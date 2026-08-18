@@ -23979,6 +23979,48 @@ The technique the match tests reference is seeded by this package and removed
 after, per the own-the-library-rows rule — `ct_fx_closed_guard_armbar`, prefixed
 and keeping the original name as the suffix, the `workout` convention.
 
+### What review found: no blocking findings, and three comments that were wrong
+
+The check suite was green before review, which is the state every serious bug
+in this repo has shipped from. Nothing blocking came back. What did come back is
+worth recording, because two of the four are the same mistake in different
+places — **a comment claiming a guarantee the code does not give**.
+
+- **`maxBody` was under-sized against its own caps.** 64 KiB, justified in a
+  comment by "64 matches × an 80-rune opponent and a 280-rune note is roughly
+  25 KB". That arithmetic is ASCII, and the caps are RUNE caps — the same
+  distinction `capRunes` exists for. A CJK entry at exactly the documented
+  limits is ~100 KB and would have been refused as "invalid JSON body": a
+  contract-valid payload rejected as malformed. Now 256 KiB, with the worst case
+  stated in bytes rather than characters.
+- **The OpenAPI contradicted itself.** `ContestMatch` listed `position` as
+  required and was reused as the *request* schema, so a generated client was
+  obliged to send the one field the server refuses to read — while the prose on
+  the same schema said a client cannot send it. Split into `ContestMatchInput`
+  (no `position`) and `ContestMatch` (response), which is what the code always
+  meant.
+- **"A client cannot send `position` even by accident" was false.** It can; the
+  field is silently dropped, because `decode` does not set
+  `DisallowUnknownFields` — matching every other handler here. The guarantee is
+  that the server's numbering wins, which is a weaker statement than the comment
+  made. Reworded rather than "fixed" in code: silent-drop is the convention, and
+  changing it in this module alone would make one endpoint stricter than the
+  rest for no reason a client could predict.
+- **The handler test's panic came from the wrong nil.** It recovers a panic to
+  prove a valid body got past validation, and the comment attributed it to the
+  nil repository. It is actually the nil `*Claims`, one expression earlier. The
+  test is still sound — a rejection writes a 400 and returns — but if somebody
+  later makes the claims handling nil-safe, that test silently stops proving
+  anything, and only the corrected comment says so.
+
+Review also noticed that **the ORDER BY's tiebreak was asserted by comment
+only**: the ordering test's three entries have distinct dates, so dropping
+`created_at DESC, id` left it green. Two entries on one day is the ordinary case
+here — gi and no-gi at the same tournament — so there is now a test that pins it,
+with `created_at` set explicitly rather than trusting two `now()` calls to land
+in different microseconds. Dropping the tiebreak turns it red; that was checked
+rather than assumed.
+
 ### Gaps this leaves
 
 - **Nothing derived.** There is no "12-4, 7 by submission" anywhere: the API

@@ -19,13 +19,19 @@ func NewHandler(repo Repository) *Handler {
 
 // maxBody bounds one entry's payload.
 //
-// Sized against the caps rather than guessed: MaxMatches (64) matches each
-// carrying an opponent (80) and a note (280) is roughly 25 KB of content, and
-// 64 KiB leaves room for JSON overhead without accepting a body nothing valid
-// could fill. It is the SECOND line of defence, not the first — the per-field
-// caps in Validate are what bound any single column, since none of these
-// columns has a length constraint in the database.
-const maxBody = 64 << 10
+// Sized against the caps in the worst case they actually allow, which is NOT
+// the ASCII one. MaxMatches (64) matches each carrying an 80-rune opponent and
+// a 280-rune note is ~27 KB of ASCII — but those are RUNE caps, and a CJK
+// payload at the same limits is 3 bytes per character before JSON escaping,
+// so the true ceiling is ~100 KB. An earlier 64 KiB here would have refused a
+// perfectly contract-valid entry as "invalid JSON body", which is the same
+// bytes-versus-runes confusion `capRunes` exists to prevent, relocated to the
+// body limit. 256 KiB covers the worst case with margin.
+//
+// It is the SECOND line of defence, not the first — the per-field caps in
+// Validate are what bound any single column, since none of these columns has a
+// length constraint in the database.
+const maxBody = 256 << 10
 
 // contestRequest is the wire shape. Separate from Input because the two have
 // genuinely different jobs: this one mirrors the JSON exactly, Input is what
@@ -52,10 +58,15 @@ type contestRequest struct {
 	} `json:"matches"`
 }
 
-// toInput converts and validates. Note the match request struct has no
-// `position` field at all — a client cannot send one even by accident, which is
-// a stronger statement of "the server numbers these" than ignoring a field
-// would be.
+// toInput converts and validates.
+//
+// The match request struct has no `position` field, so there is no way for a
+// client's numbering to influence the stored order — the server assigns it from
+// array order in Validate. Note the precise claim: a sent `position` is
+// silently DROPPED rather than refused, because `decode` does not set
+// `DisallowUnknownFields` (matching every other handler in this codebase). So
+// this guarantees the server's numbering wins, not that a client is told its
+// field was ignored.
 func (req contestRequest) toInput() (Input, error) {
 	in := Input{
 		Sport:          req.Sport,

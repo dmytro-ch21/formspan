@@ -13,10 +13,17 @@ import (
 // caller. Every case here must therefore stop BEFORE the repository — which
 // decode failures and validation failures do.
 //
-// That constraint is what makes these tests meaningful rather than a
-// limitation to work around: delete the validation call in `toInput` and these
-// requests fall through toward a nil repository and panic, which is loudly red
-// rather than quietly green.
+// That constraint is what makes these tests meaningful rather than a limitation
+// to work around: delete the validation call in `toInput` and these requests
+// fall through and panic, which is loudly red rather than quietly green.
+//
+// **The panic comes from the nil `*Claims`, not the nil repository** —
+// `ClaimsFromContext` finds nothing on an unauthenticated test request, and
+// `claims.UserID` is evaluated as the repository call's argument, so it fires
+// one expression earlier than it looks. Recorded precisely because the
+// difference is invisible from the test output: if a future change makes the
+// claims handling nil-safe, the accept-path test below stops proving anything
+// until it is given a non-nil sentinel repository instead.
 
 func post(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -108,6 +115,10 @@ func TestCreateRefusesAnOversizedBody(t *testing.T) {
 // rejected everything would leave every test above passing.
 func TestAValidBodyReachesTheRepository(t *testing.T) {
 	defer func() {
+		// See the note at the top: this panic is the nil *Claims, reached only
+		// because validation let the request through. A rejection would have
+		// written a 400 and returned, so recovering here cannot happen for any
+		// other reason.
 		if recover() == nil {
 			t.Fatal("a valid contest should pass validation and reach the repository")
 		}

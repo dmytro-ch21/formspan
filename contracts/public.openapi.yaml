@@ -146,25 +146,20 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
-    ContestMatch:
+    ContestMatchInput:
       type: object
-      required: [position, result, method, technique_id, opponent, note]
+      required: [result]
+      description: >
+        One bout, as sent. There is deliberately **no `position` field**: the
+        server numbers matches from the order they appear in the array, so array
+        order IS bracket order and "lost in the final" is expressed by putting
+        that match last. A `position` sent anyway is ignored.
+
+
+        There is no `id` either, and it is not an omission — matches are
+        replaced wholesale on every write, so a row's identity does not survive
+        an edit. Position is the stable handle within an entry.
       properties:
-        position:
-          type: integer
-          minimum: 1
-          description: >
-            Order within the bracket, 1-based. **Assigned by the server** from
-            the order matches appear in the request — a client does not send it
-            and cannot choose it. That is what makes the uniqueness of a
-            position unviolatable from outside, and it means array order IS
-            bracket order: "lost in the final" is expressed by putting that
-            match last.
-
-
-            There is deliberately no `id`. Matches are replaced wholesale on
-            every write, so a row's identity does not survive an edit; position
-            is the stable handle within an entry.
         result:
           type: string
           enum: [won, lost]
@@ -198,6 +193,20 @@ components:
           maxLength: 80
           description: Free text. Opponents are not entities in this product.
         note: { type: string, maxLength: 280 }
+
+    ContestMatch:
+      allOf:
+        - $ref: "#/components/schemas/ContestMatchInput"
+        - type: object
+          required: [position, method, technique_id, opponent, note]
+          properties:
+            position:
+              type: integer
+              minimum: 1
+              description: >
+                Order within the bracket, 1-based, assigned by the server. This
+                is what makes the uniqueness of a position unviolatable from
+                outside — it is never taken from the request.
 
     ContestInput:
       type: object
@@ -271,11 +280,10 @@ components:
         matches:
           type: array
           maxItems: 64
-          items: { $ref: "#/components/schemas/ContestMatch" }
+          items: { $ref: "#/components/schemas/ContestMatchInput" }
           description: >
-            The bracket, in order. Sent WITHOUT `position` — the server numbers
-            them. Omitting the field entirely is an ordinary entry: a placement
-            alone is a complete thing to remember.
+            The bracket, in order. Omitting the field entirely is an ordinary
+            entry: a placement alone is a complete thing to remember.
 
     Contest:
       allOf:
@@ -284,6 +292,14 @@ components:
           required: [id, matches, created_at, updated_at]
           properties:
             id: { type: string }
+            # Restated so a RESPONSE match carries `position`, which a request
+            # one does not. Both branches apply, and ContestMatch is
+            # ContestMatchInput plus that field, so the intersection is exactly
+            # ContestMatch.
+            matches:
+              type: array
+              items: { $ref: "#/components/schemas/ContestMatch" }
+              description: Always present; `[]` for an entry recorded as a placement alone.
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
 

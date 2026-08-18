@@ -407,3 +407,56 @@ func TestListAttachesEachEntrysOwnMatches(t *testing.T) {
 		t.Errorf("second entry's matches are wrong: %+v", list[1])
 	}
 }
+
+// The ORDER BY's tiebreak, which the ordering test above cannot reach because
+// its three entries have distinct dates.
+//
+// Two entries on the SAME day is the ordinary case, not a contrived one — gi
+// and no-gi at one tournament is exactly that — and without a tiebreak their
+// relative order is unspecified. api-conventions.md requires a TOTAL order on
+// any capped list for two reasons: at the 200-entry boundary an unstable order
+// lets one row appear twice while another never appears, and an order that
+// flaps changes the response body, which flaps the conditional-GET ETag for no
+// reason.
+//
+// `created_at` is set explicitly rather than relying on insertion timing, so
+// the assertion cannot depend on two `now()` calls landing in different
+// microseconds.
+func TestListBreaksTiesOnTheSameDayDeterministically(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_contest_tiebreak"
+	cleanupUser(t, pool, user)
+
+	const day = "2026-03-14"
+	first := mustCreate(t, repo, user, Input{Sport: "bjj", Name: "gi", HeldOn: str(day)})
+	second := mustCreate(t, repo, user, Input{Sport: "bjj", Name: "no-gi", HeldOn: str(day)})
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE contests SET created_at = $2 WHERE id = $1`,
+		first.ID, "2026-03-14T09:00:00Z"); err != nil {
+		t.Fatalf("age the first entry: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE contests SET created_at = $2 WHERE id = $1`,
+		second.ID, "2026-03-14T17:00:00Z"); err != nil {
+		t.Fatalf("age the second entry: %v", err)
+	}
+
+	// Called twice: a single call can be right by accident on a two-row table,
+	// and the property being pinned is that the answer does not move.
+	for attempt := 1; attempt <= 2; attempt++ {
+		list, err := repo.List(ctx, user)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(list) != 2 {
+			t.Fatalf("attempt %d: want 2 entries, got %d", attempt, len(list))
+		}
+		// created_at DESC — the later-recorded entry leads.
+		if list[0].Name != "no-gi" || list[1].Name != "gi" {
+			t.Errorf("attempt %d: want no-gi then gi, got %q then %q",
+				attempt, list[0].Name, list[1].Name)
+		}
+	}
+}
