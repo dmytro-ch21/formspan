@@ -110,9 +110,12 @@ export function isValidationError(err: unknown): boolean {
  * can repair by itself.
  *
  * Its own code rather than `invalid_input` because the difference is the whole
- * point. A build knows four grips; the server decides how many exist. Checking
+ * point. A build knows a FIXED list of grips; the server decides how many
+ * exist, and the two numbers diverge the moment either ships. (Do not write
+ * the current count here in present tense — it was "four" until N9 made it six,
+ * and the same sentence went stale in six files at once.) Checking
  * a grip against the local list answers "do I recognise this?" while pretending
- * to answer "would the server take it?" — so the day a fifth value ships, an
+ * to answer "would the server take it?" — so the day the server grows one, an
  * older phone reads a legitimate `mixed`, nulls it, and the wholesale PUT
  * writes that null back over data the athlete recorded. Silently.
  *

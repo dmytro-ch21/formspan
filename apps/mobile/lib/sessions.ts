@@ -48,11 +48,14 @@ export const GRIPS: { key: Grip; label: string }[] = [
 /**
  * Which grips to OFFER for a movement — mirrors the server's `GripsFor`.
  *
- * Two subsets look wrong until you check the catalog, so do not "tidy" them:
- * hinges include `neutral` because the Hex Bar Deadlift and four kettlebell and
- * dumbbell swings live among those 55 rows, and olympic includes it because 22
- * of its 25 rows are kettlebell or dumbbell cleans and snatches. `mixed` is on
- * hinges ALONE — you do not mix-grip a snatch.
+ * Two subsets look wrong until you count the catalog, so do not "tidy" them:
+ * 20 of the 55 hinge rows are kettlebell, dumbbell or hex-bar, and 12 of the 25
+ * olympic rows are kettlebell (11) or dumbbell (1) — none of which hook-grips
+ * anything. `mixed` is on hinges ALONE, because you do not mix-grip a snatch.
+ *
+ * (These numbers were wrong here for two PRs: "22 of 25" counted rows NAMED
+ * clean or snatch, not kettlebell/dumbbell ones. They were corrected in the Go
+ * mirror and missed here, which is the duplication N16 exists to delete.)
  *
  * This mapping is duplicated from Go rather than fetched, exactly as
  * `gripApplies` was before it. That is a known drift risk and is filed rather
@@ -1209,13 +1212,20 @@ export function repairSet<T extends LoggedSet>(set: T): T {
     zero, an RIR of 25, more assisted reps than reps. Those are illegal on any
     server, forever, and nulling them is safe.
 
-    A grip is not like that. This build knows six values; the server decides
+    A grip is not like that. This build knows a FIXED list; the server decides
     how many there are. Checking `set.grip` against `GRIPS` therefore answers
     "do I recognise this?" while pretending to answer "would the server take
-    it?" — and the moment a fifth value ships, every phone still on this build
-    reads a legitimate `mixed`, nulls it, and the wholesale PUT writes that null
+    it?" — and the moment the server grows one, every phone still on this build
+    reads a legitimate value, nulls it, and the wholesale PUT writes that null
     back over real data. Silent, on rows the athlete did record, with no error
     anywhere.
+
+    The erasure itself never shipped — #256 removed the nulling BEFORE the
+    server grew a value, which is why N9 was safe to widen. What did happen is
+    smaller and worth guarding against anyway: this paragraph said "four" and
+    "a fifth value" and "`mixed`" until the day N9 merged, at which point it
+    described the wrong world in six files at once. Do not write the current
+    count here in present tense.
 
     Note where an unknown value can come FROM. The picker only ever writes
     `g.key` for `g` in `GRIPS`, so nothing local can produce one; a grip this

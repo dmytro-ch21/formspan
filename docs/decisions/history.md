@@ -23232,8 +23232,9 @@ so:
 - **Hinges include `neutral`** — 20 of those 55 rows are kettlebell, dumbbell
   or hex-bar: dumbbell deadlifts and RDLs, the swings, the Hex Bar Deadlift.
 - **Olympic lifts include `neutral`** — 12 of those 25 are kettlebell (11) or
-  dumbbell (1), none of which hook-grips anything. Barbell is the plurality at
-  13, so neither value is the majority answer and the bucket needs both.
+  dumbbell (1), none of which hook-grips anything. Barbell is 13, a bare
+  majority. Twelve real rows still need `neutral`; the split does not have to be
+  even for both values to be required.
 
 `mixed` is offered on hinges **alone**. You do not mix-grip a snatch, and a
 mixed farmer's carry is not a thing — offering it there would relocate the
@@ -23521,6 +23522,105 @@ movement patterns, identical across all three.
 - **`mixed` still has no side.** N9 decided that deliberately and recorded when
   to revisit; this picker inherits it, so an athlete cannot yet say which hand
   was over.
+
+## 2026-08-17 — N9's review landed after N9 did, and it found the half that was not pinned
+
+#266 merged while its second review pass was still running. Both reviewers came
+back with no blocking findings, but two of the suggestions were worth a
+follow-up rather than a note, so this is that.
+
+### `hook` was never asserted anywhere
+
+`TestGripsForOffersOnlyWhatTheMovementCanUse` checked the five original patterns
+with a full-set equality and then spot-checked the three new ones by
+membership — `Contains(GripsFor("hinge"), GripMixed)` and friends. Review
+measured **four mutations surviving it**: hinge losing `hook`, carry and olympic
+losing `hook`, hinge losing `regular`, hinge gaining `reverse`. All green.
+
+So half of N9's headline had no server-side pin at all, and `GripsFor` has no
+backend caller, which means that test is the only thing that could have one. The
+three new patterns are full-set equalities now and all four mutations fail.
+
+The general shape is worth keeping: **a `Contains` is one clause of a
+specification, an equality is the specification.** The test's own comment
+claimed to BE the specification while asserting a fraction of it.
+
+### The same sentence, stale in six files
+
+`repairSet`'s guard is documented in six places, and every copy said some
+version of "this build knows four grips; the server decides how many exist".
+N9 made all six wrong at once — and two of them were rewritten *by N9's own fix
+round* into a state that was still wrong ("knows six values… the moment a fifth
+value ships… reads a legitimate `mixed`", with `mixed` by then shipped).
+
+Five of the six are fixed by removing the number rather than updating it (the
+sixth, `sessions.test.ts`, was already past-tensed by N9's round and reads as
+the history it became). The sentence is now "a
+build knows a FIXED list; the server decides how many exist", which cannot go
+stale, plus an explicit instruction not to write the current count in present
+tense and a note that doing so is what rotted six files simultaneously.
+
+Two related ones went with it: the picker comment N9 rewrote mis-enumerated the
+subsets (it said hinges "add" `mixed` and `hook`, implying the original four
+remain, when a hinge gets its own four and loses `reverse`/`angled`) — it now
+points at `gripsFor` rather than restating it, because enumerating it inline is
+what made that comment wrong twice. And `GripApplies`'s Go doc still carried the
+whole rationale including "hinges and carries are out because their answer is
+`mixed` or `hook`, which this enum does not have", sitting directly above a
+function that had just gained both. The rationale moved to `GripsFor`, where the
+table it describes actually lives.
+
+### Two numbers I got wrong while correcting numbers
+
+The correction round introduced its own. "Barbell is the plurality at 13" — 13
+of 25 is a bare **majority**, and stating it the generous way is the same class
+of error the round existed to purge. And "20 of 55 hinge rows… all held
+palms-facing" is false: the four swings in that 20 are held overhand, which is
+`regular` in this very enum. Both fixed; the argument survives either way,
+because twelve olympic rows that cannot hook-grip anything still need `neutral`.
+
+### And review found this round's own fresh error
+
+The move duplicated what it was moving. `GripsFor` already carried a near-verbatim
+copy of the `isolation` rationale, so lifting the paragraph out of `GripApplies`
+put the same 210-rows argument in one doc comment twice, eleven lines apart —
+falsifying this entry's own claim that there is now "one place to keep true".
+The pre-existing copy is deleted (it also said "the four original patterns",
+of which there are five).
+
+Two more of mine: the freshness note named the wrong hazard — `append` cannot
+corrupt a shared table, because a slice literal has `len == cap` and appending
+reallocates; the real hazard is an in-place write or a sort. And a claim that
+the silent erasure "HAPPENED between #256 and N9" was false: #256 removed the
+nulling *before* the server grew a value, which is precisely why N9 was safe.
+What happened was the comment going stale, on the day #266 merged.
+
+Review also measured a **fifth** surviving mutation on `GripsFor` — replacing
+the literals with package-level tables passed everything, so the deliberate
+per-call freshness was undeclared in the only way that counts. Pinned now.
+
+And it found one instance of the rot that all three sweeps missed, in a file
+this branch was already editing: `TestGripIsAskedWhereTheVocabularyCanAnswerIt`'s
+doc still said hinges, carries and olympic lifts "are absent BECAUSE the enum
+has no `mixed` or `hook`", directly above a body asserting all three are
+present. It even warned that adding those values without revisiting the list
+would leave the picker hidden — which is exactly what N9 did and did not do.
+
+The TypeScript mirror was carrying both numbers this round corrected in Go
+("22 of 25", "most of the bucket"), because the correction touched one copy of a
+duplicated table. That is the argument for `N16` restated as evidence rather
+than prediction.
+
+### Gaps
+
+- **The mobile mirror has no equivalent pin.** `gripsFor` in TypeScript is
+  asserted with `toEqual` for the five original patterns and by membership for
+  the three new ones — the same asymmetry, in the copy that actually drives the
+  picker. It was not tightened here because `N16` proposes deleting the
+  duplication outright by serving the list from the API, and pinning a table
+  that is scheduled for removal is work aimed at the wrong place. If N16 slips,
+  this should be revisited.
+- **Still not seen on a phone**, unchanged from #266.
 
 ## Open items / known gaps as of this entry
 

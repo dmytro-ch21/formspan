@@ -90,29 +90,17 @@ func ValidGrip(g Grip) bool {
 	return false
 }
 
-// GripApplies says whether a grip is worth asking about for a movement.
+// GripApplies says whether a grip is worth asking about for a movement at all.
 //
-// Derived from the catalog's existing `movement_pattern` vocabulary rather than
-// from a new column, deliberately: a `grips_vary` flag would be 762 more rows
-// of hand-classification to maintain and get wrong, and the per-side review
-// (F3) is the standing evidence of what that costs.
+// It IS the emptiness of `GripsFor` — read that for which values and why. Kept
+// as a separate name because "is this question worth asking" and "which answers
+// does it have" are different questions, and a caller usually wants the second.
 //
-// The five patterns here are the ones where this enum IS the vocabulary an
-// athlete would use: 403 of the catalog's 762 exercises. Squats, lunges, jumps
-// and conditioning are out because the question is meaningless; hinges and
-// carries are out because their answer is `mixed` or `hook`, which this enum
-// does not have, so asking there would collect confident WRONG answers rather
-// than none.
-//
-// `isolation` is in, and it is the debatable one: 210 rows, the catalog's
-// "honest bucket for the single-joint long tail", so it carries calf raises
-// (grip is meaningless) alongside hammer and reverse curls — which are the
-// purest grip variations in the whole catalog. Excluding it would halve the
-// gate to 193 and cut exactly the exercises this feature is clearest for.
-//
-// The asymmetry decides it: a false positive is an optional control somebody
-// ignores on a calf raise, and a false negative is the feature not existing
-// for reverse curls. Cheap wrong beats expensive wrong.
+// This doc used to carry the whole rationale and went stale the moment N9
+// widened the vocabulary: it still said hinges and carries were out "because
+// their answer is `mixed` or `hook`, which this enum does not have", directly
+// under a function that had just gained both. The rationale now lives with the
+// table it describes, so there is one place to keep true.
 func GripApplies(movementPattern string) bool {
 	return len(GripsFor(movementPattern)) > 0
 }
@@ -123,29 +111,46 @@ func GripApplies(movementPattern string) bool {
 // because two of them are counter-intuitive:
 //
 //   - **Hinges get `neutral`**, which looks wrong for a deadlift until you
-//     count them: 20 of those 55 rows are kettlebell, dumbbell or hex-bar —
-//     dumbbell deadlifts and RDLs, the swings, the Hex Bar Deadlift. All held
-//     palms-facing.
+//     count them: 20 of those 55 rows are kettlebell, dumbbell or hex-bar.
+//     Not all of those are palms-facing — the four swings are held overhand —
+//     but the hex bar and the dumbbells-at-the-sides work carry the argument
+//     on their own. (`regular` is on this list for the 13 barbell rows, not
+//     for the swings; four of 55 would not earn a value.)
 //   - **Olympic lifts get `neutral`** for the same reason: 12 of those 25 rows
 //     are kettlebell (11) or dumbbell (1), none of which hook-grips anything.
-//     Barbell is the plurality at 13, so `hook` is not the majority answer
-//     either — the bucket is genuinely split and needs both.
+//     Barbell is 13 — a bare majority, not a plurality, and stating it the
+//     generous way was itself corrected once. Twelve real rows still need
+//     `neutral`, which is the whole argument; the split does not have to be
+//     even to need both values.
 //
 // `mixed` appears on hinges ALONE. You do not mix-grip a snatch, and a mixed
 // farmer's carry is not a thing — offering it there would be the same
 // false-entry mistake in a new place.
 //
-// The four original patterns are unchanged, including `isolation`: 210 rows,
-// the catalog's honest bucket for the single-joint long tail, carrying calf
-// raises (grip is meaningless) alongside hammer and reverse curls (the purest
-// grip variations there are). A false positive is an optional control somebody
-// ignores; a false negative is the feature not existing where it is clearest.
+// The five original patterns are unchanged.
+//
+// Derived from the catalog's existing `movement_pattern` vocabulary rather than
+// a new column, deliberately: a `grips_vary` flag would be 762 more rows of
+// hand-classification to maintain and get wrong, and the per-side review (F3)
+// is the standing evidence of what that costs.
+//
+// `isolation` is the debatable inclusion: 210 rows, the catalog's honest bucket
+// for the single-joint long tail, so it carries calf raises (grip is
+// meaningless) alongside hammer and reverse curls — the purest grip variations
+// there are. The asymmetry decides it. A false positive is an optional control
+// somebody ignores on a calf raise; a false negative is the feature not
+// existing for reverse curls. Cheap wrong beats expensive wrong.
 //
 // Returns nil where the question is meaningless — squats, lunges, jumps,
 // conditioning, core, mobility, rotation. `GripApplies` is that emptiness.
-// Each branch returns a FRESH slice, deliberately: `offeredGrips` on the client
-// appends the set's own grip to this list, and a package-level table would be
-// corrupted by the first caller that did the same here.
+// Together the eight patterns here are 496 of the catalog's 762 exercises; it
+// was 403 before N9 added the last three.
+// Each branch returns a FRESH slice, deliberately — and the mechanism matters,
+// because the first version of this note named the wrong one. `append` is NOT
+// the hazard: a slice literal has len == cap, so appending reallocates and the
+// caller's copy diverges harmlessly. The hazard is an in-place write or a
+// `sort` on the returned slice, which a package-level table would carry into
+// every later caller. Pinned by `TestGripsForReturnsAFreshSliceEachCall`.
 func GripsFor(movementPattern string) []Grip {
 	switch movementPattern {
 	case "horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation":

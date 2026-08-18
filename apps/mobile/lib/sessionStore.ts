@@ -707,7 +707,7 @@ async function pushRow(
     //
     // Repaired HERE rather than in `repairSet` deliberately, and that is the
     // whole of T4. `repairSet` runs on every read and cannot know the server's
-    // vocabulary — it knows four grips, the server decides how many exist. It
+    // vocabulary — it knows a fixed list, the server decides how many exist. It
     // used to null anything outside its own list, which is right for garbage
     // and WRONG for a value a newer server legitimately added: an older phone
     // would read a valid `mixed`, null it, and this very PUT would write that

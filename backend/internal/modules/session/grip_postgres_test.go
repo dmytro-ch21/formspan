@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"testing"
 )
@@ -135,24 +134,28 @@ func TestTheGripConstraintKeepsTheNameTheWireCodeDependsOn(t *testing.T) {
 	// with a second such constraint a badly-named one could hide behind a
 	// well-named one and this test would flap rather than fail.
 	var total, named int
+	var offenders []string
 	err := pool.QueryRow(ctx, `
-		SELECT count(*), count(*) FILTER (WHERE conname LIKE '%grip%')
+		SELECT count(*), count(*) FILTER (WHERE conname LIKE '%grip%'),
+		       coalesce(array_agg(conname) FILTER (WHERE conname NOT LIKE '%grip%'), '{}')
 		FROM pg_constraint
 		WHERE conrelid = 'session_sets'::regclass
 		  AND contype = 'c'
-		  AND pg_get_constraintdef(oid) LIKE '%grip%'`).Scan(&total, &named)
+		  AND pg_get_constraintdef(oid) LIKE '%grip%'`).Scan(&total, &named, &offenders)
 	if err != nil {
 		t.Fatalf("querying session_sets CHECK constraints: %v", err)
 	}
 	if total == 0 {
 		t.Fatal("no CHECK constraint on session_sets mentions grip at all")
 	}
-	name := "all " + fmt.Sprint(total)
 	if named != total {
-		t.Fatalf("the grip CHECK is named %q, which does not contain \"grip\" — "+
+		// Names the OFFENDER. The first version printed a count here, so the
+		// message read `named "all 1"` — a diagnostic that misidentifies itself
+		// at exactly the moment somebody needs it.
+		t.Fatalf("grip CHECK constraint(s) %v do not contain \"grip\" in the name — "+
 			"translatePgError matches on that substring to return ErrInvalidGrip, so "+
 			"every unknown grip now reaches the client as a generic invalid_input and "+
-			"no phone can repair itself", name)
+			"no phone can repair itself", offenders)
 	}
 }
 
@@ -160,10 +163,41 @@ func TestTheGripConstraintKeepsTheNameTheWireCodeDependsOn(t *testing.T) {
 // own copy of this list — so without a test nothing pins it at all, and an
 // uncalled source of truth is exactly how the two copies drift apart.
 //
-// The exclusions are the half worth pinning. Hinges, carries and olympic lifts
-// are absent BECAUSE the enum has no `mixed` or `hook`; if someone adds those
-// values later and this list is not revisited, the picker stays hidden on the
-// movements the new values exist for.
+// The exclusions are the half worth pinning: squats, jumps and conditioning,
+// where no vocabulary would make the question worth asking.
+//
+// This comment used to say hinges, carries and olympic lifts were absent
+// "BECAUSE the enum has no `mixed` or `hook`", and warned that adding those
+// values without revisiting the list would leave the picker hidden. N9 added
+// them and DID revisit the list — but not this paragraph, which then sat as a
+// flat self-contradiction directly above a body asserting all three are
+// present. Three separate review passes swept for exactly this class of rot and
+// all three missed it, including the one that found six other instances.
+// GripsFor must hand every caller its own slice.
+//
+// The doc above declares this deliberate and load-bearing, and review measured
+// it surviving: swapping the literals for package-level tables passed both
+// existing tests. Unobservable today — there is no backend caller — but the
+// client's `offeredGrips` builds on this list, and a shared table that one
+// caller sorts is corrupted for every later one.
+func TestGripsForReturnsAFreshSliceEachCall(t *testing.T) {
+	for _, p := range []string{"hinge", "carry", "olympic", "horizontal_push", "isolation"} {
+		a, b := GripsFor(p), GripsFor(p)
+		if len(a) == 0 {
+			t.Fatalf("GripsFor(%q) is empty; the fixture is wrong", p)
+		}
+		if &a[0] == &b[0] {
+			t.Errorf("GripsFor(%q) returns the SAME backing array twice — one caller "+
+				"sorting or writing in place corrupts it for every later one", p)
+		}
+		// And prove it concretely rather than by pointer identity alone.
+		a[0] = GripHook
+		if GripsFor(p)[0] == GripHook && b[0] != GripHook {
+			t.Errorf("writing to GripsFor(%q)'s result changed what later callers see", p)
+		}
+	}
+}
+
 func TestGripIsAskedWhereTheVocabularyCanAnswerIt(t *testing.T) {
 	for _, p := range []string{
 		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation",
@@ -201,12 +235,27 @@ func TestGripsForOffersOnlyWhatTheMovementCanUse(t *testing.T) {
 		}
 	}
 
-	// `mixed` on hinges ALONE. You do not mix-grip a snatch, and a mixed
-	// farmer's carry is not a thing — offering it there would relocate the
-	// false-entry mistake this feature exists to fix rather than remove it.
-	if !slices.Contains(GripsFor("hinge"), GripMixed) {
-		t.Error("a hinge cannot offer mixed, which is the one movement family it belongs to")
+	// The three new patterns, pinned as FULL SETS rather than by membership.
+	//
+	// Membership spot-checks were what shipped in #266, and review measured
+	// four mutations surviving them: hinge losing `hook`, carry/olympic losing
+	// `hook`, hinge losing `regular`, hinge gaining `reverse` — all green.
+	// `hook` had no positive assertion anywhere, which is half of N9's headline
+	// unpinned, and since `GripsFor` has no backend caller this test is the
+	// only server-side pin there is. An equality is the whole specification;
+	// a `Contains` is one clause of it.
+	if got := GripsFor("hinge"); !slices.Equal(got, []Grip{GripRegular, GripNeutral, GripMixed, GripHook}) {
+		t.Errorf("GripsFor(hinge) = %v, want regular/neutral/mixed/hook", got)
 	}
+	for _, p := range []string{"carry", "olympic"} {
+		if got := GripsFor(p); !slices.Equal(got, []Grip{GripRegular, GripNeutral, GripHook}) {
+			t.Errorf("GripsFor(%q) = %v, want regular/neutral/hook", p, got)
+		}
+	}
+
+	// `mixed` on hinges ALONE, kept as its own assertion because it is the one
+	// property the equalities above would still satisfy if every subset were
+	// rewritten together by someone who thought mixed belonged on a carry.
 	for _, p := range []string{
 		"carry", "olympic", "horizontal_push", "horizontal_pull",
 		"vertical_push", "vertical_pull", "isolation",
