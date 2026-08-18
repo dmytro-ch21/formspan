@@ -7006,8 +7006,8 @@ you can argue with beats a verdict you must trust. The scenarios below lean on
 that: almost every one is about the app being honest when it does not know
 something, rather than about the arithmetic being right.
 
-Backend-only so far (N21). The Food tab, the day screen and the offline outbox
-are N22 and their scenarios belong with them.
+Backend-only so far (N24). The Food tab, the day screen and the offline outbox
+are N25 and their scenarios belong with them.
 
 ### The rule that outranks everything else here
 

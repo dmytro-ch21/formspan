@@ -1,6 +1,6 @@
 # Nutrition — the design
 
-Status: **backend landed (N21), clients in progress.** This document is the
+Status: **backend landed (N24), clients in progress.** This document is the
 forward-looking half. What was built and why it is shaped that way is in
 [history.md](history.md)'s 2026-08-18 entry; the wire contract is in
 [public.openapi.yaml](../../contracts/public.openapi.yaml). This file is for the
@@ -113,7 +113,7 @@ Reviewed against a full walkthrough of Lose It!'s onboarding and logging:
 and no remaining — a useful state, and one that stops the feature being gated
 behind homework.
 
-## 6. Describe it or photograph it (N23)
+## 6. Describe it or photograph it (N26)
 
 The highest-leverage piece, and the reason no food database is scheduled.
 
@@ -169,7 +169,7 @@ The second half is the cross-sport conflict flag: a hard cut during a
 competition camp is the case where the three disciplines genuinely have to
 disagree with each other, and it is the day this product proves its thesis.
 
-## 8. The weekly adjustment (N24)
+## 8. The weekly adjustment (N27)
 
 Deterministic and explainable — "evidence-based rules before AI." Compare the
 observed 7-day trend-weight change against the phase's target rate; propose a

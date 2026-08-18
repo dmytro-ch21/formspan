@@ -24702,7 +24702,7 @@ log, and saved foods.
 **One gap the audit turned up and nobody had noticed:** `createPhase` and
 `endPhase` exist in `apps/mobile/lib/body.ts` and in the API with **zero UI
 callers anywhere in `apps/`**. There is no screen to start a cut. A calorie
-target derives from the live phase, so N22 has to build one before any of this
+target derives from the live phase, so N25 has to build one before any of this
 is reachable by an athlete.
 
 ### The load-bearing rule
@@ -24911,7 +24911,7 @@ never used.
 - **No external food database yet**, honouring the "validate manual logging
   first" instruction. USDA (CC0, no obligations) is the intended first
   integration and Open Food Facts (ODbL, share-alike, must stay separable) the
-  second — but both are now **unscheduled**, because N23's describe-or-photograph
+  second — but both are now **unscheduled**, because N26's describe-or-photograph
   path is a substitute for a food database rather than a complement. The schema
   carries `source` and `external_id` from day one so either costs no migration.
 
