@@ -3845,8 +3845,8 @@ components:
         to learn, while the suggestion tiers say what your logs report about how
         it is going.
       required:
-        [id, editable, name, description, visibility, enrolled, item_count,
-         countable_items, mastered_items, created_at, updated_at]
+        [id, editable, official, name, description, visibility, enrolled,
+         item_count, countable_items, mastered_items, created_at, updated_at]
       properties:
         id: { type: string }
         editable:
@@ -3855,6 +3855,18 @@ components:
             Whether the CALLER may edit this. Resolved server-side rather than
             by handing the client an owner id to compare, which is the shape
             that produces client-side authorization.
+
+            NOT a provenance signal. It is false for a VOLA curriculum AND for
+            every other athlete's public one, so a client filtering on
+            `!editable` shows a stranger's list as VOLA's — see `official`.
+        official:
+          type: boolean
+          description: >
+            Whether VOLA authored this, rather than an athlete. Use this, never
+            `!editable`, to decide whether something may be presented as VOLA
+            content: `belt` and `track` are unvalidated hints, so an athlete
+            publishing a public curriculum chooses which section and which belt
+            word it would otherwise appear under.
         name: { type: string, example: Blue belt basics }
         description: { type: string }
         belt:
