@@ -2510,6 +2510,24 @@ function Field({
         // computed from a row index, because rows differ in height by
         // exercise and by whether they are expanded.
         onFocus={() => ensureVisible(inputRef.current)}
+        /*
+          On blur, the field says what is STORED — the one moment it is safe to
+          overwrite what was typed, because typing is over.
+
+          While a field has focus it deliberately keeps its own text, so that a
+          half-typed `72.` is not eaten and so that an entry the store refuses
+          (the timer's `0`, on its way to `0.5`) survives to its next keystroke.
+          The cost is that an ABANDONED entry leaves the two disagreeing: type
+          `0` over a stored 60, walk away, and the box reads 0 while the row
+          still carries a 60-second countdown that will arm the play button and
+          sync. On this screen — one hand, twenty seconds between sets —
+          abandoning a half-typed number is ordinary, not exotic.
+
+          Re-deriving here costs nothing anyone can perceive and makes the
+          visible number true again. It is not a commit: nothing is written, the
+          field simply stops claiming something the set does not hold.
+        */
+        onBlur={() => setText(value?.toString() ?? '')}
         style={styles.fieldInput}
         // decimal-pad rather than numeric: reps are whole, weight isn't, and
         // the keypad should offer the point where it's meaningful.
