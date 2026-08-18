@@ -289,6 +289,68 @@ func TestListTargetsCarriesInTheOneLiveAtTheStartOfTheWindow(t *testing.T) {
 	}
 }
 
+// The window must return its OWN rows as well as the carry-in.
+//
+// This is the case the carry-in test above cannot see: with no in-window rows,
+// one row is the right answer whether the query is correct or not. Postgres
+// binds an ORDER BY / LIMIT written after a UNION ALL to the WHOLE union, so
+// the first version of this query returned exactly one row — the newest target
+// overall — and silently dropped every target set inside the window. A month
+// on web would have rendered one target and attributed it to every day.
+func TestListTargetsReturnsInWindowRowsAsWellAsTheCarryIn(t *testing.T) {
+	r := repoFor(t, uid)
+	for _, tgt := range []Target{
+		{UserID: uid, EffectiveOn: "2026-05-01", Kcal: 2400, ProteinG: 180, CarbG: 250, FatG: 70, Source: TargetDerived},
+		{UserID: uid, EffectiveOn: "2026-08-05", Kcal: 2300, ProteinG: 180, CarbG: 230, FatG: 68, Source: TargetAdjustment},
+		{UserID: uid, EffectiveOn: "2026-08-12", Kcal: 2200, ProteinG: 175, CarbG: 210, FatG: 66, Source: TargetAdjustment},
+	} {
+		if _, err := r.SaveTarget(ctx(), tgt); err != nil {
+			t.Fatalf("save %s: %v", tgt.EffectiveOn, err)
+		}
+	}
+
+	got, err := r.ListTargets(ctx(), uid, "2026-08-01", "2026-08-31")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var on []string
+	for _, g := range got {
+		on = append(on, g.EffectiveOn)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d targets (%v), want 3: both August rows plus the May carry-in", len(got), on)
+	}
+	// Newest first, and the carry-in last — a client reading these in order is
+	// walking backwards through the athlete's history.
+	for i, want := range []string{"2026-08-12", "2026-08-05", "2026-05-01"} {
+		if got[i].EffectiveOn != want {
+			t.Errorf("position %d is %s, want %s (order: %v)", i, got[i].EffectiveOn, want, on)
+		}
+	}
+}
+
+// Exactly one carry-in, never a second. Two targets before the window must not
+// both ride along — the client only needs what was live at the start.
+func TestListTargetsCarriesInAtMostOneRow(t *testing.T) {
+	r := repoFor(t, uid)
+	for _, on := range []string{"2026-03-01", "2026-04-01", "2026-05-01"} {
+		if _, err := r.SaveTarget(ctx(), Target{UserID: uid, EffectiveOn: on,
+			Kcal: 2400, ProteinG: 180, CarbG: 250, FatG: 70, Source: TargetDerived}); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+	}
+	got, err := r.ListTargets(ctx(), uid, "2026-08-01", "2026-08-31")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d rows, want exactly 1 carry-in", len(got))
+	}
+	if got[0].EffectiveOn != "2026-05-01" {
+		t.Fatalf("carried in %s, want the newest before the window (2026-05-01)", got[0].EffectiveOn)
+	}
+}
+
 func TestTargetOnResolvesTheNewestOnOrBeforeTheDay(t *testing.T) {
 	r := repoFor(t, uid)
 	for _, tgt := range []Target{

@@ -24803,6 +24803,21 @@ makes the required rate negative and the per-phase sign inverts it again.
 An athlete who just missed their weigh-in while still six kilos over would have
 been handed a **+2718 kcal surplus**. The test now covers it.
 
+A third came out of simply re-reading the SQL afterwards, and it is the same
+lesson from a different angle. `ListTargets` returns the window's rows **plus**
+the one live at its start, and it was written as a bare `UNION ALL` with an
+`ORDER BY ... LIMIT 1` after it. In Postgres that binds to the **whole union**,
+not to the branch above it — so the query returned exactly one row, the newest
+target overall, silently discarding every target set inside the window. A month
+reviewed on web would have rendered one target and attributed it to every day.
+
+It compiled, it ran, and the test passed, because the only case covered was a
+window with no rows of its own — where one row is also the right answer. **The
+test asserted a count that the correct and the broken query both produce**,
+which is the same failure as the deadline guard above wearing different clothes.
+The carry-in branch is now wrapped in a subquery, and there is a test with rows
+on both sides of the boundary plus one asserting the carry-in is never doubled.
+
 The same exercise caught a second one in `check-rate-parity.py` itself: its
 first regex matched `[\d.]+`, which silently skipped `recomposition` and
 `maintenance` — whose bands sit around zero and therefore have a negative

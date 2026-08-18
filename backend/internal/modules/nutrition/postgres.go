@@ -460,14 +460,25 @@ func scanTarget(row pgx.Row) (Target, error) {
 // eating to one — a bug that only appears for people who have not changed their
 // target recently, which is to say the ones doing it right.
 func (r *PostgresRepository) ListTargets(ctx context.Context, userID, from, to string) ([]Target, error) {
+	// The carry-in branch is WRAPPED IN A SUBQUERY, and it has to be.
+	//
+	// In Postgres an ORDER BY / LIMIT written after a UNION ALL binds to the
+	// WHOLE union, not to the branch above it — so the unwrapped version
+	// returned exactly one row: the newest target overall, silently discarding
+	// every in-window row it was supposed to return. It compiled, it ran, and
+	// the test passed, because the only case covered was a window with no rows
+	// of its own, where one row is also the right answer.
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+targetCols+` FROM nutrition_targets
 		WHERE user_id = $1 AND effective_on BETWEEN $2::date AND $3::date
 		UNION ALL
-		SELECT `+targetCols+` FROM nutrition_targets
-		WHERE user_id = $1 AND effective_on < $2::date
-		ORDER BY effective_on DESC
-		LIMIT 1`, userID, from, to)
+		SELECT * FROM (
+			SELECT `+targetCols+` FROM nutrition_targets
+			WHERE user_id = $1 AND effective_on < $2::date
+			ORDER BY effective_on DESC
+			LIMIT 1
+		) carry_in
+		ORDER BY effective_on DESC`, userID, from, to)
 	if err != nil {
 		return nil, translate(err)
 	}
