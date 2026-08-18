@@ -60,6 +60,22 @@ jest.mock('../sequences', () => ({
   syncSequences: jest.fn(async () => ({ pushed: 0, failed: 0 })),
 }));
 
+// The FOURTH outbox, and this mock has now grown four times. Same reason as
+// the other three: the real module opens SQLite, which jest-expo stubs out, so
+// leaving it real kills every test in this file inside `NativeDatabase` with an
+// error that says nothing about the orchestrator.
+//
+// Like sequences it has NO `deferred` — a logged meal cannot be waiting on
+// another local row to land first.
+jest.mock('../foodLog', () => ({
+  pendingFoodCount: jest.fn(async () => 0),
+  syncFood: jest.fn(async () => ({ pushed: 0, failed: 0 })),
+}));
+
+// eslint-disable-next-line import/first -- must follow the jest.mock above
+import { pendingFoodCount, syncFood } from '../foodLog';
+// eslint-disable-next-line import/first -- must follow the jest.mock above
+import { countPendingPlans } from '../plan';
 // eslint-disable-next-line import/first -- must follow the jest.mock above
 import { pendingSequenceCount, syncSequences } from '../sequences';
 
@@ -379,6 +395,54 @@ describe('the pending count', () => {
     expect(syncState().pending).toBe(6);
   });
 
+  it('includes logged FOOD, not just the other three', async () => {
+    // The fourth time this has needed writing, and for the fourth identical
+    // reason: every mock returns 0, so every other assertion here sums the
+    // other three and stays green with `pendingFoodCount` unwired from
+    // `refreshPending`.
+    //
+    // The consequence is the worst of the four. A meal logged in a restaurant
+    // basement would get no backoff retry and no foreground retry, and would
+    // sit on the device while the screen reported nothing owed — and unlike a
+    // session, the athlete has no way to notice, because the day screen reads
+    // the local row and looks perfectly correct.
+    // Every count set explicitly, including the ones this test is not about.
+    // The suite does not reset these between cases, so relying on a default of
+    // 0 makes the expected sum depend on which test ran before this one.
+    (countPendingSessions as jest.Mock).mockResolvedValue(1);
+    (countPendingWorkouts as jest.Mock).mockResolvedValue(1);
+    (countPendingPlans as jest.Mock).mockResolvedValue(0);
+    (pendingSequenceCount as jest.Mock).mockResolvedValue(0);
+    (pendingFoodCount as jest.Mock).mockResolvedValue(5);
+
+    setSyncIdentity('u1', async () => 'tok');
+    await refreshPending();
+
+    expect(syncState().pending).toBe(7);
+  });
+});
+
+describe('food in the merge', () => {
+  it('surfaces a food failure the way it surfaces every other one', async () => {
+    // Mirrors the sequences case immediately above. Without food's three terms
+    // in the merged result, a meal that failed to send reports nothing at all:
+    // the banner stays clean and the athlete has no way to know, because the
+    // day screen reads the local row and looks perfectly correct.
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue({ pushed: 0, pulled: 0, failed: 0, deferred: 0 });
+    (syncFood as jest.Mock).mockResolvedValue({
+      pushed: 0,
+      failed: 1,
+      error: 'meal refused',
+      errorKind: 'transient',
+    });
+    await syncNow();
+
+    expect(syncState().lastError).toBe('meal refused');
+    expect(syncState().online).toBe(true);
+  });
 });
 
 describe('sequences in the three-way merge', () => {
