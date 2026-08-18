@@ -55,8 +55,19 @@ jest.mock('../db', () => {
   return { ...real, getDb: async () => mockFixture };
 });
 
-/** A grip no build in the wild knows, standing in for the one a future server adds. */
-const FUTURE_GRIP = 'mixed';
+/**
+ * A grip no build in the wild knows, standing in for the one a future server
+ * adds.
+ *
+ * Was `'mixed'` until N9 shipped it, at which point both halves of that
+ * sentence became false — this build offers a chip for it and the server on the
+ * same branch accepts it. Nothing here was mechanically disarmed (the refusal
+ * is injected by mock, and the retry assertions also cover a known grip), but a
+ * fixture whose premise is a lie is one rename away from testing the opposite
+ * deploy window. Same rule as the repairSet probes: always outside the current
+ * six.
+ */
+const FUTURE_GRIP = 'mixed_left';
 
 const set = (position: number, grip: string | null) => ({
   exercise_id: 'bench-press', position, set_type: 'working', reps: 5, weight_kg: 100,

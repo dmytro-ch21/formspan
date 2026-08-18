@@ -112,7 +112,7 @@ describe('which movements ask about grip', () => {
     // or one recorded before a subset changed. Rendering only the subset leaves
     // it visible in the summary line but with NO CHIP TO TAP, so the single way
     // back to "unrecorded" disappears and the athlete is stuck with it.
-    const shown = offeredGrips('horizontal_push', 'hook' as never);
+    const shown = offeredGrips('horizontal_push', 'hook');
     expect(shown.map((g) => g.key)).toEqual([
       'regular',
       'neutral',

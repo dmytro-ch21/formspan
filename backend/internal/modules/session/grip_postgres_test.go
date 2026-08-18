@@ -3,8 +3,8 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -131,16 +131,24 @@ func TestTheGripConstraintKeepsTheNameTheWireCodeDependsOn(t *testing.T) {
 	_, pool := newTestRepo(t)
 	ctx := context.Background()
 
-	var name string
+	// EVERY grip-mentioning CHECK, not the first one an unordered scan returns:
+	// with a second such constraint a badly-named one could hide behind a
+	// well-named one and this test would flap rather than fail.
+	var total, named int
 	err := pool.QueryRow(ctx, `
-		SELECT conname FROM pg_constraint
+		SELECT count(*), count(*) FILTER (WHERE conname LIKE '%grip%')
+		FROM pg_constraint
 		WHERE conrelid = 'session_sets'::regclass
 		  AND contype = 'c'
-		  AND pg_get_constraintdef(oid) LIKE '%grip%'`).Scan(&name)
+		  AND pg_get_constraintdef(oid) LIKE '%grip%'`).Scan(&total, &named)
 	if err != nil {
-		t.Fatalf("no CHECK constraint on session_sets mentions grip: %v", err)
+		t.Fatalf("querying session_sets CHECK constraints: %v", err)
 	}
-	if !strings.Contains(name, "grip") {
+	if total == 0 {
+		t.Fatal("no CHECK constraint on session_sets mentions grip at all")
+	}
+	name := "all " + fmt.Sprint(total)
+	if named != total {
 		t.Fatalf("the grip CHECK is named %q, which does not contain \"grip\" — "+
 			"translatePgError matches on that substring to return ErrInvalidGrip, so "+
 			"every unknown grip now reaches the client as a generic invalid_input and "+
@@ -208,11 +216,11 @@ func TestGripsForOffersOnlyWhatTheMovementCanUse(t *testing.T) {
 		}
 	}
 
-	// `neutral` on hinges and olympic lifts reads wrong and is not: the catalog
-	// files the Hex Bar Deadlift and four kettlebell/dumbbell swings under
-	// `hinge`, and 22 of `olympic`'s 25 rows are kettlebell or dumbbell cleans
-	// and snatches. Removing it — the obvious tidy-up — takes the control away
-	// from most of the bucket.
+	// `neutral` on hinges and olympic lifts reads wrong and is not. Counted from
+	// the seed catalog: 20 of `hinge`'s 55 rows are kettlebell, dumbbell or
+	// hex-bar, and 12 of `olympic`'s 25 are kettlebell (11) or dumbbell (1).
+	// Neither is a majority — olympic is 13 barbell — which is the point: both
+	// buckets are split, so dropping either value strands a real half.
 	for _, p := range []string{"hinge", "olympic"} {
 		if !slices.Contains(GripsFor(p), GripNeutral) {
 			t.Errorf("GripsFor(%q) dropped neutral; check the catalog before "+
@@ -230,6 +238,18 @@ func TestGripsForOffersOnlyWhatTheMovementCanUse(t *testing.T) {
 		t.Error("GripsFor(olympic) offers reverse")
 	}
 
+	// Emptiness IS GripApplies — asserted rather than assumed. The two agree by
+	// construction today, but `GripApplies` is one edit away from being an
+	// independent switch that happens to match, and nothing else would notice.
+	for _, p := range []string{
+		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull",
+		"isolation", "hinge", "carry", "olympic", "squat", "core", "", "not_a_pattern",
+	} {
+		if GripApplies(p) != (len(GripsFor(p)) > 0) {
+			t.Errorf("GripApplies(%q) = %v but GripsFor gives %d values — these have "+
+				"come apart", p, GripApplies(p), len(GripsFor(p)))
+		}
+	}
 	// Emptiness IS GripApplies, so the two can never disagree.
 	for _, p := range []string{"squat", "core", ""} {
 		if len(GripsFor(p)) != 0 {

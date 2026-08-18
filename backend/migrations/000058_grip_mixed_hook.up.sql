@@ -23,6 +23,13 @@
 -- a value later cheap (the server refuses an unknown grip with a code the
 -- client acts on, and an old build keeps what it holds rather than nulling it),
 -- so `mixed_left`/`mixed_right` remain reachable without a stale-client story.
+-- Same as 000054, which created this constraint: `session_sets` is the largest
+-- table in the app, and ADD CONSTRAINT ... CHECK scans all of it under ACCESS
+-- EXCLUSIVE. Without a timeout the ALTER queues behind any long-running query
+-- and every subsequent query on the table — reads included — queues behind the
+-- ALTER. Failing fast beats blocking every session write.
+SET lock_timeout = '3s';
+
 ALTER TABLE session_sets
     DROP CONSTRAINT IF EXISTS session_sets_grip_valid;
 

@@ -1209,7 +1209,7 @@ export function repairSet<T extends LoggedSet>(set: T): T {
     zero, an RIR of 25, more assisted reps than reps. Those are illegal on any
     server, forever, and nulling them is safe.
 
-    A grip is not like that. This build knows four values; the server decides
+    A grip is not like that. This build knows six values; the server decides
     how many there are. Checking `set.grip` against `GRIPS` therefore answers
     "do I recognise this?" while pretending to answer "would the server take
     it?" — and the moment a fifth value ships, every phone still on this build

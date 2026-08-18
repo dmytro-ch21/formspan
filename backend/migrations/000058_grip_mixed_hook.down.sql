@@ -5,10 +5,20 @@
 -- backwards here: there is no narrower grip to demote a mixed pull to, and
 -- `regular` would be a false entry — precisely the thing 000054 refused to
 -- invent. Clearing gives back "unrecorded", which is true.
-UPDATE session_sets SET grip = NULL WHERE grip IN ('mixed', 'hook');
+SET lock_timeout = '3s';
 
+-- DROP first, then clear, then ADD — not clear-then-swap.
+--
+-- UPDATE takes only ROW EXCLUSIVE, which does not block concurrent inserts, so
+-- clearing first leaves a window where a fresh `mixed` row commits between the
+-- UPDATE and the ADD's validation scan. The ADD then fails on a row that did
+-- not exist when we looked, and the migration lands dirty. Dropping first takes
+-- ACCESS EXCLUSIVE and holds it to commit, so nothing can write a value the
+-- clear will miss.
 ALTER TABLE session_sets
     DROP CONSTRAINT IF EXISTS session_sets_grip_valid;
+
+UPDATE session_sets SET grip = NULL WHERE grip IN ('mixed', 'hook');
 
 ALTER TABLE session_sets
     ADD CONSTRAINT session_sets_grip_valid

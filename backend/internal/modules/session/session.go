@@ -123,11 +123,13 @@ func GripApplies(movementPattern string) bool {
 // because two of them are counter-intuitive:
 //
 //   - **Hinges get `neutral`**, which looks wrong for a deadlift until you
-//     notice the Hex Bar Deadlift and the four kettlebell and dumbbell swings
-//     sitting in the same 55 rows. They are hinges held palms-facing.
-//   - **Olympic lifts get `neutral`** for the same reason and harder: 22 of
-//     those 25 rows are kettlebell or dumbbell cleans and snatches. `hook` is
-//     the barbell answer; `neutral` is what most of the bucket actually is.
+//     count them: 20 of those 55 rows are kettlebell, dumbbell or hex-bar —
+//     dumbbell deadlifts and RDLs, the swings, the Hex Bar Deadlift. All held
+//     palms-facing.
+//   - **Olympic lifts get `neutral`** for the same reason: 12 of those 25 rows
+//     are kettlebell (11) or dumbbell (1), none of which hook-grips anything.
+//     Barbell is the plurality at 13, so `hook` is not the majority answer
+//     either — the bucket is genuinely split and needs both.
 //
 // `mixed` appears on hinges ALONE. You do not mix-grip a snatch, and a mixed
 // farmer's carry is not a thing — offering it there would be the same
@@ -141,6 +143,9 @@ func GripApplies(movementPattern string) bool {
 //
 // Returns nil where the question is meaningless — squats, lunges, jumps,
 // conditioning, core, mobility, rotation. `GripApplies` is that emptiness.
+// Each branch returns a FRESH slice, deliberately: `offeredGrips` on the client
+// appends the set's own grip to this list, and a package-level table would be
+// corrupted by the first caller that did the same here.
 func GripsFor(movementPattern string) []Grip {
 	switch movementPattern {
 	case "horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation":

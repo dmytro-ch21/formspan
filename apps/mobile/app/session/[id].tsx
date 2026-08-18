@@ -101,7 +101,6 @@ import {
   elapsedBelongsInSeconds,
   offersTimerTarget,
   workSecondsFor,
-  gripApplies,
   offeredGrips,
   SET_TYPES,
   type LoggedSet,
@@ -2373,15 +2372,24 @@ function SetRow({
           </View>
 
           {/* How the bar was held.
-              Offered only where the four values ARE the vocabulary — pushes,
-              pulls, isolation. Not squats (meaningless) and not hinges, whose
-              real answer is `mixed`, which this enum does not have: a picker
-              there would collect confident wrong answers rather than none.
+              Which values are offered depends on the movement (`gripsFor`):
+              pushes, pulls and isolation get the original four; hinges add
+              `mixed` and `hook`; carries and olympic lifts get `hook`. Squats,
+              jumps and conditioning get nothing, because the question is
+              meaningless there rather than merely hard to answer.
 
-              Tapping the selected chip clears it, which is the only way back to
-              "unrecorded" once something is chosen. Without that, a mis-tap is
-              permanent — and unrecorded is a real state here, not an absence. */}
-          {gripApplies(exercise?.movement_pattern) && (
+              Gated on `offeredGrips`, NOT on `gripApplies`. They differ in
+              exactly one case and it is the one that traps data: a set holding
+              a grip on a movement whose subset is empty — an exercise the
+              console re-categorised after it was logged, or a pattern a newer
+              server grew. `gripApplies` hides the row, and the grip is then
+              visible in the summary line with no chip to tap, so the single
+              route back to "unrecorded" is gone.
+
+              Tapping the selected chip clears it, which is that route. Without
+              it a mis-tap is permanent — and unrecorded is a real state here,
+              not an absence. */}
+          {offeredGrips(exercise?.movement_pattern, set.grip).length > 0 && (
             <View style={styles.chips}>
               {offeredGrips(exercise?.movement_pattern, set.grip).map((g) => {
                 const on = set.grip === g.key;
