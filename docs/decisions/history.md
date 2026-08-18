@@ -25193,6 +25193,151 @@ Open questions:
   techniques. That matches `item_count` and the curricula list cards, and is a
   different number from the "73 techniques" the history entry for #277 quotes.
   Both are correct about different things, which is not obvious from either.
+## 2026-08-18 — Nutrition on the phone: the Food tab, the outbox, and the phase screen that never existed (N25)
+
+The backend from N24 could hold a target and a food diary; nothing could log
+into it. This lands the mobile half: a fifth `Food` tab, the day screen, a
+two-tap quick-add, the Today Fuel card, and the offline outbox at schema v18.
+
+**A fifth tab, second in the bar.** The four-tab argument in `(tabs)/_layout.tsx`
+was always about *learnability*, not the literal number, and the bar has been
+four-or-five since `anyCatalog` gated Library — so a variable count is the
+established state, not a new one. Food earns a fixed slot on frequency: three
+to six logs a day, more than anything else in this app, and a stack route costs
+an extra tap every time on a screen whose contents move. Gated with `href: null`
+through a `hiddenFor(name)` helper, never by omitting `<Tabs.Screen>`, and keyed
+on the `has_food_log` **capability** rather than on `key === 'nutrition'`.
+
+**Two outbox shapes, not a third.** `food_entries` are append-mostly and
+push-only (`sequences.ts`'s shape); `foods` are a small catalog web also writes,
+so they get a pull as well (`workout_cache`'s shape). `last_used_at` and
+`use_count` are local-only and never pulled, which is what makes the recents
+list a single indexed read with no join and no network.
+
+**A race the tests found only in the full suite.** The compare-and-swap that
+protects a mid-push edit compares `updated_at` strings at millisecond
+resolution — so two writes landing in the same millisecond produced identical
+tokens, and an edit made during a push was silently marked as sent. The test
+passed alone and failed under load. `stamp()` now guarantees a strictly
+increasing value. Worth remembering the shape: a CAS token is only a token if it
+actually changes.
+
+**The phase screen is the part that was easy to miss.** `createPhase` and
+`endPhase` have been in `lib/body.ts` and in the API since the body module
+landed, with **zero callers anywhere in `apps/`**. Nothing depended on them, so
+nothing noticed — until a calorie target, which takes its direction and its rate
+from the live phase and has nothing to derive from without one. `app/phase/`
+asks for kind, and for a target weight and date only where they mean something:
+making weight fixes the required rate arithmetically, everywhere else the rate
+comes from the evidence-based band. Goal *pace* is deliberately not asked —
+letting somebody type "2 kg a week" would make the app the author of a target it
+then judges them against. The band copy is read off `RATE_TARGETS` rather than
+written out, so it cannot drift from the arithmetic.
+
+**No chart.** Every candidate fails the N5 carve-out: 7-day calorie bars fail
+"decided away from a desk", protein bars fail that *and* inform nothing the
+remaining number leaves open, intake-vs-weight fails "one question" outright.
+`RemainingBlock` carries a comment saying its in-day progress bar is not a chart
+— one quantity against one target, no time axis — so nobody files it as
+precedent later.
+
+**Two tests that passed for the wrong reason, both caught by mutation.**
+Deleting the entire schema-v18 upgrade block left the migration test green,
+because the unconditional `CREATE TABLE IF NOT EXISTS` section recreates the
+tables by design; the index assertion is what actually catches it, and the
+comment now says so rather than overclaiming. And the first `rescale` round-trip
+test used a fixture that divided evenly, so it would have passed whatever the
+arithmetic did. The measured drift is one rounding step — 355 kcal at two
+servings returns 355.1 — and both the docstring and the test say that instead of
+claiming exactness.
+
+**The target is cached, and the fourth state is a type.** The first draft
+fetched the target over the network on every render and rendered a failure as
+`Set a target` — an instruction to go and do homework the athlete may have done
+on web that morning. It is now cached in SQLite at **schema v19**, behind a
+`TargetView` union (`checking | unknown | none | set`) rather than
+`Target | null` alongside a `loaded` boolean. The union is the point: a pair of
+booleans lets the fourth state collapse silently, and this is exactly the
+collapse the module's own rule forbids.
+
+v19 rather than an extension of the unmerged v18, because `migrate()` returns
+early at `current >= SCHEMA_VERSION` — a device already stamped 18, which is
+every machine that has run this branch, would never reach the unconditional
+`CREATE TABLE IF NOT EXISTS` section. **The version bump is what fixes that, not
+the `if (current < 19)` branch**, which is a no-op against the unconditional
+section exactly as v18's is. Both comments claimed the branch was load-bearing
+until mutation testing showed otherwise; reverting `SCHEMA_VERSION` to 18 is the
+mutation that goes red, and it takes four tests with it.
+
+**Four review findings, and the sharpest was in the outbox.** The
+compare-and-swap protecting a mid-push edit existed on the success path from the
+start and had never been added to the FAILURE path — so a 4xx on the payload
+that preceded an edit cleared `dirty` on the newer row and the correction never
+left the phone. Also: `accept()` on the target screen had no `catch`, so a
+failed save un-dimmed the button and was indistinguishable from success;
+stepping to another day kept the previous day's target while the new day's
+entries rendered against it; and `noteFoodUsed` was the one unscoped write in a
+file whose every read scopes.
+
+**And the two mid-push tests were themselves passing for the wrong reason** — a
+third instance in one branch. A persistent mock implementation also fired on the
+newly-wired foods pull, which re-ran the edit and re-dirtied the row, so
+removing the guard under test left them green. One-shot now, and all three
+compare-and-swap guards go red under mutation.
+
+**The fix for the offline hole had a hole of its own, and the review found it.**
+Wiring the foods pull looked complete and could not write a single row:
+`foods.created_at` and `cached_at` are `NOT NULL` with no default, and the
+insert omitted both. Two things made it invisible. The `catch` around the pull
+swallowed everything — a failed pull is genuinely not a failed sync, so nothing
+surfaced. And **every sync test resolved `{}`**, so `listFoods` returned an
+empty array and the pull loop ran zero times: a fixture that STARVES the code
+under test hides a bug exactly as well as one that supplies the behaviour, which
+is the mirror image of the mistake this suite was started over. Confirmed
+against the real engine, including the surprising half — SQLite enforces NOT
+NULL *before* resolving the primary-key conflict, so the upsert path fails too,
+not just the insert.
+
+The pull now supplies both columns, deletes rows the server dropped (guarded on
+`remote = 1 AND dirty = 0`, so a food saved here and not yet pushed is never
+mistaken for a deletion), and records its error instead of swallowing it. Five
+fixture tests feed it actual foods; all three guards go red under mutation,
+including the original `NOT NULL` bug.
+
+Two of those tests were wrong on the first attempt in an instructive way: they
+mocked a server that accepted a push and then listed back a *different* value.
+Within one sync pass the push runs first, so that server cannot exist, and the
+tests were asserting against an impossible history rather than against the
+guard. Reaching the state they meant to test needs a push that fails
+**transiently** — a 5xx is not offline, so the pull still runs while the row is
+still owed.
+
+### Open questions this leaves
+
+- **Not verified on a device or Simulator.** `verify` is green, 1,424 mobile
+  tests pass under the pinned `TZ`, and every new guard was mutation-tested —
+  but no screen here has been looked at. `L1` records what that gap has cost
+  before.
+- **`cacheEntries` is written, tested, and deliberately not wired.** Entries are
+  push-only today because nothing on web writes one. The merge exists because
+  the moment web can correct a day (N28) the phone needs one that does not
+  clobber what it still owes, and writing that under pressure next to a scoped
+  DELETE is how a sync loses data. It says so in its own docstring rather than
+  sitting there looking like an oversight.
+- A reinstalled phone has an empty diary: entries never pull, so history lives
+  on the server and the device cannot fetch it back. Acceptable while the phone
+  is the only writer; it stops being acceptable at N28.
+- **The target cache's fetched-marker is device-global while the cache fills a
+  day-window at a time.** Stepping back, offline, to a day before the earliest
+  target ever fetched reports `none` where the truth is `unknown` — the sentence
+  the union exists to prevent, in a narrower window. Fixing it means recording
+  fetched windows rather than one timestamp; the limitation is stated in
+  `localTargetView` rather than left to be discovered.
+- Saving a meal from a slot with two or more entries is in the plan and is not
+  built. Quick-add covers the repeat case; that covers the repeat *combination*.
+- The training row on the day screen is not built either. Its docstring states
+  the rule it must obey when it is — stated, never spent — because the tempting
+  version is the wrong one.
 
 
 ## Open items / known gaps as of this entry

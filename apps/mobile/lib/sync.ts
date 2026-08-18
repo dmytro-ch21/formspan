@@ -4,6 +4,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { isOffline } from './apiError';
 import { countPendingSessions, countPendingWorkouts, syncSessions } from './sessionStore';
 import { countPendingPlans, syncPlans } from './plan';
+import { pendingFoodCount, syncFood } from './foodLog';
 import { pendingSequenceCount, syncSequences } from './sequences';
 import type { SyncErrorKind } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
@@ -164,7 +165,7 @@ function cancelTimer(): void {
 export async function refreshPending(): Promise<void> {
   if (!creds) return;
   try {
-    const [sessions, workouts, plans, sequences] = await Promise.all([
+    const [sessions, workouts, plans, sequences, food] = await Promise.all([
       countPendingSessions(creds.userID),
       countPendingWorkouts(creds.userID),
       countPendingPlans(creds.userID),
@@ -172,8 +173,9 @@ export async function refreshPending(): Promise<void> {
       // outbox while the sync screen reports nothing owed — which reads as
       // "it saved" and is exactly the reassurance that must not be false.
       pendingSequenceCount(creds.userID),
+      pendingFoodCount(creds.userID),
     ]);
-    emit({ pending: sessions + workouts + plans + sequences });
+    emit({ pending: sessions + workouts + plans + sequences + food });
   } catch {
     // A failed count must not break anything; the number is advisory.
   }
@@ -244,6 +246,11 @@ async function run(reason: string): Promise<void> {
       // carry an athlete's actual training have already drained.
       const sequenceResult = await syncSequences(userID, getToken);
 
+      // Food last, like sequences: nothing depends on it having landed, and a
+      // failure here must not stop a session or a plan from being pushed. Both
+      // outboxes are independent of the FK ordering above.
+      const foodResult = await syncFood(userID, getToken);
+
       // Merged so one failing half cannot be masked by the other succeeding.
       // Both surfaces — the pending count and the error banner — describe the
       // whole outbox, not one table of it.
@@ -258,20 +265,26 @@ async function run(reason: string): Promise<void> {
       // precedence for exactly this; discarding it at the merge point undoes
       // the work.
       const result = {
-        failed: sessionResult.failed + planResult.failed + sequenceResult.failed,
-        // Sequences have no deferred state: nothing about a captured chain can
-        // be waiting on another local row to land first, so there is nothing
-        // to add here. Written out rather than omitted, because a `+ 0` that
-        // is actually a missing term is the kind of thing that reads as a bug.
+        failed:
+          sessionResult.failed + planResult.failed + sequenceResult.failed + foodResult.failed,
+        // Neither sequences nor food have deferred state: nothing about a
+        // captured chain or a logged meal can be waiting on another local row
+        // to land first, so there is nothing to add here. Written out rather
+        // than omitted, because a `+ 0` that is actually a missing term is the
+        // kind of thing that reads as a bug.
         deferred: sessionResult.deferred + planResult.deferred,
-        error: sessionResult.error ?? planResult.error ?? sequenceResult.error,
+        error:
+          sessionResult.error ?? planResult.error ?? sequenceResult.error ?? foodResult.error,
         // RANKED across all three, for the reason spelled out above: `??` makes
         // the classification order-dependent, so a permanently-refused session
         // would mask a sequence that failed on a perfectly retryable 5xx and
         // the orchestrator would stop retrying it.
         errorKind: rankKind(
-          rankKind(sessionResult.errorKind, planResult.errorKind),
-          sequenceResult.errorKind,
+          rankKind(
+            rankKind(sessionResult.errorKind, planResult.errorKind),
+            sequenceResult.errorKind,
+          ),
+          foodResult.errorKind,
         ),
       };
 

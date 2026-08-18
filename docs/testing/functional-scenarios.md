@@ -7023,8 +7023,8 @@ you can argue with beats a verdict you must trust. The scenarios below lean on
 that: almost every one is about the app being honest when it does not know
 something, rather than about the arithmetic being right.
 
-Backend-only so far (N24). The Food tab, the day screen and the offline outbox
-are N25 and their scenarios belong with them.
+The backend is N24; the phone is N25 and its scenarios are the second half of
+this section.
 
 ### The rule that outranks everything else here
 
@@ -7132,6 +7132,81 @@ are N25 and their scenarios belong with them.
 - **A range longer than its cap is a 400**, not a slow success — the response
   stack buffers to compute an ETag, so an unbounded window is a memory cost that
   scales with how long somebody has trained.
+
+### Mobile: the Food tab, the day screen and the outbox (N25)
+
+**Happy path**
+
+- **A repeat meal is two taps.** Open `Food`, tap `+ Add` on a slot, tap a
+  recent — logged, sheet dismissed, the remaining figure on Today has moved.
+  Nothing about that sequence may require a network round trip.
+- **The quick-add list is ranked for the slot being logged into**, not by raw
+  recency: a breakfast staple tops breakfast and does not appear at dinner.
+- **A food logged from the quick-add sheet appears on the day screen
+  immediately**, before any push has completed.
+- **A new food is one screen** — name, serving label, four numbers — with a
+  single `Save and log`. Saving it both stores the food and logs a serving.
+- **The Today card and the day screen agree, always.** They share
+  `RemainingBlock`; a scenario that shows them disagreeing is a regression in
+  that sharing, not in the arithmetic.
+- **Starting a phase from `You ▸ Phase` and then opening `Food ▸ Target` shows a
+  derivation pointing the right way** — a cut proposes fewer calories than
+  maintenance, a lean bulk more.
+
+**Edge cases and errors**
+
+- **Logging works with the network off**, end to end: the entry is written, the
+  day screen totals it, the pending count rises, and it pushes when signal
+  returns. This is the scenario the whole outbox exists for.
+- **No target is a first-class state.** The card and the day screen show eaten
+  totals and say `Set a target` — never a zero remaining, which reads as "you
+  have nothing left".
+- **An unreachable target is NOT reported as no target.** With the network off
+  and a target cached, the cached figure is shown; with none cached and no fetch
+  ever having succeeded, the screen says it cannot check — never `Set a target`,
+  which is an instruction to redo work the athlete may have done on web. These
+  are FOUR distinct sentences with not-yet-loaded and nothing-logged, and a
+  scenario that accepts any of them for another is not testing the distinction.
+- **Stepping to another day never shows the previous day's target.** The failure
+  mode is a wrong remaining figure, not a stale one, and it appears specifically
+  when the new day's target fetch fails.
+- **Over the target is muted, never an error colour.** One day over is not a
+  failure state, and rendering it as one is against the no-shame rule.
+- **A dinner logged at 23:00 stays dinner.** The slot is assigned from the wall
+  clock once, at log time, and stored — never re-derived on read. Worth an
+  explicit evening-log scenario: the suite runs under
+  `TZ=America/Los_Angeles`, so a UTC-derived date fails here and only here.
+- **Editing an entry does not change the food it came from**, and editing a
+  saved food does not change any entry already logged from it. Both directions
+  need their own scenario; each passes against the other's bug.
+- **Changing servings on an entry rescales the macros; typing a macro stops it
+  rescaling** for the rest of that edit.
+- **Deleting an entry always tombstones while a push may be in flight.** A row
+  logged and immediately deleted must not be forgotten locally before its create
+  has landed, or the server keeps an entry the phone no longer knows about and
+  no tombstone will ever remove it.
+- **An edit made during a push survives the REJECTION of the payload that
+  preceded it**, not only its success. Both halves need a scenario; each passes
+  against the other's bug.
+- **An incomplete profile blocks the target with named fields**, and the screen
+  routes to the profile form rather than offering a retry. It must never fall
+  back to an estimated resting baseline — that runs 20–30% high, which is a cut
+  that silently never happens.
+- **A bound rail is stated.** When the derivation clamps, the screen says so;
+  without that line the last step does not follow from the one above it.
+- **Making weight refuses to start without a weight and a date.** Every other
+  phase kind accepts both as optional.
+
+**Auth and security**
+
+- **The Food tab is absent when no enabled module has `has_food_log`** — and
+  absent by `href: null`, so `/food` still resolves for a deep link or an
+  in-flight push.
+- **A local read is scoped to the signed-in athlete.** The entry editor opened
+  on another athlete's id finds nothing, even though ids are generated on the
+  device and are therefore guessable-adjacent.
+- **Signing out and signing in as somebody else shows none of the first
+  athlete's food**, from the local database, with the network off.
 
 ## The BJJ position map (`GET /v1/bjj/positions`, mobile `/bjj/positions`)
 

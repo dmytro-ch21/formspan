@@ -311,6 +311,16 @@ export default function YouScreen() {
               onPress={() => router.push('/profile/edit')}
               testID="you-edit"
             />
+            {/* A phase is the thing every calorie target points at, and until
+                this row existed the API could hold one that nothing in the app
+                could create. Beside Edit profile because it is the same kind of
+                fact: something true about you that the app reasons over. */}
+            <NavRow
+              label="Phase"
+              detail="Cutting, bulking, or holding where you are"
+              onPress={() => router.push('/phase')}
+              testID="you-phase"
+            />
             <NavRow
               label="Settings"
               detail="Units, accent, and how VOLA behaves"

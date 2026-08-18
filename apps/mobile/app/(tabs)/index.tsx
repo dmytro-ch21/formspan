@@ -15,6 +15,7 @@ import {
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 
 import { CheckinCard } from '@/components/CheckinCard';
+import { NutritionCard } from '@/components/NutritionCard';
 import { Text, View } from '@/components/Themed';
 import { Image } from 'expo-image';
 
@@ -65,6 +66,17 @@ import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
 import { listCheckins, listPhases, type Checkin, type Phase } from '@/lib/body';
+import { cacheTargets, localEntries, localTargetView, logFood, recentsFor } from '@/lib/foodLog';
+import { hasFoodLog } from '@/lib/modules';
+import {
+  rankRecents,
+  scale,
+  slotForClock,
+  type Entry,
+  type Food,
+  type TargetView,
+} from '@/lib/nutrition';
+import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { accentGlow } from '@/lib/palette';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -538,6 +550,78 @@ export default function TodayScreen() {
   const [checkins, setCheckins] = useState<Checkin[]>([]);
   const [phase, setPhase] = useState<Phase | null>(null);
   const [checkinsLoaded, setCheckinsLoaded] = useState(false);
+
+  // Fuel. Read locally first, exactly like the day screen: the card must be
+  // right with no signal, because the log it reports is written offline.
+  const [foodEntries, setFoodEntries] = useState<Entry[]>([]);
+  const [foodView, setFoodView] = useState<TargetView>({ state: 'checking' });
+  const [foodQuick, setFoodQuick] = useState<Food[]>([]);
+  const foodEnabled = hasFoodLog(modules);
+
+  const refreshFood = useCallback(() => {
+    let live = true;
+    const today = dayString(new Date());
+    const slot = slotForClock(new Date());
+
+    (userId ? localEntries(userId, today) : Promise.resolve<Entry[]>([]))
+      .then((rows) => {
+        if (live) setFoodEntries(rows);
+      })
+      .catch(() => {});
+
+    // Ranked for the CURRENT slot, so the chips are porridge at breakfast and
+    // something else at dinner.
+    (userId ? recentsFor(userId, slot) : Promise.resolve([]))
+      .then((rs) => {
+        if (live) setFoodQuick(rankRecents(rs, today));
+      })
+      .catch(() => {});
+
+    // The one thing the phone cannot compute. Cache first, server second — and
+    // a failed fetch leaves the cached answer standing rather than falling back
+    // to "set a target", which would be a false claim about an athlete who set
+    // one on web. See TargetView.
+    // Sequenced rather than raced, same as the day screen: started in parallel
+    // a slow cache read can land after a fast network answer and overwrite it.
+    let answered = false;
+    (userId ? localTargetView(userId, today) : Promise.resolve<TargetView>({ state: 'unknown' }))
+      .catch((): TargetView => ({ state: 'unknown' }))
+      .then((v) => {
+        if (live && !answered) setFoodView(v);
+        return listTargets(getToken, { from: today, to: today });
+      })
+      .then(async (ts) => {
+        if (userId) await cacheTargets(userId, today, today, ts);
+        if (!live) return;
+        answered = true;
+        const t = targetOn(ts, today);
+        setFoodView(t ? { state: 'set', target: t } : { state: 'none' });
+      })
+      .catch(() => {});
+
+    return () => {
+      live = false;
+    };
+  }, [getToken, userId]);
+
+  /** One tap from the card: log a serving of a ranked food, right now. */
+  const quickLog = useCallback(
+    async (food: Food) => {
+      if (!userId) return;
+      await logFood(userId, {
+        eaten_on: dayString(new Date()),
+        meal: slotForClock(new Date()),
+        name: food.name,
+        servings: 1,
+        serving_label: food.serving_label,
+        ...scale(food, 1),
+        source_food_id: food.id,
+      });
+      requestSync('food logged');
+      refreshFood();
+    },
+    [userId, refreshFood],
+  );
   /**
    * Refreshed on FOCUS, not once on mount.
    *
@@ -582,6 +666,11 @@ export default function TodayScreen() {
       refreshSessions();
       refreshPlan();
       refreshCheckins();
+      // Its cleanup is KEPT, unlike its neighbours'. Food is the one refresh on
+      // this screen with a same-screen writer racing it — `quickLog` refreshes
+      // again immediately after logging — so a slow read started at focus could
+      // otherwise resolve last and paint over the row just added.
+      const stopFood = refreshFood();
       // On focus only, not on every day-step: the funnel is an aggregate over
       // every session ever logged and does not change because you looked at
       // Thursday.
@@ -591,8 +680,11 @@ export default function TodayScreen() {
       refreshRoadmaps();
       // Settings can have changed any of these while this screen sat mounted.
       const stop = readSuggestionPrefs();
-      return stop;
-    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins]),
+      return () => {
+        stopFood?.();
+        stop?.();
+      };
+    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins, refreshFood]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -1336,6 +1428,21 @@ export default function TodayScreen() {
           loaded={checkinsLoaded}
           unitsReady={unitsReady}
         />
+
+        {/* Fuel sits beside the check-in because both ASK for something rather
+            than reporting, and the two belong together above the blocks that
+            only report. Two numbers and nothing else: remaining calories and
+            remaining protein. */}
+        {foodEnabled && (
+          <NutritionCard
+            entries={foodEntries}
+            view={foodView}
+            quickAdd={foodQuick}
+            onLog={() => router.push('/food/add')}
+            onOpenDay={() => router.push('/food')}
+            onQuickAdd={(f) => void quickLog(f)}
+          />
+        )}
 
         {/*
           The week, summed up — what happened, against what was meant to, and
