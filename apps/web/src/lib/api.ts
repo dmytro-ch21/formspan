@@ -205,16 +205,27 @@ export type SetType =
  * How the implement was held for one set. A property of the SET, not of the
  * exercise — see the migration and the server's `Grip`.
  *
- * `mixed` and `hook` are deliberately absent, which is why no picker is offered
- * on hinges.
+ * All six the server defines, because this app DISPLAYS grips even though it
+ * cannot author them (N10) — a set recorded as `mixed` on the phone is opened
+ * at a desk here, and a union missing it renders the raw key. The `?? set.grip`
+ * fallback at the render site meant that degraded rather than broke, which is
+ * why it was a display defect and not a crash.
  */
-export type Grip = "regular" | "neutral" | "reverse" | "angled";
+export type Grip =
+  | "regular"
+  | "neutral"
+  | "reverse"
+  | "angled"
+  | "mixed"
+  | "hook";
 
 export const GRIPS: { key: Grip; label: string; short: string }[] = [
   { key: "regular", label: "Regular", short: "Reg" },
   { key: "neutral", label: "Neutral", short: "Neu" },
   { key: "reverse", label: "Reverse", short: "Rev" },
   { key: "angled", label: "Angled", short: "Ang" },
+  { key: "mixed", label: "Mixed", short: "Mix" },
+  { key: "hook", label: "Hook", short: "Hook" },
 ];
 
 export const SET_TYPES: { key: SetType; label: string; short: string }[] = [

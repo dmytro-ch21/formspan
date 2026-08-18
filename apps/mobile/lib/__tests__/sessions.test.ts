@@ -178,11 +178,19 @@ describe('repairSet', () => {
     // the day a fifth value shipped, every phone on an older build would read a
     // legitimate `mixed`, null it, and the wholesale PUT would write that null
     // back over data the athlete really recorded. Silently.
-    const future = set('bench-press', { grip: 'mixed' as never });
-    expect(repairSet(future).grip).toBe('mixed');
+    //
+    // **The probe must be OUTSIDE the current vocabulary, and N9 broke that
+    // here.** This line read `'mixed'` until then; adding `mixed` to the union
+    // turned it into a check that a KNOWN value survives — still green, and
+    // covering nothing, since reverting the guard to `GRIPS.some(...)` would
+    // have left it passing. Its twin in `grip.test.ts` was re-pointed and this
+    // one was missed; review caught it. Whoever ships `mixed_left` must move
+    // this again.
+    const future = set('bench-press', { grip: 'mixed_left' as never });
+    expect(repairSet(future).grip).toBe('mixed_left');
 
-    // The four it does know are untouched, obviously.
-    for (const g of ['regular', 'neutral', 'reverse', 'angled'] as const) {
+    // The six it does know are untouched, obviously.
+    for (const g of ['regular', 'neutral', 'reverse', 'angled', 'mixed', 'hook'] as const) {
       expect(repairSet(set('bench-press', { grip: g })).grip).toBe(g);
     }
     // And "not recorded" still means not recorded — never coerced to a default.

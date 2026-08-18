@@ -38,10 +38,13 @@ const (
 // hurt — while splitting one exercise's history in two, so the progression
 // rule and the personal records each see half the sets.
 //
-// `mixed` and `hook` are deliberately absent: they are how a heavy deadlift is
-// held and they are not variations of these four. Offering these four on a
-// hinge would let a deadlifter record `regular` for a mixed pull, which is a
-// false entry rather than a missing one. See `GripApplies`.
+// Six values, and which of them are OFFERED depends on the movement — see
+// `GripsFor`. `mixed` and `hook` were absent until #266, which is why that
+// function exists: they are how a heavy deadlift is held and they are not
+// variations of the other four, so a hinge that could only answer `regular`
+// collected a false entry rather than a missing one. The old fix was to
+// withhold the picker from hinges, carries and olympic lifts — 93 of 762
+// exercises, and the ones where grip matters most.
 type Grip string
 
 const (
@@ -57,11 +60,31 @@ const (
 	// GripAngled — the canted position an EZ-bar or an angled handle forces,
 	// which is neither fully pronated nor neutral.
 	GripAngled Grip = "angled"
+	// GripMixed — one hand pronated, one supinated. How a heavy deadlift is
+	// pulled once it outgrows a double-overhand hold.
+	//
+	// **No side.** Lifters do alternate which hand is under, and it is the
+	// reason they care — but nothing consumes that yet, and asking "which
+	// hand?" between sets is a question answered carelessly or skipped, which
+	// is the confident-wrong-answer this whole enum refuses. #256 made adding
+	// a value later cheap, so `mixed_left`/`mixed_right` stay reachable.
+	GripMixed Grip = "mixed"
+	// GripHook — thumb trapped under the fingers. The olympic grip, and what a
+	// deadlifter uses instead of mixed to keep the pull symmetrical.
+	GripHook Grip = "hook"
 )
 
+// ValidGrip is the VOCABULARY check: is this a grip at all.
+//
+// Deliberately not pattern-aware, even though `GripsFor` is. The subset governs
+// what a client OFFERS; refusing an unusual pairing server-side would turn a UI
+// affordance into a data-integrity rule and invent a new false negative — a
+// hook-gripped shrug is `isolation`, real, and nobody's business to refuse.
+// This is the same split 000054 shipped with: `GripApplies` gated the picker,
+// the server only ever checked the vocabulary.
 func ValidGrip(g Grip) bool {
 	switch g {
-	case GripRegular, GripNeutral, GripReverse, GripAngled:
+	case GripRegular, GripNeutral, GripReverse, GripAngled, GripMixed, GripHook:
 		return true
 	}
 	return false
@@ -91,11 +114,48 @@ func ValidGrip(g Grip) bool {
 // ignores on a calf raise, and a false negative is the feature not existing
 // for reverse curls. Cheap wrong beats expensive wrong.
 func GripApplies(movementPattern string) bool {
+	return len(GripsFor(movementPattern)) > 0
+}
+
+// GripsFor is which grips are worth OFFERING for a movement.
+//
+// The subsets are grounded in the catalog rather than in what sounds right,
+// because two of them are counter-intuitive:
+//
+//   - **Hinges get `neutral`**, which looks wrong for a deadlift until you
+//     count them: 20 of those 55 rows are kettlebell, dumbbell or hex-bar —
+//     dumbbell deadlifts and RDLs, the swings, the Hex Bar Deadlift. All held
+//     palms-facing.
+//   - **Olympic lifts get `neutral`** for the same reason: 12 of those 25 rows
+//     are kettlebell (11) or dumbbell (1), none of which hook-grips anything.
+//     Barbell is the plurality at 13, so `hook` is not the majority answer
+//     either — the bucket is genuinely split and needs both.
+//
+// `mixed` appears on hinges ALONE. You do not mix-grip a snatch, and a mixed
+// farmer's carry is not a thing — offering it there would be the same
+// false-entry mistake in a new place.
+//
+// The four original patterns are unchanged, including `isolation`: 210 rows,
+// the catalog's honest bucket for the single-joint long tail, carrying calf
+// raises (grip is meaningless) alongside hammer and reverse curls (the purest
+// grip variations there are). A false positive is an optional control somebody
+// ignores; a false negative is the feature not existing where it is clearest.
+//
+// Returns nil where the question is meaningless — squats, lunges, jumps,
+// conditioning, core, mobility, rotation. `GripApplies` is that emptiness.
+// Each branch returns a FRESH slice, deliberately: `offeredGrips` on the client
+// appends the set's own grip to this list, and a package-level table would be
+// corrupted by the first caller that did the same here.
+func GripsFor(movementPattern string) []Grip {
 	switch movementPattern {
 	case "horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation":
-		return true
+		return []Grip{GripRegular, GripNeutral, GripReverse, GripAngled}
+	case "hinge":
+		return []Grip{GripRegular, GripNeutral, GripMixed, GripHook}
+	case "carry", "olympic":
+		return []Grip{GripRegular, GripNeutral, GripHook}
 	}
-	return false
+	return nil
 }
 
 func ValidSetType(s SetType) bool {

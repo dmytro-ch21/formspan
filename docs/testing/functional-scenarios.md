@@ -7421,3 +7421,29 @@ training. Everything here is about it telling the truth.
 - Another athlete's sessions never appear, even when they trained the same exercise between two of yours. The user comes from the token; the path parameter names the exercise only.
 - Unauthenticated requests are 401.
 - The route lives under `/records` precisely so the per-user scoping is structural — a test that passes a friend's session id or user id anywhere must not change the result.
+
+## Grip: mixed and hook (N9)
+
+### Happy path
+
+- A hinge (Conventional Deadlift), a carry (Farmer Carry) and an olympic lift (Clean) all show a grip picker, where before they showed none.
+- A hinge offers regular / neutral / mixed / hook. A carry and an olympic lift offer regular / neutral / hook. A bench press still offers the original four.
+- Choosing `mixed` on a deadlift round-trips: stored, pushed, read back, and shown on the web session view as "Mix".
+- Tapping the selected chip still clears it back to unrecorded.
+
+### Edge cases & errors
+
+- **`mixed` is offered on hinges only.** A carry, an olympic lift and any press must not offer it.
+- **`neutral` must stay on hinges and olympic lifts** — 20 of 55 hinge rows are kettlebell, dumbbell or hex-bar, and 12 of 25 olympic rows are kettlebell or dumbbell. Neither is a majority (olympic is 13 barbell), so removing either value as a "tidy-up" strands a real half of the bucket.
+- A set already holding a grip the movement would not offer (a `hook` recorded on a press, or a value from a newer server) **still shows a chip**, appended after the subset — otherwise it is visible in the summary and impossible to clear.
+- An unknown grip from a newer server is **kept** locally, never nulled. The probe for this must be a value outside the *current* vocabulary — using one that has since been added makes the test pass while covering nothing. There are **three** such probes (`grip.test.ts`, `sessions.test.ts`, and `gripPush.test.ts`'s `FUTURE_GRIP`); N9 re-pointed one and review found the other two.
+- The database accepts `mixed` and `hook` and rejects anything else, with the dedicated `invalid_grip` code rather than a generic `invalid_input`.
+- Squats, lunges, jumps, core, mobility and conditioning still show no picker at all.
+
+### Auth / security
+
+- Unchanged: grip travels on the set, and every set path is already owner-scoped.
+
+### Regression trap
+
+- **The grip CHECK constraint's name must contain the substring `grip`.** `translatePgError` selects the `invalid_grip` wire code by matching it, and that code is what tells a stale client to drop the grip and retry. A migration that renames the constraint migrates cleanly, still refuses bad grips, and silently breaks every old client's self-repair.
