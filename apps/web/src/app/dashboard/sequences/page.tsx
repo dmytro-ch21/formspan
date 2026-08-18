@@ -98,7 +98,11 @@ export default function SequencesPage() {
                   {s.step_count} {s.step_count === 1 ? "step" : "steps"}
                   {s.start_position_name ? ` · from ${s.start_position_name}` : ""}
                   {/* Reference chains are readable and not editable. Said on the
-                      card so it is not a surprise on the edit screen. */}
+                      card so it is not a surprise on the edit screen.
+
+                      Sound only because sequences have no public arm — see the
+                      note on `Sequence.editable`, and F7 for what this same
+                      inference did to curricula once they did. */}
                   {!s.editable ? " · reference" : ""}
                 </p>
                 {s.description && (

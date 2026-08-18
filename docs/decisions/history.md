@@ -25340,6 +25340,80 @@ still owed.
   version is the wrong one.
 
 
+## 2026-08-18 — A curriculum says who wrote it (F7)
+
+Two strips decided "VOLA authored this" by reading `editable: false`. That is
+owner-is-caller, so it is false for a VOLA syllabus **and** for every other
+athlete's public curriculum — and `track` and `belt` are documented as hints
+with no validation on write, so a stranger publishing with `track: "syllabus"`
+and `belt: "white"` appeared on mobile's belt-syllabus strip wearing a belt
+word. The same payload worked on the Plan tab's Roadmaps strip.
+
+The fix is to serialise the positive fact. `official` is `owner_user_id IS
+NULL`, which is migration 000034's own definition of VOLA-authored, and it is
+trustworthy because `curricula_source_matches_owner` is **bidirectional** —
+`(owner_user_id IS NULL) = (source <> 'user')`, so an owned row cannot claim
+`seed`/`admin` and an ownerless one cannot claim `user`. Ownership and
+provenance cannot drift apart, which is what lets one boolean stand for both.
+(Review checked this rather than taking my word for it, and found the guarantee
+stronger than I had written it: I had described only the first half.) An athlete
+has no route to an ownerless row — `Create` hard-codes both columns, and neither
+`Update` nor `Delete` touches either.
+Deliberately not `source`: that distinguishes *which* ownerless writer, a deploy
+or the console, which is the content pipeline's question and not a client's.
+`owner_user_id` stays `json:"-"` — a client needs to know whether something is
+VOLA's, never which account owns it.
+
+**Named `official`, not `vola`**, which is what TASKS.md proposed. `vola` is the
+colour palette imported by nearly every component in `apps/mobile`, so `c.vola`
+next to `vola.textDim` is a reader's problem on every line; and the schema
+already uses "official" for exactly this concept, in `curricula_official_is_public`
+and its twin on workouts.
+
+**The other option — reserving `track` values and validating on write — was
+declined.** Both the migration and the domain type state that `track` and `belt`
+are hints for grouping and never gates, in as many words. Making one a gate to
+fix a provenance problem trades a documented contract for a partial fix, since
+it would not reach rows already published.
+
+**The Roadmaps filter moved out of `CurriculaStrip` into `lib/syllabuses.ts`,
+beside the syllabus filter.** Keeping them apart is how they came to disagree:
+the roadmap one had already been through a review that added `!editable` to both
+its arms after an asymmetry was found, and it still let every stranger's
+curriculum through, because the guard itself was the wrong question. The two now
+sit together answering it once. It also removes a byte-identical private copy of
+`beltOf` — the duplicated-vocabulary shape `check:grip-parity` exists to police,
+one language down.
+
+**The test that matters compares two rows.** A single-row test passes against
+this bug in both directions — check only a VOLA row and `!editable` looks like a
+sound provenance signal; check only a stranger's and it looks sound too. The
+defect is precisely that they *agree* where they must differ, so the backend
+test asserts both that the pair is indistinguishable on `editable` and that
+`official` separates them. Mutation-tested: encoding the bug as
+`Official = !Editable` turns it red.
+
+### Open questions this leaves
+
+- **`apps/web`'s curricula page still splits on `editable`** (`mine` vs
+  `shared`). That is a legitimate use — "not mine" is what it means to say — and
+  it makes no authorship claim, so it is left alone. Review agreed, and pointed
+  out the follow-up it enables: now that `official` is on the wire, the Shared
+  tab could badge the VOLA rows in it. Not done here.
+- **The same inference survives on `apps/web`'s sequences list**, which labels a
+  chain "· reference" from `!s.editable`. Review checked it and it is sound
+  *today*, for a reason that has nothing to do with the label: `sequence`'s
+  `visibleTo` has no public arm, so you can see your own and VOLA's and nothing
+  else. It becomes wrong in the same breath as the first public sequence, and
+  nothing will fail when it does. Filed as **T9** and noted at both call sites,
+  because that is the shape this entry is about — the guard that is right by
+  accident is the one nobody revisits.
+- `track` remains unvalidated, so a stranger's curriculum can still *claim* the
+  syllabus track. Nothing renders it as VOLA content now, but a future consumer
+  filtering on `track` alone would reintroduce the hole. The field comments say
+  so; nothing enforces it.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

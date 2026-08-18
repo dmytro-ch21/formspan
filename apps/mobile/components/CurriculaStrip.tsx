@@ -8,7 +8,8 @@ import { SectionHeader } from '@/components/ui/Section';
 import { Text, View } from '@/components/Themed';
 import { activeBeltAccent, activeStrap, vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { BELTS, type Belt } from '@/lib/bjj';
+import { type Belt } from '@/lib/bjj';
+import { beltOf, roadmapCurricula } from '@/lib/syllabuses';
 import { listCurricula, type Curriculum } from '@/lib/curriculum';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -68,32 +69,7 @@ export function CurriculaStrip() {
   // Order: what you are working leads; then foundations before the belts,
   // because it is the entry point and finishes first; then belts in rank
   // order.
-  const shown = curricula
-    // `!editable` on BOTH arms. The belt arm went unguarded for a long time,
-    // and `belt` is athlete-writable ("a hint, never a gate") — so an athlete
-    // setting belt on their own public curriculum put a dead-end card here
-    // wearing a belt photograph. The review that added foundations flushed
-    // the asymmetry out.
-    // Roadmaps only — the belt track and foundations. **The syllabus track is
-    // excluded deliberately, and by TRACK rather than by belt**: a reference
-    // syllabus carries a belt too, so filtering on `belt` alone would put a
-    // 73-item list that finishes nothing onto a strip labelled "Roadmaps",
-    // wearing a belt photograph, next to the roadmap it exists to support.
-    //
-    // It is web-only for now, per the platform rule: the roadmap is the worked
-    // path and belongs on the phone, the long-form reference is read at a desk.
-    // The map (#274) is the orientation a beginner needs on this device.
-    .filter(
-      (c) =>
-        (c.track === 'belt' || c.track === 'foundations') &&
-        (beltOf(c.belt) !== null || c.track === 'foundations') &&
-        !c.editable,
-    )
-    .sort(
-      (a, b) =>
-        Number(b.enrolled) - Number(a.enrolled) ||
-        rankOf(a) - rankOf(b),
-    );
+  const shown = roadmapCurricula(curricula);
   if (shown.length === 0) return null;
 
   return (
@@ -239,19 +215,6 @@ function beltTint(belt: Belt): string {
   // White needs less: a pale wash on a dark ground reads much stronger than a
   // saturated one at the same alpha.
   return STRAP[belt] + (belt === 'white' ? '14' : '22');
-}
-
-function beltOf(belt: string | null): Belt | null {
-  if (belt === null) return null;
-  const b = belt.toLowerCase() as Belt;
-  return BELTS.includes(b) ? b : null;
-}
-
-/** Strip order within the un-enrolled: foundations first — the entry point,
- *  and the one that finishes first — then belts in rank order. */
-function rankOf(c: Curriculum): number {
-  const belt = beltOf(c.belt);
-  return belt === null ? -1 : BELTS.indexOf(belt);
 }
 
 const styles = StyleSheet.create({

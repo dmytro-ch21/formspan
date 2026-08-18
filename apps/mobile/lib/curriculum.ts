@@ -103,6 +103,32 @@ export type Curriculum = {
   id: string;
   /** Resolved server-side. Never decide this by comparing user ids. */
   editable: boolean;
+  /**
+   * VOLA authored this — `owner_user_id IS NULL`, resolved server-side.
+   *
+   * Named `official` rather than `vola` (which is what F7 proposed) because
+   * `vola` is the colour palette imported by nearly every component here, and
+   * the schema already calls this concept official — see
+   * `curricula_official_is_public` and its twin on workouts.
+   *
+   * See the server's field comment — `editable` is
+   * permission and this is authorship, and the two agree on every row VOLA
+   * wrote, which is what made confusing them survive review.
+   *
+   * **OPTIONAL on purpose**, because that is what the wire can actually
+   * deliver: an older server omits it entirely. Typed `boolean` this was a
+   * lie the tests had to `as never` their way around, and the truthy-filter
+   * idiom below was a doc-comment plea rather than something the typechecker
+   * enforced. Optional makes forgetting to handle the absence a type error.
+   *
+   * Both strips test it as a TRUTHY filter rather than normalising it, and
+   * that is the whole safety argument: an older server omitting the field
+   * yields `undefined`, the filter drops the row, and the strip renders empty.
+   * Empty is the safe failure here — the unsafe one is a strip full of
+   * strangers' curricula wearing belt words. Do not "fix" this by defaulting
+   * it to `true`.
+   */
+  official?: boolean;
   name: string;
   description: string;
   /** A hint for ordering, never a gate — working white-belt fundamentals at

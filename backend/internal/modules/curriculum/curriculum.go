@@ -43,7 +43,31 @@ type Curriculum struct {
 	// Editable is computed per caller — see Repository. It exists so a client
 	// never has to compare user ids to decide whether to show an edit affordance,
 	// which is the shape that produces client-side authorization.
-	Editable bool   `json:"editable"`
+	//
+	// **It is not a provenance signal, and two clients read it as one.**
+	// `Editable` is owner-is-caller, so it is false for a VOLA syllabus AND for
+	// every other athlete's public curriculum. A strip filtering on `!editable`
+	// therefore shows a stranger's list as though VOLA wrote it — and since
+	// `track` and `belt` are unvalidated hints, that stranger picks the section
+	// and the belt word it appears under. That is what `Official` below is for.
+	Editable bool `json:"editable"`
+	// Official reports that VOLA authored this — the positive fact, so a client
+	// never has to infer authorship from the ABSENCE of permission.
+	//
+	// `owner_user_id IS NULL` is the definition, straight from migration 000034
+	// ("NULL means VOLA-authored"), and `curricula_source_matches_owner` makes
+	// it trustworthy: `(owner_user_id IS NULL) = (source <> 'user')` is
+	// BIDIRECTIONAL, so an owned row cannot claim `seed`/`admin` and an
+	// ownerless one cannot claim `user`. Ownership and provenance cannot drift
+	// apart, which is what lets one boolean stand for both.
+	// Deliberately NOT `source`: that distinguishes which ownerless writer —
+	// a deploy or the console — which is the content pipeline's question and
+	// not a client's.
+	//
+	// Derived here rather than by serialising `owner_user_id`, which stays
+	// `json:"-"`: a client needs to know whose it is in the sense of "VOLA's or
+	// not", never which account.
+	Official bool   `json:"official"`
 	Name     string `json:"name"`
 	// Belt this is the fundamentals for, or nil for an athlete's own list.
 	//

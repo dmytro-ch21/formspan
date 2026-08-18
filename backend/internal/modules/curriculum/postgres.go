@@ -115,6 +115,9 @@ func scanCurriculum(rows pgx.Rows, userID string) (*Curriculum, *time.Time, erro
 	// compare — a client that decides editability by comparing user ids is
 	// one refactor away from being the authorization.
 	c.Editable = c.OwnerUserID != nil && *c.OwnerUserID == userID
+	// Authorship, which is a DIFFERENT question from permission — see the field
+	// comment. Both are resolved here so no client can reach a third answer.
+	c.Official = c.OwnerUserID == nil
 	if startedOn != nil {
 		s := startedOn.Format(dateLayout)
 		c.StartedOn = &s

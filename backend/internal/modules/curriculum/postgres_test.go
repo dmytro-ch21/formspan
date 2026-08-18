@@ -116,6 +116,34 @@ func mustExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 	}
 }
 
+// seedOwnerlessCurriculum writes a VOLA-authored row the way a deploy does.
+//
+// `repo.Create` cannot produce one: it hard-codes `owner_user_id` to the caller
+// and `source` to 'user', which is exactly the property that makes the
+// `official` flag trustworthy — an athlete has no route to an ownerless row. So the seed
+// path is reproduced here in SQL rather than faked by nulling a column
+// afterwards, which would not exercise `curricula_source_matches_owner`.
+//
+// Cleans up AFTER ITSELF and by id, since `cleanupUser` deletes by owner and an
+// ownerless row has none — one left behind is a public curriculum that shows up
+// in every later run's List.
+func seedOwnerlessCurriculum(t *testing.T, pool *pgxpool.Pool, name, track, belt string) string {
+	t.Helper()
+	var id string
+	err := pool.QueryRow(context.Background(), `
+		INSERT INTO curricula (owner_user_id, source, name, description, belt, track, visibility)
+		VALUES (NULL, 'seed', $1, '', $2, $3, 'public')
+		RETURNING id`, name, belt, track).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed ownerless curriculum: %v", err)
+	}
+	t.Cleanup(func() {
+		mustExec(t, pool, `DELETE FROM curriculum_enrollments WHERE curriculum_id = $1`, id)
+		mustExec(t, pool, `DELETE FROM curricula WHERE id = $1`, id)
+	})
+	return id
+}
+
 func intp(v int) *int         { return &v }
 func f64p(v float64) *float64 { return &v }
 func strp(v string) *string   { return &v }
@@ -195,10 +223,85 @@ func TestAPublicCurriculumIsReadableButNotEditable(t *testing.T) {
 	if got.Editable {
 		t.Fatal("a stranger was told they may edit somebody else's curriculum")
 	}
+	// THE POINT OF F7. `Editable` being false is the same answer a VOLA
+	// syllabus gives, so a client filtering on `!editable` shows this row as
+	// though VOLA wrote it — and `track`/`belt` are unvalidated hints, so the
+	// stranger chooses which section and which belt word it wears.
+	if got.Official {
+		t.Fatal("another athlete's curriculum was reported as VOLA-authored")
+	}
 	// ErrForbidden here, not ErrNotFound: they can already see it, so saying
 	// "not yours" leaks nothing and is the useful answer.
 	if _, err := repo.Update(ctx, "stranger3", c.ID, "", Update{Name: strp("Hijacked")}); err != ErrForbidden {
 		t.Fatalf("stranger Update on public: want ErrForbidden, got %v", err)
+	}
+}
+
+func TestAnOwnerlessCurriculumIsReportedAsOfficial(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "reader7")
+	id := seedOwnerlessCurriculum(t, pool, "F7 syllabus", "syllabus", "white")
+
+	got, err := repo.Get(ctx, "reader7", id, "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Official {
+		t.Fatal("a VOLA-authored syllabus was not reported as one")
+	}
+	// Both halves, in one place: the pair only discriminates if VOLA content
+	// and a stranger's content differ on exactly ONE of these two fields.
+	if got.Editable {
+		t.Fatal("a reader was told they may edit a VOLA syllabus")
+	}
+}
+
+// TestOfficialAndEditableAreNotTheSameQuestion is the regression guard proper.
+//
+// A single-row test passes against the F7 bug in both directions: check only a
+// VOLA row and `!editable` looks like a sound provenance signal; check only a
+// stranger's row and it looks sound too. The defect is only visible when the
+// two are compared, because it is precisely that they AGREE where they must
+// differ.
+func TestOfficialAndEditableAreNotTheSameQuestion(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "owner7", "reader8")
+
+	// A stranger's public curriculum, wearing the syllabus track and a belt
+	// word — exactly the payload F7 describes, and nothing refuses it, because
+	// both fields are documented as hints rather than gates.
+	strangers, err := repo.Create(ctx, "owner7", "", NewCurriculum{
+		Name: "Totally official", Visibility: "public",
+		Track: strp("syllabus"), Belt: strp("white"),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	volaID := seedOwnerlessCurriculum(t, pool, "White belt basics", "syllabus", "white")
+
+	strangersView, err := repo.Get(ctx, "reader8", strangers.ID, "")
+	if err != nil {
+		t.Fatalf("Get stranger's: %v", err)
+	}
+	volasView, err := repo.Get(ctx, "reader8", volaID, "")
+	if err != nil {
+		t.Fatalf("Get VOLA's: %v", err)
+	}
+
+	// They are indistinguishable on `editable` — which is the bug — and must
+	// differ on `vola`, which is the fix.
+	if strangersView.Editable != volasView.Editable {
+		t.Fatal("premise broken: these are supposed to look identical on editable")
+	}
+	if strangersView.Official == volasView.Official {
+		t.Fatalf("official failed to tell them apart: stranger=%v official=%v", strangersView.Official, volasView.Official)
+	}
+	if !volasView.Official {
+		t.Fatal("the VOLA row is the one that should be official=true")
 	}
 }
 

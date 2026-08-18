@@ -6779,6 +6779,33 @@ agree about the same rows.
   scenario so it is found deliberately rather than by an athlete.
 
 
+### Authorship: `official`, and why `!editable` is not it
+
+The hole F7 recorded, and the one most likely to be reintroduced by somebody
+simplifying a filter. `editable` is owner-is-caller, so a VOLA curriculum and
+every other athlete's public one give the SAME answer — and `track` and `belt`
+are documented hints with no validation, so a stranger picks the section and the
+belt word their curriculum would appear under.
+
+- **`GET /v1/curricula` reports `official: true` for a VOLA-authored row and
+  `false` for another athlete's public one**, while `editable` is `false` for
+  both. Every scenario here needs two rows: a single row cannot fail, because
+  the defect is that the two agree where they must differ.
+- **A stranger's public curriculum with `track: "syllabus"` and `belt: "white"`
+  does not appear on the mobile Library's belt-syllabus strip**, and the same
+  row with `track: "belt"` does not appear on the Plan tab's Roadmaps strip.
+  Both are the actual F7 payload; nothing refuses the POST that creates it, and
+  nothing should — `track` is a grouping hint.
+- **The caller's own curriculum claiming either track is also excluded**, which
+  is the weaker case an earlier review already closed. Keep both scenarios: they
+  fail independently.
+- **A response with no `official` field at all renders an empty strip**, never a
+  populated one. Both filters test it as truthy, so an older server degrades to
+  showing nothing — the safe direction. A scenario that only checks the happy
+  path would not notice a default of `true`.
+- **`owner_user_id` is never on the wire**, on any curriculum endpoint. The
+  client is told whether something is VOLA's, never which account owns it.
+
 ## The session timer, timed sets and guided runs (mobile)
 
 Mobile-only by the platform rule — a rest countdown on a desk you are not
