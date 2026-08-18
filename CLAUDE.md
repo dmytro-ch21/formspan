@@ -222,6 +222,15 @@ invisible, so claim *early* — the empty commit exists precisely so you can cla
 before there is anything to show. And nothing enforces any of this; it is a
 convention, and it works only if the check half is done too.
 
+**And an id is only claimed if it is in a PR TITLE.** `gh pr list` shows titles,
+not diffs — so a new id you file inside an open PR's `TASKS.md` is invisible to
+every other session until that PR merges. Two sessions allocated **N19** the same
+afternoon that way, both correctly: one had it in a draft PR's title, the other
+had written the line into a branch nobody could see. The one in the title wins,
+because that is the channel the convention is built on. If you file forward-looking
+ids for follow-up work, either claim them immediately with their own draft PR, or
+expect to renumber.
+
 It does work when it is. This convention was written after a session picked up
 **H1**, ran `gh pr list` first, found #216 already open with the work complete
 but a week stale, and rebased and landed that instead of writing a second copy

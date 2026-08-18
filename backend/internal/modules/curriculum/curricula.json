@@ -11,6 +11,11 @@
         "items": [
           {
             "kind": "concept",
+            "title": "Where this sits",
+            "notes": "This comes before the white belt roadmap, not instead of it. It finishes in your first two or three months and every item completes from showing up and drilling — no live rounds required. When it is done, open the white belt roadmap: that one teaches the map of the sport and one answer from every place on it."
+          },
+          {
+            "kind": "concept",
             "title": "Tap early, tap often",
             "notes": "A tap is information, not defeat: it says the position was lost ten seconds ago and you now know why. Tap physically on their body, tap loud, and say it if your hands are trapped. Recognise your partner's taps the same way — verbal, physical, or a stopped struggle."
           },
@@ -123,15 +128,20 @@
   },
   {
     "id": "white-belt-basics",
-    "name": "White belt: survive and escape",
+    "name": "White belt: learn the map",
     "belt": "white",
     "track": "belt",
-    "description": "The white belt question is: where am I, and how do I survive or improve my position? This roadmap works through it in the order it actually goes wrong — get out of the bad places first, then stop losing the guard you have, then the handful of attacks that genuinely work at white belt. Milestones complete from what you log live; the concepts around them are the ideas each phase is really teaching.",
+    "description": "Goal: understand what is actually happening in a round, and have one dependable answer from every major position. It opens with the map — the shape every round has — and then works the positions in the order they go wrong: out of the bad places first, then stop losing the guard you have, then the handful of attacks that genuinely work at white belt. Milestones complete from what you log live; the concepts around them are the ideas each phase is really teaching.",
     "phases": [
       {
         "title": "How this belt works",
         "description": "White belt is roughly 40% escapes and defense, 20% guard retention, 20% positional control, and only 10% submissions — and that split is the curriculum, not a limitation of it. A white belt who can survive, escape and hold position is dangerous at blue; one who only hunts submissions is starting over.",
         "items": [
+          {
+            "kind": "concept",
+            "title": "Where this belt sits",
+            "notes": "Four belts, four different jobs. White learns the map: what is happening, and one answer from every position on it. Blue builds reliable routes through the map — technique, their reaction, your second technique. Purple connects the routes into systems and starts choosing which reaction to provoke. Brown controls the whole decision tree. You are not behind; you are on the step the other three are built on."
+          },
           {
             "kind": "concept",
             "title": "Defense is the syllabus, not the warm-up",
@@ -141,6 +151,32 @@
             "kind": "concept",
             "title": "Know when the escape is gone",
             "notes": "Armbar straight and your elbow past their hips: tap. Choke sunk under the chin: tap. The skill of recognising a lost position early is worth more this year than any single escape — it is what lets you roll again tomorrow."
+          }
+        ]
+      },
+      {
+        "title": "The map: how a round goes",
+        "description": "Jiu-jitsu is unreadable as a list of moves and obvious as a map. Read this before the phases below — nothing here is trained and nothing here is scored. It is the shape every round has, so that everything after it has somewhere to sit.",
+        "items": [
+          {
+            "kind": "concept",
+            "title": "The route",
+            "notes": "Standing, then a takedown or a guard pull, then guard — and from guard either you sweep from the bottom or you pass from the top. Passing lands in side control, side control climbs to mount or to the back, and the submission comes from there. Every round you will ever watch is somewhere on that line. When you have no idea what to do, find the step you are on and go to the next one."
+          },
+          {
+            "kind": "concept",
+            "title": "The loop back",
+            "notes": "Nobody runs the route cleanly. When you lose a position the answer is always the same three moves in the same order: survive, escape, then recover guard or come up on top — and you rejoin the route where you left it. Most of white belt is this loop, which is why the phases below start with the escapes rather than the attacks."
+          },
+          {
+            "kind": "concept",
+            "title": "The hierarchy",
+            "notes": "From best to worst: their back, mount, side control, guard on top, guard on the bottom, then pinned underneath. Every position is worth more than the one below it and the entire sport is trading upward. It is also why a submission thrown from a position you have not secured usually costs you the position — you traded down to reach for it."
+          },
+          {
+            "kind": "concept",
+            "title": "Position before submission",
+            "notes": "The oldest rule in jiu-jitsu, and the one that makes the route work: improve the position first and finish second. A tap that arrives from a stable position will arrive again next week, because you can reproduce how you got there. One that arrives out of a scramble was luck, and luck does not compound."
           }
         ]
       },
@@ -440,15 +476,20 @@
   },
   {
     "id": "blue-belt-basics",
-    "name": "Blue belt: building a game",
+    "name": "Blue belt: build reliable systems",
     "belt": "blue",
     "track": "belt",
-    "description": "The blue belt question is: how do I reliably attack from every major position? You already know how to survive — this belt is about choosing where the fight happens: one guard you play on purpose, one pass you trust, attacks that connect to each other instead of arriving one at a time, and the first honest look at the front headlock and the legs.",
+    "description": "Goal: stop thinking in single techniques and start thinking technique → their reaction → your second technique. You already know how to survive; this belt is about choosing where the fight happens — one guard you play on purpose, one pass you trust, attacks that connect to each other instead of arriving one at a time, and the first honest look at the front headlock and the legs.",
     "phases": [
       {
         "title": "How this belt works",
         "description": "Blue belt is where a game starts being chosen rather than inherited. Four questions run through everything below: what is my preferred game, what reactions am I trying to create, what is my second attack when the first fails, and how do I get back to my strongest position?",
         "items": [
+          {
+            "kind": "concept",
+            "title": "Where this belt sits",
+            "notes": "White belt learned the map. Blue builds reliable routes through it: every technique has a most likely reaction, and the second technique is the one that beats the reaction. Purple connects those routes into systems, brown controls the whole tree. The change this belt asks for is that you stop collecting moves and start choosing a game."
+          },
           {
             "kind": "concept",
             "title": "Systems, not moves",
@@ -741,15 +782,20 @@
   },
   {
     "id": "purple-belt-basics",
-    "name": "Purple belt: connections",
+    "name": "Purple belt: connect the game",
     "belt": "purple",
     "track": "belt",
-    "description": "The purple belt question is: how do I connect attacks and force predictable reactions? Purple is less about new moves than about joining up the ones you already have — a personal game named out loud, one guard taken from entry all the way to the back, one pass taken all the way to its counter, and the kimura and the legs as systems rather than submissions.",
+    "description": "Goal: connect the whole game, until the question stops being what do I do here and becomes which reaction do I want them to give me. Purple is less about new moves than about joining up the ones you have — a personal game named out loud, one guard taken from entry all the way to the back, one pass taken all the way to its counter, and the kimura and the legs as systems rather than submissions.",
     "phases": [
       {
         "title": "Name your game",
         "description": "Purple belt starts with an architecture, written down: a primary standing entry, a primary guard, a secondary guard that solves the primary's problems, a passing system, and a finishing system. The phases below build one such game — swap the pieces for yours, but have answers for every slot.",
         "items": [
+          {
+            "kind": "concept",
+            "title": "Where this belt sits",
+            "notes": "White learned the map, blue built reliable routes through it. Purple joins them up: you stop responding to what happens and start deciding what happens, by choosing which reaction to provoke. Brown then refines that same game until very little stops it. Almost nothing here is a new move."
+          },
           {
             "kind": "concept",
             "title": "A-game, B-game, emergency game",
@@ -997,15 +1043,20 @@
   },
   {
     "id": "brown-belt-basics",
-    "name": "Brown belt: one game, no leaks",
+    "name": "Brown belt: master your game",
     "belt": "brown",
     "track": "belt",
-    "description": "The brown belt question is: how do I impose, adapt, refine, and teach a complete game? Almost nothing here is new — it is material you have had for years, held to a standard nobody applies at blue. A third of it is scored on attacks that never land on you rather than on ones you hit, and the rest is a single connected game where every escape ends in an attack.",
+    "description": "Goal: make ordinary jiu-jitsu extremely difficult to stop — knowing why, when, where and against whom each technique works. Almost nothing here is new: it is material you have had for years, held to a standard nobody applies at blue. A third of it is scored on attacks that never land on you rather than on ones you hit, and the rest is a single connected game where every escape ends in an attack.",
     "phases": [
       {
         "title": "What brown belt is",
         "description": "Refinement, not accumulation. The goal is not more techniques — it is proven techniques made extremely difficult to stop: timing, weight, grip efficiency, energy conservation, and control kept through every transition.",
         "items": [
+          {
+            "kind": "concept",
+            "title": "Where this belt sits",
+            "notes": "The map at white, reliable routes at blue, connected systems at purple, and now the whole decision tree under control. Nearly nothing in this roadmap is new material — it is what you have had for years, held to a standard nobody applies at blue, and scored as much on what never lands on you as on what you hit."
+          },
           {
             "kind": "concept",
             "title": "The defensive chain, complete",
