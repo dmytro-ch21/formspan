@@ -25102,6 +25102,98 @@ acknowledged limitation is a different thing from an unnoticed one.
 - **Nothing marks a competition award anywhere.** Five of the seven kinds can
   never appear on a session card by construction, and no screen lists them yet —
   so entering a tournament earns an award the athlete cannot see.
+## 2026-08-18 — The syllabuses reach the phone, and the argument that kept them off it
+
+**N30**, and it reverses a decision from #277 three hours old.
+
+That PR left the reference syllabuses web-only, reasoning from the platform
+rule: the roadmap is the worked path and belongs on the phone, the long-form
+reference is read at a desk. Asked directly whether all of this work was on both
+platforms, the answer had to be no — and stating the exclusion out loud is what
+exposed it. **This app already carries the entire 542-technique library,
+searchable, on the Library tab.** A curated 73-item belt list is smaller than
+that and better organised. Excluding it while shipping the library was
+inconsistent, not principled.
+
+Half of #277's reasoning does hold, and the placement keeps it: they are in the
+LIBRARY's reference block, beside the position glossary and the round map — not
+on the Plan tab's Roadmaps strip. Plan is what you are working; a list that
+finishes nothing is not that. The block now reads widest-first: the map (the
+shape of a round), the belts (what each one owes you), then a single position.
+
+Selection is `lib/syllabuses.ts` rather than an inline filter, because both of
+its rules have a way of being quietly wrong. It keys on the **syllabus track**,
+since the roadmaps carry a belt too — the mirror of the bug #277 fixed on the
+Plan strip, which keyed on belt and would have admitted syllabuses. And it drops
+`editable` rows, because `track` and `belt` are both athlete-writable hints, so
+a public personal curriculum can wear either and would otherwise appear among
+VOLA content wearing a belt word. Six unit tests, including that an unrecognised
+belt sorts LAST rather than above white.
+
+**One thing shipped knowingly and is worth reading before the next person
+touches that screen.** `app/curriculum/[id].tsx` is a plain `ScrollView`, and
+this change makes an **85-item** curriculum reachable on it — double the largest
+roadmap (42) and double the screen's previous ceiling. Left un-virtualised
+deliberately: the catalog list on the Library tab IS virtualised, at 542 rows of
+richer content, which is where this app's real threshold sits, and 85 rows of
+text is roughly 300 native views. The judgement is recorded at the call site
+with the trigger for revisiting and the one non-obvious part of doing it —
+step numbers count techniques continuously ACROSS phase groups, so a
+`SectionList` would need them precomputed rather than accumulated during render.
+
+It is **unmeasured**, and it cannot be measured from here: a worktree cannot
+build this app (the `EXPO_PUBLIC_*` trap), so nothing in this session has opened
+one of these screens on a device.
+
+**Review found one blocking regression and two things I had reasoned wrong.**
+
+The regression: the new `listCurricula` call omitted `ac.signal`. It shares a
+`Promise.all` with the glossary fetch, inside a block that builds a 10-second
+deadline specifically because "a captive portal accepts the connection and never
+answers, and iOS won't give up for ~60s". An unbounded request there holds
+`setPositions` hostage past that deadline — a guarantee the file argues for at
+length, disarmed by an omission. **And the reason for the omission was a false
+premise stated out loud**: the review prompt asserted that `listCurricula` takes
+no `AbortSignal` on mobile. It does; the signature is right there. Asserting a
+limitation instead of checking it is the same failure as the map, one day later.
+
+The first thing reasoned wrong: `!editable` was described here and in the tests
+as the guard that keeps an athlete's own curriculum out of VOLA content. It
+means "not YOURS", not "VOLA's" — `Editable` is owner-is-caller, so every other
+athlete's public curriculum is also un-editable, and `track` is unvalidated on
+write. A stranger can publish one on this track and appear on the strip wearing
+a belt word. The client has no discriminator (`owner_user_id` is `json:"-"`), so
+this is filed as **F7** for a server-side fix, which closes the same hole on the
+Plan strip where it pre-existed.
+
+The second: a test that could not fail. `beltSyllabuses` filtered out
+unrecognised belts AND `rank` had a branch sorting them last, so the branch was
+unreachable and "sorts an unrecognised belt last" was green whatever `rank`
+did — precisely what this app's test charter forbids. Fixed by dropping the
+filter rather than the branch: silently hiding a syllabus because a future build
+named a belt this one does not know is worse than listing it last. Mutation-
+checked, and it goes red now.
+
+Also from the same pass: the discipline-off early return cleared three of four
+states and left syllabuses stale, and the two new labels lacked
+`accessibilityRole="header"` that their sibling has. And the note about
+virtualising overestimated the work — it is one pre-pass into a flat
+`{kind, item, step}` array plus a `FlatList`, about ten lines, not a
+`SectionList`; the comment now says so.
+
+Open questions:
+
+- **Nothing on the phone links a roadmap to its own belt's syllabus.** They are
+  two lists about one belt, now reachable from two different tabs. The pairing
+  is the obvious next connection on both platforms.
+- The Library's reference block is now four things deep (map, syllabuses,
+  positions, then the catalog) and only renders under the BJJ filter. It was
+  already noted as ~300pt of header before the first result; this adds to that.
+- The syllabus cards say "85 entries", which counts concepts as well as
+  techniques. That matches `item_count` and the curricula list cards, and is a
+  different number from the "73 techniques" the history entry for #277 quotes.
+  Both are correct about different things, which is not obvious from either.
+
 
 ## Open items / known gaps as of this entry
 

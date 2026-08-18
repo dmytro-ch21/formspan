@@ -43,6 +43,8 @@ import {
   type TechniqueSummary,
 } from '@/lib/techniques';
 import { fetchPositions, type Position } from '@/lib/positions';
+import { listCurricula, type Curriculum } from '@/lib/curriculum';
+import { beltLabel, beltSyllabuses } from '@/lib/syllabuses';
 import { useModules } from '@/lib/ModulesProvider';
 import { enabledSports, moduleFor, type Module, usesBelt } from '@/lib/modules';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -245,6 +247,11 @@ export default function LibraryScreen() {
   // if it doesn't load the row is absent, which is quieter and more honest
   // than an error about content the user never asked for.
   const [positions, setPositions] = useState<Position[]>([]);
+  // The belt syllabuses, for the reference block below. Same silent-failure
+  // treatment as the glossary: this is an extra on a screen whose job is the
+  // catalog, and an error banner about content nobody asked for would make an
+  // offline Library look broken.
+  const [syllabuses, setSyllabuses] = useState<Curriculum[]>([]);
   const [sport, setSportState] = useState<string>('');
   const [position, setPosition] = useState('');
   const [belt, setBeltState] = useState('');
@@ -480,6 +487,10 @@ export default function LibraryScreen() {
       setTechniques([]);
       setTechniquesFailed(false);
       setPositions([]);
+      // The fourth. Turning the discipline off left stale syllabuses in state,
+      // invisible only because the block renders behind a positions check —
+      // which is the kind of accident that becomes a bug the day the gate moves.
+      setSyllabuses([]);
       return;
     }
     techniqueAbortRef.current?.abort();
@@ -502,10 +513,32 @@ export default function LibraryScreen() {
       // superseded request that rejects after the newer one already populated
       // the row would otherwise blank it.
       try {
-        const list = await fetchPositions(getToken, ac.signal);
-        if (techniqueAbortRef.current === ac) setPositions(list);
+        const [list, curricula] = await Promise.all([
+          fetchPositions(getToken, ac.signal),
+          // Independent of the glossary but on the same swallowed footing:
+          // both are reference extras beside the catalog. Promise.all rather
+          // than sequential because neither needs the other, and a beginner
+          // waiting on two round trips to see a reference block is two too
+          // many.
+          // ac.signal, not bare: these share a Promise.all with the glossary,
+          // so an unbounded request here holds `setPositions` hostage until
+          // iOS gives up at ~60s — past the 10s deadline this block builds
+          // precisely for the captive-portal case. Review caught it; the
+          // premise that this function took no signal was simply wrong.
+          listCurricula(getToken, ac.signal).catch(() => [] as Curriculum[]),
+        ]);
+        if (techniqueAbortRef.current === ac) {
+          setPositions(list);
+          setSyllabuses(beltSyllabuses(curricula));
+        }
       } catch {
-        if (techniqueAbortRef.current === ac) setPositions([]);
+        if (techniqueAbortRef.current === ac) {
+          setPositions([]);
+          // Cleared together: they are fetched together, so leaving one
+          // populated after the pair failed shows a reference block that is
+          // half a previous load.
+          setSyllabuses([]);
+        }
       }
     } catch (err) {
       // A supersede is not a failure; a timeout is. `fetchTechniques` rejects
@@ -844,6 +877,52 @@ export default function LibraryScreen() {
                 Every position on one map, stacked by what it is worth.
               </Text>
             </Pressable>
+            {/* Between the map and the positions on purpose. The map is the
+                shape of a round, a syllabus is what a belt owes you, and a
+                position is one place on it — widest first, narrowest last.
+
+                #277 kept these off the phone entirely on a platform-rule
+                argument that does not survive the comparison: this app already
+                carries the whole 542-technique library, searchable, on this
+                very screen. A curated 73-item belt list is smaller than that.
+                They stay off the PLAN tab's Roadmaps strip, which is the half
+                of that reasoning that holds — Plan is what you are working, and
+                these finish nothing. */}
+            {syllabuses.length > 0 && (
+              <>
+                <Text style={styles.syllabusLabel} accessibilityRole="header">
+                  What each belt should know
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.glossaryRow}
+                >
+                  {syllabuses.map((c) => (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => router.push(`/curriculum/${c.id}`)}
+                      hitSlop={6}
+                      style={({ pressed }) => [
+                        styles.syllabusCard,
+                        pressed && styles.posCardPressed,
+                      ]}
+                      accessibilityRole="button"
+                      // The belt AND the count, because "White" alone does not
+                      // say what tapping it gives you.
+                      accessibilityLabel={`${beltLabel(c)} belt, the whole list, ${c.item_count} entries`}
+                      testID={`library-syllabus-${c.id}`}
+                    >
+                      <Text style={styles.syllabusBelt}>{beltLabel(c)}</Text>
+                      <Text style={styles.syllabusCount}>{c.item_count} entries</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+            <Text style={styles.syllabusLabel} accessibilityRole="header">
+              {syllabuses.length > 0 ? 'Or read one position' : 'Read one position'}
+            </Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -1290,6 +1369,25 @@ const styles = StyleSheet.create({
   // a screen reader should still be handed the words. `apps/web`'s `.eyebrow`
   // does the same with `text-transform`, so both clients now announce the same
   // accessible name rather than one of them spelling it out.
+  syllabusBelt: { color: vola.text, fontSize: 15, fontWeight: '700' },
+  syllabusCard: {
+    borderColor: vola.line,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 2,
+    minWidth: 104,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  syllabusCount: { color: vola.textMuted, fontSize: 12 },
+  syllabusLabel: {
+    color: vola.textDim,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    marginTop: 4,
+    textTransform: 'uppercase',
+  },
   mapLink: {
     borderColor: vola.line,
     borderRadius: 12,

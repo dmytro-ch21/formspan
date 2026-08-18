@@ -152,6 +152,25 @@ export default function CurriculumScreen() {
   const proposal = focus ? proposeFocus(items, focus) : null;
 
   return (
+    /* A plain ScrollView, and the number that decides whether that stays right
+       is 85 — the white belt syllabus, now reachable from the Library since
+       #282. That is DOUBLE the largest roadmap (42) and this screen's previous
+       ceiling.
+
+       Left un-virtualised deliberately, not by omission. The catalog list on
+       the Library tab IS virtualised, at 542 rows of richer content, which is
+       where this app's threshold actually sits; 85 rows of text is roughly
+       300 native views, well under it. Revisit if a syllabus passes ~150
+       items, or the first time somebody sees a pause opening one on an older
+       phone — neither has been measured, because a worktree cannot build this
+       app (the EXPO_PUBLIC_ trap).
+
+       And the fix is smaller than the first draft of this comment claimed:
+       not a SectionList, just one pre-pass. Walk `groupByPhase` once into a
+       flat array of {kind: 'phaseHeader' | 'concept' | 'technique', item,
+       step}, assigning step numbers in that walk, and hand it to a FlatList
+       with phase headers as ordinary rows. About ten lines, and it retires
+       `renderGroups`' render-time `++step` mutation as a side effect. */
     <ScrollView contentContainerStyle={styles.scroll} testID="curriculum-screen">
       <Stack.Screen options={{ title: curriculum.name }} />
 
