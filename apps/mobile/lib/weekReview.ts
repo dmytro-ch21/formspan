@@ -215,6 +215,26 @@ export function leadMeasure(t: SportTotals): 'volume' | 'time' {
  * judgement it makes is about *adherence*, because the athlete set that target
  * themselves and comparing against it is not the app's opinion.
  */
+/**
+ * Did the week meet everything that was planned for it? (N19)
+ *
+ * Lives here, beside `weekVerdict`, because both answer the same question about
+ * the same object and **the rule must exist once**. It was briefly duplicated —
+ * `weekVerdict`'s `met >= planned` and a second copy behind the Today
+ * congratulation — which is how the grey sentence and the badge above it come
+ * to disagree on one card. This project has cleaned that shape up three times
+ * already (#268); `weekVerdict` now consumes this rather than restating it.
+ *
+ * **Zero planned is not a met plan.** A week nobody planned cannot be
+ * completed, and congratulating someone for it is the hollow praise
+ * `worthCelebrating` refuses elsewhere — it teaches people to ignore the app,
+ * and it would fire for every athlete who does not use the planner at all,
+ * which is most of them.
+ */
+export function metThePlan(r: { planned: number; met: number }): boolean {
+  return r.planned > 0 && r.met >= r.planned;
+}
+
 export function weekVerdict(r: WeekReview): string {
   if (r.totals.sessions === 0) {
     return r.planned > 0 ? 'Nothing logged against this week’s plan yet.' : 'Nothing logged yet.';
@@ -224,6 +244,6 @@ export function weekVerdict(r: WeekReview): string {
     r.totals.days === 1 ? 'day' : 'days'
   }`;
   if (r.planned === 0) return `${base}.`;
-  if (r.met >= r.planned) return `${base} — the whole plan, done.`;
+  if (metThePlan(r)) return `${base} — the whole plan, done.`;
   return `${base} — ${r.met} of ${r.planned} planned.`;
 }

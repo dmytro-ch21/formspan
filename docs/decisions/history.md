@@ -2399,6 +2399,115 @@ can never compete for this day's sessions, and plans on the same day are the
 same rows. A parameter that cannot change the answer reads as a safeguard and is
 scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
+**Review caught two blocking defects, and the first is the better lesson.**
+
+The `===` was correct and it was defeated by its input. `streakRange()` fetched
+`-51 * 7` days, which is exactly 52 weeks including the current one — so
+`weekStreak` **saturated at 52**. An athlete on a genuine 53-week streak measured
+52. So did they at 60 weeks, and at 100. Harmless for a displayed figure, and
+fatal here: the year rung matched on exact equality, so it fired again *every
+week, forever*, for precisely the athletes it was meant to honour. The
+congratulation this whole design went out of its way not to turn into a counter
+became one, through a constant in a different module.
+
+The fix is one week of headroom — the window is 53 weeks now, so a saturated
+measurement is 53, which equals no rung and never will. The invariant to keep is
+stated on `streakRange` itself: **the saturation point must not be a rung**, so
+anything adding a rung at or above 52 has to widen the window too. What made
+this findable is worth noting as much as the fix: the test that "proved" week 53
+was silent handed the function a 53-week array the real call path cannot
+produce. It tested the function and not the feature. The new tests build their
+input by walking `streakRange()`.
+
+The second was a race the diff's own comments claimed was settled. "The
+milestone needs no `recordsSettled` gate — nothing can outrank it, so there is
+no race to lose" is exactly backwards: nothing outranks it *logically*, but the
+shared chime latch is claimed by whichever effect **arrives** first, and the two
+inputs come from two independent fetches. The records lookup usually answers
+sooner — a handful of exercise ids against a rollup of a year of days — so the
+PR chime latched and the milestone arriving a moment later found the latch
+taken. This is the identical failure `recordsSettled` was introduced to fix one
+rung down, reintroduced with the desired winner reversed and no reciprocal gate.
+
+The fix is symmetric: a `streakSettled` flag set in the history fetch's
+`finally` (it had none, so a naive gate would have hung the PR chime offline),
+and the PR chime now waits on it. It costs nothing visible — the PR *row* still
+renders the moment records land, which is why the two fetches were kept separate
+in the first place; only the sound waits. And the precedence is now an explicit
+value rather than a property of effect declaration order: `celebratesRecord`
+joins `celebratesMilestone` and `celebratesStreak`, each standing down for what
+outranks it, with the latch left as belt-and-braces. Declaration order still
+decides a tie inside one commit; it is no longer the only thing that does.
+
+**A third blocking finding arrived on re-review, and it is the one worth being
+uncomfortable about.** Asked whether widening the window affected other callers,
+this branch answered by naming `TrainingSummary` as "its only other caller" —
+without checking. It is not. `app/bjj/session/[id].tsx` fetches the same range
+and renders the same `SessionCelebration`, and it had been wired for the streak
+but not the milestone.
+
+The consequence is worse than a missing block, because `milestoneForSession`
+fires only on the session that CARRIED the streak. If the mat opens the week and
+that screen computes nothing, no later session can pick the rung up — every
+strength session that week has `carried === false`. The rung is not delayed, it
+is **lost for that week**, silently. And for VOLA's stated core athlete the mat
+is usually what opens the week, so lost was the normal case, not the edge one.
+The BJJ screen's own comment predicted this exact shape for the streak chime a
+release earlier — "wiring only the strength card would have left the chime
+firing almost never for a BJJ+strength athlete" — and the milestone recreated it
+one rung up anyway. Both screens compute it now, from the same pass over the
+same days, and both pass `streakSettled`.
+
+Two review suggestions were taken after that. The celebration reset lists in
+both screens now clear `celebrationMilestone` and `streakSettled` along with the
+three states they already cleared — no path to a second celebration in one mount
+exists today, but the list had silently drifted for exactly the states this
+branch added, and a stale milestone surviving that transition would chime a rung
+the session did not cross. And the wiring gap got the test it deserved:
+`app/__tests__/bjjSessionScreen.test.tsx` finishes a class against a real
+four-week history and asserts the rung appears, with negatives for the week's
+later classes and for a three-week streak. Mutation-checked against the bug that
+actually shipped — deleting the `milestone` prop from the BJJ card turns it red.
+That is the class of failure the lib suite structurally cannot see, and it is
+worth stating plainly: every `lib/milestones.ts` test passed while the feature
+was absent from the screen it mattered most on.
+
+One visible side effect of the window fix, recorded because it changed copy in a
+file this branch never touched: the displayed streak caps at 53 now rather than
+52, so an athlete on a 60-week run reads "53 weeks in a row" instead of "52".
+Neither figure was the truth and `streakRange` already accepted the cap, but 52
+at least read as "a year" and 53 reads as an arbitrary number.
+
+Three review suggestions landed with them. `milestoneReached` now requires the
+current week to hold a session — `weekStreak` deliberately steps back to last
+week while this one is open, which would have re-announced last week's rung
+every day of an untrained week; unreachable through the shipped caller, but the
+export invites it. `metThePlan` moved to `weekReview.ts` beside `weekVerdict`,
+which now consumes it, so the badge and the grey sentence cannot disagree —
+the same duplicated-rule shape cleaned up in #268. And `isCurrentWeek` was
+deleted rather than kept: it had no caller, and a tested function that nothing
+calls is an assertion that cannot fail against shipping code.
+
+**Rebased onto a main that had moved 13 commits, and one of them was in these
+exact files.** #284 (N29) gave the BJJ finish card its first badge — a
+server-judged accomplishment — and wired it to take the personal record's slot
+*including its chime*, which also made `recordsSettled` stop being true by
+construction on that screen. This branch was changing the same ladder from the
+other end. The merged rule is three rungs: **milestone > badge (record OR
+accomplishment) > weekly streak**, with each rung waiting on the lookup that
+could outrank it — the badge chime now gates on `streakSettled` exactly as the
+streak chime already gated on `recordsSettled`.
+
+The merge conflict resolved cleanly in a way that was silently wrong for one
+line, and the mutation check is what caught it: `celebratesRecord` must receive
+`earnedBadge`, not `hasRecords`. With the records-only flag, a BJJ first chimes
+**nothing** — `records` is hard-coded empty on that screen — and **1476 tests
+stayed green**. #284's own rule ("an accomplishment must latch the streak chime
+out") lived in prose and a comment, and nothing on either branch asserted it.
+`bjjSessionScreen.test.tsx` now asserts the *sound*: a first chimes `pr`, and a
+milestone earned in the same class chimes `success` and stands the first down.
+Both go red against the wrong flag.
+
 ### Gaps this leaves
 
 - **No password reset**, which is now the most urgent hole in mobile auth and is
@@ -25765,6 +25874,114 @@ Covered by `lib/__tests__/setGuide.test.ts`, driven off `GRIPS` and `SET_TYPES`
 rather than a list repeated in the test — so a seventh grip added without copy
 fails, rather than silently shipping a pill whose long press says "no
 description yet". Mutation-checked: blanking `hook`'s entry turns it red.
+
+## 2026-08-18 — A week you finished, and the rungs a streak passes, said out loud
+
+The fourth complaint from the same screenshot session, and the one that is not
+about a screen being wrong: *"I hit everything that was planned, so it should
+congratulate me."* Plus streaks — a month, half a year, a year.
+
+Most of the machinery already existed and none of it was ever *said*.
+`weekStreak` has counted consecutive training weeks for a long time and the
+Progress tab has always shown the number; `weekVerdict` has always ended
+"— the whole plan, done." for a met week. What nothing did was **mark the
+moment**. The met week read in the same grey sentence as the four weeks that
+were not met, and an athlete who trained every week for a year got the same
+quiet line in week 52 that they got in week 51, on a screen they had to go and
+open.
+
+**The hard part was not the ladder, it was not becoming a streak counter.**
+`components/WeekReview.tsx` records a design decision in its own header — *no
+score, no grade, no streak* — resting on the project's no-shame-based-messaging
+principle. The obvious implementation of this feature contradicts it directly.
+
+The distinction that lets both stand: **a running number can visibly break and
+a congratulation cannot.** A "12 weeks" figure on the home screen is a
+possession, and protecting a possession is exactly what makes somebody train on
+a week their body wanted off and then feel they lost something when they
+didn't. So `milestoneReached` compares **`===`, never `>=`** — it returns a rung
+only in the week that rung is newly reached, and null every other week of an
+athlete's life. There is no number that ticks on any screen this touches,
+nothing to watch, and so nothing to break; a week off simply means the next
+congratulation comes later. The Progress tab keeps the honest running count,
+which is a different act — going to look at a number is not being shown one.
+
+That `===` is the whole mechanism and it is easy to "fix" into a `>=` while
+tidying, so the test that pins it asserts the *negative*: week 27 must say
+nothing, week 5 must say nothing, week 53 must say nothing. Mutation-checked —
+swapping it to `<=` turns two tests red.
+
+**The ladder is 4 / 13 / 26 / 52 weeks.** A month is reachable from a standing
+start; a year is rare enough to mean something. 13 exists because the gap from
+4 to 26 is five months, long enough that the ladder would stop existing for most
+people between their first milestone and their second. Weeks and not days,
+inherited from `weekStreak` and worth restating because it is the ethics of the
+whole thing: a *daily* streak in a training app punishes rest days, which are
+training, so it cannot be protected by training hurt.
+
+**The chime ladder gained a top rung, and it inverts the argument below it.**
+`celebratesStreak` documents why a personal record outranks an ordinary weekly
+streak — frequency: a PR is rare, a streak recurs every week. A milestone sits
+on the other side of that same argument, since three of the four rungs happen at
+most once ever, so it outranks the PR. It needs no `recordsSettled` gate for the
+same reason — nothing can outrank it, so there is no race to lose. The shared
+`chimed` latch moved above all three effects, and declaration order is now the
+precedence, reading top to bottom: milestone, record, streak. `celebratesStreak`
+additionally stands down for a milestone *explicitly* rather than relying on
+that ordering, because an explicit refusal is what a test can pin.
+
+**Today did not get a history fetch, deliberately.** Its `WeekReview` is
+computed from the local store precisely so it answers on a gym floor with no
+signal, and adding a network call to the home screen for a congratulation that
+fires four times in an athlete's life is the wrong trade. So the split is:
+Today shows the plan-met congratulation, which it can compute from the review it
+already holds; the finish card shows the rung, where the history fetch for the
+streak line already exists and the milestone is derived from the *same pass*
+over the *same* days — so the card can never show a milestone whose streak line
+disagrees with it.
+
+`metThePlan` refuses a week nobody planned rather than treating `0 of 0` as met.
+That is the hollow-praise case `worthCelebrating` already declines elsewhere,
+and without the guard it would fire every week for every athlete who does not
+use the planner at all — which is most of them.
+
+**One trap found while writing this, worth recording because it typechecks
+against nothing useful.** `lib/calendar.ts` and `lib/history.ts` both export
+`startOfWeek`, `addDays` and `today` under the same names, and they are
+different functions: `calendar`'s take and return `Date`, `history`'s take and
+return the `YYYY-MM-DD` key a `HistoryDay` is stored under. The first version of
+`milestones.ts` imported from `calendar`, which compiles far enough to run and
+then compares a Date to a string. One test caught it. The import now carries a
+comment saying which one and why.
+
+### Gaps this leaves
+
+- **Not seen on a phone.** Both halves are typechecked and covered, and neither
+  has been looked at on a device — the same L1 gap, now with two more entries.
+  The finish card's milestone block in particular is a two-line bordered panel
+  whose fit in a column that already holds a badge, a streak line and a stat row
+  cannot be inferred from a passing test.
+- **A milestone reached while offline is silently skipped, not deferred.** Same
+  bound `carriedTheStreak` already has: history is the server's, so a phone that
+  never reached the network sees a shorter streak and says nothing. Silence is
+  not a claim, but the congratulation for that rung is then lost rather than
+  shown late, and nothing re-checks it on the next sync.
+- **BJJ-only athletes reach every rung**, which is correct, but the finish card
+  they reach it on still has no badge equivalent of a personal record. That gap
+  predates this and is unchanged.
+- **The streak line now caps at 53 rather than 52**, on the celebration card,
+  the BJJ card and the Progress tab. An honest fix would show "52+" past the
+  window rather than a number that is quietly a measurement of the fetch.
+- **The strength screen has no equivalent wiring test.** `bjjSessionScreen.test.tsx`
+  now pins that the mat's card computes and shows a rung, which is the exact
+  regression that shipped — but there is no strength-session screen test to
+  extend, so the other caller is still covered only by the lib suite that
+  stayed green through the original bug.
+- **The chime precedence is verified as logic, not as timing.** Every rule is a
+  pure function with tests, but nothing exercises two real fetches resolving in
+  either order against a live component. The gates make the ordering
+  unnecessary rather than proving it; a screen test that resolves the two
+  promises in both orders would be the real check.
 
 ## Open items / known gaps as of this entry
 

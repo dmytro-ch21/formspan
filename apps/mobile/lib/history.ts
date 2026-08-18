@@ -158,9 +158,23 @@ export function spanRange(span: SpanKey, to = today()): { from: string; to: stri
  * "4 weeks in a row" on the 4-week view and "12" on the 12-week one, when the
  * truth might be 40. A year is long enough that the cap is nearly never the
  * binding constraint, and it's one extra request of dates.
+ *
+ * **53 weeks, not 52, and the extra one is load-bearing.** `-51 * 7` covered
+ * exactly 52 weeks including the current one, which meant `weekStreak`
+ * SATURATED at 52 — an athlete on a genuine 53-week streak measured 52, and so
+ * did they at 60 weeks, and at 100. That is harmless for a displayed figure and
+ * was fatal for the milestone ladder: `milestoneReached` matches a rung on
+ * exact equality, so the year rung fired again every single week, forever, for
+ * exactly the athletes it was meant to honour. Found in review of N19.
+ *
+ * One week of headroom makes the saturated measurement 53, which equals no rung
+ * and never will — so the year rung fires once, at a true 52, and is silent
+ * afterwards. The smaller rungs were never at risk, being well inside the
+ * window. **Anything that adds a rung at or above 52 has to widen this too**,
+ * and the invariant to keep is that the saturation point must not be a rung.
  */
 export function streakRange(to = today()): { from: string; to: string } {
-  return { from: addDays(startOfWeek(to), -51 * 7), to };
+  return { from: addDays(startOfWeek(to), -52 * 7), to };
 }
 
 export type DayBucket = {

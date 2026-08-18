@@ -21,6 +21,7 @@ import {
 } from '@/lib/celebration';
 import { fetchRecords } from '@/lib/records';
 import { carriedTheStreak, fetchHistory, localZone, streakRange, weekStreak } from '@/lib/history';
+import { milestoneForSession, type Milestone } from '@/lib/milestones';
 import { elapsedOf } from '@/lib/countdown';
 import {
   adjustStepFor,
@@ -257,11 +258,34 @@ export default function SessionScreen() {
     pending one is not.
   */
   const [recordsSettled, setRecordsSettled] = useState(false);
+  /**
+   * Whether the HISTORY lookup has finished — the mirror of `recordsSettled`,
+   * and the thing that makes the milestone actually outrank a personal record.
+   *
+   * The two lookups are deliberately parallel, so "milestone beats record" is
+   * only true within a single commit; across two independent fetches it is a
+   * race, and the records call is the likelier to win it (a lookup by exercise
+   * id against a rollup of 371 days). Whichever effect fires first claims the
+   * shared chime latch, so without this the PR chime latched on ARRIVAL and the
+   * rarer event was silenced by the commoner one — precisely the failure
+   * `recordsSettled` already exists to prevent one rung further down. Found in
+   * review.
+   */
+  const [streakSettled, setStreakSettled] = useState(false);
   /** `null` until history answers; `carried` is what decides the chime. */
   const [celebrationStreak, setCelebrationStreak] = useState<{
     weeks: number;
     carried: boolean;
   } | null>(null);
+  /**
+   * A streak rung this session crossed, or null — almost always null.
+   *
+   * Its own state rather than derived from `celebrationStreak.weeks`, because
+   * the milestone is about the SESSION, not the week: `milestoneForSession`
+   * needs `carriedTheStreak` as well, and a rung reached earlier in the week by
+   * a different session must not re-fire on this one.
+   */
+  const [celebrationMilestone, setCelebrationMilestone] = useState<Milestone | null>(null);
 
   /**
    * Personal records arrive after the card does, if at all.
@@ -307,11 +331,22 @@ export default function SessionScreen() {
     fetchHistory(getToken, { from, to, tz: localZone() })
       .then((h) => {
         if (!live) return;
-        setCelebrationStreak({ weeks: weekStreak(h.days), carried: carriedTheStreak(h.days) });
+        const carried = carriedTheStreak(h.days);
+        setCelebrationStreak({ weeks: weekStreak(h.days), carried });
+        // Same history, same pass — so the card can never show a milestone
+        // whose streak line disagrees with it.
+        setCelebrationMilestone(milestoneForSession(h.days, carried));
       })
       .catch(() => {
         // Same silence as the records lookup. No history, no streak line, no
         // chime — the phone cannot know what the week holds.
+      })
+      .finally(() => {
+        // `finally` for the same reason the records lookup has one, now load
+        // bearing in the other direction: offline the answer is "no milestone",
+        // and the PR chime must not wait forever for a history that is never
+        // coming back.
+        if (live) setStreakSettled(true);
       });
     return () => {
       live = false;
@@ -1786,9 +1821,28 @@ export default function SessionScreen() {
                   // "opened it and finished it" with a card is the hollow
                   // praise that teaches people to stop reading the app.
                   if (worthCelebrating(summary)) {
+                    /*
+                      Every piece of async celebration state, cleared together.
+
+                      These lines exist because somebody judged the transition
+                      into a celebration worth defending, and the list had
+                      already drifted: `celebrationMilestone` and
+                      `streakSettled` were added without joining it. A second
+                      celebration in one mount would then open with a fresh
+                      `chimed` ref and a STALE milestone — showing and chiming
+                      a rung this session did not cross, which is the exact
+                      wrong-congratulation this feature is built to avoid.
+
+                      No path to a second celebration exists today (the finish
+                      control renders only while `ended_at` is null), so this
+                      is defence, not a fix. It is written as one block so the
+                      next state added here is obvious. Raised in review.
+                    */
                     setCelebrationRecords([]);
                     setRecordsSettled(false);
                     setCelebrationStreak(null);
+                    setCelebrationMilestone(null);
+                    setStreakSettled(false);
                     setCelebrating(summary);
                   }
                 }
@@ -1869,7 +1923,9 @@ export default function SessionScreen() {
           summary={{ ...celebrating, records: celebrationRecords }}
           sessionID={id}
           streak={celebrationStreak}
+          milestone={celebrationMilestone}
           recordsSettled={recordsSettled}
+          streakSettled={streakSettled}
           formatTonnage={(v) => formatVolume(v, units)}
           onDismiss={() => {
             setCelebrating(null);

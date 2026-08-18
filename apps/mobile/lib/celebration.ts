@@ -150,11 +150,52 @@ export function badgeFor(
  * Extracted from the card so the rule is testable without rendering anything —
  * the precedence is the part worth pinning, not the JSX around it.
  */
+/**
+ * Should the personal-record chime play?
+ *
+ * Extracted for the same reason `celebratesStreak` was — the precedence is the
+ * part worth pinning, not the JSX around it — and extracted *now* because
+ * review found the precedence was not actually being enforced by anything a
+ * test could see.
+ *
+ * Two conditions beyond having a record, and both are about losing gracefully
+ * to the rung above:
+ *
+ *  - **`streakSettled`.** The record and the history are independent fetches,
+ *    and the shared chime latch is claimed by whichever effect fires FIRST, not
+ *    by whichever ranks highest. The records lookup usually answers sooner (a
+ *    handful of exercise ids, against a rollup of a year of days), so without
+ *    this gate a once-a-year milestone was silenced by a personal record every
+ *    time the two coincided. It is the exact mirror of the `recordsSettled`
+ *    gate that already keeps the ordinary streak from latching the record out.
+ *  - **`milestone`.** Explicit rather than left to the latch, so the rule is
+ *    a value a test can assert instead of a property of effect declaration
+ *    order inside a component.
+ */
+export function celebratesRecord(opts: {
+  streakSettled: boolean;
+  hasRecords: boolean;
+  milestone?: boolean;
+}): boolean {
+  return opts.streakSettled && opts.hasRecords && !opts.milestone;
+}
+
 export function celebratesStreak(opts: {
   recordsSettled: boolean;
   hasRecords: boolean;
   carried: boolean;
+  /**
+   * Whether this session also crossed a streak MILESTONE (N19).
+   *
+   * Top of the precedence ladder, above the personal record that outranks the
+   * ordinary streak — see `celebratesMilestone` for why the frequency argument
+   * reverses at that rung. It needs no settling gate of its own: the streak and
+   * the milestone are computed from the same history in the same pass, so this
+   * boolean is never pending while `carried` is known.
+   */
+  milestone?: boolean;
 }): boolean {
+  if (opts.milestone) return false;
   return opts.recordsSettled && !opts.hasRecords && opts.carried;
 }
 

@@ -1,8 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import BjjSessionScreen from '../bjj/session/[id]';
 import type { SessionDetail } from '@/lib/bjjSession';
 import { readLocalSession, type LocalSession } from '@/lib/sessionStore';
+import { addDays, fetchHistory, startOfWeek, today, type HistoryDay } from '@/lib/history';
+import { fetchAccomplishments, type Accomplishment } from '@/lib/accomplishments';
+import { playSound } from '@/lib/sounds';
 
 /**
  * Opening a BJJ session from Today crashed.
@@ -140,6 +143,77 @@ jest.mock('@/lib/techniques', () => ({
 // A local `useAuthToken: () => async () => 'token'` returns a fresh arrow per
 // render and reproduces exactly that: measured at 17 refetches in one test.
 
+/*
+ * The history the streak and the milestone are both computed from.
+ *
+ * `requireActual` for everything else on purpose: `weekStreak`,
+ * `carriedTheStreak`, `startOfWeek` and `milestoneForSession` are the logic
+ * under test here, and stubbing any of them would leave this asserting that a
+ * mock returns what it was told to.
+ */
+jest.mock('@/lib/history', () => ({
+  ...jest.requireActual('@/lib/history'),
+  fetchHistory: jest.fn(),
+}));
+
+// Sound and haptics reach native modules the celebration fires on mount.
+jest.mock('@/lib/sounds', () => ({ playSound: jest.fn(), primeSounds: jest.fn() }));
+
+/*
+ * The accomplishments lookup (#284). Mocked to resolve empty by default so the
+ * milestone tests below are not silently competing with a badge; the chime
+ * tests override it.
+ */
+jest.mock('@/lib/accomplishments', () => ({
+  ...jest.requireActual('@/lib/accomplishments'),
+  fetchAccomplishments: jest.fn(async () => []),
+}));
+jest.mock('expo-haptics', () => ({
+  notificationAsync: jest.fn(async () => {}),
+  impactAsync: jest.fn(async () => {}),
+  NotificationFeedbackType: { Success: 'success' },
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium' },
+}));
+
+/*
+ * The finish control, reduced to a press.
+ *
+ * The hold gesture, its timing and its confirm dialog have their own suite
+ * (`components/__tests__/holdToConfirm.test.tsx`), so re-driving them here
+ * would test that component twice and this screen once. What this file is
+ * about is what happens AFTER the confirmation.
+ */
+jest.mock('@/components/HoldToConfirm', () => {
+  /*
+    `require`, not `import`, and the disable is not laziness: `jest.mock` factories
+    are hoisted above the import block, so a module referenced by an ESM import is
+    not initialised when the factory runs. The sibling `expo-router` mock below
+    does the same thing for the same reason. Scoped to these two lines so the
+    rule keeps working everywhere else — this app holds a warning ratchet, and a
+    new warning fails the gate rather than quietly raising it.
+  */
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Pressable, Text } = require('react-native');
+  return {
+    HoldToConfirm: ({
+      label,
+      onConfirm,
+      testID,
+    }: {
+      label: string;
+      onConfirm: () => void;
+      testID?: string;
+    }) =>
+      React.createElement(
+        Pressable,
+        { onPress: onConfirm, testID },
+        React.createElement(Text, null, label),
+      ),
+  };
+});
+
 jest.mock('@/lib/sync', () => ({
   request: jest.fn(),
   syncNow: jest.fn(async () => {}),
@@ -224,6 +298,185 @@ it('offers no share card while the class is still open', async () => {
   // one: the finish control is what stands where Share stands afterwards.
   expect(screen.getByTestId('bjj-session-finish')).toBeTruthy();
   expect(screen.queryByTestId('bjj-session-share')).toBeNull();
+});
+
+
+/*
+ * A milestone reached on the mat.
+ *
+ * This is a WIRING test, and it exists because wiring is the one class the
+ * lib suite structurally cannot see. `lib/milestones.ts` was correct and fully
+ * covered while this screen — the one a BJJ+strength athlete most often opens
+ * the week from — never computed a milestone at all. Every lib test stayed
+ * green through it; review found it by enumerating callers.
+ *
+ * The stakes are why it matters here rather than only on the strength screen:
+ * `milestoneForSession` fires ONLY on the session that carried the streak, so
+ * a rung the mat carries and this screen drops is not delayed to the next
+ * session, it is lost for that week entirely.
+ */
+
+/** `n` consecutive trained weeks ending in the current one. */
+function historyWithStreak(n: number, sessionsThisWeek: number) {
+  const thisMonday = startOfWeek(today());
+  const days: HistoryDay[] = [];
+  for (let i = 0; i < n; i++) {
+    days.push({
+      date: addDays(thisMonday, -i * 7),
+      sessions: i === 0 ? sessionsThisWeek : 1,
+      working_sets: 0,
+      total_reps: 0,
+      tonnage_kg: 0,
+      duration_seconds: 3600,
+      sports: ['bjj'],
+    });
+  }
+  return {
+    from: days[days.length - 1].date,
+    to: today(),
+    totals: emptyTotals(),
+    previous: emptyTotals(),
+    days,
+    sports: [{ sport: 'bjj', sessions: n }],
+  };
+}
+
+const emptyTotals = () => ({
+  sessions: 0,
+  working_sets: 0,
+  total_reps: 0,
+  tonnage_kg: 0,
+  duration_seconds: 0,
+  exercises: 0,
+  active_days: 0,
+});
+
+/** Finish the class, which is what opens the celebration card. */
+async function finishTheClass() {
+  (readLocalSession as jest.Mock).mockImplementation(() =>
+    deferred({ ...mockSession, ended_at: null }),
+  );
+  render(<BjjSessionScreen />);
+  const finish = await screen.findByTestId('bjj-session-finish');
+  fireEvent.press(finish);
+}
+
+it('shows the rung when the class on the mat is what carried the streak', async () => {
+  // Four consecutive weeks, and exactly ONE session in the current one — which
+  // is what `carriedTheStreak` reads to decide that THIS session carried it.
+  (fetchHistory as jest.Mock).mockResolvedValue(historyWithStreak(4, 1));
+
+  await finishTheClass();
+
+  await waitFor(() => {
+    expect(screen.getByTestId('celebration-milestone')).toBeTruthy();
+  });
+  // The rung itself, not merely a block: a test keyed on the testID alone
+  // would pass against a milestone for the wrong number of weeks.
+  expect(screen.getByText('A month, unbroken')).toBeTruthy();
+});
+
+it('shows no rung for the week’s later classes', async () => {
+  // Same four-week streak, but the current week already held a session before
+  // this one — so this class is training, not a milestone. Without this the
+  // card would open on every class for the rest of the week.
+  (fetchHistory as jest.Mock).mockResolvedValue(historyWithStreak(4, 2));
+
+  await finishTheClass();
+
+  // The card itself must still appear, or this passes for the wrong reason —
+  // a screen that never celebrated at all would also show no milestone.
+  await waitFor(() => {
+    expect(screen.getByTestId('session-celebration')).toBeTruthy();
+  });
+  expect(screen.queryByTestId('celebration-milestone')).toBeNull();
+});
+
+it('shows no rung on a week that reaches no rung', async () => {
+  // Three weeks is not a month. Guards against a block that renders whenever
+  // there is any streak at all.
+  (fetchHistory as jest.Mock).mockResolvedValue(historyWithStreak(3, 1));
+
+  await finishTheClass();
+
+  await waitFor(() => {
+    expect(screen.getByTestId('session-celebration')).toBeTruthy();
+  });
+  expect(screen.queryByTestId('celebration-milestone')).toBeNull();
+});
+
+
+/*
+ * The chime ladder, where #284 and #276 meet.
+ *
+ * Three things can fire one sound on this card and only one may: a streak
+ * MILESTONE, a BJJ FIRST, and the ordinary weekly streak, in that order. The
+ * middle rung is new — before #284 a BJJ card had no badge at all — and the
+ * rule that a first "takes the personal record's slot" existed only in prose
+ * plus a comment. Nothing failed when the wiring was wrong: passing the
+ * records-only flag instead of "earned a badge of either kind" left every test
+ * green while a BJJ first chimed nothing.
+ *
+ * These assert the SOUND, because the sound is the whole subject — the badge
+ * renders either way.
+ */
+
+const aFirst: Accomplishment = {
+  kind: 'first_submission_win',
+  basis: 'reported',
+  achieved_on: null,
+  contest_id: null,
+  contest_name: null,
+  placement: null,
+  entrants: null,
+  session_id: 's1',
+  technique_id: null,
+  technique_name: null,
+};
+
+/** The chime is deliberately delayed ~1.1s so it lands off `sessionComplete`. */
+async function soundsAfterTheChimeDelay() {
+  await act(async () => {
+    jest.advanceTimersByTime(1500);
+  });
+  return (playSound as jest.Mock).mock.calls.map(([name]) => name);
+}
+
+describe('one sound per session', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    (playSound as jest.Mock).mockClear();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    (fetchAccomplishments as jest.Mock).mockImplementation(async () => []);
+  });
+
+  it('chimes the first when the mat earns one', async () => {
+    (fetchAccomplishments as jest.Mock).mockResolvedValue([aFirst]);
+    (fetchHistory as jest.Mock).mockResolvedValue(historyWithStreak(2, 1));
+
+    await finishTheClass();
+    await waitFor(() => expect(screen.getByTestId('celebration-badge')).toBeTruthy());
+
+    // `pr`, the rare-thing sound a first shares with a personal record — and
+    // NOT `streak`, which is what fires if the badge fails to latch it out.
+    expect(await soundsAfterTheChimeDelay()).toContain('pr');
+  });
+
+  it('lets a milestone outrank a first earned in the same class', async () => {
+    (fetchAccomplishments as jest.Mock).mockResolvedValue([aFirst]);
+    (fetchHistory as jest.Mock).mockResolvedValue(historyWithStreak(4, 1));
+
+    await finishTheClass();
+    await waitFor(() => expect(screen.getByTestId('celebration-milestone')).toBeTruthy());
+
+    const played = await soundsAfterTheChimeDelay();
+    expect(played).toContain('success');
+    // The rung is rarer than the first, so the first stands down — the whole
+    // point of the shared latch, and the half a wrong flag would invert.
+    expect(played).not.toContain('pr');
+  });
 });
 
 afterEach(() => {

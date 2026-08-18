@@ -6,8 +6,10 @@ import { Medal } from '@/components/ui/Medal';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { celebratesMilestone, type Milestone } from '@/lib/milestones';
 import {
   badgeFor,
+  celebratesRecord,
   celebratesStreak,
   feltFor,
   statsFor,
@@ -101,8 +103,10 @@ export function SessionCelebration({
   formatTonnage,
   onDismiss,
   streak = null,
+  milestone = null,
   recordsSettled = false,
   accomplishment = null,
+  streakSettled = false,
   sessionID,
   testID = 'session-celebration',
 }: {
@@ -112,6 +116,12 @@ export function SessionCelebration({
   onDismiss: () => void;
   /** Weekly streak, once history answers. `carried` means this session did it. */
   streak?: { weeks: number; carried: boolean } | null;
+  /**
+   * A streak rung this session crossed (N19), or null — which is the answer
+   * almost every session. Never a running number: see `lib/milestones.ts` for
+   * why a countdown to the next rung is deliberately not offered here.
+   */
+  milestone?: Milestone | null;
   /** Whether the records lookup has finished — see the chime below. */
   recordsSettled?: boolean;
   /**
@@ -124,6 +134,22 @@ export function SessionCelebration({
    * finished", whichever lookup that is for this sport.
    */
   accomplishment?: { label: string } | null;
+  /**
+   * Whether the HISTORY lookup has finished — the mirror of `recordsSettled`.
+   *
+   * What makes the milestone's precedence real rather than a coin toss. The two
+   * lookups race, and declaration order only decides a tie inside one commit;
+   * across two fetches the PR would otherwise latch on arrival and silence a
+   * once-a-year event. Defaults false, so a caller that does not pass it gets
+   * no PR chime at all rather than a wrongly-ordered one — the safe direction.
+   *
+   * Both callers pass it. The BJJ screen has nothing to gate today (its summary
+   * hard-codes `records: []`, so `celebratesRecord` is structurally false
+   * there) and passes it anyway, because the day BJJ grows a record equivalent
+   * a missing prop would default false and hold that chime forever, looking
+   * exactly like a broken lookup.
+   */
+  streakSettled?: boolean;
   /**
    * The session's id, which the shareable card needs.
    *
@@ -163,6 +189,39 @@ export function SessionCelebration({
   }, []);
 
   /*
+    The shared latch — ONE celebratory sound per session.
+
+    Hoisted above all three effects rather than living in the PR block, because
+    the milestone effect now sits above that block and has to read the same
+    flag. Whichever effect fires first latches, so declaration order decides a
+    tie WITHIN one commit and reads top to bottom — milestone, record, streak.
+
+    Declaration order alone is not enough, and assuming it was is a defect
+    review found here: the three inputs arrive from two independent fetches, so
+    across commits the winner is whoever ARRIVES first, not whoever ranks
+    highest. Each effect below therefore also waits for the lookup that could
+    outrank it — the record waits on `streakSettled`, the streak waits on
+    `recordsSettled`, and the milestone, outranked by nothing, waits for
+    neither.
+  */
+  const chimed = useRef(false);
+
+  /*
+    Above both of the others, and declared before them so it claims the latch
+    first in the same commit — the same ordering argument the PR effect already
+    makes against the streak, one rung higher. `success` rather than `streak`:
+    hearing the weekly sound for a thing that happens once a year would make
+    the rarer event sound like the ordinary one.
+  */
+  const crossed = celebratesMilestone({ milestone });
+  useEffect(() => {
+    if (!crossed || chimed.current) return;
+    chimed.current = true;
+    const t = setTimeout(() => playSound('success'), 1100);
+    return () => clearTimeout(t);
+  }, [crossed]);
+
+  /*
     The PR chime, if this session set one.
 
     Separate from the mount effect because the records are not there yet when
@@ -199,18 +258,51 @@ export function SessionCelebration({
     means "something rare just happened", which is exactly what this is, and a
     new one would need the synth script, the bundle list and three more edits to
     say the same thing.
+
+    N19 puts ONE rung above it. A streak milestone is rarer still — three of its
+    four rungs happen at most once ever — so it takes the latch first and this
+    stands down, exactly as this stands above the weekly streak.
   */
   const earnedBadge = hasRecords || accomplishment != null;
-  const chimed = useRef(false);
+
+  /*
+    And gated on `streakSettled`, the reciprocal of the gate the streak chime
+    below already has — what makes the milestone's precedence survive contact
+    with two independent fetches.
+
+    Without it, "the milestone outranks the badge" held only when both landed in
+    one commit. In practice the badge lookup usually answers first — a handful
+    of exercise ids, or one accomplishments call — while the history rolls up a
+    year of days, so this effect claimed the shared latch on ARRIVAL and the
+    milestone arriving a moment later found it taken. The rarer event lost to
+    the commoner one, silently: the exact bug `recordsSettled` was introduced to
+    fix one rung further down. Found in review.
+
+    Waiting costs nothing visible. The badge ROW still renders the instant its
+    lookup lands — the streak fetch is separate precisely so it can — and only
+    the sound waits. Offline the history settles in its `finally`, so this is
+    delayed, never lost.
+
+    `earnedBadge` is what goes in, NOT `hasRecords`: on the mat the thing that
+    outranks a streak is the accomplishment, and the parameter is named for the
+    strength case it was written from. Passing the records-only flag here would
+    let a BJJ first lose its chime to a milestone that should have deferred to
+    nothing, and would chime the streak over it on the way back down.
+  */
+  const beat = celebratesRecord({
+    streakSettled,
+    hasRecords: earnedBadge,
+    milestone: milestone !== null,
+  });
   useEffect(() => {
-    if (!earnedBadge || chimed.current) return;
+    if (!beat || chimed.current) return;
     chimed.current = true;
     const t = setTimeout(() => playSound('pr'), 1100);
     return () => clearTimeout(t);
-  }, [earnedBadge]);
+  }, [beat]);
 
   /*
-    The streak chime — ONE celebratory sound per session, and the PR wins.
+    The streak chime — last in the ladder, so both of the above win.
 
     `chimed` is shared with the effect above rather than being its own flag,
     which is what makes that precedence hold: whichever fires first latches,
@@ -221,7 +313,9 @@ export function SessionCelebration({
 
     Declared after the PR effect on purpose too: within one commit React runs
     them in order, so if both become true together the PR still claims the
-    latch.
+    latch. `celebratesStreak` additionally stands down for a milestone outright
+    rather than relying on that ordering, because the milestone is known in the
+    same pass as `carried` and an explicit refusal is what a test can pin.
   */
   const carried = celebratesStreak({
     recordsSettled,
@@ -230,6 +324,7 @@ export function SessionCelebration({
     // would chime the streak straight over the top of a BJJ first.
     hasRecords: earnedBadge,
     carried: streak?.carried === true,
+    milestone: milestone !== null,
   });
   useEffect(() => {
     if (!carried || chimed.current) return;
@@ -275,6 +370,28 @@ export function SessionCelebration({
               <Text style={[styles.badgeText, { color: accent.ink }]} testID="celebration-badge">
                 {badge.label}
               </Text>
+            </RNView>
+          )}
+
+          {/*
+            The milestone, when this session crossed one — which is almost
+            never, and that is what makes it worth a block of its own rather
+            than another line in the streak sentence. It sits above the streak
+            line because it is the larger statement about the same fact; both
+            show, because "a year, unbroken" and "52 weeks in a row" are the
+            headline and the figure behind it, not a repetition.
+          */}
+          {milestone && (
+            <RNView
+              style={[styles.milestone, { borderColor: accent.accent }]}
+              // Arrives after the card opens, like the streak line and the
+              // records below it, so a screen reader has to be told or the one
+              // rare thing on this card is the one thing only seen.
+              accessibilityLiveRegion="polite"
+              testID="celebration-milestone"
+            >
+              <Text style={[styles.milestoneLabel, { color: accent.ink }]}>{milestone.label}</Text>
+              <Text style={styles.milestoneBlurb}>{milestone.blurb}</Text>
             </RNView>
           )}
 
@@ -465,6 +582,29 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   feltValue: { fontSize: 13, color: vola.textMuted, marginTop: 2 },
+  /*
+    Bordered in the accent like `badge`, but a block rather than a pill: it
+    carries two lines, and a pill wide enough for "Twenty-six weeks in a row.
+    Six months of showing up." is not a pill. Deliberately NOT filled with the
+    accent — the tick above it is, and two solid accent shapes in one column
+    would leave nothing as the card's focus.
+  */
+  milestone: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 4,
+    marginTop: 4,
+  },
+  milestoneLabel: { fontSize: 15, fontWeight: '800', textAlign: 'center' },
+  milestoneBlurb: {
+    fontSize: 12,
+    color: vola.textMuted,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
   streak: { fontSize: 12.5, color: vola.textDim, marginTop: 10, letterSpacing: 0.2 },
   records: { alignSelf: 'stretch', gap: 8, marginTop: 12 },
   recordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
