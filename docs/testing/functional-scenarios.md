@@ -700,6 +700,21 @@ Domain: a training session that **actually happened**, and the sets in it — re
   by `ValidGrip` and the CHECK constraint, which the script never reads. A
   functional test is what would catch the two disagreeing, as a 400 on save.
 
+### Sync races on the pull side (T8)
+
+- **An edit made while a sync is running survives it.** Start a sync, edit a
+  session while it is in flight, let it finish: the edit must be on screen AND
+  still queued. Losing either half is the bug — a kept name with `dirty` cleared
+  is the quieter version, right on screen and never sent.
+- **Ordinary editing is unaffected.** Two edits in a row before anything syncs
+  must both land. (Note for whoever translates this: they land via direct
+  `UPDATE`s that bypass the guarded upsert entirely, so this scenario is not
+  actually exercising the T8 clause — it is here because it is what an athlete
+  would check, not because it pins the fix. The clause is pinned at the fixture
+  level in `pullClobber.test.ts`.)
+- **A deleted session is not resurrected by a pull**, which is the older half of
+  the same clause and must keep holding.
+
 ## Progression rules — double progression (`GET /v1/sessions/suggestions`, both clients)
 
 Domain: what to load today and for how many reps, computed from the caller's own last few sessions. The thing in the product that advises rather than records, so it follows the standing rule — deterministic, and it always states its evidence.

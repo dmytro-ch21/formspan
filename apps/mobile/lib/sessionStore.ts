@@ -200,7 +200,46 @@ export async function upsert(
      --
      -- With this, a tombstoned row is immune to upserts until the delete
      -- completes and the row is gone for real.
-     WHERE local_sessions.deleted_at IS NULL`,
+     --
+     -- The second clause is T8, and it is the same invariant one step over:
+     -- the SERVER'S COPY MAY NOT OVERWRITE PENDING WORK.
+     --
+     -- The pull calls this with dirty = 0 to write what the server returned.
+     -- Without a guard it wins a race it should lose: an edit landing between
+     -- the pull's per-row SELECT and this upsert is replaced by the server's
+     -- older copy AND marked clean, so it is never sent. The change is gone
+     -- from the screen and from the outbox, pending reads zero, and the
+     -- newer-than guard on the next pull stops it reconciling.
+     --
+     -- Read the excluded.dirty = 1 half as a BACKSTOP, not as the hot path.
+     -- An earlier version of this comment claimed it protected "every ordinary
+     -- edit-on-top-of-an-edit, which is the whole app", and named a
+     -- saveLocalSession that does not exist. It is wrong twice: athlete edits
+     -- (saveLocalSets, renameLocalSession, the delete) are direct UPDATEs that
+     -- never come through here, and the only production caller passing
+     -- dirty = 1 is startLocalSession, which inserts a fresh uuid and so never
+     -- conflicts. Today an unconditional dirty = 0 would behave identically.
+     -- The disjunct is kept for the same reason the tombstone clause above it
+     -- is written as an invariant rather than left to its callers: it states
+     -- which write wins, so a future caller that does conflict gets the right
+     -- answer instead of silently losing an edit.
+     --
+     -- name_dirty is deliberately NOT in this clause, and that rests on
+     -- renameLocalSession setting dirty = 1 ALONGSIDE name_dirty = 1, so an
+     -- unsent rename is already protected by the dirty half. The workout table
+     -- takes the OPPOSITE convention on purpose (see cacheWorkouts, which does
+     -- have to check name_dirty). Reshape a session rename to match that and
+     -- this clause quietly stops covering renames.
+     --
+     -- Both siblings already carry both halves -- plan.ts's upsert, whose
+     -- comment describes this exact clobber, and cacheWorkouts. This was the
+     -- one outbox missing it.
+     --
+     -- NOTE: no backticks in here. This is inside a template literal, and a
+     -- backtick in a SQL comment ends the string -- which is a parse error two
+     -- hundred lines away from anything that looks related.
+     WHERE local_sessions.deleted_at IS NULL
+       AND (excluded.dirty = 1 OR local_sessions.dirty = 0)`,
     s.id,
     userID,
     s.workout_id,

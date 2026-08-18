@@ -23622,6 +23622,101 @@ than prediction.
   this should be revisited.
 - **Still not seen on a phone**, unchanged from #266.
 
+## 2026-08-17 — The pull could overwrite an edit and mark it clean
+
+**T8**, the third of the family T6 opened. `sessionStore`'s upsert carried the
+tombstone guard and not the dirty one, so the pull could replace an edit with
+the server's older copy AND mark the row clean — the change neither on screen
+nor in the outbox, `pending` reading zero, and the pull's newer-than guard
+stopping the next run from reconciling it.
+
+Both siblings already had the clause: `plan.ts`'s upsert, whose comment
+describes this exact clobber, and `cacheWorkouts`. Sessions were the one outbox
+missing it.
+
+### Why it is not a bare `dirty = 0` — and the reason I first gave was wrong
+
+The clause is `(excluded.dirty = 1 OR local_sessions.dirty = 0)`, keyed on the
+incoming row rather than on a parameter: a local write wins, a server write
+yields to anything outstanding.
+
+The first version of this entry justified that by saying an unconditional
+`dirty = 0` "would decline every ordinary edit-on-top-of-an-edit, which is most
+of what logging is", and named a `saveLocalSession` doing those writes. **Both
+halves are false, and review caught it.** There is no `saveLocalSession`
+anywhere in the app — the name existed only in my comments. Athlete edits
+(`saveLocalSets`, `renameLocalSession`, the delete) are direct `UPDATE`s that
+never pass through this upsert at all, and the only production caller passing
+`dirty = 1` is `startLocalSession`, which inserts a fresh uuid and therefore
+never conflicts. **An unconditional guard would behave identically in the app as
+it stands today.**
+
+The disjunct is still the right choice, for the reason the tombstone clause
+above it is written as an invariant rather than left to its callers: it says
+which write wins, so a future caller that does conflict gets the right answer
+instead of quietly losing an edit. That is a weaker claim than the one I made,
+and it is the true one.
+
+Recording it at length because this repo's expensive bugs come from exactly
+this — a confident comment nobody re-checks. The T6 entry says as much about
+its own predecessor.
+
+### `name_dirty` is deliberately absent, and that rests on something invisible
+
+A row can be name-dirty without being sets-dirty, so the obvious question is
+whether an unsent RENAME is still exposed. It is not — but only because
+`renameLocalSession` sets `dirty = 1` alongside `name_dirty = 1`, so the dirty
+half already covers it.
+
+The workout table takes the OPPOSITE convention on purpose, which is why
+`cacheWorkouts`'s guard has to check `name_dirty` and this one does not. Reshape
+a session rename to match the workout shape and this clause silently stops
+covering renames, with nothing to catch it — so the dependency is now written
+down at the clause. Adding `name_dirty = 0` here would be actively wrong: a
+benign lingering `dirty = 0, name_dirty = 1` state exists after a create, and
+guarding on it would make those rows pull-immune forever.
+
+### The race is reproduced, not argued
+
+The pull already refuses two ways — it skips a row whose local copy is dirty,
+and it refuses to go backwards on `updated_at` — and both read a snapshot. The
+window is between those checks and the upsert, and it is not hypothetical: the
+comment above that loop records an athlete hitting the sibling version of it
+("apparently the exercise was added but would just load without my
+intervention").
+
+There is no async seam between the SELECT and the upsert to hook, so the test
+interrupts the SELECT itself: it wraps `getFirstAsync`, lets the pull read its
+clean snapshot, and then lands the edit before returning — which is exactly
+where a real one lands. Same technique `tombstoneRace.test.ts` uses for T6, and
+disclosed the same way.
+
+### The tombstone test passed for the wrong reason
+
+Worth recording because the mutation run is the only thing that caught it, and
+because it is this repo's recurring failure in miniature.
+
+The first version deleted a **dirty** row and asserted the server's copy did not
+land. It passed — and it passed with `deleted_at IS NULL` deleted from the SQL,
+because the new T8 clause was declining the write and the tombstone clause was
+never consulted. A clean tombstone is the only state where that clause is the
+one doing the work. Four mutations now, each failing a different test: remove the T8 clause, make
+it unconditional, remove the tombstone clause, and — the one review found still
+alive — `excluded.dirty = local_sessions.dirty`, a rule that only writes when
+the two AGREE. That one passed everything, because no test covered a local write
+landing on a CLEAN row. Four cells in the table, and I had pinned three.
+
+### Open questions this leaves
+
+- **T7 is the same family and is somebody else's** (#270) — a rename landing
+  mid-push clears `name_dirty` with no compare-and-swap at all, which is worse
+  than this because it never self-heals.
+- **The other two outboxes were not re-checked here.** `cacheWorkouts` has both
+  clauses; `plan.ts` has both. Nothing swept for a FOURTH upsert, and the way
+  this family keeps producing members suggests somebody should.
+- **The window is still a window.** This closes the clobber, not the race: an
+  edit landing in the gap is now kept and re-sent, which is the correct
+  outcome, but the pull still did work it had to throw away.
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
