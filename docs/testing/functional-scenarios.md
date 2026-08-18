@@ -7503,3 +7503,20 @@ training. Everything here is about it telling the truth.
 ### Regression trap
 
 - **The grip CHECK constraint's name must contain the substring `grip`.** `translatePgError` selects the `invalid_grip` wire code by matching it, and that code is what tells a stale client to drop the grip and retry. A migration that renames the constraint migrates cleanly, still refuses bad grips, and silently breaks every old client's self-repair.
+
+## A rename landing mid-push (T7)
+
+### Happy path
+
+- Rename a session while offline, come back online: the new name reaches the server on the next sync.
+
+### Edge cases & errors
+
+- **Rename a session WHILE its push is in flight.** The push carries the old name (correct — it is what was snapshotted), and the row must still owe the name afterwards. The next push must deliver the new one. Asserting only that a flag survived is a proxy; assert the server ends up with the new name.
+- After that second push the row must go clean, or the same PATCH is re-sent on every foreground forever.
+- A session renamed before its first push is CREATED with the new name — there is no PATCH to race, and none should be sent.
+- A session deleted while its push is in flight still owes the delete (T6), and the two guards compose: a rename and a delete racing the same push must both survive.
+
+### Regression trap
+
+- **Nothing may clear `dirty` or `name_dirty` outside the guarded terminal swap.** A declined swap has to leave the row owing everything it owed; clearing part of that debt elsewhere makes "declined" mean "partly sent", and the half that was cleared is lost permanently because the pull's newer-than guard stops reconciliation.

@@ -23717,6 +23717,61 @@ landing on a CLEAN row. Four cells in the table, and I had pinned three.
 - **The window is still a window.** This closes the clobber, not the race: an
   edit landing in the gap is now kept and re-sent, which is the correct
   outcome, but the pull still did work it had to throw away.
+## 2026-08-17 — A rename that lands mid-push, and the flag that made it permanent
+
+`T7`, found by review while checking T6. Same family, strictly worse: T6 cost a
+cycle and healed itself, this one never heals.
+
+`pushRow` cleared `name_dirty = 0` in **its own statement, with no
+compare-and-swap at all** — no `updated_at`, no `deleted_at` — sitting directly
+above a terminal swap that carried both guards. The sequence:
+
+1. the push snapshots the session with name "A"
+2. the athlete renames it to "B", setting `dirty = 1`, `name_dirty = 1` and a
+   fresh `updated_at`
+3. `pushRename` sends "A" — correct, that is what was snapshotted — and the
+   unguarded clear sets `name_dirty = 0`
+4. the terminal swap **correctly declines** on `updated_at`, so the row stays
+   `dirty = 1` and is picked up again
+5. the next pass sends the sets and never the name, because the flag that
+   decides that is already 0
+
+The phone keeps "B", the server keeps "A", and the pull's newer-than guard stops
+the server copy overwriting the local one — so nothing reconciles, ever. Silent
+divergence on exactly the rows somebody deliberately edited.
+
+### The fix is the shape the sibling already had
+
+`workout_cache` never had this: it clears both flags **inside** its guarded
+swap. So `local_sessions` now does the same, and the reason is worth stating as
+a rule rather than a patch — **a declined swap has to leave the row owing
+everything it owed.** Clearing any part of that debt outside the guard is what
+makes "declined" mean "partly sent".
+
+That the two outboxes differed at all is the third instance of one pattern: T5,
+T6 and now T7 were each a guard present in one of two near-identical paths, with
+the reason recorded only in the guarded one.
+
+### The test asserts the name, not the flag
+
+`renameRace.test.ts` has three cases, and the second is the one that matters.
+Asserting `name_dirty` survives is a proxy; asserting that a **second push
+delivers "B"** is the property, and it is what fails with the bug restored —
+`mockRename` receives `["A"]` and nothing else, forever. The third is the
+control: without it, "never clear `name_dirty`" would satisfy the first two
+while re-sending the same PATCH on every foreground for the life of the install.
+
+### Gaps
+
+- **`T8` is the same family and still open**, in the same file: the pull's
+  upsert carries the tombstone guard but not the dirty guard, so an edit landing
+  in the reconciliation gap is overwritten and marked clean. Both siblings
+  (`plan.ts`, `cacheWorkouts`) check both halves. Left claimable rather than
+  folded in here, since it is a separate id.
+- **Not seen on a phone**, like everything in this family — the race is forced
+  in a fixture, which is the only way to make two `Date.now()` calls collide on
+  demand.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
