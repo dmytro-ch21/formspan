@@ -177,10 +177,20 @@ describe('renaming a session that the server already holds', () => {
   it('does NOT send it for a session the server has never seen', async () => {
     // The create carries the name itself, so a second call would be a wasted
     // request on the one path that is already two round trips.
-    seed({ remote: 0 });
+    //
+    // `name_dirty: 1` is set EXPLICITLY. The default is 0, so seeding only
+    // `remote: 0` made the guard false via the wrong operand — dropping
+    // `wasRemote` from `wasRemote && row.name_dirty === 1` survived the entire
+    // suite, and this test, which exists to pin exactly that, would not have
+    // noticed.
+    seed({ remote: 0, name_dirty: 1 });
     await pushSession('u1', 's1', async () => 'tok');
 
     expect(mockRename).not.toHaveBeenCalled();
     expect(mockStart).toHaveBeenCalledTimes(1);
+    // And the row is still marked clean — the flag is cleared by the terminal
+    // swap rather than by a statement of its own, so a create that carried the
+    // name does not leave the row owing one.
+    expect(calls).toContain('mark-clean');
   });
 });
