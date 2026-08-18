@@ -218,7 +218,13 @@ export default function CurriculumScreen() {
         </Text>
       </Pressable>
 
-      {curriculum.enrolled && proposal && (
+      {/* `isRoadmap` too, matching web. On a criteria-free list `proposeFocus`
+          always returns unchanged, so the panel said either "Nothing left to
+          work on this one" (false — nothing was ever workable) or "Your focus
+          already matches this roadmap" (false — the focus has nothing to do
+          with it). Review found the asymmetry with web, which has always
+          gated on all three. */}
+      {isRoadmap && curriculum.enrolled && proposal && (
         <FocusPanel proposal={proposal} busy={busy} onApply={() => confirmFocus(proposal)} />
       )}
 

@@ -24174,9 +24174,14 @@ technique id resolves in the library — checked while authoring, which caught
 **28 invented ids** before any of them reached the seeder, exactly what
 `TestEverySeededTechniqueExistsInTheLibrary` exists to catch one step later.
 
-**White belt's list is 100% White-tagged techniques.** Blue is 55 Blue and 15
-White — fundamentals reappearing at a higher standard, which is the belt's own
-argument. Brown is the interesting distribution: only 25 techniques in the whole
+**White belt's list is 100% White-tagged techniques** (73 of them). Blue is 55
+Blue, 15 White and 1 Purple; purple is 23 Purple, 15 Blue, 2 White and 2 Brown;
+brown is 14 Brown, 13 Blue, 7 Purple and 1 White. The White entries at higher
+belts are fundamentals reappearing at a higher standard, which is those belts'
+own argument, and the three above-belt picks are deliberate — a leg-lock escape
+at blue because defence comes first, and two saddle finishes at purple, both
+carrying "where the rules allow it". 27 techniques appear in more than one
+syllabus, each with a note written for its belt. Brown is the interesting distribution: only 25 techniques in the whole
 catalog are tagged Brown, and they are almost entirely the leg family and the
 late finishes. That matches the proposal's claim that brown is refinement rather
 than new material, so brown's list is the shortest of the four and says so.
@@ -24208,11 +24213,43 @@ criteria-free list it is a bookmark, which is what an athlete's own curriculum
 has always been. Keyed on the real property rather than on `track`, which this
 repo's own rule calls a grouping hint that must never gate anything.
 
+**Review found the guard I thought was airtight had a hole, and a false claim on
+the front screen.**
+
+The hole: both guards filtered on an exact track string, so anything on a third
+track was exempt from both — and `novice-fundamentals` already was. It is a
+roadmap with ten countable items on the `foundations` track, and stripping every
+criterion from it left the whole suite green. Fixed by asserting the track
+vocabulary is CLOSED and extending the milestone guard to every non-syllabus
+track. Demonstrated both ways: that mutation is red now and was green before.
+
+The false claim is the worse one, and the new "Keep this handy" button was the
+invitation into it. `/v1/curricula/working` returned every enrolment with no
+countable filter, and `RoadmapLine` reads a null next step as **"Every technique
+on this one is done."** So bookmarking a 73-item syllabus put that sentence on
+the Today screen, over "0 of 0 mastered", with the screen reader saying "All 0
+mastered". Reachable before the syllabuses existed — any criteria-free reading
+list did it — and they made it inviting and large. **`Working` now excludes
+curricula with nothing completable**, which is a display rule and not an
+un-enrolment: a test asserts the bookmark survives and is still readable through
+`Get`. Filtered server-side rather than in each client because every consumer
+renders progress from that endpoint, and one that forgot would draw a false claim
+rather than a blank.
+
+Two smaller things from the same pass. The evidence CTE is now narrowed to items
+that **carry criteria**, not merely to the curriculum's techniques: nothing but a
+criterion reads those numbers, so a syllabus read computed the athlete's entire
+tag history to produce nothing — and for an un-enrolled reader the date window is
+disabled, so it really was the whole career. And the mobile focus panel now gates
+on `isRoadmap` like web's always has; without it a bookmarked list claimed
+"Nothing left to work on this one."
+
 Verified: seeded against a real database — 9 curricula, the four roadmaps with
 every technique countable and the four syllabuses with zero, which is the split
-stated as a table. Both new guards mutation-tested (a criterion added to a
-syllabus item, every criterion stripped from a roadmap), each red alone and green
-restored. Full `verify` chain green. **Not seen in a browser**: Clerk again.
+stated as a table. Every guard mutation-tested: a criterion added to a syllabus
+item, every criterion stripped from a roadmap, the criteria stripped from
+`novice-fundamentals`, and a typo'd track — each red alone and green restored.
+Full `verify` chain green. **Not seen in a browser**: Clerk again.
 
 Open questions:
 

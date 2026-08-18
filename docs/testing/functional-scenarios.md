@@ -6600,6 +6600,15 @@ The reference syllabuses (2026-08-18):
 - **The web list groups them under "Reference syllabuses", after Belt roadmaps
   and Foundations.** Assert the section ORDER: somebody scanning for something to
   work should meet the roadmaps first.
+- **A bookmarked syllabus must not appear on Today or the You tab.** This is the
+  one review caught: `/v1/curricula/working` returned every enrolment, and
+  `RoadmapLine` reads a null next step as "Every technique on this one is done",
+  so bookmarking one put a false completion claim on the front screen over "0 of
+  0 mastered". Enrol a criteria-free list — a syllabus OR your own reading list,
+  both reproduce it — and assert it appears on neither surface while remaining
+  enrolled and readable on the curricula list.
+- **The mobile focus panel stays hidden on a bookmarked list.** Without the
+  `isRoadmap` gate it claims "Nothing left to work on this one."
 - **They must NOT appear on the mobile Plan strip.** They carry a belt, so a
   filter keyed on `belt` lets them through; the strip is keyed on `track`.
   Regression test: the strip shows five cards (foundations + four belts), never
