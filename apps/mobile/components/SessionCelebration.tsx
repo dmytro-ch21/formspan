@@ -102,6 +102,7 @@ export function SessionCelebration({
   onDismiss,
   streak = null,
   recordsSettled = false,
+  accomplishment = null,
   sessionID,
   testID = 'session-celebration',
 }: {
@@ -113,6 +114,16 @@ export function SessionCelebration({
   streak?: { weeks: number; carried: boolean } | null;
   /** Whether the records lookup has finished — see the chime below. */
   recordsSettled?: boolean;
+  /**
+   * A BJJ first this session earned, once the server answers.
+   *
+   * Passed in rather than derived here, because deciding it needs a network
+   * call and this component takes no dependencies of its own. Strength passes
+   * none and BJJ passes no records, so the two never contend for the one badge
+   * slot. `recordsSettled` gates this too — it means "the badge lookup has
+   * finished", whichever lookup that is for this sport.
+   */
+  accomplishment?: { label: string } | null;
   /**
    * The session's id, which the shareable card needs.
    *
@@ -134,7 +145,7 @@ export function SessionCelebration({
   testID?: string;
 }) {
   const accent = useAccent();
-  const badge = badgeFor(summary);
+  const badge = badgeFor(summary, accomplishment);
   const stats = statsFor(summary, formatTonnage);
   const felt = feltFor(summary);
 
@@ -179,13 +190,24 @@ export function SessionCelebration({
     refetch path here should re-read this rather than assume it still holds.
   */
   const hasRecords = summary.records.length > 0;
+  /*
+    A BJJ first takes the SAME slot as a personal record, deliberately.
+
+    It is the mat's equivalent — rare, server-judged, and the larger moment of
+    the two whenever it coincides with a streak — so it chimes, and it latches
+    the streak out. Reusing the `pr` sound rather than adding a ninth: the sound
+    means "something rare just happened", which is exactly what this is, and a
+    new one would need the synth script, the bundle list and three more edits to
+    say the same thing.
+  */
+  const earnedBadge = hasRecords || accomplishment != null;
   const chimed = useRef(false);
   useEffect(() => {
-    if (!hasRecords || chimed.current) return;
+    if (!earnedBadge || chimed.current) return;
     chimed.current = true;
     const t = setTimeout(() => playSound('pr'), 1100);
     return () => clearTimeout(t);
-  }, [hasRecords]);
+  }, [earnedBadge]);
 
   /*
     The streak chime — ONE celebratory sound per session, and the PR wins.
@@ -203,7 +225,10 @@ export function SessionCelebration({
   */
   const carried = celebratesStreak({
     recordsSettled,
-    hasRecords,
+    // `earnedBadge`, not `hasRecords`: on the mat the thing that outranks a
+    // streak is the accomplishment, and passing the records-only flag here
+    // would chime the streak straight over the top of a BJJ first.
+    hasRecords: earnedBadge,
     carried: streak?.carried === true,
   });
   useEffect(() => {
@@ -232,7 +257,21 @@ export function SessionCelebration({
           <Text style={styles.subtitle}>{subtitleFor(summary)}</Text>
 
           {badge && (
-            <RNView style={[styles.badge, { borderColor: accent.accent }]}>
+            /*
+              `polite`, for the same reason the streak line and the records list
+              below carry it: this arrives AFTER the card has rendered, once the
+              network answers, so a screen reader has already moved past it.
+
+              It matters more here than it did for records. A strength athlete
+              hears the news anyway from the announced records list underneath;
+              on the mat this badge is the ONLY representation of the first, so
+              without it a VoiceOver athlete gets flares and a chime and no
+              words at all.
+            */
+            <RNView
+              accessibilityLiveRegion="polite"
+              style={[styles.badge, { borderColor: accent.accent }]}
+            >
               <Text style={[styles.badgeText, { color: accent.ink }]} testID="celebration-badge">
                 {badge.label}
               </Text>

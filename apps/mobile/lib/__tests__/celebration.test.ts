@@ -122,6 +122,33 @@ describe('the badge', () => {
     // wallpaper — unread within a week, and it takes the real ones with it.
     expect(badgeFor({ records: [] })).toBeNull();
   });
+
+  /*
+    The mat's half. A BJJ first fills the same single slot, and the precedence
+    lives here rather than in the card's JSX precisely so it can be pinned:
+    "records, then an accomplishment, then nothing" is a rule, and a rule
+    expressed as a `??` inside a render is one nothing can test.
+  */
+  it('shows a BJJ first when there are no records', () => {
+    expect(badgeFor({ records: [] }, { label: 'First technique landed' })).toEqual({
+      key: 'accomplishment',
+      label: 'First technique landed',
+    });
+  });
+
+  it('still shows nothing when neither exists', () => {
+    expect(badgeFor({ records: [] }, null)).toBeNull();
+  });
+
+  it('prefers the record if both somehow arrive', () => {
+    // Unreachable today — a session is one sport, so a strength session has no
+    // accomplishment and a BJJ session has no records. Pinned anyway, because
+    // the safe direction is the MEASURED thing winning rather than whichever
+    // was checked first, and that should not silently invert.
+    expect(
+      badgeFor({ records: [{ exerciseID: 'bench', record: record() }] }, { label: 'A first' }),
+    ).toEqual({ key: 'record', label: 'Personal record' });
+  });
 });
 
 describe('whether to show a card at all', () => {

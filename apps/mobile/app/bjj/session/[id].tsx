@@ -35,6 +35,11 @@ import { request as requestSync } from '@/lib/sync';
 import { fetchTechniques, type TechniqueSummary } from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { carriedTheStreak, fetchHistory, localZone, streakRange, weekStreak } from '@/lib/history';
+import {
+  accomplishmentBadge,
+  accomplishmentsFromSession,
+  fetchAccomplishments,
+} from '@/lib/accomplishments';
 
 /**
  * Reading a BJJ session back.
@@ -139,6 +144,69 @@ export default function BjjSessionScreen() {
       live = false;
     };
   }, [celebrating, getToken]);
+
+  /*
+    And the BADGE — what this session was the first of.
+
+    The mat's answer to the personal-record row, and it arrives the same way:
+    the SERVER decides, every award carries the session that earned it, and
+    this filters. Re-deriving "is this a first?" here would be a second opinion
+    that can disagree with the accomplishments the rest of the app shows.
+
+    `settled` is what makes the chime precedence real rather than a race. It
+    starts false, so BJJ now has a genuine lookup to wait for where it
+    previously had none — see the note at the call site, which used to say the
+    opposite and was true when it was written.
+
+    Offline it never settles, and that is the honest outcome the PR row already
+    chose: silence is not a claim, a wrong medal is.
+  */
+  /*
+    ONE piece of state, stamped with the session it answered for, rather than a
+    value plus a `settled` boolean.
+
+    Two states would need a synchronous reset at the top of the effect, which
+    `react-hooks/set-state-in-effect` refuses — and the rule is right here
+    rather than merely satisfied: stamping is also the stronger version. A
+    result can never be read as a different session's, because settledness IS
+    "the answer I hold is for the id on screen" instead of a flag somebody has
+    to remember to clear.
+  */
+  const [badge, setBadge] = useState<{
+    sessionID: string;
+    value: { label: string } | null;
+  } | null>(null);
+  // `badge != null` first: `badge?.sessionID === id` alone is `undefined ===
+  // undefined` when both are absent, which would open the streak gate before
+  // anything had been looked up. Unreachable today (a celebration needs a
+  // loaded session, which needs an id) and closed anyway, because it costs a
+  // comparison and the failure is silent.
+  const badgeSettled = badge != null && badge.sessionID === id;
+  const celebrationBadge = badgeSettled ? badge.value : null;
+  useEffect(() => {
+    if (!celebrating || !id) return;
+    let live = true;
+    fetchAccomplishments(getToken, localZone())
+      .then((all) => accomplishmentBadge(accomplishmentsFromSession(all, id)))
+      // No network, no badge and no claim — silent, because a failed lookup is
+      // not an error to raise on a celebration screen.
+      .catch(() => null)
+      .then((value) => {
+        // A FAILURE STILL SETTLES, matching the strength card exactly: offline
+        // the answer is "nothing to show", and the streak chime must not wait
+        // forever for a lookup that is never coming back. An earlier version
+        // here never settled on failure and claimed that matched the PR row --
+        // it did the opposite, and review caught the contradiction. One rule
+        // for both sports; suppressing a streak the athlete really did carry,
+        // because an unrelated endpoint failed, punishes them for a server
+        // fault.
+        if (live) setBadge({ sessionID: id, value });
+      });
+    return () => {
+      live = false;
+    };
+  }, [celebrating, getToken, id]);
+
   const [loading, setLoading] = useState(true);
   const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
 
@@ -247,11 +315,15 @@ export default function BjjSessionScreen() {
       requestSync('bjj-session-finished');
       /*
         BJJ gets the same card, with its own vocabulary — rounds and mat time
-        rather than sets and tonnage — and deliberately NO badge and no PR row.
-        There is no BJJ equivalent of a personal record yet (`lib/records.ts`
-        is strength-only), and inventing a "you showed up" badge to fill the
-        gap is precisely the wallpaper that would devalue the real ones. It
-        stays honest until the accomplishments work lands.
+        rather than sets and tonnage — and no PR row, because `lib/records.ts`
+        is strength-only.
+
+        It DOES now get a badge. This comment used to end "it stays honest
+        until the accomplishments work lands"; that work landed, and the badge
+        is a server-derived FIRST rather than the "you showed up" wallpaper the
+        old text was refusing. The distinction it was protecting is intact:
+        these fire once each in an athlete's life, so the common case here is
+        still no badge at all. See `lib/accomplishments.ts`.
       */
       /*
         Read back rather than taken from `session`.
@@ -646,10 +718,13 @@ export default function BjjSessionScreen() {
           formatTonnage={(v) => `${Math.round(v)}`}
           onDismiss={() => setCelebrating(null)}
           streak={celebrationStreak}
-          // Settled by construction: BJJ has no record equivalent yet, so the
-          // summary hard-codes `records: []` and there is no lookup to wait
-          // for. Nothing can arrive later and outrank the streak chime here.
-          recordsSettled
+          accomplishment={celebrationBadge}
+          // NO LONGER settled by construction, and the comment that used to sit
+          // here said it was — correctly, until this session gained a badge to
+          // look up. BJJ still hard-codes `records: []`, but the accomplishment
+          // fetch is a real lookup that can answer late, so the streak chime has
+          // to wait for it exactly as the strength card waits for its records.
+          recordsSettled={badgeSettled}
         />
       )}
     </KeyboardAwareScrollView>

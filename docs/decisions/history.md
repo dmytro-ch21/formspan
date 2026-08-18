@@ -24945,6 +24945,164 @@ never used.
   promoting.
 
 
+## 2026-08-18 — The BJJ finish card finally has something honest to say
+
+#280 derived BJJ accomplishments and deliberately shipped without a client,
+because #276 was mid-flight in the three files a badge renders in. This wires
+it anyway, at the user's explicit direction after the collision was raised
+twice. The comment that has sat in `app/bjj/session/[id].tsx` since the
+celebration card was built — "it stays honest until the accomplishments work
+lands" — is rewritten, and the card can now carry a badge on the mat.
+
+(An earlier draft of this entry said that comment was "gone". It was not:
+review found it still sitting there, intact, four hundred lines above the
+render it now contradicted. Recorded rather than quietly corrected, because it
+is the same failure this project keeps finding — **a claim about the code that
+the code does not support** — and it was in the history file this time.)
+
+### The phone still decides nothing
+
+`lib/accomplishments.ts` fetches and filters. It does not judge, and the reason
+is the one already recorded for personal records: re-deriving "is this a first?"
+here would be a second opinion that can disagree with the server's, and the two
+disagreeing about whether you achieved something is worse than never mentioning
+it.
+
+Which award belongs to this session is therefore a **filter on the authority** —
+`accomplishmentsFromSession(all, sessionID)`, the exact shape `recordsFromSession`
+already uses, and it works for the same reason: the server stamps every award
+with the session that earned it.
+
+**Competition awards fall out of that automatically**, and it is worth saying
+why that is correct rather than incidental. They carry a `contest_id` and no
+`session_id`, so a gold medal has no session to appear on — which is right,
+because nobody finishes a tournament by tapping Finish in this app, and
+attaching one to whichever mat session was logged next would be a badge for
+something that did not happen there.
+
+### An accomplishment takes the personal record's slot, including its chime
+
+Not a new slot beside it. A session is one sport, so the two can never contend,
+and the mat's first is the same KIND of moment: rare, server-judged, and the
+larger of the two whenever it coincides with a weekly streak. So it renders in
+the one badge slot, it plays the `pr` sound, and — the part that is easy to
+miss — **it latches the streak chime out**.
+
+That last one is a real behaviour change and not a detail. `celebratesStreak`
+takes `hasRecords`, and passing the records-only flag on a BJJ session would
+chime the streak straight over the top of a first. The call site now passes
+"earned a badge of either kind".
+
+Reusing the `pr` sound rather than adding a ninth is deliberate: the sound means
+"something rare just happened", which is exactly what this is, and a new one
+would need the synth script, the `BUNDLE` list and three more edits to say the
+same thing.
+
+### `recordsSettled` was true by construction and is not any more
+
+The call site carried a comment explaining that BJJ needed no gate — "there is
+no lookup to wait for. Nothing can arrive later and outrank the streak chime
+here." That was correct when written and this change falsifies it: there is now
+a network call that can answer late, so the gate has to be real or a fast
+history chimes the streak and latches the first out. Same race the strength card
+documented; same fix.
+
+### The lint ratchet forced a better shape, which is the argument for it
+
+The obvious implementation — a value plus a `settled` boolean, reset at the top
+of the effect — trips `react-hooks/set-state-in-effect`, and with the mobile
+warning cap at 54 of 54 there was no headroom to absorb it.
+
+The rewrite holds ONE piece of state stamped with the session it answered for,
+and derives settledness as "the answer I hold is for the id on screen". That is
+strictly stronger than the flag: a result can never be read as a different
+session's, and there is no reset anybody can forget. The ratchet did not merely
+block a warning here, it produced the better version.
+
+### Testing, and what is not tested
+
+`accomplishments.test.ts` — 11 tests, three guards mutation-checked: adding a
+kind the backend does not declare, dropping the `session_id` filter, and
+returning a badge for an empty list each fail.
+
+The vocabulary parity test **reads the Go constants** rather than restating
+them, the idiom `basisParity.test.ts` established for exactly this shape — the
+kind list now exists in Go and in TypeScript, and two copies of a vocabulary is
+two chances for one to be wrong. `ACCOMPLISHMENT_KINDS` is an array with the
+type derived from it (`lib/sounds.ts`'s idiom) precisely so it can be
+enumerated at runtime; a bare union cannot be, so nothing could have compared
+it. The test also asserts the regex found anything at all, since an empty list
+would make every comparison vacuously true.
+
+**The badge precedence IS tested, because review pointed out it did not have to
+live in the card.** It was a `??` inside the render; `badgeFor` now takes the
+accomplishment as a second argument, which turns "records, then an
+accomplishment, then nothing" from JSX into a rule with three tests and two
+mutations behind it. A rule expressed in a render is one nothing can pin.
+
+**Still not tested: the chime precedence and the rendering itself.** Both need
+a component test this suite deliberately does not usually write, and what
+remains uncovered is two lines of wiring over logic that is covered. That is
+the honest boundary rather than a claim of completeness.
+
+### What review found: the settle rule was inconsistent, and said so in three places
+
+No blocking findings. The one worth the space is a rule this branch got wrong
+in a way that was self-consistent enough to look right.
+
+**A failed lookup now settles, matching the strength card.** My first version
+never settled on failure, with a comment saying that was "the honest outcome the
+PR row already chose". The PR row chose the opposite — `session/[id].tsx` uses
+`.finally` with its own comment: *"a failure still settles: offline the answer
+is 'no records', and the streak chime must not wait forever."* So two sports had
+two rules, and both files claimed to be following the other.
+
+The concrete cost was narrow and real: history succeeds while the badge lookup
+fails (one endpoint 500s; full offline kills both), and BJJ would then render a
+streak line while never chiming it, forever. Suppressing a streak the athlete
+genuinely carried, because an unrelated endpoint failed, punishes them for a
+server fault. One rule for both sports now.
+
+**The badge is announced.** It had no `accessibilityLiveRegion`, while the
+streak line and records list beside it both do — and it arrives after render,
+which is exactly when that matters. For strength the omission was masked,
+because the announced records list carries the same news; on the mat this badge
+is the ONLY representation of the first, so a VoiceOver athlete got flares, a
+chime, and no words.
+
+Two smaller ones: `badgeSettled` compared `badge?.sessionID === id`, which is
+`undefined === undefined` when both are absent and would open the streak gate
+before anything was looked up (unreachable today, closed anyway); and
+`accomplishmentsFromSession` lacked the empty-id guard its stated model
+`recordsFromSession` has.
+
+### A race this inherits rather than introduces
+
+`requestSync('bjj-session-finished')` is fire-and-forget and the badge fetch
+starts the moment the card opens, so the server can honestly answer "no firsts"
+**before the just-finished session's rows have landed**. The badge then settles
+null, the streak chimes, and nothing refetches — a genuinely earned first,
+silently missed.
+
+Strength records have the identical single-shot exposure and it was accepted
+there, so accepting it here is consistent rather than new. It is written down
+because review found it by reading, not by seeing it happen, and an
+acknowledged limitation is a different thing from an unnoticed one.
+
+### Gaps
+
+- **Never seen on a phone.** L1's standing list, and this joins it: a badge that
+  fires on a rare event, behind a network call, needing an athlete whose first
+  ever score just happened. Building from a worktree cannot verify it either —
+  `EXPO_PUBLIC_*` is inlined at build time and a worktree has no `.env.local`.
+- **#276 will conflict here.** It is 8 commits behind main and edits all three
+  of these files; the overlap was raised twice and proceeded with deliberately.
+  Its rebase now has to reconcile a badge slot and a chime precedence that moved
+  under it.
+- **Nothing marks a competition award anywhere.** Five of the seven kinds can
+  never appear on a session card by construction, and no screen lists them yet —
+  so entering a tournament earns an award the athlete cannot see.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
