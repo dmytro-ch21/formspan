@@ -264,6 +264,32 @@ export function scale(food: Food, servings: number): Macros {
   };
 }
 
+/**
+ * Restate a logged entry at a different number of servings.
+ *
+ * Rescales from the entry's OWN per-serving figures, never from what is
+ * currently displayed: scaling the shown numbers compounds their rounding every
+ * time the stepper moves. Dividing back out of the stored absolutes instead
+ * bounds the error at ONE rounding step whatever route the stepper took —
+ * measured: 355 kcal at two servings goes 266.3 at 1.5 and comes back 355.1,
+ * not 355. A tenth of a kilocalorie, once, rather than a drift that grows.
+ *
+ * A zero or negative `servings` on the stored entry cannot be divided by, so it
+ * is read as one serving — the row is already wrong and inventing an infinity
+ * on top of it helps nobody.
+ */
+export function rescale(entry: Macros & { servings: number }, servings: number): Macros {
+  const per = entry.servings > 0 ? entry.servings : 1;
+  const f = servings / per;
+  return {
+    kcal: round1(entry.kcal * f),
+    protein_g: round1(entry.protein_g * f),
+    carb_g: round1(entry.carb_g * f),
+    fat_g: round1(entry.fat_g * f),
+    fibre_g: entry.fibre_g == null ? null : round1(entry.fibre_g * f),
+  };
+}
+
 function round1(v: number): number {
   return Math.round(v * 10) / 10;
 }

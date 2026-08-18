@@ -17,6 +17,7 @@ import {
   cacheEntries,
   editEntry,
   localEntries,
+  localEntry,
   logFood,
   pendingFoodCount,
   recentsFor,
@@ -107,6 +108,31 @@ describe('logging', () => {
     await logFood('u2', meal({ name: 'Theirs' }));
     const mine = await localEntries(USER, TODAY);
     expect(mine.map((e) => e.name)).toEqual(['Chicken thigh']);
+  });
+});
+
+describe('reading one entry', () => {
+  it('returns the row the editor was opened on', async () => {
+    const id = await logFood(USER, meal());
+    const e = await localEntry(USER, id);
+    expect(e?.name).toBe('Chicken thigh');
+  });
+
+  it('will not hand another athlete their row, even knowing the id', async () => {
+    // The id is generated on THIS device and travels through sync, so treating
+    // it as a capability would make a signed-out athlete's leftover rows
+    // readable by whoever signs in next on the same phone.
+    const id = await logFood('u2', meal({ name: 'Theirs' }));
+    expect(await localEntry(USER, id)).toBeNull();
+  });
+
+  it('is gone once tombstoned, so the editor says so rather than editing a ghost', async () => {
+    const id = await logFood(USER, meal());
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal(), id, source_food_id: null, notes: '' } as never,
+    ]);
+    await removeEntry(USER, id);
+    expect(await localEntry(USER, id)).toBeNull();
   });
 });
 

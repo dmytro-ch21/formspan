@@ -21,6 +21,7 @@ import {
   kcalLooksOff,
   MEALS,
   rankRecents,
+  rescale,
   remaining,
   scale,
   slotForClock,
@@ -295,6 +296,47 @@ describe('daysBetween', () => {
     // as 0.958 of a day and rounds wrong; both sides are UTC for that reason.
     expect(daysBetween('2026-10-31', '2026-11-01')).toBe(1);
     expect(daysBetween('2026-11-01', '2026-11-02')).toBe(1);
+  });
+});
+
+describe('rescale', () => {
+  /** An entry as logged: two servings of the 180 kcal food. */
+  const logged = () => ({ ...food(), servings: 2, kcal: 360, protein_g: 50, carb_g: 20, fat_g: 8 });
+
+  it('divides back out of the stored absolutes, not out of what is displayed', () => {
+    const m = rescale(logged(), 3);
+    expect(m.kcal).toBe(540);
+    expect(m.protein_g).toBe(75);
+  });
+
+  it('treats the stored macros as ABSOLUTE, not as per-serving', () => {
+    // The mutation this exists for: dropping the divide reads a two-serving
+    // row's 360 kcal as 360 PER serving and doubles the entry the moment the
+    // editor opens on it. Rescaling to the count it already has must be
+    // identity.
+    expect(rescale(logged(), 2).kcal).toBe(360);
+    expect(rescale(logged(), 1).kcal).toBe(180);
+  });
+
+  it('does not compound its rounding beyond a tenth across a round trip', () => {
+    // Deliberately a value that does NOT divide evenly — an exact one passes
+    // whatever the arithmetic does. The bound is one rounding step rather than
+    // equality: 355 at two servings is 266.3 at 1.5 and returns 355.1. The
+    // 0.11 rather than 0.1 is float representation, not slack in the claim.
+    const start = { ...logged(), kcal: 355 };
+    const down = rescale(start, 1.5);
+    const back = rescale({ ...down, servings: 1.5 }, 2);
+    expect(Math.abs(back.kcal - 355)).toBeLessThan(0.11);
+  });
+
+  it('reads a zero-serving row as one rather than dividing by it', () => {
+    const m = rescale({ ...logged(), servings: 0 }, 2);
+    expect(Number.isFinite(m.kcal)).toBe(true);
+    expect(m.kcal).toBe(720);
+  });
+
+  it('keeps unstated fibre unstated', () => {
+    expect(rescale(logged(), 4).fibre_g).toBeNull();
   });
 });
 

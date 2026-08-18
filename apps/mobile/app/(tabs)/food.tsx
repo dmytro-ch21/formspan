@@ -133,7 +133,21 @@ export default function FoodScreen() {
         contentContainerStyle={[styles.container, { paddingBottom: TAB_BAR_CLEARANCE + 40 }]}
         contentInsetAdjustmentBehavior="never"
       >
-        <ScreenHeader title="Food" />
+        <ScreenHeader
+          title="Food"
+          action={
+            <Pressable
+              onPress={() => router.push('/food/target')}
+              accessibilityRole="button"
+              accessibilityLabel={target ? 'Why this target' : 'Set a target'}
+              testID="food-target-link"
+            >
+              <Text style={[styles.headerLink, { color: accent.ink }]}>
+                {target ? 'Target' : 'Set target'}
+              </Text>
+            </Pressable>
+          }
+        />
 
         <View style={styles.body}>
           <PeriodSwitcher
@@ -217,6 +231,7 @@ function trimZero(n: number): string {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vola.bg },
+  headerLink: { fontSize: 13, fontWeight: '700' },
   container: { gap: 12 },
   body: { paddingHorizontal: 20, gap: 16 },
   summary: {

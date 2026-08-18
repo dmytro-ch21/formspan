@@ -184,6 +184,23 @@ export async function localEntries(userId: string, on: string): Promise<Entry[]>
 }
 
 /**
+ * One entry by id, tombstones excluded.
+ *
+ * Scoped by `user_id` like every other read here. A row is not addressable
+ * just because its UUID is known — the id is generated on this device and
+ * travels through sync, so treating it as a capability would make a signed-out
+ * user's leftover rows readable by the next one.
+ */
+export async function localEntry(userId: string, id: string): Promise<Entry | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<EntryRow>(
+    `SELECT * FROM food_entries WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    id, userId,
+  );
+  return row ? toEntry(row) : null;
+}
+
+/**
  * Merge a server window into the local store.
  *
  * Never clobbers a row this device still owes, and absent-from-the-server is

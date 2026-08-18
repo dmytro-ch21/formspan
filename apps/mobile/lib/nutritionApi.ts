@@ -104,3 +104,87 @@ export function targetOn(targets: Target[], on: string): Target | null {
   }
   return best;
 }
+
+/**
+ * The arithmetic behind a target, computed but never written.
+ *
+ * `suggestion` is null when the profile cannot support a derivation, and
+ * `missing` names the fields that would fix it. That is a 200, not a 400: the
+ * request was fine, the profile is incomplete, and the client's remedy is a
+ * form rather than a retry.
+ */
+export type Suggested = {
+  suggestion: Suggestion | null;
+  missing: string[];
+  activities: string[];
+};
+
+export type Suggestion = {
+  kcal: number;
+  protein_g: number;
+  carb_g: number;
+  fat_g: number;
+  fibre_g: number;
+  basis: Basis | null;
+};
+
+/** Every line the explanation screen renders, frozen onto the target on accept. */
+export type Basis = {
+  rmr_kcal: number;
+  rmr_precision: string;
+  weight_kg: number;
+  weight_measured_on: string;
+  activity: string;
+  activity_factor: number;
+  neat_kcal: number;
+  training_kcal_per_day: number;
+  training_days_covered: number;
+  training_sessions: number;
+  tdee_kcal: number;
+  phase_kind: string;
+  target_rate_pct_per_week: number;
+  target_rate_kg_per_week: number;
+  kcal_per_kg: number;
+  energy_delta_kcal: number;
+  clamped: boolean;
+  clamp_reason?: string;
+  relaxed?: string;
+  protein_g_per_kg: number;
+  fat_g_per_kg: number;
+};
+
+export function suggestedTarget(
+  getToken: TokenGetter,
+  on: string,
+  activity: string,
+): Promise<Suggested> {
+  const q = new URLSearchParams({ on, activity });
+  return apiRequest<Suggested>(getToken, `/nutrition/targets/suggested?${q}`);
+}
+
+/**
+ * Accept a target from a given date.
+ *
+ * The basis travels with it and is stored FROZEN. Recomputing an explanation on
+ * read would be a lie about the past — weight, phase and training history all
+ * move, so "why am I eating 2,410" must answer with the numbers that produced
+ * it, not with today's.
+ */
+export function saveTarget(
+  getToken: TokenGetter,
+  date: string,
+  body: {
+    kcal: number;
+    protein_g: number;
+    carb_g: number;
+    fat_g: number;
+    fibre_g: number | null;
+    source: 'derived' | 'manual' | 'adjustment';
+    basis: Basis | null;
+  },
+): Promise<Target> {
+  return apiRequest<Target>(getToken, `/nutrition/targets/${date}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
