@@ -146,6 +146,147 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
+    ContestMatch:
+      type: object
+      required: [position, result, method, technique_id, opponent, note]
+      properties:
+        position:
+          type: integer
+          minimum: 1
+          description: >
+            Order within the bracket, 1-based. **Assigned by the server** from
+            the order matches appear in the request — a client does not send it
+            and cannot choose it. That is what makes the uniqueness of a
+            position unviolatable from outside, and it means array order IS
+            bracket order: "lost in the final" is expressed by putting that
+            match last.
+
+
+            There is deliberately no `id`. Matches are replaced wholesale on
+            every write, so a row's identity does not survive an edit; position
+            is the stable handle within an entry.
+        result:
+          type: string
+          enum: [won, lost]
+          description: >
+            A draw is not in the vocabulary — IBJJF brackets do not draw. The
+            column has no CHECK constraint, so adding one is a code change
+            rather than a migration.
+        method:
+          type: string
+          enum: ["", submission, points, advantage, penalty, decision, dq, walkover]
+          description: >
+            How the match was decided. Empty means not recorded, which is normal
+            for an entry logged from memory. This is what a counter column could
+            never answer: "lost on advantages" and "lost by armbar" are
+            different findings.
+        technique_id:
+          type: string
+          nullable: true
+          description: >
+            The submission that ended it, when there was one and the athlete
+            knows it. **Only accepted when `method` is `submission`** — naming a
+            technique on a match decided on points is a contradiction, and it is
+            refused rather than silently dropped.
+
+
+            Retiring a technique from the shared library sets this to null
+            rather than deleting the match: a record of having hit something
+            outlives the library entry for it.
+        opponent:
+          type: string
+          maxLength: 80
+          description: Free text. Opponents are not entities in this product.
+        note: { type: string, maxLength: 280 }
+
+    ContestInput:
+      type: object
+      required: [sport, name]
+      description: >
+        One ENTRY, not one event. Gi and no-gi at the same tournament are two
+        contests; adult and master are two contests. They share a name and a
+        date and nothing else.
+      properties:
+        sport:
+          type: string
+          description: >
+            Any discipline that can be a sport. The resource is not BJJ-specific
+            — it has to hold a powerlifting meet and a 10k, which is why the
+            contract uses the neutral word while a client may say "tournament".
+        name: { type: string, maxLength: 120 }
+        organisation:
+          type: string
+          maxLength: 80
+          description: IBJJF, ADCC, USAPL, parkrun. Empty is normal.
+        held_on:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Nullable on the same reasoning as a promotion date: refusing an
+            undated entry would lose the fact in order to protect the metadata.
+            Someone who remembers placing third in 2019 but not the month should
+            still be able to record it — it simply cannot sit on a timeline.
+        format:
+          type: string
+          enum: ["", points, submission_only]
+          description: >
+            How the matches were scored. NOT called `ruleset`: that word already
+            means IBJJF rule legality in the technique library. Empty is normal
+            for a sport with no such distinction.
+        gi:
+          type: boolean
+          nullable: true
+          description: >
+            Three-state. Null is "didn't say", which is a different fact from gi
+            or no-gi and has to stay tellable.
+        division_belt: { type: string, maxLength: 40 }
+        division_age: { type: string, maxLength: 40 }
+        division_weight:
+          type: string
+          maxLength: 40
+          description: >
+            The division as three independent free-text parts rather than one
+            string, so "how did I do at brown belt" is answerable without
+            parsing prose. Empty is normal for a sport with no belts, no age
+            brackets or no weight classes.
+        placement:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: >
+            1 means you won it. Null is **not** "did not place" — it is "not
+            recorded", the ordinary state for a bracket that pays no places. A
+            sentinel like 0 or 99 would make every future ordering and average
+            wrong in a different way.
+        entrants:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: >
+            How big the field was, which is what gives a placement its meaning:
+            third of four and third of sixty-four are not the same result.
+            `placement` may not exceed it.
+        note: { type: string, maxLength: 500 }
+        matches:
+          type: array
+          maxItems: 64
+          items: { $ref: "#/components/schemas/ContestMatch" }
+          description: >
+            The bracket, in order. Sent WITHOUT `position` — the server numbers
+            them. Omitting the field entirely is an ordinary entry: a placement
+            alone is a complete thing to remember.
+
+    Contest:
+      allOf:
+        - $ref: "#/components/schemas/ContestInput"
+        - type: object
+          required: [id, matches, created_at, updated_at]
+          properties:
+            id: { type: string }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
     BjjRank:
       type: object
       required: [belt, stripes, degree]
@@ -7582,3 +7723,122 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /contests:
+    get:
+      operationId: listContests
+      summary: The caller's competitive record
+      description: >
+        Every entry the athlete has recorded, newest first, with each entry's
+        matches nested.
+
+
+        **Everything here is objective.** A placement, a bracket size and a
+        referee's decision are externally verifiable, which makes a contest the
+        strongest measured evidence this API carries — nothing in it is
+        self-rated, and nothing self-rated may be added. How a session felt
+        belongs on the session.
+
+
+        Undated entries sort last. Capped at 200 entries; an athlete's whole
+        competitive career is far below that, and the cap is what keeps the
+        response size bounded.
+      tags: [Contests]
+      responses:
+        "200":
+          description: The entries, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contests]
+                properties:
+                  contests:
+                    type: array
+                    items: { $ref: "#/components/schemas/Contest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createContest
+      summary: Record an entry
+      description: >
+        The id is minted server-side. Client-supplied ids exist elsewhere in
+        this API to make offline retries idempotent; a contest result is entered
+        at a desk with a connection and has no outbox behind it, so there is
+        nothing for one to buy.
+
+
+        Consequently there is **no natural unique key**: submitting the same
+        form twice writes two identical entries. Entries are deletable, and
+        deduplicating them would need a naming authority this product does not
+        have.
+      tags: [Contests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContestInput" }
+      responses:
+        "201":
+          description: The entry as stored, with its matches.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contest" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /contests/{contestID}:
+    parameters:
+      - name: contestID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getContest
+      summary: One entry, with its matches
+      tags: [Contests]
+      responses:
+        "200":
+          description: The entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: updateContest
+      summary: Replace an entry
+      description: >
+        PUT rather than PATCH, and the matches are the reason. They travel with
+        the entry and replace **wholesale** — so a partial update would have to
+        define what sending no matches means, and both answers are traps:
+        "leave them alone" makes clearing a bracket impossible, "clear them"
+        deletes a record on a request that never mentioned it. PUT has one
+        meaning.
+
+
+        An entry that does not exist and one belonging to another account answer
+        identically, so this endpoint never confirms that an id exists.
+      tags: [Contests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContestInput" }
+      responses:
+        "200":
+          description: The entry as stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contest" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteContest
+      summary: Remove an entry
+      description: Its matches go with it.
+      tags: [Contests]
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }

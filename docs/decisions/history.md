@@ -23875,6 +23875,133 @@ Re-filed here as F5.
   (#271), T7 (#270) and this one. Nobody has swept for a fifth, and this family
   produced a new member every time somebody looked.
 
+## 2026-08-18 — `contests` gets its consumer
+
+The schema landed alone on 2026-08-10 (migration `000050`) with "**No
+consumer.** The table is invisible to every client; nothing validates the index
+shapes against real queries until a module exists" filed as its own first gap.
+This is that module: `internal/modules/contest`, five routes under
+`/v1/contests`, and the OpenAPI entries. No migration — the schema was already
+right, which is the pleasant half of merging one schema-first.
+
+### Two shape decisions are visible from outside
+
+**`/v1/contests`, not `/v1/bjj/contests`.** The table was designed to hold a
+powerlifting meet and a 10k, which is the whole reason the migration argued
+itself out of the name `tournament`. Nesting the route under `bjj` would put
+that back on a different axis. Only today's content is jiu-jitsu.
+
+**PUT, not PATCH**, which is where this diverges from `bjj_promotions` next
+door. The matches travel with the entry and replace wholesale — `curriculum`'s
+"the two replace together", applied to a bracket. A partial update would have to
+define what an absent `matches` field means, and both answers are traps:
+"leave them alone" makes clearing a bracket impossible, "clear them" destroys a
+record on a request that never mentioned it.
+
+### Positions are assigned, never accepted
+
+`contest_matches.position` is what makes "lost in the final" different from
+"lost the first match", and the server numbers them from array order. The HTTP
+request struct has **no `position` field at all**, so a client cannot send one
+even by accident — a stronger statement than ignoring a field would be, and it
+makes `contest_matches_unique_position` unviolatable from outside.
+
+The same reasoning is why `Match` exposes no `id`. The column is a BIGINT
+identity and every write replaces the rows, so the third match's id changes on
+every edit; exposing it would invite a client to hold a handle that silently
+starts pointing somewhere else. `created_at` is omitted for the sibling reason —
+on a replaced row it records when the edit happened, not when the match did.
+
+### Validation is the only gate, and that was the migration's choice
+
+Four columns are TEXT with no CHECK (`sport`, `format`, `result`, `method`) so
+that adding a value is an enum edit rather than a migration, and six more have
+no length constraint at all. That trade only pays if Go genuinely is the gate,
+so `Input.Validate` covers every one of them — an unconstrained column with no
+Go check behind it is not a relaxed rule, it is no rule.
+
+**The caps count runes, and both sides are asserted.** Asserting only the
+refusal passes against a bytes-for-runes bug, because under `len` a
+120-character multibyte name is refused too, for the wrong reason. That is the
+mistake CLAUDE.md records against a rename endpoint, and `theme.CleanTitle`
+exists as a separate function so the accepting half could be written at all.
+
+### The 22003 trap the migration warned about, closed on both sides
+
+The migration spends a paragraph on it: `placement` is INTEGER so a 60,000-runner
+road race can record finishing 41,203rd, and an overflow raises **SQLSTATE
+22003 — a numeric range error with no constraint name on it**, so a repository
+translating by constraint name would pass it through as an unmapped internal
+error and return 500 for what is plainly a bad request.
+
+Closed twice. `Validate` refuses anything above the column's own ceiling, so it
+should never reach Postgres; `translatePgError` has a 22003 arm anyway, because
+"should never" is not a guarantee. The same applies to `position`, which is
+SMALLINT — hence `MaxMatches = 64`, whose hard justification is the column
+rather than good taste.
+
+### One transaction, and the read-back has to run inside it
+
+An entry whose matches failed to write is a competitive record that reads as
+"turned up, never fought" — permanently, with nothing flagging the loss. So
+create and update are one transaction each, the same argument `bjj.PutDetail`
+makes for a reflection.
+
+The response is then read back **through the transaction**, not the pool. A
+`querier` interface exists for exactly this: reading through the pool takes a
+separate connection that cannot see uncommitted rows, so the response would come
+back with an empty `matches` array on every successful write. That is a silent
+wrong answer, not an error.
+
+### A pointer-into-a-growing-slice, avoided deliberately
+
+`List` builds its id index **after** the scan loop, not inside it. `out` grows by
+append, so a `&out[i]` taken mid-loop can be left pointing into a stale backing
+array the moment it reallocates — and the matches would attach to a copy nobody
+returns. Written the safe way from the start; recorded because the bug it avoids
+is invisible until the list crosses a capacity boundary, which a two-row test
+never does.
+
+### Testing: 28 tests, zero skips, two mutations checked
+
+The integration half was run against a real `vola_test` rather than trusted to
+pass — CLAUDE.md is blunt that a suite which skips silently proves nothing, and
+`-v` is the only way to tell "green" from "ran".
+
+Two guards were mutation-checked rather than assumed:
+
+- Dropping `user_id` from the update's WHERE — the IDOR shape the reviewers have
+  caught twice in this repo — fails `TestEveryPathIsScopedToTheOwner`.
+- Swapping `utf8.RuneCountInString` for `len` fails both cap tests, on the
+  ACCEPTING case, which is the half that would otherwise have gone unwritten.
+
+The technique the match tests reference is seeded by this package and removed
+after, per the own-the-library-rows rule — `ct_fx_closed_guard_armbar`, prefixed
+and keeping the original name as the suffix, the `workout` convention.
+
+### Gaps this leaves
+
+- **Nothing derived.** There is no "12-4, 7 by submission" anywhere: the API
+  returns entries and matches, and every aggregate is the client's to compute
+  for now. That matches the migration's own position that the facts are the
+  entries and nothing caches a total — but a record screen will want one, and
+  the honest place for it is a derived field beside the list, which is why the
+  response is a named envelope rather than a bare array.
+- **No client.** Web and mobile know nothing about this. Which of the two gets
+  it is a live question rather than an oversight: entering a bracket is desk
+  work by the platform rule, so web — but reading your record back on the way
+  home is not.
+- **Still no natural unique key**, unchanged from the schema entry: submitting
+  the same form twice writes two identical entries. Deliberate, and entries are
+  deletable.
+- **The accomplishments work this table was partly meant to feed is still not
+  started.** The migration says a row here is what makes "first submission win
+  in competition" a real evidence stream rather than an increment nobody can
+  look inside, and `apps/mobile/app/bjj/session/[id].tsx` still carries the
+  placeholder saying a BJJ session gets no badge "until the accomplishments work
+  lands". This unblocks that; it does not do it.
+- **Not staging-verified.** Exercised locally against `vola_test` only.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
