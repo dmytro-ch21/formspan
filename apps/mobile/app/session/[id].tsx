@@ -1821,9 +1821,28 @@ export default function SessionScreen() {
                   // "opened it and finished it" with a card is the hollow
                   // praise that teaches people to stop reading the app.
                   if (worthCelebrating(summary)) {
+                    /*
+                      Every piece of async celebration state, cleared together.
+
+                      These lines exist because somebody judged the transition
+                      into a celebration worth defending, and the list had
+                      already drifted: `celebrationMilestone` and
+                      `streakSettled` were added without joining it. A second
+                      celebration in one mount would then open with a fresh
+                      `chimed` ref and a STALE milestone — showing and chiming
+                      a rung this session did not cross, which is the exact
+                      wrong-congratulation this feature is built to avoid.
+
+                      No path to a second celebration exists today (the finish
+                      control renders only while `ended_at` is null), so this
+                      is defence, not a fix. It is written as one block so the
+                      next state added here is obvious. Raised in review.
+                    */
                     setCelebrationRecords([]);
                     setRecordsSettled(false);
                     setCelebrationStreak(null);
+                    setCelebrationMilestone(null);
+                    setStreakSettled(false);
                     setCelebrating(summary);
                   }
                 }

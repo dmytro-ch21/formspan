@@ -364,7 +364,12 @@ export default function BjjSessionScreen() {
       if (!base) return;
       const bjjSummary = bjjSummaryFor(base, detail);
       if (worthCelebrating(bjjSummary)) {
+        // All three together — see the strength screen's note. A stale
+        // milestone surviving into a second celebration would chime a rung
+        // this session did not cross.
         setCelebrationStreak(null);
+        setCelebrationMilestone(null);
+        setStreakSettled(false);
         setCelebrating(bjjSummary);
       }
     } catch (err) {

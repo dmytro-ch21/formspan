@@ -2458,6 +2458,20 @@ firing almost never for a BJJ+strength athlete" — and the milestone recreated 
 one rung up anyway. Both screens compute it now, from the same pass over the
 same days, and both pass `streakSettled`.
 
+Two review suggestions were taken after that. The celebration reset lists in
+both screens now clear `celebrationMilestone` and `streakSettled` along with the
+three states they already cleared — no path to a second celebration in one mount
+exists today, but the list had silently drifted for exactly the states this
+branch added, and a stale milestone surviving that transition would chime a rung
+the session did not cross. And the wiring gap got the test it deserved:
+`app/__tests__/bjjSessionScreen.test.tsx` finishes a class against a real
+four-week history and asserts the rung appears, with negatives for the week's
+later classes and for a three-week streak. Mutation-checked against the bug that
+actually shipped — deleting the `milestone` prop from the BJJ card turns it red.
+That is the class of failure the lib suite structurally cannot see, and it is
+worth stating plainly: every `lib/milestones.ts` test passed while the feature
+was absent from the screen it mattered most on.
+
 One visible side effect of the window fix, recorded because it changed copy in a
 file this branch never touched: the displayed streak caps at 53 now rather than
 52, so an athlete on a 60-week run reads "53 weeks in a row" instead of "52".
@@ -25938,6 +25952,11 @@ comment saying which one and why.
 - **The streak line now caps at 53 rather than 52**, on the celebration card,
   the BJJ card and the Progress tab. An honest fix would show "52+" past the
   window rather than a number that is quietly a measurement of the fetch.
+- **The strength screen has no equivalent wiring test.** `bjjSessionScreen.test.tsx`
+  now pins that the mat's card computes and shows a rung, which is the exact
+  regression that shipped — but there is no strength-session screen test to
+  extend, so the other caller is still covered only by the lib suite that
+  stayed green through the original bug.
 - **The chime precedence is verified as logic, not as timing.** Every rule is a
   pure function with tests, but nothing exercises two real fetches resolving in
   either order against a live component. The gates make the ordering
