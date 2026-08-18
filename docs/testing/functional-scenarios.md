@@ -8001,7 +8001,7 @@ training. Everything here is about it telling the truth.
 - **Only a LIVE finish celebrates.** The retroactive "New log" path saves the session and returns to Today with no card at all, so no badge is reachable that way — verified on a Simulator 2026-08-18.
 - Land a technique drilled in an earlier session, for the first time: the card shows **First drilled technique landed live**.
 - Earn both at once (first-ever score, of something drilled weeks ago): the badge reads **2 firsts** rather than picking one.
-- **`first_drilled_scored` is currently unearnable through any client** (N31): the award needs a technique on the scored side and nothing writes one, so this scenario can only be staged by inserting evidence directly. Do not read a passing run of it as proof the athlete-facing path works.
+- **`first_drilled_scored` needs the technique on the athlete's FOCUS LIST** (N31). The live step's "Working on" grid is the only control that attributes a live outcome to a technique, and it only lists focus entries (plus anything already carrying live evidence) — never something merely drilled this session. With an empty focus list every scored tag is a bare category count, so the award is unreachable and the technique funnel is drilled-only. Set a focus list before running this scenario, or it will fail for a reason that has nothing to do with the award.
 - Finish an ordinary BJJ session that earned nothing: **no badge at all**, which is the common case and the design.
 
 ### Edge cases & errors
