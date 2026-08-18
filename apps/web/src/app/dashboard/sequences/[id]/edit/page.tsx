@@ -56,9 +56,15 @@ export default function EditSequencePage() {
     // actually see. T9; the same split F7 drew for curricula.
     return (
       <p className="text-sm text-neutral-500">
+        {/* No "Copy it to make it yours" — review found that sentence naming an
+            affordance that does not exist. There is no copy button for
+            sequences anywhere in this app, and no endpoint behind one either:
+            `CopyTo` is reachable only by ACCEPTING a share from a friend. It
+            was pre-existing copy and this branch would have duplicated it into
+            a second branch. Filed as F9. */}
         {s.official
-          ? "This is a reference sequence and cannot be edited. Copy it to make it yours."
-          : "This sequence cannot be edited. Copy it to make it yours."}
+          ? "This is a reference sequence and cannot be edited."
+          : "This sequence cannot be edited."}
       </p>
     );
   }

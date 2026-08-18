@@ -26085,6 +26085,25 @@ so calling it twice in one test returns the SAME id. The stranger was the caller
 for one run, which turned the third case into a duplicate of the second and
 failed loudly — the good kind.
 
+**And the third row turned out to close a pre-existing hole nobody was looking
+for.** Review noticed it and I measured it: mutate `Editable` to
+`s.OwnerUserID != nil` — "editable by anyone, if owned by anyone" — and before
+this branch the ENTIRE sequence suite passed. `TestCreateAndGetRoundTrip` only
+ever observes the owner's own row (true either way) and
+`TestReferenceChainIsReadableAndNotWritable` only the ownerless one (false
+either way); no reachable read surfaced a stranger's row, so the discriminating
+case did not exist. With the new test the only failing assertion in the suite is
+that third row's `editable`. The test hardens the permission field, not just the
+provenance one.
+
+Review also found the refusal message promising something that does not exist:
+"Copy it to make it yours" — there is no copy affordance for sequences anywhere
+in `apps/web`, and no endpoint behind one, since `CopyTo` is reachable only by
+accepting a share from a friend. Pre-existing copy, and this branch would have
+duplicated it into a second branch. The promise is gone; the affordance is filed
+as **F9**, because a reference chain you cannot adapt is a chain you can only
+admire.
+
 Open questions:
 
 - **Four surfaces now read `official` and each decided independently what an

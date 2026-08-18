@@ -6601,6 +6601,8 @@ Authorship on sequences (2026-08-18):
   still `editable`; only the sentence asks `official`.
 - **Against a server that omits `official`, nothing is labelled.** Unlabelled is
   the safe failure; calling somebody else's chain VOLA's is not.
+- **Neither refusal message offers to copy the chain.** There is no copy
+  affordance and no endpoint behind one (F9); the message must not name one.
 
 Authorship on the web curricula list (2026-08-18):
 
