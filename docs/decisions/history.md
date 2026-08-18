@@ -25738,13 +25738,28 @@ editor onto the revealed `Timer (s) target` field, changing the row summary to
 the strongest evidence the tap writes a real target rather than a decoration;
 and `+ Set` as one clean full-width solid button.
 
-**Not verified, and honestly:** the `+ Set` / `+ Drop` PAIR (needs a weight on
-the set), the minutes-mode `0` → `0.5` case, and VoiceOver. All three need
-keyboard input, and this Simulator had latched its hardware keyboard — the field
-focuses, a caret appears, no soft keyboard ever does. That is the failure mode
-`CLAUDE.md` documents as unfixable from the command line; only ⌘⇧K on the device
-window clears it. The typed-input cases are covered by `timerTargetEdit`'s unit
-tests instead, and the VoiceOver claims remain reasoned rather than observed.
+**The two keyboard-dependent cases are verified too, after the Simulator's
+latched hardware keyboard was cleared.** Worth recording how, because the
+documented remedy did not work and the one that did is not in `CLAUDE.md`:
+⌘⇧K had no effect (the menu shortcut needs the Simulator's own device window
+focused, which it was not), and the global `ConnectHardwareKeyboard` pref read
+`0` throughout — so the pref is not a discriminator, exactly as that entry warns.
+`simctl shutdown` + `boot` cleared it in one go, and the sign-in and the
+in-progress session both survived, being in the keychain and SQLite. **Add the
+reboot as the first thing to try, not the last.**
+
+With a keyboard: entering 20 kg brings up `+ Set` and `+ Drop` as EQUAL HALVES,
+solid and matched, with the exercise below still showing a solo full-width
+`+ Set` — both layout cases confirmed, and the original complaint closed. And in
+minutes mode, `0` → `.` → `5` types through to **0.5 min = 0:30 on the row**,
+with the field surviving the `0` that used to unmount it and wipe what was
+typed. That is the regression this branch introduced and then fixed, observed
+failing nowhere and passing here.
+
+**Still not verified: VoiceOver.** Every claim about the custom `info` action,
+the `accessible={false}` scrim and `onAccessibilityEscape` is reasoned from the
+documented RN and iOS behaviour, not observed. It is the one part of this
+component whose whole design rests on behaviour nobody has watched.
 
 Covered by `lib/__tests__/setGuide.test.ts`, driven off `GRIPS` and `SET_TYPES`
 rather than a list repeated in the test — so a seventh grip added without copy
