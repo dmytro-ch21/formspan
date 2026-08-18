@@ -7858,3 +7858,26 @@ training. Everything here is about it telling the truth.
 - **Every kind must have a declared basis.** A default arm would pick one for a kind nobody classified, and the flattering answer is the likely default — a self-reported award rendering as `measured` is the one wrong answer this endpoint must never give.
 - **Nothing may rank or score these.** `basis.go`'s first reading rule forbids a measured award being judged by a reported one, and a leaderboard over this list is exactly that. The list is chronological on purpose.
 - **`ORDER BY` inside a `UNION` branch must stay parenthesised.** Unparenthesised it applies to the whole union along with the `LIMIT`, returning one row for the entire result rather than one per kind — it parses, it runs, and it is wrong.
+
+## The BJJ finish card's accomplishment badge (mobile)
+
+### Happy path
+
+- Finish a BJJ session in which the athlete landed a technique live for the first time ever: the celebration card shows **First technique landed**.
+- Land a technique drilled in an earlier session, for the first time: the card shows **First drilled technique landed live**.
+- Earn both at once (first-ever score, of something drilled weeks ago): the badge reads **2 firsts** rather than picking one.
+- Finish an ordinary BJJ session that earned nothing: **no badge at all**, which is the common case and the design.
+
+### Edge cases & errors
+
+- **A competition award never appears on a session card.** Winning gold earns `first_gold`, which carries a contest and no session — it must not surface on whichever mat session is logged next.
+- An award belonging to a *different* session never appears on this one.
+- **Offline, no badge and no claim.** The lookup never answers, the card opens on local numbers, and nothing is asserted — silence is not a claim, a wrong medal is.
+- A kind the installed build does not know (server vocabulary ahead of the app) renders as "A first" rather than an empty badge.
+- The card must never show a badge and a personal-record badge together — a session is one sport, so they cannot both exist.
+
+### Regression trap
+
+- **An accomplishment must latch the streak chime out.** It takes the personal record's slot in the precedence, so `celebratesStreak` has to be passed "earned a badge of either kind", not the records-only flag. Passing the records flag chimes the streak straight over a BJJ first, and every existing test still passes.
+- **`recordsSettled` is no longer true by construction on BJJ.** There is now a real network lookup that can answer late; hard-coding it true lets a fast history chime the streak and latch the first out — the exact race the strength card documents.
+- **The phone must not decide what counts as a first.** It filters the server's awards by `session_id`; re-deriving the rule locally is a second opinion that can disagree with the accomplishments list elsewhere in the app.

@@ -79,7 +79,10 @@ export function recordsFromSession(all: ExerciseRecords[], sessionID: string): S
   );
 }
 
-export type Badge = { key: 'record'; label: string };
+// `accomplishment` is the mat's half: a BJJ first, derived and stamped by the
+// server exactly as a personal record is. See `lib/accomplishments.ts`. One
+// slot either way — a session is one sport, so the two never co-occur.
+export type Badge = { key: 'record' | 'accomplishment'; label: string };
 
 /**
  * The badge, or nothing at all.
