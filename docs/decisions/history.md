@@ -25548,6 +25548,224 @@ none of them is in any doc:
   during this run). Left deliberately: the phone holds it locally as clean and
   synced, so deleting it server-side invites an orphan rather than tidiness.
 
+## 2026-08-18 — The set editor says what is true, and the two buttons under it stop looking broken
+
+Four complaints from a screenshot of a live session, three of them about the
+same screen and one of them a genuine rendering bug rather than a taste
+argument.
+
+**`+ Set` and `+ Drop` were the actual defect.** `styles.addSet` set
+`borderStyle: 'dashed'` together with `borderRadius: 12`, and iOS does not
+support that combination: it squares the corners off and restarts the dash
+phase per edge, so the outline comes back ragged and unrounded. It is not a
+value that can be tuned — RN has never implemented dashed-plus-radius on iOS.
+They also had no width of their own, so each shrink-wrapped its own two words
+and the pair sat left-aligned in a full-width row at two different widths,
+reading as two fragments of one broken control. They are now `flex: 1` halves
+on a solid hairline over `surface`, `minHeight: 44`, which matches
+`styles.primary` immediately below them; when the drop is not offered the
+remaining button simply takes the row.
+
+**Twelve chips became two selects on one line.** Expanding a set dropped six
+set-type chips and up to six grip chips onto the screen, all permanently open,
+all the same weight. The height cost is real — that is most of a phone screen,
+so the fields you came to edit go under the keyboard — but the worse problem is
+that an always-open list of equal chips does not say what is *currently true*.
+The answer is in there, tinted, among eleven alternatives.
+
+The first attempt collapsed each to a header that expanded **in place**, stacked.
+Shown on a device that was rejected on sight and it deserved to be: stacked, two
+short answers about the same set read as two sections of it, and expanding
+either one pushes everything below — including the other one, the remove control
+and the row's own footer — down under a thumb that is already moving. It also
+still cost two rows of an editor carrying four fields.
+
+What ships is `components/ui/OptionSelect.tsx`: `TYPE` and `GRIP` side by side on
+ONE line, styled as the fields above them because that is what they are — two
+short answers, not two sections — and each opening a **popover over itself**. A
+popover costs no layout, so the editor never reflows; the card is measured with
+`measureInWindow` at press time (a `Modal` renders in its own window and knows
+nothing about the tree it came from), prefers to sit below its control, and
+flips above when there is no room, which on a set editor near the bottom of a
+long session is the common case rather than the exotic one.
+
+**The pills answer for themselves now.** "Back-off", "AMRAP", "Hook" and
+"Angled" are jargon, and an athlete who does not know them had no way to find
+out from inside the app — so the field went unrecorded, or recorded wrongly. A
+long press opens the entry from the new `lib/setGuide.ts`. Two things about
+that module are load-bearing rather than tidy. Its lookups are **total over
+unknown keys**, because `offeredGrips` deliberately renders a grip this build
+has never heard of (#256 — the server decides how many grips exist), and a
+partial lookup would make that one pill the only pill that crashes on long
+press. And the copy is allowed to claim only the two behaviours the code
+actually implements, both checked against `contributesVolume` / `countsAsSet`:
+a warm-up adds neither tonnage nor a set, and a drop adds tonnage but is not
+counted as a set. `backoff`, `amrap` and `failure` change nothing the app
+computes, and the sentences say so rather than implying a progression rule that
+does not exist.
+
+**Long press is invisible, so it is announced twice** — a hint line under an
+opened group for sighted athletes, and an `accessibilityActions` entry on every
+pill for VoiceOver, because a long press is not a gesture the screen reader
+forwards. Without the custom action the definitions would be unreachable for
+exactly the people most likely to want one read aloud.
+
+**The timer lost its switch and kept its clock.** N4's per-set timer target was
+already per-set; it was a permanently-present `Timer (s)` input on every
+`weight_reps` set, mostly empty, competing with the numbers that matter. The
+first attempt put a `Timed` pill beside it — which was a second control for a
+state the row's clock glyph already had to express, and one you had to expand a
+row to reach at all.
+
+So there is no switch. **The clock beside the tick does the whole job**, and it
+does two things decided by whether the set already carries a duration: dim and
+it arms one, opening the editor onto the field it just revealed; accent and it
+starts the countdown, exactly as it always did. The two never compete because
+they are the two halves of one state — you cannot start a countdown with no
+length, and arming is meaningless once there is one.
+
+Turning it back off is clearing the field, which is the route it has always
+been, and deliberately **not** a second tap on the clock: a mis-tap on the row's
+most-used control must never silently delete a prescription. Arming seeds
+`DEFAULT_TIMER_SECONDS` (60 — deliberately *not* `DEFAULT_MODE_SECONDS`, which
+answers the different question of how long a rep-counted exercise runs once it
+is being *measured* in time).
+
+`TIMER_GUIDE` went with the switch rather than being left as a panel nothing
+points at. The distinction it carried is the one an athlete cannot work out from
+the screen — on a plank seconds are the MEASUREMENT, here they are a TARGET, and
+stopping early does not rewrite the number — and it now lives as the field's own
+`target` hint, four words in the label instead of a paragraph behind a hold.
+
+**What this deliberately did not do.** The request was for "timed at the set
+level", and there are two different time concepts on this screen. The one moved
+here is the timer *target*. The other is `setMode`'s reps↔time switch, which is
+per **exercise** on purpose — `setMode.ts` argues at length that nobody does set
+1 of burpees in reps and set 2 in seconds, and that offering it creates a group
+whose sets cannot be compared to each other. Moving it per-set was considered
+and declined; `offersTimerTarget` still excludes dual-mode exercises, so the two
+affordances cannot compete for the same row.
+
+**Review caught two blocking defects in the first version, and both were in the
+half that looked finished.**
+
+The first is the one worth remembering, because the bug was created by the fix.
+Rendering the timer field on `set.seconds != null` alone tied its *mount* to a
+value that goes null on transient keystrokes — and in minutes mode `0` is the
+first character of `0.5`, converting to zero seconds, which the server refuses.
+So the field unmounted and the switch flipped off under the athlete's finger
+before the second character could be typed: **a sub-minute target could not be
+entered at all.** Two changes fix it. The showing-flag is now sticky UI state,
+turned off only by the switch and forced on whenever a duration is stored, so no
+parse can unmount the field. And a non-positive or unparseable entry now writes
+*nothing* rather than null — `timerTargetEdit` in `lib/duration.ts`, returning a
+tagged result precisely because "write null" and "write nothing" are the two
+states a nullable number cannot tell apart. Writing null was the actual wipe:
+`Field` adopts an externally-changed value, so the store going null made the
+field overwrite the `0` the athlete had just typed. Note this half was wrong
+*before* this branch too; the always-mounted field merely hid it.
+
+The second was an accessibility defect that defeated the feature's own premise.
+`GuideSheet`'s scrim was a `Pressable` carrying a role and a label — and a
+`Pressable` is accessible by default, which on iOS collapses its whole subtree
+into one element. A VoiceOver user who invoked the custom "What is this?" action
+got a sheet announcing itself as "Close, button", with the title, the definition
+and the Done button unreachable: the one control added *for* screen readers
+opened a panel screen readers could not read. The scrim is now
+`accessible={false}` with no role or label; tap-outside still works for sighted
+users because `onPress` does not require accessibility, and `Done` is the screen
+reader's dismissal. **Not verified on a device** — the reasoning is the
+documented RN default plus iOS grouping behaviour, and it wants a VoiceOver pass.
+
+Three smaller review findings landed with them: the group now actually closes
+after a pick (the doc comment claimed it did and the code did not); the group
+header announces its row — "Type for set 2 of Back Squat: Working" rather than
+six identical "Type: Working" headers down a session; and the definition card no
+longer blanks mid-fade, by splitting `visible` from `entry` so the caller holds
+the content across the close. That last one was first written with a ref read
+during render, which cost five lint warnings against a ratchet set at 54 — the
+state version is both correct and free.
+
+**Review of the rework found two more, and one was the accessibility gap the
+component's own design leans hardest on.** The popover had **no screen-reader
+exit that did not change something**. The scrim is `accessible={false}` —
+correctly, or iOS collapses the whole card into one element — but that also
+removes it as a dismiss target, and there is no close button; `onRequestClose`
+is Android's back gesture only. So every way out for a VoiceOver user ran
+through an option, and on the clearable Grip control the one that looks least
+destructive — re-picking the grip already selected — is the one that CLEARS it.
+`onAccessibilityEscape` closes it now with nothing recorded. The list also
+renders its own `TYPE` / `GRIP` title, because a sighted user carries that over
+from the control they tapped and a screen-reader user landing inside a modal had
+nothing saying which menu this was.
+
+The other was geometry, and the first version's numbers did not cover its own
+content. `POPOVER_MIN_SPACE` is 260 while the Type list is about 305pt, so any
+anchor with 261–305pt below it opened *downward* and rendered its own foot off
+the bottom of the screen — "To failure" clipped into the home-indicator zone and
+the hint gone. A continuous band the athlete scrolls through every session, not
+an edge case. Raising the threshold only moves the problem: flip up too eagerly
+on a short screen and it clips at the top instead, because a mid-screen anchor
+there has less than a full card on either side. So the side stayed a preference
+and the height became a measurement — the card is clamped to the room it
+actually has and its inner `ScrollView` takes over, which is the one outcome
+that is correct at every size, scroll position and mode.
+
+Two smaller ones landed with them: `canArmTimer` now carries the same two timer
+suppressions `onStartTimer` does, so clearing the field mid-countdown no longer
+grows a dim "give this a timer" clock on the row that is ticking; and a selected
+option no longer announces "selected" twice.
+
+**Seen on a device, which for this branch is the point** — twice, and the second
+pass is why the design above is not the design first written. L1 exists because
+nothing on the phone has been looked at on a phone, and a change whose entire
+subject is how a screen reads cannot be signed off from a passing typecheck.
+Verified on a booted iPhone 17 Simulator against a dev client pinned to this
+branch's Metro (worth stating: `expo run:ios` auto-attached to the Metro already
+serving the PRIMARY checkout, i.e. `main`, so the first screenshots would have
+shown the code this branch replaces — confirm which bundle a screenshot came
+from before trusting it).
+
+Confirmed on the shipped design, and again after the review fixes above:
+`TYPE` and `GRIP` sitting on one line as boxed
+selects matching the fields above them; the popover opening over the control and
+correctly flipping ABOVE it near the foot of the editor, left-clamped, with the
+selection ticked in accent; holding an option swapping the card to its
+definition without stacking a second modal; the clock dim on a fresh set and
+accent on one carrying 60s; tapping the dim clock arming a target, opening the
+editor onto the revealed `Timer (s) target` field, changing the row summary to
+`60s` and making **Run all** appear — the set joining a hands-free run, which is
+the strongest evidence the tap writes a real target rather than a decoration;
+and `+ Set` as one clean full-width solid button.
+
+**The two keyboard-dependent cases are verified too, after the Simulator's
+latched hardware keyboard was cleared.** Worth recording how, because the
+documented remedy did not work and the one that did is not in `CLAUDE.md`:
+⌘⇧K had no effect (the menu shortcut needs the Simulator's own device window
+focused, which it was not), and the global `ConnectHardwareKeyboard` pref read
+`0` throughout — so the pref is not a discriminator, exactly as that entry warns.
+`simctl shutdown` + `boot` cleared it in one go, and the sign-in and the
+in-progress session both survived, being in the keychain and SQLite. **Add the
+reboot as the first thing to try, not the last.**
+
+With a keyboard: entering 20 kg brings up `+ Set` and `+ Drop` as EQUAL HALVES,
+solid and matched, with the exercise below still showing a solo full-width
+`+ Set` — both layout cases confirmed, and the original complaint closed. And in
+minutes mode, `0` → `.` → `5` types through to **0.5 min = 0:30 on the row**,
+with the field surviving the `0` that used to unmount it and wipe what was
+typed. That is the regression this branch introduced and then fixed, observed
+failing nowhere and passing here.
+
+**Still not verified: VoiceOver.** Every claim about the custom `info` action,
+the `accessible={false}` scrim and `onAccessibilityEscape` is reasoned from the
+documented RN and iOS behaviour, not observed. It is the one part of this
+component whose whole design rests on behaviour nobody has watched.
+
+Covered by `lib/__tests__/setGuide.test.ts`, driven off `GRIPS` and `SET_TYPES`
+rather than a list repeated in the test — so a seventh grip added without copy
+fails, rather than silently shipping a pill whose long press says "no
+description yet". Mutation-checked: blanking `hook`'s entry turns it red.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

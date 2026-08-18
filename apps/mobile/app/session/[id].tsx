@@ -28,6 +28,7 @@ import {
   durationInputUnit,
   durationUnitKey,
   fromDisplayDuration,
+  timerTargetEdit,
   parseDurationUnit,
   toDisplayDuration,
   type DurationUnit,
@@ -100,17 +101,21 @@ import {
   timedSetStillAt,
   elapsedBelongsInSeconds,
   offersTimerTarget,
+  DEFAULT_TIMER_SECONDS,
   workSecondsFor,
   offeredGrips,
   SET_TYPES,
   type LoggedSet,
   type Measure,
+  type Grip,
   type Session,
   type SetType,
   type Suggestion,
   type SuggestionCode,
   type Volume,
 } from '@/lib/sessions';
+import { OptionSelect } from '@/components/ui/OptionSelect';
+import { gripGuide, setTypeGuide } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';
 
 /**
@@ -1502,6 +1507,27 @@ export default function SessionScreen() {
                         ? () => startWork(i, g.exerciseID)
                         : undefined
                     }
+                    /*
+                      The other half of the same clock. `offersTimerTarget`
+                      excludes a set that already MEASURES seconds (a plank's
+                      clock is its measurement, not a target) and a dual-mode
+                      exercise (writing `seconds` on a burpee set logged in reps
+                      flips it to time mode and hides the rep count — what the
+                      exercise-level reps/time switch exists to do properly).
+
+                      The two timer suppressions are repeated deliberately: a
+                      row that is ticking, or a run already driving this
+                      exercise, should show no clock at all rather than swapping
+                      the start button for an arm one. Raised in review — the
+                      first version gated only on the load type, so clearing the
+                      field mid-countdown grew a dim clock on the running row.
+                    */
+                    canArmTimer={
+                      offersTimerTarget(exercise?.load_type) &&
+                      sets[i].seconds == null &&
+                      timerState.timer?.setIndex !== i &&
+                      !timerState.run
+                    }
                     showEffort={showEffort}
                     units={unitFor(g.exerciseID)}
                     duration={durationUnit}
@@ -2017,6 +2043,7 @@ function SetRow({
   onRemove,
   onToggleDone,
   onStartTimer,
+  canArmTimer = false,
   units,
   duration,
   showEffort,
@@ -2038,6 +2065,18 @@ function SetRow({
   onToggleDone: () => void;
   /** Undefined when this set isn't timed — see `workSecondsFor`. */
   onStartTimer?: () => void;
+  /**
+   * Whether this set can be GIVEN a countdown it does not have.
+   *
+   * Decided at the call site rather than here, because the answer depends on
+   * the running timer and the interval run — state this row does not see. It
+   * is the exact complement of `onStartTimer` and carries the same three
+   * suppressions, which is what stops a dim "give this a timer" clock
+   * appearing on the very row that is currently ticking (clear the field
+   * mid-countdown and it otherwise would) or during a run whose plan is
+   * already driving this exercise.
+   */
+  canArmTimer?: boolean;
   units: UnitSystem;
   /** Seconds or minutes, for this exercise — see `lib/duration.ts`. */
   duration: DurationUnit;
@@ -2045,6 +2084,33 @@ function SetRow({
 }) {
   const accent = useAccent();
   const [open, setOpen] = useState(false);
+  /*
+    Whether the Timed field is SHOWING, which is not quite the same question as
+    whether the set carries a duration — and conflating them made a real target
+    impossible to type.
+
+    Rendering the field on `set.seconds != null` alone meant every transient
+    parse unmounted it mid-keystroke. In minutes mode `0` is the first character
+    of `0.5`, and `fromDisplayDuration(0)` is not positive, so the field
+    vanished and the switch flipped off under the athlete's finger before the
+    second character could be typed. A sub-minute target could not be entered at
+    all.
+
+    So the flag is sticky: turned on by the switch, turned off only by the
+    switch, and FORCED on whenever a duration is actually stored — a reload,
+    carry-forward from the previous set, or a template that prescribed one all
+    have to show their field without anyone having tapped anything.
+
+    The invariant the switch exists for is unaffected and still holds in the
+    direction that matters: turning it off nulls `seconds`, so the switch can
+    never read "off" over a live duration that is still arming the play button.
+    The other direction — on, with the field empty — is a row being typed into,
+    and it behaves exactly as off does everywhere it counts: `workSecondsFor`
+    is null, so no play button, and `canRun` will not take it.
+  */
+  const [timedOn, setTimedOn] = useState(set.seconds != null);
+  const timed = timedOn || set.seconds != null;
+
   // Mode-aware: burpees switched to time show a duration field and no reps one,
   // which is the whole point of the switch. Going through `measuresFor` directly
   // would offer the one number the row is not keeping.
@@ -2096,29 +2162,62 @@ function SetRow({
           {typeShort ? <Text style={styles.setBadge}> {typeShort}</Text> : null}
         </Text>
         <Text style={styles.setSummary}>{describeSet(set, units, duration)}</Text>
-        {editable && onStartTimer && (
+        {editable && (onStartTimer || canArmTimer) && (
           /*
-            Only on sets measured in seconds — a plank, a hold, a carry.
+            One clock, doing the whole job of a set's countdown — and it does
+            two things, decided by whether the set already carries a duration.
 
-            It sits beside the tick rather than inside the expanded editor
-            because starting a timed set is the thing you do BEFORE the set,
-            one-handed, and burying it behind a disclosure would cost the tap
-            the countdown exists to save. `hitSlop` matches the tick for the
-            same reason both are 10: sweaty thumbs, 20 seconds, one hand.
+            **No duration** (`canArmTimer`): dim. Tapping arms one and opens the
+            editor onto the field it just revealed. This replaced a `Timed`
+            switch that sat in the expanded editor beside the number it
+            controlled — a second control for a state this glyph already had to
+            express, and one you had to expand a row to reach.
+
+            **A duration** (`onStartTimer`): accent. Tapping starts the
+            countdown, exactly as it always did.
+
+            The two never compete, because they are the two halves of one
+            state: you cannot start a countdown that has no length, and arming
+            is meaningless once there is one. Turning it back OFF is clearing
+            the field, which is the same route it has always been — deliberately
+            NOT a second tap here, because a mis-tap on the row's most-used
+            control must never silently delete a prescription.
+
+            It sits beside the tick rather than inside the editor because
+            starting a timed set is the thing you do BEFORE the set, one-handed;
+            burying it behind a disclosure would cost the tap the countdown
+            exists to save. `hitSlop` matches the tick for the same reason both
+            are 10: sweaty thumbs, 20 seconds, one hand.
           */
           <Pressable
-            onPress={onStartTimer}
+            onPress={() => {
+              if (onStartTimer) {
+                onStartTimer();
+                return;
+              }
+              setTimedOn(true);
+              onChange(withSetChange(set, { seconds: DEFAULT_TIMER_SECONDS }));
+              // Opened, because the whole point of the tap is to produce the
+              // field. Arming a duration the athlete cannot see or change would
+              // be the control doing half its job.
+              setOpen(true);
+            }}
             hitSlop={10}
             style={styles.play}
             accessibilityRole="button"
-            accessibilityLabel={`Start the timer for set ${ordinal}${
-              set.seconds ? `, ${set.seconds} seconds` : ''
-            }`}
-            testID={`start-timer-${index}`}
+            accessibilityLabel={
+              onStartTimer
+                ? `Start the timer for ${setName}${set.seconds ? `, ${set.seconds} seconds` : ''}`
+                : `Give ${setName} a timer`
+            }
+            accessibilityHint={onStartTimer ? undefined : 'Adds a countdown you can edit'}
+            testID={onStartTimer ? `start-timer-${index}` : `arm-timer-${index}`}
           >
-            {/* The kit's timer glyph rather than a play triangle: this starts
-                a countdown, and a ▶ next to a ✓ reads as "play the set back". */}
-            <Icon name="timer" size={16} color={accent.ink} />
+            {/* The kit's timer glyph rather than a play triangle: this is a
+                countdown, and a ▶ next to a ✓ reads as "play the set back".
+                Dim until the set has a length, so the two states of the one
+                control are distinguishable without reading the row. */}
+            <Icon name="timer" size={16} color={onStartTimer ? accent.ink : vola.textDim} />
           </Pressable>
         )}
         {editable && (
@@ -2233,44 +2332,53 @@ function SetRow({
               burpee set in reps mode, where writing a duration silently flips
               the row to time mode.
 
-              Setting it is what makes the play button appear (`workSecondsFor`)
-              and what lets the set join a hands-free run (`canRun`) — the
-              circuits N4 says fall out of this. Clearing it back to empty takes
-              both away again, which is the intended undo. */}
+              **The relationship with the row's clock inverted.** It used to
+              read "setting this is what makes the play button appear"; the
+              clock is now what puts this field here in the first place, and a
+              duration is what turns that same clock from arm into start. What
+              is unchanged is the other end: a duration is what lets the set
+              join a hands-free run (`canRun`), the circuits N4 exists for, and
+              clearing this back to empty takes both away again — still the
+              intended undo, and now the ONLY route back, since the clock
+              deliberately does not toggle off. */}
           {offersTimerTarget(exercise?.load_type) && (
             <View style={styles.fieldRow}>
-              <Field
-                label={`Timer (${durationInputUnit(duration)})`}
-                value={set.seconds == null ? null : toDisplayDuration(set.seconds, duration)}
-                onChangeText={(text) => {
-                  const t = text.trim();
-                  if (t === '') {
-                    onChange(withSetChange(set, { seconds: null }));
-                    return;
-                  }
-                  const raw = Number(t.replace(',', '.'));
-                  if (!Number.isFinite(raw)) {
-                    onChange(withSetChange(set, { seconds: null }));
-                    return;
-                  }
-                  const canonical = fromDisplayDuration(raw, duration);
-                  // A zero or negative duration is refused rather than stored:
-                  // the server rejects `seconds <= 0` outright, so keeping it
-                  // would be a row that syncs 400 and a timer that fires the
-                  // instant it starts. Null is the honest reading of "no".
-                  onChange(withSetChange(set, { seconds: canonical > 0 ? canonical : null }));
-                }}
-                hint="optional"
-                integer={duration !== 'minutes'}
-                // Built from the unit-bearing label, exactly as the measure
-                // fields above are. Without the unit a VoiceOver user in
-                // minutes mode hears "Timer" and has no way to know that 1.5
-                // means ninety seconds.
-                accessibilityLabel={`Timer in ${
-                  duration === 'minutes' ? 'minutes' : 'seconds'
-                } for ${setName} of ${exerciseName}, optional`}
-                testID={`set-${index}-timer`}
-              />
+              {/* No switch beside it any more — the row's clock is what puts
+                  this here, and a second control for the same state was one
+                  the athlete had to expand a row to reach. So this is an
+                  ordinary field row like the measures above it, which is what
+                  it now is. */}
+              {timed && (
+                <View style={styles.timedField}>
+                  <Field
+                    label={`Timer (${durationInputUnit(duration)})`}
+                    // The one thing about this field an athlete cannot work out
+                    // from the screen, and the distinction N4 was built around:
+                    // on a plank seconds are the MEASUREMENT, here they are a
+                    // TARGET, and stopping early does not rewrite the number.
+                    // It carried a hold-for-info panel until the switch that
+                    // opened it was removed; four words in the label is a
+                    // better home for it than a panel nothing pointed at.
+                    hint="target"
+                    value={set.seconds == null ? null : toDisplayDuration(set.seconds, duration)}
+                    onChangeText={(text) => {
+                      // Three outcomes, and the third — write nothing — is what
+                      // makes `0.5` typeable in minutes mode. See its note.
+                      const edit = timerTargetEdit(text, duration);
+                      if (edit.write) onChange(withSetChange(set, { seconds: edit.seconds }));
+                    }}
+                    integer={duration !== 'minutes'}
+                    // Built from the unit-bearing label, exactly as the measure
+                    // fields above are. Without the unit a VoiceOver user in
+                    // minutes mode hears "Timer" and has no way to know that 1.5
+                    // means ninety seconds.
+                    accessibilityLabel={`Timer in ${
+                      duration === 'minutes' ? 'minutes' : 'seconds'
+                    } for ${setName} of ${exerciseName}`}
+                    testID={`set-${index}-timer`}
+                  />
+                </View>
+              )}
             </View>
           )}
 
@@ -2348,30 +2456,28 @@ function SetRow({
           </View>
           )}
 
-          <View style={styles.chips}>
-            {SET_TYPES.map((t) => (
-              <Pressable
-                key={t.key}
-                onPress={() => onChange({ ...set, set_type: t.key as SetType })}
-                style={[
-                  styles.chip,
-                  set.set_type === t.key && [
-                    styles.chipActive,
-                    { backgroundColor: accent.accent, borderColor: accent.accent },
-                  ],
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: set.set_type === t.key }}
-                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-              >
-                <Text style={[styles.chipText, set.set_type === t.key && styles.chipTextActive]}>
-                  {t.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {/* How the bar was held.
+          {/*
+            Type and grip on ONE line, because they are two short answers about
+            the same set rather than two sections of it. Stacked, they cost two
+            full rows of an editor that already carries four fields; and each
+            expanding in place pushed everything below it — including the other
+            one — down under the athlete's thumb mid-tap. `OptionSelect` opens
+            over itself instead, so the editor never reflows.
+          */}
+          <View style={styles.selects}>
+            <OptionSelect
+              label="Type"
+              options={SET_TYPES}
+              selected={set.set_type}
+              // Never null — the control is not `clearable`, so the only value
+              // it can emit is one of its own keys. The cast is the price of a
+              // component that also serves grips, where null is a real answer.
+              onSelect={(key) => onChange({ ...set, set_type: key as SetType })}
+              guideFor={setTypeGuide}
+              context={`${setName} of ${exerciseName}`}
+              testID={`set-${index}-type`}
+            />
+            {/* How the bar was held.
               Which values are offered depends on the movement — `gripsFor`
               is the list, and it SUBSTITUTES rather than extends: a hinge does
               not get the four plus two, it gets its own four. Read that
@@ -2391,34 +2497,20 @@ function SetRow({
               Tapping the selected chip clears it, which is that route. Without
               it a mis-tap is permanent — and unrecorded is a real state here,
               not an absence. */}
-          {offeredGrips(exercise?.movement_pattern, set.grip).length > 0 && (
-            <View style={styles.chips}>
-              {offeredGrips(exercise?.movement_pattern, set.grip).map((g) => {
-                const on = set.grip === g.key;
-                return (
-                  <Pressable
-                    key={g.key}
-                    onPress={() => onChange({ ...set, grip: on ? null : g.key })}
-                    style={[
-                      styles.chip,
-                      on && [
-                        styles.chipActive,
-                        { backgroundColor: accent.accent, borderColor: accent.accent },
-                      ],
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
-                    accessibilityLabel={`${g.label} grip for ${setName} of ${exerciseName}`}
-                    accessibilityHint={on ? 'Tap again to clear the grip' : undefined}
-                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                    testID={`set-${index}-grip-${g.key}`}
-                  >
-                    <Text style={[styles.chipText, on && styles.chipTextActive]}>{g.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
+            {offeredGrips(exercise?.movement_pattern, set.grip).length > 0 && (
+              <OptionSelect
+                label="Grip"
+                options={offeredGrips(exercise?.movement_pattern, set.grip)}
+                selected={set.grip ?? null}
+                clearable
+                emptyLabel="Not recorded"
+                onSelect={(key) => onChange({ ...set, grip: key as Grip | null })}
+                guideFor={gripGuide}
+                context={`${setName} of ${exerciseName}`}
+                testID={`set-${index}-grip`}
+              />
+            )}
+          </View>
 
           <Pressable
             onPress={onRemove}
@@ -2488,6 +2580,24 @@ function Field({
         // computed from a row index, because rows differ in height by
         // exercise and by whether they are expanded.
         onFocus={() => ensureVisible(inputRef.current)}
+        /*
+          On blur, the field says what is STORED — the one moment it is safe to
+          overwrite what was typed, because typing is over.
+
+          While a field has focus it deliberately keeps its own text, so that a
+          half-typed `72.` is not eaten and so that an entry the store refuses
+          (the timer's `0`, on its way to `0.5`) survives to its next keystroke.
+          The cost is that an ABANDONED entry leaves the two disagreeing: type
+          `0` over a stored 60, walk away, and the box reads 0 while the row
+          still carries a 60-second countdown that will arm the play button and
+          sync. On this screen — one hand, twenty seconds between sets —
+          abandoning a half-typed number is ordinary, not exotic.
+
+          Re-deriving here costs nothing anyone can perceive and makes the
+          visible number true again. It is not a commit: nothing is written, the
+          field simply stops claiming something the set does not hold.
+        */
+        onBlur={() => setText(value?.toString() ?? '')}
         style={styles.fieldInput}
         // decimal-pad rather than numeric: reps are whole, weight isn't, and
         // the keypad should offer the point where it's meaningful.
@@ -2708,19 +2818,13 @@ const styles = StyleSheet.create({
     backgroundColor: vola.bg,
     textAlign: 'center',
   },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: {
-    borderWidth: 1,
-    borderColor: vola.line,
-    borderRadius: 999,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  chipActive: {},
-  chipText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
-  chipTextActive: { color: vola.navy },
+  // The switch and its field on one line, baseline-agnostic: `Field` carries a
+  // label above the input, so `alignItems: 'flex-end'` is what puts the pill
+  // level with the input rather than with the label.
+  timedField: { flex: 1 },
+  // Two short answers on one line. `alignItems: 'flex-start'` so a control
+  // without a sibling does not stretch to a height it has no content for.
+  selects: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   hintRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -2771,7 +2875,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hintApplyText: { color: vola.navy, fontWeight: '700', fontSize: 14 },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  /*
+    Both buttons share the row EVENLY (`flex: 1` on each), rather than each
+    shrink-wrapping its own two words. Sized by their labels, "+ Set" and
+    "+ Drop" came out different widths, left-aligned in a full-width row, and
+    read as two fragments of a broken control rather than a pair of choices —
+    which is what they are. Even halves, or one full-width button when the drop
+    is not offered, is the only arrangement that says that.
+  */
+  addRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
   // Indented and rule-marked, so a drop reads as hanging off the row above
   // rather than sitting beside it. The accent is deliberately NOT used: a drop
   // is not an achievement, and this app reserves the accent for what was
@@ -2783,14 +2895,30 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
   },
   addSet: {
+    flex: 1,
     borderWidth: 1,
-    borderStyle: 'dashed',
+    /*
+      SOLID, and this is the actual fix rather than a taste change. iOS renders
+      `borderStyle: 'dashed'` together with a `borderRadius` by falling back to
+      an unrounded, unevenly-dashed box — the corners square off and the dash
+      phase restarts per edge, which is the ragged outline in the report. RN has
+      never supported the combination on iOS; it is not a value that can be
+      tuned. A filled surface with a hairline reads as "another one of these"
+      just as well as a dashed one, and it matches `styles.primary` directly
+      below it.
+    */
     borderColor: vola.line,
+    backgroundColor: vola.surface,
     borderRadius: 12,
+    // 44 is the floor, not the target: these are pressed with a thumb, standing
+    // up, between sets.
+    minHeight: 44,
     paddingVertical: 12,
+    paddingHorizontal: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  addSetText: { fontWeight: '700' },
+  addSetText: { fontWeight: '700', fontSize: 14 },
   primary: {
     backgroundColor: vola.surfaceRaised,
     borderRadius: 12,

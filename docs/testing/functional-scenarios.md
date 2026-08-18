@@ -8019,3 +8019,49 @@ training. Everything here is about it telling the truth.
 - **An accomplishment must latch the streak chime out.** It takes the personal record's slot in the precedence, so `celebratesStreak` has to be passed "earned a badge of either kind", not the records-only flag. Passing the records flag chimes the streak straight over a BJJ first, and every existing test still passes.
 - **`recordsSettled` is no longer true by construction on BJJ.** There is now a real network lookup that can answer late; hard-coding it true lets a fast history chime the streak and latch the first out — the exact race the strength card documents.
 - **The phone must not decide what counts as a first.** It filters the server's awards by `session_id`; re-deriving the rule locally is a second opinion that can disagree with the accomplishments list elsewhere in the app.
+
+## The set editor's option selects and timer clock (F6, mobile — `components/ui/OptionSelect.tsx`)
+
+### Happy path
+
+- Expand a set: `TYPE` and `GRIP` sit **side by side on one line**, each stating its answer (`Working`, and the grip or `Not recorded`).
+- Tap `TYPE`: a popover opens **over** the control — the editor must not reflow, and nothing below may move. Pick `Back-off`: the popover closes, the control reads `Back-off`, and the row's badge changes to `B`.
+- Tap `GRIP`, pick `Neutral`, reopen and pick `Neutral` again: the grip returns to `Not recorded`. This is the only route back to unrecorded and it must not be lost.
+- Hold an option: the popover's own content swaps to that option's definition, with `Back` returning to the list. It must never open a second modal on top of the first.
+- **Open a select near the bottom of the screen**: the card flips above the control instead of running off the foot. Open one near the right edge: the card clamps inside the screen.
+- **Open one with a middling amount of room below it** — roughly 260–310pt, which is a band the athlete scrolls through every session. The card must be clamped to the space available and scroll internally; the last option and the hint must both be reachable. The first version clipped its own foot here, because the flip threshold was smaller than the list's height.
+- Tap the **dim clock** beside the tick on a set with no duration: it seeds 60s, turns accent, the editor opens onto the revealed `Timer (s) target` field, the row summary reads `60s`, and `Run all` appears on the exercise.
+- Tap the **accent clock** on a set that has a duration: the countdown starts, as it always did.
+- Clear the `Timer` field to empty: the duration goes, the clock returns to dim, and the start affordance goes with it. **This is the only way to turn a timer off** — the clock deliberately does not toggle off, so a mis-tap cannot delete a prescription.
+
+### Edge cases & errors
+
+- **No clock at all on the row that is currently counting down, or during an interval run** — in either state, whether or not the set has a duration. Clearing the field mid-countdown must not grow a dim "give this a timer" clock on the ticking row.
+- **The clock never removes a duration.** Tapping it on a set that already has one must start the countdown, never clear it — this control sits next to the tick and is pressed one-handed mid-workout.
+- Typing `0` or a negative number in the Timer field stores `null`, not `0` — the server rejects `seconds <= 0`, so keeping it would be a row that 400s on sync and a countdown that fires instantly.
+- In minutes mode the Timer accepts a decimal (`1.5` = 90s); in seconds mode it is whole numbers only.
+- **Type a sub-minute target one character at a time in minutes mode: `0`, then `.`, then `5`** (confirmed on device: the row ends at `0:30`). The field must stay mounted, the switch must stay on, and the digits must survive — the result is 30s. The first version of this failed on the first keystroke, because `0` converts to zero seconds and the field's mount was tied to the stored value. A non-positive or unparseable entry must write *nothing* to the set, not null.
+- A `0` typed and then abandoned leaves the previous target in place — deliberate, since zero would sync 400 and arm a countdown that fires instantly. **On blur the field must go back to showing the stored value**, or the box reads `0` while the row still carries the old countdown. That divergence applies to every numeric field on this screen, not just the timer.
+- **The arm state must never appear on a dual-mode exercise** (`load_type: 'reps'` — burpees, mountain climbers). Writing `seconds` there flips the set into time mode and hides its rep count; those exercises get the exercise-header reps/time toggle instead. Same gate as N4 (`offersTimerTarget`). A plank is the other exclusion: its seconds are the measurement, so its clock is a start button and never an arm one.
+- **A grip this build does not know about still opens a panel.** Log a set carrying a grip outside the app's union (a newer server's value, or a movement re-categorised after the set was logged): the pill renders, holding it says the value is *recorded* and merely undescribed, and it must not crash or imply the data is broken.
+- A set type or grip added to `SET_TYPES` / `GRIPS` without copy in `lib/setGuide.ts` must fail the suite, not ship a pill whose info panel says "no description yet".
+
+### Accessibility
+
+- **The popover must be escapable without changing anything.** The scrim is deliberately not accessible and there is no close button, so `onAccessibilityEscape` (two-finger Z) is the only non-mutating exit — without it a VoiceOver user's every way out selects an option, and on Grip the least-destructive-looking one clears the recorded value.
+- The open popover states which menu it is (`TYPE` / `GRIP`). A sighted user carries that over from the control they tapped; a screen-reader user landing inside a modal does not.
+- Each select is announced with its **answer** and its row — "Type for set 2 of Back Squat: Working", not "Type". Without the context every set in the session sounds identical.
+- Every pill exposes a **custom action** ("What is this?"). VoiceOver does not forward a long press, so without it the definitions are unreachable for the people most likely to want them read aloud.
+- **The info panel itself must be readable under VoiceOver** — title, body and Done each focusable. Its scrim must stay `accessible={false}`: a `Pressable` is accessible by default and iOS then collapses the whole card into one "Close, button" element, which silently undoes the custom action above. Worth a real VoiceOver pass, not just a code read.
+
+- The clock announces which of its two jobs it is offering — "Give set 2 of Back Squat a timer" when dim, "Start the timer for…" when armed. One label for both states would make it unusable without sight.
+- Every pill and both add buttons clear 44pt of touch target (`hitSlop` counts).
+
+### Notes for whoever automates this
+
+- **Both `set-N-timer` and `set-N-grip-<key>` are conditionally mounted now.** The timer field needs a duration, armed via `arm-timer-N` (the dim clock); the grip options need the popover opened first via `set-N-grip`. A test that reaches straight for the old testID will fail for the wrong reason. The clock's testID also changes with its state: `arm-timer-N` when dim, `start-timer-N` when armed.
+
+### Layout
+
+- `+ Set` and `+ Drop` are equal halves of one row; with the drop not offered (a set carrying no weight), `+ Set` takes the full width. Neither may shrink-wrap its label.
+- **No dashed border with a corner radius anywhere on iOS.** It renders squared-off with an uneven dash phase — that combination is the original defect, not a value to be tuned.
