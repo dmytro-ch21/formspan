@@ -50,9 +50,8 @@ function renderCard(over: Partial<React.ComponentProps<typeof NutritionCard>> = 
   return render(
     <NutritionCard
       entries={[]}
-      target={target}
+      view={{ state: 'set', target }}
       quickAdd={[]}
-      loaded
       onLog={() => {}}
       onOpenDay={() => {}}
       onQuickAdd={() => {}}
@@ -61,16 +60,25 @@ function renderCard(over: Partial<React.ComponentProps<typeof NutritionCard>> = 
   );
 }
 
-describe('the three absent states, which are three different sentences', () => {
+describe('the four absent states, which are four different sentences', () => {
   it('not loaded says so, rather than claiming nothing was logged', () => {
     // Asserting "nothing logged yet" while offline is a false claim about the
     // athlete's day — the same distinction CheckinCard makes.
-    renderCard({ loaded: false, target: null });
+    renderCard({ view: { state: 'checking' } });
     expect(screen.getByText('Checking…')).toBeTruthy();
   });
 
+  it('an unreachable target is NOT reported as no target', () => {
+    // The pair that matters. "Set a target" is an instruction to go and do
+    // homework; saying it to somebody who set one on web because this phone is
+    // in a basement is the app being wrong rather than uninformed.
+    renderCard({ view: { state: 'unknown' } });
+    expect(screen.queryByText('Set a target to see what is left')).toBeNull();
+    expect(screen.getByText('Cannot check your target from here — logging still works')).toBeTruthy();
+  });
+
   it('no target asks for one rather than inventing a number', () => {
-    renderCard({ target: null });
+    renderCard({ view: { state: 'none' } });
     expect(screen.getByText('Set a target to see what is left')).toBeTruthy();
     // And the figures are dashes, never zeros: zero would read as "you have
     // nothing left", which is the opposite of the truth.

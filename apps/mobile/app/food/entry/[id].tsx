@@ -234,6 +234,24 @@ export default function EditEntryScreen() {
         ))}
       </View>
 
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Fibre (g) — blank if you never recorded it</Text>
+        <TextInput
+          style={styles.input}
+          value={draft.fibre_g ?? ''}
+          onChangeText={(t) => {
+            setManual(true);
+            setDraft((d) => ({ ...d, fibre_g: t }));
+          }}
+          keyboardType="decimal-pad"
+          inputMode="decimal"
+          placeholder="—"
+          placeholderTextColor={vola.textDim}
+          accessibilityLabel="Fibre in grams"
+          testID="edit-fibre_g"
+        />
+      </View>
+
       <View style={styles.actions}>
         <Pressable
           onPress={() => void save()}

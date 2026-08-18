@@ -24,8 +24,9 @@ import { randomUUID } from 'expo-crypto';
 
 import { isOffline, isPermanentRejection } from './apiError';
 import { getDb, withTransaction } from './db';
-import type { Entry, Food, Macros, Meal } from './nutrition';
+import type { Entry, Food, Macros, Meal, Target, TargetView } from './nutrition';
 import * as api from './nutritionApi';
+import { PREF_TARGETS_FETCHED_AT, readPref, writePref } from './prefs';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -126,7 +127,7 @@ export async function logFood(userId: string, input: NewEntry): Promise<string> 
     input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
     input.source_food_id ?? null, input.notes ?? '', now, now,
   );
-  if (input.source_food_id) await noteFoodUsed(input.source_food_id, input.eaten_on);
+  if (input.source_food_id) await noteFoodUsed(userId, input.source_food_id, input.eaten_on);
   return id;
 }
 
@@ -155,11 +156,18 @@ export async function editEntry(userId: string, id: string, input: NewEntry): Pr
  */
 export async function removeEntry(userId: string, id: string): Promise<void> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ remote: number }>(
-    `SELECT remote FROM food_entries WHERE id = ? AND user_id = ?`, id, userId,
+  const row = await db.getFirstAsync<{ remote: number; dirty: number }>(
+    `SELECT remote, dirty FROM food_entries WHERE id = ? AND user_id = ?`, id, userId,
   );
   if (!row) return; // Already gone. Deleting twice is not an error.
-  if (row.remote === 0) {
+  // `dirty` as well as `remote`, and the second half is the one that is easy to
+  // miss. A row the server has never seen but whose FIRST push is in flight
+  // would be hard-deleted here; that push then succeeds, the CAS finds nothing
+  // to update, and the server keeps an entry this device has forgotten — with
+  // no tombstone left to ever remove it, so web totals a lunch the athlete
+  // deleted. Entries are push-only, so nothing would ever bring it back to be
+  // deleted again. A tombstone costs one row and closes the window.
+  if (row.remote === 0 && row.dirty === 0) {
     await db.runAsync(`DELETE FROM food_entries WHERE id = ? AND user_id = ?`, id, userId);
     return;
   }
@@ -201,7 +209,15 @@ export async function localEntry(userId: string, id: string): Promise<Entry | nu
 }
 
 /**
- * Merge a server window into the local store.
+ * Merge a server window of ENTRIES into the local store.
+ *
+ * **Not wired to anything yet, deliberately, and that is worth stating rather
+ * than leaving to be discovered.** `food_entries` is push-only today: nothing
+ * on web writes an entry, so there is nothing to pull. This exists and is
+ * tested because the moment web can correct a day (N28) the phone needs a merge
+ * that does not clobber what it still owes — and writing that merge under
+ * pressure, next to a scoped DELETE, is how a sync loses data. Wire it when
+ * there is a second writer; until then it is a specification with tests.
  *
  * Never clobbers a row this device still owes, and absent-from-the-server is
  * only evidence of deletion for rows the server KNOWS about — an entry logged
@@ -245,14 +261,86 @@ export async function cacheEntries(
   });
 }
 
+/**
+ * What this device can say about the target on a day, with no network.
+ *
+ * Returns `unknown` rather than `none` when nothing is cached and no fetch has
+ * ever succeeded. That distinction is the whole reason this function exists:
+ * both cases have zero rows, and reporting the second as "you have no target"
+ * tells an athlete who set one on web to go and set it again.
+ */
+export async function localTargetView(userId: string, on: string): Promise<TargetView> {
+  const db = await getDb();
+  // The newest row effective on or before the day — the same rule `targetOn`
+  // applies to a server response, so the cache cannot answer differently from
+  // the wire.
+  const row = await db.getFirstAsync<Target>(
+    `SELECT effective_on, kcal, protein_g, carb_g, fat_g, fibre_g
+       FROM nutrition_targets
+      WHERE user_id = ? AND effective_on <= ?
+      ORDER BY effective_on DESC
+      LIMIT 1`,
+    userId, on,
+  );
+  if (row) return { state: 'set', target: row };
+  const fetched = await readPref(userId, PREF_TARGETS_FETCHED_AT);
+  return fetched ? { state: 'none' } : { state: 'unknown' };
+}
+
+/**
+ * Store a server window of targets.
+ *
+ * Rows the server did not return for days INSIDE the window are dropped, so a
+ * target deleted on web does not linger in the cache and reappear the next time
+ * the phone is offline. The carry-in row `listTargets` adds sits before `from`
+ * and is therefore untouched by that delete, which is what keeps a target set
+ * in March from being swept away by a query about August.
+ *
+ * The timestamp is written even when `targets` is empty — that is exactly the
+ * case it exists to record.
+ */
+export async function cacheTargets(
+  userId: string, from: string, to: string, targets: Target[],
+): Promise<void> {
+  const db = await getDb();
+  await withTransaction(db, async () => {
+    const days = targets.map((t) => t.effective_on);
+    const placeholders = days.length ? days.map(() => '?').join(',') : `''`;
+    await db.runAsync(
+      `DELETE FROM nutrition_targets
+        WHERE user_id = ? AND effective_on BETWEEN ? AND ?
+          AND effective_on NOT IN (${placeholders})`,
+      userId, from, to, ...days,
+    );
+    for (const t of targets) {
+      await db.runAsync(
+        `INSERT INTO nutrition_targets
+           (user_id, effective_on, kcal, protein_g, carb_g, fat_g, fibre_g)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(user_id, effective_on) DO UPDATE SET
+           kcal = excluded.kcal, protein_g = excluded.protein_g,
+           carb_g = excluded.carb_g, fat_g = excluded.fat_g,
+           fibre_g = excluded.fibre_g`,
+        userId, t.effective_on, t.kcal, t.protein_g, t.carb_g, t.fat_g, t.fibre_g,
+      );
+    }
+  });
+  await writePref(userId, PREF_TARGETS_FETCHED_AT, stamp());
+}
+
 export async function localFoods(userId: string, q = ''): Promise<Food[]> {
   const db = await getDb();
-  const like = `%${q.trim().toLowerCase()}%`;
+  // `%` and `_` are LIKE metacharacters, so a search for "100%" would otherwise
+  // match every saved food. The backend's own search escapes them for the same
+  // reason; two search surfaces disagreeing about what a query means is worse
+  // than either being wrong.
+  const escaped = q.trim().toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`);
+  const like = `%${escaped}%`;
   return db.getAllAsync<Food>(
     `SELECT id, kind, name, brand, serving_label, serving_grams,
             kcal, protein_g, carb_g, fat_g, fibre_g
        FROM foods
-      WHERE user_id = ? AND deleted_at IS NULL AND lower(name) LIKE ?
+      WHERE user_id = ? AND deleted_at IS NULL AND lower(name) LIKE ? ESCAPE '\\'
       ORDER BY lower(name)`,
     userId, like,
   );
@@ -291,10 +379,16 @@ export async function saveFoodLocally(
  * needs, and marking the row owed would put a pointless request in the outbox
  * after every single log.
  */
-async function noteFoodUsed(foodId: string, on: string): Promise<void> {
+async function noteFoodUsed(userId: string, foodId: string, on: string): Promise<void> {
   const db = await getDb();
+  // Scoped like every read in this file. `source_food_id` arrives from a
+  // caller, so an unscoped UPDATE would let one athlete's log bump another's
+  // counters on a shared device — improbable with UUIDs, and still the rule
+  // this module states: an id is provenance, never a capability.
   await db.runAsync(
-    `UPDATE foods SET use_count = use_count + 1, last_used_at = ? WHERE id = ?`, on, foodId,
+    `UPDATE foods SET use_count = use_count + 1, last_used_at = ?
+      WHERE id = ? AND user_id = ?`,
+    on, foodId, userId,
   );
 }
 
@@ -363,6 +457,8 @@ export function syncFood(userId: string, getToken: TokenGetter): Promise<FoodSyn
 async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResult> {
   const db = await getDb();
   const result: FoodSyncResult = { pushed: 0, failed: 0 };
+  /** Set once the connection is gone, so the second queue is not even read. */
+  let stalled = false;
 
   const rows = await db.getAllAsync<EntryRow & { remote: number }>(
     `SELECT * FROM food_entries WHERE user_id = ? AND dirty = 1 ORDER BY logged_at`, userId,
@@ -398,17 +494,38 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
       result.failed += 1;
       result.error = result.error ?? message;
       result.errorKind = worseKind(result.errorKind, kind);
-      await db.runAsync(`UPDATE food_entries SET last_error = ? WHERE id = ?`, message, r.id);
+      // THE SAME COMPARE-AND-SWAP AS THE SUCCESS PATH, and for the same reason.
+      // Without it, an edit made while this push was in flight is stomped by
+      // the failure of the payload that PRECEDED it: `dirty` is cleared on a
+      // row that is now newer than anything the server has, and the correction
+      // never leaves the phone. The success branch guarded this from the start;
+      // the failure branch did not, which is the quieter half of one bug.
+      await db.runAsync(
+        `UPDATE food_entries SET last_error = ?
+          WHERE id = ? AND user_id = ? AND updated_at = ?`,
+        message, r.id, userId, r.updated_at,
+      );
       if (kind === 'permanent') {
         // A 4xx will not become a 2xx. Stop owing it; keep the row and the
         // reason so the sync screen can explain it.
-        await db.runAsync(`UPDATE food_entries SET dirty = 0 WHERE id = ?`, r.id);
+        await db.runAsync(
+          `UPDATE food_entries SET dirty = 0
+            WHERE id = ? AND user_id = ? AND updated_at = ?`,
+          r.id, userId, r.updated_at,
+        );
       }
-      if (kind === 'offline') break; // No point walking the queue with no connection.
+      if (kind === 'offline') {
+        // No point walking the queue with no connection — and no point
+        // starting the SECOND queue either, which a bare `break` would do.
+        stalled = true;
+        break;
+      }
     }
   }
 
-  const foods = await db.getAllAsync<Food & { updated_at: string }>(
+  const foods = stalled
+    ? []
+    : await db.getAllAsync<Food & { updated_at: string }>(
     `SELECT id, kind, name, brand, serving_label, serving_grams,
             kcal, protein_g, carb_g, fat_g, fibre_g, updated_at
        FROM foods WHERE user_id = ? AND dirty = 1 AND deleted_at IS NULL`,
@@ -433,13 +550,70 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
       result.failed += 1;
       result.error = result.error ?? message;
       result.errorKind = worseKind(result.errorKind, kind);
-      await db.runAsync(`UPDATE foods SET last_error = ? WHERE id = ?`, message, f.id);
-      if (kind === 'permanent') await db.runAsync(`UPDATE foods SET dirty = 0 WHERE id = ?`, f.id);
+      await db.runAsync(
+        `UPDATE foods SET last_error = ? WHERE id = ? AND user_id = ? AND updated_at = ?`,
+        message, f.id, userId, f.updated_at,
+      );
+      if (kind === 'permanent') {
+        await db.runAsync(
+          `UPDATE foods SET dirty = 0 WHERE id = ? AND user_id = ? AND updated_at = ?`,
+          f.id, userId, f.updated_at,
+        );
+      }
       if (kind === 'offline') break;
     }
   }
 
+  // The foods PULL. `foods` is the half of this outbox that is not push-only —
+  // web authors recipes and the phone saves what it just ate, and both have to
+  // survive the other, which is why this table copies `workout_cache`'s shape
+  // rather than `sequences.ts`'s. Runs last and only when the pushes got
+  // through, so a local edit is never overwritten by a server copy that
+  // predates it.
+  if (!stalled && result.errorKind !== 'offline') {
+    try {
+      await cacheFoods(userId, await api.listFoods(getToken));
+    } catch {
+      // A failed pull is not a failed sync. Everything owed has already gone,
+      // and the catalog this refreshes is a convenience — the recents list is
+      // built from local entries and does not need it.
+    }
+  }
+
   return result;
+}
+
+/**
+ * Merge the server's foods in, never over a row this device still owes.
+ *
+ * The `dirty = 0` guard is the whole of it: a food edited here and not yet
+ * pushed must win against the copy the server still holds, or the athlete's
+ * correction is undone by the sync that was meant to carry it. Absent-from-the
+ * server does NOT delete, because a food saved here and not yet pushed is
+ * absent for the ordinary reason that the server has never heard of it.
+ */
+async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
+  const db = await getDb();
+  await withTransaction(db, async () => {
+    const now = stamp();
+    for (const f of foods) {
+      await db.runAsync(
+        `INSERT INTO foods (
+           id, user_id, kind, name, brand, serving_label, serving_grams,
+           kcal, protein_g, carb_g, fat_g, fibre_g, updated_at, dirty, remote)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+         ON CONFLICT(id) DO UPDATE SET
+           kind = excluded.kind, name = excluded.name, brand = excluded.brand,
+           serving_label = excluded.serving_label, serving_grams = excluded.serving_grams,
+           kcal = excluded.kcal, protein_g = excluded.protein_g,
+           carb_g = excluded.carb_g, fat_g = excluded.fat_g, fibre_g = excluded.fibre_g,
+           remote = 1
+         WHERE foods.dirty = 0 AND foods.deleted_at IS NULL`,
+        f.id, userId, f.kind, f.name, f.brand, f.serving_label, f.serving_grams,
+        f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g, now,
+      );
+    }
+  });
 }
 
 /**

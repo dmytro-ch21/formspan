@@ -25,38 +25,44 @@ import { StyleSheet, View } from 'react-native';
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import type { Macros, Remaining, Target } from '@/lib/nutrition';
+import { remaining as computeRemaining, viewTarget, type Macros, type TargetView } from '@/lib/nutrition';
 
 export function RemainingBlock({
   totals,
-  target,
-  remaining,
-  loaded,
+  view,
   compact = false,
   testID,
 }: {
   totals: Macros;
-  target: Target | null;
-  remaining: Remaining | null;
-  /** False until the read has settled. Distinguishes "nothing yet" from "could not load". */
-  loaded: boolean;
+  /** Everything this device knows about the target. See {@link TargetView}. */
+  view: TargetView;
   /** The card is compact; the day screen is not. */
   compact?: boolean;
   testID?: string;
 }) {
   const accent = useAccent();
 
-  // Three states, deliberately distinguished. "Could not load", "you have not
-  // logged anything" and "you have no target" are three different sentences,
-  // and asserting the second while offline is a false claim — the same
-  // reasoning CheckinCard carries.
-  const caption = !loaded
-    ? 'Checking…'
-    : !target
-      ? 'Set a target to see what is left'
-      : totals.kcal === 0
-        ? 'nothing logged yet'
-        : `${fmt(target.kcal)} target · ${fmt(totals.kcal)} eaten`;
+  // `remaining` is DERIVED here rather than passed in. Two surfaces sharing
+  // this component but each computing the figure themselves is the same drift
+  // the component exists to prevent, one level down.
+  const target = viewTarget(view);
+  const remaining = computeRemaining(totals, target);
+
+  // Four states, deliberately distinguished. "Could not check", "you have no
+  // target", "you have not logged anything" and the ordinary line are four
+  // different sentences, and the first two are the pair that matters: asserting
+  // "set a target" at somebody who set one on web, because this phone happens
+  // to be in a basement, is the app being wrong rather than uninformed.
+  const caption =
+    view.state === 'checking'
+      ? 'Checking…'
+      : view.state === 'unknown'
+        ? 'Cannot check your target from here — logging still works'
+        : view.state === 'none'
+          ? 'Set a target to see what is left'
+          : totals.kcal === 0
+            ? 'nothing logged yet'
+            : `${fmt(view.target.kcal)} target · ${fmt(totals.kcal)} eaten`;
 
   const kcalText = remaining ? fmt(Math.abs(remaining.kcal)) : '—';
   const proteinText = remaining ? `${fmt(Math.abs(remaining.protein_g))} g` : '—';

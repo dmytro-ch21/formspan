@@ -267,6 +267,21 @@ export const PREF_SEEDED_AT = 'seeded_at';
 export const PREF_PINNED_RECORDS = 'pinned_records';
 
 /**
+ * When the calorie targets were last successfully read from the server.
+ *
+ * The one thing the target cache cannot infer from its own rows: an athlete
+ * with NO target and an athlete this device has never managed to ask about
+ * both have zero cached rows, and telling them apart is the difference between
+ * "set a target" and "could not check". Same shape and same reasoning as
+ * {@link PREF_SEEDED_AT} — a timestamp rather than a boolean, because "when"
+ * answers questions a flag cannot.
+ *
+ * Local-only: written with `dirty = 0` and never pushed. It is a fact about
+ * this device's network luck, not a preference the account holds.
+ */
+export const PREF_TARGETS_FETCHED_AT = 'targets_fetched_at';
+
+/**
  * Carry pre-v10 OWED flags onto the `dirty` column.
  *
  * The companion-key scheme worked; it just did not generalise. Migrating

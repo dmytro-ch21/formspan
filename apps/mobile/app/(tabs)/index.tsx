@@ -66,7 +66,7 @@ import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
 import { listCheckins, listPhases, type Checkin, type Phase } from '@/lib/body';
-import { localEntries, logFood, recentsFor } from '@/lib/foodLog';
+import { cacheTargets, localEntries, localTargetView, logFood, recentsFor } from '@/lib/foodLog';
 import { hasFoodLog } from '@/lib/modules';
 import {
   rankRecents,
@@ -74,7 +74,7 @@ import {
   slotForClock,
   type Entry,
   type Food,
-  type Target,
+  type TargetView,
 } from '@/lib/nutrition';
 import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { accentGlow } from '@/lib/palette';
@@ -554,9 +554,8 @@ export default function TodayScreen() {
   // Fuel. Read locally first, exactly like the day screen: the card must be
   // right with no signal, because the log it reports is written offline.
   const [foodEntries, setFoodEntries] = useState<Entry[]>([]);
-  const [foodTarget, setFoodTarget] = useState<Target | null>(null);
+  const [foodView, setFoodView] = useState<TargetView>({ state: 'checking' });
   const [foodQuick, setFoodQuick] = useState<Food[]>([]);
-  const [foodLoaded, setFoodLoaded] = useState(false);
   const foodEnabled = hasFoodLog(modules);
 
   const refreshFood = useCallback(() => {
@@ -568,10 +567,7 @@ export default function TodayScreen() {
       .then((rows) => {
         if (live) setFoodEntries(rows);
       })
-      .catch(() => {})
-      .finally(() => {
-        if (live) setFoodLoaded(true);
-      });
+      .catch(() => {});
 
     // Ranked for the CURRENT slot, so the chips are porridge at breakfast and
     // something else at dinner.
@@ -581,11 +577,22 @@ export default function TodayScreen() {
       })
       .catch(() => {});
 
-    // The one thing the phone cannot compute. A failure leaves it null, which
-    // renders as "set a target" rather than as a wrong number.
+    // The one thing the phone cannot compute. Cache first, server second — and
+    // a failed fetch leaves the cached answer standing rather than falling back
+    // to "set a target", which would be a false claim about an athlete who set
+    // one on web. See TargetView.
+    (userId ? localTargetView(userId, today) : Promise.resolve<TargetView>({ state: 'unknown' }))
+      .then((v) => {
+        if (live) setFoodView(v);
+      })
+      .catch(() => {});
+
     listTargets(getToken, { from: today, to: today })
-      .then((ts) => {
-        if (live) setFoodTarget(targetOn(ts, today));
+      .then(async (ts) => {
+        if (userId) await cacheTargets(userId, today, today, ts);
+        if (!live) return;
+        const t = targetOn(ts, today);
+        setFoodView(t ? { state: 'set', target: t } : { state: 'none' });
       })
       .catch(() => {});
 
@@ -656,7 +663,11 @@ export default function TodayScreen() {
       refreshSessions();
       refreshPlan();
       refreshCheckins();
-      refreshFood();
+      // Its cleanup is KEPT, unlike its neighbours'. Food is the one refresh on
+      // this screen with a same-screen writer racing it — `quickLog` refreshes
+      // again immediately after logging — so a slow read started at focus could
+      // otherwise resolve last and paint over the row just added.
+      const stopFood = refreshFood();
       // On focus only, not on every day-step: the funnel is an aggregate over
       // every session ever logged and does not change because you looked at
       // Thursday.
@@ -666,7 +677,10 @@ export default function TodayScreen() {
       refreshRoadmaps();
       // Settings can have changed any of these while this screen sat mounted.
       const stop = readSuggestionPrefs();
-      return stop;
+      return () => {
+        stopFood?.();
+        stop?.();
+      };
     }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins, refreshFood]),
   );
 
@@ -1419,9 +1433,8 @@ export default function TodayScreen() {
         {foodEnabled && (
           <NutritionCard
             entries={foodEntries}
-            target={foodTarget}
+            view={foodView}
             quickAdd={foodQuick}
-            loaded={foodLoaded}
             onLog={() => router.push('/food/add')}
             onOpenDay={() => router.push('/food')}
             onQuickAdd={(f) => void quickLog(f)}

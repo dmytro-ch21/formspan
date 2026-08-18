@@ -7,7 +7,7 @@
  *
  * ## The order, and why
  *
- * One remaining block, then the meal slots, then what training cost. There is
+ * One remaining block, then the meal slots. There is
  * NO per-meal calorie allocation: "536 calories now available for breakfast"
  * requires knowing a day the app cannot see, it is wrong the moment you eat a
  * big lunch, and it manufactures four budgets to fail against instead of one
@@ -15,7 +15,9 @@
  *
  * ## Training is stated, not spent
  *
- * The row at the bottom reports what a session cost and changes nothing above
+ * The training row is NOT BUILT YET — this note is about the rule it must obey
+ * when it is, and it is here rather than in a task because the tempting version
+ * is the wrong one. It reports what a session cost and changes nothing above
  * it. Adding it back to the target double-counts (the target already includes a
  * 28-day training average) and makes the observed weekly rate unreadable — you
  * could no longer tell a bad week of eating from a moved goalpost.
@@ -36,11 +38,11 @@ import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { addDays, dayString } from '@/lib/calendar';
-import { localEntries, removeEntry } from '@/lib/foodLog';
-import { bySlot, dayTotals, remaining, type Entry, type Meal, type Target } from '@/lib/nutrition';
+import { cacheTargets, localEntries, localTargetView, removeEntry } from '@/lib/foodLog';
+import { bySlot, dayTotals, type Entry, type Meal, type TargetView } from '@/lib/nutrition';
 import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { useAuthToken } from '@/lib/useAuthToken';
-import { useSyncState } from '@/lib/sync';
+import { request as requestSync, useSyncState } from '@/lib/sync';
 
 const MEAL_LABELS: Record<Meal, string> = {
   breakfast: 'Breakfast',
@@ -59,8 +61,15 @@ export default function FoodScreen() {
   // the wall clock while it sits mounted — the same shape Today uses.
   const [dayOffset, setDayOffset] = useState(0);
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [target, setTarget] = useState<Target | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  // Keyed to the DAY it was computed for. Without the key, stepping to another
+  // day leaves the previous day's target standing while the new day's entries
+  // render against it — a wrong remaining figure, not merely a stale one — and
+  // a failed fetch would leave it there indefinitely. Resetting in an effect
+  // would be a synchronous setState the ratchet forbids; deriving is free.
+  const [dated, setDated] = useState<{ on: string; view: TargetView }>({
+    on: '',
+    view: { state: 'checking' },
+  });
   const { userId } = useAuth();
 
   const on = dayString(addDays(new Date(), dayOffset));
@@ -79,17 +88,26 @@ export default function FoodScreen() {
       .then((rows) => {
         if (live) setEntries(rows);
       })
-      .catch(() => {})
-      .finally(() => {
-        if (live) setLoaded(true);
-      });
+      .catch(() => {});
 
-    // The target is server-side and is the one thing this screen cannot
-    // compute. A failure leaves it null, which renders as "set a target"
-    // rather than as a wrong number.
+    // The target is the one thing this screen cannot compute — it needs
+    // training history the phone does not hold. So: the CACHE first, then the
+    // server, and a failed fetch simply leaves the cached answer standing. A
+    // day with no cache and no successful fetch ever renders as `unknown`,
+    // never as "set a target": telling an athlete who set one on web to go and
+    // set it again is the app being wrong rather than uninformed.
+    (userId ? localTargetView(userId, on) : Promise.resolve<TargetView>({ state: 'unknown' }))
+      .then((v) => {
+        if (live) setDated({ on, view: v });
+      })
+      .catch(() => {});
+
     listTargets(getToken, { from: on, to: on })
-      .then((ts) => {
-        if (live) setTarget(targetOn(ts, on));
+      .then(async (ts) => {
+        if (userId) await cacheTargets(userId, on, on, ts);
+        if (!live) return;
+        const t = targetOn(ts, on);
+        setDated({ on, view: t ? { state: 'set', target: t } : { state: 'none' } });
       })
       .catch(() => {});
 
@@ -118,12 +136,16 @@ export default function FoodScreen() {
   }, [lastSyncAt, refresh]);
 
   const totals = dayTotals(entries);
-  const left = remaining(totals, target);
   const slots = bySlot(entries);
+  const view: TargetView = dated.on === on ? dated.view : { state: 'checking' };
 
   async function onDelete(id: string) {
     if (!userId) return;
     await removeEntry(userId, id);
+    // Every other write in this feature asks for a push; without it the
+    // tombstone sits until the next foreground or timer tick, and a row deleted
+    // on the phone stays on web for minutes.
+    requestSync('food deleted');
     setEntries(await localEntries(userId, on));
   }
 
@@ -139,11 +161,11 @@ export default function FoodScreen() {
             <Pressable
               onPress={() => router.push('/food/target')}
               accessibilityRole="button"
-              accessibilityLabel={target ? 'Why this target' : 'Set a target'}
+              accessibilityLabel={view.state === 'set' ? 'Why this target' : 'Set a target'}
               testID="food-target-link"
             >
               <Text style={[styles.headerLink, { color: accent.ink }]}>
-                {target ? 'Target' : 'Set target'}
+                {view.state === 'set' ? 'Target' : 'Set target'}
               </Text>
             </Pressable>
           }
@@ -163,13 +185,7 @@ export default function FoodScreen() {
           />
 
           <View style={styles.summary}>
-            <RemainingBlock
-              totals={totals}
-              target={target}
-              remaining={left}
-              loaded={loaded}
-              testID="food-remaining"
-            />
+            <RemainingBlock totals={totals} view={view} testID="food-remaining" />
           </View>
 
           {slots.map((slot) => (

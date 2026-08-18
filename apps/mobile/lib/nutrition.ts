@@ -98,6 +98,33 @@ export function dayTotals(entries: Entry[]): Macros {
   return out;
 }
 
+/**
+ * What this device knows about the day's target.
+ *
+ * A union rather than `Target | null` plus a `loaded` boolean, because the
+ * fourth state is the one that matters and a pair of booleans lets it collapse
+ * silently. The target is the ONE number the phone cannot compute — it needs
+ * training history the device does not hold — so a failed fetch is a real and
+ * ordinary outcome, and "I could not check" must never render as "you have not
+ * set one". The second is an instruction to go and do homework the athlete may
+ * already have done on web.
+ *
+ * - `checking` — the first read has not settled.
+ * - `unknown` — no cached target and this device has never successfully asked.
+ * - `none` — the server has answered, and no target covers this day.
+ * - `set` — a target, from the server or from the cache.
+ */
+export type TargetView =
+  | { state: 'checking' }
+  | { state: 'unknown' }
+  | { state: 'none' }
+  | { state: 'set'; target: Target };
+
+/** The target in a view, or null in every state that has none. */
+export function viewTarget(view: TargetView): Target | null {
+  return view.state === 'set' ? view.target : null;
+}
+
 export type Remaining = {
   kcal: number;
   protein_g: number;

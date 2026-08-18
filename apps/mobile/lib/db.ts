@@ -322,6 +322,19 @@ const CREATE_FOODS = `
   );
 `;
 
+const CREATE_NUTRITION_TARGETS = `
+  CREATE TABLE IF NOT EXISTS nutrition_targets (
+    user_id TEXT NOT NULL,
+    effective_on TEXT NOT NULL,
+    kcal REAL NOT NULL,
+    protein_g REAL NOT NULL,
+    carb_g REAL NOT NULL,
+    fat_g REAL NOT NULL,
+    fibre_g REAL,
+    PRIMARY KEY (user_id, effective_on)
+  );
+`;
+
 /**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
@@ -351,11 +364,12 @@ const CREATE_FOODS = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
   | 'activities'
+  | 'nutrition_targets'
   | 'local_sessions'
   | 'prefs'
   | 'workout_cache'
@@ -440,6 +454,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_SEQUENCES);
   await db.execAsync(CREATE_FOOD_ENTRIES);
   await db.execAsync(CREATE_FOODS);
+  await db.execAsync(CREATE_NUTRITION_TARGETS);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -719,10 +734,30 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync(
       `CREATE INDEX IF NOT EXISTS food_entries_user_day_idx ON food_entries (user_id, eaten_on);`,
     );
-    // The quick-add list, which must not touch the network to be worth having.
+    // Held for the foods pull and for a future "recently saved" listing.
+    // NOTE it does not serve the quick-add list, which an earlier version of
+    // this comment claimed: `recentsFor` groups over `food_entries` and never
+    // orders by `last_used_at`. Recorded because an index believed to be load-
+    // bearing is one nobody measures before relying on it.
     await db.execAsync(
       `CREATE INDEX IF NOT EXISTS foods_user_recent_idx ON foods (user_id, last_used_at DESC);`,
     );
+  }
+
+  if (current < 19) {
+    // The day's calorie target, cached.
+    //
+    // A NEW VERSION rather than an extension of 18, even though 18 is unmerged
+    // and has never shipped: `migrate()` returns early at
+    // `current >= SCHEMA_VERSION`, so a device already stamped 18 never reaches
+    // the unconditional CREATE block above and would simply not have this
+    // table. Every dev machine that has run this branch is such a device.
+    //
+    // Note it is the BUMP that fixes that, not this branch — the branch is a
+    // no-op against the unconditional CREATE, same as 18's. It is here so the
+    // version the table arrived in is readable from `migrate()` rather than
+    // only from git.
+    await db.execAsync(CREATE_NUTRITION_TARGETS);
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

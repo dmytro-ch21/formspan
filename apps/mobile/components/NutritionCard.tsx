@@ -27,23 +27,22 @@ import { Icon } from '@/components/ui/Icon';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { dayTotals, remaining, type Entry, type Food, type Target } from '@/lib/nutrition';
+import { dayTotals, type Entry, type Food, type TargetView } from '@/lib/nutrition';
 
 export function NutritionCard({
   entries,
-  target,
+  view,
   quickAdd,
-  loaded,
   onLog,
   onOpenDay,
   onQuickAdd,
   testID,
 }: {
   entries: Entry[];
-  target: Target | null;
+  /** Everything Today knows about the target. See {@link TargetView}. */
+  view: TargetView;
   /** The three most-logged foods for the current slot. May be empty. */
   quickAdd: Food[];
-  loaded: boolean;
   onLog: () => void;
   onOpenDay: () => void;
   onQuickAdd: (food: Food) => void;
@@ -51,7 +50,6 @@ export function NutritionCard({
 }) {
   const accent = useAccent();
   const totals = dayTotals(entries);
-  const left = remaining(totals, target);
 
   return (
     <View style={styles.card} testID={testID ?? 'fuel-card'}>
@@ -60,7 +58,7 @@ export function NutritionCard({
         <Text style={[styles.eyebrow, { color: accent.ink }]}>FUEL</Text>
       </View>
 
-      <RemainingBlock totals={totals} target={target} remaining={left} loaded={loaded} compact />
+      <RemainingBlock totals={totals} view={view} compact />
 
       {quickAdd.length > 0 && (
         <View style={styles.quick}>

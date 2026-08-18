@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(18);
+  expect(row.user_version).toBe(19);
 });
 
 it('a fresh install has the sequences outbox', async () => {
@@ -122,7 +122,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 19 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -156,7 +156,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 19 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -177,7 +177,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 19 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
@@ -331,7 +331,7 @@ it('upgrading a v15-shaped database does not mark every cached name as owed', as
     .prepare(`SELECT name_dirty FROM workout_cache WHERE id = 'w1'`)
     .get() as { name_dirty: number };
   expect(row.name_dirty).toBe(0);
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 19 });
 });
 
 it('a fresh install has the food log', async () => {
@@ -407,17 +407,42 @@ it('upgrades a v17-shaped database by adding the food log', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 19 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
   expect(tables).toEqual(expect.arrayContaining(['food_entries', 'foods']));
 });
 
+it('upgrades a v18-shaped database by adding the target cache', async () => {
+  // The case that made this a NEW version rather than an extension of 18.
+  // `migrate()` returns early at `current >= SCHEMA_VERSION`, so a device
+  // already stamped 18 — every dev machine that has run this branch — would
+  // never reach the unconditional CREATE section and would simply not have the
+  // table.
+  //
+  // BE HONEST ABOUT WHAT THIS COVERS, exactly as the v17 test above is. The
+  // load-bearing thing is the VERSION BUMP, not the `if (current < 19)` block:
+  // deleting that block leaves this green, because the unconditional section
+  // recreates the table once the early return is no longer taken. Reverting
+  // SCHEMA_VERSION to 18 is the mutation this catches — verified, and it takes
+  // four tests in this file red with it.
+  const db = await migratedFixture();
+  db.raw.exec('DROP TABLE nutrition_targets; PRAGMA user_version = 18;');
+
+  await migrate(db as never);
+
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 19 });
+  const tables = (
+    db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+  ).map((t) => t.name);
+  expect(tables).toContain('nutrition_targets');
+});
+
 it('the food log is indexed on the two reads that matter', async () => {
   // Not decoration: the day screen queries (user_id, eaten_on) on every focus,
-  // and the quick-add list queries foods by recency every time the sheet opens.
-  // A missing index here is a scan on the tables expected to grow fastest.
+  // and the foods pull upserts the whole catalog on every sync. A missing index
+  // here is a scan on the tables expected to grow fastest.
   const db = await migratedFixture();
   const idx = (
     db.raw

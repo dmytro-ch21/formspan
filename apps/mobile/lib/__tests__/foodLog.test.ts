@@ -16,8 +16,10 @@ import { ApiError, OfflineError } from '../apiError';
 import {
   cacheEntries,
   editEntry,
+  cacheTargets,
   localEntries,
   localEntry,
+  localTargetView,
   logFood,
   pendingFoodCount,
   recentsFor,
@@ -25,6 +27,7 @@ import {
   saveFoodLocally,
   syncFood,
 } from '../foodLog';
+import type { Target } from '../nutrition';
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 
 let db: FixtureDb;
@@ -43,6 +46,18 @@ jest.mock('../apiRequest', () => ({
 }));
 
 const USER = 'u1';
+
+function aTarget(over: Partial<Target> = {}): Target {
+  return {
+    effective_on: TODAY,
+    kcal: 2400,
+    protein_g: 180,
+    carb_g: 240,
+    fat_g: 80,
+    fibre_g: 34,
+    ...over,
+  };
+}
 const TODAY = '2026-08-18';
 const token = async () => 'tok';
 
@@ -69,7 +84,12 @@ async function row(id: string) {
     deleted_at: string | null;
     last_error: string | null;
     updated_at: string;
-  }>(`SELECT dirty, remote, deleted_at, last_error, updated_at FROM food_entries WHERE id = ?`, id);
+    kcal: number;
+  }>(
+    `SELECT dirty, remote, deleted_at, last_error, updated_at, kcal
+       FROM food_entries WHERE id = ?`,
+    id,
+  );
 }
 
 beforeEach(async () => {
@@ -137,11 +157,28 @@ describe('reading one entry', () => {
 });
 
 describe('removing', () => {
-  it('hard-deletes a row the server has never seen, and never asks', async () => {
+  it('tombstones a row whose FIRST push may be in flight, rather than forgetting it', async () => {
+    // A freshly logged row is `remote = 0, dirty = 1`. Hard-deleting it loses
+    // the race: the in-flight create succeeds, the compare-and-swap finds
+    // nothing, and the server keeps an entry this device has forgotten — with
+    // no tombstone left to remove it and no pull to bring it back. Web then
+    // totals a lunch the athlete deleted. The delete is 204-always on the
+    // server, so tombstoning an id it has never seen costs nothing.
     const id = await logFood(USER, meal());
     await removeEntry(USER, id);
-    expect(await row(id)).toBeNull();
+    expect(await row(id)).not.toBeNull();
+    expect((await row(id))?.deleted_at).toBeTruthy();
+    // Gone from every read, immediately, which is all the athlete sees.
     expect(await localEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it('hard-deletes a row that is neither pushed nor owed', async () => {
+    const id = await logFood(USER, meal());
+    // Simulate a completed push whose row was then marked not-remote — the only
+    // state where nothing can be in flight.
+    await db.runAsync(`UPDATE food_entries SET dirty = 0 WHERE id = ?`, id);
+    await removeEntry(USER, id);
+    expect(await row(id)).toBeNull();
   });
 
   it('tombstones a row the server knows about, so it cannot come back on the next pull', async () => {
@@ -200,16 +237,56 @@ describe('pushing', () => {
    */
   it('an edit made mid-push leaves the row still owed', async () => {
     const id = await logFood(USER, meal());
-    mockApi.mockImplementation(async () => {
+    mockApi.mockImplementationOnce(async () => {
       // The user corrects the portion while the request is in the air.
       await editEntry(USER, id, meal({ servings: 2, kcal: 360 }));
       return {};
     });
+    mockApi.mockResolvedValue({});
 
     await syncFood(USER, token);
 
     const r = await row(id);
     expect(r?.dirty).toBe(1);
+  });
+
+  it('an edit made mid-push survives a REJECTION of the payload that preceded it', async () => {
+    // The quieter half of the same bug, and the one that shipped. The success
+    // path compared-and-swapped from the start; the failure path did not, so a
+    // 4xx on the OLD payload cleared `dirty` on the NEW edit and the
+    // correction never left the phone — silently, with no error the athlete
+    // could act on.
+    const id = await logFood(USER, meal());
+    // ONCE, and the distinction is load-bearing: a persistent implementation
+    // also fires on the foods pull at the end of the push, which edits the row
+    // a second time and re-dirties it — so the test would pass with the guard
+    // removed. Found by mutation, which is the only thing that finds this.
+    mockApi.mockImplementationOnce(async () => {
+      await editEntry(USER, id, meal({ servings: 2, kcal: 360 }));
+      throw new ApiError('rejected', 'invalid_input', 400);
+    });
+    mockApi.mockResolvedValue({});
+
+    await syncFood(USER, token);
+
+    const r = await row(id);
+    expect(r?.dirty).toBe(1);
+    expect(r?.kcal).toBe(360);
+  });
+
+  it('a rejection does not stamp its error onto a newer edit', async () => {
+    const id = await logFood(USER, meal());
+    mockApi.mockImplementationOnce(async () => {
+      await editEntry(USER, id, meal({ servings: 2, kcal: 360 }));
+      throw new ApiError('rejected', 'invalid_input', 400);
+    });
+    mockApi.mockResolvedValue({});
+
+    await syncFood(USER, token);
+
+    // `editEntry` clears `last_error`; the failure of the previous payload
+    // must not put it back on a row that has not been tried yet.
+    expect((await row(id))?.last_error).toBeNull();
   });
 
   it('a permanent rejection stops owing but keeps the reason', async () => {
@@ -283,6 +360,57 @@ describe('the pull', () => {
       { ...meal(), id: 'srv-1', source_food_id: null, notes: '' },
     ]);
     expect(await localEntries(USER, TODAY)).toHaveLength(0);
+  });
+});
+
+describe('the target cache', () => {
+  it('an unreachable target is UNKNOWN, not "you have none"', async () => {
+    // The distinction the whole TargetView union exists for. Zero cached rows
+    // and no successful fetch ever is not evidence that the athlete has no
+    // target — they may have set one on web this morning.
+    expect(await localTargetView(USER, TODAY)).toEqual({ state: 'unknown' });
+  });
+
+  it('once the server has answered, no target really does mean none', async () => {
+    await cacheTargets(USER, TODAY, TODAY, []);
+    expect(await localTargetView(USER, TODAY)).toEqual({ state: 'none' });
+  });
+
+  it('serves the cached target with no network at all', async () => {
+    await cacheTargets(USER, TODAY, TODAY, [aTarget()]);
+    const v = await localTargetView(USER, TODAY);
+    expect(v.state).toBe('set');
+    expect(v.state === 'set' && v.target.kcal).toBe(2400);
+  });
+
+  it('carries a target forward from before the window, like the server does', async () => {
+    await cacheTargets(USER, '2026-03-01', '2026-03-01', [
+      aTarget({ effective_on: '2026-03-01' }),
+    ]);
+    const v = await localTargetView(USER, TODAY);
+    expect(v.state === 'set' && v.target.effective_on).toBe('2026-03-01');
+  });
+
+  it('a target deleted on web does not linger in the cache', async () => {
+    await cacheTargets(USER, TODAY, TODAY, [aTarget()]);
+    await cacheTargets(USER, TODAY, TODAY, []);
+    expect(await localTargetView(USER, TODAY)).toEqual({ state: 'none' });
+  });
+
+  it('a narrow window does not sweep away a target from another month', async () => {
+    // The carry-in row sits BEFORE `from`, so the in-window delete must not
+    // reach it — otherwise asking about August erases March.
+    await cacheTargets(USER, '2026-03-01', '2026-03-01', [
+      aTarget({ effective_on: '2026-03-01' }),
+    ]);
+    await cacheTargets(USER, TODAY, TODAY, []);
+    const v = await localTargetView(USER, TODAY);
+    expect(v.state === 'set' && v.target.effective_on).toBe('2026-03-01');
+  });
+
+  it('is scoped to the athlete', async () => {
+    await cacheTargets('u2', TODAY, TODAY, [aTarget()]);
+    expect(await localTargetView(USER, TODAY)).toEqual({ state: 'unknown' });
   });
 });
 

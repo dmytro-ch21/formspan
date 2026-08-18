@@ -64,6 +64,7 @@ export default function TargetScreen() {
   const [data, setData] = useState<Suggested | null>(null);
   const [failed, setFailed] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const on = todayString();
 
   useEffect(() => {
@@ -90,6 +91,7 @@ export default function TargetScreen() {
     const s = data?.suggestion;
     if (!s || saving) return;
     setSaving(true);
+    setSaveFailed(false);
     try {
       await saveTarget(getToken, on, {
         kcal: s.kcal,
@@ -101,6 +103,11 @@ export default function TargetScreen() {
         basis: s.basis,
       });
       router.back();
+    } catch {
+      // Accepting a target is the one WRITE on this screen, and offline is this
+      // app's ordinary weather. Without this the button simply un-dimmed and
+      // nothing happened — the athlete would reasonably conclude it had saved.
+      setSaveFailed(true);
     } finally {
       setSaving(false);
     }
@@ -219,6 +226,12 @@ export default function TargetScreen() {
                 {saving ? 'Saving…' : 'Use this target'}
               </Text>
             </Pressable>
+            {saveFailed ? (
+              <Text style={styles.problem}>
+                Could not save it — this one needs a connection. Nothing has changed; try again
+                when you have signal.
+              </Text>
+            ) : null}
             <Text style={styles.footnote}>
               Nothing is saved until you tap that. The workings above are stored with it, so this
               page still answers the question months from now.
@@ -319,6 +332,7 @@ const styles = StyleSheet.create({
   rowValue: { fontSize: 14, fontVariant: ['tabular-nums'], color: vola.textMuted },
   rowValueStrong: { fontSize: 16, fontWeight: '700', color: vola.text },
   note: { fontSize: 12, color: vola.textMuted, lineHeight: 17 },
+  problem: { fontSize: 12, color: vola.danger, lineHeight: 17 },
   link: { fontSize: 13, fontWeight: '700', paddingVertical: 6 },
   footnote: { fontSize: 11, color: vola.textDim, lineHeight: 16 },
   primary: {
