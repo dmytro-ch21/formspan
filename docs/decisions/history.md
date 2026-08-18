@@ -25659,6 +25659,39 @@ the content across the close. That last one was first written with a ref read
 during render, which cost five lint warnings against a ratchet set at 54 — the
 state version is both correct and free.
 
+**Seen on a device, which for this branch is the point.** L1 exists because
+nothing on the phone has been looked at on a phone, and a change whose entire
+subject is how a screen reads cannot be signed off from a passing typecheck.
+Verified on a booted iPhone 17 Simulator against a dev client pinned to this
+branch's Metro (worth stating: `expo run:ios` auto-attached to the Metro already
+serving the PRIMARY checkout, i.e. `main`, so the first screenshots would have
+shown the code this branch replaces — confirm which bundle a screenshot came
+from before trusting it):
+
+- `+ Set` renders as one clean full-width solid button on a set carrying no
+  weight, which is the no-drop case behaving as designed.
+- The set editor collapses to `TYPE  Working` and `GRIP  Not recorded`. The
+  twelve-chip wall is gone.
+- Opening `TYPE` wraps six 12pt pills with the selection in accent and the
+  "Hold one for what it means." hint below them.
+- Holding `Back-off` opens the panel with its definition and a Done button, and
+  the long press does **not** also fire the selection.
+- Tapping `Back-off` selects it, closes the group, sets the header to
+  `Back-off`, and puts the `B` badge on the row.
+- Turning `Timed` on fills the pill, reveals `Timer (s)` at 60, changes the row
+  summary to `60s`, arms the row's timer glyph, and makes **Run all** and
+  **Guided workout** appear — the set joining a hands-free run, which is exactly
+  what the panel's copy promises and the strongest evidence the switch writes a
+  real target rather than a decoration.
+
+**Not verified, and honestly:** the `+ Set` / `+ Drop` PAIR (needs a weight on
+the set), the minutes-mode `0` → `0.5` case, and VoiceOver. All three need
+keyboard input, and this Simulator had latched its hardware keyboard — the field
+focuses, a caret appears, no soft keyboard ever does. That is the failure mode
+`CLAUDE.md` documents as unfixable from the command line; only ⌘⇧K on the device
+window clears it. The typed-input cases are covered by `timerTargetEdit`'s unit
+tests instead, and the VoiceOver claims remain reasoned rather than observed.
+
 Covered by `lib/__tests__/setGuide.test.ts`, driven off `GRIPS` and `SET_TYPES`
 rather than a list repeated in the test — so a seventh grip added without copy
 fails, rather than silently shipping a pill whose long press says "no
