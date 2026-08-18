@@ -164,7 +164,7 @@ func TestGripError_StillSatisfiesBothSentinels(t *testing.T) {
 // A valid body goes on to the repository, so this asserts what it can from
 // outside: whatever happens next, it is not a 400 blaming the grip.
 func TestValidateSets_AcceptsTheGripsTheEnumDefines(t *testing.T) {
-	for _, g := range []Grip{GripRegular, GripNeutral, GripReverse, GripAngled} {
+	for _, g := range []Grip{GripRegular, GripNeutral, GripReverse, GripAngled, GripMixed, GripHook} {
 		if err := validateSets([]Set{{ExerciseID: "bench-press", Grip: ptrGrip(g)}}); err != nil {
 			t.Errorf("grip %q was refused: %v", g, err)
 		}
