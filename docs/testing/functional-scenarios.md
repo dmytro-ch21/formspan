@@ -3772,6 +3772,23 @@ Covers `lib/plan.ts`'s outbox and `lib/plansApi.ts`. Schema v15.
   failed — the pending count includes it, no error banner appears, and it goes
   out once the template lands.
 
+**Deleting while a push is in flight — sessions and workouts (T6)**
+
+The same race as the plan case above, in the other two outboxes, where the guard
+was missing entirely rather than merely untested. Reproduce against a slow or
+throttled network.
+
+- Delete a **session** while its push is in flight → it stays owed, the pending
+  count still shows it, and the delete reaches the server on the next sync. It
+  must not end up gone from the phone and alive on the server with pending
+  reading zero — that state never retries and nothing reports it.
+- Delete a **workout** mid-push → same, and the `DELETE` actually goes out on
+  the following sync rather than merely staying dirty forever.
+- A push with nothing deleted underneath it still clears to zero pending, in
+  both cases.
+- An ordinary **edit** mid-push still keeps the row owed too — the older guard
+  must survive alongside the new one.
+
 **Editing or deleting while a push is in flight (T5)**
 
 The window between the sync reading a plan and writing "sent" back. The Plan

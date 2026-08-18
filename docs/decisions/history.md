@@ -23341,6 +23341,78 @@ rolled-back transaction, during review.
   that tells them. That is the argument for a side on `mixed`, and it should be
   made with a consumer in hand rather than by widening the enum first.
 
+## 2026-08-17 — The comment said the race was handled, so nobody checked
+
+**T6.** Sessions and workouts both end their push by clearing `dirty` under a
+compare-and-swap on `updated_at`. `deleteLocalSession`'s docstring explained why
+that was enough:
+
+> The interleaving is safe because the tombstone bumps `updated_at`: a push
+> already in flight finds its CAS no longer matches, so the row stays dirty.
+
+It is not enough, and the gap is the clock. The delete stamps `updated_at` from
+the same wall clock the swap compares against, so a delete landing in the **same
+millisecond** as the push's snapshot writes an identical string. The swap
+matches, the tombstone is marked clean — and the push loop selects on
+`dirty = 1`, so it is then never sent at all. The session or workout is gone
+from the phone, alive on the server, `pending` reads zero, and nothing retries.
+Silent, and only on rows somebody deliberately deleted.
+
+### How it was found, which is the part worth keeping
+
+Not by a failing test — by **wording review**. A reviewer checking the prose of
+T5's entry noticed the shape in the siblings and said so. Everything else about
+it was invisible: the code compiled, the suite was green, and the docstring
+above the delete asserted the protection actually held. A comment claiming a
+race is handled is the most effective way to stop anyone checking whether it is.
+
+`plan.ts` carries the second clause — `AND deleted_at IS NULL` — and T5 had
+just pinned it there. **It did not start with it.** Its swap was written with
+`updated_at` alone, exactly like these two; the clause was added by a
+`/pre-merge` review finding on that same PR (`1f746dc`, "Resolve every blocking
+finding"). Nobody swept the two older outboxes at the time, so for months one of
+the three was guarded and the reasoning existed only inside the guarded one.
+
+So of the three, the one that HAD the guard was the one nothing tested, and the
+two without went unnoticed because nothing tested them either. There was no
+failing test to make anyone look, in either direction — and the fix, both times,
+came out of review rather than out of the suite.
+
+### What landed
+
+`AND deleted_at IS NULL` on both closing swaps, **alongside** the `updated_at`
+clause rather than instead of it, and the docstring rewritten to say what is
+true. `tombstoneRace.test.ts` pins all of it: reverting the session fix, the workout
+fix, or the `updated_at` clause each turns the matching test red. Not *only*
+that test, and the difference is worth stating rather than rounding off —
+reverting the workout clause also fails "the delete goes out on the very next
+sync", and dropping `updated_at` additionally fails cases in `gripPush` and
+`workoutPush`. Everything that fires is on-topic; nothing fires spuriously. Two further cases hold the other direction —
+a push with nothing deleted underneath it still goes clean, and the workout's
+tombstone actually goes out on the next sync — because "never clear `dirty`"
+would otherwise satisfy the whole file.
+
+Reproduced with a control before any fix was written: the probe left
+`deleted_at` set and `dirty = 0`; adding the clause made the same probe report
+`dirty = 1`.
+
+### Gaps
+
+- **`updated_at` string equality is still the reconciliation primitive**, at
+  millisecond ISO resolution, in all three outboxes. The tombstone clause exists
+  because that resolution is too coarse — but it only covers deletes. Two
+  ordinary edits inside one millisecond still collide, and there the CAS matches
+  when it should decline. Nothing measures how often that happens on a real
+  device; the fixture forces collisions rather than observing them.
+- **No test asserts the two clauses are independent across a future edit.**
+  `tombstoneRace.test.ts` checks each in isolation today, but a later change
+  that folds them into one condition would need its own mutation to catch.
+- **The delete-mid-push window was only ever closed for the LAST write of the
+  push.** Earlier statements in `pushRow` — the `remote = 1` flip, the grip
+  repair — still run against a row that may already be a tombstone. Harmless as
+  far as this entry checked, since the terminal swap now declines and the next
+  pass re-reads, but nothing pins that reasoning.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
