@@ -70,7 +70,7 @@ describe('beltSyllabuses', () => {
     // drops the row, and the strip renders empty. Empty is the safe failure;
     // a strip full of strangers wearing belt words is not.
     const got = beltSyllabuses([
-      { ...c({ id: 'unknown', belt: 'white', track: 'syllabus' }), official: undefined } as never,
+      { ...c({ id: 'unknown', belt: 'white', track: 'syllabus' }), official: undefined },
     ]);
     expect(got).toEqual([]);
   });
@@ -143,7 +143,7 @@ describe('roadmapCurricula', () => {
 
   it('hides everything when the server does not send the field at all', () => {
     const got = roadmapCurricula([
-      { ...c({ id: 'x', belt: 'white', track: 'belt' }), official: undefined } as never,
+      { ...c({ id: 'x', belt: 'white', track: 'belt' }), official: undefined },
     ]);
     expect(got).toEqual([]);
   });

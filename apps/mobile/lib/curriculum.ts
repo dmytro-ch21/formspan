@@ -115,6 +115,12 @@ export type Curriculum = {
    * permission and this is authorship, and the two agree on every row VOLA
    * wrote, which is what made confusing them survive review.
    *
+   * **OPTIONAL on purpose**, because that is what the wire can actually
+   * deliver: an older server omits it entirely. Typed `boolean` this was a
+   * lie the tests had to `as never` their way around, and the truthy-filter
+   * idiom below was a doc-comment plea rather than something the typechecker
+   * enforced. Optional makes forgetting to handle the absence a type error.
+   *
    * Both strips test it as a TRUTHY filter rather than normalising it, and
    * that is the whole safety argument: an older server omitting the field
    * yields `undefined`, the filter drops the row, and the strip renders empty.
@@ -122,7 +128,7 @@ export type Curriculum = {
    * strangers' curricula wearing belt words. Do not "fix" this by defaulting
    * it to `true`.
    */
-  official: boolean;
+  official?: boolean;
   name: string;
   description: string;
   /** A hint for ordering, never a gate — working white-belt fundamentals at

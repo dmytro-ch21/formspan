@@ -2733,8 +2733,18 @@ export type SequenceStep = {
 export type Sequence = {
   id: string;
   /** Whether the CALLER may change this — resolved server-side so no client
-   *  compares user ids to decide whether to show an edit affordance. False
-   *  only for VOLA-authored reference chains. */
+   *  compares user ids to decide whether to show an edit affordance.
+   *
+   *  False only for VOLA-authored reference chains **TODAY, and only because
+   *  `sequence`'s `visibleTo` has no public arm** — you can see your own and
+   *  VOLA's, nothing else, and sharing is by copy. So the sequences list can
+   *  still say "· reference" off `!editable` and be right.
+   *
+   *  **The day sequences gain a public arm, that label becomes a lie**, and it
+   *  is the exact bug F7 fixed for curricula: `editable` is owner-is-caller,
+   *  so it is false for VOLA's AND for every stranger's. The fix there was a
+   *  separate `official` field carrying `owner_user_id IS NULL`. Do the same
+   *  here rather than rediscovering it. */
   editable: boolean;
   name: string;
   description: string;

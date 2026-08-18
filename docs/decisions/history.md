@@ -25397,8 +25397,17 @@ test asserts both that the pair is indistinguishable on `editable` and that
 
 - **`apps/web`'s curricula page still splits on `editable`** (`mine` vs
   `shared`). That is a legitimate use — "not mine" is what it means to say — and
-  it makes no authorship claim, so it is left alone. Worth knowing it is the one
-  remaining `!editable` consumer if the word "shared" ever grows a VOLA section.
+  it makes no authorship claim, so it is left alone. Review agreed, and pointed
+  out the follow-up it enables: now that `official` is on the wire, the Shared
+  tab could badge the VOLA rows in it. Not done here.
+- **The same inference survives on `apps/web`'s sequences list**, which labels a
+  chain "· reference" from `!s.editable`. Review checked it and it is sound
+  *today*, for a reason that has nothing to do with the label: `sequence`'s
+  `visibleTo` has no public arm, so you can see your own and VOLA's and nothing
+  else. It becomes wrong in the same breath as the first public sequence, and
+  nothing will fail when it does. Filed as **T9** and noted at both call sites,
+  because that is the shape this entry is about — the guard that is right by
+  accident is the one nobody revisits.
 - `track` remains unvalidated, so a stranger's curriculum can still *claim* the
   syllabus track. Nothing renders it as VOLA content now, but a future consumer
   filtering on `track` alone would reintroduce the hole. The field comments say
