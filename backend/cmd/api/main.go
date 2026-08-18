@@ -238,6 +238,14 @@ func main() {
 	}
 	bodyHandler := body.NewHandler(body.NewPostgresRepository(pool), photoStore)
 	nutritionHandler := nutrition.NewHandler(nutrition.NewPostgresRepository(pool))
+	// The AI estimate endpoint. `NewAnthropicEstimator` returns nil on an empty
+	// key and the handler serves 503 for that, so a deploy without
+	// ANTHROPIC_API_KEY runs every other nutrition route normally rather than
+	// refusing to start — this is the only feature in the API that needs it.
+	estimateHandler := nutrition.NewEstimateHandler(
+		nutrition.NewAnthropicEstimator(os.Getenv("ANTHROPIC_API_KEY")),
+		nutrition.NewPostgresEstimateUsage(pool),
+	)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
@@ -275,6 +283,10 @@ func main() {
 	mux.Handle("PUT /v1/nutrition/entries/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveEntry)))
 	mux.Handle("DELETE /v1/nutrition/entries/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteEntry)))
 	mux.Handle("GET /v1/nutrition/days", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.Days)))
+	// Computes a DRAFT and writes nothing. Rate-limited per athlete on top of
+	// the global limiter, because this is the one route where a loop costs
+	// real money rather than CPU.
+	mux.Handle("POST /v1/nutrition/estimate", verifier.RequireAuth(http.HandlerFunc(estimateHandler.Estimate)))
 	mux.Handle("GET /v1/nutrition/foods", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.ListFoods)))
 	mux.Handle("PUT /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveFood)))
 	mux.Handle("DELETE /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteFood)))

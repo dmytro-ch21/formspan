@@ -181,6 +181,23 @@ func ClaimsFromContext(ctx context.Context) (*Claims, bool) {
 	return claims, ok
 }
 
+// ContextWithClaims is the inverse of ClaimsFromContext, for tests.
+//
+// The context key is deliberately unexported, which is right — nothing outside
+// this package should be able to forge an identity in production code. But it
+// also means a handler test cannot reach an authenticated code path at all
+// without standing up a verifier and minting a real signed token, and the
+// alternative to this function is that authenticated handlers simply go
+// untested. That trade is worse: the handlers are where the authorization
+// decisions live.
+//
+// **Not a way to authenticate a request.** Only `RequireAuth` puts claims in a
+// context that came from the network; this writes to a context a test already
+// owns, so it cannot be reached by a caller.
+func ContextWithClaims(ctx context.Context, claims *Claims) context.Context {
+	return context.WithValue(ctx, claimsContextKey, claims)
+}
+
 // RequireAdmin composes RequireAuth with an admin-membership check: 401 if
 // not signed in at all (same as RequireAuth), 403 if signed in but the
 // caller's user ID isn't in the ADMIN_USER_IDS allowlist.

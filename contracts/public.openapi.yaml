@@ -61,6 +61,84 @@ components:
         fat_g: { type: number }
         fibre_g: { type: number, nullable: true }
 
+    MealEstimate:
+      type: object
+      description: >
+        A draft, not an entry. Nothing has been written; the athlete corrects
+        these rows and confirms them.
+      required: [items, note, model, source]
+      properties:
+        items:
+          type: array
+          maxItems: 12
+          items: { $ref: "#/components/schemas/EstimatedItem" }
+        note:
+          type: string
+          description: >
+            What the model wants the athlete to know about the estimate as a
+            whole — typically what it could not see. Empty is normal.
+        model:
+          type: string
+          description: Which model produced this, so a later quality question has an answer.
+        source:
+          type: string
+          enum: [text, photo]
+
+    EstimatedItem:
+      type: object
+      description: >
+        One component the athlete would correct separately. A sandwich is
+        usually one item, not five.
+      required:
+        [name, serving_label, servings, kcal, protein_g, carb_g, fat_g,
+         fibre_g, portion_confidence, assumption]
+      properties:
+        name: { type: string, example: Scrambled eggs }
+        serving_label: { type: string, example: 1 medium egg }
+        servings: { type: number, example: 2 }
+        kcal: { type: number }
+        protein_g: { type: number }
+        carb_g: { type: number }
+        fat_g: { type: number }
+        fibre_g:
+          type: number
+          nullable: true
+          description: Null is "not stated", never zero — the same contract the rest of this module holds.
+        portion_confidence:
+          type: string
+          enum: [high, medium, low]
+          description: >
+            How sure the model is about the QUANTITY — never about what the
+            food is. A confidently identified food at an unclear portion is
+            `low`, which is the common case for a photo.
+        assumption:
+          type: string
+          description: >
+            The judgement the model had to make to give a number at all —
+            "assumed a medium egg". Empty when there was nothing to assume.
+            This is what tells the athlete which field to correct.
+
+    EstimateQuota:
+      type: object
+      description: Usage of one path, over a rolling 24 hours.
+      required: [source, used, limit, remaining, resets_at]
+      properties:
+        source: { type: string, enum: [text, photo] }
+        used: { type: integer }
+        limit: { type: integer, description: "20 for text, 5 for photo." }
+        remaining:
+          type: integer
+          description: >
+            Clamped at zero — never negative, even if the caps are lowered in a
+            deploy.
+        resets_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            When the oldest call in the window ages out, which is when one more
+            becomes available. Null when nothing is used.
+
     NutritionEntry:
       allOf:
         - $ref: "#/components/schemas/NutritionMacros"
@@ -8370,6 +8448,130 @@ paths:
       responses:
         "204": { description: "Gone, or never there." }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/estimate:
+    post:
+      operationId: estimateMeal
+      summary: Turn a description or a photo into an editable draft
+      description: >
+        Describe what you ate — "two eggs, sourdough and butter" — or send a
+        photo, and get back a draft the athlete corrects and confirms.
+
+
+        **This writes nothing.** The response is a draft for the quick-add
+        sheet; no `nutrition_entries` row exists until the client PUTs one. A
+        model that logged food without confirmation would make its mistakes
+        indistinguishable from the athlete's own history, and every derived
+        number in this module rests on a logged row being what they said they
+        ate.
+
+
+        **`portion_confidence` is about the QUANTITY, never the
+        identification**, and the distinction is the point. Naming a food from
+        a photo is reliable; judging how much of it is on the plate is not. A
+        misnamed food is obvious to the athlete; a portion wrong by a factor of
+        two is invisible and moves the day's remaining figure by hundreds of
+        calories. Clients should surface `low` prominently and pre-focus the
+        quantity field. `assumption` carries the judgement the model had to
+        make to answer at all ("assumed a medium egg"), which is what tells the
+        athlete WHICH field to fix.
+
+
+        **Text first.** The text path costs a fraction of the photo path — no
+        image tokens at all — and covers most logging. The camera is the
+        fallback for a meal you cannot describe, not the primary path.
+
+
+        **Photos are not stored.** Bytes are forwarded to the model provider
+        and discarded; nothing is persisted. A client must disclose that the
+        photo leaves the device before sending it.
+
+
+        **Quotas are per athlete, per path, over a rolling 24 hours** — 20 text
+        and 5 photo, counted separately because a photo costs roughly fifty
+        times a description and one shared counter would let the expensive path
+        exhaust the cheap one. Failed and refused calls count, because they
+        cost tokens too. Exhaustion is `429` with `rate_limited`.
+      tags: [Nutrition]
+      security:
+        - ClerkBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                  maxLength: 600
+                  example: two eggs, sourdough and butter
+                meal:
+                  type: string
+                  enum: [breakfast, lunch, dinner, snack]
+                  description: >
+                    Context for portion sizing only — a breakfast portion of
+                    oats and a dinner one differ. It never constrains what the
+                    model may return.
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                description: { type: string, maxLength: 600 }
+                meal: { type: string }
+                image:
+                  type: string
+                  format: binary
+                  description: >
+                    JPEG, PNG, GIF or WebP, at most 5 MB. The media type is
+                    sniffed from the bytes, not read from the part's declared
+                    Content-Type.
+      responses:
+        '200':
+          description: A draft. Nothing has been written.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [estimate, quota]
+                properties:
+                  estimate: { $ref: '#/components/schemas/MealEstimate' }
+                  quota: { $ref: '#/components/schemas/EstimateQuota' }
+        '400':
+          description: No input, an over-long description, or an unreadable image.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Unauthenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: >
+            The request was well formed and the model could not read it as
+            food. Distinct from 400 — the client's remedy is a better photo or
+            a description, not a corrected field.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: The daily cap for this path is used up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: The model provider is unreachable. Retryable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: >
+            Estimation is not configured on this deploy (no API key). Every
+            other nutrition route is unaffected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /nutrition/days:
     get:

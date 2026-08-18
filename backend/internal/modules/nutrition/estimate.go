@@ -3,6 +3,7 @@ package nutrition
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -226,23 +227,68 @@ func ValidateEstimate(e Estimate) error {
 		if !it.PortionConfidence.Valid() {
 			return fmt.Errorf("%w: item %d has confidence %q", ErrInvalidInput, i, it.PortionConfidence)
 		}
-		// `!(x >= 0)` rather than `x < 0`: the second is FALSE for NaN, and a
-		// NaN reaching a numeric column is the same class of bug the energy
-		// package's weight guard exists for.
 		for _, f := range []struct {
 			name string
 			v    float64
+			max  float64
 		}{
-			{"kcal", it.Kcal}, {"protein_g", it.ProteinG},
-			{"carb_g", it.CarbG}, {"fat_g", it.FatG}, {"servings", it.Servings},
+			{"kcal", it.Kcal, maxItemKcal},
+			{"protein_g", it.ProteinG, maxItemGrams},
+			{"carb_g", it.CarbG, maxItemGrams},
+			{"fat_g", it.FatG, maxItemGrams},
+			{"servings", it.Servings, maxItemServings},
 		} {
-			if !(f.v >= 0) {
-				return fmt.Errorf("%w: item %d has %s = %v", ErrInvalidInput, i, f.name, f.v)
+			if err := sane(f.name, i, f.v, f.max); err != nil {
+				return err
 			}
 		}
-		if it.FibreG != nil && !(*it.FibreG >= 0) {
-			return fmt.Errorf("%w: item %d has fibre_g = %v", ErrInvalidInput, i, *it.FibreG)
+		if it.FibreG != nil {
+			if err := sane("fibre_g", i, *it.FibreG, maxItemGrams); err != nil {
+				return err
+			}
 		}
+	}
+	return nil
+}
+
+// The magnitudes above which a number is not food.
+//
+// These are ABSURDITY bounds, not correctness ones, and the distinction is why
+// they are set so far above any real meal: a rail that fires on an ordinary
+// case is an unevidenced second opinion about the athlete's dinner, and this
+// module has already been bitten once by rails tuned too tight. Nothing here
+// should ever fire on something somebody ate. What they catch is garbage —
+// a misplaced decimal, a units confusion, or an infinity.
+const (
+	// Eight times a day's intake, in one item.
+	maxItemKcal = 20000
+	// Five kilograms of one macronutrient.
+	maxItemGrams = 5000
+	// A thousand of anything.
+	maxItemServings = 1000
+)
+
+// sane rejects the values a JSON schema cannot.
+//
+// Structured outputs guarantee that a field is a number; they cannot express a
+// range, so negatives, NaN, infinities and absurd magnitudes all arrive
+// looking perfectly well-typed.
+//
+// The form is `!(v >= 0)` rather than `v < 0` because every comparison with
+// NaN is false, so the second would wave NaN straight through — and Postgres
+// numeric accepts 'NaN', so it would reach the column and poison every sum it
+// takes part in. **`math.IsInf` is a separate check for the mirror reason:**
+// `+Inf >= 0` is TRUE, so the NaN-safe form alone lets infinity past. That gap
+// was real here until a test caught it.
+func sane(field string, idx int, v, max float64) error {
+	if math.IsInf(v, 0) {
+		return fmt.Errorf("%w: item %d has %s = %v", ErrInvalidInput, idx, field, v)
+	}
+	if !(v >= 0) {
+		return fmt.Errorf("%w: item %d has %s = %v", ErrInvalidInput, idx, field, v)
+	}
+	if v > max {
+		return fmt.Errorf("%w: item %d has %s = %v, which is not food", ErrInvalidInput, idx, field, v)
 	}
 	return nil
 }
