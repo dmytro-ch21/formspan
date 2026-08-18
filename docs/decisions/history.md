@@ -24677,6 +24677,200 @@ Unique node above the HashAggregate for nothing.
   out has to hardcode the vocabulary today.
 - **Not staging-verified.** Local `vola_test` only.
 
+## 2026-08-18 — Nutrition, and the rule that a logged row owns its numbers
+
+The last unbuilt pillar of the frozen MVP. `nutrition` had been a module toggle
+since migration 000001 — registered in the discipline registry with
+`IsSport: false`, on by default, and nothing behind it. Zero occurrences of
+"calorie", "macro", "protein" or "food" anywhere in `backend/` or `apps/`.
+
+### What was already there, which changed the shape of the work
+
+The request listed ten things. **Five were already shipped**, and finding that
+out first is what stopped this being twice the size it needed to be:
+
+- weight, girths and private progress photos are `body` (migration 000047),
+- goal pacing is `body_phases` — kind, target weight, target date,
+- the rolling average is `anthropometry.trendWeight`, a 7-day mean that refuses
+  below three readings,
+- `energy` already computes Mifflin–St Jeor and a **net** MET estimate, with a
+  `Precision` signal for when height/age/sex are missing.
+
+So this entry is about the half that genuinely did not exist: targets, a food
+log, and saved foods.
+
+**One gap the audit turned up and nobody had noticed:** `createPhase` and
+`endPhase` exist in `apps/mobile/lib/body.ts` and in the API with **zero UI
+callers anywhere in `apps/`**. There is no screen to start a cut. A calorie
+target derives from the live phase, so N22 has to build one before any of this
+is reachable by an athlete.
+
+### The load-bearing rule
+
+**A logged row owns its numbers.** `nutrition_entries` and
+`nutrition_recipe_items` both copy the macros they were created with;
+`source_food_id` is provenance, answering "log this again", and no query that
+returns nutrition may follow it.
+
+The tempting shape is a join. It is shorter, it compiles, and it passes every
+test — which is the problem. Correcting a saved food from 180 to 210 kcal would
+silently rewrite every entry ever logged from it, along with every average and
+trend an athlete was using to learn something, and there would be nothing left
+to compare against so nothing would go red. Same reasoning that keeps `plans`
+free of a `completed` flag: a stored status is a status that keeps lying.
+
+The rule is therefore about **queries**, not columns, and it is pinned by an
+integration test that edits a food after logging it and asserts the entry is
+byte-identical. Mutating the read to `LEFT JOIN nutrition_foods` compiles
+cleanly and turns that test red — which is exactly the point.
+
+### Targets are dated, not current
+
+`nutrition_targets` is keyed `(user_id, effective_on)`. "Set my target from
+today" is an idempotent upsert; "what was I eating to in March" is the newest
+row on or before that day. A single mutable `current_target` column cannot
+express the second question at all — it would silently re-judge every past week
+against today's number.
+
+The `basis` — the whole arithmetic — is **frozen** onto the row when the athlete
+accepts it, never recomputed on read. Weight, height and the live phase all
+move, so a "live" explanation is a confident lie about a past decision.
+
+`ListTargets` returns the window **plus the row live at its start**. Without
+that carry-in, a target set three months ago makes a week-long window return
+nothing and the client honestly reports "no target" for a week the athlete was
+eating to one — a bug that only appears for people who have not changed their
+target recently, which is to say the ones doing it right.
+
+### The derivation, and the two ways it can be silently wrong
+
+```
+RMR (Mifflin–St Jeor) + NEAT + a 28-day training average = TDEE
+TDEE + (phase rate × bodyweight × 7700 ÷ 7)             = target
+```
+
+It runs **server-side**, departing from `body`'s "this module does not compute"
+stance, and the reason is specific: a target's dominant input is training
+expenditure aggregated across four weeks of sessions, which the phone does not
+hold. Mirroring Mifflin–St Jeor into TypeScript to avoid that would be a second
+copy of arithmetic that decides how much somebody eats — the drift
+`check:grip-parity` exists because of, with worse consequences.
+
+Two failure modes here are invisible, and both are guarded:
+
+**The sign.** A cut's rate is negative. `judgeRate` already documents that
+writing the comparison inline is what gets it inverted; inverted here it
+proposes *more* food to somebody already losing too fast, with every number on
+screen still plausible. Both directions are table-tested, because a
+single-direction test passes against a sign that is inverted for both.
+
+**The precision fallback.** `energy`'s own doc says its generic resting baseline
+runs 20–30% high. On a session card that inflates a badge nobody acts on; in a
+food target it overfeeds by roughly 400 kcal/day and the cut simply never
+happens, indefinitely. So a coarse profile is **refused** rather than
+derived-with-a-caveat — there is no caveat an athlete can act on. It returns 200
+with a null suggestion and the field names, because the request was fine and the
+client's fix is a form, not a retry.
+
+### Two rails were mis-set, and a hand-worked test is what showed it
+
+The first draft capped the deficit at 25% of maintenance and floored the target
+at `RMR × 1.1`. A test that computed the reference athlete's numbers by hand —
+80 kg, lightly active, the evidence-based 0.75%/week cut midpoint, landing on
+1954 kcal — tripped **both**.
+
+That target is one any coach would sign off. The rails were guarding the wrong
+line: the rate scales with bodyweight while TDEE scales sub-linearly with it
+(RMR carries height and age terms that do not), so a percentage cap tuned by
+intuition fires on ordinary athletes. A rail that routinely overrides Garthe et
+al. is not a rail, it is an unevidenced second opinion — and one that fires
+constantly teaches everyone to ignore it. The cap moved to 30% and the floor to
+resting itself, which is the line an athlete recognises and the one worth
+defending.
+
+Worth recording as a method: this was only visible because the expectation was
+worked out by hand rather than by running the code and pasting the answer.
+
+### Mutation testing found a bug the tests did not
+
+Every new guard was broken deliberately to check its test went red. Four did.
+The fifth — the `days <= 0` deadline guard in `makingWeightRate` — stayed green,
+and the reason was instructive: the test used a deadline of **today**, where a
+division by zero yields `+Inf` and `math.Min` quietly clamps it to the ceiling.
+The guard's real job is a deadline in the **past**, where a negative day count
+makes the required rate negative and the per-phase sign inverts it again.
+
+An athlete who just missed their weigh-in while still six kilos over would have
+been handed a **+2718 kcal surplus**. The test now covers it.
+
+The same exercise caught a second one in `check-rate-parity.py` itself: its
+first regex matched `[\d.]+`, which silently skipped `recomposition` and
+`maintenance` — whose bands sit around zero and therefore have a negative
+minimum — on both sides at once. It printed "3 phases" and passed. There is now
+a floor on the parsed count, because a parity check that has quietly stopped
+comparing things is worse than none.
+
+### `check:rate-parity`
+
+The rate bands are now a second copy of `RATE_TARGETS` in `anthropometry.ts`.
+Neither can be deleted — the mobile copy has to work with no signal, the Go copy
+has to aggregate training the phone does not hold — so the copies are allowed to
+exist and drift fails a check instead. Same trade `check-grip-parity` makes, and
+it is wired into both `verify` and CI.
+
+The drift it prevents is worse than the grip one because both halves stay
+plausible: the app would report "on target" against a band the target itself
+never used.
+
+### Decisions worth naming
+
+- **Training does not raise the day's target.** Expenditure is amortised into
+  the target when it is derived. Giving calories back double-counts (the phase
+  target already assumes a training week) and makes the observed rate
+  unreadable — you could no longer tell a bad week of eating from a moved
+  goalpost. The clients will show what a session cost as a row that is *stated,
+  not spent*.
+- **Per-entry PUT, not a whole-day replace.** Sessions replace a set list
+  because a session is one surface on one device for an hour. A day accrues from
+  several contexts and commonly two devices at once; under day-replace a web
+  correction deletes a phone's lunch. Worse, a day-replace outbox queues a
+  whole-day snapshot, and replaying one captured before another device's entry
+  synced silently drops it — the T5–T8 family.
+- **DELETE is 204 whether or not the row was there**, diverging from
+  `body.DeleteCheckin`'s 404. An outbox retrying a delete that already landed
+  would otherwise strand a correctly-gone row on the sync screen. It is also the
+  non-oracle answer.
+- **No CHECK reconciling kcal against 4P+4C+9F.** Real labels do not reconcile —
+  rounding, fibre, sugar alcohols and Atwater's own approximations put them
+  5–10% apart — so that constraint would reject correct data read off a packet.
+  kcal is authoritative and the contract says so.
+- **`HasFoodLog` is a capability, not a key comparison.** The clients ban
+  `key === "bjj"` repo-wide; this is the same rule. `Caps.Catalog` stays empty:
+  it names what the Library renders, and an athlete's own saved foods are not a
+  library.
+- **No external food database yet**, honouring the "validate manual logging
+  first" instruction. USDA (CC0, no obligations) is the intended first
+  integration and Open Food Facts (ODbL, share-alike, must stay separable) the
+  second — but both are now **unscheduled**, because N23's describe-or-photograph
+  path is a substitute for a food database rather than a complement. The schema
+  carries `source` and `external_id` from day one so either costs no migration.
+
+### Gaps this leaves
+
+- Nothing is reachable by an athlete: no tab, no screen, no phase-start UI.
+- The strength half of the training average is conservative by construction —
+  without set-level detail it uses `energy`'s default multi-exercise MET, the
+  lowest option. Under-counting makes the target smaller, which is the safe
+  direction, but it is a known bias not a neutral estimate.
+- `TargetInputs` reads `profiles`, `body_checkins`, `body_phases` and `sessions`
+  by SQL. That is the sessioncard precedent and it couples this module to the
+  schema rather than to a sibling's Go API — but it is still four tables another
+  module owns.
+- The first draft of that query filtered on a `session_sets.warmup` column that
+  does not exist. It compiled, because Go does not type-check SQL. The
+  integration test is the only reason it was caught before review.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

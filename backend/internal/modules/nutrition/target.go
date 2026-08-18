@@ -1,0 +1,535 @@
+// Calorie and macro targets, derived from what the athlete is already doing.
+//
+// # Why this computes on the server when the body module deliberately does not
+//
+// `body`'s rule is that the numbers a LOGGING screen renders must be computed
+// on the client, because a bathroom scale is where the signal is worst. A
+// target is a different animal: it is set once a month, online, and its
+// dominant input is training expenditure aggregated across every session in the
+// last four weeks — which the phone does not hold and would have to fetch.
+//
+// Mirroring Mifflin–St Jeor into TypeScript to avoid that would create a second
+// copy of arithmetic that decides how much somebody eats. `check:grip-parity`
+// exists in this repo because a vocabulary reached three copies and drifted;
+// this would be the same shape with worse consequences. One implementation,
+// server-side, and the endpoint returns the inputs alongside the answer so the
+// client can render the explanation without owning the maths.
+//
+// # Everything here is pure
+//
+// No context, no SQL, no time.Now(). The caller passes the day. That is what
+// lets every branch below be table-tested with no database, so it runs on every
+// CI pass rather than only where TEST_DATABASE_URL is set.
+package nutrition
+
+import (
+	"math"
+	"time"
+)
+
+// Activity is the NEAT multiplier — everything the athlete does that is NOT
+// their logged training.
+//
+// **The vocabulary is truncated on purpose and this is the single easiest thing
+// to get wrong here.** Textbook Harris/Mifflin multipliers run 1.2–1.9 and
+// already INCLUDE exercise. Using 1.55 for "moderately active" and then adding
+// the trailing training average double-counts every mat class — roughly 300–500
+// kcal/day for a BJJ athlete, in the direction that makes a cut silently not
+// happen. So the ladder stops at 1.45, which is an on-your-feet job and no
+// more, and the training term is added separately where it can be audited.
+type Activity string
+
+const (
+	ActivitySedentary Activity = "sedentary"
+	ActivityLight     Activity = "light"
+	ActivityActive    Activity = "active"
+)
+
+var Activities = []Activity{ActivitySedentary, ActivityLight, ActivityActive}
+
+// ActivityFactors are NEAT-only. See the type doc before raising any of them.
+var ActivityFactors = map[Activity]float64{
+	ActivitySedentary: 1.20,
+	ActivityLight:     1.30,
+	ActivityActive:    1.45,
+}
+
+func (a Activity) valid() bool {
+	_, ok := ActivityFactors[a]
+	return ok
+}
+
+// PhaseKind mirrors body_phases.kind.
+//
+// Declared here rather than imported: a module never imports a sibling in this
+// codebase, and nutrition reads body_phases by SQL the way sessioncard reads
+// profiles. The database's CHECK constraint is what keeps the two spellings
+// honest; an unknown value here falls through to maintenance rather than
+// guessing, so a phase kind added later under-feeds nothing.
+type PhaseKind string
+
+const (
+	PhaseCut           PhaseKind = "cut"
+	PhaseLeanBulk      PhaseKind = "lean_bulk"
+	PhaseRecomposition PhaseKind = "recomposition"
+	PhaseMaintenance   PhaseKind = "maintenance"
+	PhaseMakingWeight  PhaseKind = "making_weight"
+)
+
+// RateBand is a target rate as a FRACTION OF BODY MASS PER WEEK, stored as a
+// positive magnitude with the sign applied per phase below.
+//
+// **The magnitudes are a mirror of `RATE_TARGETS` in
+// apps/mobile/lib/anthropometry.ts and `scripts/check-rate-parity.py` fails the
+// build if the two drift.** Storing magnitudes and signing them once is the TS
+// file's decision, kept deliberately: a cut's rate is negative, so writing the
+// comparison inline gets it inverted, and an inverted comparison here proposes
+// MORE food to somebody already losing too fast while every number on screen
+// still looks plausible.
+type RateBand struct{ Min, Max float64 }
+
+// RateTargets is the evidence-based band per phase. Cut: Garthe et al. (2011)
+// — elite athletes at ~0.7%/week held lean mass where ~1.4%/week did not. Lean
+// bulk is tighter because past ~0.5%/week the surplus outruns what muscle can
+// be built from. making_weight has no band: the rate comes from the deadline.
+var RateTargets = map[PhaseKind]*RateBand{
+	PhaseCut:           {Min: 0.005, Max: 0.01},
+	PhaseLeanBulk:      {Min: 0.0025, Max: 0.005},
+	PhaseRecomposition: {Min: -0.0025, Max: 0.0025},
+	PhaseMaintenance:   {Min: -0.0025, Max: 0.0025},
+	PhaseMakingWeight:  nil,
+}
+
+// Mirrored from anthropometry.ts and checked by check-rate-parity.py. Unused by
+// the derivation itself — they belong to the adjustment rule (N24) and to the
+// trend the client draws — but they live here so the parity check has one Go
+// home to compare against rather than hunting them across files later.
+const (
+	TrendDays        = 7
+	MinTrendReadings = 3
+	MinRateDays      = 7
+)
+
+// kcalPerKG is Wishnofsky's 3500 kcal/lb, and it is an approximation that
+// OVERESTIMATES long-run loss: it ignores adaptive thermogenesis and treats
+// every kilogram lost as pure fat. A target built on it drifts optimistic over
+// a phase — which is precisely why the weekly adjustment rule exists rather
+// than being a nice-to-have. Do not "correct" this constant; correct the target
+// from observed weight change, which is what actually happened.
+const kcalPerKG = 7700.0
+
+// Clamps, in the order they are applied. Each exists to stop the arithmetic
+// producing a number that is internally consistent and physiologically wrong.
+const (
+	// Never below the athlete's own resting rate. Exactly 1.0, and the margin
+	// that used to sit on top of it was removed for the same reason the
+	// deficit cap moved: at 1.1 it bound on the reference athlete, whose
+	// 1954 kcal target on a standard 0.75%/week cut is one any coach would
+	// sign off. A rail that fires on the ordinary case is not protecting
+	// anybody, it is just noise in the explanation.
+	//
+	// Resting itself is the line worth defending and the one an athlete
+	// recognises — "we will not propose less than your body burns lying
+	// still" is a sentence that means something. A multiplier above it is a
+	// safety factor invented on top of a rule that is already conservative,
+	// and inventing one here would be exactly the unevidenced second opinion
+	// the deficit-cap comment warns about.
+	minKcalOverResting = 1.0
+	// 30%, and the number was moved UP from 25% because a hand-worked test
+	// showed 25% firing on the ordinary case: an 80 kg lightly-active athlete
+	// on the evidence-based cut midpoint needs a 25.2% deficit, because the
+	// rate scales with bodyweight while TDEE scales sub-linearly with it (RMR
+	// carries height and age terms that do not). A rail that routinely
+	// overrides Garthe et al. is not a rail, it is a second opinion with no
+	// evidence behind it — and one that fires constantly teaches everyone to
+	// ignore it. This catches proportional absurdity; minKcalOverResting above
+	// catches absolute absurdity, and that is the harder of the two.
+	maxDeficitFraction = 0.30
+	maxSurplusFraction = 0.20
+)
+
+// Macro rules, with their sources.
+const (
+	// Morton et al. 2018 (BJSM meta-analysis, 49 studies) finds the benefit of
+	// added protein plateaus at ~1.62 g/kg/day with a confidence interval
+	// reaching 2.2. The upper end is the defensible choice in a deficit, where
+	// protein is doing double duty preserving lean mass (Helms et al. 2014).
+	//
+	// Scaled to BODYWEIGHT, not fat-free mass, deliberately. FFM would be the
+	// better denominator but needs a body-fat estimate, and `navyBodyFat` lives
+	// client-side — porting it would be a second copy of a formula for a
+	// second-order refinement. Revisit if body fat ever reaches the server.
+	proteinDeficitGPerKG = 2.2
+	proteinDefaultGPerKG = 1.8
+	proteinFloorGPerKG   = 1.6
+
+	// Fat has two floors and both bind: an absolute g/kg floor for essential
+	// fatty acids, and a share of total energy for hormonal function. A very
+	// large athlete on a small target can satisfy one and violate the other.
+	fatGPerKG       = 0.8
+	fatFloorGPerKG  = 0.5
+	fatMinKcalShare = 0.20
+
+	// US Dietary Guidelines: 14 g per 1000 kcal. Advisory — a target the
+	// athlete is not failing against if they miss it.
+	fibreGPer1000Kcal = 14.0
+)
+
+// Inputs is everything the derivation needs, gathered by one repository query.
+//
+// Every field is what it says at a moment in time: the weight is the latest
+// check-in ON OR BEFORE the day being derived for, not the newest one, so
+// re-deriving an old target is reproducible.
+type Inputs struct {
+	// On is the day the target takes effect, "YYYY-MM-DD".
+	On string
+
+	WeightKG         *float64
+	WeightMeasuredOn string
+	HeightCM         *float64
+	DateOfBirth      *string
+	Sex              *string
+
+	// Phase is the live body_phases row, empty when none is running.
+	PhaseKind           PhaseKind
+	PhaseTargetOn       *string
+	PhaseTargetWeightKG *float64
+
+	// TrainingKcalPerDay is the trailing average of NET session cost.
+	//
+	// Amortised FLAT over the window rather than applied per-day: per-day
+	// cycling needs tomorrow's schedule, which does not exist yet, and a target
+	// that moved with yesterday's training would make the observed weekly rate
+	// unreadable — you could no longer tell a bad week of eating from a moved
+	// goalpost.
+	TrainingKcalPerDay  float64
+	TrainingDaysCovered int
+	TrainingSessions    int
+}
+
+// TrainingWindowDays is the trailing window the training average is taken over.
+//
+// 28 rather than 14 because BJJ attendance is lumpy — one holiday week distorts
+// a fortnight badly enough to move a target by a few hundred kcal. The window
+// is reported in the Basis so a thin history is visible rather than silently
+// flattering.
+const TrainingWindowDays = 28
+
+// Basis is the arithmetic, every line of which the UI renders as one row of the
+// explanation. Frozen onto the target row when the athlete accepts it.
+type Basis struct {
+	RMRKcal      int     `json:"rmr_kcal"`
+	RMRPrecision string  `json:"rmr_precision"`
+	WeightKG     float64 `json:"weight_kg"`
+	WeightOn     string  `json:"weight_measured_on"`
+
+	Activity       Activity `json:"activity"`
+	ActivityFactor float64  `json:"activity_factor"`
+	NEATKcal       int      `json:"neat_kcal"`
+
+	TrainingKcalPerDay  int `json:"training_kcal_per_day"`
+	TrainingDaysCovered int `json:"training_days_covered"`
+	TrainingSessions    int `json:"training_sessions"`
+
+	TDEEKcal int `json:"tdee_kcal"`
+
+	PhaseKind         PhaseKind `json:"phase_kind"`
+	TargetRatePerWeek float64   `json:"target_rate_pct_per_week"`
+	TargetRateKGPerWk float64   `json:"target_rate_kg_per_week"`
+	KcalPerKG         float64   `json:"kcal_per_kg"`
+	EnergyDeltaKcal   int       `json:"energy_delta_kcal"`
+
+	// Clamped is true when a rail bound, so the UI can say "we stopped here"
+	// rather than showing arithmetic whose last line does not follow from the
+	// one above it.
+	Clamped     bool   `json:"clamped"`
+	ClampReason string `json:"clamp_reason,omitempty"`
+
+	// Relaxed names which macro rule had to give way, empty when none did.
+	Relaxed string `json:"relaxed,omitempty"`
+
+	ProteinGPerKG float64 `json:"protein_g_per_kg"`
+	FatGPerKG     float64 `json:"fat_g_per_kg"`
+}
+
+// Suggestion is a proposal. Nothing here is stored until the athlete accepts
+// it with a PUT — the same posture as the weekly adjustment rule, and the
+// project's "auditable recommendations" principle: a number you can argue with
+// beats a verdict you must trust.
+type Suggestion struct {
+	Kcal     int    `json:"kcal"`
+	ProteinG int    `json:"protein_g"`
+	CarbG    int    `json:"carb_g"`
+	FatG     int    `json:"fat_g"`
+	FibreG   int    `json:"fibre_g"`
+	Basis    *Basis `json:"basis"`
+}
+
+// Missing names the profile fields a derivation needs and did not have.
+const (
+	MissingWeight = "weight_kg"
+	MissingHeight = "height_cm"
+	MissingDOB    = "date_of_birth"
+	MissingSex    = "sex"
+)
+
+// Suggest derives a target, or reports what is missing.
+//
+// A nil Suggestion with a non-empty `missing` is NOT an error and the handler
+// returns 200 for it: the request was fine, the profile is incomplete, and the
+// client's fix is a form rather than a retry.
+//
+// # The refusal that matters most in this file
+//
+// `energy`'s own package doc says its fallback resting baseline runs 20–30%
+// high for many people. On a session card that inflates a badge nobody acts on.
+// Used for a FOOD TARGET it inflates the whole chain by roughly 400 kcal/day,
+// and the cut then simply does not happen — invisibly, indefinitely, with every
+// number on screen looking reasonable. So a coarse profile is refused outright
+// rather than derived-with-a-caveat: there is no caveat an athlete can act on.
+func Suggest(in Inputs, activity Activity, restingPerDay func() (float64, bool), precision string) (*Suggestion, []string) {
+	if !activity.valid() {
+		activity = ActivityLight
+	}
+
+	var missing []string
+	if in.WeightKG == nil || !(*in.WeightKG > 0) {
+		missing = append(missing, MissingWeight)
+	}
+	if in.HeightCM == nil {
+		missing = append(missing, MissingHeight)
+	}
+	if in.DateOfBirth == nil {
+		missing = append(missing, MissingDOB)
+	}
+	if in.Sex == nil {
+		missing = append(missing, MissingSex)
+	}
+	if len(missing) > 0 {
+		return nil, missing
+	}
+
+	rmr, ok := restingPerDay()
+	// PrecisionEstimated is the only acceptable quality — see the doc above.
+	// The string rather than the energy.Precision type keeps this file free of
+	// the import and therefore testable with a stub.
+	if !ok || precision != "estimated" {
+		// Nothing is nil-checked away here: the caller had every field, so a
+		// coarse verdict means one of them was unusable (an unparseable date of
+		// birth, most likely). Report the fields rather than a bare failure.
+		return nil, []string{MissingHeight, MissingDOB, MissingSex}
+	}
+
+	weight := *in.WeightKG
+	factor := ActivityFactors[activity]
+	neat := rmr * (factor - 1)
+	tdee := rmr + neat + in.TrainingKcalPerDay
+
+	ratePerWeek, rateKGPerWeek := targetRate(in, weight)
+	deltaPerDay := rateKGPerWeek * kcalPerKG / 7
+
+	kcal, clamped, reason := clampKcal(tdee+deltaPerDay, tdee, rmr)
+
+	basis := &Basis{
+		RMRKcal:             int(math.Round(rmr)),
+		RMRPrecision:        precision,
+		WeightKG:            round2(weight),
+		WeightOn:            in.WeightMeasuredOn,
+		Activity:            activity,
+		ActivityFactor:      factor,
+		NEATKcal:            int(math.Round(neat)),
+		TrainingKcalPerDay:  int(math.Round(in.TrainingKcalPerDay)),
+		TrainingDaysCovered: in.TrainingDaysCovered,
+		TrainingSessions:    in.TrainingSessions,
+		TDEEKcal:            int(math.Round(tdee)),
+		PhaseKind:           phaseOrMaintenance(in.PhaseKind),
+		TargetRatePerWeek:   round4(ratePerWeek),
+		TargetRateKGPerWk:   round2(rateKGPerWeek),
+		KcalPerKG:           kcalPerKG,
+		EnergyDeltaKcal:     int(math.Round(deltaPerDay)),
+		Clamped:             clamped,
+		ClampReason:         reason,
+	}
+
+	s := macros(kcal, weight, isDeficit(ratePerWeek), basis)
+	return &s, nil
+}
+
+// targetRate returns the signed weekly rate — negative for loss — as a fraction
+// of body mass and as kilograms.
+//
+// The band midpoint rather than an edge: the min and max are where a rate stops
+// being worth pursuing and starts costing lean mass respectively, so aiming at
+// either leaves no room for the week to go slightly wrong.
+func targetRate(in Inputs, weight float64) (fraction, kg float64) {
+	switch in.PhaseKind {
+	case PhaseCut:
+		b := RateTargets[PhaseCut]
+		fraction = -midpoint(b)
+	case PhaseLeanBulk:
+		b := RateTargets[PhaseLeanBulk]
+		fraction = midpoint(b)
+	case PhaseMakingWeight:
+		fraction = -makingWeightRate(in, weight)
+	default:
+		// recomposition, maintenance, and any phase kind this build does not
+		// know: hold weight. Under-feeding on a vocabulary mismatch would be
+		// the worse failure.
+		fraction = 0
+	}
+	return fraction, fraction * weight
+}
+
+// makingWeightRate is the rate a deadline demands, CLAMPED AT THE CUT CEILING.
+//
+// A competition date does not change physiology: if the division is four weeks
+// away and the athlete is six kilos over, the honest answer is the fastest safe
+// rate plus a plan that says the gap will not close, not a target that starves
+// them. This is the same clamp `makingWeightPlan` applies on the client, whose
+// `safe` flag surfaces the shortfall.
+func makingWeightRate(in Inputs, weight float64) float64 {
+	ceiling := RateTargets[PhaseCut].Max
+	if in.PhaseTargetOn == nil || in.PhaseTargetWeightKG == nil || weight <= 0 {
+		return midpoint(RateTargets[PhaseCut])
+	}
+	days := daysBetween(in.On, *in.PhaseTargetOn)
+	toGo := weight - *in.PhaseTargetWeightKG
+	if toGo <= 0 {
+		// Already made it: hold, do not keep cutting into the weigh-in.
+		return 0
+	}
+	if days <= 0 {
+		// A deadline today or in the past cannot yield a rate — dividing by it
+		// gives +Inf, which would render as a number and clamp to the ceiling
+		// silently. Return the ceiling explicitly instead.
+		return ceiling
+	}
+	required := (toGo / weight) * (7 / float64(days))
+	return math.Min(required, ceiling)
+}
+
+func midpoint(b *RateBand) float64 { return (b.Min + b.Max) / 2 }
+
+func isDeficit(fraction float64) bool { return fraction < 0 }
+
+func phaseOrMaintenance(k PhaseKind) PhaseKind {
+	if k == "" {
+		return PhaseMaintenance
+	}
+	return k
+}
+
+// clampKcal applies the rails in order and reports which one bound.
+func clampKcal(want, tdee, rmr float64) (int, bool, string) {
+	floor := rmr * minKcalOverResting
+	if want < tdee*(1-maxDeficitFraction) {
+		want = tdee * (1 - maxDeficitFraction)
+		return roundTo10(want), true, "the deficit was capped at 25% of maintenance"
+	}
+	if want > tdee*(1+maxSurplusFraction) {
+		want = tdee * (1 + maxSurplusFraction)
+		return roundTo10(want), true, "the surplus was capped at 20% of maintenance"
+	}
+	// Checked last so its message wins: a target under resting is the one an
+	// athlete most needs told, and on a small person an aggressive phase can
+	// hit it without tripping the percentage rails above.
+	if want < floor {
+		return roundTo10(floor), true, "the target was raised to stay above your resting rate"
+	}
+	return roundTo10(want), false, ""
+}
+
+// macros splits a calorie target into grams.
+//
+// Protein and fat are set from bodyweight and carbs take the remainder, which
+// is the order that matters: carbs are the only one of the three with no floor
+// worth defending, so they are what gives way when the target is small.
+//
+// When the remainder still goes negative — a heavy athlete on an aggressive
+// cut — the rules relax in a FIXED, RECORDED order: fat toward its absolute
+// floor, then protein toward the Morton plateau. Writing the order down once,
+// here, is the whole point; relaxing ad hoc at a call site is how one athlete
+// ends up on a different rule from another.
+func macros(kcal int, weight float64, deficit bool, basis *Basis) Suggestion {
+	proteinPerKG := proteinDefaultGPerKG
+	if deficit {
+		proteinPerKG = proteinDeficitGPerKG
+	}
+	fatPerKG := fatGPerKG
+
+	total := float64(kcal)
+	protein := proteinPerKG * weight
+	fat := math.Max(fatPerKG*weight, total*fatMinKcalShare/9)
+
+	if remainder(total, protein, fat) < 0 {
+		// Step one: fat down to its absolute floor. The energy-share floor is
+		// abandoned before the essential-fatty-acid one, because the former is
+		// a ratio and the latter is an intake.
+		fatPerKG = fatFloorGPerKG
+		fat = fatPerKG * weight
+		basis.Relaxed = "fat reduced to its floor to leave room for carbohydrate"
+	}
+	if remainder(total, protein, fat) < 0 {
+		// Step two: protein down to the plateau Morton et al. identify. Below
+		// this there is measurable lean-mass cost, so it is where relaxing
+		// stops.
+		proteinPerKG = proteinFloorGPerKG
+		protein = proteinPerKG * weight
+		basis.Relaxed = "protein and fat both reduced toward their floors"
+	}
+
+	carb := remainder(total, protein, fat) / 4
+	if carb < 0 {
+		// Step three: there is no honest split left. Report zero carbohydrate
+		// rather than a negative one — the clamp above should make this
+		// unreachable, and a negative gram figure rendered in a UI is worse
+		// than a zero that visibly does not add up.
+		carb = 0
+		basis.Relaxed = "the target is too small to hold protein and fat at their floors"
+	}
+
+	basis.ProteinGPerKG = round2(proteinPerKG)
+	basis.FatGPerKG = round2(fatPerKG)
+
+	return Suggestion{
+		Kcal:     kcal,
+		ProteinG: roundTo5(protein),
+		CarbG:    roundTo5(carb),
+		FatG:     roundTo5(fat),
+		FibreG:   roundTo5(total / 1000 * fibreGPer1000Kcal),
+		Basis:    basis,
+	}
+}
+
+func remainder(total, protein, fat float64) float64 {
+	return total - protein*4 - fat*9
+}
+
+// Rounding is coarse on purpose: macros to 5 g, kcal to 10. Nobody weighs
+// chicken to the gram against a target, and a target printed to three
+// significant figures implies a precision the whole chain does not have.
+//
+// The consequence, and it must be stated in the contract: 4P + 4C + 9F will not
+// equal kcal exactly. **Kcal is authoritative.** A client that "reconciles"
+// them by recomputing kcal from the macros discards the clamp above.
+func roundTo5(v float64) int  { return int(math.Round(v/5) * 5) }
+func roundTo10(v float64) int { return int(math.Round(v/10) * 10) }
+func round2(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+func round4(v float64) float64 { return math.Round(v*10000) / 10000 }
+
+// daysBetween counts whole days from a to b, positive when b is later. Both
+// must already be valid "YYYY-MM-DD"; callers validate first.
+func daysBetween(a, b string) int {
+	ta, errA := parseDay(a)
+	tb, errB := parseDay(b)
+	if errA != nil || errB != nil {
+		return 0
+	}
+	return int(tb.Sub(ta).Hours() / 24)
+}
+
+func parseDay(s string) (time.Time, error) {
+	return time.Parse("2006-01-02", s)
+}
