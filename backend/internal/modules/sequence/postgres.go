@@ -50,6 +50,9 @@ func scanSequence(row pgx.Row, userID string) (Sequence, error) {
 		return Sequence{}, err
 	}
 	s.Editable = s.OwnerUserID != nil && *s.OwnerUserID == userID
+	// The positive fact, beside the permission one. They coincide today only
+	// because `visibleTo` has no public arm — see the field docs and T9.
+	s.Official = s.OwnerUserID == nil
 	return s, nil
 }
 

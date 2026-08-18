@@ -97,13 +97,10 @@ export default function SequencesPage() {
                 <p className="mt-1 text-sm text-neutral-500">
                   {s.step_count} {s.step_count === 1 ? "step" : "steps"}
                   {s.start_position_name ? ` · from ${s.start_position_name}` : ""}
-                  {/* Reference chains are readable and not editable. Said on the
-                      card so it is not a surprise on the edit screen.
-
-                      Sound only because sequences have no public arm — see the
-                      note on `Sequence.editable`, and F7 for what this same
-                      inference did to curricula once they did. */}
-                  {!s.editable ? " · reference" : ""}
+                  {/* On `official`, not `!editable`. The two coincide only
+                      while sequences have no public arm; the label is about
+                      who WROTE the chain, so it asks that directly. T9. */}
+                  {s.official ? " · reference" : ""}
                 </p>
                 {s.description && (
                   <p className="mt-2 line-clamp-2 text-sm text-neutral-500">

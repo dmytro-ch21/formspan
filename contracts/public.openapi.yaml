@@ -3684,7 +3684,9 @@ components:
 
         Sequences are LINEAR. A class ending "…and if he defends, armbar OR
         kimura" is two sequences sharing a prefix, not one with a branch.
-      required: [id, editable, name, description, created_at, updated_at, step_count]
+      required:
+        [id, editable, official, name, description, created_at, updated_at,
+         step_count]
       properties:
         id: { type: string }
         editable:
@@ -3693,7 +3695,25 @@ components:
             Whether the CALLER may change this. Resolved server-side so a client
             never compares user ids to decide whether to show an edit
             affordance — that shape is how client-side authorization gets
-            written by accident. False only for VOLA-authored reference chains.
+            written by accident.
+
+            It says nothing about who WROTE this. Today `!editable` happens to
+            mean VOLA's, because sequence visibility has no public arm — you
+            see your own and VOLA's, nothing else. Do not label a chain
+            "reference" off it; use `official`, which stays correct if a public
+            arm ever lands. `!editable` meaning "VOLA's" is exactly what put a
+            stranger's curriculum under a VOLA heading before `official` existed
+            there too.
+        official:
+          type: boolean
+          description: >
+            VOLA authored this — `owner_user_id IS NULL`, resolved server-side.
+            The positive fact, so a client never infers authorship from the
+            absence of permission.
+
+            Nothing seeds an ownerless sequence yet, so this is currently false
+            for every row. It is served now so that the day reference chains
+            land, the clients are already asking the right question.
         name: { type: string }
         description: { type: string }
         start_position_id:

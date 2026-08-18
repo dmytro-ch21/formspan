@@ -46,12 +46,19 @@ export default function EditSequencePage() {
   }
   if (!s) return <p className="text-sm text-neutral-500">Loading…</p>;
   if (!s.editable) {
-    // A VOLA-authored reference chain. The API answers 403 on the write, but
-    // letting the builder mount would offer a Save that cannot succeed.
+    // The GATE stays on `editable`, and that is the correct use of it: you may
+    // not edit this whoever wrote it, and letting the builder mount would offer
+    // a Save the API answers 403 to.
+    //
+    // Only the MESSAGE was making an authorship claim — "This is a reference
+    // sequence" says VOLA wrote it, which `!editable` does not know. It asks
+    // `official` for that half now and falls back to saying only what it can
+    // actually see. T9; the same split F7 drew for curricula.
     return (
       <p className="text-sm text-neutral-500">
-        This is a reference sequence and cannot be edited. Copy it to make it
-        yours.
+        {s.official
+          ? "This is a reference sequence and cannot be edited. Copy it to make it yours."
+          : "This sequence cannot be edited. Copy it to make it yours."}
       </p>
     );
   }
