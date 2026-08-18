@@ -23796,6 +23796,81 @@ Worth carrying to `T8`: its guard must check **both** flags, not `dirty` alone. 
 - **Not seen on a phone**, like everything in this family — the race is forced
   in a fixture, which is the only way to make two `Date.now()` calls collide on
   demand.
+## 2026-08-17 — A novice opens the belt roadmaps and now finds a map first
+
+The complaint was that the belt content is unreadable to a beginner. Reading it
+end to end, the *content* was not the problem: 42 phases, every one carrying a
+written objective, 136 items split between techniques with criteria and concept
+prose, and both clients already rendering phase descriptions. Two other things
+were, and one of them is the whole diagnosis.
+
+**There was no map.** The roadmaps opened straight into "Mount: get out, then
+hold" — correct triage, and meaningless to somebody who does not yet know that a
+round has a shape. A `The map: how a round goes` phase now leads white belt: four
+concepts, no techniques, no criteria. The route (standing → takedown or pull →
+guard → sweep or pass → side control → mount or back → submission), the loop back
+(survive, escape, recover — and rejoin where you left it), the positional
+hierarchy, and position before submission. It contributes nothing to progress and
+cannot be finished, which is right — it is what you read before the list means
+anything, not a thing you train. **White belt only**: a round's shape is learned
+once.
+
+**The four belts did not read as a progression.** Each description was good in
+isolation and said nothing about where the belt sat. Every roadmap now opens with
+a `Where this belt sits` concept naming all four jobs — learn the map, build
+reliable routes, connect them into systems, control the decision tree — and the
+belts are renamed so the four titles tell that story when seen as a list.
+Rendered by the concept card both clients already have, so this cost no UI work
+at all. The novice track's version points explicitly at the white belt roadmap as
+the next thing to open, which nothing did before.
+
+Belt descriptions now lead with the goal in a single sentence, because the goal
+was previously the *implication* of a good paragraph rather than its first line.
+
+**`docs/content/bjj-curriculum-structure.md` is new**, and is the part meant to
+survive this PR: the twelve canonical domains, which belt owns what depth of
+each, and the rule that the reference syllabus (match order, complete, no
+criteria) and the roadmap (map first, then triage, curated, criteria-bearing) are
+two artifacts sharing one vocabulary. Writing the taxonomy down first was what
+established that the phase *titles* were already fine — the temptation was to
+rename them onto the domain names, which would have traded "Half guard is a
+position, not a failure" for "Guard: attacking" and made the thing worse in the
+name of consistency. The table is a coverage checklist, not a naming scheme, and
+says so.
+
+**A fact worth recording because it de-risks everything queued behind this**:
+rewriting `curricula.json` wholesale cannot damage an athlete's record.
+`cmd/seed` deletes and reinserts items, but progress lives in `bjj_session_tags`
+and is recomputed on read — so reordering, renaming and re-describing all five
+curricula is a content edit plus a reseed. No migration, no backfill, nothing to
+reconcile. That is why the reference layer can be built as pure content later.
+
+**What this deliberately does not do.** The proposal this came from names roughly
+70 techniques for white belt against the roadmap's 25. That gap is not closed
+here and should not be closed *in the roadmap*: 70 criteria-bearing items is a
+progress bar nobody fills, which is a worse version of the original complaint. It
+belongs in the reference syllabus (N19), where nothing is completable.
+
+Verified: seeded against a migrated `vola_test` — 5 curricula, white belt at 11
+phases / 25 techniques / 17 concepts — the three content tests green (shape,
+criteria legality, and every `technique_id` resolving in the 542-entry library),
+and the full `verify` chain. Not client-verified: the two screens that render
+this are unchanged, and the concept card they use has its own tests.
+
+Open questions:
+
+- **The map is prose, not a picture.** Four concept cards describing a flowchart
+  is strictly worse than the flowchart, and the position graph to draw it from
+  already exists (`positions.json`, 11 ordered positions with descriptions and
+  priorities). That is N18, and it is the step that makes this click.
+- The reference syllabus track does not exist yet. Until it does, the
+  twelve-domain table in the new doc is a spec with one implementation, which is
+  the state most likely to let it drift.
+- Nothing checks that a phase title leads with its position, or that a belt's
+  phases stay inside the twelve domains. Both are conventions in a doc, and the
+  history of this repo says a convention nothing checks is a convention that
+  rots.
+
 
 ## Open items / known gaps as of this entry
 

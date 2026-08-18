@@ -6523,6 +6523,25 @@ the schema rather than from taste:
   nothing rather than an error. Deliberate; test that an offline Plan tab still
   shows its templates.
 
+The map and the progression (2026-08-17):
+
+- **White belt's second phase is the map, and it moves no number.** `The map:
+  how a round goes` holds four concepts and zero techniques, so adding it must
+  leave `countable_items` and the step numbering exactly where they were.
+  Regression check: the roadmap card's "N of M" and the last technique's step
+  number, before and after. A concept-only phase that shifts either is the bug.
+- **Every roadmap opens with `Where this belt sits`** — the first item of the
+  first phase on all five, including the foundations track. It is a concept, so
+  it draws as text with no step disc, no criteria chrome and no progress row.
+- **The four belt titles read as a progression in the list** — learn the map,
+  build reliable systems, connect the game, master your game — in rank order,
+  with foundations first. Assert the ORDER on the Plan strip and on the web
+  Shared tab, not just presence: the progression is only legible if they are
+  adjacent and sorted.
+- **Belt descriptions lead with "Goal:"** and are not truncated on the phone at
+  the smallest supported width — they got longer, and the roadmap header is
+  where a clipped first line costs the most.
+
 Phases, concepts and foundations on the phone (2026-08-10):
 
 - **The roadmap screen groups items by phase**, phase title and description
