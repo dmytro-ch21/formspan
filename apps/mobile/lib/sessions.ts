@@ -1209,13 +1209,18 @@ export function repairSet<T extends LoggedSet>(set: T): T {
     zero, an RIR of 25, more assisted reps than reps. Those are illegal on any
     server, forever, and nulling them is safe.
 
-    A grip is not like that. This build knows six values; the server decides
+    A grip is not like that. This build knows a FIXED list; the server decides
     how many there are. Checking `set.grip` against `GRIPS` therefore answers
     "do I recognise this?" while pretending to answer "would the server take
-    it?" — and the moment a fifth value ships, every phone still on this build
-    reads a legitimate `mixed`, nulls it, and the wholesale PUT writes that null
+    it?" — and the moment the server grows one, every phone still on this build
+    reads a legitimate value, nulls it, and the wholesale PUT writes that null
     back over real data. Silent, on rows the athlete did record, with no error
     anywhere.
+
+    That is not hypothetical: it HAPPENED between #256 and N9. Do not write the
+    current count into this paragraph in present tense — it said "four" and "a
+    fifth value" and "`mixed`" until N9 shipped `mixed` and `hook`, at which
+    point the sentence described the wrong world in six files at once.
 
     Note where an unknown value can come FROM. The picker only ever writes
     `g.key` for `g` in `GRIPS`, so nothing local can produce one; a grip this

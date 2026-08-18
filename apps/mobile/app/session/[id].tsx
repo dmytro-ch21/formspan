@@ -2372,11 +2372,13 @@ function SetRow({
           </View>
 
           {/* How the bar was held.
-              Which values are offered depends on the movement (`gripsFor`):
-              pushes, pulls and isolation get the original four; hinges add
-              `mixed` and `hook`; carries and olympic lifts get `hook`. Squats,
-              jumps and conditioning get nothing, because the question is
-              meaningless there rather than merely hard to answer.
+              Which values are offered depends on the movement — `gripsFor`
+              is the list, and it SUBSTITUTES rather than extends: a hinge does
+              not get the four plus two, it gets its own four. Read that
+              function; enumerating it here is what made this comment wrong
+              twice. Squats, jumps and conditioning get nothing, because the
+              question is meaningless there rather than merely hard to
+              answer.
 
               Gated on `offeredGrips`, NOT on `gripApplies`. They differ in
               exactly one case and it is the one that traps data: a set holding

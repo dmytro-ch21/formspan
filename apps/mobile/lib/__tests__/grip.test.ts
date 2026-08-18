@@ -176,9 +176,13 @@ describe('what a swap must throw away', () => {
   const legPress = { id: 'leg-press', load_type: 'weight_reps' } as Exercise;
 
   it('clears the grip when the exercise changes', () => {
-    // Grip describes the movement that was just replaced. Worse, the picker is
-    // gated on movement pattern — so a grip left on a leg press is still sent
-    // on every write and has no control anywhere that could clear it.
+    // Grip describes the hands on the movement that was just replaced, so
+    // carrying it forward asserts a fact about a lift nobody performed.
+    //
+    // This used to add "and has no control anywhere that could clear it",
+    // which was the stronger half of the argument — and `offeredGrips` gave it
+    // one, so that half is now false. The remaining reason is the whole
+    // reason: clearable or not, a stale grip is a false entry.
     const [swapped] = swapExercise([set()], 'dumbbell-bench-press', legPress, 'weight_reps');
     expect(swapped.grip).toBeNull();
   });
@@ -209,7 +213,7 @@ describe('a grip the server would refuse', () => {
   it('is KEPT locally, because only the server owns the vocabulary (T4)', () => {
     // This assertion used to be the opposite, and the reversal is the fix.
     //
-    // `repairSet` runs on every read and knows four grips; the server decides
+    // `repairSet` runs on every read and knows a fixed list of grips; the server decides
     // how many exist. Nulling anything outside the local list is right for
     // garbage and WRONG for a value a newer server legitimately added — an
     // older phone reads a valid `mixed`, nulls it, and the wholesale PUT writes

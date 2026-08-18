@@ -7,7 +7,7 @@ import { migratedFixture, type FixtureDb } from './support/sqlite';
  * The grip repair: the one server refusal a phone can settle by itself.
  *
  * T4 stopped `repairSet` nulling grips it does not recognise, because that is a
- * question only the server can answer — a build knows four, the server decides
+ * question only the server can answer — a build knows a fixed list, the server decides
  * how many exist, and guessing meant an older phone read a legitimate `mixed`,
  * nulled it, and wrote that null back over real data. So the client sends what
  * it holds and drops a grip only once the server has actually refused it, by
