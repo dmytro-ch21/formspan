@@ -31,17 +31,45 @@ import { join, relative, sep } from 'node:path';
  * ROUTE tree are matched (`/session/[id]` accepts `/session/abc`), so a literal
  * pointing into a dynamic route is covered; a computed one is not.
  *
+ * It also cannot see a TYPO UNDER A DYNAMIC PARENT. `/bjj/promotion/nope`
+ * resolves, because `[id].tsx` sits beside `new.tsx` and matches any segment —
+ * so a misspelt static sibling is invisible here. That is inherent to matching
+ * patterns rather than resolving them the way the router does.
+ *
  * If this ever needs to be stronger, the honest upgrade is generating the typed
- * routes in CI and letting `tsc` do it properly — not making this regex
- * cleverer.
+ * routes in CI and letting `tsc` do it properly — that covers the computed
+ * cases and the shadowed ones together, and it is the real fix this stands in
+ * for. Do not make this regex cleverer instead.
  */
 
 const MOBILE = join(__dirname, '..', '..');
 const APP = join(MOBILE, 'app');
 
-/** Files Expo Router does not turn into routes. */
+/**
+ * Files Expo Router does not turn into routes.
+ *
+ * `.ts` and `.js` count: nothing in this app uses them as routes today, but
+ * Expo Router does, and enumerating only `.tsx` would make the first one a
+ * FALSE POSITIVE — the failure mode that gets a guard deleted rather than read.
+ */
 function isRouteFile(name: string): boolean {
-  return name.endsWith('.tsx') && !name.startsWith('_layout') && !name.startsWith('+');
+  return /\.(tsx|ts|jsx|js)$/.test(name) && !name.startsWith('_layout') && !name.startsWith('+');
+}
+
+/**
+ * Source with comments blanked out, preserving offsets.
+ *
+ * This scanner reads raw text, so a COMMENT shaped like a navigation call fails
+ * the suite — and this codebase quotes removed code verbatim in comments
+ * constantly, so that is the likeliest route to somebody deleting this file as
+ * noise. Demonstrated in review: appending `// see also router.push("/legacy")`
+ * to an untouched component turned the build red. Whitespace rather than
+ * deletion so the reported positions stay honest.
+ */
+function withoutComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, lead) => lead + ' '.repeat(m.length - lead.length));
 }
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -95,7 +123,13 @@ function resolves(target: string, all: string[]): boolean {
     const pattern = r
       .split('/')
       .map((seg) =>
-        /^\[.+\]$/.test(seg) ? '[^/]+' : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+          seg.startsWith('[...')
+          ? // A catch-all swallows the rest of the path, so it must not be
+            // matched as ONE segment or a legitimate deep link reads as dead.
+            '.+'
+          : /^\[.+\]$/.test(seg)
+            ? '[^/]+'
+            : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
       )
       .join('/');
     return new RegExp(`^${pattern}$`).test(path);
@@ -103,7 +137,8 @@ function resolves(target: string, all: string[]): boolean {
 }
 
 /** Where a navigation begins. The literals may be anywhere inside it. */
-const NAVIGATION_START = /(?:router|nav)\.(?:push|replace|navigate)\s*\(|href=\{?/g;
+const NAVIGATION_START =
+  /(?:router|nav)\.(?:push|replace|navigate|dismissTo)\s*\(|href=\{?|pathname:\s*/g;
 
 /** A quoted path literal — `'/profile/edit'`, `"/workouts"`. */
 const PATH_LITERAL = /['"](\/[^'"`$\s]*)['"]/g;
@@ -136,6 +171,16 @@ function targetsIn(src: string): string[] {
         else if (src[i] === ')') depth--;
       }
       span = src.slice(from, i);
+    } else if (src[from - 1] === '{') {
+      // `href={{ pathname: '…' }}` — balance the braces rather than stopping at
+      // the newline, or a prettier reflow silently drops this call's coverage.
+      let depth = 1;
+      let i = from;
+      for (; i < src.length && depth > 0; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}') depth--;
+      }
+      span = src.slice(from, i);
     } else {
       span = src.slice(from, src.indexOf('\n', from) + 1 || undefined);
     }
@@ -161,7 +206,7 @@ describe('navigation targets', () => {
     for (const dir of ['app', 'components']) {
       for (const file of walk(join(MOBILE, dir))) {
         if (!/\.tsx?$/.test(file)) continue;
-        for (const target of targetsIn(readFileSync(file, 'utf8'))) {
+        for (const target of targetsIn(withoutComments(readFileSync(file, 'utf8')))) {
           if (!resolves(target, all)) dead.push(`${relative(MOBILE, file)} → ${target}`);
         }
       }

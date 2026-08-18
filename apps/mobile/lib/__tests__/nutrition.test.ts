@@ -364,8 +364,11 @@ describe('scale', () => {
  * `tsc` sees a loose `Href` and passes; it only surfaced locally, in a worktree
  * that happened to have the generated file.
  *
- * So the last test here checks the route files exist ON DISK. That is the only
- * guard available in CI, and it is the one that would have failed.
+ * The guard for that class lives in `routes.test.ts`, which checks every
+ * navigation literal in the app against the real route tree. This file covers
+ * only the RULE — which screen a given set of missing fields should send you
+ * to — and deliberately says nothing about routes, so the two cannot drift into
+ * disagreeing about the same thing.
  */
 describe('profileGap', () => {
   it('says nothing when the target is already derivable', () => {
@@ -397,9 +400,18 @@ describe('profileGap', () => {
     expect(profileGap(['weight_kg', 'sex'])?.kind).toBe('profile');
   });
 
-  it('ignores a field this build does not know', () => {
-    // Server vocabulary can lead the app. An unknown field is not a profile
-    // field, so it must not silently route to the profile form.
-    expect(profileGap(['galaxy_brain_index'])?.kind).toBe('weigh-in');
+  it('offers nothing for a field this build does not know', () => {
+    // Server vocabulary can lead the app, and an unknown field has no screen we
+    // can honestly send anyone to. Routing it to the check-in — which the first
+    // version did — is the same silent mis-send as routing it to the profile:
+    // the athlete records a weigh-in, nothing changes, and nothing says why.
+    // The screen still names the field; only the button is withheld.
+    expect(profileGap(['galaxy_brain_index'])).toBeNull();
+  });
+
+  it('still answers when a known field arrives beside an unknown one', () => {
+    // The mixed case must not be swallowed by the unknown-field rule.
+    expect(profileGap(['galaxy_brain_index', 'sex'])?.kind).toBe('profile');
+    expect(profileGap(['galaxy_brain_index', 'weight_kg'])?.kind).toBe('weigh-in');
   });
 });

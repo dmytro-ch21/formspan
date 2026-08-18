@@ -2508,6 +2508,38 @@ out") lived in prose and a comment, and nothing on either branch asserted it.
 milestone earned in the same class chimes `success` and stands the first down.
 Both go red against the wrong flag.
 
+**Review found the fix's own second branch was unguarded, which is the finding
+worth keeping.** The check-in half was written as `` router.push(`/checkin/${d}`) ``
+— a template literal, which the new guard deliberately skips and CI's `tsc`
+cannot see either. So the branch added by this PR was exposed to the exact bug
+this PR exists to fix: rename `checkin/[date]` and you get a green build and a
+dead button. It uses the object form now
+(`{ pathname: '/checkin/[date]', params: { date } }`), which names the route
+pattern as a literal that both the guard and the generated types can check.
+
+Three more from the same pass, each demonstrated by mutation rather than
+argued:
+
+- **A comment shaped like a navigation call failed the suite.** The scanner
+  reads raw text, and this codebase quotes removed code verbatim in comments
+  constantly — the likeliest route to somebody deleting the guard as noise.
+  Comments are blanked (offset-preserving) before scanning.
+- **Literals inside href-returning helpers were invisible.** `sessionHref` on
+  the Today screen builds `'/bjj/session/[id]'` and three buttons flow through
+  it; breaking it passed. `pathname:` is a third anchor now, which costs no new
+  false-positive surface because every object-form target sits behind that key.
+- **An unknown field routed to the check-in.** Server vocabulary can lead the
+  app, and sending someone to record a weigh-in that fixes nothing is the same
+  silent mis-send as sending them to the profile. `profileGap` returns null
+  there, and the screen was restructured so the *explanation* still renders
+  without a button — gating both on the gap would have shown a blank screen
+  instead of a named reason.
+
+Also corrected: a docstring describing a test that had been deleted survived
+its removal and documented coverage living in another file. That is the same
+class as the bug — something that reads as true and is not — arriving in the
+commit that fixes it.
+
 ### Gaps this leaves
 
 - **No password reset**, which is now the most urgent hole in mobile auth and is

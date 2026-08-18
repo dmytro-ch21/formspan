@@ -341,8 +341,11 @@ function round1(v: number): number {
  * missing: you have to go there anyway, and the weigh-in is one tap from Today
  * afterwards — whereas the reverse order strands you a second time.
  *
- * Returns `null` when nothing is missing, so a caller cannot render a
- * fix-this button for a target that is already derivable.
+ * Returns `null` when nothing is missing — and also when the server names ONLY
+ * fields this build does not know, because then there is no screen we can
+ * honestly send anyone to. The caller renders the explanation either way and
+ * the button only when there is one; a button that fixes nothing is worse than
+ * no button beside a sentence that at least names what is wrong.
  */
 export type ProfileGap = {
   /**
@@ -361,12 +364,20 @@ export type ProfileGap = {
 
 /** The three the profile form actually edits — see `app/profile/edit.tsx`. */
 const PROFILE_FIELDS = ['height_cm', 'date_of_birth', 'sex'];
+/** The fourth thing a target waits on, and the one that is NOT on that form. */
+const MISSING_WEIGHT = 'weight_kg';
 
 export function profileGap(missing: string[]): ProfileGap | null {
-  if (missing.length === 0) return null;
   if (missing.some((f) => PROFILE_FIELDS.includes(f))) {
     return { kind: 'profile', label: 'Open profile' };
   }
-  // Only the weigh-in is outstanding, and that is a check-in, not the profile.
-  return { kind: 'weigh-in', label: 'Record a weigh-in' };
+  if (missing.includes(MISSING_WEIGHT)) {
+    // The weigh-in is outstanding, and that is a check-in, not the profile.
+    return { kind: 'weigh-in', label: 'Record a weigh-in' };
+  }
+  // Nothing missing, or nothing we recognise. Raised in review: routing an
+  // unknown field to the check-in is the same silent mis-send as routing it to
+  // the profile — the athlete records a weigh-in that fixes nothing and is
+  // stranded with no idea why. Server vocabulary can lead the app.
+  return null;
 }
