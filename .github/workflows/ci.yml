@@ -150,6 +150,13 @@ jobs:
       - name: Python version
         run: python3 --version
 
+      # The grip vocabulary is duplicated in Go, mobile and web because there
+      # is no shared package to put it in. This is what makes that survivable:
+      # drift fails here rather than reaching an athlete as a 400 they cannot
+      # explain, or as a grip the picker silently refuses to offer.
+      - name: Grip vocabulary parity
+        run: python3 scripts/check-grip-parity.py
+
       # Until this job existed, NOTHING in this repo read a .py file: no CI
       # step, no `verify` link, no pyproject/ruff config anywhere. The content
       # pipeline is Python, and the script that imports the whole catalog is

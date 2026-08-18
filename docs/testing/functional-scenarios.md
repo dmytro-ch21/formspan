@@ -676,6 +676,30 @@ Domain: a training session that **actually happened**, and the sets in it — re
   rather than being repaired away on the client. Worth an explicit sync test:
   log a timed squat offline, sync, reload.
 
+### Authoring grip on web (N10)
+
+- **A deadlifter corrects a session at a desk.** Open a finished hinge session
+  on web, set two sets to `mixed`, reload: the value persisted. This is the
+  correcting case the platform rule already grants web — it does not make
+  logging a desk activity.
+- **The picker only appears where the movement has a vocabulary.** A leg press
+  or a squat row shows no grip control at all; a deadlift, a carry and an
+  olympic lift do. An empty picker is a question with no answers.
+- **Back to unrecorded.** Set a grip, then choose the empty option: the set
+  must return to no grip, not to "regular". The row summary should then show
+  nothing rather than a default.
+- **A grip outside the movement's subset stays clearable.** A set holding
+  `angled` on a hinge (recorded before the subset changed, or by a newer
+  server) must still appear in the picker as a selectable option — otherwise it
+  is visible in the row and impossible to remove.
+- **Carry-forward.** Add a set after one with a grip: the new row inherits it,
+  the way weight and reps do. Effort (RIR/RPE) must NOT be inherited.
+- **Parity.** Whatever web offers for a movement, mobile offers the same.
+  `check:grip-parity` enforces *that* in CI — it compares the three `gripsFor`
+  tables and nothing else. **Server acceptance is a separate guarantee**, held
+  by `ValidGrip` and the CHECK constraint, which the script never reads. A
+  functional test is what would catch the two disagreeing, as a 400 on save.
+
 ## Progression rules — double progression (`GET /v1/sessions/suggestions`, both clients)
 
 Domain: what to load today and for how many reps, computed from the caller's own last few sessions. The thing in the product that advises rather than records, so it follows the standing rule — deterministic, and it always states its evidence.

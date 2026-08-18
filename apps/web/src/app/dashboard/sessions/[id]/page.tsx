@@ -26,6 +26,7 @@ import {
   replaceSets,
   setExerciseUnit,
   GRIPS,
+  offeredGrips,
   SET_TYPES,
   swapSuggestions,
   swapExercise,
@@ -902,6 +903,7 @@ function ExerciseBlock({
                 editable={editable}
                 exerciseName={exercise?.name ?? exerciseID}
                 perSide={exercise?.load_mode === "per_side"}
+                movementPattern={exercise?.movement_pattern}
                 units={units}
                 onChange={(next) => onChange(index, next)}
                 onRemove={() => onRemove(index)}
@@ -931,6 +933,7 @@ function SetRow({
   editable,
   exerciseName,
   perSide,
+  movementPattern,
   onChange,
   onRemove,
   units,
@@ -940,6 +943,12 @@ function SetRow({
   measures: Measure[];
   editable: boolean;
   exerciseName: string;
+  /**
+   * Which grips this movement can be held in — see `gripsFor`. A plain string
+   * rather than the `Exercise`, for the same reason `perSide` is a boolean:
+   * this row is given values, not an object to interrogate.
+   */
+  movementPattern?: string;
   /**
    * The exercise is entered per hand. Passed down rather than read here
    * because this row is given a NAME, not an exercise — and it is needed for
@@ -986,21 +995,75 @@ function SetRow({
         {short && (
           <span className="ml-1 text-xs font-bold text-lime">{short}</span>
         )}
-        {/* Read-only here. Grip is recorded while training, which is a phone
-            thing under the platform rule; web's job is that a session opened at
-            a desk SHOWS what was recorded and does not destroy it. Only when
-            set — an unrecorded grip renders nothing, never "Reg". */}
-        {set.grip && (
-          // `title` because "Neu" alone is announced verbatim by a screen
-          // reader and explains nothing on hover — and unlike the set-type
-          // short beside it, grip has no other surface on this page to read the
-          // full word from. Same treatment the RIR/RPE headers already use.
-          <span
-            className="ml-1 text-xs text-text-dim"
-            title={`${GRIPS.find((g) => g.key === set.grip)?.label ?? set.grip} grip`}
+        {/* N10. Web can author grip now, not only display it.
+
+            This does NOT make logging a desk activity — the platform rule is
+            unchanged and a session is still run from the phone. It is the
+            correcting-at-a-desk case the rule already grants web: you got home
+            and remember the last two sets were mixed, and until now the only
+            way to fix that was to pick the phone back up.
+
+            A `<select>` rather than the chip row mobile uses. The chips are
+            right for a thumb between sets; this is a dense table, and a native
+            select is compact, keyboard-operable and screen-reader-labelled
+            without any of that being rebuilt. Its empty option is load-bearing:
+            it is the way back to UNRECORDED, which `offeredGrips` exists to
+            keep reachable.
+
+            Gated on `offeredGrips`, NOT on `gripApplies` — mobile's copy of
+            this control carries the same warning and I shipped the wrong one
+            first. They differ in exactly one case and it is the one that traps
+            data: a set holding a grip on a movement whose subset is EMPTY (the
+            console recategorised the exercise after it was logged, a newer
+            server grew a pattern, or the exercise failed to load so the pattern
+            is undefined). `gripApplies` is false there, so the picker would
+            disappear while the grip stayed visible in the row — unclearable,
+            and re-sent by every wholesale PUT forever. `offeredGrips` returns
+            that held grip, so the select renders with exactly one option and
+            the "Not recorded" escape.
+
+            Where there is neither a vocabulary nor a held grip — a leg press,
+            normally — it returns nothing and no picker appears, which is the
+            original intent: an empty picker is a question with no answers. */}
+        {editable && offeredGrips(movementPattern, set.grip).length > 0 ? (
+          <select
+            className="ml-1 rounded border border-line bg-transparent text-xs text-text-dim"
+            value={set.grip ?? ""}
+            aria-label={`Grip for set ${ordinal} of ${exerciseName}`}
+            onChange={(e) =>
+              onChange(
+                withSetChange(set, {
+                  // "" is the unrecorded option — null, never the string, so
+                  // the server stores an absent grip rather than a bad value.
+                  grip: (e.target.value || null) as LoggedSet["grip"],
+                }),
+              )
+            }
           >
-            {GRIPS.find((g) => g.key === set.grip)?.short ?? set.grip}
-          </span>
+            {/* Named, not "—": this option is the way back to unrecorded,
+                and an em dash is announced as "em dash" or as nothing at all,
+                making the one load-bearing choice the one with no
+                comprehensible name. */}
+            <option value="">Not recorded</option>
+            {offeredGrips(movementPattern, set.grip).map((g) => (
+              <option key={g.key} value={g.key}>
+                {g.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          set.grip && (
+            // `title` because "Neu" alone is announced verbatim by a screen
+            // reader and explains nothing on hover — and unlike the set-type
+            // short beside it, grip has no other surface on this page to read
+            // the full word from. Same treatment the RIR/RPE headers use.
+            <span
+              className="ml-1 text-xs text-text-dim"
+              title={`${GRIPS.find((g) => g.key === set.grip)?.label ?? set.grip} grip`}
+            >
+              {GRIPS.find((g) => g.key === set.grip)?.short ?? set.grip}
+            </span>
+          )
         )}
       </td>
 

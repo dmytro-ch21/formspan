@@ -23412,6 +23412,115 @@ Reproduced with a control before any fix was written: the probe left
   repair — still run against a row that may already be a tombstone. Harmless as
   far as this entry checked, since the terminal swap now declines and the next
   pass re-reads, but nothing pins that reasoning.
+## 2026-08-17 — Web can say how you pulled, and a rule that now exists three times
+
+**N10.** The session page could show a grip and not set one. A deadlifter who
+got home and remembered the last two sets were mixed had to pick the phone back
+up to record it.
+
+This does **not** move logging to the desk. The platform rule is untouched and a
+session is still run from the phone; correcting a session at a desk is a case
+that rule already grants web, and the missing control was the gap.
+
+### The gate was wrong first, and mobile had already written down why
+
+The picker was gated on `gripApplies`. Mobile's copy of the same control gates
+on `offeredGrips(...).length > 0` and carries a comment saying exactly why:
+they differ in one case, and it is the one that traps data. A set holding a grip
+on a movement whose subset is EMPTY — an exercise the console recategorised
+after it was logged, a pattern a newer server grew, or an exercise that simply
+failed to load — is hidden by `gripApplies`, leaving the grip visible in the row
+with no control to clear it, and re-sent by every wholesale PUT.
+
+`offeredGrips` returns that held grip, so the select renders with one option and
+the "Not recorded" escape. The irony is that this branch is the entire reason
+`offeredGrips` exists, it was carried over into web's copy correctly, and the
+gate made it unreachable. Review caught it; the branch is now pinned by a test
+that was missing before the fix went in.
+
+### A select, not the chip row
+
+Mobile uses chips, which are right for a thumb between sets. This is a dense
+table, so it gets a native `<select>`: compact, keyboard-operable and
+screen-reader-labelled without rebuilding any of that.
+
+Its empty option is load-bearing rather than decoration. It is the way back to
+UNRECORDED, and `offeredGrips` exists to keep that reachable — a set holding a
+grip outside its movement's subset (recorded before the subset changed, or one a
+newer server added) is appended to the list rather than hidden, because
+rendering the subset alone leaves that grip visible in the row and impossible to
+remove. That is the UI end of #256's rule, and it is the half that is easy to
+leave out.
+
+`SetRow` takes `movementPattern`, a value, rather than the `Exercise`. TASKS
+assumed it would need the object; the file already had the answer — `perSide` is
+passed down as a boolean with a comment explaining that this row is given
+values, not something to interrogate.
+
+### emptySet reversed, and the reason it had been right
+
+`emptySet` deliberately did not carry `grip`, and its comment said why: web had
+no grip control, so a carried value would have been a recording this app made
+and could not unmake. That reasoning was correct and it died with this change.
+Web carries grip forward now, exactly as mobile does — you do not change your
+grip between sets — while effort is still never carried, because a grip is how
+you are doing the movement and effort is a judgement about one particular set.
+
+### The part worth arguing about: a third copy
+
+The grip vocabulary now exists three times — `GripsFor` in Go, `gripsFor` in
+mobile, `gripsFor` in web. Nobody chose that. There is no shared TypeScript
+package between the two apps (the pnpm workspace globs `packages/*`; no such
+package exists), so the alternative was inventing a shared library and rewiring
+two apps' builds — a bigger and riskier change than the picker N10 asked for.
+
+What makes the copy survivable is **`check:grip-parity`**, in `verify` and in
+CI's Scripts (Python) job: it parses the three `gripsFor` case tables — and
+nothing else — and fails if they disagree. Precedent is `check:brand-copies`,
+which does the same job for the brand assets.
+
+Four failure modes are proven, not assumed, and two of them only exist because
+review went looking for a third way the check could pass while the copies
+disagreed:
+
+- **Real drift** — removing `hook` from web's hinge prints all three tables side
+  by side and exits 1.
+- **A vacuous pass** — renaming mobile's function so the parser finds nothing
+  exits 1 with "the parser needs updating, not deleting", rather than passing on
+  an empty table. That one is the failure this repo has actually shipped before,
+  in other guards.
+- **The `default:` branch**, which the first version discarded. It decides what
+  every pattern OUTSIDE the eight offers, so one app returning the full four
+  there while the others return nothing is real, athlete-visible drift across
+  every unlisted movement — and it was invisible. Now compared under a sentinel
+  key. Go writes that fallback as a trailing `return nil` rather than a
+  `default:`, so the parser fills the sentinel from there; without that the
+  check failed on a difference in spelling rather than in behaviour.
+- **A Go constant whose wire value differs from its name.** The first version
+  lowercased the constant NAME, so `GripHook Grip = "hook_grip"` would have been
+  reported as agreeing with TS. The const block is resolved now, which also
+  stops a legitimately snake_case value being reported as false drift.
+
+It is syntactic and stdlib-only, matching `check-python-syntax.py`, so `verify`
+still needs no Go toolchain and no Python packages. The cost is that a copy
+which reformats its switch beyond the parsed patterns fails as drift when it is
+correct — fix the parser then, do not delete the check.
+
+The three tables were also compared once by hand at the time of writing: eight
+movement patterns, identical across all three.
+
+### Open questions this leaves
+
+- **Not seen in a browser.** Same debt as N4 and N5, and **L1** now covers a
+  third thing. The select's contrast against the dense table, and whether it
+  crowds the ordinal cell, are exactly what a rendered pass would answer.
+- **The parity check compares the `gripsFor` tables, and only those.** It does
+  not read `ValidGrip`, the CHECK constraint, or the three copies of
+  `offeredGrips` — so "web offers what the server accepts" is held by those,
+  not by this script. Four restatements of one vocabulary, one of them checked.
+- **`mixed` still has no side.** N9 decided that deliberately and recorded when
+  to revisit; this picker inherits it, so an athlete cannot yet say which hand
+  was over.
 
 ## Open items / known gaps as of this entry
 
