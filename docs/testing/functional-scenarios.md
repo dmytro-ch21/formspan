@@ -6589,6 +6589,21 @@ The round map (2026-08-18):
 - **Both sides of a position share one link.** "Mount" and "Under mount" both
   read about `mount`, so both counts are the family's. That is the glossary
   describing a position for both players, not a duplicate.
+Authorship on the web curricula list (2026-08-18):
+
+- **A stranger's public curriculum with `track: "syllabus"` appears under "From
+  other athletes", never "Reference syllabuses".** Publish one from a second
+  account with `track` set to each of `syllabus`, `belt` and `foundations` and
+  assert all three land in the strangers' section. This is the whole of F8.
+- **It is still VISIBLE.** Unlike the mobile strips, which drop non-official
+  rows, this page must keep showing it — browsing other athletes' lists is what
+  the Shared tab is for.
+- **VOLA content still files under its own heading**, in order: Belt roadmaps,
+  Foundations, Reference syllabuses, any other named track, then strangers.
+- **Against a server that omits `official`, every section collapses into "From
+  other athletes".** Safe by design; worth asserting so nobody "fixes" it by
+  defaulting the field to true.
+
 Syllabuses on the phone (2026-08-18):
 
 - **The Library's BJJ reference block shows four belt cards**, white → brown, in
