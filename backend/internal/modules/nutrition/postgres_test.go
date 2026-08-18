@@ -713,6 +713,56 @@ func TestListFoodsIsScopedAndSearchable(t *testing.T) {
 	}
 }
 
+// The athlete's own text is not a LIKE pattern.
+//
+// Without escaping, searching for "100%" matches everything and
+// "protein_shake" matches "protein-shake" — which reads as broken search
+// rather than as an escaping bug, so nobody reports it as one. Raised in
+// review.
+func TestSearchDoesNotTreatTheQueryAsAPattern(t *testing.T) {
+	r := repoFor(t, uid)
+	for id, name := range map[string]string{
+		"aaaaaaaa-1111-4111-8111-111111111111": "Milk 100% whole",
+		"bbbbbbbb-1111-4111-8111-111111111111": "Chicken thigh",
+		"cccccccc-1111-4111-8111-111111111111": "protein_shake",
+		"dddddddd-1111-4111-8111-111111111111": "protein-shake",
+	} {
+		if _, err := r.SaveFood(ctx(), aFood(id, name, 100)); err != nil {
+			t.Fatalf("save %q: %v", name, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		q     string
+		want  int
+		notes string
+	}{
+		{"100%", 1, "a literal percent must not become a wildcard"},
+		// One, not zero and not four: escaped, "%" is a literal character, and
+		// exactly one saved food has one in its name. Zero was the first
+		// expectation here and it was wrong — "matches nothing" is what an
+		// over-escaped pattern would do.
+		{"%", 1, "a bare percent matches names containing a percent, not everything"},
+		{"protein_shake", 1, "an underscore must not match any character"},
+		{"chicken", 1, "ordinary search still works"},
+		{"", 4, "an empty query still returns everything"},
+	} {
+		t.Run(tc.q, func(t *testing.T) {
+			got, err := r.ListFoods(ctx(), uid, tc.q, 50)
+			if err != nil {
+				t.Fatalf("search %q: %v", tc.q, err)
+			}
+			if len(got) != tc.want {
+				var names []string
+				for _, g := range got {
+					names = append(names, g.Name)
+				}
+				t.Fatalf("%q returned %d rows %v, want %d — %s", tc.q, len(got), names, tc.want, tc.notes)
+			}
+		})
+	}
+}
+
 func mustExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(), sql, args...); err != nil {

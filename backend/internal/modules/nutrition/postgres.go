@@ -242,11 +242,17 @@ func (r *PostgresRepository) ListFoods(ctx context.Context, userID, q string, li
 	// catalog has 762 rows shared by everybody, where this is one athlete's own
 	// saved list and will be dozens. ILIKE over an indexed lower(name) is the
 	// honest tool at this size; revisit if a seeded catalog ever lands.
-	pattern := "%" + strings.ToLower(strings.TrimSpace(q)) + "%"
+	// The athlete's own text is escaped before it becomes a LIKE pattern.
+	// Without this, searching for "100%" or "protein_shake" turns their own
+	// characters into wildcards and quietly returns the wrong rows — a bug that
+	// looks like broken search rather than like an escaping mistake. Backslash
+	// first, or it re-escapes the escapes it just added.
+	esc := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+	pattern := "%" + esc.Replace(strings.ToLower(strings.TrimSpace(q))) + "%"
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+foodCols+`
 		FROM nutrition_foods
-		WHERE user_id = $1 AND ($2 = '%%' OR lower(name) LIKE $2)
+		WHERE user_id = $1 AND ($2 = '%%' OR lower(name) LIKE $2 ESCAPE '\')
 		ORDER BY lower(name), id
 		LIMIT $3`, userID, pattern, limit)
 	if err != nil {

@@ -24870,6 +24870,14 @@ input schema inherited required macros while its own description said a recipe's
 are ignored — required-but-ignored is a contradiction a generated client cannot
 satisfy.
 
+A re-review confirmed both fixes and turned up one more: the food search built
+a `LIKE` pattern straight from the athlete's own text, so a search for `100%`
+matched everything and `protein_shake` matched `protein-shake`. That reads as
+broken search rather than as an escaping bug, which is why nobody would report
+it as one. It escapes now, with `ESCAPE '\'`, and a test asserts a literal
+percent matches only the food that has one in its name — the first version of
+that test expected zero, which is what an OVER-escaped pattern would return.
+
 ### `check:rate-parity`
 
 The rate bands are now a second copy of `RATE_TARGETS` in `anthropometry.ts`.
@@ -24929,6 +24937,12 @@ never used.
 - The first draft of that query filtered on a `session_sets.warmup` column that
   does not exist. It compiled, because Go does not type-check SQL. The
   integration test is the only reason it was caught before review.
+- **The composite FK's `ON DELETE SET NULL (source_food_id)` needs Postgres 15
+  or newer.** Local and CI are both 16, and the migration was applied and
+  exercised on 16.14 — but Railway's `staging` Postgres version was not verified
+  from here. On 14 or below the migration fails at `migrate up` rather than
+  silently, so it is a deploy-time stop rather than a data risk; check it before
+  promoting.
 
 
 ## Open items / known gaps as of this entry
