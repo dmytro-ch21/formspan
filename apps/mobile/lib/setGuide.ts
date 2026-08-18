@@ -1,8 +1,8 @@
 /**
  * What a set type or a grip actually means — the copy behind the info panel.
  *
- * The set editor offers up to twelve pills across two groups, and until now
- * every one of them was a bare word. "Back-off" and "Hook" are jargon: an
+ * The set editor's two selects offer up to twelve options between them, and
+ * until now every one was a bare word. "Back-off" and "Hook" are jargon: an
  * athlete who does not already know what they mean has no way to find out from
  * inside the app, so the honest options are to guess or to leave the field
  * unrecorded. Both are worse than a sentence.
@@ -10,10 +10,10 @@
  * ## Data, not JSX
  *
  * The strings live here rather than in the component for the same reason
- * `celebration.ts` holds the card's numbers: a long-press sheet is one
- * presentation of this, and the template editor on web will want the same
- * sentences. A component that owns its copy cannot be reused and cannot be
- * tested without rendering.
+ * `celebration.ts` holds the card's numbers: the popover that swaps to a
+ * definition is one presentation of this, and the template editor on web will
+ * want the same sentences. A component that owns its copy cannot be reused and
+ * cannot be tested without rendering.
  *
  * ## Every lookup is TOTAL, and for grips that is load-bearing
  *
@@ -21,8 +21,8 @@
  * That mirrors {@link offeredGrips}, which deliberately renders a grip this
  * build does not know about — the server decides how many grips exist (#256),
  * so a set can legitimately carry `sumo` on a build whose union stops at
- * `hook`. A partial lookup would make that pill the one pill in the group that
- * crashes on long-press, and it is exactly the pill an athlete is most likely
+ * `hook`. A partial lookup would make that option the one in the list that
+ * crashes on long-press, and it is exactly the one an athlete is most likely
  * to ask about.
  *
  * `setTypeGuide` is total for the weaker reason that it costs nothing to be.

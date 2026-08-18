@@ -1507,6 +1507,27 @@ export default function SessionScreen() {
                         ? () => startWork(i, g.exerciseID)
                         : undefined
                     }
+                    /*
+                      The other half of the same clock. `offersTimerTarget`
+                      excludes a set that already MEASURES seconds (a plank's
+                      clock is its measurement, not a target) and a dual-mode
+                      exercise (writing `seconds` on a burpee set logged in reps
+                      flips it to time mode and hides the rep count — what the
+                      exercise-level reps/time switch exists to do properly).
+
+                      The two timer suppressions are repeated deliberately: a
+                      row that is ticking, or a run already driving this
+                      exercise, should show no clock at all rather than swapping
+                      the start button for an arm one. Raised in review — the
+                      first version gated only on the load type, so clearing the
+                      field mid-countdown grew a dim clock on the running row.
+                    */
+                    canArmTimer={
+                      offersTimerTarget(exercise?.load_type) &&
+                      sets[i].seconds == null &&
+                      timerState.timer?.setIndex !== i &&
+                      !timerState.run
+                    }
                     showEffort={showEffort}
                     units={unitFor(g.exerciseID)}
                     duration={durationUnit}
@@ -2022,6 +2043,7 @@ function SetRow({
   onRemove,
   onToggleDone,
   onStartTimer,
+  canArmTimer = false,
   units,
   duration,
   showEffort,
@@ -2043,6 +2065,18 @@ function SetRow({
   onToggleDone: () => void;
   /** Undefined when this set isn't timed — see `workSecondsFor`. */
   onStartTimer?: () => void;
+  /**
+   * Whether this set can be GIVEN a countdown it does not have.
+   *
+   * Decided at the call site rather than here, because the answer depends on
+   * the running timer and the interval run — state this row does not see. It
+   * is the exact complement of `onStartTimer` and carries the same three
+   * suppressions, which is what stops a dim "give this a timer" clock
+   * appearing on the very row that is currently ticking (clear the field
+   * mid-countdown and it otherwise would) or during a run whose plan is
+   * already driving this exercise.
+   */
+  canArmTimer?: boolean;
   units: UnitSystem;
   /** Seconds or minutes, for this exercise — see `lib/duration.ts`. */
   duration: DurationUnit;
@@ -2076,19 +2110,7 @@ function SetRow({
   */
   const [timedOn, setTimedOn] = useState(set.seconds != null);
   const timed = timedOn || set.seconds != null;
-  /*
-    Can this set be GIVEN a countdown it does not have?
 
-    Gated on `offersTimerTarget`, which excludes both a set that already
-    measures seconds (a plank's clock is its measurement, not a target) and a
-    dual-mode exercise — writing `seconds` on a burpee set logged in reps flips
-    it to time mode and hides the rep count, which is what the exercise-level
-    reps/time switch exists to do properly.
-
-    `set.seconds == null` is the other half: once there is a duration this
-    control's job is to START it, and `onStartTimer` takes over.
-  */
-  const canArmTimer = offersTimerTarget(exercise?.load_type) && set.seconds == null;
   // Mode-aware: burpees switched to time show a duration field and no reps one,
   // which is the whole point of the switch. Going through `measuresFor` directly
   // would offer the one number the row is not keeping.
@@ -2320,10 +2342,12 @@ function SetRow({
               intended undo, and now the ONLY route back, since the clock
               deliberately does not toggle off. */}
           {offersTimerTarget(exercise?.load_type) && (
-            <View style={styles.timed}>
+            <View style={styles.fieldRow}>
               {/* No switch beside it any more — the row's clock is what puts
                   this here, and a second control for the same state was one
-                  the athlete had to expand a row to reach. */}
+                  the athlete had to expand a row to reach. So this is an
+                  ordinary field row like the measures above it, which is what
+                  it now is. */}
               {timed && (
                 <View style={styles.timedField}>
                   <Field
@@ -2797,7 +2821,6 @@ const styles = StyleSheet.create({
   // The switch and its field on one line, baseline-agnostic: `Field` carries a
   // label above the input, so `alignItems: 'flex-end'` is what puts the pill
   // level with the input rather than with the label.
-  timed: { flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
   timedField: { flex: 1 },
   // Two short answers on one line. `alignItems: 'flex-start'` so a control
   // without a sibling does not stretch to a height it has no content for.

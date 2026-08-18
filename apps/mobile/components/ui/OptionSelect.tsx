@@ -58,6 +58,14 @@ const INFO_ACTION = [{ name: 'info', label: 'What is this?' }];
 
 /** Enough room to be worth opening downward; otherwise the card flips up. */
 const POPOVER_MIN_SPACE = 260;
+/** Never taller than this, however much room there is — a menu, not a page. */
+const CARD_MAX_HEIGHT = 320;
+/** Never shorter than this; below it the list is unusable and should scroll. */
+const CARD_MIN_HEIGHT = 132;
+/** Breathing room from the screen edge the card opens toward. */
+const SCREEN_INSET = 16;
+/** Gap between the card and the control it belongs to. */
+const ANCHOR_GAP = 6;
 
 export type SelectOption = { key: string; label: string };
 
@@ -162,7 +170,9 @@ export function OptionSelect({
               style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
               accessibilityRole="button"
               accessibilityState={{ selected: on }}
-              accessibilityLabel={`${o.label}${on && clearable ? ', selected' : ''}`}
+              // No ", selected" suffix: `accessibilityState` already announces
+              // it, and the hint below carries what selecting again would do.
+              accessibilityLabel={o.label}
               accessibilityHint={
                 on && clearable ? 'Pick again to clear it' : 'Hold for what it means'
               }
@@ -210,16 +220,45 @@ function Popover({
   const accent = useAccent();
   const screen = Dimensions.get('window');
 
-  // Below when there is room, above when there is not — a set editor near the
-  // bottom of a long session is the common case, not the exotic one.
-  const below = anchor ? screen.height - (anchor.y + anchor.height) > POPOVER_MIN_SPACE : true;
+  /*
+    Which side, and how tall — and the height half is the part that was missing.
+
+    The first version chose a side and stopped, trusting `maxHeight: 320` to be
+    small enough. It is not: the Type list is six 44pt options plus padding and
+    the hint, about 305pt, so any anchor with 261–305pt below it opened DOWNWARD
+    and rendered its own foot off the bottom of the screen — "To failure" clipped
+    into the home-indicator zone and the hint gone entirely. A continuous band
+    the athlete scrolls through on every session, not an edge case.
+
+    Raising the threshold does not fix it, it moves it: flip up too eagerly on a
+    short screen and the card clips at the TOP instead, because a mid-screen
+    anchor there has less than a full card's height on either side.
+
+    So the side is a preference and the height is a measurement. The card is
+    clamped to the room it actually has, and its inner `ScrollView` takes over
+    when that is less than the content — which is the one outcome that is
+    correct on every screen size, at every scroll position, in both modes.
+  */
+  const spaceBelow = anchor
+    ? screen.height - (anchor.y + anchor.height) - ANCHOR_GAP - SCREEN_INSET
+    : 0;
+  const spaceAbove = anchor ? anchor.y - ANCHOR_GAP - SCREEN_INSET : 0;
+  // Below when it is genuinely roomy; otherwise whichever side has more, so a
+  // cramped screen still picks the better of two bad options rather than a
+  // fixed one.
+  const below = spaceBelow >= POPOVER_MIN_SPACE || spaceBelow >= spaceAbove;
+  const maxHeight = Math.max(
+    CARD_MIN_HEIGHT,
+    Math.min(CARD_MAX_HEIGHT, below ? spaceBelow : spaceAbove),
+  );
   const position = anchor
     ? {
         // Clamped so a control near the right edge does not push the card off.
         left: Math.max(8, Math.min(anchor.x, screen.width - CARD_WIDTH - 8)),
+        maxHeight,
         ...(below
-          ? { top: anchor.y + anchor.height + 6 }
-          : { bottom: screen.height - anchor.y + 6 }),
+          ? { top: anchor.y + anchor.height + ANCHOR_GAP }
+          : { bottom: screen.height - anchor.y + ANCHOR_GAP }),
       }
     : {};
 
@@ -246,7 +285,29 @@ function Popover({
           // Swallows the press so a tap on the card does not dismiss what it is
           // trying to read. Not a Pressable: this must not announce as a control.
           onStartShouldSetResponder={() => true}
+          /*
+            The screen-reader exit, and without it this card had none that did
+            not CHANGE something.
+
+            The scrim is `accessible={false}` — correctly, or it would collapse
+            the whole card into one element — but that also removes it as a
+            dismiss target, and there is no close button. `onRequestClose` is
+            Android's back gesture only. So a VoiceOver user's every way out ran
+            through an option, and on the clearable Grip control the one that
+            looks least destructive — re-picking the grip already selected — is
+            the one that CLEARS it. Two-finger Z now closes with nothing
+            recorded. Raised in review; VoiceOver is the part of this component
+            that has never been exercised on a device.
+          */
+          accessibilityViewIsModal
+          onAccessibilityEscape={onClose}
         >
+          {/*
+            The title renders in BOTH modes, not just for a definition. In list
+            mode it is the only thing saying whether this menu is Type or Grip —
+            a sighted user carries that over from the control they just tapped,
+            and a screen-reader user landing inside a modal has nothing.
+          */}
           {guide ? (
             <>
               <Text style={styles.cardTitle}>{guide.title}</Text>
@@ -264,7 +325,10 @@ function Popover({
               </Pressable>
             </>
           ) : (
-            <ScrollView>{children}</ScrollView>
+            <>
+              <Text style={styles.cardLabel}>{title.toUpperCase()}</Text>
+              <ScrollView>{children}</ScrollView>
+            </>
           )}
         </View>
       </Pressable>
@@ -325,6 +389,15 @@ const styles = StyleSheet.create({
   tick: { fontSize: 14, fontWeight: '700' },
   hint: { fontSize: 11, color: vola.textDim, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4 },
   cardTitle: { fontSize: 15, fontWeight: '700', paddingHorizontal: 10, paddingTop: 8 },
+  cardLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    color: vola.textDim,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
   cardBody: { fontSize: 13, lineHeight: 19, color: vola.textMuted, paddingHorizontal: 10, paddingTop: 6 },
   back: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 10 },
   backText: { fontSize: 14, fontWeight: '700' },

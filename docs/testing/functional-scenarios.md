@@ -8029,12 +8029,14 @@ training. Everything here is about it telling the truth.
 - Tap `GRIP`, pick `Neutral`, reopen and pick `Neutral` again: the grip returns to `Not recorded`. This is the only route back to unrecorded and it must not be lost.
 - Hold an option: the popover's own content swaps to that option's definition, with `Back` returning to the list. It must never open a second modal on top of the first.
 - **Open a select near the bottom of the screen**: the card flips above the control instead of running off the foot. Open one near the right edge: the card clamps inside the screen.
+- **Open one with a middling amount of room below it** — roughly 260–310pt, which is a band the athlete scrolls through every session. The card must be clamped to the space available and scroll internally; the last option and the hint must both be reachable. The first version clipped its own foot here, because the flip threshold was smaller than the list's height.
 - Tap the **dim clock** beside the tick on a set with no duration: it seeds 60s, turns accent, the editor opens onto the revealed `Timer (s) target` field, the row summary reads `60s`, and `Run all` appears on the exercise.
 - Tap the **accent clock** on a set that has a duration: the countdown starts, as it always did.
 - Clear the `Timer` field to empty: the duration goes, the clock returns to dim, and the start affordance goes with it. **This is the only way to turn a timer off** — the clock deliberately does not toggle off, so a mis-tap cannot delete a prescription.
 
 ### Edge cases & errors
 
+- **No clock at all on the row that is currently counting down, or during an interval run** — in either state, whether or not the set has a duration. Clearing the field mid-countdown must not grow a dim "give this a timer" clock on the ticking row.
 - **The clock never removes a duration.** Tapping it on a set that already has one must start the countdown, never clear it — this control sits next to the tick and is pressed one-handed mid-workout.
 - Typing `0` or a negative number in the Timer field stores `null`, not `0` — the server rejects `seconds <= 0`, so keeping it would be a row that 400s on sync and a countdown that fires instantly.
 - In minutes mode the Timer accepts a decimal (`1.5` = 90s); in seconds mode it is whole numbers only.
@@ -8046,6 +8048,8 @@ training. Everything here is about it telling the truth.
 
 ### Accessibility
 
+- **The popover must be escapable without changing anything.** The scrim is deliberately not accessible and there is no close button, so `onAccessibilityEscape` (two-finger Z) is the only non-mutating exit — without it a VoiceOver user's every way out selects an option, and on Grip the least-destructive-looking one clears the recorded value.
+- The open popover states which menu it is (`TYPE` / `GRIP`). A sighted user carries that over from the control they tapped; a screen-reader user landing inside a modal does not.
 - Each select is announced with its **answer** and its row — "Type for set 2 of Back Squat: Working", not "Type". Without the context every set in the session sounds identical.
 - Every pill exposes a **custom action** ("What is this?"). VoiceOver does not forward a long press, so without it the definitions are unreachable for the people most likely to want them read aloud.
 - **The info panel itself must be readable under VoiceOver** — title, body and Done each focusable. Its scrim must stay `accessible={false}`: a `Pressable` is accessible by default and iOS then collapses the whole card into one "Close, button" element, which silently undoes the custom action above. Worth a real VoiceOver pass, not just a code read.

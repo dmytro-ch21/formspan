@@ -25686,6 +25686,36 @@ the content across the close. That last one was first written with a ref read
 during render, which cost five lint warnings against a ratchet set at 54 — the
 state version is both correct and free.
 
+**Review of the rework found two more, and one was the accessibility gap the
+component's own design leans hardest on.** The popover had **no screen-reader
+exit that did not change something**. The scrim is `accessible={false}` —
+correctly, or iOS collapses the whole card into one element — but that also
+removes it as a dismiss target, and there is no close button; `onRequestClose`
+is Android's back gesture only. So every way out for a VoiceOver user ran
+through an option, and on the clearable Grip control the one that looks least
+destructive — re-picking the grip already selected — is the one that CLEARS it.
+`onAccessibilityEscape` closes it now with nothing recorded. The list also
+renders its own `TYPE` / `GRIP` title, because a sighted user carries that over
+from the control they tapped and a screen-reader user landing inside a modal had
+nothing saying which menu this was.
+
+The other was geometry, and the first version's numbers did not cover its own
+content. `POPOVER_MIN_SPACE` is 260 while the Type list is about 305pt, so any
+anchor with 261–305pt below it opened *downward* and rendered its own foot off
+the bottom of the screen — "To failure" clipped into the home-indicator zone and
+the hint gone. A continuous band the athlete scrolls through every session, not
+an edge case. Raising the threshold only moves the problem: flip up too eagerly
+on a short screen and it clips at the top instead, because a mid-screen anchor
+there has less than a full card on either side. So the side stayed a preference
+and the height became a measurement — the card is clamped to the room it
+actually has and its inner `ScrollView` takes over, which is the one outcome
+that is correct at every size, scroll position and mode.
+
+Two smaller ones landed with them: `canArmTimer` now carries the same two timer
+suppressions `onStartTimer` does, so clearing the field mid-countdown no longer
+grows a dim "give this a timer" clock on the row that is ticking; and a selected
+option no longer announces "selected" twice.
+
 **Seen on a device, which for this branch is the point** — twice, and the second
 pass is why the design above is not the design first written. L1 exists because
 nothing on the phone has been looked at on a phone, and a change whose entire
@@ -25696,7 +25726,8 @@ serving the PRIMARY checkout, i.e. `main`, so the first screenshots would have
 shown the code this branch replaces — confirm which bundle a screenshot came
 from before trusting it).
 
-Confirmed on the shipped design: `TYPE` and `GRIP` sitting on one line as boxed
+Confirmed on the shipped design, and again after the review fixes above:
+`TYPE` and `GRIP` sitting on one line as boxed
 selects matching the fields above them; the popover opening over the control and
 correctly flipping ABOVE it near the foot of the editor, left-clamped, with the
 selection ticked in accent; holding an option swapping the card to its
