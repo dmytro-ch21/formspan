@@ -23784,11 +23784,11 @@ independent conjuncts: the swap declines on both counts, the row keeps
 everything it owed, and the next pass deletes — the rename subsumed rather than
 sent, since removing the session was the athlete's later intent.
 
-Worth carrying to `T8`: its guard must check **both** flags, not `dirty` alone.
+Worth carrying to `T8`: its guard must check **both** flags, not `dirty` alone. (#271 landed T8 in parallel and its own review reached the same shape independently.)
 
 ### Gaps
 
-- **`T8` is the same family and still open**, in the same file: the pull's
+- **`T8` was the same family and landed in parallel (#271)**, in the same file: the pull's
   upsert carries the tombstone guard but not the dirty guard, so an edit landing
   in the reconciliation gap is overwritten and marked clean. Both siblings
   (`plan.ts`, `cacheWorkouts`) check both halves. Left claimable rather than
