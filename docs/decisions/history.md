@@ -25475,6 +25475,78 @@ Open questions:
   sequence and cannot be edited" off the same `!editable`. Found reviewing this
   PR and added to that task's line, so its fix does not stop at two.
 
+## 2026-08-18 — The badge was seen on a phone, and the run found an award nobody can earn
+
+#284 shipped the BJJ accomplishment badge with "never seen on a phone" as its
+first listed gap. It has been now, on a Simulator against staging, and the
+verification did what verification is for: it produced two findings no test in
+the suite could have.
+
+### It renders
+
+The pill reads **FIRST DRILLED TECHNIQUE LANDED LIVE** on the BJJ finish card,
+stamped with the right session, sitting in the slot a personal record occupies
+on a strength session, with the streak line beneath it. The session screen
+behind it renders the scored technique correctly as "Armbar from Closed Guard —
+1 landed".
+
+Two cosmetic notes worth carrying: that label is the longest of the seven and
+`styles.badgeText` uppercases it, so it wraps to two lines inside the pill —
+legible, and not what "Personal record" looks like. And the celebration card
+does not appear at all on the retroactive **New log** path; the badge is
+reachable only by finishing a live session. `functional-scenarios.md` said
+"finish a BJJ session" without drawing that distinction, and now says it.
+
+### The finding: `first_drilled_scored` cannot be earned by anybody
+
+Filed as **N31**. The award requires a technique on the **scored** side of the
+funnel, and nothing in any client ever writes one:
+
+- both technique-attaching paths in `app/bjj/reflect/[id].tsx` hard-code
+  `event: 'drilled'` — the picker and the sequence importer;
+- step 2 of the wizard, "What happened live?", records outcomes as per-category
+  counts with no technique at all.
+
+So every `scored` row in both the dev and staging databases has `technique_id`
+NULL, and the only way to see this badge was to insert the evidence by hand.
+**The derivation is correct; the evidence stream cannot feed it.**
+
+That is a design question rather than a bug to patch. The fast path is
+deliberately three taps and naming a technique per outcome is precisely the
+friction it refuses — the reflection wizard's own copy says "logging takes three
+taps". Worth knowing the same gap is why the technique funnel
+(`/v1/bjj/proficiency`) is effectively drilled-only, which is a larger prize
+than any badge.
+
+### What verifying it cost, recorded because the shape recurs
+
+Three environment facts made this far harder than "run it on a Simulator", and
+none of them is in any doc:
+
+- **The app points at Railway staging, not localhost.** `EXPO_PUBLIC_API_URL` in
+  `apps/mobile/.env.local` is the staging URL, so a local API and a local
+  database are invisible to the phone no matter how carefully they are seeded.
+- **The local dev database was 25 migrations behind** — version 34 against a
+  repo at 59, so `contests` did not exist and half the app's endpoints were
+  broken locally. Migrated to 59 as part of this; it is nobody's task and that
+  is presumably why it rotted.
+- **The signed-in athlete is not the one with the visible history.** I read a
+  user id out of `bjj_session_tags` and assumed it was the account on the
+  device; it was not, and I edited the wrong account's rows before noticing.
+  Restored from a CSV backup and verified. The device's own SQLite
+  (`local_sessions.user_id`) is the authority on who is signed in, and it is one
+  query away.
+
+### Gaps
+
+- **L1 is NOT closed.** Only the badge clause is struck; the share card, the
+  feed, the drop indent, N4's timer field, N5's weight chart and N10's grip
+  select remain exactly as unseen as they were.
+- **The chime was not verified** — a Simulator screenshot carries no audio, so
+  "an accomplishment latches the streak chime out" is still argued from code.
+- **One test session remains on staging** (`b1f1818d…`, logged through the app
+  during this run). Left deliberately: the phone holds it locally as clean and
+  synced, so deleting it server-side invites an orphan rather than tidiness.
 
 ## Open items / known gaps as of this entry
 
