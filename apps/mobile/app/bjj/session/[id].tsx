@@ -40,6 +40,7 @@ import {
   accomplishmentsFromSession,
   fetchAccomplishments,
 } from '@/lib/accomplishments';
+import { milestoneForSession, type Milestone } from '@/lib/milestones';
 
 /**
  * Reading a BJJ session back.
@@ -127,6 +128,22 @@ export default function BjjSessionScreen() {
     weeks: number;
     carried: boolean;
   } | null>(null);
+  /*
+    And the MILESTONE, for exactly the reason stated above — the argument does
+    not merely also apply here, it applies harder.
+
+    `milestoneForSession` fires only on the session that carried the streak into
+    the rung. So if the mat opens the week and this screen does not compute one,
+    no later session can pick it up: every strength session that week has
+    `carried === false`. The rung is not delayed, it is **lost**, silently, for
+    that week and that week only — and for a BJJ+strength athlete the mat is
+    usually what opens the week, so "lost" would have been the normal case.
+
+    Review caught this after the strength screen was wired and this one was not.
+    The comment above predicted the shape and the fix still missed the file.
+  */
+  const [celebrationMilestone, setCelebrationMilestone] = useState<Milestone | null>(null);
+  const [streakSettled, setStreakSettled] = useState(false);
   useEffect(() => {
     if (!celebrating) return;
     let live = true;
@@ -134,11 +151,18 @@ export default function BjjSessionScreen() {
     fetchHistory(getToken, { from, to, tz: localZone() })
       .then((h) => {
         if (!live) return;
-        setCelebrationStreak({ weeks: weekStreak(h.days), carried: carriedTheStreak(h.days) });
+        const carried = carriedTheStreak(h.days);
+        setCelebrationStreak({ weeks: weekStreak(h.days), carried });
+        // Same pass, same `carried` — so the card cannot show a milestone whose
+        // streak line disagrees with it.
+        setCelebrationMilestone(milestoneForSession(h.days, carried));
       })
       .catch(() => {
         // No history, no streak line and no chime — same silence as the
         // strength card, for the same reason.
+      })
+      .finally(() => {
+        if (live) setStreakSettled(true);
       });
     return () => {
       live = false;
@@ -719,12 +743,19 @@ export default function BjjSessionScreen() {
           onDismiss={() => setCelebrating(null)}
           streak={celebrationStreak}
           accomplishment={celebrationBadge}
+          milestone={celebrationMilestone}
           // NO LONGER settled by construction, and the comment that used to sit
           // here said it was — correctly, until this session gained a badge to
           // look up. BJJ still hard-codes `records: []`, but the accomplishment
           // fetch is a real lookup that can answer late, so the streak chime has
           // to wait for it exactly as the strength card waits for its records.
           recordsSettled={badgeSettled}
+          // And the reciprocal, which #284 made load-bearing here rather than
+          // merely defensive: the badge lookup and the history lookup are now
+          // two real races on this screen, so the badge chime has to wait for
+          // the milestone exactly as the streak chime waits for the badge.
+          // Without it a BJJ first would silence the rung it coincided with.
+          streakSettled={streakSettled}
         />
       )}
     </KeyboardAwareScrollView>

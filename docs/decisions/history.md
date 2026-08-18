@@ -2439,6 +2439,31 @@ joins `celebratesMilestone` and `celebratesStreak`, each standing down for what
 outranks it, with the latch left as belt-and-braces. Declaration order still
 decides a tie inside one commit; it is no longer the only thing that does.
 
+**A third blocking finding arrived on re-review, and it is the one worth being
+uncomfortable about.** Asked whether widening the window affected other callers,
+this branch answered by naming `TrainingSummary` as "its only other caller" —
+without checking. It is not. `app/bjj/session/[id].tsx` fetches the same range
+and renders the same `SessionCelebration`, and it had been wired for the streak
+but not the milestone.
+
+The consequence is worse than a missing block, because `milestoneForSession`
+fires only on the session that CARRIED the streak. If the mat opens the week and
+that screen computes nothing, no later session can pick the rung up — every
+strength session that week has `carried === false`. The rung is not delayed, it
+is **lost for that week**, silently. And for VOLA's stated core athlete the mat
+is usually what opens the week, so lost was the normal case, not the edge one.
+The BJJ screen's own comment predicted this exact shape for the streak chime a
+release earlier — "wiring only the strength card would have left the chime
+firing almost never for a BJJ+strength athlete" — and the milestone recreated it
+one rung up anyway. Both screens compute it now, from the same pass over the
+same days, and both pass `streakSettled`.
+
+One visible side effect of the window fix, recorded because it changed copy in a
+file this branch never touched: the displayed streak caps at 53 now rather than
+52, so an athlete on a 60-week run reads "53 weeks in a row" instead of "52".
+Neither figure was the truth and `streakRange` already accepted the cap, but 52
+at least read as "a year" and 53 reads as an arbitrary number.
+
 Three review suggestions landed with them. `milestoneReached` now requires the
 current week to hold a session — `weekStreak` deliberately steps back to last
 week while this one is open, which would have re-announced last week's rung
@@ -25910,6 +25935,9 @@ comment saying which one and why.
 - **BJJ-only athletes reach every rung**, which is correct, but the finish card
   they reach it on still has no badge equivalent of a personal record. That gap
   predates this and is unchanged.
+- **The streak line now caps at 53 rather than 52**, on the celebration card,
+  the BJJ card and the Progress tab. An honest fix would show "52+" past the
+  window rather than a number that is quietly a measurement of the fetch.
 - **The chime precedence is verified as logic, not as timing.** Every rule is a
   pure function with tests, but nothing exercises two real fetches resolving in
   either order against a live component. The gates make the ordering

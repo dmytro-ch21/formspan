@@ -141,8 +141,13 @@ export function SessionCelebration({
    * lookups race, and declaration order only decides a tie inside one commit;
    * across two fetches the PR would otherwise latch on arrival and silence a
    * once-a-year event. Defaults false, so a caller that does not pass it gets
-   * no PR chime at all rather than a wrongly-ordered one — the safe direction,
-   * and every real caller passes it.
+   * no PR chime at all rather than a wrongly-ordered one — the safe direction.
+   *
+   * Both callers pass it. The BJJ screen has nothing to gate today (its summary
+   * hard-codes `records: []`, so `celebratesRecord` is structurally false
+   * there) and passes it anyway, because the day BJJ grows a record equivalent
+   * a missing prop would default false and hold that chime forever, looking
+   * exactly like a broken lookup.
    */
   streakSettled?: boolean;
   /**

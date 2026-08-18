@@ -8072,6 +8072,7 @@ training. Everything here is about it telling the truth.
 
 - Plan 3 sessions for the week and log 3: Today's `THIS WEEK` card shows `3/3 planned` **and** a bordered congratulation line. Log only 2 and the line is absent.
 - Finish the session that takes a weekly streak to 4 / 13 / 26 / 52 consecutive weeks: the celebration card shows the rung's label and blurb, above the `N weeks in a row` line, and plays the milestone chime.
+- **From a BJJ class as well as a strength session.** The streak is sport-agnostic and for this app's core athlete the mat usually opens the week. Both session screens render the same card and both must compute the milestone — a rung reached on the mat cannot be picked up later, because every other session that week has `carried === false`, so an unwired screen loses it silently rather than delaying it.
 
 ### Edge cases & errors
 
