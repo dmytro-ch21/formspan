@@ -23845,6 +23845,13 @@ and is recomputed on read — so reordering, renaming and re-describing all five
 curricula is a content edit plus a reseed. No migration, no backfill, nothing to
 reconcile. That is why the reference layer can be built as pure content later.
 
+One boundary on that, worth stating before N19 leans on it: it is exactly true
+for reorder, rename, re-describe and add. **Removing** a technique item does move
+the displayed fraction, because that item's countable and mastered contributions
+leave with it — the underlying record is untouched and re-adding the item
+restores its progress computed since enrolment, but the number on screen changed.
+So the safe sentence is not "any rewrite is invisible to athletes".
+
 **What this deliberately does not do.** The proposal this came from names roughly
 70 techniques for white belt against the roadmap's 25. That gap is not closed
 here and should not be closed *in the roadmap*: 70 criteria-bearing items is a

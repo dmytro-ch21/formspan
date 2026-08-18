@@ -6530,14 +6530,23 @@ The map and the progression (2026-08-17):
   leave `countable_items` and the step numbering exactly where they were.
   Regression check: the roadmap card's "N of M" and the last technique's step
   number, before and after. A concept-only phase that shifts either is the bug.
-- **Every roadmap opens with `Where this belt sits`** — the first item of the
-  first phase on all five, including the foundations track. It is a concept, so
-  it draws as text with no step disc, no criteria chrome and no progress row.
-- **The four belt titles read as a progression in the list** — learn the map,
-  build reliable systems, connect the game, master your game — in rank order,
-  with foundations first. Assert the ORDER on the Plan strip and on the web
-  Shared tab, not just presence: the progression is only legible if they are
-  adjacent and sorted.
+- **Every roadmap opens with a placement concept** — the first item of the first
+  phase on all five. Titled `Where this belt sits` on the four belts and
+  **`Where this sits` on the foundations track**, which is not a belt; a test
+  asserting one literal string across all five fails on foundations. It is a
+  concept either way, so it draws as text with no step disc, no criteria chrome
+  and no progress row.
+- **The four belt titles read as a progression** — learn the map, build reliable
+  systems, connect the game, master your game — and are in RANK order, which is
+  the client's job: the API sorts `c.belt` alphabetically on purpose (blue,
+  brown, purple, white) because `belt` is unconstrained TEXT. Both clients
+  re-sort (`beltRank` on web, `rankOf` on the Plan strip). Assert the order on
+  both, and note the two ways it legitimately breaks: **an enrolled roadmap
+  sorts to the front on both clients**, so the four are only adjacent while none
+  or all are enrolled; and the two clients disagree about foundations —
+  **mobile puts it before the belts, web puts it after** (a section under its
+  own heading). Neither is a bug; a test written against one client's order
+  fails on the other.
 - **Belt descriptions lead with "Goal:"** and are not truncated on the phone at
   the smallest supported width — they got longer, and the roadmap header is
   where a clipped first line costs the most.
