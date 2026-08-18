@@ -27,9 +27,12 @@ import { migratedFixture, type FixtureDb } from './support/sqlite';
  * server, `pending` reads zero, and nothing ever retries. Silent, and only on
  * the rows somebody deliberately deleted.
  *
- * `plan.ts` had the second clause — `AND deleted_at IS NULL` — all along, and
- * T5 pinned it there. These two never had it. Found by review while checking
- * T5's wording, reproduced with a control, then fixed here.
+ * `plan.ts` carries the second clause — `AND deleted_at IS NULL` — and T5 pinned
+ * it there. It did not start with it either: it was added by a `/pre-merge`
+ * review finding on that PR, and the two older outboxes were never swept. So one
+ * of the three was guarded, for a reason recorded only in the guarded one.
+ * Found by review again here, while checking T5's WORDING rather than its code,
+ * reproduced with a control, then fixed.
  *
  * Both cases below force the collision rather than waiting for one: two
  * `Date.now()` calls cannot be made to collide on demand, so the tombstone is
@@ -123,7 +126,7 @@ describe('a session deleted while its push is in flight', () => {
       await collideClock('local_sessions', 's1');
     });
 
-    await pushSession('u1', 's1', token).catch(() => {});
+    await pushSession('u1', 's1', token);
 
     const after = await row();
     expect(after.deleted_at).not.toBeNull();
@@ -153,7 +156,7 @@ describe('a session deleted while its push is in flight', () => {
       );
     });
 
-    await pushSession('u1', 's1', token).catch(() => {});
+    await pushSession('u1', 's1', token);
 
     expect((await row()).dirty).toBe(1);
   });
@@ -221,7 +224,7 @@ describe('a workout deleted while its push is in flight', () => {
 });
 
 describe('the guards are independent', () => {
-  it('a permanently refused push still records the failure rather than going clean', async () => {
+  it('a permanently refused push leaves the row owed rather than going clean', async () => {
     // Guards against a fix that made the swap decline for the wrong reason.
     await db.runAsync(
       `INSERT INTO local_sessions

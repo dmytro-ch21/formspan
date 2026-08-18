@@ -23341,7 +23341,7 @@ rolled-back transaction, during review.
   that tells them. That is the argument for a side on `mixed`, and it should be
   made with a consumer in hand rather than by widening the enum first.
 
-## 2026-08-18 — The comment said the race was handled, so nobody checked
+## 2026-08-17 — The comment said the race was handled, so nobody checked
 
 **T6.** Sessions and workouts both end their push by clearing `dirty` under a
 compare-and-swap on `updated_at`. `deleteLocalSession`'s docstring explained why
@@ -23366,19 +23366,28 @@ it was invisible: the code compiled, the suite was green, and the docstring
 above the delete asserted the protection actually held. A comment claiming a
 race is handled is the most effective way to stop anyone checking whether it is.
 
-`plan.ts` had the second clause — `AND deleted_at IS NULL` — all along, and T5
-had just pinned it there. So of the three outboxes, the one that had the guard
-was the one nothing tested, and the two with no guard went unnoticed because
-nothing tested them either. There was no failing test to make anyone look, in
-either direction.
+`plan.ts` carries the second clause — `AND deleted_at IS NULL` — and T5 had
+just pinned it there. **It did not start with it.** Its swap was written with
+`updated_at` alone, exactly like these two; the clause was added by a
+`/pre-merge` review finding on that same PR (`1f746dc`, "Resolve every blocking
+finding"). Nobody swept the two older outboxes at the time, so for months one of
+the three was guarded and the reasoning existed only inside the guarded one.
+
+So of the three, the one that HAD the guard was the one nothing tested, and the
+two without went unnoticed because nothing tested them either. There was no
+failing test to make anyone look, in either direction — and the fix, both times,
+came out of review rather than out of the suite.
 
 ### What landed
 
 `AND deleted_at IS NULL` on both closing swaps, **alongside** the `updated_at`
 clause rather than instead of it, and the docstring rewritten to say what is
-true. `tombstoneRace.test.ts` pins all of it: reverting the session fix, or the
-workout fix, or dropping the `updated_at` clause, each turns exactly the
-matching test red and nothing else. Two further cases hold the other direction —
+true. `tombstoneRace.test.ts` pins all of it: reverting the session fix, the workout
+fix, or the `updated_at` clause each turns the matching test red. Not *only*
+that test, and the difference is worth stating rather than rounding off —
+reverting the workout clause also fails "the delete goes out on the very next
+sync", and dropping `updated_at` additionally fails cases in `gripPush` and
+`workoutPush`. Everything that fires is on-topic; nothing fires spuriously. Two further cases hold the other direction —
 a push with nothing deleted underneath it still goes clean, and the workout's
 tombstone actually goes out on the next sync — because "never clear `dirty`"
 would otherwise satisfy the whole file.

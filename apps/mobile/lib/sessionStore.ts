@@ -430,11 +430,16 @@ export async function readLocalBjjDetail(
  *
  * **That used to rest on `updated_at` alone, and it was not enough.** This
  * function stamps `updated_at` from the same wall clock the swap compares
- * against, so a delete landing in the same millisecond as the push's snapshot
- * wrote an identical string, the swap matched, and the tombstone was marked
- * clean — never sent, because the push loop selects on `dirty = 1`. The swap
- * now also requires `deleted_at IS NULL`, which is the clause `plan.ts` had
- * all along and these two did not (T6).
+ * against, so a delete landing in the same millisecond as that stamp wrote an
+ * identical string, the swap matched, and the tombstone was marked clean —
+ * never sent, because the push loop only selects rows still owed. The swap now
+ * also requires `deleted_at IS NULL` (T6).
+ *
+ * `plan.ts` carries the same pair, and how it got them is the point: its swap
+ * was written with `updated_at` alone too, and the second clause was added by a
+ * `/pre-merge` review finding on that same PR (`1f746dc`). The two older
+ * outboxes were never swept, so for months one of the three was guarded and the
+ * reason was recorded only there.
  */
 export async function deleteLocalSession(userID: string, id: string): Promise<void> {
   const db = await getDb();
@@ -1776,8 +1781,10 @@ async function pushWorkoutRow(
      -- stamps it from the same wall clock, so a delete landing in the same
      -- millisecond as the snapshot writes an IDENTICAL string, the swap above
      -- matches, and the tombstone is marked as already sent. The push loop
-     -- selects on dirty = 1, so it is then never sent at all: gone from this
-     -- phone, alive on the server, pending reading zero, nothing retrying.
+     -- selects on workoutOwed -- (dirty = 1 OR name_dirty = 1) -- so it is
+     -- then never sent at all: gone from this phone, alive on the server,
+     -- pending reading zero, nothing retrying. Note this statement clears BOTH
+     -- flags, which is the only reason declining it is sufficient here.
      -- Reproduced before it was fixed; tombstoneRace.test.ts holds it.
      AND deleted_at IS NULL`,
     row.id, userID, row.updated_at,
