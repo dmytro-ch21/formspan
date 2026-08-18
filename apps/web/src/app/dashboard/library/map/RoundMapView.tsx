@@ -83,9 +83,22 @@ export function RoundMapView() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  /**
+   * Route AND recover by default; concede on request.
+   *
+   * Route alone was the first version, on a "one question at a time" argument,
+   * and looking at the drawn output killed it: every edge touching the losing
+   * band is a recover or a concede, so the four worst positions rendered as
+   * boxes with NO arrows at all — floating, unreachable, and reading as broken.
+   * That is the same "a missing edge is invisible" failure the concede kind was
+   * added to prevent, reintroduced by a default.
+   *
+   * Recover is also the beginner's actual second question. Concede — how you
+   * end up down there — is the one that can wait.
+   */
   const [shown, setShown] = useState<Record<RoundMapEdgeKind, boolean>>({
     route: true,
-    recover: false,
+    recover: true,
     concede: false,
   });
 
@@ -266,7 +279,7 @@ export function RoundMapView() {
                 return (
                   <path
                     key={`${e.from}-${e.to}-${i}`}
-                    d={edgePath(a, b)}
+                    d={edgePath(a, b, width)}
                     fill="none"
                     stroke={KIND[e.kind].stroke}
                     strokeWidth={1.5}

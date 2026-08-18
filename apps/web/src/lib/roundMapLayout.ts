@@ -17,6 +17,15 @@ export const NODE_H = 76;
 export const GAP_X = 22;
 export const ROW_H = 132;
 export const PAD_X = 28;
+/**
+ * Empty columns down each side, reserved for edges that skip a row.
+ *
+ * Rows are centred, so the only reliably free space is outside them — and a
+ * multi-row edge has to get outside the boxes it would otherwise drive
+ * through. Without this the swings simply left the canvas and were clipped,
+ * which is how the first attempt looked: correct geometry, half of it invisible.
+ */
+export const GUTTER = 64;
 export const PAD_TOP = 16;
 
 export type Placed = RoundMapNode & { x: number; y: number };
@@ -29,7 +38,7 @@ export function layout(nodes: RoundMapNode[]): Layout {
   const tiers = [...new Set(nodes.map((n) => n.tier))].sort((a, b) => b - a);
   const rows = tiers.map((t) => nodes.filter((n) => n.tier === t));
   const widest = Math.max(...rows.map((r) => r.length));
-  const width = widest * NODE_W + (widest - 1) * GAP_X + PAD_X * 2;
+  const width = widest * NODE_W + (widest - 1) * GAP_X + PAD_X * 2 + GUTTER * 2;
 
   const placed: Placed[] = [];
   rows.forEach((row, r) => {
@@ -65,7 +74,7 @@ export function bandOf(
  * and on this map something always does — side control sits between north–south
  * and knee on belly.
  */
-export function edgePath(a: Placed, b: Placed): string {
+export function edgePath(a: Placed, b: Placed, canvasWidth?: number): string {
   const ax = a.x + NODE_W / 2;
   const bx = b.x + NODE_W / 2;
 
@@ -81,5 +90,28 @@ export function edgePath(a: Placed, b: Placed): string {
   const ay = down ? a.y + NODE_H : a.y;
   const by = down ? b.y : b.y + NODE_H;
   const lift = Math.min(60, Math.abs(by - ay) / 2);
+
+  // An edge that skips a row drives straight through whatever sits between it
+  // and its target, because the control points only ever pull vertically.
+  // Measured on the shipped map: six crossings, all of them multi-row —
+  // "on their turtle" to "their back" runs through mount AND north–south, and
+  // three of the escape edges run through the pin above them.
+  //
+  // So a multi-row edge swings WIDE instead: the control points are pushed
+  // sideways, away from the diagram's centre, far enough to clear a box and the
+  // gutter beside it. Single-row edges are untouched — they cannot cross
+  // anything, and bowing them would be noise.
+  const rows = Math.round(Math.abs(b.y - a.y) / ROW_H);
+  if (rows > 1 && canvasWidth !== undefined) {
+    // Out through the nearer gutter, at a FIXED x rather than a relative
+    // offset. Relative was the first attempt and it scaled with the number of
+    // rows skipped, which put a three-row edge hundreds of pixels off-canvas.
+    // A fixed lane is both bounded and more legible: every long edge takes the
+    // same route round the outside.
+    const lane =
+      (ax + bx) / 2 < canvasWidth / 2 ? GUTTER / 2 : canvasWidth - GUTTER / 2;
+    return `M ${ax} ${ay} C ${lane} ${ay + (down ? lift : -lift)}, ${lane} ${by - (down ? lift : -lift)}, ${bx} ${by}`;
+  }
+
   return `M ${ax} ${ay} C ${ax} ${ay + (down ? lift : -lift)}, ${bx} ${by - (down ? lift : -lift)}, ${bx} ${by}`;
 }

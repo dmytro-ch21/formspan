@@ -24438,6 +24438,74 @@ rather than assumed.
   lands". This unblocks that; it does not do it.
 - **Not staging-verified.** Exercised locally against `vola_test` only.
 
+## 2026-08-18 — The map was drawn wrong, and only looking at it could tell
+
+**N22.** #274 landed the round map with its layout unit-tested, its content
+validated from both ends, and two reviewers over it. Every check was green and
+the picture was wrong.
+
+Six edges drove straight through boxes. Every one spanned more than one row:
+"on their turtle" to "their back" ran through **mount and north–south**, and
+three of the escape edges ran through the pin sitting above them. The cause is
+one line — the control points only ever pulled vertically, so a bezier from A's
+bottom to B's top passes through whatever occupies the rows between at the same
+x. The PR description had said as much and waved it off: *"Mostly adjacent or 2
+rows. Drawable with cubic beziers."* Mostly.
+
+**How it was found, since that is the transferable part.** The screen is behind
+Clerk and no credentials are available here, so "open it and look" was not
+possible — but the geometry does not need the screen. `layout` and `edgePath`
+are pure functions of the content, so rendering the real `roundmap.json` through
+the real functions into a standalone SVG produces exactly what the page draws.
+That was enough to see it. The extraction of those functions into
+`roundMapLayout.ts` — done in #274 only so a browser-less session could unit-test
+them — is what made this possible at all.
+
+Then the eye handed off to arithmetic: sampling every bezier at 240 points and
+testing each against every box turns "does an arrow cross something" into a
+list. That is now a permanent test, and it reads the real content rather than a
+fixture, because a fixture would pass forever while the map it protects grew a
+seventeenth node.
+
+**The fix, and the wrong fix that came first.** Multi-row edges now route out
+through a reserved `GUTTER` lane down each side — rows are centred, so the
+gutters are the only reliably empty columns. The first attempt swung them
+outward by an offset scaled to the number of rows skipped, which cleared the
+boxes and put a three-row edge hundreds of pixels past the left border:
+geometrically correct, half of it clipped. A fixed lane is bounded and more
+legible, since every long edge then takes the same route around the outside.
+The canvas grew by a gutter on each side to hold it.
+
+**The default view was independently wrong, and worse.** Route-only was the
+shipped default, on a "one question at a time" argument. But every edge touching
+the losing band is a `recover` or a `concede`, so the four worst positions in the
+sport rendered as boxes with **no arrows at all** — floating, unreachable, and
+reading as broken. That is precisely the "a missing edge is invisible, it reads
+as you cannot get there" failure the `concede` kind was invented to prevent,
+reintroduced one layer up by a toggle default. It is route + recover now, which
+is also the beginner's real second question; concede stays opt-in.
+
+Three tests hold it: no edge crosses a box, no edge leaves the canvas, and no
+node is untouched by the default view's edges. Each was mutation-checked against
+the actual defect it describes — the pre-fix routing, the off-canvas swing, and
+route-only — rather than against an invented one. One candidate mutation was
+DISCARDED as not a real defect: setting the gutter to zero puts the lane exactly
+on the border, which is ugly and not out of bounds, and a test that failed on it
+would be asserting taste.
+
+Open questions:
+
+- **The rest of the screen still has not been seen** — the panel, the toggles,
+  the band labels, the text list. Only the diagram's geometry was checked, and
+  only because it is pure. A layout regression in the surrounding page would
+  still ship unnoticed.
+- Nothing checks edge legibility beyond collisions: two long edges in the same
+  gutter overlap for most of their length, which is honest but busy. Whether
+  that matters is a judgement no test makes.
+- The same treatment is available for the mobile ladder and was not done — it has
+  no geometry to get wrong, which is exactly why the phone got a ladder.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

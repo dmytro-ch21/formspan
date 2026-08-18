@@ -6589,6 +6589,22 @@ The round map (2026-08-18):
 - **Both sides of a position share one link.** "Mount" and "Under mount" both
   read about `mount`, so both counts are the family's. That is the glossary
   describing a position for both players, not a duplicate.
+The drawn map's geometry (2026-08-18):
+
+- **No arrow crosses a box it does not connect.** Covered by a unit test over the
+  real content, which is the only practical way — it found six on the shipped
+  version. An E2E equivalent would be a screenshot diff; the unit test is
+  cheaper and names the offending edge.
+- **The default view leaves no box without arrows.** Open the map cold: the four
+  positions in the "you are behind" band must each have at least one edge. They
+  had none when the default was route-only.
+- **Toggling "Losing ground" on adds the dashed red edges and nothing else
+  moves.** The boxes must not shift — layout is independent of which kinds are
+  drawn.
+- **The diagram scrolls inside its own container at narrow widths** and the page
+  never scrolls sideways. The canvas grew by a routing gutter each side, so this
+  is worth re-checking at 1024px and below.
+
 The reference syllabuses (2026-08-18):
 
 - **A syllabus draws no progress anywhere.** `countable_items` is 0 on all four,
