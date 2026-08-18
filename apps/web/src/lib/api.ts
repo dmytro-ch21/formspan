@@ -228,6 +228,82 @@ export const GRIPS: { key: Grip; label: string; short: string }[] = [
   { key: "hook", label: "Hook", short: "Hook" },
 ];
 
+/**
+ * Which grips a movement can be held in.
+ *
+ * **This is the THIRD copy of one rule.** `GripsFor` lives in
+ * `backend/internal/modules/session/session.go` and `gripsFor` in
+ * `apps/mobile/lib/sessions.ts`, and this is the same table again. That is not
+ * a design anyone chose — there is no shared TypeScript package between
+ * `apps/web` and `apps/mobile` (the pnpm workspace globs `packages/*`, but no
+ * such package exists), so the alternative to copying was inventing a shared
+ * library and rewiring two apps' builds to consume it. That is a bigger and
+ * riskier change than the picker N10 asks for.
+ *
+ * What makes a copy survivable is a test that fails when it drifts, not a
+ * comment asking people to be careful — see `__tests__/grip.test.ts`, which
+ * pins this table entry by entry. **If you change the vocabulary, change all
+ * three**, and note the backend is the only one that is authoritative: it is
+ * the one with the CHECK constraint behind it.
+ *
+ * The subsets themselves are N9's, not this file's invention. A hinge can be
+ * pulled mixed or hook and is never angled; a carry or an olympic lift is
+ * hook or nothing much; a press or a row is the original four.
+ */
+export function gripsFor(movementPattern: string | undefined): Grip[] {
+  switch (movementPattern) {
+    case "horizontal_push":
+    case "horizontal_pull":
+    case "vertical_push":
+    case "vertical_pull":
+    case "isolation":
+      return ["regular", "neutral", "reverse", "angled"];
+    case "hinge":
+      return ["regular", "neutral", "mixed", "hook"];
+    case "carry":
+    case "olympic":
+      return ["regular", "neutral", "hook"];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Whether a grip is worth asking about at all — the emptiness of `gripsFor`.
+ * Its own name because that is the question the call site is asking.
+ */
+export function gripApplies(movementPattern: string | undefined): boolean {
+  return gripsFor(movementPattern).length > 0;
+}
+
+/**
+ * The grip chips to show: the movement's own subset, plus whatever this set
+ * already holds if that is not in it.
+ *
+ * The second half is the UI end of #256's rule, and it is the half that is easy
+ * to leave out. The SERVER decides how many grips exist, so a set can carry a
+ * value this build's subset does not list — a newer server's grip, or one
+ * recorded before a movement's subset changed. Rendering only the subset would
+ * leave that grip visible in the row summary but **unclearable**: no chip to
+ * tap, so the way back to "unrecorded" is gone. Appending rather than replacing
+ * keeps the common answers in their usual positions.
+ */
+export function offeredGrips(
+  movementPattern: string | undefined,
+  current: Grip | null | undefined,
+): { key: Grip; label: string }[] {
+  const keys = gripsFor(movementPattern);
+  const shown = keys.map(
+    (k) => GRIPS.find((g) => g.key === k) ?? { key: k, label: k },
+  );
+  if (current && !keys.includes(current)) {
+    shown.push(
+      GRIPS.find((g) => g.key === current) ?? { key: current, label: current },
+    );
+  }
+  return shown;
+}
+
 export const SET_TYPES: { key: SetType; label: string; short: string }[] = [
   { key: "warmup", label: "Warm-up", short: "W" },
   { key: "working", label: "Working", short: "" },
@@ -414,10 +490,19 @@ export const MEASURE_KEY: Record<Measure, keyof LoggedSet> = {
 };
 
 /**
- * A brand-new set. Deliberately does NOT carry `grip` from `from`, unlike
- * mobile's — web has no grip control, so a carried value would be a recording
- * this app made and cannot unmake. Absent is the honest state for a row created
- * here, and the phone can set it afterwards.
+ * A brand-new set. Carries `grip` from `from`, as mobile's does.
+ *
+ * **This reversed with N10.** It used to refuse, and the reason was sound at
+ * the time: web had no grip control, so a carried value would have been a
+ * recording this app made and could not unmake — visible, wrong, and with no
+ * way to clear it. Web can author grip now, so the asymmetry is gone and the
+ * carry is the same one every other measure gets: you do not change your grip
+ * between sets of the same exercise, and re-picking it on every row is the
+ * retype this function exists to avoid.
+ *
+ * Effort is still never carried — see below. The distinction is that a grip is
+ * a property of how you are doing the movement, and effort is a judgement about
+ * one particular set.
  */
 export function emptySet(
   exerciseID: string,
@@ -439,6 +524,8 @@ export function emptySet(
     // number nobody actually judged.
     rir: null,
     rpe: null,
+    // Carried, unlike effort — see the note above.
+    grip: from?.grip,
     notes: "",
     completed: false,
   };
