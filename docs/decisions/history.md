@@ -23579,6 +23579,38 @@ palms-facing" is false: the four swings in that 20 are held overhand, which is
 `regular` in this very enum. Both fixed; the argument survives either way,
 because twelve olympic rows that cannot hook-grip anything still need `neutral`.
 
+### And review found this round's own fresh error
+
+The move duplicated what it was moving. `GripsFor` already carried a near-verbatim
+copy of the `isolation` rationale, so lifting the paragraph out of `GripApplies`
+put the same 210-rows argument in one doc comment twice, eleven lines apart —
+falsifying this entry's own claim that there is now "one place to keep true".
+The pre-existing copy is deleted (it also said "the four original patterns",
+of which there are five).
+
+Two more of mine: the freshness note named the wrong hazard — `append` cannot
+corrupt a shared table, because a slice literal has `len == cap` and appending
+reallocates; the real hazard is an in-place write or a sort. And a claim that
+the silent erasure "HAPPENED between #256 and N9" was false: #256 removed the
+nulling *before* the server grew a value, which is precisely why N9 was safe.
+What happened was the comment going stale, on the day #266 merged.
+
+Review also measured a **fifth** surviving mutation on `GripsFor` — replacing
+the literals with package-level tables passed everything, so the deliberate
+per-call freshness was undeclared in the only way that counts. Pinned now.
+
+And it found one instance of the rot that all three sweeps missed, in a file
+this branch was already editing: `TestGripIsAskedWhereTheVocabularyCanAnswerIt`'s
+doc still said hinges, carries and olympic lifts "are absent BECAUSE the enum
+has no `mixed` or `hook`", directly above a body asserting all three are
+present. It even warned that adding those values without revisiting the list
+would leave the picker hidden — which is exactly what N9 did and did not do.
+
+The TypeScript mirror was carrying both numbers this round corrected in Go
+("22 of 25", "most of the bucket"), because the correction touched one copy of a
+duplicated table. That is the argument for `N16` restated as evidence rather
+than prediction.
+
 ### Gaps
 
 - **The mobile mirror has no equivalent pin.** `gripsFor` in TypeScript is
