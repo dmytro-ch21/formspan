@@ -1619,13 +1619,14 @@ components:
         grip:
           type: string
           nullable: true
-          enum: [regular, neutral, reverse, angled]
+          enum: [regular, neutral, reverse, angled, mixed, hook]
           example: neutral
           description: >
             How the implement was held for this set: `regular` (overhand,
             pronated), `neutral` (palms facing), `reverse` (underhand,
             supinated), `angled` (the canted position an EZ-bar or multi-grip
-            handle forces).
+            handle forces), `mixed` (one hand over, one under) or `hook`
+            (thumb trapped under the fingers).
 
 
             **A property of the SET, not of the exercise.** A catalog row per
@@ -1646,11 +1647,29 @@ components:
             summed — so it appears only on this schema and not in any figure.
 
 
-            `mixed` and `hook` are deliberately absent. They are how a heavy
-            deadlift is actually held and they are not variations of these four,
-            so the clients do not offer the picker on hinges, carries or olympic
-            lifts: collecting `regular` for a mixed pull would be a false entry
-            rather than a missing one.
+            **Which values a client OFFERS depends on the movement, and the
+            server does not enforce that pairing.** Pushes, pulls and isolation
+            work get the first four; hinges get regular/neutral/mixed/hook;
+            carries and olympic lifts get regular/neutral/hook. `mixed` is
+            offered on hinges alone — you do not mix-grip a snatch. Hinges and
+            olympic lifts include `neutral` because the catalog puts hex-bar
+            deadlifts and kettlebell swings in the first and kettlebell cleans
+            and snatches in the second.
+
+
+            The subset is a question-quality rule, not a constraint: this API
+            accepts any value in the enum for any exercise, because refusing an
+            unusual-but-real pairing (a hook-gripped shrug) would invent a false
+            negative. Only the vocabulary is enforced, and an unknown value is
+            rejected with the dedicated code `invalid_grip` rather than
+            `invalid_input`, so a client can drop the grip and retry rather than
+            surfacing an error a human cannot act on.
+
+
+            **`mixed` records no side.** One hand is over and one is under, and
+            lifters alternate which — but nothing consumes that, and asking
+            between sets collects a careless answer. Adding `mixed_left`/
+            `mixed_right` later is cheap by the same `invalid_grip` mechanism.
         load_factor:
           type: integer
           example: 2

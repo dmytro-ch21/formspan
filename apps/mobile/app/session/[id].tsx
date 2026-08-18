@@ -101,8 +101,8 @@ import {
   elapsedBelongsInSeconds,
   offersTimerTarget,
   workSecondsFor,
-  GRIPS,
   gripApplies,
+  offeredGrips,
   SET_TYPES,
   type LoggedSet,
   type Measure,
@@ -2383,7 +2383,7 @@ function SetRow({
               permanent — and unrecorded is a real state here, not an absence. */}
           {gripApplies(exercise?.movement_pattern) && (
             <View style={styles.chips}>
-              {GRIPS.map((g) => {
+              {offeredGrips(exercise?.movement_pattern, set.grip).map((g) => {
                 const on = set.grip === g.key;
                 return (
                   <Pressable

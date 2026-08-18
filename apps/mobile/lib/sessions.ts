@@ -21,11 +21,19 @@ const API_BASE = `${API_URL}/v1`;
  * hurt. A catalog row per grip could express neither — it would multiply the
  * 762-row catalog toward 3,000 — and would split one exercise's history in two.
  *
- * `mixed` and `hook` are deliberately absent: they are how a heavy deadlift is
- * held, and they are not variations of these four. The picker is not offered on
- * hinges, so nobody is asked a question this list cannot answer.
+ * `mixed` and `hook` joined in #PR. Before that the list held four and the
+ * picker was withheld from hinges, carries and olympic lifts — 93 of 762
+ * exercises, and the ones where grip matters most — because a hinge that could
+ * only answer `regular` would collect a false entry rather than a missing one.
+ * Which values are offered where now lives in `gripsFor`.
  */
-export type Grip = 'regular' | 'neutral' | 'reverse' | 'angled';
+export type Grip =
+  | 'regular'
+  | 'neutral'
+  | 'reverse'
+  | 'angled'
+  | 'mixed'
+  | 'hook';
 
 /** Ordered by how often they are used, so the common answer is the first tap. */
 export const GRIPS: { key: Grip; label: string }[] = [
@@ -33,25 +41,74 @@ export const GRIPS: { key: Grip; label: string }[] = [
   { key: 'neutral', label: 'Neutral' },
   { key: 'reverse', label: 'Reverse' },
   { key: 'angled', label: 'Angled' },
+  { key: 'mixed', label: 'Mixed' },
+  { key: 'hook', label: 'Hook' },
 ];
 
 /**
- * Whether a grip is worth asking about for a movement — mirrors the server's
- * `GripApplies`. Pushes, pulls and isolation work; not squats, hinges or
- * conditioning. See the Go function for why `isolation` is in despite carrying
- * calf raises, and why hinges are out despite grip mattering there most.
+ * Which grips to OFFER for a movement — mirrors the server's `GripsFor`.
+ *
+ * Two subsets look wrong until you check the catalog, so do not "tidy" them:
+ * hinges include `neutral` because the Hex Bar Deadlift and four kettlebell and
+ * dumbbell swings live among those 55 rows, and olympic includes it because 22
+ * of its 25 rows are kettlebell or dumbbell cleans and snatches. `mixed` is on
+ * hinges ALONE — you do not mix-grip a snatch.
+ *
+ * This mapping is duplicated from Go rather than fetched, exactly as
+ * `gripApplies` was before it. That is a known drift risk and is filed rather
+ * than hidden: the API could carry the list per exercise, which would also mean
+ * a future grip needs no app release. See N16.
  */
-export function gripApplies(movementPattern: string | undefined): boolean {
+export function gripsFor(movementPattern: string | undefined): Grip[] {
   switch (movementPattern) {
     case 'horizontal_push':
     case 'horizontal_pull':
     case 'vertical_push':
     case 'vertical_pull':
     case 'isolation':
-      return true;
+      return ['regular', 'neutral', 'reverse', 'angled'];
+    case 'hinge':
+      return ['regular', 'neutral', 'mixed', 'hook'];
+    case 'carry':
+    case 'olympic':
+      return ['regular', 'neutral', 'hook'];
     default:
-      return false;
+      return [];
   }
+}
+
+/**
+ * The grip chips to show: the movement's own subset, plus whatever this set
+ * already holds if that is not in it.
+ *
+ * The second half is the UI end of #256's rule. The server decides how many
+ * grips exist, so a set can legitimately carry a value this build's subset does
+ * not list — a newer server's grip, or one recorded on a movement whose subset
+ * has since changed. Rendering only the subset would leave that grip invisible
+ * AND unclearable: the athlete can see it in the summary line but has no chip
+ * to tap, so the one way back to "unrecorded" is gone. Showing it appends
+ * rather than replaces, so the common answers stay in their usual positions.
+ */
+export function offeredGrips(
+  movementPattern: string | undefined,
+  current: Grip | null | undefined,
+): { key: Grip; label: string }[] {
+  const keys = gripsFor(movementPattern);
+  const shown = keys.map(
+    (k) => GRIPS.find((g) => g.key === k) ?? { key: k, label: k },
+  );
+  if (current && !keys.includes(current)) {
+    shown.push(GRIPS.find((g) => g.key === current) ?? { key: current, label: current });
+  }
+  return shown;
+}
+
+/**
+ * Whether a grip is worth asking about at all — the emptiness of `gripsFor`.
+ * Kept as its own name because that is what the call site is asking.
+ */
+export function gripApplies(movementPattern: string | undefined): boolean {
+  return gripsFor(movementPattern).length > 0;
 }
 
 export type SetType = 'warmup' | 'working' | 'backoff' | 'drop' | 'amrap' | 'failure';

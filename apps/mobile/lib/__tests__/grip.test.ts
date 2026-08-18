@@ -4,6 +4,8 @@ import {
   emptyDropSet,
   emptySet,
   gripApplies,
+  gripsFor,
+  offeredGrips,
   repairSet,
   swapExercise,
   type LoggedSet,
@@ -57,14 +59,86 @@ describe('which movements ask about grip', () => {
     }
   });
 
-  it('does not ask on hinges, where the real answer is one this list lacks', () => {
-    // The deliberate omission. A heavy deadlift is held mixed or hook, neither
-    // of which is a variation of the four — so offering the picker here would
-    // collect "regular" for a mixed pull. A false entry is worse than a missing
-    // one, because nothing downstream can tell it from a real answer.
+  it('now asks on hinges, carries and olympic lifts — the whole of N9', () => {
+    // This test used to assert the OPPOSITE, and the inversion is the feature.
+    // The four-value list could not answer a heavy deadlift, so the picker was
+    // withheld rather than collect "regular" for a mixed pull. With `mixed` and
+    // `hook` in the vocabulary the question is answerable, so 93 exercises that
+    // had no grip control now have one.
     for (const p of ['hinge', 'carry', 'olympic']) {
-      expect(gripApplies(p)).toBe(false);
+      expect(gripApplies(p)).toBe(true);
     }
+  });
+
+  it('offers mixed on hinges ALONE', () => {
+    // You do not mix-grip a snatch, and a mixed farmer's carry is not a thing.
+    // Offering it there would be the same false-entry mistake the old design
+    // avoided by withholding the picker, just relocated.
+    expect(gripsFor('hinge')).toContain('mixed');
+    for (const p of ['carry', 'olympic', 'horizontal_push', 'vertical_pull', 'isolation']) {
+      expect(gripsFor(p)).not.toContain('mixed');
+    }
+  });
+
+  it('offers neutral on hinges and olympic lifts, which reads wrong and is not', () => {
+    // The catalog decides this, not intuition. `hinge` holds the Hex Bar
+    // Deadlift and four kettlebell/dumbbell swings; `olympic` is 22 kettlebell
+    // and dumbbell cleans and snatches out of 25. Dropping `neutral` from
+    // either — the obvious tidy-up — would take the grip control away from
+    // most of the bucket.
+    expect(gripsFor('hinge')).toContain('neutral');
+    expect(gripsFor('olympic')).toContain('neutral');
+  });
+
+  it('never offers a grip the movement cannot use', () => {
+    // The four original values stay off carries and olympic lifts where they
+    // are meaningless, and hook/mixed stay off presses.
+    for (const p of [
+      'horizontal_push',
+      'horizontal_pull',
+      'vertical_push',
+      'vertical_pull',
+      'isolation',
+    ]) {
+      expect(gripsFor(p)).toEqual(['regular', 'neutral', 'reverse', 'angled']);
+    }
+    expect(gripsFor('carry')).not.toContain('angled');
+    expect(gripsFor('olympic')).not.toContain('reverse');
+  });
+
+  it('shows a grip the set already holds even when the movement would not offer it', () => {
+    // The UI end of #256. The server decides how many grips exist, so a set can
+    // carry a value this build's subset does not list — a newer server's grip,
+    // or one recorded before a subset changed. Rendering only the subset leaves
+    // it visible in the summary line but with NO CHIP TO TAP, so the single way
+    // back to "unrecorded" disappears and the athlete is stuck with it.
+    const shown = offeredGrips('horizontal_push', 'hook' as never);
+    expect(shown.map((g) => g.key)).toEqual([
+      'regular',
+      'neutral',
+      'reverse',
+      'angled',
+      'hook',
+    ]);
+    // Appended, never substituted: the common answers keep their positions, so
+    // muscle memory is not rearranged by an odd value on one set.
+    expect(shown[0].key).toBe('regular');
+  });
+
+  it('labels a grip it has never heard of rather than rendering an empty chip', () => {
+    // A value from a NEWER server, outside all six. Falling back to the raw key
+    // is ugly and truthful; an empty chip is untappable and invisible.
+    const shown = offeredGrips('hinge', 'mixed_left' as never);
+    expect(shown.at(-1)).toEqual({ key: 'mixed_left', label: 'mixed_left' });
+  });
+
+  it('does not duplicate the held grip when the movement already offers it', () => {
+    expect(offeredGrips('hinge', 'mixed').map((g) => g.key)).toEqual([
+      'regular',
+      'neutral',
+      'mixed',
+      'hook',
+    ]);
   });
 
   it('does not ask when the exercise has not loaded yet', () => {
@@ -150,8 +224,25 @@ describe('a grip the server would refuse', () => {
     // refused — the create and the sets push — settle it, and `gripPush.test.ts`
     // is what holds that, including the case where the retry must NOT happen
     // because the athlete edited the session mid-push.
+    // **This line was `'mixed'` until N9, and N9 disarmed it.** Adding `mixed`
+    // to the vocabulary turned the one assertion covering "a value a NEWER
+    // server added" into a test of a value this build already knows — still
+    // green, covering nothing. T4's entry asked the first PR adding a grip to
+    // confirm an old build round-trips it rather than trust the entry; this is
+    // that confirmation, and it found the guard rotting rather than holding.
+    //
+    // So the probe must always be a value OUTSIDE the current six. `mixed_left`
+    // is the plausible next one (a side on the mixed grip, deliberately not
+    // shipped in N9). **Whoever adds it must move this line again.**
     expect(repairSet(set({ grip: 'banana' as LoggedSet['grip'] })).grip).toBe('banana');
-    expect(repairSet(set({ grip: 'mixed' as LoggedSet['grip'] })).grip).toBe('mixed');
+    expect(repairSet(set({ grip: 'mixed_left' as LoggedSet['grip'] })).grip).toBe(
+      'mixed_left',
+    );
+    // And the two values N9 DID add must survive as ordinary known grips, which
+    // is the other half of the round-trip: a server sending `mixed` to a build
+    // that has it must not be treated as exotic either.
+    expect(repairSet(set({ grip: 'mixed' })).grip).toBe('mixed');
+    expect(repairSet(set({ grip: 'hook' })).grip).toBe('hook');
   });
 
   it('still drops something that could not be a grip at all', () => {
