@@ -18,6 +18,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/bjj"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/body"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/contest"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/curriculum"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
@@ -81,6 +82,7 @@ func main() {
 	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
 	bjjPositionHandler := bjj.NewPositionHandler(bjjRepo)
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
+	contestHandler := contest.NewHandler(contest.NewPostgresRepository(pool))
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
 	// RATE LIMITS. Six features shipped recording "no rate limiting" as a
 	// residual; this is that, once, in the platform layer.
@@ -275,6 +277,28 @@ func main() {
 	// platform split: choosing a focus for the next few weeks is planning.
 	mux.Handle("GET /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Get)))
 	mux.Handle("PUT /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Set)))
+
+	// The competitive record: what you entered, in which division, and how it
+	// went.
+	//
+	// Under /v1/contests rather than /v1/bjj/contests because the table is not
+	// BJJ-specific and was designed not to be -- it has to hold a powerlifting
+	// meet and a 10k, which is exactly why the schema takes the neutral word
+	// while the client says "tournament" through `labelFor`. Only today's
+	// content is jiu-jitsu.
+	//
+	// PUT rather than PATCH for the update, which is the one shape decision
+	// visible from outside. The matches travel WITH the entry and replace
+	// wholesale -- the same call `curriculum` makes for phases and items, in
+	// its words "the two replace together" -- so a partial update would have to
+	// say what sending no matches means, and either answer is a trap: "leave
+	// them alone" makes clearing a bracket impossible, "clear them" deletes a
+	// record on a request that never mentioned it. PUT has one meaning.
+	mux.Handle("GET /v1/contests", verifier.RequireAuth(http.HandlerFunc(contestHandler.List)))
+	mux.Handle("POST /v1/contests", verifier.RequireAuth(http.HandlerFunc(contestHandler.Create)))
+	mux.Handle("GET /v1/contests/{contestID}", verifier.RequireAuth(http.HandlerFunc(contestHandler.Get)))
+	mux.Handle("PUT /v1/contests/{contestID}", verifier.RequireAuth(http.HandlerFunc(contestHandler.Update)))
+	mux.Handle("DELETE /v1/contests/{contestID}", verifier.RequireAuth(http.HandlerFunc(contestHandler.Delete)))
 
 	// Curricula and the roadmaps built on them. Under /v1/curricula rather than
 	// /v1/bjj/curricula because the sharing model is the workouts one and the

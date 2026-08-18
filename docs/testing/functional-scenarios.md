@@ -7647,3 +7647,43 @@ training. Everything here is about it telling the truth.
 ### Regression trap
 
 - **Nothing may clear `dirty` or `name_dirty` outside the guarded terminal swap.** A declined swap has to leave the row owing everything it owed; clearing part of that debt elsewhere makes "declined" mean "partly sent", and the half that was cleared is lost permanently because the pull's newer-than guard stops reconciliation.
+
+## The competitive record (`/v1/contests`)
+
+### Happy path
+
+- Record an entry with a name, a sport, a date, a division, a placement out of a field and three matches; read it back and get every field, with the matches in the order they were sent.
+- Record an entry with a **placement alone and no matches** — an ordinary entry logged from memory, not an edge case. `matches` comes back as `[]`.
+- Record an entry with **no date at all**. It is accepted, and it sorts last in the list rather than being refused or floated to the top.
+- Two entries for the same tournament on the same day (gi and no-gi) are two independent rows, each with its own division and result.
+- List returns newest first, undated last, each entry carrying its own matches and nobody else's.
+- Replace an entry with PUT: the fields change and **every match is replaced**, including three-down-to-one and down-to-none.
+- Delete an entry; its matches go with it.
+
+### Edge cases & errors
+
+- **`placement` without `entrants`, and `entrants` without `placement`**, are both accepted — the pair is not all-or-nothing.
+- `placement` greater than `entrants` is refused ("2nd of 1"), by the API and by the database's own CHECK.
+- `placement: 0` and negatives are refused. Null means *not recorded*, never "did not place" — a client must not send a sentinel to express that.
+- A `placement` above the INTEGER ceiling is a **400 naming the field, never a 500**. It overflows as SQLSTATE 22003, which carries no constraint name, so it is the one out-of-range value a constraint-name translator cannot see.
+- A large but real placement (41,203rd of 60,000 in a road race) is accepted — the ceiling is the column's, not a guess about brackets.
+- An unknown `sport` is refused, and so is `nutrition` — a real module, and a nonsense sport.
+- An unknown `format`, `result` or `method` is refused; an **empty** `format` or `method` is accepted, because a 10k has no format and an entry logged from memory has no recorded method.
+- `technique_id` on a match whose method is not `submission` is refused, not silently dropped.
+- `technique_id` naming a technique that does not exist is a **400, not a 500** — and the entry must not be left behind by the failed write.
+- A blank `held_on` or `technique_id` (what a cleared form field sends) is treated as absent rather than refused.
+- More than 64 matches is refused. Field lengths are capped in **characters, not bytes**: a name of 120 multibyte characters is accepted and 121 is refused.
+- An oversized request body is refused as a 400 without being read into memory.
+
+### Auth / security
+
+- Every endpoint requires a signed-in caller.
+- Reading, updating or deleting **another account's entry id** answers exactly as a nonexistent id does — a 404 either way, so the API never confirms an id exists.
+- A refused cross-account update leaves the owner's row byte-for-byte unchanged; asserting the error alone is a proxy for that, not proof of it.
+- One account's list never contains another's entries, and one entry's matches never attach to another entry.
+
+### Regression trap
+
+- **`position` is assigned by the server from array order and must never be accepted from a client.** It is what makes "lost in the final" different from "lost the first match", and the wire format deliberately has no field for it — if one is ever added, the uniqueness of a position stops being unviolatable from outside.
+- **The write's read-back must run inside the transaction.** Reading it through the pool takes a connection that cannot see the uncommitted rows, so a successful create returns an empty `matches` array — a silent wrong answer, not an error. A test that only checks the status code passes against it.
+- **Nothing self-rated may be added to these payloads.** Everything here is externally verifiable, which is what makes a contest the strongest measured evidence the app holds; an RPE field would quietly demote it. How it felt belongs on the session.
