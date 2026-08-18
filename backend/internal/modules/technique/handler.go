@@ -7,9 +7,19 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 )
 
-type Handler struct{ repo Repository }
+type Handler struct {
+	repo Repository
+	// roundMap is the teaching diagram, loaded once at construction rather than
+	// per request: it is embedded content that cannot change while the process
+	// runs. Passed in rather than loaded here so a bad map fails the process at
+	// boot — see cmd/api — instead of being discovered by the first client to
+	// open the glossary.
+	roundMap *RoundMap
+}
 
-func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
+func NewHandler(repo Repository, roundMap *RoundMap) *Handler {
+	return &Handler{repo: repo, roundMap: roundMap}
+}
 
 // maxQueryLen bounds ?q= — no technique name comes close, so anything longer
 // is a mistake or an attempt to make the database work for nothing.
@@ -56,17 +66,26 @@ func (h *Handler) Rulesets(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"rulesets": rulesets})
 }
 
-// Positions returns the whole glossary — ten entries, so the same
+// Positions returns the whole glossary — eleven entries, so the same
 // fetch-once-and-keep treatment as Rulesets. Clients resolve "techniques from
 // here" locally against the library they already hold, which is why there is no
 // filter parameter and no per-position technique endpoint.
+//
+// It carries `round_map` too: the teaching diagram whose nodes are these
+// positions. One response rather than two because the map is meaningless
+// without the glossary it points into, and two endpoints means two caches that
+// can hold different versions of the same vocabulary — a node naming a position
+// the client's cached glossary does not have would render as a dead box.
 func (h *Handler) Positions(w http.ResponseWriter, r *http.Request) {
 	positions, err := h.repo.Positions(r.Context())
 	if err != nil {
 		apihttp.WriteInternal(w, r, "technique: positions", err)
 		return
 	}
-	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"positions": positions})
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{
+		"positions": positions,
+		"round_map": h.roundMap,
+	})
 }
 
 func (h *Handler) GetPosition(w http.ResponseWriter, r *http.Request) {

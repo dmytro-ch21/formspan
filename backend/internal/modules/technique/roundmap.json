@@ -1,0 +1,321 @@
+{
+  "title": "How a round goes",
+  "intro": "Jiu-jitsu is unreadable as a list of moves and obvious as a map. Every position below is somewhere you can end up, stacked by what it is worth from your side: the best at the top, the worst at the bottom. The whole sport is trading upward — and when you lose ground, the way back is always the same three moves in the same order: survive, escape, recover.",
+  "bands": [
+    {
+      "min_tier": 1,
+      "label": "You are ahead",
+      "note": "Every one of these is worth more than the one below it, and the higher you are the fewer answers they have. Stabilise before you attack — reaching down for a submission is how you trade back down."
+    },
+    {
+      "min_tier": 0,
+      "label": "Even",
+      "note": "Nobody is on top yet. Standing and the guards live together here on purpose: having someone in your guard is not losing, and it is not winning either. This band is where most of a round is actually spent."
+    },
+    {
+      "min_tier": -99,
+      "label": "You are behind",
+      "note": "Bad, worse, worst — in that order going down. The way back is always the same three moves in the same order: survive, escape, recover. Panicking skips the first one, which is why it never works."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "back-top",
+      "label": "Their back",
+      "position_id": "back-control",
+      "position": "Back - Top (Back Control)",
+      "tier": 5,
+      "note": "The best place in the sport, and the only one they cannot see. Chest to their back, both hooks or a body triangle, and their neck already yours."
+    },
+    {
+      "id": "mount-top",
+      "label": "Mount",
+      "position_id": "mount",
+      "position": "Mount - Top",
+      "tier": 4,
+      "note": "Sitting on them with both legs outside. Stabilise before you attack: reaching for a submission from an unsettled mount is how you end up back in their guard."
+    },
+    {
+      "id": "north-south",
+      "label": "North–south",
+      "position_id": "north-south",
+      "position": "North-South",
+      "tier": 3,
+      "note": "Head to head, chest on their chest. A pin they cannot frame against the same way, and the place side control goes when they turn in."
+    },
+    {
+      "id": "knee-on-belly",
+      "label": "Knee on belly",
+      "position_id": "knee-on-belly",
+      "position": "Side Control - Top",
+      "tier": 3,
+      "note": "Mobile, heavy and worth points. It is a place you pass through on the way to mount, not one you settle in."
+    },
+    {
+      "id": "side-control-top",
+      "label": "Side control",
+      "position_id": "side-control",
+      "position": "Side Control - Top",
+      "tier": 3,
+      "note": "Where a finished pass lands. Crossface and underhook first: a pass is not finished until the pin is, and everything above this position is reached from here."
+    },
+    {
+      "id": "turtle-top",
+      "label": "On their turtle",
+      "position_id": "turtle",
+      "position": "Turtle - Top",
+      "tier": 2,
+      "note": "They are balled up and you are on them. Seatbelt and go: turtle is a door, and the room on the other side of it is their back."
+    },
+    {
+      "id": "guard-top",
+      "label": "Inside their guard",
+      "position_id": "open-guard",
+      "position": "Guard - Top",
+      "tier": 2,
+      "note": "On top, but their legs are still between you and them. Nothing above this is available until you pass, which is why passing is the whole job here."
+    },
+    {
+      "id": "half-guard-top",
+      "label": "Half guard, on top",
+      "position_id": "half-guard",
+      "position": "Half Guard - Top",
+      "tier": 2,
+      "note": "One leg trapped, and the underhook decides it. Half guard is not most of a pass — it is its own fight, and the winner of the underhook usually wins it."
+    },
+    {
+      "id": "standing",
+      "label": "Standing",
+      "position_id": "standing",
+      "position": "Standing",
+      "tier": 0,
+      "note": "Where every round starts and nobody is winning yet. Two exits that are not a takedown: pull guard on your terms, or disengage and reset."
+    },
+    {
+      "id": "leg-entanglement",
+      "label": "Leg entanglement",
+      "position_id": "leg-entanglement",
+      "position": "Leg Entanglement",
+      "tier": 0,
+      "note": "Legs tangled, and neither of you is on top. A position with its own controls and its own escapes — treat it as one, not as a lottery."
+    },
+    {
+      "id": "guard-bottom",
+      "label": "Your guard",
+      "position_id": "closed-guard",
+      "position": "Guard - Bottom",
+      "tier": 0,
+      "note": "Underneath, with your legs between you and them. The only bottom position that attacks: sweep them, submit them, or come up to your feet."
+    },
+    {
+      "id": "half-guard-bottom",
+      "label": "Half guard, on the bottom",
+      "position_id": "half-guard",
+      "position": "Half Guard - Bottom",
+      "tier": 0,
+      "note": "One of their legs trapped between yours. Not a guard that half-failed — a real position, and the underhook is what it is fought over."
+    },
+    {
+      "id": "turtle-bottom",
+      "label": "Turtled",
+      "position_id": "turtle",
+      "position": "Turtle - Bottom",
+      "tier": -1,
+      "note": "On your knees, balled up. Somewhere you move through, never somewhere you wait: staying still here is volunteering your back."
+    },
+    {
+      "id": "side-control-bottom",
+      "label": "Under side control",
+      "position_id": "side-control",
+      "position": "Side Control - Bottom",
+      "tier": -1,
+      "note": "Pinned across the chest. Uncomfortable rather than dangerous, and you can keep it that way — frames first, then move your hips, then recover."
+    },
+    {
+      "id": "mount-bottom",
+      "label": "Under mount",
+      "position_id": "mount",
+      "position": "Mount - Bottom",
+      "tier": -2,
+      "note": "The worst place a beginner spends time. Elbows to knees, and get out before they climb: high mount is much harder to escape than low."
+    },
+    {
+      "id": "back-bottom",
+      "label": "Back taken",
+      "position_id": "back-control",
+      "position": "Back - Bottom (Being Controlled)",
+      "tier": -3,
+      "note": "The worst place in the sport. Two hands to your neck first, then get your shoulders to the floor and turn in — in that order, every time."
+    }
+  ],
+  "edges": [
+    {
+      "from": "standing",
+      "to": "guard-top",
+      "label": "Takedown",
+      "kind": "route"
+    },
+    {
+      "from": "standing",
+      "to": "guard-bottom",
+      "label": "Guard pull",
+      "kind": "route"
+    },
+    {
+      "from": "guard-top",
+      "to": "half-guard-top",
+      "label": "Pass",
+      "kind": "route"
+    },
+    {
+      "from": "guard-top",
+      "to": "side-control-top",
+      "label": "Pass",
+      "kind": "route"
+    },
+    {
+      "from": "half-guard-top",
+      "to": "side-control-top",
+      "label": "Pass",
+      "kind": "route"
+    },
+    {
+      "from": "guard-bottom",
+      "to": "guard-top",
+      "label": "Sweep",
+      "kind": "route"
+    },
+    {
+      "from": "guard-bottom",
+      "to": "standing",
+      "label": "Wrestle up",
+      "kind": "route"
+    },
+    {
+      "from": "guard-bottom",
+      "to": "leg-entanglement",
+      "label": "Leg entry",
+      "kind": "route"
+    },
+    {
+      "from": "half-guard-bottom",
+      "to": "guard-top",
+      "label": "Sweep",
+      "kind": "route"
+    },
+    {
+      "from": "leg-entanglement",
+      "to": "guard-top",
+      "label": "Sweep",
+      "kind": "route"
+    },
+    {
+      "from": "side-control-top",
+      "to": "knee-on-belly",
+      "label": "Transition",
+      "kind": "route"
+    },
+    {
+      "from": "side-control-top",
+      "to": "north-south",
+      "label": "Transition",
+      "kind": "route"
+    },
+    {
+      "from": "side-control-top",
+      "to": "mount-top",
+      "label": "Transition",
+      "kind": "route"
+    },
+    {
+      "from": "knee-on-belly",
+      "to": "mount-top",
+      "label": "Transition",
+      "kind": "route"
+    },
+    {
+      "from": "mount-top",
+      "to": "back-top",
+      "label": "Back take",
+      "kind": "route"
+    },
+    {
+      "from": "turtle-top",
+      "to": "back-top",
+      "label": "Back take",
+      "kind": "route"
+    },
+    {
+      "from": "guard-bottom",
+      "to": "side-control-bottom",
+      "label": "They pass",
+      "kind": "concede"
+    },
+    {
+      "from": "half-guard-bottom",
+      "to": "side-control-bottom",
+      "label": "They pass",
+      "kind": "concede"
+    },
+    {
+      "from": "side-control-bottom",
+      "to": "mount-bottom",
+      "label": "They climb",
+      "kind": "concede"
+    },
+    {
+      "from": "turtle-bottom",
+      "to": "back-bottom",
+      "label": "They take the back",
+      "kind": "concede"
+    },
+    {
+      "from": "mount-bottom",
+      "to": "back-bottom",
+      "label": "You turn away",
+      "kind": "concede"
+    },
+    {
+      "from": "back-bottom",
+      "to": "side-control-bottom",
+      "label": "Escape",
+      "kind": "recover"
+    },
+    {
+      "from": "mount-bottom",
+      "to": "guard-bottom",
+      "label": "Escape",
+      "kind": "recover"
+    },
+    {
+      "from": "mount-bottom",
+      "to": "half-guard-bottom",
+      "label": "Escape",
+      "kind": "recover"
+    },
+    {
+      "from": "side-control-bottom",
+      "to": "guard-bottom",
+      "label": "Escape",
+      "kind": "recover"
+    },
+    {
+      "from": "side-control-bottom",
+      "to": "turtle-bottom",
+      "label": "Turn in",
+      "kind": "recover"
+    },
+    {
+      "from": "turtle-bottom",
+      "to": "guard-bottom",
+      "label": "Recover guard",
+      "kind": "recover"
+    },
+    {
+      "from": "turtle-bottom",
+      "to": "standing",
+      "label": "Stand up",
+      "kind": "recover"
+    }
+  ]
+}

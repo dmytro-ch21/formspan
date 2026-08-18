@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 import {
   buildEdgeIndex,
@@ -135,8 +137,29 @@ export default function LibraryPage() {
   const wantsTechniques = !known || techniqueKey !== undefined;
   const { getToken } = useAuth();
 
-  const [sport, setSport] = useState("");
-  const [position, setPosition] = useState("");
+  /**
+   * The one deep link into this page: `?sport=bjj&position=<glossary id>`,
+   * which the round map emits so "46 techniques from side control" lands on
+   * them already filtered.
+   *
+   * READ ONCE, AS AN INITIAL VALUE, and never written back. This page
+   * deliberately keeps no filter state anywhere — the docstring above says
+   * sport and position both reset on reload — and pushing every chip into the
+   * URL would turn that decision over quietly. An initial value is a different
+   * thing from persistence: it is the caller saying where to start, after
+   * which the chips behave exactly as they do when you arrive with no
+   * parameters at all.
+   *
+   * Position without sport would be the stale-invisible-filter bug the chips'
+   * own docstring warns about, so the map sends both and this trusts neither:
+   * a position is only taken if the sport it belongs to came with it.
+   */
+  const params = useSearchParams();
+  const initialSport = params.get("sport") ?? "";
+  const initialPosition = initialSport === "" ? "" : (params.get("position") ?? "");
+
+  const [sport, setSport] = useState(initialSport);
+  const [position, setPosition] = useState(initialPosition);
   const [belt, setBelt] = useState("");
   const [query, setQuery] = useState("");
 
@@ -521,6 +544,26 @@ export default function LibraryPage() {
                 label on this page uses it bare, and matching them is the point:
                 this is a heading over content, not a control. */}
             <h2 className="eyebrow">Start with positions</h2>
+            {/* Above the cards, because it is the thing to read BEFORE any
+                single position: the glossary says what each place is, the map
+                says how they connect and which way is up. A beginner opening
+                "Closed Guard" first learns a definition with nothing to hang
+                it on. */}
+            <Link
+              href="/dashboard/library/map"
+              className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-raised px-4 py-3 text-sm hover:bg-surface-hover"
+            >
+              <span>
+                <span className="font-medium">How a round goes</span>
+                <span className="block text-text-muted">
+                  Every position on one map, stacked by what it is worth — and
+                  the ways between them.
+                </span>
+              </span>
+              <span aria-hidden className="text-text-dim">
+                →
+              </span>
+            </Link>
             <ul className="flex flex-wrap gap-2">
               {positions.map((p) => {
                 const [code, accent] = positionBadge(p.id);

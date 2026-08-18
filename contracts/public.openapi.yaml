@@ -1332,7 +1332,7 @@ components:
         One entry in the BJJ position glossary — the nodes of the graph the
         technique library forms. Techniques are the edges between positions;
         this is what the positions themselves are, written for someone who has
-        never trained. Ten curated entries, read-only, the same for every user.
+        never trained. Eleven curated entries, read-only, the same for every user.
       required:
         [
           id,
@@ -1429,11 +1429,113 @@ components:
 
     PositionList:
       type: object
-      required: [positions]
+      required: [positions, round_map]
       properties:
         positions:
           type: array
           items: { $ref: "#/components/schemas/Position" }
+        round_map: { $ref: "#/components/schemas/RoundMap" }
+
+    RoundMap:
+      type: object
+      description: >
+        The teaching diagram of a round: what the positions are, how you move
+        between them, and which way is up. Authored rather than derived — the
+        library does carry a real position graph in `to_position`, but only
+        170 of 542 techniques record one, so the derived graph has no
+        side-control-to-mount edge, no mount-to-back and no escapes at all. A
+        drawn map with holes reads as "you cannot get there", which is worse
+        than no map. The structure is authored; every node points at a real
+        position and resolves to real techniques.
+      required: [title, intro, bands, nodes, edges]
+      properties:
+        title: { type: string }
+        intro:
+          type: string
+          description: The paragraph a beginner reads before the diagram means anything.
+        bands:
+          type: array
+          description: >
+            The reading key for the tier ladder — which stretch counts as
+            ahead, even and behind. Ordered from the top down, and a node
+            belongs to the FIRST band whose `min_tier` it clears, so they
+            partition the nodes and a gap between two bands cannot exist.
+            Authored rather than derived from the sign of `tier`, so the
+            wording lives in one place instead of being restated by every
+            client that draws the ladder.
+          items: { $ref: "#/components/schemas/RoundMapBand" }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/RoundMapNode" }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/RoundMapEdge" }
+
+    RoundMapBand:
+      type: object
+      required: [min_tier, label, note]
+      properties:
+        min_tier:
+          type: integer
+          description: >
+            Inclusive. The lowest band sits far below the lowest node rather
+            than exactly on it, so adding a worse position later cannot fall
+            out of every band.
+          example: 1
+        label: { type: string, example: You are ahead }
+        note: { type: string }
+
+    RoundMapNode:
+      type: object
+      description: >
+        One place you can be. Nodes are SIDED and the glossary is not — it
+        describes closed guard once, for both players, which is right for a
+        glossary and useless for a route, since "sweep" and "get swept" would
+        be the same arrow. So a node carries both keys, and two nodes may share
+        a `position_id`: being mounted and mounting are one position and
+        opposite places to be.
+      required: [id, label, position_id, position, tier, note]
+      properties:
+        id: { type: string, example: mount-top }
+        label: { type: string, example: Mount }
+        position_id:
+          type: string
+          description: The glossary entry behind this node.
+          example: mount
+        position:
+          type: string
+          description: >
+            The sided value to filter the library by, matching
+            `Technique.position` exactly.
+          example: Mount - Top
+        tier:
+          type: integer
+          description: >
+            What the position is worth FROM YOUR SIDE — 5 on their back, -3
+            with your own back taken, 0 standing. Ordering, not arithmetic: the
+            gap between two tiers means nothing and several nodes share one. It
+            is the whole hierarchy in one integer, which is what lets a narrow
+            screen render the map as a ladder without the edges at all.
+          example: 4
+        note: { type: string }
+
+    RoundMapEdge:
+      type: object
+      required: [from, to, label, kind]
+      properties:
+        from: { type: string, example: side-control-top }
+        to: { type: string, example: mount-top }
+        label: { type: string, example: Transition }
+        kind:
+          type: string
+          enum: [route, recover, concede]
+          description: >
+            `route` is you advancing, `recover` is you getting out of a bad
+            place, `concede` is you losing ground. Three rather than two
+            because a map with no concede edges leaves every bad position with
+            nothing pointing at it, which draws as unreachable — and "how did I
+            end up here" is the question a beginner looking at one is usually
+            asking.
 
     WorkoutItem:
       type: object
@@ -4537,8 +4639,11 @@ paths:
       summary: List the BJJ position glossary
       operationId: listPositions
       description: >
-        All ten positions, already in pedagogical reading order. Fetch once and
-        cache, like the rulesets. There is no per-position technique endpoint on
+        All eleven positions, already in pedagogical reading order, plus
+        `round_map` — the teaching diagram whose nodes are these positions.
+        Fetch once and cache, like the rulesets; the map rides along rather
+        than getting its own endpoint so a client cannot hold a map and a
+        glossary from different versions. There is no per-position technique endpoint on
         purpose: a client that already holds the library resolves "techniques
         from here" locally, by prefix-matching each summary's `position`
         against this entry's `family` AND then applying

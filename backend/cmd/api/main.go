@@ -201,7 +201,16 @@ func main() {
 	exerciseContentHandler := exercise.NewContentHandler(exerciseRepo)
 	workoutHandler := workout.NewHandler(workoutRepo)
 	techniqueRepo := technique.NewPostgresRepository(pool)
-	techniqueHandler := technique.NewHandler(techniqueRepo)
+	// Fatal rather than degraded: the round map is embedded content, so a
+	// failure here means the binary itself is wrong, and a process that boots
+	// and serves a glossary with no map would look like a feature that has not
+	// shipped yet.
+	roundMap, err := technique.LoadRoundMap()
+	if err != nil {
+		logger.Error("round map failed to load", "err", err)
+		os.Exit(1)
+	}
+	techniqueHandler := technique.NewHandler(techniqueRepo, roundMap)
 	techniqueContentHandler := technique.NewContentHandler(techniqueRepo)
 	sessionHandler := session.NewHandler(session.NewPostgresRepository(pool))
 	planHandler := plan.NewHandler(plan.NewPostgresRepository(pool))

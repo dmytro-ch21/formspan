@@ -1682,10 +1682,75 @@ export type Position = {
 };
 
 /**
+ * The teaching diagram of a round, served alongside the glossary.
+ *
+ * Nodes are SIDED and positions are not — the glossary describes closed guard
+ * once, for both players, which is right for a glossary and useless for a
+ * route, since "sweep" and "get swept" would be the same arrow. So a node
+ * carries `position_id` (the glossary entry, for the prose) and `position`
+ * (the sided value, an exact match against a summary's `position`, for the
+ * library link). Two nodes may share a `position_id`.
+ */
+export type RoundMapNode = {
+  id: string;
+  label: string;
+  position_id: string;
+  position: string;
+  /**
+   * What the position is worth FROM YOUR SIDE — 5 on their back, -3 with your
+   * own back taken, 0 standing. ORDERING, NOT ARITHMETIC: the gap between two
+   * tiers means nothing and several nodes share one, so group by it and sort
+   * descending; never space anything proportionally to a difference of tiers.
+   */
+  tier: number;
+  note: string;
+};
+
+/**
+ * `route` is you advancing, `recover` is you getting out of a bad place,
+ * `concede` is you losing ground. All three are drawn: without the concede
+ * edges every bad position has nothing pointing at it and reads as
+ * unreachable.
+ */
+export type RoundMapEdgeKind = "route" | "recover" | "concede";
+
+export type RoundMapEdge = {
+  from: string;
+  to: string;
+  label: string;
+  kind: RoundMapEdgeKind;
+};
+
+/**
+ * The reading key for the tier ladder. Ordered top down, and a node belongs to
+ * the FIRST band whose `min_tier` it clears — so iterate in order and take the
+ * first match; comparing against a range would reintroduce the gap the server
+ * shape exists to prevent.
+ */
+export type RoundMapBand = {
+  min_tier: number;
+  label: string;
+  note: string;
+};
+
+export type RoundMap = {
+  title: string;
+  intro: string;
+  bands: RoundMapBand[];
+  nodes: RoundMapNode[];
+  edges: RoundMapEdge[];
+};
+
+/**
  * Positions, fetched once. Failures are not cached, same reasoning as the
  * technique cache above.
+ *
+ * The round map rides on the same response and the same cache deliberately:
+ * its nodes name positions, so two caches could hold two versions of one
+ * vocabulary and a node would draw as a dead box.
  */
 let positionCache: Position[] | null = null;
+let roundMapCache: RoundMap | null = null;
 
 function normalisePosition(p: Position): Position {
   return {
@@ -1700,19 +1765,44 @@ function normalisePosition(p: Position): Position {
   };
 }
 
-export async function listPositions(
+async function loadGlossary(
   getToken: Token,
   signal?: AbortSignal,
-): Promise<Position[]> {
-  if (positionCache) return positionCache;
-  const b = await request<{ positions: Position[] }>(
+): Promise<void> {
+  const b = await request<{ positions: Position[]; round_map?: RoundMap }>(
     getToken,
     "/techniques/positions",
     {},
     signal,
   );
   positionCache = (b.positions ?? []).map(normalisePosition);
-  return positionCache;
+  // Optional on the wire even though the contract requires it: an older API
+  // than this build is the one case where it is absent, and a page that throws
+  // is a worse answer than one that renders the glossary without the map.
+  roundMapCache = b.round_map ?? null;
+}
+
+export async function listPositions(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<Position[]> {
+  if (positionCache) return positionCache;
+  await loadGlossary(getToken, signal);
+  return positionCache ?? [];
+}
+
+/**
+ * Null means the API did not send one — see `loadGlossary`. Callers render the
+ * absence rather than treating it as an error, which is why this does not
+ * throw.
+ */
+export async function getRoundMap(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<RoundMap | null> {
+  if (roundMapCache) return roundMapCache;
+  await loadGlossary(getToken, signal);
+  return roundMapCache;
 }
 
 /**

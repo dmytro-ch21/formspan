@@ -1,4 +1,4 @@
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -299,6 +299,45 @@ export default function LibraryScreen() {
     // `modules` is a dependency because the guard reads it: on a cold start
     // the cache resolves first and this must re-check against it.
   }, [userId, modules]);
+
+  /**
+   * The one deep link into this tab: `sport` and `position`, sent by the round
+   * map so "techniques from side control" lands here already filtered.
+   *
+   * **On FOCUS, not on mount, and not as an initial value.** A tab screen stays
+   * mounted for the life of the process, so `useState(param)` would read
+   * whatever was there when the app started and never again. `useFocusEffect`
+   * is also the honest hook rather than the convenient one: the link should
+   * apply when the athlete actually arrives on this tab, and a tab sitting
+   * unfocused in the background has no business grabbing route params.
+   *
+   * **It clears the params after applying them.** Route params persist, so
+   * without this the filter would be re-applied on every return to the tab,
+   * silently undoing whatever the athlete picked in between. Consumed once is
+   * what a link means.
+   *
+   * `setSportState`, deliberately, not `setSport`: choosing a sport here
+   * persists it as a preference, and arriving through a link is not the same
+   * act as tapping the chip. A one-off navigation should not rewrite what the
+   * tab opens on tomorrow.
+   */
+  const linkParams = useLocalSearchParams<{ sport?: string; position?: string }>();
+  const linkSport = typeof linkParams.sport === 'string' ? linkParams.sport : '';
+  const linkPosition = typeof linkParams.position === 'string' ? linkParams.position : '';
+  useFocusEffect(
+    useCallback(() => {
+      if (linkSport === '') return;
+      // Guarded like every other path that sets this: a link naming a
+      // discipline the athlete has turned off would filter the list to a chip
+      // that is not rendered — the invisible-filter bug documented above.
+      if (!enabledSports(modules).some((m) => m.key === linkSport)) return;
+
+      setSportState(linkSport);
+      // Position only where the axis exists, same rule as the chips.
+      setPosition(usesPosition(linkSport, modules) ? linkPosition : '');
+      router.setParams({ sport: undefined, position: undefined });
+    }, [linkSport, linkPosition, modules, router]),
+  );
 
   const setSport = useCallback(
     (next: string) => {
@@ -828,6 +867,22 @@ export default function LibraryScreen() {
             <Text style={styles.glossaryLabel} accessibilityRole="header">
               Start with positions
             </Text>
+            {/* Above the cards, because it is what to read BEFORE any single
+                position: the glossary says what each place is, the map says how
+                they connect and which way is up. Opening "Closed Guard" first
+                gives a beginner a definition with nothing to hang it on. */}
+            <Pressable
+              onPress={() => router.push('/bjj/roundmap')}
+              accessibilityRole="button"
+              accessibilityLabel="How a round goes: every position on one map"
+              testID="library-roundmap-link"
+              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+            >
+              <Text style={styles.mapLinkTitle}>How a round goes</Text>
+              <Text style={styles.mapLinkNote}>
+                Every position on one map, stacked by what it is worth.
+              </Text>
+            </Pressable>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -1274,6 +1329,17 @@ const styles = StyleSheet.create({
   // a screen reader should still be handed the words. `apps/web`'s `.eyebrow`
   // does the same with `text-transform`, so both clients now announce the same
   // accessible name rather than one of them spelling it out.
+  mapLink: {
+    borderColor: vola.line,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 2,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mapLinkNote: { color: vola.textMuted, fontSize: 13, lineHeight: 18 },
+  mapLinkTitle: { color: vola.text, fontSize: 14, fontWeight: '700' },
   glossaryLabel: {
     color: vola.textMuted,
     fontSize: 11,

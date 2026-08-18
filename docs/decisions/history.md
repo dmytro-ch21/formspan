@@ -23956,6 +23956,136 @@ Re-filed here as F5.
 - **The four things found reviewing #267 are now all closed** — T6 (#267), T8
   (#271), T7 (#270) and this one. Nobody has swept for a fifth, and this family
   produced a new member every time somebody looked.
+## 2026-08-18 — The map gets drawn, and the derived graph turns out not to be one
+
+**N18**, and the answer to the open question #272 left behind: four concept
+cards describing a flowchart is strictly worse than the flowchart.
+
+**The first thing tried was deriving it, and recording why that failed is the
+point of this entry.** The library already models techniques as edges between
+positions — `Technique.ToPosition` records where a technique leaves you — so a
+real position graph looked like it was already in the data. Folding it gives a
+spine that reads exactly like the teaching diagram: standing → takedown → guard
+top (35 techniques), guard top → pass → side control (29), guard bottom → sweep
+→ guard top (16). And then it stops. Only **170 of 542** techniques record a
+`to_position`, and the missing ones are the transitions a beginner most needs:
+there is **no side-control-to-mount edge, no mount-to-back, and no escapes at
+all**. A drawn map with holes in it is worse than no map, because a missing edge
+is invisible — it does not read as "unrecorded", it reads as "you cannot get
+there".
+
+So the structure is authored and everything it points at is real. Sixteen nodes,
+28 edges, `roundmap.json` beside the glossary it names.
+
+**Nodes are sided; the glossary is not, and that is the structural problem the
+design had to solve.** `Position` describes closed guard once, for both players,
+which is right for a glossary and useless for a route: a map drawn from nobody's
+point of view makes "sweep" and "get swept" the same arrow. A node therefore
+carries both keys — `position_id` for the glossary prose behind it and
+`position` for the library filter, which is the sided value ("Mount - Top") —
+and two nodes may share the first. Being mounted and mounting are one position
+and opposite places to be.
+
+**Tier is ordering, not arithmetic**, and it is the single most load-bearing
+field. It is what the position is worth from your side: 5 on their back, -3 with
+your own back taken, 0 standing. Both clients lay out by RANK among the distinct
+tiers present, never by the value — spacing proportionally would put four empty
+rows between mount (4) and standing (0) and imply a distance that means nothing.
+Web has a unit test that fails if anyone does; so does the mobile ladder.
+
+**Standing sits in the contested band with the guards, which was a correction.**
+The first pass gave guard bottom tier 1 and standing tier 0, which draws the
+entry point of every round *below* having someone in your guard. Grouping
+standing, both guards and leg entanglement at 0 — "nobody is on top yet" — is
+both more defensible and what the node copy already said.
+
+**`bands` are authored rather than derived from the sign of `tier`**, so "you are
+ahead / even / behind" and the paragraph under each is written once instead of
+being restated by every client that draws the ladder. A node takes the FIRST
+band whose `min_tier` it clears, which makes them exhaustive downward and a gap
+between two of them impossible by construction.
+
+**Served on the existing `/v1/techniques/positions` response, not a new
+endpoint.** The map's nodes name positions, so two endpoints means two caches
+that can hold two versions of one vocabulary, and a node naming a position the
+cached glossary lacks would draw as a dead box. One request, one cache. It is
+also deliberately **not a table**: every other content type here is a collection
+that gets filtered and looked up by id, and this is one document referenced by
+nothing — a table would mean a migration each time somebody rewrites a diagram.
+`cmd/api` fatals if it fails to load, because a process that boots and serves a
+glossary with no map looks like a feature that has not shipped.
+
+**Web draws the graph, mobile draws a ladder, and that is not a downgrade.** The
+hierarchy — the back is above mount is above side control, and the whole sport
+is trading upward — is the half a beginner most needs, and a hierarchy IS a
+vertical list. `tier` carries it, so the phone needs none of the edges to teach
+what the diagram exists for; the edges are still there as words under each
+position ("From here: Pass → Side control"), which reads fine in a column and
+would be unreadable as arrows at that width. Web additionally gets the three
+edge kinds as toggles, with `route` on and `recover`/`concede` off — 28 arrows
+at once is a hairball and a beginner's first question is only ever "how do I get
+to the top".
+
+**Three edge kinds rather than two.** `route`, `recover` and `concede`. Without
+the concede edges every bad position has nothing pointing at it and draws as
+unreachable — and "how did I end up here" is the question somebody looking at a
+diagram is usually asking.
+
+**Colour never carries meaning alone**, per the palette rule: each edge kind has
+a distinct hue AND its own words on the label AND its own named toggle. The one
+thing encoded by position alone is the vertical axis, which is the message.
+
+Both clients gained one deep link into the library, `?sport=…&position=…`, and
+the two apps needed opposite mechanisms for the same idea. Web reads it as an
+INITIAL VALUE and never writes back — that page keeps no filter state anywhere
+and pushing every chip into the URL would quietly reverse that decision. Mobile
+cannot use an initial value at all: a tab screen stays mounted for the life of
+the process, so it applies the params in a **`useFocusEffect` and then clears
+them**, because route params persist and would otherwise re-apply the filter
+every time the athlete returned to the tab. It also sets the sport through
+`setSportState` rather than `setSport`, since choosing a sport there persists a
+preference and arriving through a link is not the same act as tapping the chip.
+
+The `useFocusEffect` was not the first attempt — a plain `useEffect` was, and the
+mobile lint ratchet refused it (`react-hooks/set-state-in-effect`, 54 → 55). The
+right response to a ratchet is not to raise the number, and in this case the
+rule was pointing at a real bug: a link should apply when the athlete arrives on
+the tab, not while it sits unfocused in the background.
+
+Two small drifts fixed in passing: the contract and the `Position` docstring both
+still said **ten** positions, and there have been eleven since leg entanglement
+was added.
+
+Verified: 28 backend packages green against a real database; the new content
+tests mutation-checked one at a time — a node filtering to a value nothing
+matches, a node with no edges, a glossary position missing from the map, bands
+removed, a band made unreachable, a node below every band, and a renamed struct
+tag — each red on its own and green restored. Web 89 tests (9 new), mobile 1312
+(6 new), both mutation-checked the same way; mobile lint holds at exactly 54/54;
+`verify` and the OpenAPI lint green. **Not seen in a browser or on a device**:
+the dashboard sits behind Clerk and this session holds no credentials, and the
+worktree carries the `EXPO_PUBLIC_*` trap that makes a device build from here
+useless. The layout maths that a screenshot would have checked is unit-covered
+instead, which is why it was extracted from both views in the first place.
+
+Open questions:
+
+- **Neither screen has been looked at.** The SVG's edge routing is the part most
+  likely to be wrong in a way tests cannot see — 28 beziers between sixteen
+  boxes, and "does it cross something" is a judgement a human makes in a second
+  and a test makes badly. Same-row edges bow, which is covered; everything else
+  is geometry nobody has laid eyes on.
+- The map is only reachable from the Library's glossary block, which renders
+  only under the BJJ filter. A beginner who has not found that filter has not
+  found the map. The belt roadmaps describe the same material in prose and do
+  not link to it, which is the obvious next connection and is deliberately not
+  made here: curriculum items are content, and giving one a URL is a schema
+  question rather than a screen.
+- Nothing checks the authored edges against the library's derived ones. Where
+  both exist they agree today, and an edge the catalog contradicts would be a
+  real content bug — but the derived side is too sparse to assert against
+  without failing on its own gaps.
+
 
 ## Open items / known gaps as of this entry
 

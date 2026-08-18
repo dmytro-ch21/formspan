@@ -6542,6 +6542,52 @@ the schema rather than from taste:
   nothing rather than an error. Deliberate; test that an offline Plan tab still
   shows its templates.
 
+The round map (2026-08-18):
+
+- **`GET /v1/techniques/positions` carries `round_map`** beside `positions`, and
+  the two are one fetch on purpose. Assert both are present; a client holding a
+  map from one version and a glossary from another is the failure the single
+  response prevents.
+- **Every node's `position_id` is in the same response's `positions`**, and every
+  node's `position` matches at least one technique in `GET /v1/techniques`. Both
+  are covered by Go tests against the embedded catalogs, so the API-level check
+  is a smoke test rather than the guarantee.
+- **The API refuses to boot on a broken map** rather than serving a glossary
+  without one. Hard to exercise from a functional suite; recorded because the
+  alternative (a degraded response) would look identical to a feature that has
+  not shipped.
+- **Web `/dashboard/library/map`**: the diagram draws with `route` arrows only.
+  Toggling "Getting out" and "Losing ground" adds theirs; each toggle reports
+  its own count, so nothing is silently missing. Selecting a box opens the
+  panel with the glossary's description and priorities, and dims every edge not
+  touching it.
+- **The page never scrolls sideways.** The diagram is wider than a narrow
+  window and must scroll inside its own container. Check at 1024px and below.
+- **Every position also appears as text below the diagram**, best to worst. Not
+  a fallback for the SVG — this is reference material and should be readable
+  without clicking sixteen boxes.
+- **Mobile `/bjj/roundmap` is a ladder, not the diagram**, best at the top, with
+  a band heading opening each of the three bands exactly once. Tapping a row
+  expands its note, its edges as words, and the library link; the expanded state
+  must be announced (`accessibilityState`), since collapsed and expanded sound
+  identical otherwise.
+- **Do not confuse it with `/bjj/positions`**, which is the athlete's own
+  heatmap computed from their logs. Same word, different screens: assert the
+  titles ("How a round goes" against the position map's own).
+- **The library deep link works from both, and behaves differently on purpose.**
+  Web: `?sport=bjj&position=side-control` opens the library already filtered,
+  and the chips then behave exactly as on a plain visit. Mobile: the same
+  params are applied on focus and then CLEARED — navigate to the library from
+  the map, change the filter by hand, switch tabs and come back, and the
+  hand-set filter must survive. A re-applied filter here is the bug the
+  clearing exists to prevent.
+- **A link naming a disabled discipline changes nothing.** Turn BJJ off, send
+  `?sport=bjj&position=mount`, and the library must ignore both rather than
+  filter to a chip that is not rendered.
+- **Mobile's deep link must not rewrite the stored sport preference.** Arrive via
+  the map, then relaunch the app: the library should open on whatever sport was
+  stored before, not on BJJ.
+
 The map and the progression (2026-08-17):
 
 - **White belt's second phase is the map, and it moves no number.** `The map:
