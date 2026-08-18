@@ -5,6 +5,7 @@ import { Icon, type IconName } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { useModules } from '@/lib/ModulesProvider';
+import { hasFoodLog } from '@/lib/modules';
 
 /**
  * The tab bar: an icon, a label, and an underline on the active one.
@@ -13,8 +14,15 @@ import { useModules } from '@/lib/ModulesProvider';
  * beside a word is redundant furniture. The redesign puts the icons back, and
  * the argument against them was thinner than it looked: at a glance-and-tap
  * distance — thumb moving before the eye has read anything — a shape is faster
- * to acquire than a five-letter word, and four destinations are few enough
- * that each shape stays learnable.
+ * to acquire than a five-letter word, and this bar holds few enough
+ * destinations that each shape stays learnable.
+ *
+ * That said "four" until Food arrived. The claim was always about
+ * LEARNABILITY rather than the literal number, and the bar was already four
+ * or five depending on whether any enabled discipline has a catalog — so a
+ * variable count is the established state, not a new one. Food earns the slot
+ * on frequency: it is logged three to six times a day, more than anything else
+ * here, and the tab bar is the only fixed-position affordance the phone has.
  *
  * The active mark moved from a dot above the label to a rule beneath it. A dot
  * is ambiguous about *what* it marks when there is now also an icon above the
@@ -43,6 +51,19 @@ export default function TabLayout() {
    * for an in-flight router.push and for deep links.
    */
   const anyCatalog = modules.some((m) => m.enabled && m.capabilities.catalog !== '');
+  const anyFoodLog = hasFoodLog(modules);
+
+  /**
+   * Which tabs are hidden right now.
+   *
+   * A helper rather than a longer ternary, because there are two conditions
+   * now and a third would make the inline form unreadable. Gated on
+   * CAPABILITIES, never on a module key — comparing `key === 'nutrition'` is
+   * the pattern this codebase bans, since a discipline gaining or losing a
+   * surface should be one row on the server rather than an edit in three apps.
+   */
+  const hiddenFor = (name: string): boolean =>
+    (name === 'library' && !anyCatalog) || (name === 'food' && !anyFoodLog);
 
   // Hold the frame until the cached module set has been read. This is the
   // whole reason the cache exists: without it the first frames compute
@@ -71,7 +92,7 @@ export default function TabLayout() {
           name={name}
           options={{
             title,
-            href: name === 'library' && !anyCatalog ? null : undefined,
+            href: hiddenFor(name) ? null : undefined,
             tabBarIcon: ({ focused }) => (
               <Icon
                 name={icon}
@@ -135,6 +156,11 @@ function TabButton({ color, children, ...props }: TabButtonProps) {
 
 const TABS = [
   { name: 'index', title: 'Today', icon: 'dashboard' },
+  // Second, not last. Food is logged more often than anything else in this app
+  // — three to six times a day against once for a session — and the tab bar is
+  // the only fixed-position affordance the phone has. A card on Today would
+  // cost an extra tap every time, on a screen whose contents move.
+  { name: 'food', title: 'Food', icon: 'food' },
   { name: 'workouts', title: 'Plan', icon: 'calendar' },
   { name: 'library', title: 'Library', icon: 'chart' },
   { name: 'you', title: 'You', icon: 'profile' },
