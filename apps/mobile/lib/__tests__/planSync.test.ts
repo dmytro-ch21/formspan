@@ -257,6 +257,154 @@ describe('deleting', () => {
   });
 });
 
+/*
+ * The closing compare-and-swap — T5.
+ *
+ * `pushRow` ends by clearing `dirty` only `AND updated_at = ?` and only
+ * `AND deleted_at IS NULL`. Both clauses guard the same instant: the window
+ * between the snapshot `runSync` took and the UPDATE that says "sent". A plan
+ * screen writes through on every change, so something landing in that window is
+ * ordinary, not exotic.
+ *
+ * Measured against #256's merge, by deleting each clause — the `updated_at`
+ * one with its binding, since that clause alone is a parameter-arity error
+ * which measures the harness rather than the guard; the tombstone clause has
+ * no binding to remove. The whole mobile suite stayed green,
+ * 1280/1280, for both. The two sibling swaps in `sessionStore` were pinned;
+ * this was the last unheld one.
+ *
+ * **The tombstone half turned out to be worse than unheld: it was held by a
+ * clock race.** `deleting DURING an in-flight create` above does catch that
+ * deletion — but only when `planSession` and `unplanSession` land in the SAME
+ * millisecond, because otherwise the `updated_at` clause declines first and the
+ * tombstone clause is never reached. Confirmed as the mechanism rather than
+ * inferred: holding mocks, ordering and module state constant and varying only
+ * the timestamp flips the outcome, and instrumented runs held
+ * `dirty cleared` ⇔ `timestamps equal` 30/30.
+ *
+ * **The rate is not a property of the code, which is the point.** With the
+ * clause removed it was caught 5 of 6 runs of this file alone and 0 of 1 under
+ * the full suite on one machine, then 11 of 12 and 4 of 4 on another an hour
+ * later. Do not read a regime into those numbers — the honest statement is that
+ * the verdict tracks machine load, in every regime, and nothing declares it. A
+ * guard whose coverage is a coin toss reads as covered, so nobody re-measures
+ * it. The test below forces the collision instead of hoping for it: 12 of 12.
+ *
+ * What it costs when it goes: the row is marked clean, the change exists on this
+ * phone and nowhere else, and `countPendingPlans` reads zero — so nothing ever
+ * retries and nothing reports a fault.
+ */
+describe('an edit or a delete that lands mid-push', () => {
+  /** The snapshot's timestamp, so a test can decide what "unchanged" means. */
+  const AT = '2026-08-01T10:00:00.000Z';
+
+  /** Remote, clean, then dirtied at `AT` — the state a push starts from. */
+  async function pushableAt(id: string, notes: string) {
+    await db.runAsync(
+      `UPDATE planned_sessions SET notes = ?, dirty = 1, updated_at = ? WHERE id = ?`,
+      notes,
+      AT,
+      id,
+    );
+  }
+
+  /** The server still holds it: the delete or edit has not been sent yet. */
+  function serverStillHas(id: string) {
+    mockFetch.mockResolvedValueOnce([
+      {
+        id,
+        user_id: USER,
+        day: '2026-08-05',
+        sport: 'strength',
+        workout_id: null,
+        notes: '',
+        created_at: AT,
+        updated_at: AT,
+      },
+    ]);
+  }
+
+  test('an edit is not marked as already sent', async () => {
+    const p = await planSession(USER, '2026-08-05', 'strength', null);
+    await syncPlans(USER, getToken);
+    await pushableAt(p.id, 'first');
+
+    // The second edit lands while the PATCH is in flight, which is the whole
+    // race: the push is sending `first` and the athlete has since typed
+    // `second`. Marking the row clean here loses `second` permanently.
+    mockUpdate.mockImplementationOnce(async () => {
+      await db.runAsync(
+        `UPDATE planned_sessions SET notes = ?, dirty = 1, updated_at = ? WHERE id = ?`,
+        'second',
+        '2026-08-01T10:00:01.000Z',
+        p.id,
+      );
+    });
+    serverStillHas(p.id);
+
+    await syncPlans(USER, getToken);
+
+    const after = await row(p.id);
+    expect(after?.dirty).toBe(1);
+    expect(await countPendingPlans(USER)).toBe(1);
+  });
+
+  test('a DELETE is not marked as already sent, even in the same millisecond', async () => {
+    // The clause `updated_at` cannot cover. `unplanSession` stamps `updated_at`
+    // with its own clock, so in the ordinary case the first clause declines and
+    // this second one is never reached — which is exactly why the existing
+    // coverage was a coin toss. It exists for the collision: a delete inside
+    // the same millisecond as the snapshot writes an IDENTICAL timestamp, the
+    // first clause matches, and only `deleted_at IS NULL` can still say no.
+    //
+    // Two `Date.now()` calls cannot be forced into one millisecond on demand,
+    // so the tombstone is written by the real `unplanSession` and only the
+    // clock is then closed by hand. The guard under test is untouched, and the
+    // race is no longer left to how busy the machine is.
+    //
+    // The state that produces is `deleted_at = now, updated_at = snapshot`,
+    // where a true collision gives `deleted_at = updated_at = snapshot`. The
+    // clause reads `deleted_at IS NULL` and never its value, so the difference
+    // is invisible to it — and the state is reachable anyway without a
+    // sub-millisecond write pair, since `new Date()` is wall clock and a
+    // backwards clock step between the edit and the delete can produce the same
+    // thing — any step that lands the delete's read back on the snapshot's
+    // millisecond, not merely any step backwards.
+    const p = await planSession(USER, '2026-08-05', 'strength', null);
+    await syncPlans(USER, getToken);
+    await pushableAt(p.id, 'edited');
+
+    mockUpdate.mockImplementationOnce(async () => {
+      await unplanSession(USER, p.id);
+      await db.runAsync(`UPDATE planned_sessions SET updated_at = ? WHERE id = ?`, AT, p.id);
+    });
+    serverStillHas(p.id);
+
+    await syncPlans(USER, getToken);
+
+    const after = await row(p.id);
+    // Still a tombstone, and still owed. Cleared, the plan is gone from this
+    // phone, alive on the server forever, and `pending` reads zero so no sync
+    // ever tries again.
+    expect(after?.deleted_at).not.toBeNull();
+    expect(after?.dirty).toBe(1);
+    expect(await countPendingPlans(USER)).toBe(1);
+  });
+
+  test('a push with nothing landing underneath it DOES go clean', async () => {
+    // Or "never clear dirty at all" would satisfy both tests above.
+    const p = await planSession(USER, '2026-08-05', 'strength', null);
+    await syncPlans(USER, getToken);
+    await pushableAt(p.id, 'first');
+    serverStillHas(p.id);
+
+    await syncPlans(USER, getToken);
+
+    expect((await row(p.id))?.dirty).toBe(0);
+    expect(await countPendingPlans(USER)).toBe(0);
+  });
+});
+
 describe('pulling', () => {
   test('a plan made elsewhere lands locally, clean', async () => {
     mockFetch.mockResolvedValueOnce([
