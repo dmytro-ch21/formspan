@@ -31,9 +31,28 @@ const draft = {
   quota: { source: 'text', used: 1, limit: 20, remaining: 19, resets_at: null },
 };
 
+/** What was handed to FormData.append, before it stringifies anything. */
+let appended: Map<string, unknown>;
+
 beforeEach(() => {
   mockFetch.mockReset();
   mockFetch.mockResolvedValue(ok(draft));
+  appended = new Map();
+  // Records AND calls through. A spy that only records leaves the FormData
+  // empty, so every `form.get()` assertion beside it silently reads null —
+  // which is how the first version of this failed.
+  const realAppend = FormData.prototype.append;
+  jest.spyOn(FormData.prototype, 'append').mockImplementation(function (
+    this: FormData,
+    ...args: unknown[]
+  ) {
+    appended.set(args[0] as string, args[1]);
+    return (realAppend as (...a: unknown[]) => unknown).apply(this, args);
+  } as never);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe('describeMeal', () => {
@@ -78,7 +97,15 @@ describe('photographMeal', () => {
     const form = init.body as FormData;
     expect(form.get('description')).toBe('the sauce is peanut');
     expect(form.get('meal')).toBe('dinner');
-    expect(form.get('image')).not.toBeNull();
+    // NOT `form.get('image')`: this environment's FormData stringifies the RN
+    // file object to "[object Object]", so a `not.toBeNull()` there stays green
+    // even if `uri` is dropped — and `uri` is the whole part, since the bridge
+    // streams the file from it. Spying on append is the only way to see the
+    // object that was actually handed over. Raised in review.
+    expect(appended.get('image')).toMatchObject({
+      uri: 'file:///meal.jpg',
+      type: 'image/jpeg',
+    });
   });
 });
 

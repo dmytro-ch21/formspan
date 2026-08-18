@@ -1,6 +1,7 @@
 package nutrition
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 // EstimateHandler serves POST /v1/nutrition/estimate.
@@ -98,13 +100,26 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	// RECORDED WHETHER OR NOT IT WORKED, and deliberately not gated on estErr.
 	// A refusal and an upstream error both cost tokens, so a meter that counted
 	// only successes would let a caller loop on input the model keeps declining
-	// and pay for every attempt. A failure to record is logged by the caller's
-	// middleware and never fails the request — the athlete should not lose a
-	// draft they have already paid for because the meter write lost a race.
-	_ = h.usage.Record(r.Context(), EstimateRecord{
+	// and pay for every attempt.
+	//
+	// **`WithoutCancel`, not the request context.** The tokens are already
+	// spent by this line, so a caller who disconnects mid-call would otherwise
+	// escape the meter entirely — and a cancel-loop is exactly the
+	// spend-somebody-else's-money shape the quota exists to bound. Found by
+	// review.
+	//
+	// A failure to record is LOGGED and never fails the request: the athlete
+	// should not lose a draft they have already paid for because the meter
+	// write lost a race. The previous version discarded the error with `_ =`
+	// while claiming middleware would log it, which was simply false — a meter
+	// that silently stops metering is worse than one that errors.
+	if err := h.usage.Record(context.WithoutCancel(r.Context()), EstimateRecord{
 		UserID: userID, Source: src, Succeeded: estErr == nil,
 		Model: est.Model, ItemCount: len(est.Items),
-	})
+	}); err != nil {
+		httplog.FromContext(r.Context()).Error("nutrition: estimate not metered",
+			"user_id", userID, "source", src, "err", err)
+	}
 
 	if estErr != nil {
 		writeEstimateError(w, estErr)
@@ -116,7 +131,20 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	// with the server the moment they are.
 	after, err := h.usage.Quota(r.Context(), userID, src, now)
 	if err != nil {
+		// The pre-call figure would overstate `remaining` by one, since it does
+		// not count the call just made, so it is adjusted by hand.
+		//
+		// NOT `NewQuota(src, quota.Used+1, quota.ResetsAt)` — that takes the
+		// OLDEST call and adds the window itself, so passing an already-derived
+		// `ResetsAt` would push the reset a further 24 hours out. I wrote that
+		// first; the field names are close enough to swap without noticing.
 		after = quota
+		after.Used++
+		if after.Remaining > 0 {
+			after.Remaining--
+		}
+		httplog.FromContext(r.Context()).Warn("nutrition: quota re-read failed",
+			"user_id", userID, "source", src, "err", err)
 	}
 
 	apihttp.WriteJSON(w, http.StatusOK, estimateResponse{Estimate: est, Quota: after})

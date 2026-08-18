@@ -27,11 +27,18 @@ type fakeEstimator struct {
 	err    error
 	calls  int
 	lastIn EstimateInput
+	// onCall fires inside the estimate, so a test can cancel the request while
+	// the "model call" is in flight — which is when the spend has happened and
+	// the meter has not yet run.
+	onCall func()
 }
 
 func (f *fakeEstimator) Estimate(_ context.Context, in EstimateInput) (Estimate, error) {
 	f.calls++
 	f.lastIn = in
+	if f.onCall != nil {
+		f.onCall()
+	}
 	return f.out, f.err
 }
 
@@ -40,6 +47,10 @@ type memUsage struct {
 	rows    []EstimateRecord
 	quotaFn func(src EstimateSource) Quota
 	recErr  error
+	// lastCtxErr is the state of the context the meter was handed. A real
+	// Postgres write would fail on a cancelled one, so recording it here is
+	// how the test sees the bug without a database.
+	lastCtxErr error
 }
 
 func (m *memUsage) Quota(_ context.Context, _ string, src EstimateSource, _ time.Time) (Quota, error) {
@@ -55,7 +66,8 @@ func (m *memUsage) Quota(_ context.Context, _ string, src EstimateSource, _ time
 	return NewQuota(src, used, nil), nil
 }
 
-func (m *memUsage) Record(_ context.Context, rec EstimateRecord) error {
+func (m *memUsage) Record(ctx context.Context, rec EstimateRecord) error {
+	m.lastCtxErr = ctx.Err()
 	m.rows = append(m.rows, rec)
 	return m.recErr
 }
@@ -187,12 +199,46 @@ func TestUpstreamErrorTextNeverReachesTheClient(t *testing.T) {
 }
 
 func TestAnUnconfiguredDeployFailsOnlyThisRoute(t *testing.T) {
-	// A nil estimator is "no API key on this deploy". 503 rather than a crash
-	// at startup, so every other nutrition route keeps working.
-	h := NewEstimateHandler(nil, &memUsage{})
+	// CONSTRUCTED THE WAY main.go DOES IT, not with an untyped nil literal.
+	//
+	// The first version passed `nil` directly, which is a different thing
+	// entirely: a nil `*AnthropicEstimator` assigned into an `Estimator`
+	// produces a NON-nil interface, so `h.estimator == nil` read false, the 503
+	// branch was skipped, and a real request panicked on a nil receiver. The
+	// test passed throughout. Review found it; this shape is what would have
+	// caught it, and the constructor now returns the interface so the nil is
+	// genuine.
+	h := NewEstimateHandler(NewAnthropicEstimator(""), &memUsage{})
 	w := call(t, h, `{"description":"two eggs"}`)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status %d, want 503", w.Code)
+	}
+}
+
+func TestSpendIsMeteredEvenWhenTheCallerDisconnects(t *testing.T) {
+	// The tokens are already gone by the time the meter runs, so a caller who
+	// cancels mid-call must not escape it — a cancel-loop is exactly the
+	// spend-somebody-else's-money shape the quota exists to bound.
+	est := &fakeEstimator{out: goodEstimate()}
+	usage := &memUsage{}
+	h := NewEstimateHandler(est, usage)
+
+	ctx, cancel := context.WithCancel(
+		auth.ContextWithClaims(context.Background(), &auth.Claims{UserID: "eater"}))
+	r := httptest.NewRequest(http.MethodPost, "/v1/nutrition/estimate",
+		strings.NewReader(`{"description":"two eggs"}`)).WithContext(ctx)
+	r.Header.Set("Content-Type", "application/json")
+	// Cancelled while the model call is in flight — the request context is
+	// already done by the time the handler reaches the meter write.
+	est.onCall = cancel
+
+	h.Estimate(httptest.NewRecorder(), r)
+
+	if len(usage.rows) != 1 {
+		t.Fatalf("%d rows recorded, want 1 — a cancelled request escaped the meter", len(usage.rows))
+	}
+	if usage.lastCtxErr != nil {
+		t.Fatalf("the meter was handed a cancelled context: %v", usage.lastCtxErr)
 	}
 }
 

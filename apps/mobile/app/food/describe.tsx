@@ -73,12 +73,12 @@ export default function DescribeMealScreen() {
   // Drafted rows the athlete can edit before logging. Held separately from the
   // estimate so the original stays readable — the assumption beside a number
   // makes no sense once the number has been changed.
-  const [rows, setRows] = useState<EstimatedItem[]>([]);
+  const [rows, setRows] = useState<DraftRow[]>([]);
   const [saving, setSaving] = useState(false);
 
   const receive = useCallback((res: { estimate: MealEstimate; quota: EstimateQuota }) => {
     setEstimate(res.estimate);
-    setRows(res.estimate.items);
+    setRows(res.estimate.items.map(toDraft));
     setQuota(res.quota);
   }, []);
 
@@ -143,31 +143,46 @@ export default function DescribeMealScreen() {
     [busy, description, getToken, meal, receive],
   );
 
-  /** Log every row, then leave. Each becomes an ordinary entry. */
+  /**
+   * Log every row, then leave.
+   *
+   * **Each row is dropped as it lands**, so a failure part-way through leaves
+   * exactly the un-logged remainder on screen and a second tap logs only
+   * those. Without that, a retry would re-log everything that already
+   * succeeded — `logFood` mints a fresh id per call, so the outbox's
+   * idempotency key does not protect a client-side replay. Raised in review.
+   */
   const logAll = useCallback(async () => {
     if (!userId || rows.length === 0 || saving) return;
     setSaving(true);
+    setError(null);
     try {
-      for (const row of rows) {
+      // A copy, because `rows` is trimmed inside the loop.
+      for (const row of [...rows]) {
         await logFood(userId, {
           eaten_on: date,
           meal,
-          ...itemToEntry(row),
+          ...itemToEntry(fromDraft(row)),
           // No source_food_id: a draft came from a guess, not from a saved
           // food, so there is no provenance to record. And nothing marks the
           // row as model-drafted — what was eaten is what the athlete
           // confirmed, whoever typed it first.
           source_food_id: null,
         });
+        setRows((rs) => rs.filter((r) => r !== row));
       }
       requestSync('meal estimated');
       router.back();
+    } catch (err) {
+      // Silent failure here would leave the athlete unable to tell what was
+      // logged and what was not.
+      setError(`${messageFor(err)} The items still listed were not logged.`);
     } finally {
       setSaving(false);
     }
   }, [userId, rows, saving, date, meal, router]);
 
-  const updateRow = (i: number, patch: Partial<EstimatedItem>) =>
+  const updateRow = (i: number, patch: Partial<DraftRow>) =>
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   return (
@@ -213,6 +228,10 @@ export default function DescribeMealScreen() {
         style={[styles.primary, { backgroundColor: accent.accent }, busy && styles.off]}
         accessibilityRole="button"
         accessibilityLabel="Work it out"
+        // Dimming is a sighted-only signal. Without the state, a screen reader
+        // announces an ordinary button that then does nothing.
+        disabled={busy || !description.trim()}
+        accessibilityState={{ disabled: busy || !description.trim() }}
         testID="describe-submit"
       >
         <Text style={[styles.primaryText, { color: accent.on }]}>
@@ -234,6 +253,8 @@ export default function DescribeMealScreen() {
           style={[styles.secondary, busy && styles.off]}
           accessibilityRole="button"
           accessibilityLabel="Take a photo of this meal"
+          disabled={busy}
+          accessibilityState={{ disabled: busy }}
           testID="describe-camera"
         >
           <Text style={styles.secondaryText}>Take a photo</Text>
@@ -243,6 +264,8 @@ export default function DescribeMealScreen() {
           style={[styles.secondary, busy && styles.off]}
           accessibilityRole="button"
           accessibilityLabel="Choose a photo from your library"
+          disabled={busy}
+          accessibilityState={{ disabled: busy }}
           testID="describe-library"
         >
           <Text style={styles.secondaryText}>Choose one</Text>
@@ -253,6 +276,16 @@ export default function DescribeMealScreen() {
       {error ? (
         <Text style={styles.error} testID="describe-error">
           {error}
+        </Text>
+      ) : null}
+
+      {/* An estimate that came back EMPTY still cost a quota unit, so it has to
+          say something. Rendering nothing would look like a screen that
+          ignored the tap. The note is where the model says what it could not
+          see, which is the useful half. */}
+      {estimate && rows.length === 0 ? (
+        <Text style={styles.note} testID="describe-empty">
+          {estimate.note || 'Nothing recognisable came back. Try describing it instead.'}
         </Text>
       ) : null}
 
@@ -282,20 +315,20 @@ export default function DescribeMealScreen() {
               <View style={styles.fields}>
                 <Field
                   label="Servings"
-                  value={String(row.servings)}
-                  onChange={(v) => updateRow(i, { servings: toNumber(v, row.servings) })}
+                  value={row.servingsText}
+                  onChange={(v) => updateRow(i, { servingsText: v })}
                   testID={`describe-servings-${i}`}
                 />
                 <Field
                   label="Calories"
-                  value={String(Math.round(row.kcal))}
-                  onChange={(v) => updateRow(i, { kcal: toNumber(v, row.kcal) })}
+                  value={row.kcalText}
+                  onChange={(v) => updateRow(i, { kcalText: v })}
                   testID={`describe-kcal-${i}`}
                 />
                 <Field
                   label="Protein (g)"
-                  value={String(Math.round(row.protein_g))}
-                  onChange={(v) => updateRow(i, { protein_g: toNumber(v, row.protein_g) })}
+                  value={row.proteinText}
+                  onChange={(v) => updateRow(i, { proteinText: v })}
                   testID={`describe-protein-${i}`}
                 />
               </View>
@@ -316,6 +349,8 @@ export default function DescribeMealScreen() {
             style={[styles.primary, { backgroundColor: accent.accent }, saving && styles.off]}
             accessibilityRole="button"
             accessibilityLabel={`Log ${rows.length} items`}
+            disabled={saving}
+            accessibilityState={{ disabled: saving }}
             testID="describe-log"
           >
             <Text style={[styles.primaryText, { color: accent.on }]}>
@@ -362,9 +397,53 @@ function Field({
   );
 }
 
-/** Keeps the previous value rather than collapsing a half-typed field to zero. */
-function toNumber(raw: string, fallback: number): number {
-  const n = Number(raw.trim().replace(',', '.'));
+/**
+ * A drafted row, whose editable numbers are held as TEXT.
+ *
+ * **This is the trap the check-in form and the session logger both record, and
+ * this screen fell into it anyway.** Round-tripping through `Number` on every
+ * keystroke deletes the decimal point out from under the cursor: `"1."` parses
+ * to `1`, redisplays as `"1"`, and the next keystroke makes `15` — so an
+ * athlete correcting a portion to 1.5 servings silently logs ten times what
+ * they meant. Worst in exactly the field a low-confidence warning tells them
+ * to fix. Clearing a field the same way collapsed it to `0`, since `Number('')`
+ * is `0` and passes a `>= 0` guard. Found by review.
+ */
+type DraftRow = EstimatedItem & {
+  servingsText: string;
+  kcalText: string;
+  proteinText: string;
+};
+
+function toDraft(it: EstimatedItem): DraftRow {
+  return {
+    ...it,
+    servingsText: String(it.servings),
+    kcalText: String(Math.round(it.kcal)),
+    proteinText: String(Math.round(it.protein_g)),
+  };
+}
+
+/**
+ * Parse the text back, ONCE, at log time.
+ *
+ * An unparseable or empty field keeps the model's own number rather than
+ * becoming zero — a blank calorie box means "I did not change this", not "this
+ * meal had no calories".
+ */
+function fromDraft(row: DraftRow): EstimatedItem {
+  return {
+    ...row,
+    servings: parseOr(row.servingsText, row.servings),
+    kcal: parseOr(row.kcalText, row.kcal),
+    protein_g: parseOr(row.proteinText, row.protein_g),
+  };
+}
+
+function parseOr(raw: string, fallback: number): number {
+  const trimmed = raw.trim().replace(',', '.');
+  if (trimmed === '') return fallback;
+  const n = Number(trimmed);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 

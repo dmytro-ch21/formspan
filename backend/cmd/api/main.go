@@ -243,6 +243,9 @@ func main() {
 	// ANTHROPIC_API_KEY runs every other nutrition route normally rather than
 	// refusing to start — this is the only feature in the API that needs it.
 	estimateHandler := nutrition.NewEstimateHandler(
+		// Nil-safe: the constructor returns the Estimator interface precisely so
+		// an absent key is a true nil here rather than a non-nil interface
+		// wrapping a nil pointer. See its doc comment.
 		nutrition.NewAnthropicEstimator(os.Getenv("ANTHROPIC_API_KEY")),
 		nutrition.NewPostgresEstimateUsage(pool),
 	)

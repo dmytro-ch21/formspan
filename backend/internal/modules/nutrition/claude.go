@@ -67,7 +67,18 @@ type AnthropicEstimator struct {
 // "not configured" — so a deploy without the key serves every other nutrition
 // route normally and fails only this one, rather than refusing to start. The
 // API key is the one piece of config this module needs that nothing else does.
-func NewAnthropicEstimator(apiKey string) *AnthropicEstimator {
+//
+// **It returns the INTERFACE rather than `*AnthropicEstimator`, and that is
+// the whole point of the signature.** Go's usual advice is to return the
+// concrete type, but a nil `*AnthropicEstimator` assigned into an `Estimator`
+// produces a NON-nil interface holding a nil pointer — so the handler's
+// `estimator == nil` check reads false, the 503 branch is skipped, and the
+// first real request on an unconfigured deploy panics on a nil receiver.
+// Returning the interface makes the nil a true nil at the source, so no call
+// site has to remember. Review found this as a live panic; the test that was
+// supposed to cover it passed an untyped `nil` literal, which is a different
+// thing entirely.
+func NewAnthropicEstimator(apiKey string) Estimator {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil
 	}
