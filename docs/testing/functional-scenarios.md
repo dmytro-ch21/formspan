@@ -7244,6 +7244,64 @@ this section.
   stack buffers to compute an ETag, so an unbounded window is a memory cost that
   scales with how long somebody has trained.
 
+### Describe it or photograph it (`POST /v1/nutrition/estimate`, mobile `/food/describe`)
+
+**Happy path**
+
+- **A described meal comes back as editable rows**, one per component, each
+  carrying a portion confidence and an assumption. Confirming logs them as
+  ordinary entries and the day's remaining figure moves.
+- **A photographed meal does the same**, and a photo sent *with* a description
+  uses both — the strongest input there is, since it pairs what the camera sees
+  with what it cannot.
+- **The quick-add search text is carried into the describe screen**, so nothing
+  typed there has to be typed twice.
+
+**The rules that must not break**
+
+- **Nothing is logged until the athlete confirms.** No `nutrition_entries` row
+  exists after an estimate, however many items came back. This is the whole
+  design, not a detail.
+- **A logged entry carries no confidence and no assumption**, and nothing marks
+  it as model-drafted. Those describe how a number was reached; an entry records
+  what was eaten.
+- **`portion_confidence` is about quantity, not identification.** A scenario
+  asserting it drops when the food is obvious has misread the field — a
+  confidently named food at an unclear portion is the common photo case and must
+  read `low`.
+- **The quota is checked BEFORE the model is called.** At the cap, the response
+  is 429 and the upstream is never reached. A test that only checks the status
+  passes against a handler that spent the money first.
+- **The two paths have separate caps.** Exhausting photos must leave the text
+  path working, and vice versa — the scenario needs both halves.
+- **Failed and refused calls count toward the quota.** They cost tokens.
+- **The window rolls.** A call ages out 24 hours later and one more becomes
+  available; `resets_at` names when.
+
+**Edge cases and errors**
+
+- **A refusal is 422, an outage is 502**, and they say different things: send a
+  better photo versus try again later. Collapsing them tells the athlete the
+  wrong thing.
+- **No upstream error text ever reaches the client** — it can carry request ids
+  and prompt fragments.
+- **A deploy with no `ANTHROPIC_API_KEY` serves 503 on this route only.** Every
+  other nutrition route must keep working; a scenario that only checks this
+  endpoint would miss the regression that matters.
+- **An empty request never reaches the model**, nor does an over-long
+  description or an oversize image — all refused before a token is spent.
+- **A non-image sent as an image is refused on its sniffed type**, not on the
+  declared one.
+- **A meter write that fails does not cost the athlete their draft.** They have
+  already paid for it.
+
+**Privacy**
+
+- **The photo disclosure appears before the camera opens**, not afterwards and
+  not only in a privacy page.
+- **No photo is persisted** — not by VOLA and not in the usage table, which
+  records only the model, the item count and whether it worked.
+
 ### Mobile: the Food tab, the day screen and the outbox (N25)
 
 **Happy path**

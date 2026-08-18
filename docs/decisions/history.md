@@ -18249,7 +18249,6 @@ module load with the same symptom and the opposite cause.
   needs `expo-system-ui`, which is not installed. Pre-existing, surfaced here.
 
 
-
 ## 2026-08-09 — Two numbers for the share card, and what each refuses to claim
 
 `internal/platform/energy` and `internal/platform/score`, plus the eight
@@ -27157,6 +27156,87 @@ therefore stops the two naming different things, so
   `recordRevision` marshals the whole scanned `Exercise`, so an old revision
   carries the grip table as it was. Harmless — `Restore`'s SET clause does not
   include it — but the value in a stored revision is decorative, not a record.
+
+## 2026-08-18 — Describe it or photograph it (N26)
+
+`POST /v1/nutrition/estimate` turns "two eggs, sourdough and butter" — or a
+photo — into an editable draft. It is the reason the food-database work stayed
+unscheduled: if describing a meal in a sentence works, USDA search and barcode
+scanning lose most of their value, and that is a question only real usage can
+answer.
+
+**It returns a draft and writes nothing.** The handler has no repository at
+all, so it could not log an entry if it tried — the structural version of the
+rule rather than a promise in a comment. Confirming goes through the ordinary
+outbox and produces an entry with no marker saying a model was involved. What
+was eaten is what the athlete confirmed, whoever typed it first.
+
+**`portion_confidence` is about the QUANTITY, never the identification**, and
+the split is the whole design. Naming a food from a photo is reliable; judging
+how much of it is on the plate is not. A misnamed food is obvious the moment
+you read it; a portion wrong by a factor of two is invisible and moves the
+day's remaining figure by hundreds of calories. The paired `assumption` field
+("assumed a medium egg") is what makes a wrong number *correctable* rather than
+merely wrong — the athlete reads it and knows which field to fix. Both are shown
+beside the numbers, not behind a disclosure.
+
+**Two quotas, not one.** A photo costs roughly fifty times a description, so one
+shared counter would let five photos stop an athlete typing a sixth meal —
+punishing them for using the feature as intended. 20 text and 5 photo per
+rolling day, counted as rows in a window rather than a stored counter (a counter
+needs a reset, and a reset needs a scheduler this repo does not have). Failed
+and refused calls count, because they cost tokens: a meter counting only
+successes would let a caller loop on input the model keeps declining and pay
+each time. **The gate runs before the model call** — checking after would meter
+spend that has already happened, which is a receipt, not a quota.
+
+The caps are deliberately generous. A cap hit during ordinary use teaches
+athletes not to rely on the feature, which is the opposite of what this release
+is trying to find out.
+
+**Photos are forwarded and discarded**, and the disclosure sits on the screen
+before the camera opens rather than in a privacy page. Images are downscaled to
+1080px on the phone first — a cost decision as much as a bandwidth one, since
+image tokens scale with resolution.
+
+**Every SDK binding came from the module source, not from recall**, and the
+marshalled request was probed to confirm it: `model`, adaptive thinking, effort
+medium, `format.type: json_schema`, image-before-text. Three documented traps
+were handled explicitly, each of which produces a plausible wrong result rather
+than an error: `stop_reason` is checked *before* reading content (a refusal is a
+200 with an empty array); `max_tokens` caps thinking and response together, so a
+value sized to the JSON alone truncates; and thinking blocks come first, so
+`Content[0]` is the wrong block on an ordinary response.
+
+### Two bugs found in my own code by my own tests
+
+**`+Inf` passed the NaN-safe guard.** `!(v >= 0)` is the correct form for
+catching NaN and was written deliberately for that — but `+Inf >= 0` is *true*,
+so infinity sailed through. Postgres numeric accepts `'Infinity'` as readily as
+`'NaN'`, so it would have reached the column and poisoned every sum it joined.
+`math.IsInf` is now a separate check, with magnitude bounds set far above any
+real meal so they can never fire on somebody's dinner.
+
+**The error-leak test used `errors.New` with matching text rather than `%w`**, so
+`errors.Is` was false, the handler took the default branch, and the test never
+reached the code it was written to cover. It passed with the leak deliberately
+reintroduced; only mutation testing found it. Sixteen guards are mutation-tested
+across the schema, the quota query, the handler and the wire layer.
+
+### Open questions this leaves
+
+- **Nothing has been run against the real API.** No key is configured here, so
+  every path is exercised against a fake estimator. The first real call is
+  unproven — including whether the prompt actually produces useful portion
+  confidence, which is the feature's entire premise.
+- **Nothing has been seen on a phone**, same as N25.
+- **The caps are guesses.** 20 and 5 were chosen from cost arithmetic, not from
+  usage. The point of shipping is to find out whether they are anywhere near
+  right.
+- **`ANTHROPIC_API_KEY` is not set on Railway staging**, so the route serves 503
+  there until it is. That is the intended degradation rather than a failure, but
+  it does mean the feature is off until somebody sets it.
+
 
 ## Open items / known gaps as of this entry
 
