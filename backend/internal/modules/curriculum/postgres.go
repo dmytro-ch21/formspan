@@ -188,6 +188,24 @@ func (r *PostgresRepository) Working(ctx context.Context, userID, tz string) ([]
 				}
 			}
 		}
+		// **Nothing completable is nothing being worked.** Enrolment on a
+		// criteria-free list is a bookmark — an athlete's own reading list has
+		// always been one, and the reference syllabuses are 73 items of it —
+		// and a bookmark has no next step and no progress.
+		//
+		// Filtered HERE rather than in each client because every consumer of
+		// this endpoint renders progress from it, and one that forgot would
+		// draw a false claim rather than a blank: `RoadmapLine` reads a null
+		// next step as "Every technique on this one is done", so a bookmarked
+		// syllabus announced "0 of 0 mastered. All 0 mastered." on the Today
+		// screen. Review found it; it was reachable before the syllabuses
+		// existed, through any criteria-free list, and they made it inviting.
+		//
+		// It also removes the cost: the items and their per-item evidence are
+		// computed above for a row nobody can use.
+		if p.c.CountableItems == 0 {
+			continue
+		}
 		out = append(out, p.c)
 	}
 	return out, nil
@@ -333,7 +351,26 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 			  -- 22ms against 24k tags, 1.4ms with this line, because it lets
 			  -- bjj_session_tags_user_technique_idx do the work.
 			  AND t.technique_id IN (
-			      SELECT ci.technique_id FROM curriculum_items ci WHERE ci.curriculum_id = $2
+			      SELECT ci.technique_id FROM curriculum_items ci
+			      WHERE ci.curriculum_id = $2
+			        -- ...and only the items that can USE evidence. Nothing but
+			        -- a criterion reads these numbers (see Criteria, built in
+			        -- scanItem only when one of these columns is non-NULL), so
+			        -- everything gathered for the rest is computed and thrown
+			        -- away.
+			        --
+			        -- On a reference syllabus that is the WHOLE aggregate: 73
+			        -- techniques, no criteria, and for an un-enrolled reader the
+			        -- since-date is NULL so the window filter is disabled too --
+			        -- the athlete's entire tag history, scanned to produce
+			        -- nothing. Review found it. It narrows ordinary roadmaps as
+			        -- well, since their concept rows and un-criteria'd
+			        -- techniques were in the list for the same bad reason.
+			        AND (ci.target_scored IS NOT NULL
+			             OR ci.target_defended IS NOT NULL
+			             OR ci.target_sessions IS NOT NULL
+			             OR ci.min_hit_rate IS NOT NULL
+			             OR ci.target_drilled_sessions IS NOT NULL)
 			  )
 			  -- The session's own start, not the tag's created_at: a class
 			  -- logged late still happened when it happened.

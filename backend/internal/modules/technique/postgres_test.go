@@ -45,7 +45,7 @@ func newTestRepo(t *testing.T) *PostgresRepository {
 // **The order matters here in the opposite way to `exercise`, and that is the
 // trap.** Over there the delete ABORTED on a NO ACTION foreign key, which is
 // loud. Every foreign key into `techniques` is CASCADE or SET NULL, so a bare
-// `DELETE FROM techniques` succeeds — and takes the 136 `curriculum_items` of
+// `DELETE FROM techniques` succeeds — and takes the 399 `curriculum_items` of
 // the five seeded syllabuses with it, leaving five named curricula containing
 // nothing. Silent, and it guts the very content the curriculum seed tests are
 // about. So the seeded curricula are removed first and deliberately, and their

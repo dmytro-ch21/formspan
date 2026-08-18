@@ -269,13 +269,26 @@ function trackSections(
   const titles: Record<string, string> = {
     belt: "Belt roadmaps",
     foundations: "Foundations",
+    syllabus: "Reference syllabuses",
   };
   // `!track`, not `=== null`: the column is unconstrained TEXT, so an empty
   // string is reachable via a raw API write, and it must not render an empty
   // heading sorted among the named sections.
   const keyOf = (c: Curriculum) => (c.track ? c.track : null);
+  // Explicit rather than alphabetical, and syllabuses sit LAST of the named
+  // tracks on purpose: they are the longest lists and the only ones that
+  // finish nothing, so a browser scanning for something to work should meet
+  // the roadmaps first.
   const order = (t: string | null) =>
-    t === "belt" ? 0 : t === "foundations" ? 1 : t !== null ? 2 : 3;
+    t === "belt"
+      ? 0
+      : t === "foundations"
+        ? 1
+        : t === "syllabus"
+          ? 2
+          : t !== null
+            ? 3
+            : 4;
   // Grouped on the track VALUE, not the display title — two tracks that
   // happen to render the same title must not merge into one section under
   // whichever arrived first's sort order.
@@ -415,7 +428,13 @@ function CurriculumCard({
               : "bg-neutral-900 text-white hover:bg-neutral-700 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
           }`}
         >
-          {busy ? "…" : c.enrolled ? "Put down" : "Start working this"}
+          {busy
+            ? "…"
+            : c.enrolled
+              ? "Put down"
+              : c.countable_items > 0
+                ? "Start working this"
+                : "Keep this handy"}
         </button>
         {c.enrolled && c.started_on && (
           <span className="text-xs text-neutral-500">

@@ -1266,3 +1266,69 @@ func TestTheTrackCanBeClearedAndNotOnlySet(t *testing.T) {
 		t.Fatalf("track survived an explicit clear: %v", *upd.Track)
 	}
 }
+
+// A bookmark is not something you are working.
+//
+// Enrolment on a criteria-free list is a bookmark — an athlete's own reading
+// list has always been one, and the reference syllabuses are 73 items of it.
+// Every consumer of Working renders progress from it, and one that forgot to
+// guard would draw a FALSE CLAIM rather than a blank: the phone's RoadmapLine
+// reads a null next step as "Every technique on this one is done", so a
+// bookmarked syllabus announced "0 of 0 mastered. All 0 mastered." on Today.
+// Review found it, and it was reachable before the syllabuses existed.
+func TestWorkingExcludesCurriculaWithNothingCompletable(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "bookm1")
+	tech := seedTechnique(t, pool, "test-bookmark")
+
+	roadmap, err := repo.Create(ctx, "bookm1", "", NewCurriculum{
+		Name:  "A real roadmap",
+		Items: []NewItem{{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(2)}}},
+	})
+	if err != nil {
+		t.Fatalf("create roadmap: %v", err)
+	}
+	// Same shape, one difference: no criteria on anything.
+	reading, err := repo.Create(ctx, "bookm1", "", NewCurriculum{
+		Name:  "A reading list",
+		Items: []NewItem{{TechniqueID: tech}, {Kind: "concept", Title: "An idea"}},
+	})
+	if err != nil {
+		t.Fatalf("create reading list: %v", err)
+	}
+	for _, id := range []string{roadmap.ID, reading.ID} {
+		if err := repo.Enroll(ctx, "bookm1", id, ""); err != nil {
+			t.Fatalf("enroll: %v", err)
+		}
+	}
+
+	got, err := repo.Working(ctx, "bookm1", "")
+	if err != nil {
+		t.Fatalf("working: %v", err)
+	}
+	if len(got) != 1 {
+		names := make([]string, 0, len(got))
+		for _, c := range got {
+			names = append(names, c.Name)
+		}
+		t.Fatalf("working returned %d curricula (%v); the reading list is enrolled but not workable", len(got), names)
+	}
+	if got[0].ID != roadmap.ID {
+		t.Fatalf("working returned %q; want the roadmap", got[0].Name)
+	}
+	// And the enrolment itself is untouched — the reading list is still taken
+	// on, it simply has no progress to report. Reading it back through Get is
+	// what proves the filter is a display rule and not a deletion.
+	back, err := repo.Get(ctx, "bookm1", reading.ID, "")
+	if err != nil {
+		t.Fatalf("get reading list: %v", err)
+	}
+	if !back.Enrolled {
+		t.Error("the reading list lost its enrollment; the filter should hide it from Working, not un-enroll it")
+	}
+	if back.CountableItems != 0 {
+		t.Errorf("reading list reports %d countable items; the fixture is wrong and this test proved nothing", back.CountableItems)
+	}
+}

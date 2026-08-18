@@ -12,11 +12,21 @@ made the first version read as a wall of items.
 | | **Reference syllabus** | **Roadmap** |
 |---|---|---|
 | Answers | "What should a blue belt know?" | "What should I work on now?" |
-| Coverage | Complete — every technique the belt owns | Curated — the subset worth chasing |
+| Coverage | Broad — the belt's whole shape, section by section | Curated — the subset worth chasing |
 | Criteria | None. Nothing is completable | Most items carry criteria |
-| Length | ~60–70 items | ~25–35 items |
+| Length | ~40–85 items | ~25–35 items |
 | Order | Match order: the sequence a round happens in | Map first, then triage: the map, then what hurts most |
 | Track | `syllabus` | `belt` |
+
+**Broad, not exhaustive, and that was a decision.** `typical_belt` covers 100%
+of the technique catalog, so a genuinely complete per-belt list is derivable —
+and it would be the Library's own belt filter reorganised, which the Library
+already offers with search and position chips on top. White belt would be 158
+items. What a syllabus adds over a filter is sections in the order a round
+happens, an objective for each, and a subset short enough to read; that is
+curation, so the lists are curated. The cost is real and worth stating: an
+exhaustive list can answer "is X a blue belt technique?" negatively, and a
+curated one cannot.
 
 **They share section names.** The reference is the atlas; the roadmap is a route
 through it. An athlete moving between the two must never meet a section name they

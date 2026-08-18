@@ -201,3 +201,113 @@ func TestEverySeededTechniqueExistsInTheLibrary(t *testing.T) {
 		}
 	}
 }
+
+// carriesCriteria is the five-field check, in ONE place. It was written out
+// three times across this file before review pointed out that a sixth criterion
+// field on SeedItem would have to be remembered in all of them.
+func carriesCriteria(it SeedItem) bool {
+	return it.TargetScored != nil || it.TargetDefended != nil ||
+		it.TargetSessions != nil || it.MinHitRate != nil ||
+		it.TargetDrilledSessions != nil
+}
+
+// The track vocabulary is CLOSED, and this is the assertion that makes the two
+// guards below mean what they say.
+//
+// Both of them filter on an exact track string. Without this, a curriculum on a
+// typo'd track — "sylabus" — escapes both entirely, and so does any track added
+// later. Review found the hole by noticing that `novice-fundamentals` was
+// already outside them: it is a roadmap with ten countable items on the
+// `foundations` track, and stripping every criterion from it left the whole
+// suite green.
+func TestTheSeededTrackVocabularyIsClosed(t *testing.T) {
+	data, err := SeedData()
+	if err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+	known := map[string]bool{"belt": true, "foundations": true, "syllabus": true}
+	seen := map[string]bool{}
+	for _, c := range data {
+		if c.Track == "" {
+			t.Errorf("%s has no track; every VOLA-authored curriculum belongs to a browse section", c.ID)
+			continue
+		}
+		if !known[c.Track] {
+			t.Errorf("%s is on unknown track %q — add it to this list and to the guards below, "+
+				"or it is silently exempt from both", c.ID, c.Track)
+		}
+		seen[c.Track] = true
+	}
+	for tr := range known {
+		if !seen[tr] {
+			t.Errorf("no seeded curriculum is on track %q, so the guards keyed on it check nothing", tr)
+		}
+	}
+}
+
+// The syllabus track's defining property, asserted rather than assumed.
+//
+// A reference is consulted and a roadmap is worked, and the ONLY thing in the
+// data separating them is whether items carry criteria: `countable_items` is
+// what both clients switch on to decide whether to draw progress at all. A
+// criterion authored onto a syllabus item would silently turn a reference into
+// a roadmap nobody can finish — 73 milestones on white belt alone — and no
+// existing test would notice, because a legal criterion is legal wherever it
+// appears.
+func TestNothingOnTheSyllabusTrackIsCompletable(t *testing.T) {
+	data, err := SeedData()
+	if err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+
+	syllabuses := 0
+	for _, c := range data {
+		if c.Track != "syllabus" {
+			continue
+		}
+		syllabuses++
+		items := allItems(c)
+		if len(items) == 0 {
+			t.Errorf("%s is on the syllabus track with no items, so this checked nothing", c.ID)
+		}
+		for _, it := range items {
+			if carriesCriteria(it) {
+				t.Errorf("%s: item %q carries criteria; a syllabus is reference, not a roadmap",
+					c.ID, it.TechniqueID+it.Title)
+			}
+		}
+	}
+	if syllabuses == 0 {
+		t.Fatal("no curriculum is on the syllabus track, so this test asserted nothing")
+	}
+}
+
+// The other half of the same distinction, over EVERY non-syllabus track rather
+// than just "belt" — which is the fix for the hole described above. Without
+// this, deleting every criterion in the file would satisfy the test above and
+// quietly turn the whole feature into reading material.
+func TestEveryNonSyllabusCurriculumStillHasMilestones(t *testing.T) {
+	data, err := SeedData()
+	if err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+	checked := 0
+	for _, c := range data {
+		if c.Track == "syllabus" {
+			continue
+		}
+		checked++
+		countable := 0
+		for _, it := range allItems(c) {
+			if carriesCriteria(it) {
+				countable++
+			}
+		}
+		if countable == 0 {
+			t.Errorf("%s is on track %q with nothing completable in it", c.ID, c.Track)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("every seeded curriculum is a syllabus, so this test asserted nothing")
+	}
+}
