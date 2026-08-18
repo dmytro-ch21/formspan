@@ -1,5 +1,5 @@
 import { GRIPS, SET_TYPES } from '../sessions';
-import { gripGuide, setTypeGuide, TIMER_GUIDE } from '../setGuide';
+import { gripGuide, setTypeGuide } from '../setGuide';
 
 /**
  * The info panel's copy — covered because it is *reachable data*, not prose.
@@ -63,14 +63,5 @@ describe('gripGuide', () => {
     // IS sent back correctly, so copy implying data loss would be a lie that
     // sends someone to re-enter a set that was fine.
     expect(gripGuide('sumo').body).toMatch(/Recorded on this set/);
-  });
-});
-
-describe('TIMER_GUIDE', () => {
-  it('says the duration is a target rather than a measurement', () => {
-    // The whole distinction N4 was built around, and the one thing on this
-    // panel an athlete cannot work out from the screen: stopping the clock
-    // early does not rewrite the number they set.
-    expect(TIMER_GUIDE.body).toMatch(/target, not a measurement/);
   });
 });

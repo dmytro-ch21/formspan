@@ -25566,16 +25566,28 @@ on a solid hairline over `surface`, `minHeight: 44`, which matches
 `styles.primary` immediately below them; when the drop is not offered the
 remaining button simply takes the row.
 
-**Twelve chips became two rows that state their answer.** Expanding one set
-dropped six set-type chips and up to six grip chips onto the screen, all
-permanently open, all the same weight. The height cost is real — that is most
-of a phone screen, so the fields you came to edit go under the keyboard — but
-the worse problem is that an always-open list of equal chips does not say what
-is *currently true*. The answer is in there, tinted, among eleven alternatives.
-`components/ui/PillGroup` collapses each to `TYPE  Working`, a statement, and
-opening it is the deliberate act of changing that statement — the same shape
-the set row itself already uses to collapse to `12 × 100lb`. It closes again
-after a pick, because picking a type is a decision that ends.
+**Twelve chips became two selects on one line.** Expanding a set dropped six
+set-type chips and up to six grip chips onto the screen, all permanently open,
+all the same weight. The height cost is real — that is most of a phone screen,
+so the fields you came to edit go under the keyboard — but the worse problem is
+that an always-open list of equal chips does not say what is *currently true*.
+The answer is in there, tinted, among eleven alternatives.
+
+The first attempt collapsed each to a header that expanded **in place**, stacked.
+Shown on a device that was rejected on sight and it deserved to be: stacked, two
+short answers about the same set read as two sections of it, and expanding
+either one pushes everything below — including the other one, the remove control
+and the row's own footer — down under a thumb that is already moving. It also
+still cost two rows of an editor carrying four fields.
+
+What ships is `components/ui/OptionSelect.tsx`: `TYPE` and `GRIP` side by side on
+ONE line, styled as the fields above them because that is what they are — two
+short answers, not two sections — and each opening a **popover over itself**. A
+popover costs no layout, so the editor never reflows; the card is measured with
+`measureInWindow` at press time (a `Modal` renders in its own window and knows
+nothing about the tree it came from), prefers to sit below its control, and
+flips above when there is no room, which on a set editor near the bottom of a
+long session is the common case rather than the exotic one.
 
 **The pills answer for themselves now.** "Back-off", "AMRAP", "Hook" and
 "Angled" are jargon, and an athlete who does not know them had no way to find
@@ -25598,17 +25610,32 @@ pill for VoiceOver, because a long press is not a gesture the screen reader
 forwards. Without the custom action the definitions would be unreachable for
 exactly the people most likely to want one read aloud.
 
-**Timed is a switch that produces its field.** N4's per-set timer target was
-already per-set; it was just a permanently-present `Timer (s)` input on every
-`weight_reps` set, mostly empty, competing with the numbers that matter.
-It is now a `TogglePill` beside the field it reveals, and the two are one
-state in both directions: flipping it on seeds `DEFAULT_TIMER_SECONDS` (60 —
-deliberately *not* `DEFAULT_MODE_SECONDS`, which answers the different question
-of how long a rep-counted exercise runs once it is being *measured* in time),
-and flipping it off clears the number rather than hiding it. That last half is
-the one worth stating: a stored duration is what puts the play button on the
-row and what lets the set join a hands-free run, so a switch reading "off" over
-a live 60 would be describing a row that still behaves as timed.
+**The timer lost its switch and kept its clock.** N4's per-set timer target was
+already per-set; it was a permanently-present `Timer (s)` input on every
+`weight_reps` set, mostly empty, competing with the numbers that matter. The
+first attempt put a `Timed` pill beside it — which was a second control for a
+state the row's clock glyph already had to express, and one you had to expand a
+row to reach at all.
+
+So there is no switch. **The clock beside the tick does the whole job**, and it
+does two things decided by whether the set already carries a duration: dim and
+it arms one, opening the editor onto the field it just revealed; accent and it
+starts the countdown, exactly as it always did. The two never compete because
+they are the two halves of one state — you cannot start a countdown with no
+length, and arming is meaningless once there is one.
+
+Turning it back off is clearing the field, which is the route it has always
+been, and deliberately **not** a second tap on the clock: a mis-tap on the row's
+most-used control must never silently delete a prescription. Arming seeds
+`DEFAULT_TIMER_SECONDS` (60 — deliberately *not* `DEFAULT_MODE_SECONDS`, which
+answers the different question of how long a rep-counted exercise runs once it
+is being *measured* in time).
+
+`TIMER_GUIDE` went with the switch rather than being left as a panel nothing
+points at. The distinction it carried is the one an athlete cannot work out from
+the screen — on a plank seconds are the MEASUREMENT, here they are a TARGET, and
+stopping early does not rewrite the number — and it now lives as the field's own
+`target` hint, four words in the label instead of a paragraph behind a hold.
 
 **What this deliberately did not do.** The request was for "timed at the set
 level", and there are two different time concepts on this screen. The one moved
@@ -25659,30 +25686,26 @@ the content across the close. That last one was first written with a ref read
 during render, which cost five lint warnings against a ratchet set at 54 — the
 state version is both correct and free.
 
-**Seen on a device, which for this branch is the point.** L1 exists because
+**Seen on a device, which for this branch is the point** — twice, and the second
+pass is why the design above is not the design first written. L1 exists because
 nothing on the phone has been looked at on a phone, and a change whose entire
 subject is how a screen reads cannot be signed off from a passing typecheck.
 Verified on a booted iPhone 17 Simulator against a dev client pinned to this
 branch's Metro (worth stating: `expo run:ios` auto-attached to the Metro already
 serving the PRIMARY checkout, i.e. `main`, so the first screenshots would have
 shown the code this branch replaces — confirm which bundle a screenshot came
-from before trusting it):
+from before trusting it).
 
-- `+ Set` renders as one clean full-width solid button on a set carrying no
-  weight, which is the no-drop case behaving as designed.
-- The set editor collapses to `TYPE  Working` and `GRIP  Not recorded`. The
-  twelve-chip wall is gone.
-- Opening `TYPE` wraps six 12pt pills with the selection in accent and the
-  "Hold one for what it means." hint below them.
-- Holding `Back-off` opens the panel with its definition and a Done button, and
-  the long press does **not** also fire the selection.
-- Tapping `Back-off` selects it, closes the group, sets the header to
-  `Back-off`, and puts the `B` badge on the row.
-- Turning `Timed` on fills the pill, reveals `Timer (s)` at 60, changes the row
-  summary to `60s`, arms the row's timer glyph, and makes **Run all** and
-  **Guided workout** appear — the set joining a hands-free run, which is exactly
-  what the panel's copy promises and the strongest evidence the switch writes a
-  real target rather than a decoration.
+Confirmed on the shipped design: `TYPE` and `GRIP` sitting on one line as boxed
+selects matching the fields above them; the popover opening over the control and
+correctly flipping ABOVE it near the foot of the editor, left-clamped, with the
+selection ticked in accent; holding an option swapping the card to its
+definition without stacking a second modal; the clock dim on a fresh set and
+accent on one carrying 60s; tapping the dim clock arming a target, opening the
+editor onto the revealed `Timer (s) target` field, changing the row summary to
+`60s` and making **Run all** appear — the set joining a hands-free run, which is
+the strongest evidence the tap writes a real target rather than a decoration;
+and `+ Set` as one clean full-width solid button.
 
 **Not verified, and honestly:** the `+ Set` / `+ Drop` PAIR (needs a weight on
 the set), the minutes-mode `0` → `0.5` case, and VoiceOver. All three need

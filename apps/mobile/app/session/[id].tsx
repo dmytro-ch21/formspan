@@ -114,8 +114,8 @@ import {
   type SuggestionCode,
   type Volume,
 } from '@/lib/sessions';
-import { PillGroup, TogglePill } from '@/components/ui/Pills';
-import { gripGuide, setTypeGuide, TIMER_GUIDE } from '@/lib/setGuide';
+import { OptionSelect } from '@/components/ui/OptionSelect';
+import { gripGuide, setTypeGuide } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';
 
 /**
@@ -2076,6 +2076,19 @@ function SetRow({
   */
   const [timedOn, setTimedOn] = useState(set.seconds != null);
   const timed = timedOn || set.seconds != null;
+  /*
+    Can this set be GIVEN a countdown it does not have?
+
+    Gated on `offersTimerTarget`, which excludes both a set that already
+    measures seconds (a plank's clock is its measurement, not a target) and a
+    dual-mode exercise — writing `seconds` on a burpee set logged in reps flips
+    it to time mode and hides the rep count, which is what the exercise-level
+    reps/time switch exists to do properly.
+
+    `set.seconds == null` is the other half: once there is a duration this
+    control's job is to START it, and `onStartTimer` takes over.
+  */
+  const canArmTimer = offersTimerTarget(exercise?.load_type) && set.seconds == null;
   // Mode-aware: burpees switched to time show a duration field and no reps one,
   // which is the whole point of the switch. Going through `measuresFor` directly
   // would offer the one number the row is not keeping.
@@ -2127,29 +2140,62 @@ function SetRow({
           {typeShort ? <Text style={styles.setBadge}> {typeShort}</Text> : null}
         </Text>
         <Text style={styles.setSummary}>{describeSet(set, units, duration)}</Text>
-        {editable && onStartTimer && (
+        {editable && (onStartTimer || canArmTimer) && (
           /*
-            Only on sets measured in seconds — a plank, a hold, a carry.
+            One clock, doing the whole job of a set's countdown — and it does
+            two things, decided by whether the set already carries a duration.
 
-            It sits beside the tick rather than inside the expanded editor
-            because starting a timed set is the thing you do BEFORE the set,
-            one-handed, and burying it behind a disclosure would cost the tap
-            the countdown exists to save. `hitSlop` matches the tick for the
-            same reason both are 10: sweaty thumbs, 20 seconds, one hand.
+            **No duration** (`canArmTimer`): dim. Tapping arms one and opens the
+            editor onto the field it just revealed. This replaced a `Timed`
+            switch that sat in the expanded editor beside the number it
+            controlled — a second control for a state this glyph already had to
+            express, and one you had to expand a row to reach.
+
+            **A duration** (`onStartTimer`): accent. Tapping starts the
+            countdown, exactly as it always did.
+
+            The two never compete, because they are the two halves of one
+            state: you cannot start a countdown that has no length, and arming
+            is meaningless once there is one. Turning it back OFF is clearing
+            the field, which is the same route it has always been — deliberately
+            NOT a second tap here, because a mis-tap on the row's most-used
+            control must never silently delete a prescription.
+
+            It sits beside the tick rather than inside the editor because
+            starting a timed set is the thing you do BEFORE the set, one-handed;
+            burying it behind a disclosure would cost the tap the countdown
+            exists to save. `hitSlop` matches the tick for the same reason both
+            are 10: sweaty thumbs, 20 seconds, one hand.
           */
           <Pressable
-            onPress={onStartTimer}
+            onPress={() => {
+              if (onStartTimer) {
+                onStartTimer();
+                return;
+              }
+              setTimedOn(true);
+              onChange(withSetChange(set, { seconds: DEFAULT_TIMER_SECONDS }));
+              // Opened, because the whole point of the tap is to produce the
+              // field. Arming a duration the athlete cannot see or change would
+              // be the control doing half its job.
+              setOpen(true);
+            }}
             hitSlop={10}
             style={styles.play}
             accessibilityRole="button"
-            accessibilityLabel={`Start the timer for set ${ordinal}${
-              set.seconds ? `, ${set.seconds} seconds` : ''
-            }`}
-            testID={`start-timer-${index}`}
+            accessibilityLabel={
+              onStartTimer
+                ? `Start the timer for ${setName}${set.seconds ? `, ${set.seconds} seconds` : ''}`
+                : `Give ${setName} a timer`
+            }
+            accessibilityHint={onStartTimer ? undefined : 'Adds a countdown you can edit'}
+            testID={onStartTimer ? `start-timer-${index}` : `arm-timer-${index}`}
           >
-            {/* The kit's timer glyph rather than a play triangle: this starts
-                a countdown, and a ▶ next to a ✓ reads as "play the set back". */}
-            <Icon name="timer" size={16} color={accent.ink} />
+            {/* The kit's timer glyph rather than a play triangle: this is a
+                countdown, and a ▶ next to a ✓ reads as "play the set back".
+                Dim until the set has a length, so the two states of the one
+                control are distinguishable without reading the row. */}
+            <Icon name="timer" size={16} color={onStartTimer ? accent.ink : vola.textDim} />
           </Pressable>
         )}
         {editable && (
@@ -2264,39 +2310,32 @@ function SetRow({
               burpee set in reps mode, where writing a duration silently flips
               the row to time mode.
 
-              Setting it is what makes the play button appear (`workSecondsFor`)
-              and what lets the set join a hands-free run (`canRun`) — the
-              circuits N4 says fall out of this. Clearing it back to empty takes
-              both away again, which is the intended undo. */}
+              **The relationship with the row's clock inverted.** It used to
+              read "setting this is what makes the play button appear"; the
+              clock is now what puts this field here in the first place, and a
+              duration is what turns that same clock from arm into start. What
+              is unchanged is the other end: a duration is what lets the set
+              join a hands-free run (`canRun`), the circuits N4 exists for, and
+              clearing this back to empty takes both away again — still the
+              intended undo, and now the ONLY route back, since the clock
+              deliberately does not toggle off. */}
           {offersTimerTarget(exercise?.load_type) && (
             <View style={styles.timed}>
-              <TogglePill
-                label="Timed"
-                on={timed}
-                onToggle={(next) => {
-                  setTimedOn(next);
-                  onChange(
-                    withSetChange(set, {
-                      // Turning it OFF clears the number rather than hiding it.
-                      // A stored duration is not decoration: it is what puts the
-                      // play button on the row and what lets the set join a
-                      // hands-free run, so a switch that said "off" over a live
-                      // 60 would be describing a row that still behaves as timed.
-                      seconds: next ? DEFAULT_TIMER_SECONDS : null,
-                    }),
-                  );
-                }}
-                guide={TIMER_GUIDE}
-                accessibilityLabel={`Timed ${setName} of ${exerciseName}`}
-                testID={`set-${index}-timed`}
-              />
-              {/* Beside the switch, not below it: the switch's whole purpose is
-                  to produce this field, and a number that appears a row further
-                  down reads as an unrelated thing that happened to arrive. */}
+              {/* No switch beside it any more — the row's clock is what puts
+                  this here, and a second control for the same state was one
+                  the athlete had to expand a row to reach. */}
               {timed && (
                 <View style={styles.timedField}>
                   <Field
                     label={`Timer (${durationInputUnit(duration)})`}
+                    // The one thing about this field an athlete cannot work out
+                    // from the screen, and the distinction N4 was built around:
+                    // on a plank seconds are the MEASUREMENT, here they are a
+                    // TARGET, and stopping early does not rewrite the number.
+                    // It carried a hold-for-info panel until the switch that
+                    // opened it was removed; four words in the label is a
+                    // better home for it than a panel nothing pointed at.
+                    hint="target"
                     value={set.seconds == null ? null : toDisplayDuration(set.seconds, duration)}
                     onChangeText={(text) => {
                       // Three outcomes, and the third — write nothing — is what
@@ -2393,21 +2432,28 @@ function SetRow({
           </View>
           )}
 
-          <PillGroup
-            label="Type"
-            options={SET_TYPES}
-            selected={set.set_type}
-            // Never null — the group is not `clearable`, so the only value it
-            // can emit is one of its own keys. The cast is the price of a
-            // component that also serves grips, where null is a real answer.
-            onSelect={(key) => onChange({ ...set, set_type: key as SetType })}
-            guideFor={setTypeGuide}
-            describe={(o) => `${o.label} set, for ${setName} of ${exerciseName}`}
-            context={`${setName} of ${exerciseName}`}
-            testID={`set-${index}-type`}
-          />
-
-          {/* How the bar was held.
+          {/*
+            Type and grip on ONE line, because they are two short answers about
+            the same set rather than two sections of it. Stacked, they cost two
+            full rows of an editor that already carries four fields; and each
+            expanding in place pushed everything below it — including the other
+            one — down under the athlete's thumb mid-tap. `OptionSelect` opens
+            over itself instead, so the editor never reflows.
+          */}
+          <View style={styles.selects}>
+            <OptionSelect
+              label="Type"
+              options={SET_TYPES}
+              selected={set.set_type}
+              // Never null — the control is not `clearable`, so the only value
+              // it can emit is one of its own keys. The cast is the price of a
+              // component that also serves grips, where null is a real answer.
+              onSelect={(key) => onChange({ ...set, set_type: key as SetType })}
+              guideFor={setTypeGuide}
+              context={`${setName} of ${exerciseName}`}
+              testID={`set-${index}-type`}
+            />
+            {/* How the bar was held.
               Which values are offered depends on the movement — `gripsFor`
               is the list, and it SUBSTITUTES rather than extends: a hinge does
               not get the four plus two, it gets its own four. Read that
@@ -2427,20 +2473,20 @@ function SetRow({
               Tapping the selected chip clears it, which is that route. Without
               it a mis-tap is permanent — and unrecorded is a real state here,
               not an absence. */}
-          {offeredGrips(exercise?.movement_pattern, set.grip).length > 0 && (
-            <PillGroup
-              label="Grip"
-              options={offeredGrips(exercise?.movement_pattern, set.grip)}
-              selected={set.grip ?? null}
-              clearable
-              emptyLabel="Not recorded"
-              onSelect={(key) => onChange({ ...set, grip: key as Grip | null })}
-              guideFor={gripGuide}
-              describe={(o) => `${o.label} grip for ${setName} of ${exerciseName}`}
-              context={`${setName} of ${exerciseName}`}
-              testID={`set-${index}-grip`}
-            />
-          )}
+            {offeredGrips(exercise?.movement_pattern, set.grip).length > 0 && (
+              <OptionSelect
+                label="Grip"
+                options={offeredGrips(exercise?.movement_pattern, set.grip)}
+                selected={set.grip ?? null}
+                clearable
+                emptyLabel="Not recorded"
+                onSelect={(key) => onChange({ ...set, grip: key as Grip | null })}
+                guideFor={gripGuide}
+                context={`${setName} of ${exerciseName}`}
+                testID={`set-${index}-grip`}
+              />
+            )}
+          </View>
 
           <Pressable
             onPress={onRemove}
@@ -2753,6 +2799,9 @@ const styles = StyleSheet.create({
   // level with the input rather than with the label.
   timed: { flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
   timedField: { flex: 1 },
+  // Two short answers on one line. `alignItems: 'flex-start'` so a control
+  // without a sibling does not stretch to a height it has no content for.
+  selects: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   hintRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

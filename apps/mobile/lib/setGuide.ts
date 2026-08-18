@@ -107,19 +107,3 @@ export function gripGuide(key: string): GuideEntry {
   const body = GRIP_BODY[key as Grip];
   return { title, body: body ?? UNKNOWN };
 }
-
-/**
- * The timer target's own entry.
- *
- * Not in either map because it is not a value you pick from a list — it is a
- * switch with a number behind it — but it is reached the same way, by holding
- * the pill, so it lives beside the others rather than inline in the screen.
- *
- * The distinction the body has to carry is the one N4 was built around and the
- * one nothing on screen says: on a plank, seconds are the MEASURE; here they
- * are a TARGET, and the clock is not allowed to overwrite them.
- */
-export const TIMER_GUIDE: GuideEntry = {
-  title: 'Timed',
-  body: 'Give this set a countdown — for a circuit, a timed carry, or a paced squat set. It adds a start button to the row and lets the set join a hands-free run. It is a target, not a measurement: stopping early leaves the number you set alone, and your reps and weight are still what gets logged.',
-};
