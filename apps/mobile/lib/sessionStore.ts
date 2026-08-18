@@ -821,17 +821,34 @@ async function pushRow(
   // reflection ever went out, and every retry replayed the same doomed
   // request — one over-long name stranding a session's evidence forever.
   // Last means the worst case costs only the name.
+  //
+  // The flag is NOT cleared here. It used to be, in its own statement with no
+  // compare-and-swap at all — no `updated_at`, no `deleted_at` — and that made
+  // a rename landing mid-push a PERMANENT loss rather than a delayed one:
+  //
+  //   1. push starts with name "A", snapshot taken
+  //   2. athlete renames to "B" — sets `dirty = 1`, `name_dirty = 1`, and a new
+  //      `updated_at`
+  //   3. `pushRename` sends "A"; the unguarded clear sets `name_dirty = 0`
+  //   4. the terminal swap below CORRECTLY declines on `updated_at`, so the row
+  //      stays `dirty = 1` and is picked up again
+  //   5. the next pass sends the sets — and never the name, because
+  //      `name_dirty` is 0 now
+  //
+  // Local keeps "B", the server keeps "A", and the pull's newer-than guard
+  // stops the server copy overwriting the local one, so nothing ever
+  // reconciles. Unlike T6 this does not self-heal; it is silent divergence
+  // forever. `workout_cache` never had it — it clears both flags inside its
+  // guarded swap, which is the shape copied below.
   if (wasRemote && row.name_dirty === 1) {
     await pushRename(getToken, s.id, s.name);
-    await db.runAsync(
-      `UPDATE local_sessions SET name_dirty = 0 WHERE id = ? AND user_id = ?`,
-      s.id,
-      userID,
-    );
   }
 
   await db.runAsync(
-    `UPDATE local_sessions SET dirty = 0 WHERE id = ? AND user_id = ?
+    // BOTH flags, in the one guarded statement. Declining has to leave the row
+    // owing everything it owed, and clearing `name_dirty` anywhere else is what
+    // made that untrue.
+    `UPDATE local_sessions SET dirty = 0, name_dirty = 0 WHERE id = ? AND user_id = ?
      -- Only if nothing changed underneath us mid-push, or we'd mark a newer
      -- edit as already sent and silently drop it.
      AND updated_at = ?
