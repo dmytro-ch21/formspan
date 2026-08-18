@@ -15,6 +15,7 @@ import (
 	// survives a future base-image change; `apk add tzdata` would not.
 	_ "time/tzdata"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/accomplishment"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/bjj"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/body"
@@ -82,6 +83,7 @@ func main() {
 	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
 	bjjPositionHandler := bjj.NewPositionHandler(bjjRepo)
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
+	accomplishmentHandler := accomplishment.NewHandler(accomplishment.NewPostgresRepository(pool))
 	contestHandler := contest.NewHandler(contest.NewPostgresRepository(pool))
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
 	// RATE LIMITS. Six features shipped recording "no rate limiting" as a
@@ -277,6 +279,18 @@ func main() {
 	// platform split: choosing a focus for the next few weeks is planning.
 	mux.Handle("GET /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Get)))
 	mux.Handle("PUT /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Set)))
+
+	// What the athlete has actually achieved on the mat and in competition,
+	// DERIVED from evidence that already exists -- contests and the tag stream
+	// -- and stored nowhere. Under /v1/bjj because the mat half reads
+	// jiu-jitsu's own evidence table, matching /v1/bjj/proficiency and
+	// /v1/bjj/positions; the competition half filters `contests` to this sport,
+	// since that table also holds a powerlifting meet and a 10k.
+	//
+	// Read-only, with no write verb anywhere: an accomplishment that could be
+	// granted by hand would stop being evidence of anything, and would make
+	// every other one a claim rather than a fact.
+	mux.Handle("GET /v1/bjj/accomplishments", verifier.RequireAuth(http.HandlerFunc(accomplishmentHandler.List)))
 
 	// The competitive record: what you entered, in which division, and how it
 	// went.

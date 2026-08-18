@@ -7703,3 +7703,41 @@ training. Everything here is about it telling the truth.
 - **`position` is assigned by the server from array order and must never be accepted from a client.** It is what makes "lost in the final" different from "lost the first match", and the wire format deliberately has no field for it — if one is ever added, the uniqueness of a position stops being unviolatable from outside.
 - **The write's read-back must run inside the transaction.** Reading it through the pool takes a connection that cannot see the uncommitted rows, so a successful create returns an empty `matches` array — a silent wrong answer, not an error. A test that only checks the status code passes against it.
 - **Nothing self-rated may be added to these payloads.** Everything here is externally verifiable, which is what makes a contest the strongest measured evidence the app holds; an RPE field would quietly demote it. How it felt belongs on the session.
+
+## BJJ accomplishments (`GET /v1/bjj/accomplishments`)
+
+### Happy path
+
+- A new account gets `[]` — the ordinary state of somebody who has not competed or logged a reflection yet, not an error.
+- A single gold medal won by submission earns **all five** competition awards at once (entered, won a match, won by submission, podium, gold), each carrying the contest's name, placement and field size.
+- Landing a technique live earns `first_scored`; the award points at the session and names the technique.
+- Drilling a technique in one session and landing it live in a **later** one earns `first_drilled_scored`.
+- The list reads as a career: earliest first, mat awards before competition ones for a typical athlete.
+- Correcting or deleting the evidence **retracts** the award — nothing is stored, so a deleted contest removes its five awards on the next read.
+
+### Edge cases & errors
+
+- **A powerlifting meet or a 10k earns nothing.** `contests` is cross-sport; only BJJ entries count here.
+- **Fourth place is not a podium**, and an **unrecorded placement is neither a podium nor a miss** — null means "not recorded", never "did not place".
+- **Third is a podium but not gold.**
+- **"First" means earliest HELD, not earliest entered.** Somebody typing up a decade of history enters entries in any order; the 2019 entry must win `first_competition` even when the 2026 one was recorded first.
+- **An undated contest does not steal "first".** A null date sorts last, not as the beginning of time — otherwise whichever entry merely lacked a date would claim the award.
+- An undated award is still returned and must still be rendered; it simply carries `achieved_on: null`.
+- **A score with no named technique still counts** — "got the sweep" without saying which is evidence the schema deliberately accepts, and refusing it would punish the fast logging path. Both `technique_id` and `technique_name` come back null.
+- **Drilling and landing something in the same session is not a graduation.** Strictly-earlier is the award's whole meaning.
+- **Drilling one technique does not graduate a different one.**
+- A tag hanging off a non-BJJ session is not mat evidence.
+- A technique retired from the library leaves the award intact with a null `technique_name` — the record outlives the catalog entry.
+- `tz` decides which calendar day a session-derived award falls on: a session at 02:00 UTC on the 15th is the **14th** in `America/Los_Angeles`. An invalid zone, or `Local`, is a 400.
+- `tz` is optional and defaults to UTC — the competition half does not need it, since those dates are already calendar dates.
+
+### Auth / security
+
+- Requires a signed-in caller; one account never sees another's awards.
+- **There is no write verb, and there must never be one** — not even an admin grant. An accomplishment that can be granted stops being evidence, and makes every other one a claim rather than a fact.
+
+### Regression trap
+
+- **Every kind must have a declared basis.** A default arm would pick one for a kind nobody classified, and the flattering answer is the likely default — a self-reported award rendering as `measured` is the one wrong answer this endpoint must never give.
+- **Nothing may rank or score these.** `basis.go`'s first reading rule forbids a measured award being judged by a reported one, and a leaderboard over this list is exactly that. The list is chronological on purpose.
+- **`ORDER BY` inside a `UNION` branch must stay parenthesised.** Unparenthesised it applies to the whole union along with the `LIMIT`, returning one row for the entire result rather than one per kind — it parses, it runs, and it is wrong.

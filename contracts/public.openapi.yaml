@@ -303,6 +303,99 @@ components:
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
 
+    Accomplishment:
+      type: object
+      required:
+        # Every field is always present in the response — none is omitempty —
+        # so the contract states that rather than understating it. The
+        # evidence fields are nullable, and WHICH are non-null follows from
+        # `kind`; switch on that rather than sniffing.
+        [kind, basis, achieved_on, contest_id, contest_name, placement, entrants,
+         session_id, technique_id, technique_name]
+      description: >
+        One thing the athlete achieved, with the evidence that earned it.
+
+
+        **Everything here is derived on read and stored nowhere.** Correcting a
+        contest result or deleting a session RETRACTS the award — a badge for a
+        match you did not have, surviving because it was cached, is worse than
+        no badge. There is deliberately no write verb of any kind, not even an
+        admin one: an accomplishment that could be granted would stop being
+        evidence of anything.
+
+
+        Which evidence fields are populated follows from `kind`; switch on that
+        rather than sniffing for non-null fields.
+      properties:
+        kind:
+          type: string
+          enum:
+            - first_scored
+            - first_drilled_scored
+            - first_competition
+            - first_match_won
+            - first_submission_win
+            - first_podium
+            - first_gold
+          description: >
+            Every kind is a **first** — a thing that happened once, that a row
+            proves, and that most athletes reach at most once ever. That rule is
+            what keeps out anything firing constantly for whoever trains a
+            certain way, and anything self-declared.
+
+
+            `first_drilled_scored` is the technique funnel completing: a
+            technique drilled in an EARLIER session, later landed live. Strictly
+            earlier — drilling and hitting something inside one class is an
+            ordinary afternoon.
+        basis:
+          type: string
+          enum: [measured, reported]
+          description: >
+            What kind of evidence stands behind it, mirroring
+            `backend/internal/modules/session/basis.go`. Competition awards are
+            **measured** — a bracket, a referee, a placement nobody can talk
+            themselves into. Mat awards are **reported**: the athlete logged
+            that they hit it, and nobody checked.
+
+
+            Both are worth marking and they are not the same claim, which is why
+            the distinction travels with each award instead of being flattened
+            into one gold-star list. Note the list is chronological and is never
+            ranked or scored — a ranking would let a reported award be judged
+            against a measured one, which that file's first reading rule
+            forbids.
+        achieved_on:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Null is ordinary, not a defect: a contest may be recorded with no
+            date, because refusing an undated entry would lose the fact to
+            protect the metadata. Such an award still happened and must still be
+            rendered — it simply cannot sit on a timeline, and it sorts last
+            rather than first.
+        contest_id: { type: string, nullable: true }
+        contest_name: { type: string, nullable: true }
+        placement: { type: integer, nullable: true }
+        entrants:
+          type: integer
+          nullable: true
+          description: >
+            Travels with `placement` wherever it is known — third of four and
+            third of sixty-four are not the same result.
+        session_id: { type: string, nullable: true }
+        technique_id: { type: string, nullable: true }
+        technique_name:
+          type: string
+          nullable: true
+          description: >
+            Resolved server-side. Null when the tag named no technique ("got the
+            sweep" without saying which is evidence the schema accepts), and
+            also when the technique has since been retired from the library —
+            that foreign key is ON DELETE SET NULL precisely so an athlete's
+            record outlives the catalog entry.
+
     BjjRank:
       type: object
       required: [belt, stripes, degree]
@@ -7982,3 +8075,46 @@ paths:
         "204": { description: Deleted. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /bjj/accomplishments:
+    get:
+      operationId: listBjjAccomplishments
+      summary: What the athlete has achieved on the mat and in competition
+      description: >
+        Derived on every read from evidence that already exists — `/contests`
+        for the competition half, the BJJ session tag stream for the mat half —
+        and stored nowhere.
+
+
+        Earliest first, undated last. An athlete who has achieved nothing yet
+        gets `[]`, which is the ordinary state of a new account.
+
+
+        **Belt promotions are deliberately absent.** They are already recorded
+        and already derived into a current rank by `/bjj/standing`; re-deriving
+        them here would put one fact behind two vocabularies.
+      tags: [BJJ]
+      parameters:
+        - name: tz
+          in: query
+          required: false
+          schema: { type: string, default: UTC }
+          description: >
+            IANA zone deciding which calendar day a session-derived award falls
+            on. Optional rather than required because the competition half does
+            not need it — those dates are already calendar dates. "Local" is
+            refused: over HTTP it would mean the server's zone.
+      responses:
+        "200":
+          description: The accomplishments, earliest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accomplishments]
+                properties:
+                  accomplishments:
+                    type: array
+                    items: { $ref: "#/components/schemas/Accomplishment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
