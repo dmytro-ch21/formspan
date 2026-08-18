@@ -25982,6 +25982,66 @@ comment saying which one and why.
   either order against a live component. The gates make the ordering
   unnecessary rather than proving it; a screen test that resolves the two
   promises in both orders would be the real check.
+## 2026-08-18 — N31 was wrong, and the way it was wrong is the point
+
+Filed hours earlier, off the back of the Simulator run: *"`first_drilled_scored`
+cannot be earned by anybody — no client ever writes a technique on a scored
+tag."* Asked to fix it, I read the code properly and it is **false**.
+
+`lib/bjjSession.ts`'s `bumpTechniqueOutcome` writes `scored` — and `attempted`
+and `defended` — **with** a `technique_id`. It is wired to the live step's
+**Working on** grid, one row per technique with Landed / Missed / Stopped
+theirs. The capability I said did not exist has existed the whole time.
+
+### Why I got it wrong, which is worth more than the finding
+
+Three mistakes stacked, and the first one is the one to remember.
+
+**I reasoned from absence.** I grepped `app/bjj/reflect/[id].tsx` for
+`technique_id`, found only the two drilled paths, and concluded no scored path
+existed. The scored write lives in `lib/bjjSession.ts` — a file the grep never
+covered. CLAUDE.md already says this in another context, about Hermes bundles:
+**absence from a grep is not evidence.** It generalises, and it just cost a
+false finding on `main`.
+
+**The data agreed with me, for a different reason.** Every `scored` row in both
+databases had `technique_id` NULL, which I read as "impossible". The verification
+account has an **empty focus list**, and `focusRows` returns nothing without one
+— so the Working on grid never rendered, for that athlete, on that device. Data
+consistent with a hypothesis is not the same as data that confirms it.
+
+**And I never saw the control.** I stepped through the wizard once, on an
+account where the section is invisible, and took what I saw for what exists.
+
+The correction came from PRESENCE — a function that demonstrably writes the row,
+wired to a rendered control — which is a stronger class of evidence than the
+absence I built the original claim on. Worth stating explicitly, because the
+temptation after being wrong once is to distrust everything equally.
+
+### What is actually true, and still open
+
+N31 keeps its id and is rewritten rather than deleted, per the rule that a line
+is the record it was considered. The real gap is narrower and in two parts:
+
+- **`focusRows` skips `drilled` deliberately**, pinned by
+  `bjjFocusRows.test.ts`. So a technique drilled in **step 1 of this session**
+  gets no row in step 2 — the wizard asks what you drilled and then offers no
+  way to say it landed, unless it happens to be on your focus list.
+- **An athlete with no focus list can attribute nothing.** For them every live
+  outcome is a bare category count, which makes the technique funnel
+  drilled-only and `first_drilled_scored` unreachable. Not impossible — inert,
+  and silently.
+
+Whether drilling something today should earn it a live row is a product decision
+about the fastest screen in the app, where the interaction cost is deliberate
+and documented. It is not mine to flip on the back of a finding I got wrong.
+
+### The badge verification still stands
+
+Nothing here retracts the previous entry. The badge does render, it was seen,
+and `first_drilled_scored` **is** earnable — for an athlete with the technique on
+their focus list. What changes is the reason the evidence had to be inserted by
+hand: not that no client could write it, but that this account had no focus list.
 
 ## Open items / known gaps as of this entry
 
