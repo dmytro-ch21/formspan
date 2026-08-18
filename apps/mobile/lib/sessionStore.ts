@@ -200,7 +200,32 @@ export async function upsert(
      --
      -- With this, a tombstoned row is immune to upserts until the delete
      -- completes and the row is gone for real.
-     WHERE local_sessions.deleted_at IS NULL`,
+     --
+     -- The second clause is T8, and it is the same invariant one step over:
+     -- the SERVER'S COPY MAY NOT OVERWRITE PENDING WORK.
+     --
+     -- This function has two kinds of caller. saveLocalSession writes an edit
+     -- the athlete just made (dirty = 1); runSync's pull writes what the
+     -- server returned (dirty = 0). Without a guard the pull wins a race it
+     -- should lose: an edit landing between the pull's per-row SELECT and this
+     -- upsert is replaced by the server's older copy AND marked clean, so it is
+     -- never sent. The athlete's change is gone, pending reads zero, and the
+     -- newer-than guard on the next pull stops it reconciling.
+     --
+     -- Keyed on excluded.dirty rather than on a parameter, so it reads as the
+     -- rule it is: a local write always wins, a server write yields to anything
+     -- outstanding. An unconditional dirty = 0 would have declined every
+     -- ordinary edit-on-top-of-an-edit, which is the whole app.
+     --
+     -- Both siblings already do this -- plan.ts's upsert (whose comment
+     -- describes this exact clobber) and cacheWorkouts. This was the one
+     -- outbox missing it.
+     --
+     -- NOTE: no backticks in here. This is inside a template literal, and a
+     -- backtick in a SQL comment ends the string -- which is a parse error two
+     -- hundred lines away from anything that looks related.
+     WHERE local_sessions.deleted_at IS NULL
+       AND (excluded.dirty = 1 OR local_sessions.dirty = 0)`,
     s.id,
     userID,
     s.workout_id,
