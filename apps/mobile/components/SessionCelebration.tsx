@@ -9,6 +9,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { celebratesMilestone, type Milestone } from '@/lib/milestones';
 import {
   badgeFor,
+  celebratesRecord,
   celebratesStreak,
   feltFor,
   statsFor,
@@ -105,6 +106,7 @@ export function SessionCelebration({
   milestone = null,
   recordsSettled = false,
   accomplishment = null,
+  streakSettled = false,
   sessionID,
   testID = 'session-celebration',
 }: {
@@ -132,6 +134,17 @@ export function SessionCelebration({
    * finished", whichever lookup that is for this sport.
    */
   accomplishment?: { label: string } | null;
+  /**
+   * Whether the HISTORY lookup has finished — the mirror of `recordsSettled`.
+   *
+   * What makes the milestone's precedence real rather than a coin toss. The two
+   * lookups race, and declaration order only decides a tie inside one commit;
+   * across two fetches the PR would otherwise latch on arrival and silence a
+   * once-a-year event. Defaults false, so a caller that does not pass it gets
+   * no PR chime at all rather than a wrongly-ordered one — the safe direction,
+   * and every real caller passes it.
+   */
+  streakSettled?: boolean;
   /**
    * The session's id, which the shareable card needs.
    *
@@ -175,9 +188,16 @@ export function SessionCelebration({
 
     Hoisted above all three effects rather than living in the PR block, because
     the milestone effect now sits above that block and has to read the same
-    flag. Whichever effect fires first latches; declaration order is therefore
-    the precedence, and it reads top to bottom: milestone, then record, then
-    streak.
+    flag. Whichever effect fires first latches, so declaration order decides a
+    tie WITHIN one commit and reads top to bottom — milestone, record, streak.
+
+    Declaration order alone is not enough, and assuming it was is a defect
+    review found here: the three inputs arrive from two independent fetches, so
+    across commits the winner is whoever ARRIVES first, not whoever ranks
+    highest. Each effect below therefore also waits for the lookup that could
+    outrank it — the record waits on `streakSettled`, the streak waits on
+    `recordsSettled`, and the milestone, outranked by nothing, waits for
+    neither.
   */
   const chimed = useRef(false);
 
@@ -239,12 +259,42 @@ export function SessionCelebration({
     stands down, exactly as this stands above the weekly streak.
   */
   const earnedBadge = hasRecords || accomplishment != null;
+
+  /*
+    And gated on `streakSettled`, the reciprocal of the gate the streak chime
+    below already has — what makes the milestone's precedence survive contact
+    with two independent fetches.
+
+    Without it, "the milestone outranks the badge" held only when both landed in
+    one commit. In practice the badge lookup usually answers first — a handful
+    of exercise ids, or one accomplishments call — while the history rolls up a
+    year of days, so this effect claimed the shared latch on ARRIVAL and the
+    milestone arriving a moment later found it taken. The rarer event lost to
+    the commoner one, silently: the exact bug `recordsSettled` was introduced to
+    fix one rung further down. Found in review.
+
+    Waiting costs nothing visible. The badge ROW still renders the instant its
+    lookup lands — the streak fetch is separate precisely so it can — and only
+    the sound waits. Offline the history settles in its `finally`, so this is
+    delayed, never lost.
+
+    `earnedBadge` is what goes in, NOT `hasRecords`: on the mat the thing that
+    outranks a streak is the accomplishment, and the parameter is named for the
+    strength case it was written from. Passing the records-only flag here would
+    let a BJJ first lose its chime to a milestone that should have deferred to
+    nothing, and would chime the streak over it on the way back down.
+  */
+  const beat = celebratesRecord({
+    streakSettled,
+    hasRecords: earnedBadge,
+    milestone: milestone !== null,
+  });
   useEffect(() => {
-    if (!earnedBadge || chimed.current) return;
+    if (!beat || chimed.current) return;
     chimed.current = true;
     const t = setTimeout(() => playSound('pr'), 1100);
     return () => clearTimeout(t);
-  }, [earnedBadge]);
+  }, [beat]);
 
   /*
     The streak chime — last in the ladder, so both of the above win.
@@ -329,6 +379,10 @@ export function SessionCelebration({
           {milestone && (
             <RNView
               style={[styles.milestone, { borderColor: accent.accent }]}
+              // Arrives after the card opens, like the streak line and the
+              // records below it, so a screen reader has to be told or the one
+              // rare thing on this card is the one thing only seen.
+              accessibilityLiveRegion="polite"
               testID="celebration-milestone"
             >
               <Text style={[styles.milestoneLabel, { color: accent.ink }]}>{milestone.label}</Text>

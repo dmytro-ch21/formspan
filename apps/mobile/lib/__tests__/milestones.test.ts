@@ -1,13 +1,12 @@
-import type { HistoryDay } from '../history';
+import { streakRange, weekStreak, type HistoryDay } from '../history';
 import {
   MILESTONES,
   celebratesMilestone,
-  isCurrentWeek,
-  metThePlan,
   milestoneForSession,
   milestoneReached,
 } from '../milestones';
-import { celebratesStreak } from '../celebration';
+import { metThePlan } from '../weekReview';
+import { celebratesRecord, celebratesStreak } from '../celebration';
 
 /**
  * The rung logic, and the two properties that keep this from becoming a
@@ -78,7 +77,7 @@ describe('milestoneReached', () => {
   });
 
   it('says nothing when a week was missed, however long the run before it', () => {
-    // Four weeks of training with the third week absent: the streak restarts,
+    // Two trained weeks, a gap, then two more: the streak restarts at the gap,
     // so no rung is reached. The feature must never reward a total.
     const broken = [...weeks(2), ...weeks(2, '2026-07-20')];
     expect(milestoneReached(broken, TODAY)).toBeNull();
@@ -102,6 +101,9 @@ describe('the chime ladder', () => {
     // The inversion of the record-beats-streak rule, and the reason is
     // frequency: the top rung happens at most once a year.
     expect(celebratesMilestone({ milestone: MILESTONES[3] })).toBe(true);
+    expect(celebratesRecord({ streakSettled: true, hasRecords: true, milestone: true })).toBe(
+      false,
+    );
     expect(
       celebratesStreak({
         recordsSettled: true,
@@ -110,6 +112,15 @@ describe('the chime ladder', () => {
         milestone: true,
       }),
     ).toBe(false);
+  });
+
+  it('makes the record WAIT for the history lookup rather than latching on arrival', () => {
+    // The race review found. The two lookups are independent and the shared
+    // latch goes to whichever effect fires first, so a record that answered
+    // before the history used to silence the milestone that was still in
+    // flight. Unsettled means no chime yet — not "no milestone".
+    expect(celebratesRecord({ streakSettled: false, hasRecords: true })).toBe(false);
+    expect(celebratesRecord({ streakSettled: true, hasRecords: true })).toBe(true);
   });
 
   it('leaves the ordinary streak chime alone when there is no milestone', () => {
@@ -157,9 +168,63 @@ describe('metThePlan', () => {
   });
 });
 
-describe('isCurrentWeek', () => {
-  it('accepts the week Today is rendering and rejects a closed one', () => {
-    expect(isCurrentWeek({ from: '2026-08-17' }, TODAY)).toBe(true);
-    expect(isCurrentWeek({ from: '2026-08-10' }, TODAY)).toBe(false);
+describe('the fetch window, which is what the ladder actually measures against', () => {
+  /**
+   * The rung logic above is exercised with hand-built arrays. This block goes
+   * through `streakRange()` — the window the app really fetches — because the
+   * `===` comparison can be defeated by the INPUT rather than by the
+   * comparison, and that is exactly what happened.
+   *
+   * The window used to cover 52 weeks, so `weekStreak` could not report more
+   * than 52. An athlete on a 53-, 60- or 100-week streak measured 52 forever,
+   * `milestoneReached` matched the year rung on every one of those weeks, and
+   * the most dedicated athletes got congratulated for a year, weekly, for as
+   * long as they kept training. Found in review; the fix is one week of
+   * headroom, and this is the test that proves it.
+   */
+
+  /** Every week in the range the app would really request, all trained. */
+  function saturatedWindow(from: string): HistoryDay[] {
+    const { from: start, to } = streakRange(from);
+    const out: HistoryDay[] = [];
+    for (let d = start; d <= to; d = addWeek(d)) out.push(day(d));
+    return out;
+  }
+
+  function addWeek(key: string): string {
+    const d = new Date(`${key}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 7);
+    return d.toISOString().slice(0, 10);
+  }
+
+  it('has one week of headroom above the top rung', () => {
+    // The invariant, stated as a number: the most the window can ever measure
+    // must NOT equal any rung, or that rung repeats forever.
+    const saturated = weekStreak(saturatedWindow(TODAY), TODAY);
+    expect(saturated).toBe(53);
+    expect(MILESTONES.map((m) => m.weeks)).not.toContain(saturated);
+  });
+
+  it('says nothing to an athlete whose streak outruns the window', () => {
+    // The regression itself. Before the fix this returned the year rung, and
+    // would have done so again every week for the rest of their training life.
+    expect(milestoneReached(saturatedWindow(TODAY), TODAY)).toBeNull();
+    expect(milestoneForSession(saturatedWindow(TODAY), true, TODAY)).toBeNull();
+  });
+
+  it('still reaches the year rung at a true 52 weeks', () => {
+    // The other half — headroom must not push the rung out of reach.
+    expect(milestoneReached(weeks(52), TODAY)?.key).toBe('year');
+  });
+});
+
+describe('milestoneReached on an open week', () => {
+  it('does not re-report last week’s rung before this week is trained', () => {
+    // `weekStreak` steps back to last week while this one is still open, so it
+    // can keep reporting 4 across an untrained Monday. That is right for a
+    // displayed figure and wrong for a congratulation: without the guard the
+    // rung reached last week is re-announced every day of this one.
+    const lastWeekHitAMonth = weeks(4, '2026-08-10');
+    expect(milestoneReached(lastWeekHitAMonth, TODAY)).toBeNull();
   });
 });

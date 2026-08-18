@@ -258,6 +258,20 @@ export default function SessionScreen() {
     pending one is not.
   */
   const [recordsSettled, setRecordsSettled] = useState(false);
+  /**
+   * Whether the HISTORY lookup has finished — the mirror of `recordsSettled`,
+   * and the thing that makes the milestone actually outrank a personal record.
+   *
+   * The two lookups are deliberately parallel, so "milestone beats record" is
+   * only true within a single commit; across two independent fetches it is a
+   * race, and the records call is the likelier to win it (a lookup by exercise
+   * id against a rollup of 371 days). Whichever effect fires first claims the
+   * shared chime latch, so without this the PR chime latched on ARRIVAL and the
+   * rarer event was silenced by the commoner one — precisely the failure
+   * `recordsSettled` already exists to prevent one rung further down. Found in
+   * review.
+   */
+  const [streakSettled, setStreakSettled] = useState(false);
   /** `null` until history answers; `carried` is what decides the chime. */
   const [celebrationStreak, setCelebrationStreak] = useState<{
     weeks: number;
@@ -326,6 +340,13 @@ export default function SessionScreen() {
       .catch(() => {
         // Same silence as the records lookup. No history, no streak line, no
         // chime — the phone cannot know what the week holds.
+      })
+      .finally(() => {
+        // `finally` for the same reason the records lookup has one, now load
+        // bearing in the other direction: offline the answer is "no milestone",
+        // and the PR chime must not wait forever for a history that is never
+        // coming back.
+        if (live) setStreakSettled(true);
       });
     return () => {
       live = false;
@@ -1885,6 +1906,7 @@ export default function SessionScreen() {
           streak={celebrationStreak}
           milestone={celebrationMilestone}
           recordsSettled={recordsSettled}
+          streakSettled={streakSettled}
           formatTonnage={(v) => formatVolume(v, units)}
           onDismiss={() => {
             setCelebrating(null);

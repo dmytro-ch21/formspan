@@ -108,6 +108,17 @@ export const MILESTONES: Milestone[] = [
  * milestone that was not reached is.
  */
 export function milestoneReached(days: HistoryDay[], from = today()): Milestone | null {
+  // The current week must actually hold a session. `weekStreak` deliberately
+  // steps back to last week when this one is still open, so that it does not
+  // appear to reset every Monday morning — correct for a displayed figure, and
+  // wrong here: it would re-report the rung reached last week every day of the
+  // untrained week that follows. The only shipped caller cannot reach that
+  // (`milestoneForSession` requires `carried`, which implies a session this
+  // week), but the export invites it, and re-congratulating is the one failure
+  // this module exists to prevent.
+  const week = startOfWeek(from);
+  if (!days.some((d) => d.sessions > 0 && startOfWeek(d.date) === week)) return null;
+
   const weeks = weekStreak(days, from);
   return MILESTONES.find((m) => m.weeks === weeks) ?? null;
 }
@@ -150,34 +161,4 @@ export function milestoneForSession(
  */
 export function celebratesMilestone(opts: { milestone: Milestone | null }): boolean {
   return opts.milestone !== null;
-}
-
-/**
- * Did the week just closed meet everything that was planned for it?
- *
- * The half of this feature that is not about streaks at all. `weekVerdict`
- * already ends "— the whole plan, done." for a met week, but it says it in the
- * same grey sentence as every other week, so the one week in five that is worth
- * marking reads exactly like the four that are not.
- *
- * **Zero planned is not a met plan.** A week nobody planned cannot be
- * completed, and congratulating someone for it is the hollow praise
- * `worthCelebrating` already refuses elsewhere — it teaches people to ignore
- * the app, and it would fire for every athlete who does not use the planner at
- * all, which is most of them.
- */
-export function metThePlan(review: { planned: number; met: number }): boolean {
-  return review.planned > 0 && review.met >= review.planned;
-}
-
-/**
- * Is this the current week — the only week a congratulation belongs to?
- *
- * Today renders the week it is in, so in practice this is always true; it is
- * here because the same review object is what a future "last week" screen would
- * be handed, and a congratulation for a week that closed a fortnight ago is
- * stale praise. Cheap to hold now, awkward to add once a caller exists.
- */
-export function isCurrentWeek(review: { from: string }, from = today()): boolean {
-  return review.from === startOfWeek(from);
 }

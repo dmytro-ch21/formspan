@@ -8077,6 +8077,8 @@ training. Everything here is about it telling the truth.
 
 - **Week 27 must say nothing.** The rung fires on the week it is *reached*, never after. Check 5, 27 and 53 weeks — all silent. This is the property that keeps the feature from being a streak counter, and a `>=` written by accident satisfies every positive test.
 - **A missed week resets it.** Two weeks, a gap, two more weeks is not a month — no rung.
+- **An athlete whose streak outruns the fetch window must go silent, not repeat.** `streakRange()` fetches 53 weeks, so `weekStreak` saturates at 53 — a value that equals no rung. Build a fully-trained window and check both `milestoneReached` and the card: before this was fixed the year rung fired every week, forever, for the longest-running athletes. **Any new rung at or above 52 weeks has to widen the window too.**
+- **An untrained week must not re-announce last week's rung.** Hit a month, then open the app on the following Monday before training: nothing.
 - **Only one session per week fires the card.** Train four times in the week you hit a rung: the milestone shows once, on the session that carried the streak, not four times.
 - **A week nobody planned is not a met plan.** `0 of 0` must show no congratulation, or it fires every week for every athlete who does not use the planner.
 - Meeting *more* than planned (4 of 3) still counts as met.
@@ -8087,6 +8089,8 @@ training. Everything here is about it telling the truth.
 - One celebratory sound per session, and the order is milestone → personal record → ordinary streak. Set a PR *and* cross a rung in the same session: the milestone chime plays and the PR chime does not.
 - With no milestone, the pre-existing rule must be unchanged: a PR still outranks an ordinary streak.
 - The milestone chime needs no records-settled gate — nothing can outrank it, so it must not wait on a lookup that may never return.
+- **The record chime must wait for the history lookup, in both orders.** The two fetches are independent and the shared latch goes to whichever arrives first, so resolve records-first and history-first and confirm the milestone wins either way. Records-first is the likelier real ordering and is the one that used to lose.
+- **Offline, the PR chime must still play, only later.** The history fetch settles in a `finally`; without that the gate would hang it forever.
 
 ### Regression trap
 

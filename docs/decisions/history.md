@@ -2399,6 +2399,56 @@ can never compete for this day's sessions, and plans on the same day are the
 same rows. A parameter that cannot change the answer reads as a safeguard and is
 scenery. `owedOn(sessions, dayPlans)` is what was ever needed.
 
+**Review caught two blocking defects, and the first is the better lesson.**
+
+The `===` was correct and it was defeated by its input. `streakRange()` fetched
+`-51 * 7` days, which is exactly 52 weeks including the current one — so
+`weekStreak` **saturated at 52**. An athlete on a genuine 53-week streak measured
+52. So did they at 60 weeks, and at 100. Harmless for a displayed figure, and
+fatal here: the year rung matched on exact equality, so it fired again *every
+week, forever*, for precisely the athletes it was meant to honour. The
+congratulation this whole design went out of its way not to turn into a counter
+became one, through a constant in a different module.
+
+The fix is one week of headroom — the window is 53 weeks now, so a saturated
+measurement is 53, which equals no rung and never will. The invariant to keep is
+stated on `streakRange` itself: **the saturation point must not be a rung**, so
+anything adding a rung at or above 52 has to widen the window too. What made
+this findable is worth noting as much as the fix: the test that "proved" week 53
+was silent handed the function a 53-week array the real call path cannot
+produce. It tested the function and not the feature. The new tests build their
+input by walking `streakRange()`.
+
+The second was a race the diff's own comments claimed was settled. "The
+milestone needs no `recordsSettled` gate — nothing can outrank it, so there is
+no race to lose" is exactly backwards: nothing outranks it *logically*, but the
+shared chime latch is claimed by whichever effect **arrives** first, and the two
+inputs come from two independent fetches. The records lookup usually answers
+sooner — a handful of exercise ids against a rollup of a year of days — so the
+PR chime latched and the milestone arriving a moment later found the latch
+taken. This is the identical failure `recordsSettled` was introduced to fix one
+rung down, reintroduced with the desired winner reversed and no reciprocal gate.
+
+The fix is symmetric: a `streakSettled` flag set in the history fetch's
+`finally` (it had none, so a naive gate would have hung the PR chime offline),
+and the PR chime now waits on it. It costs nothing visible — the PR *row* still
+renders the moment records land, which is why the two fetches were kept separate
+in the first place; only the sound waits. And the precedence is now an explicit
+value rather than a property of effect declaration order: `celebratesRecord`
+joins `celebratesMilestone` and `celebratesStreak`, each standing down for what
+outranks it, with the latch left as belt-and-braces. Declaration order still
+decides a tie inside one commit; it is no longer the only thing that does.
+
+Three review suggestions landed with them. `milestoneReached` now requires the
+current week to hold a session — `weekStreak` deliberately steps back to last
+week while this one is open, which would have re-announced last week's rung
+every day of an untrained week; unreachable through the shipped caller, but the
+export invites it. `metThePlan` moved to `weekReview.ts` beside `weekVerdict`,
+which now consumes it, so the badge and the grey sentence cannot disagree —
+the same duplicated-rule shape cleaned up in #268. And `isCurrentWeek` was
+deleted rather than kept: it had no caller, and a tested function that nothing
+calls is an assertion that cannot fail against shipping code.
+
 ### Gaps this leaves
 
 - **No password reset**, which is now the most urgent hole in mobile auth and is
@@ -25860,10 +25910,11 @@ comment saying which one and why.
 - **BJJ-only athletes reach every rung**, which is correct, but the finish card
   they reach it on still has no badge equivalent of a personal record. That gap
   predates this and is unchanged.
-- `isCurrentWeek` has no caller yet. It exists because the same review object is
-  what a future "last week" screen would be handed, and a congratulation for a
-  week that closed a fortnight ago is stale praise — cheap to hold now, awkward
-  to add once a caller exists.
+- **The chime precedence is verified as logic, not as timing.** Every rule is a
+  pure function with tests, but nothing exercises two real fetches resolving in
+  either order against a live component. The gates make the ordering
+  unnecessary rather than proving it; a screen test that resolves the two
+  promises in both orders would be the real check.
 
 ## Open items / known gaps as of this entry
 

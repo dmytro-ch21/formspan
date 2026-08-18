@@ -9,8 +9,13 @@ import { useAccent } from '@/lib/AccentProvider';
 import { formatDuration } from '@/lib/history';
 import { labelFor, type Module } from '@/lib/modules';
 import { formatVolume, type UnitSystem } from '@/lib/units';
-import { metThePlan } from '@/lib/milestones';
-import { deltaPct, leadMeasure, weekVerdict, type WeekReview as Review } from '@/lib/weekReview';
+import {
+  deltaPct,
+  leadMeasure,
+  metThePlan,
+  weekVerdict,
+  type WeekReview as Review,
+} from '@/lib/weekReview';
 
 /**
  * The week, summed up.
