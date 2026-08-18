@@ -6589,6 +6589,23 @@ The round map (2026-08-18):
 - **Both sides of a position share one link.** "Mount" and "Under mount" both
   read about `mount`, so both counts are the family's. That is the glossary
   describing a position for both players, not a duplicate.
+Syllabuses on the phone (2026-08-18):
+
+- **The Library's BJJ reference block shows four belt cards**, white → brown, in
+  rank order not alphabetical, each with its entry count. Tapping one opens that
+  curriculum.
+- **They must NOT appear on the Plan tab's Roadmaps strip.** That strip is what
+  you are working; assert it still shows five cards (foundations + four belts).
+- **An athlete's own public curriculum on the syllabus track does not appear
+  there.** Both `track` and `belt` are athlete-writable, so create one wearing
+  both and assert only VOLA content shows.
+- **The block degrades silently.** With the curricula endpoint failing, the map
+  link and position cards must still render and no error banner appears — the
+  Library's job is the catalog.
+- **An 85-item syllabus opens without a visible pause.** The screen is a plain
+  ScrollView and this is double the largest roadmap; worth timing on the oldest
+  supported device, since nothing has measured it.
+
 The drawn map's geometry (2026-08-18):
 
 - **No arrow crosses a box it does not connect.** Covered by a unit test over the
