@@ -1442,11 +1442,14 @@ components:
         The teaching diagram of a round: what the positions are, how you move
         between them, and which way is up. Authored rather than derived — the
         library does carry a real position graph in `to_position`, but only
-        170 of 542 techniques record one, so the derived graph has no
-        side-control-to-mount edge, no mount-to-back and no escapes at all. A
-        drawn map with holes reads as "you cannot get there", which is worse
-        than no map. The structure is authored; every node points at a real
-        position and resolves to real techniques.
+        170 of 542 techniques record one. Measured against the catalog: the
+        mount-to-back edge does not exist, the side-control-to-mount edge rests
+        on a single technique, and not one Escape-category technique records
+        where it leaves you — so the whole loop back from the bad places is
+        missing. A drawn map with holes reads as "you cannot get there" rather
+        than "nobody wrote this down", which is worse than no map. The structure
+        is authored; every node points at a real position and resolves to real
+        techniques.
       required: [title, intro, bands, nodes, edges]
       properties:
         title: { type: string }
@@ -1494,7 +1497,7 @@ components:
         be the same arrow. So a node carries both keys, and two nodes may share
         a `position_id`: being mounted and mounting are one position and
         opposite places to be.
-      required: [id, label, position_id, position, tier, note]
+      required: [id, label, position_id, position, detail_includes, detail_excludes, tier, note]
       properties:
         id: { type: string, example: mount-top }
         label: { type: string, example: Mount }
@@ -1506,8 +1509,24 @@ components:
           type: string
           description: >
             The sided value to filter the library by, matching
-            `Technique.position` exactly.
+            `Technique.position` EXACTLY (not a prefix).
           example: Mount - Top
+        detail_includes:
+          type: array
+          items: { type: string }
+          description: >
+            Narrow within `position` using `Technique.position_detail`, exactly
+            as a glossary entry narrows within its `family`. Needed because the
+            library has no knee-on-belly `position` value at all — those
+            techniques sit under "Side Control - Top" carrying the detail — so
+            without it two nodes resolve to one list. A whitelist; empty means
+            the whole position.
+        detail_excludes:
+          type: array
+          items: { type: string }
+          description: >
+            A blacklist. Never set alongside `detail_includes`, which already
+            excludes everything not on it.
         tier:
           type: integer
           description: >

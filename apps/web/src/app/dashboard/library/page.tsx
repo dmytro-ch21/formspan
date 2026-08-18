@@ -138,28 +138,33 @@ export default function LibraryPage() {
   const { getToken } = useAuth();
 
   /**
-   * The one deep link into this page: `?sport=bjj&position=<glossary id>`,
-   * which the round map emits so "46 techniques from side control" lands on
-   * them already filtered.
+   * The one deep link into this page: `?position=<glossary id>`, which the
+   * round map emits so "read about side control" opens that position's panel.
    *
-   * READ ONCE, AS AN INITIAL VALUE, and never written back. This page
-   * deliberately keeps no filter state anywhere — the docstring above says
-   * sport and position both reset on reload — and pushing every chip into the
-   * URL would turn that decision over quietly. An initial value is a different
-   * thing from persistence: it is the caller saying where to start, after
-   * which the chips behave exactly as they do when you arrive with no
-   * parameters at all.
+   * **It opens the PANEL, not the chip filter, and that distinction is the bug
+   * review found.** The position chips are keyed on FAMILY — "Mount", "Side
+   * Control", "Back" — while the glossary and the map speak in ids (`mount`,
+   * `side-control`, `back-control`). A link carrying an id filtered the grid to
+   * nothing and left no chip looking active, including "All positions": an
+   * invisible filter, which is the exact failure the chips' own docstring warns
+   * about. The panel takes an id, resolves by the glossary's own rule, and is
+   * the thing the map's technique count is counted with — so the number on the
+   * link and the list at the destination agree.
    *
-   * Position without sport would be the stale-invisible-filter bug the chips'
-   * own docstring warns about, so the map sends both and this trusts neither:
-   * a position is only taken if the sport it belongs to came with it.
+   * READ ONCE, AS AN INITIAL VALUE, and never written back. This page keeps no
+   * filter state anywhere — sport and position both reset on reload — and
+   * pushing selection into the URL would turn that decision over quietly. An
+   * initial value is a different thing from persistence: it is the caller
+   * saying where to start.
+   *
+   * Unvalidated on purpose: an id that does not exist resolves to nothing and
+   * the panel reports it, which is the same path a stale bookmark already took.
    */
   const params = useSearchParams();
-  const initialSport = params.get("sport") ?? "";
-  const initialPosition = initialSport === "" ? "" : (params.get("position") ?? "");
+  const initialPosition = params.get("position");
 
-  const [sport, setSport] = useState(initialSport);
-  const [position, setPosition] = useState(initialPosition);
+  const [sport, setSport] = useState("");
+  const [position, setPosition] = useState("");
   const [belt, setBelt] = useState("");
   const [query, setQuery] = useState("");
 
@@ -221,7 +226,9 @@ export default function LibraryPage() {
   // error about content the reader never asked for.
   const [positions, setPositions] = useState<Position[]>([]);
 
-  const [selected, setSelected] = useState<Selection | null>(null);
+  const [selected, setSelected] = useState<Selection | null>(
+    initialPosition === null ? null : { kind: "position", id: initialPosition },
+  );
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Bumped by the retry button to re-run the debounced exercise effect. */

@@ -2,6 +2,7 @@ package technique
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -62,12 +63,15 @@ func TestEveryRoundMapNodeNamesAKnownPosition(t *testing.T) {
 
 // The check that keeps every node's link honest.
 //
-// A node offers "techniques from here", resolved client-side by the rule the
-// contract documents: prefix-match the technique's position against the node's,
-// which for a sided node ("Mount - Top") is an exact match against the same
-// vocabulary. A node naming a value nothing matches renders as an empty list
-// rather than an error — the failure the library's own `Edges` docstring
-// records, where uneven coverage made links read as a feature that half-works.
+// A node offers "techniques from here", resolved by the rule the contract
+// publishes: an EXACT match on `position`, then the detail lists. Exact, not a
+// prefix — the two agree on today's catalog and would stop agreeing the moment
+// the library gained a value extending one of these ("Standing - Top" would
+// count under the Standing node while an exact-matching client showed nothing).
+//
+// A node naming a value nothing matches renders as an empty list rather than an
+// error — the failure the library's own `Edges` docstring records, where uneven
+// coverage made links read as a feature that half-works.
 func TestEveryRoundMapNodeResolvesToTechniques(t *testing.T) {
 	m, err := LoadRoundMap()
 	if err != nil {
@@ -82,16 +86,59 @@ func TestEveryRoundMapNodeResolvesToTechniques(t *testing.T) {
 	}
 
 	for _, n := range m.Nodes {
-		count := 0
-		for _, tech := range library {
-			if strings.HasPrefix(tech.Position, n.Position) {
-				count++
-			}
+		if len(resolve(library, n)) == 0 {
+			t.Errorf("round map node %q filters the library to %q%v%v, which matches no technique",
+				n.ID, n.Position, n.DetailIncludes, n.DetailExcludes)
 		}
-		if count == 0 {
-			t.Errorf("round map node %q filters the library to %q, which matches no technique",
-				n.ID, n.Position)
+	}
+}
+
+// resolve applies the node's whole rule, the way a client must.
+func resolve(library []Technique, n MapNode) []string {
+	ids := make([]string, 0, 8)
+	for _, tech := range library {
+		if tech.Position != n.Position {
+			continue
 		}
+		if len(n.DetailIncludes) > 0 && !slices.Contains(n.DetailIncludes, tech.PositionDetail) {
+			continue
+		}
+		if slices.Contains(n.DetailExcludes, tech.PositionDetail) {
+			continue
+		}
+		ids = append(ids, tech.ID)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// Two boxes must never be the same list wearing two labels.
+//
+// The validator refuses two nodes with an identical RULE; this is the check
+// against the actual catalog, which is what a reader sees. Knee on belly and
+// side control share a `Position` and are separated only by the detail lists,
+// so a rule-level check alone would not notice one of them being widened until
+// somebody counted the rows.
+func TestNoTwoNodesResolveTheSameWay(t *testing.T) {
+	m, err := LoadRoundMap()
+	if err != nil {
+		t.Fatalf("load round map: %v", err)
+	}
+	library, err := SeedData()
+	if err != nil {
+		t.Fatalf("load library: %v", err)
+	}
+	if len(library) == 0 {
+		t.Fatal("empty library — every node would resolve to zero and match every other")
+	}
+
+	seen := make(map[string]string, len(m.Nodes))
+	for _, n := range m.Nodes {
+		key := strings.Join(resolve(library, n), ",")
+		if prev, dup := seen[key]; dup {
+			t.Errorf("nodes %q and %q list exactly the same techniques", prev, n.ID)
+		}
+		seen[key] = n.ID
 	}
 }
 
@@ -181,10 +228,15 @@ func TestTheRoundMapValidatorRefusesABrokenMap(t *testing.T) {
 				{MinTier: -99, Label: "behind", Note: "n"},
 			},
 			Nodes: []MapNode{
-				{ID: "a", Label: "A", PositionID: "standing", Position: "Standing", Note: "n"},
-				{ID: "b", Label: "B", PositionID: "mount", Position: "Mount - Top", Note: "n"},
+				{ID: "a", Label: "A", PositionID: "standing", Position: "Standing", Tier: 1, Note: "n"},
+				{ID: "b", Label: "B", PositionID: "mount", Position: "Mount - Top", Tier: 0, Note: "n"},
 			},
-			Edges: []MapEdge{{From: "a", To: "b", Label: "Takedown", Kind: "route"}},
+			// A minimal legal map is a CYCLE, not a line: every node must be
+			// arrivable, and only the summit may have no way out.
+			Edges: []MapEdge{
+				{From: "a", To: "b", Label: "Takedown", Kind: "route"},
+				{From: "b", To: "a", Label: "Escape", Kind: "recover"},
+			},
 		}
 	}
 	if err := validateRoundMap(good()); err != nil {
@@ -192,7 +244,18 @@ func TestTheRoundMapValidatorRefusesABrokenMap(t *testing.T) {
 	}
 
 	bad := map[string]func(*RoundMap){
-		"no nodes":                    func(m *RoundMap) { m.Nodes = nil },
+		"no nodes":        func(m *RoundMap) { m.Nodes = nil },
+		"node with no id": func(m *RoundMap) { m.Nodes[0].ID = "" },
+		"node setting both detail lists": func(m *RoundMap) {
+			m.Nodes[0].DetailIncludes = []string{"x"}
+			m.Nodes[0].DetailExcludes = []string{"y"}
+		},
+		// The borrowed-filter bug review found: one list of techniques under two
+		// differently labelled boxes, with every "does it resolve" check passing.
+		"two nodes resolving identically": func(m *RoundMap) { m.Nodes[1].Position = m.Nodes[0].Position },
+		// b is not the summit (a has the higher tier), so it may not be a dead end.
+		"a node with no way out":      func(m *RoundMap) { m.Edges = m.Edges[:1] },
+		"a node nothing arrives at":   func(m *RoundMap) { m.Edges = m.Edges[1:] },
 		"no edges":                    func(m *RoundMap) { m.Edges = nil },
 		"no bands":                    func(m *RoundMap) { m.Bands = nil },
 		"a band with no label":        func(m *RoundMap) { m.Bands[0].Label = "" },
@@ -251,7 +314,19 @@ func TestTheRoundMapSerialisesUnderTheNamesTheContractPublishes(t *testing.T) {
 	if err := json.Unmarshal(got["nodes"], &nodes); err != nil || len(nodes) == 0 {
 		t.Fatalf("nodes did not unmarshal to a non-empty list: %v", err)
 	}
-	for _, k := range []string{"id", "label", "position_id", "position", "tier", "note"} {
+	// The detail lists are required and must be `[]`, never `null`, on the many
+	// nodes that set neither.
+	for _, n := range nodes {
+		for _, k := range []string{"detail_includes", "detail_excludes"} {
+			if string(n[k]) == "null" {
+				t.Errorf("node serialised %q as null; the contract requires a list", k)
+			}
+		}
+	}
+	for _, k := range []string{
+		"id", "label", "position_id", "position",
+		"detail_includes", "detail_excludes", "tier", "note",
+	} {
 		if _, ok := nodes[0][k]; !ok {
 			t.Errorf("round map node has no %q on the wire", k)
 		}

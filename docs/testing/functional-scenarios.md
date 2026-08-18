@@ -6574,19 +6574,21 @@ The round map (2026-08-18):
 - **Do not confuse it with `/bjj/positions`**, which is the athlete's own
   heatmap computed from their logs. Same word, different screens: assert the
   titles ("How a round goes" against the position map's own).
-- **The library deep link works from both, and behaves differently on purpose.**
-  Web: `?sport=bjj&position=side-control` opens the library already filtered,
-  and the chips then behave exactly as on a plain visit. Mobile: the same
-  params are applied on focus and then CLEARED — navigate to the library from
-  the map, change the filter by hand, switch tabs and come back, and the
-  hand-set filter must survive. A re-applied filter here is the bug the
-  clearing exists to prevent.
-- **A link naming a disabled discipline changes nothing.** Turn BJJ off, send
-  `?sport=bjj&position=mount`, and the library must ignore both rather than
-  filter to a chip that is not rendered.
-- **Mobile's deep link must not rewrite the stored sport preference.** Arrive via
-  the map, then relaunch the app: the library should open on whatever sport was
-  stored before, not on BJJ.
+- **A node links to the POSITION, not to a filtered grid, and the number on the
+  link must equal the number at the destination.** Web `?position=side-control`
+  opens the library's position panel; mobile opens `/position/side-control`.
+  Both resolve with `techniquesInPosition`, and the link says "· N techniques" —
+  assert the two agree, since the first version counted a narrower sided set and
+  led somewhere listing nearly twice as many.
+- **A position id must never be sent to the position CHIPS.** They are keyed on
+  family ("Mount", "Side Control"), so a glossary id filters the grid to zero
+  with no chip looking active — not even "All positions". Regression test: the
+  map's links carry `position=<glossary id>` and the grid stays unfiltered.
+- **An unknown position id reports itself** rather than opening an empty panel —
+  the same path a stale bookmark already took.
+- **Both sides of a position share one link.** "Mount" and "Under mount" both
+  read about `mount`, so both counts are the family's. That is the glossary
+  describing a position for both players, not a duplicate.
 
 The map and the progression (2026-08-17):
 

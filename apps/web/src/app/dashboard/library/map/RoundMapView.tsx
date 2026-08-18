@@ -8,6 +8,7 @@ import {
   getRoundMap,
   listPositions,
   listTechniques,
+  techniquesInPosition,
   type Position,
   type RoundMap,
   type RoundMapEdgeKind,
@@ -153,12 +154,19 @@ export function RoundMapView() {
     ? map.edges.filter((e) => e.from === node.id)
     : [];
   const toHere = node ? map.edges.filter((e) => e.to === node.id) : [];
-  // Sided: an exact match against the same vocabulary the node names, which is
-  // narrower than the glossary's family match and is the point — "Mount - Top"
-  // is a different set of techniques from "Mount - Bottom".
-  const count = node
-    ? techniques.filter((t) => t.position === node.position).length
-    : 0;
+  /**
+   * By the GLOSSARY's rule, not the node's sided one.
+   *
+   * The number has to be the number the destination shows or the link lies, and
+   * the destination is the library's position panel, which resolves with
+   * `techniquesInPosition`. The first version counted the node's own sided
+   * filter — a different, narrower set — so "27 techniques from mount" led to a
+   * panel listing 44.
+   */
+  const count =
+    node && position && techniques.length > 0
+      ? techniquesInPosition(techniques, position).length
+      : null;
 
   return (
     <div className="space-y-6">
@@ -346,11 +354,17 @@ export function RoundMapView() {
               <EdgeList title="From here" edges={fromHere} byID={byID} dir="to" onPick={setSelected} />
               <EdgeList title="You arrive here by" edges={toHere} byID={byID} dir="from" onPick={setSelected} />
 
+              {/* The library's own position panel, which resolves the same way
+                  this count does. NOT the position chip: those are keyed on
+                  FAMILY ("Mount", "Side Control"), not on a glossary id, so a
+                  link carrying `mount` filtered the grid to nothing and left no
+                  chip looking active — review caught it. */}
               <Link
-                href={`/dashboard/library?sport=bjj&position=${encodeURIComponent(node.position_id)}`}
+                href={`/dashboard/library?position=${encodeURIComponent(node.position_id)}`}
                 className="block rounded-lg border border-line px-3 py-2 text-center text-sm font-medium hover:bg-surface-hover"
               >
-                {count} techniques from {node.label.toLowerCase()}
+                Read about {node.label.toLowerCase()}
+                {count === null ? "" : ` · ${count} techniques`}
               </Link>
             </div>
           )}
@@ -420,6 +434,13 @@ function EdgeList({
                 className="mr-2 inline-block h-0.5 w-3 rounded align-middle"
                 style={{ background: KIND[e.kind].stroke }}
               />
+              {/* The kind IN WORDS, not only in the swatch's hue. The diagram
+                  can lean on colour because its toggles carry the words; this
+                  list has no such control beside it, so without this the only
+                  difference between an advancing edge and a conceding one is a
+                  3px coloured dash that is `aria-hidden`. That is the palette
+                  rule broken in the one place nobody would look. */}
+              <span className="text-text-dim">{KIND[e.kind].label}</span>{" "}
               <span className="text-text-muted">{e.label}</span>{" "}
               <button
                 type="button"

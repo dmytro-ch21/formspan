@@ -4,7 +4,15 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } 
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { fetchRoundMap, type RoundMap, type RoundMapNode } from '@/lib/positions';
+import {
+  fetchPositions,
+  fetchRoundMap,
+  techniquesInPosition,
+  type Position,
+  type RoundMap,
+  type RoundMapNode,
+} from '@/lib/positions';
+import { fetchTechniques, type TechniqueSummary } from '@/lib/techniques';
 import { ladderRows } from '@/lib/roundMapLadder';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -36,6 +44,8 @@ export default function RoundMapScreen() {
   const getToken = useAuthToken();
   const router = useRouter();
   const [map, setMap] = useState<RoundMap | null>(null);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -46,8 +56,23 @@ export default function RoundMapScreen() {
     const ac = new AbortController();
     (async () => {
       try {
-        const m = await fetchRoundMap(getToken, ac.signal);
-        if (!ac.signal.aborted) setMap(m);
+        // The glossary shares the map's request and cache. The library is a
+        // second, larger fetch used only for the per-position counts, so it is
+        // allowed to fail on its own: a map that will not draw because a count
+        // is missing is the worse trade.
+        const [m, p] = await Promise.all([
+          fetchRoundMap(getToken, ac.signal),
+          fetchPositions(getToken, ac.signal),
+        ]);
+        if (ac.signal.aborted) return;
+        setMap(m);
+        setPositions(p);
+        try {
+          const t = await fetchTechniques(getToken, ac.signal);
+          if (!ac.signal.aborted) setTechniques(t);
+        } catch {
+          // Counts are omitted; see above.
+        }
       } catch (e) {
         if (!ac.signal.aborted) {
           setError(e instanceof Error ? e.message : 'Could not load the map.');
@@ -105,12 +130,8 @@ export default function RoundMapScreen() {
                   map={map}
                   expanded={open === node.id}
                   onToggle={toggle}
-                  onOpenLibrary={() =>
-                    router.push({
-                      pathname: '/(tabs)/library',
-                      params: { sport: 'bjj', position: node.position_id },
-                    })
-                  }
+                  count={countFor(node, positions, techniques)}
+                  onOpenPosition={() => router.push(`/position/${node.position_id}`)}
                 />
               </RNView>
             ))}
@@ -121,18 +142,39 @@ export default function RoundMapScreen() {
   );
 }
 
+/**
+ * How many techniques this position holds, by the GLOSSARY's rule.
+ *
+ * Not the node's own sided filter, and not a family match either. The number
+ * has to be the number the destination shows, or the link lies: `/position/:id`
+ * resolves with `techniquesInPosition`, so this does too. Null while the
+ * catalog is still loading or failed, which renders as no number rather than a
+ * confident zero.
+ */
+function countFor(
+  node: RoundMapNode,
+  positions: Position[],
+  techniques: TechniqueSummary[],
+): number | null {
+  if (techniques.length === 0) return null;
+  const p = positions.find((x) => x.id === node.position_id);
+  return p === undefined ? null : techniquesInPosition(techniques, p).length;
+}
+
 function Row({
   node,
   map,
   expanded,
   onToggle,
-  onOpenLibrary,
+  count,
+  onOpenPosition,
 }: {
   node: RoundMapNode;
   map: RoundMap;
   expanded: boolean;
   onToggle: (id: string) => void;
-  onOpenLibrary: () => void;
+  count: number | null;
+  onOpenPosition: () => void;
 }) {
   const from = map.edges.filter((e) => e.from === node.id);
   const into = map.edges.filter((e) => e.to === node.id);
@@ -145,8 +187,10 @@ function Row({
         accessibilityRole="button"
         // The state has to be spoken: collapsed and expanded look obviously
         // different and sound identical.
+        // State is spoken by accessibilityState alone. Repeating it in the
+        // label makes VoiceOver announce it twice.
         accessibilityState={{ expanded }}
-        accessibilityLabel={`${node.label}. ${expanded ? 'Collapse' : 'Expand'}`}
+        accessibilityLabel={node.label}
         testID={`roundmap-row-${node.id}`}
         style={({ pressed }) => [styles.rowHead, pressed && styles.pressed]}
       >
@@ -183,13 +227,17 @@ function Row({
           )}
 
           <Pressable
-            onPress={onOpenLibrary}
+            onPress={onOpenPosition}
             accessibilityRole="button"
-            accessibilityLabel={`Techniques from ${node.label}`}
-            testID={`roundmap-library-${node.id}`}
+            accessibilityLabel={`Read about ${node.label}`}
+            testID={`roundmap-position-${node.id}`}
             style={({ pressed }) => [styles.libraryLink, pressed && styles.pressed]}
           >
-            <Text style={styles.libraryLinkText}>Techniques from {node.label.toLowerCase()}</Text>
+            <Text style={styles.libraryLinkText}>
+              {count === null
+                ? `Read about ${node.label.toLowerCase()}`
+                : `Read about ${node.label.toLowerCase()} · ${count} techniques`}
+            </Text>
           </Pressable>
         </RNView>
       )}

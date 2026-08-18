@@ -49,7 +49,10 @@
       "position_id": "knee-on-belly",
       "position": "Side Control - Top",
       "tier": 3,
-      "note": "Mobile, heavy and worth points. It is a place you pass through on the way to mount, not one you settle in."
+      "note": "Mobile, heavy and worth points. It is a place you pass through on the way to mount, not one you settle in — and the library knows it as a detail of side control rather than a position of its own, which is why there are far fewer techniques here than next door.",
+      "detail_includes": [
+        "Knee on Belly"
+      ]
     },
     {
       "id": "side-control-top",
@@ -57,7 +60,10 @@
       "position_id": "side-control",
       "position": "Side Control - Top",
       "tier": 3,
-      "note": "Where a finished pass lands. Crossface and underhook first: a pass is not finished until the pin is, and everything above this position is reached from here."
+      "note": "Where a finished pass lands. Crossface and underhook first: a pass is not finished until the pin is, and everything above this position is reached from here.",
+      "detail_excludes": [
+        "Knee on Belly"
+      ]
     },
     {
       "id": "turtle-top",
@@ -73,7 +79,7 @@
       "position_id": "open-guard",
       "position": "Guard - Top",
       "tier": 2,
-      "note": "On top, but their legs are still between you and them. Nothing above this is available until you pass, which is why passing is the whole job here."
+      "note": "On top, but their legs are still between you and them. Nothing above this is available until you pass, which is why passing is the whole job here. It opens the OPEN guard entry, because by the time you are working on top the closed guard has usually already been opened."
     },
     {
       "id": "half-guard-top",
@@ -105,7 +111,7 @@
       "position_id": "closed-guard",
       "position": "Guard - Bottom",
       "tier": 0,
-      "note": "Underneath, with your legs between you and them. The only bottom position that attacks: sweep them, submit them, or come up to your feet."
+      "note": "Underneath, with your legs between you and them. The only bottom position that attacks: sweep them, submit them, or come up to your feet. It opens the CLOSED guard entry, because that is the guard you are taught first and the one you will play most on the bottom."
     },
     {
       "id": "half-guard-bottom",
@@ -316,6 +322,30 @@
       "to": "standing",
       "label": "Stand up",
       "kind": "recover"
+    },
+    {
+      "from": "guard-top",
+      "to": "turtle-top",
+      "label": "They turtle",
+      "kind": "route"
+    },
+    {
+      "from": "standing",
+      "to": "turtle-top",
+      "label": "Snapdown",
+      "kind": "route"
+    },
+    {
+      "from": "north-south",
+      "to": "mount-top",
+      "label": "Transition",
+      "kind": "route"
+    },
+    {
+      "from": "standing",
+      "to": "side-control-bottom",
+      "label": "They take you down and pass",
+      "kind": "concede"
     }
   ]
 }

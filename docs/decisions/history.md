@@ -23975,7 +23975,31 @@ is invisible — it does not read as "unrecorded", it reads as "you cannot get
 there".
 
 So the structure is authored and everything it points at is real. Sixteen nodes,
-28 edges, `roundmap.json` beside the glossary it names.
+32 edges, `roundmap.json` beside the glossary it names.
+
+**Review found the map pointing at something that was not real, though, and it
+is the finding worth keeping.** The `knee-on-belly` node filtered the library to
+`"Side Control - Top"` — because the library has **no knee-on-belly position
+value at all**: those techniques sit under side control carrying
+`position_detail` "Knee on Belly". So the node borrowed its neighbour's list,
+rendering one set of techniques under two differently labelled boxes, and every
+check passed: the validator was happy, and
+`TestEveryRoundMapNodeResolvesToTechniques` asks only "does this match
+something", which it emphatically did. Nodes now carry `detail_includes` /
+`detail_excludes`, exactly as glossary entries narrow within their `family`, one
+level down. Two new rules stop the next borrow: the validator refuses two nodes
+with an identical resolution RULE, and a test refuses two nodes that resolve to
+the same techniques against the real catalog — the second because knee on belly
+and side control legitimately share a `Position` and are separated only by the
+detail lists, so a rule-level check alone would not notice one being widened
+until somebody counted rows.
+
+Review also found two structural holes the orphan test could not see, because it
+only asked whether a node was attached at *either* end: `turtle-top` had no
+incoming edge — a winning position the map said you could not arrive at — and
+`north-south` had no outgoing edge, a room with no exit. Four edges added, and
+the rule generalised: **every node must be arrivable, and only the summit may
+have no way out.**
 
 **Nodes are sided; the glossary is not, and that is the structural problem the
 design had to solve.** `Position` describes closed guard once, for both players,
@@ -24031,26 +24055,49 @@ the concede edges every bad position has nothing pointing at it and draws as
 unreachable — and "how did I end up here" is the question somebody looking at a
 diagram is usually asking.
 
-**Colour never carries meaning alone**, per the palette rule: each edge kind has
-a distinct hue AND its own words on the label AND its own named toggle. The one
-thing encoded by position alone is the vertical axis, which is the message.
+**Colour never carries meaning alone**, per the palette rule — and review found
+the one place it did. In the diagram each edge kind has a hue, a dash pattern
+and a named toggle carrying the words. In the *aside's* edge lists there was no
+toggle beside them, the swatch is `aria-hidden`, and no kind word appeared on
+the line: an advancing edge and a conceding one differed only by a 3px coloured
+dash. The kind is now written on every line. The one thing encoded by position
+alone is the vertical axis, which is the message.
 
-Both clients gained one deep link into the library, `?sport=…&position=…`, and
-the two apps needed opposite mechanisms for the same idea. Web reads it as an
-INITIAL VALUE and never writes back — that page keeps no filter state anywhere
-and pushing every chip into the URL would quietly reverse that decision. Mobile
-cannot use an initial value at all: a tab screen stays mounted for the life of
-the process, so it applies the params in a **`useFocusEffect` and then clears
-them**, because route params persist and would otherwise re-apply the filter
-every time the athlete returned to the tab. It also sets the sport through
-`setSportState` rather than `setSport`, since choosing a sport there persists a
-preference and arriving through a link is not the same act as tapping the chip.
+**The link out of a node was built twice, and the second version is smaller than
+the first.** Both clients originally deep-linked into the library's position
+CHIP filter, carrying the glossary id. The chips are keyed on **family** —
+`"Mount"`, `"Side Control"`, `"Back"` — so a link carrying `mount` filtered the
+grid to nothing and left no chip looking active, not even "All positions": an
+invisible filter, which is precisely the failure the chips' own docstring warns
+about. It defeated the feature's headline affordance and neither client's guards
+caught it, because both checked the *sport* axis and never the position one.
 
-The `useFocusEffect` was not the first attempt — a plain `useEffect` was, and the
-mobile lint ratchet refused it (`react-hooks/set-state-in-effect`, 54 → 55). The
-right response to a ratchet is not to raise the number, and in this case the
-rule was pointing at a real bug: a link should apply when the athlete arrives on
-the tab, not while it sits unfocused in the background.
+The fix was to stop inventing a mechanism. Both clients already have a canonical
+`techniquesInPosition(techniques, position)` applying the glossary's whole rule,
+and mobile already has a `/position/[id]` screen built on it; web's library has
+the same thing as a panel, and its `getPosition` docstring already said the
+request path existed as "the fallback for a deep link". So a node now links to
+the position itself — `/position/:id` on mobile, `?position=<id>` opening the
+panel on web — and the count beside it is computed with the same helper the
+destination uses. The number on the link and the list at the destination cannot
+disagree, which the first version could not promise: it counted the node's own
+sided filter (mount top, 27) and led to a panel listing the whole family (44).
+
+That deleted the entire params mechanism on mobile, and with it a class of bugs
+worth recording since the reasoning that produced it was sound and still wrong.
+A tab screen never unmounts, so an initial value cannot work and the params had
+to be applied in a `useFocusEffect` and then **cleared**, or the filter
+re-applied on every return and silently undid whatever the athlete had picked.
+That was correct, and review still found a hole in it — a link naming a disabled
+discipline left its params in route state for the process lifetime. All of it is
+gone now, because the feature did not need a filter at all.
+
+One thing from that version is worth keeping on the record: the `useFocusEffect`
+was not the first attempt. A plain `useEffect` was, and the mobile lint ratchet
+refused it (`react-hooks/set-state-in-effect`, 54 → 55). The right response to a
+ratchet is not to raise the number, and the rule was pointing at something real:
+a link should apply when the athlete arrives on the tab, not while it sits
+unfocused in the background.
 
 Two small drifts fixed in passing: the contract and the `Position` docstring both
 still said **ten** positions, and there have been eleven since leg entanglement
@@ -24059,8 +24106,10 @@ was added.
 Verified: 28 backend packages green against a real database; the new content
 tests mutation-checked one at a time — a node filtering to a value nothing
 matches, a node with no edges, a glossary position missing from the map, bands
-removed, a band made unreachable, a node below every band, and a renamed struct
-tag — each red on its own and green restored. Web 89 tests (9 new), mobile 1312
+removed, a band made unreachable, a node below every band, a renamed struct tag,
+and the three guards review's findings produced (knee on belly widened back to
+side control, a winning node made unreachable, a node left as a dead end) — each
+red on its own and green restored. Web 89 tests (9 new), mobile 1312
 (6 new), both mutation-checked the same way; mobile lint holds at exactly 54/54;
 `verify` and the OpenAPI lint green. **Not seen in a browser or on a device**:
 the dashboard sits behind Clerk and this session holds no credentials, and the
@@ -24085,6 +24134,19 @@ Open questions:
   both exist they agree today, and an edge the catalog contradicts would be a
   real content bug — but the derived side is too sparse to assert against
   without failing on its own gaps.
+- **The web diagram's boxes are mouse-only.** They carry no `tabIndex`, no
+  keyboard handler, and `role="img"` on the `<svg>` makes the whole subtree
+  presentational — so for assistive tech the boxes do not exist. The parallel
+  text list below reaches every node with real buttons, which is why this is
+  recorded rather than fixed: the picture is a decorated duplicate, deliberately.
+  If it ever becomes the only way to reach something, that stops being true.
+- **An edge whose `kind` contradicts its tier direction still validates** — an
+  authored `concede` that goes UP the ladder would draw as nonsense. The shipped
+  map satisfies the invariant already (every `concede` descends, no `route`
+  ascends into a worse tier), so it is free to enforce and simply is not yet.
+- The library's technique list is a hard dependency of the web screen: if that
+  one ~197 KB fetch fails, the error state replaces a map that loaded fine.
+  Mobile already tolerates it and renders without counts.
 
 
 ## Open items / known gaps as of this entry

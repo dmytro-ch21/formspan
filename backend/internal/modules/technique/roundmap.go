@@ -13,11 +13,13 @@ import (
 // library already holds a real position graph — `Technique.ToPosition` records
 // where a technique leaves you — and deriving the map from it was tried first.
 // It produces the right spine (standing → guard → pass → side control) and then
-// falls apart: only 170 of 542 techniques record a `to_position`, so the
-// transitions that matter most to a beginner are simply absent. There is no
-// side-control-to-mount edge in the derived graph, no mount-to-back, and no
-// escapes at all. A drawn map with holes in it is worse than no map, because a
-// missing edge is invisible — it reads as "you cannot get there".
+// falls apart: only 170 of 542 techniques record a `to_position`. Measured
+// against the catalog: the mount-to-back edge does not exist at all, the
+// side-control-to-mount edge rests on a single technique, and **not one of the
+// Escape-category techniques records where it leaves you** — so the whole loop
+// back from the bad places is missing. A drawn map with holes in it is worse
+// than no map, because a missing edge is invisible: it reads as "you cannot get
+// there" rather than as "nobody wrote this down".
 //
 // So the structure is authored teaching content and the *contents* of each node
 // are real: every node names a position the library can be filtered to, and
@@ -82,6 +84,20 @@ type MapNode struct {
 	// a node needs both.
 	PositionID string `json:"position_id"`
 	Position   string `json:"position"`
+	// Narrow the match within Position, exactly as the glossary's Position type
+	// does within Family — and for the same reason, one level down.
+	//
+	// The library has NO knee-on-belly position value: those 8 techniques sit
+	// under "Side Control - Top" carrying `position_detail` "Knee on Belly". So
+	// a node that could only name a position had to borrow side control's 31,
+	// which passes every test that asks "does this resolve to something" and
+	// renders one list under two differently labelled boxes. Review caught it;
+	// `TestNoTwoNodesResolveTheSameWay` is what stops the next one.
+	//
+	// Includes is a whitelist (empty means the whole position), Excludes a
+	// blacklist. Never both — see the glossary's identical rule for why.
+	DetailIncludes []string `json:"detail_includes"`
+	DetailExcludes []string `json:"detail_excludes"`
 	// Tier is what the position is worth FROM YOUR SIDE — 5 on their back, -3
 	// with your own back taken, 0 standing. It is the whole hierarchy in one
 	// integer, which is what lets a narrow screen render the map as a ladder
@@ -116,6 +132,18 @@ func LoadRoundMap() (*RoundMap, error) {
 	var m RoundMap
 	if err := json.Unmarshal(roundMapJSON, &m); err != nil {
 		return nil, fmt.Errorf("technique: parse round map: %w", err)
+	}
+	// Nil slices marshal as `null`, and the contract marks both required. Same
+	// normalisation the glossary does at its own parse boundary, and for the
+	// same reason: a client should never have to special-case absent-versus-
+	// empty for a list that is empty on most entries.
+	for i := range m.Nodes {
+		if m.Nodes[i].DetailIncludes == nil {
+			m.Nodes[i].DetailIncludes = []string{}
+		}
+		if m.Nodes[i].DetailExcludes == nil {
+			m.Nodes[i].DetailExcludes = []string{}
+		}
 	}
 	if err := validateRoundMap(&m); err != nil {
 		return nil, err
@@ -164,6 +192,11 @@ func validateRoundMap(m *RoundMap) error {
 			return fmt.Errorf("technique: round map node %q needs a label and a note", n.ID)
 		case n.PositionID == "" || n.Position == "":
 			return fmt.Errorf("technique: round map node %q needs position_id and position", n.ID)
+		case len(n.DetailIncludes) > 0 && len(n.DetailExcludes) > 0:
+			// A whitelist already excludes everything not on it, so pairing the
+			// two means one of them does nothing and which one is not obvious
+			// from reading the entry. Same rule as the glossary's.
+			return fmt.Errorf("technique: round map node %q sets both detail_includes and detail_excludes", n.ID)
 		}
 		seen[n.ID] = true
 
@@ -171,6 +204,47 @@ func validateRoundMap(m *RoundMap) error {
 		// just as a position quietly missing from the map.
 		if n.Tier < m.Bands[len(m.Bands)-1].MinTier {
 			return fmt.Errorf("technique: round map node %q has tier %d, below every band", n.ID, n.Tier)
+		}
+	}
+
+	// Two nodes resolving identically is the borrowed-filter bug: one list of
+	// techniques presented under two differently labelled boxes, with every
+	// "does it resolve to anything" check passing. Keyed on the whole rule, not
+	// on Position alone, since side control and knee-on-belly legitimately share
+	// a Position and are separated by the detail lists.
+	rule := make(map[string]string, len(m.Nodes))
+	for _, n := range m.Nodes {
+		k := fmt.Sprintf("%s|%v|%v", n.Position, n.DetailIncludes, n.DetailExcludes)
+		if prev, dup := rule[k]; dup {
+			return fmt.Errorf(
+				"technique: round map nodes %q and %q resolve to the same techniques", prev, n.ID)
+		}
+		rule[k] = n.ID
+	}
+
+	// Reachability, both directions. A node nothing points at is a place the map
+	// says you cannot arrive; a node with nothing leaving it is a room with no
+	// exit. Exactly one node is allowed no exit — the summit, which is where the
+	// round ends.
+	incoming := make(map[string]bool, len(m.Nodes))
+	outgoing := make(map[string]bool, len(m.Nodes))
+	for _, e := range m.Edges {
+		incoming[e.To] = true
+		outgoing[e.From] = true
+	}
+	summit := m.Nodes[0].ID
+	best := m.Nodes[0].Tier
+	for _, n := range m.Nodes {
+		if n.Tier > best {
+			best, summit = n.Tier, n.ID
+		}
+	}
+	for _, n := range m.Nodes {
+		if !incoming[n.ID] {
+			return fmt.Errorf("technique: nothing on the map arrives at node %q", n.ID)
+		}
+		if !outgoing[n.ID] && n.ID != summit {
+			return fmt.Errorf("technique: node %q has no way out of it", n.ID)
 		}
 	}
 
