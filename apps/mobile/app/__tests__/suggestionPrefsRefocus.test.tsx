@@ -309,6 +309,7 @@ const mockModules: Module[] = (['bjj', 'strength'] as const).map((key) => ({
     facets: key === 'bjj' ? ['position', 'belt'] : [],
     has_goals: false,
     has_progression: key === 'strength',
+    has_food_log: false,
     record_kinds: key === 'strength' ? ['1rm'] : [],
   },
 }));

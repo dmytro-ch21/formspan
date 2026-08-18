@@ -33,6 +33,18 @@ export type ModuleCapabilities = {
   facets: string[];
   has_goals: boolean;
   has_progression: boolean;
+  /**
+   * Whether this module has a food log, its target, and the tab that reaches
+   * them. True only for nutrition.
+   *
+   * A capability rather than `key === 'nutrition'` at each call site, for the
+   * reason every other gate here exists: a discipline gaining or losing a
+   * surface should be one row on the server, not an edit in three apps. It is
+   * a distinct flag rather than a reading of `!is_sport`, because those answer
+   * different questions — `is_sport` says a session cannot have this sport,
+   * which happens to be true here and says nothing about a food log.
+   */
+  has_food_log: boolean;
   /** Empty means this discipline has no personal bests worth a screen. */
   record_kinds: string[];
 };
@@ -68,6 +80,7 @@ function normalise(m: Partial<Module> & { key: string }): Module {
       facets: caps.facets ?? [],
       has_goals: caps.has_goals ?? false,
       has_progression: caps.has_progression ?? false,
+      has_food_log: caps.has_food_log ?? false,
       record_kinds: caps.record_kinds ?? [],
     },
   };
@@ -150,6 +163,7 @@ const FALLBACK: Module[] = [
       facets: ['muscle', 'movement'],
       has_goals: true,
       has_progression: true,
+      has_food_log: false,
       record_kinds: ['heaviest_weight', 'estimated_1rm', 'most_reps'],
     },
   },
@@ -164,6 +178,7 @@ const FALLBACK: Module[] = [
       facets: ['position', 'belt'],
       has_goals: false,
       has_progression: false,
+      has_food_log: false,
       record_kinds: [],
     },
   },
@@ -181,6 +196,7 @@ const FALLBACK: Module[] = [
       facets: [],
       has_goals: false,
       has_progression: false,
+      has_food_log: false,
       record_kinds: ['longest_time', 'furthest_distance'],
     },
   },
@@ -195,6 +211,9 @@ const FALLBACK: Module[] = [
       facets: [],
       has_goals: false,
       has_progression: false,
+      // The only true one. Nutrition is a module rather than a sport, and this
+      // is what makes its surface reachable without anybody comparing keys.
+      has_food_log: true,
       record_kinds: [],
     },
   },
@@ -203,6 +222,17 @@ const FALLBACK: Module[] = [
 /** A copy, so a caller filtering or sorting can't corrupt the fallback. */
 export function fallbackModules(): Module[] {
   return FALLBACK.map((m) => ({ ...m, capabilities: { ...m.capabilities } }));
+}
+
+/**
+ * Is the food log reachable at all?
+ *
+ * `enabled && has_food_log`, in one place, because the tab bar and the Today
+ * card both ask it and two copies of a two-part condition is how one of them
+ * ends up checking only half. Same shape as `usesBelt` below.
+ */
+export function hasFoodLog(modules: Module[]): boolean {
+  return modules.some((m) => m.enabled && m.capabilities.has_food_log);
 }
 
 /** The enabled modules that can actually be a session's sport. */

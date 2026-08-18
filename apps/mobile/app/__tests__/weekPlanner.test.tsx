@@ -110,6 +110,7 @@ const modules: Module[] = [
       facets: [],
       has_goals: true,
       has_progression: true,
+      has_food_log: false,
       record_kinds: ['heaviest_weight'],
     },
   },

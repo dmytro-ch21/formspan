@@ -238,6 +238,91 @@ const CREATE_SEQUENCES = `
 `;
 
 /**
+ * One logged item of food.
+ *
+ * Push-only, like `sequences`: the phone is where food is logged, and a day
+ * corrected on web is rare enough that a pull would be machinery serving
+ * almost nobody. If that changes, `workout_cache` is the shape to copy, not
+ * this one.
+ *
+ * `eaten_on` is a LOCAL calendar date (`YYYY-MM-DD`), written by `dayString`
+ * and never `toISOString().slice(0,10)` — the same rule `planned_sessions.day`
+ * carries, and for a sharper reason here: west of Greenwich a 22:00 snack
+ * would land on tomorrow, and the remaining figure would then be wrong on two
+ * days at once.
+ *
+ * The macros are stored ABSOLUTE for the quantity logged, already multiplied
+ * by `servings`. The server never scales, and neither does this table — which
+ * is what lets the day screen render offline with no join, exactly as
+ * `exercise_cache.payload_json` does for the catalog.
+ */
+const CREATE_FOOD_ENTRIES = `
+  CREATE TABLE IF NOT EXISTS food_entries (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    eaten_on TEXT NOT NULL,
+    meal TEXT NOT NULL,
+    name TEXT NOT NULL,
+    servings REAL NOT NULL DEFAULT 1,
+    serving_label TEXT NOT NULL,
+    kcal REAL NOT NULL,
+    protein_g REAL NOT NULL DEFAULT 0,
+    carb_g REAL NOT NULL DEFAULT 0,
+    fat_g REAL NOT NULL DEFAULT 0,
+    fibre_g REAL,
+    source_food_id TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    logged_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    dirty INTEGER NOT NULL DEFAULT 1,
+    remote INTEGER NOT NULL DEFAULT 0,
+    deleted_at TEXT,
+    last_error TEXT
+  );
+`;
+
+/**
+ * The athlete's saved foods, cached.
+ *
+ * Pulls AND pushes, so this is `workout_cache`'s shape rather than
+ * `sequences`': web authors recipes, the phone saves what it just ate, and
+ * both have to survive the other. Hence `remote DEFAULT 1` (a row that arrived
+ * from the server owes nothing), `deleted_at` tombstones, and `updated_at` for
+ * the compare-and-swap that stops a push clearing an edit made while it was in
+ * flight.
+ *
+ * `last_used_at` and `use_count` are DELIBERATELY LOCAL-ONLY and never pulled.
+ * They are this device's reading of its own log, which is what makes the
+ * quick-add list a single indexed read with no join and no network — and the
+ * quick-add list being instant is the whole of the two-tap repeat.
+ */
+const CREATE_FOODS = `
+  CREATE TABLE IF NOT EXISTS foods (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'food',
+    name TEXT NOT NULL,
+    brand TEXT NOT NULL DEFAULT '',
+    serving_label TEXT NOT NULL,
+    serving_grams REAL,
+    kcal REAL NOT NULL,
+    protein_g REAL NOT NULL DEFAULT 0,
+    carb_g REAL NOT NULL DEFAULT 0,
+    fat_g REAL NOT NULL DEFAULT 0,
+    fibre_g REAL,
+    last_used_at TEXT,
+    use_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT '',
+    dirty INTEGER NOT NULL DEFAULT 0,
+    remote INTEGER NOT NULL DEFAULT 1,
+    deleted_at TEXT,
+    last_error TEXT,
+    cached_at TEXT NOT NULL
+  );
+`;
+
+/**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
  *
@@ -266,7 +351,7 @@ const CREATE_SEQUENCES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -276,7 +361,9 @@ type LocalTable =
   | 'workout_cache'
   | 'exercise_cache'
   | 'planned_sessions'
-  | 'sequences';
+  | 'sequences'
+  | 'food_entries'
+  | 'foods';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -351,6 +438,8 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_PREFS);
   await db.execAsync(CREATE_PLANNED);
   await db.execAsync(CREATE_SEQUENCES);
+  await db.execAsync(CREATE_FOOD_ENTRIES);
+  await db.execAsync(CREATE_FOODS);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -615,6 +704,24 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync(CREATE_SEQUENCES);
     await db.execAsync(
       `CREATE INDEX IF NOT EXISTS sequences_user_idx ON sequences (user_id);`,
+    );
+  }
+
+  if (current < 18) {
+    // The food log. Two brand-new TABLES, so nothing here is an ALTER and
+    // nothing can hit the duplicate-column trap — the unconditional
+    // `CREATE ... IF NOT EXISTS` above has already made both, on every path.
+    // Kept as its own block anyway so the version they arrived in is readable
+    // from `migrate()` rather than only from git.
+    await db.execAsync(CREATE_FOOD_ENTRIES);
+    await db.execAsync(CREATE_FOODS);
+    // The day screen's only query, and the outbox's.
+    await db.execAsync(
+      `CREATE INDEX IF NOT EXISTS food_entries_user_day_idx ON food_entries (user_id, eaten_on);`,
+    );
+    // The quick-add list, which must not touch the network to be worth having.
+    await db.execAsync(
+      `CREATE INDEX IF NOT EXISTS foods_user_recent_idx ON foods (user_id, last_used_at DESC);`,
     );
   }
 

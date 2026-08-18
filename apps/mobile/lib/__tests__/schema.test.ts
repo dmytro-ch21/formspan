@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(17);
+  expect(row.user_version).toBe(18);
 });
 
 it('a fresh install has the sequences outbox', async () => {
@@ -122,7 +122,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 17 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -156,7 +156,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 17 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -177,7 +177,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 17 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
@@ -331,5 +331,100 @@ it('upgrading a v15-shaped database does not mark every cached name as owed', as
     .prepare(`SELECT name_dirty FROM workout_cache WHERE id = 'w1'`)
     .get() as { name_dirty: number };
   expect(row.name_dirty).toBe(0);
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 17 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
+});
+
+it('a fresh install has the food log', async () => {
+  // The version bump on its own proves nothing — it is a number in a file.
+  // This is what the bump was FOR, and it covers the shape the outbox depends
+  // on: without `dirty` there is no way to know what is owed, and without
+  // `deleted_at` a delete made offline is indistinguishable from one that
+  // never happened.
+  const db = await migratedFixture();
+
+  const entries = (
+    db.raw.prepare('PRAGMA table_info(food_entries)').all() as { name: string }[]
+  ).map((c) => c.name);
+  expect(entries).toEqual(
+    expect.arrayContaining([
+      'id',
+      'user_id',
+      'eaten_on',
+      'meal',
+      'name',
+      'servings',
+      'serving_label',
+      'kcal',
+      'protein_g',
+      'source_food_id',
+      'dirty',
+      'remote',
+      'deleted_at',
+      'last_error',
+      'updated_at',
+    ]),
+  );
+
+  const foods = (db.raw.prepare('PRAGMA table_info(foods)').all() as { name: string }[]).map(
+    (c) => c.name,
+  );
+  expect(foods).toEqual(
+    expect.arrayContaining([
+      'id',
+      'user_id',
+      'kind',
+      'name',
+      'serving_label',
+      'kcal',
+      // Local-only and never pulled. This pair is what makes the quick-add
+      // list a single indexed read rather than a network round trip, which is
+      // the whole of the two-tap repeat.
+      'last_used_at',
+      'use_count',
+      'dirty',
+      'remote',
+      'deleted_at',
+      'cached_at',
+    ]),
+  );
+});
+
+it('upgrades a v17-shaped database by adding the food log', async () => {
+  // The path a real device takes: a v17 database, upgraded in place.
+  //
+  // BE HONEST ABOUT WHAT THIS COVERS. Deleting the whole `if (current < 18)`
+  // block leaves this test GREEN, because the unconditional
+  // `CREATE TABLE IF NOT EXISTS` section above the versioned branches recreates
+  // both tables on every call — which is `db.ts`'s documented contract, not a
+  // bug. What that block uniquely contributes is the two INDEXES, so the index
+  // test below is the one that actually fails when it goes missing.
+  //
+  // This test still earns its place: it proves the upgrade path reaches v18 at
+  // all and does not throw part-way, which is how a half-applied migration
+  // would present.
+  const db = await migratedFixture();
+  db.raw.exec('DROP TABLE food_entries; DROP TABLE foods; PRAGMA user_version = 17;');
+
+  await migrate(db as never);
+
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 18 });
+  const tables = (
+    db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+  ).map((t) => t.name);
+  expect(tables).toEqual(expect.arrayContaining(['food_entries', 'foods']));
+});
+
+it('the food log is indexed on the two reads that matter', async () => {
+  // Not decoration: the day screen queries (user_id, eaten_on) on every focus,
+  // and the quick-add list queries foods by recency every time the sheet opens.
+  // A missing index here is a scan on the tables expected to grow fastest.
+  const db = await migratedFixture();
+  const idx = (
+    db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='index'")
+      .all() as { name: string }[]
+  ).map((i) => i.name);
+  expect(idx).toEqual(
+    expect.arrayContaining(['food_entries_user_day_idx', 'foods_user_recent_idx']),
+  );
 });
