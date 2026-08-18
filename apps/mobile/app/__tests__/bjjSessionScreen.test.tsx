@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import BjjSessionScreen from '../bjj/session/[id]';
 import type { SessionDetail } from '@/lib/bjjSession';
 import { readLocalSession, type LocalSession } from '@/lib/sessionStore';
 import { addDays, fetchHistory, startOfWeek, today, type HistoryDay } from '@/lib/history';
+import { fetchAccomplishments, type Accomplishment } from '@/lib/accomplishments';
+import { playSound } from '@/lib/sounds';
 
 /**
  * Opening a BJJ session from Today crashed.
@@ -156,6 +158,16 @@ jest.mock('@/lib/history', () => ({
 
 // Sound and haptics reach native modules the celebration fires on mount.
 jest.mock('@/lib/sounds', () => ({ playSound: jest.fn(), primeSounds: jest.fn() }));
+
+/*
+ * The accomplishments lookup (#284). Mocked to resolve empty by default so the
+ * milestone tests below are not silently competing with a badge; the chime
+ * tests override it.
+ */
+jest.mock('@/lib/accomplishments', () => ({
+  ...jest.requireActual('@/lib/accomplishments'),
+  fetchAccomplishments: jest.fn(async () => []),
+}));
 jest.mock('expo-haptics', () => ({
   notificationAsync: jest.fn(async () => {}),
   impactAsync: jest.fn(async () => {}),
@@ -391,6 +403,80 @@ it('shows no rung on a week that reaches no rung', async () => {
     expect(screen.getByTestId('session-celebration')).toBeTruthy();
   });
   expect(screen.queryByTestId('celebration-milestone')).toBeNull();
+});
+
+
+/*
+ * The chime ladder, where #284 and #276 meet.
+ *
+ * Three things can fire one sound on this card and only one may: a streak
+ * MILESTONE, a BJJ FIRST, and the ordinary weekly streak, in that order. The
+ * middle rung is new — before #284 a BJJ card had no badge at all — and the
+ * rule that a first "takes the personal record's slot" existed only in prose
+ * plus a comment. Nothing failed when the wiring was wrong: passing the
+ * records-only flag instead of "earned a badge of either kind" left every test
+ * green while a BJJ first chimed nothing.
+ *
+ * These assert the SOUND, because the sound is the whole subject — the badge
+ * renders either way.
+ */
+
+const aFirst: Accomplishment = {
+  kind: 'first_submission_win',
+  basis: 'reported',
+  achieved_on: null,
+  contest_id: null,
+  contest_name: null,
+  placement: null,
+  entrants: null,
+  session_id: 's1',
+  technique_id: null,
+  technique_name: null,
+};
+
+/** The chime is deliberately delayed ~1.1s so it lands off `sessionComplete`. */
+async function soundsAfterTheChimeDelay() {
+  await act(async () => {
+    jest.advanceTimersByTime(1500);
+  });
+  return (playSound as jest.Mock).mock.calls.map(([name]) => name);
+}
+
+describe('one sound per session', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    (playSound as jest.Mock).mockClear();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    (fetchAccomplishments as jest.Mock).mockImplementation(async () => []);
+  });
+
+  it('chimes the first when the mat earns one', async () => {
+    (fetchAccomplishments as jest.Mock).mockResolvedValue([aFirst]);
+    (fetchHistory as jest.Mock).mockResolvedValue(historyWithStreak(2, 1));
+
+    await finishTheClass();
+    await waitFor(() => expect(screen.getByTestId('celebration-badge')).toBeTruthy());
+
+    // `pr`, the rare-thing sound a first shares with a personal record — and
+    // NOT `streak`, which is what fires if the badge fails to latch it out.
+    expect(await soundsAfterTheChimeDelay()).toContain('pr');
+  });
+
+  it('lets a milestone outrank a first earned in the same class', async () => {
+    (fetchAccomplishments as jest.Mock).mockResolvedValue([aFirst]);
+    (fetchHistory as jest.Mock).mockResolvedValue(historyWithStreak(4, 1));
+
+    await finishTheClass();
+    await waitFor(() => expect(screen.getByTestId('celebration-milestone')).toBeTruthy());
+
+    const played = await soundsAfterTheChimeDelay();
+    expect(played).toContain('success');
+    // The rung is rarer than the first, so the first stands down — the whole
+    // point of the shared latch, and the half a wrong flag would invert.
+    expect(played).not.toContain('pr');
+  });
 });
 
 afterEach(() => {

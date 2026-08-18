@@ -2488,6 +2488,26 @@ the same duplicated-rule shape cleaned up in #268. And `isCurrentWeek` was
 deleted rather than kept: it had no caller, and a tested function that nothing
 calls is an assertion that cannot fail against shipping code.
 
+**Rebased onto a main that had moved 13 commits, and one of them was in these
+exact files.** #284 (N29) gave the BJJ finish card its first badge — a
+server-judged accomplishment — and wired it to take the personal record's slot
+*including its chime*, which also made `recordsSettled` stop being true by
+construction on that screen. This branch was changing the same ladder from the
+other end. The merged rule is three rungs: **milestone > badge (record OR
+accomplishment) > weekly streak**, with each rung waiting on the lookup that
+could outrank it — the badge chime now gates on `streakSettled` exactly as the
+streak chime already gated on `recordsSettled`.
+
+The merge conflict resolved cleanly in a way that was silently wrong for one
+line, and the mutation check is what caught it: `celebratesRecord` must receive
+`earnedBadge`, not `hasRecords`. With the records-only flag, a BJJ first chimes
+**nothing** — `records` is hard-coded empty on that screen — and **1476 tests
+stayed green**. #284's own rule ("an accomplishment must latch the streak chime
+out") lived in prose and a comment, and nothing on either branch asserted it.
+`bjjSessionScreen.test.tsx` now asserts the *sound*: a first chimes `pr`, and a
+milestone earned in the same class chimes `success` and stands the first down.
+Both go red against the wrong flag.
+
 ### Gaps this leaves
 
 - **No password reset**, which is now the most urgent hole in mobile auth and is
