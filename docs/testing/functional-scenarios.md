@@ -715,6 +715,20 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - **A deleted session is not resurrected by a pull**, which is the older half of
   the same clause and must keep holding.
 
+### The repair screen and deleted rows (F4)
+
+- **A session deleted while blocked leaves the repair screen.** Get a session
+  into the blocked state, delete it, reopen the screen: it is gone. Before the
+  fix it stayed and offered "Open the session", which navigated to a screen
+  showing nothing — the row could not be repaired or dismissed.
+- **The same for a plan.**
+- **A failing delete is still visible somewhere.** It leaves the repair screen
+  but must keep counting in the pending badge; the sync it needs is the
+  ordinary one, not a per-row repair.
+- **The stale error does not outlive its operation.** A row blocked on one
+  failure, then deleted, must not carry the old message — and if the delete
+  itself then fails, the message shown should describe the delete.
+
 ## Progression rules — double progression (`GET /v1/sessions/suggestions`, both clients)
 
 Domain: what to load today and for how many reps, computed from the caller's own last few sessions. The thing in the product that advises rather than records, so it follows the standing rule — deterministic, and it always states its evidence.

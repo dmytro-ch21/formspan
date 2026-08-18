@@ -23797,6 +23797,55 @@ Worth carrying to `T8`: its guard must check **both** flags, not `dirty` alone. 
   in a fixture, which is the only way to make two `Date.now()` calls collide on
   demand.
 
+## 2026-08-17 — A row you were told to fix, that could not be opened
+
+**F4**, the last and mildest of the four things review found while checking T6 —
+and milder than T7 or T8, which lost data. This one only wasted the athlete's
+time, but it wasted it in a way that reads as the app being broken.
+
+`blockedRows` was the single read in `sessionStore` without `deleted_at IS NULL`
+while every other read has it. The task called that cosmetic and self-clearing.
+It is neither, quite: the repair screen's primary action is **"Open the
+session"**, and `readLocalSession` filters tombstones — so a session deleted
+while it was blocked stayed on the list offering a button that navigated to a
+screen showing nothing. A row you are told to go and fix, which cannot be
+opened, about a session you already deleted.
+
+Both queries now filter, and both deletes clear `last_error`, which described
+the operation that was failing BEFORE the delete and is not what the row is
+trying to do any more.
+
+### What is deliberately NOT hidden
+
+A failing DELETE does not become invisible. `countPendingSessions` does not
+filter tombstones — on purpose, since an unsent delete is genuinely outstanding
+work — so the pending badge keeps reporting it. What the row loses is a repair
+affordance that never worked for it: a tombstone has nothing to edit, and the
+retry it needs is the ordinary sync.
+
+### The mutation run caught a vacuous test again, for the third PR running
+
+The pattern is now consistent enough to name. Two independent changes here — a
+query clause and a delete's SET list — and either one alone hides the row from
+the screen. So a test that deletes through the real path and asserts the row is
+gone passes with EITHER change reverted.
+
+I had written the isolation test for sessions (write the tombstone directly,
+put `last_error` back, leaving the filter as the only thing that can drop the
+row) and not for workouts. Dropping `deleted_at IS NULL` from the workouts query
+left all seven tests green. Two queries, two clauses, two tests.
+
+Five mutations now, each failing a different test: either query's filter, either
+delete's `last_error`, and a delete that also clears `dirty` — which would drop
+the work rather than the complaint.
+
+### Open questions this leaves
+
+- **`last_error` is cleared, not recorded.** If somebody later wants "this
+  delete has failed six times", the count is gone. Nothing asks for that today.
+- **The three traps found reviewing #267 are now closed** (T6, T8 here, T7 in
+  flight as #270). Nobody has swept for a fourth, and this family has produced
+  one every time somebody looked.
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
