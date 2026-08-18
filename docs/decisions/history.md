@@ -23797,9 +23797,10 @@ Worth carrying to `T8`: its guard must check **both** flags, not `dirty` alone. 
   in a fixture, which is the only way to make two `Date.now()` calls collide on
   demand.
 
-## 2026-08-17 — A row you were told to fix, that could not be opened
+## 2026-08-18 — A row you were told to fix, that could not be opened
 
-**F4**, the last and mildest of the four things review found while checking T6 —
+**F5** — filed as **F4**, which was its own problem. The last and mildest of
+the four things review found while checking T6 —
 and milder than T7 or T8, which lost data. This one only wasted the athlete's
 time, but it wasted it in a way that reads as the app being broken.
 
@@ -23838,6 +23839,26 @@ left all seven tests green. Two queries, two clauses, two tests.
 Five mutations now, each failing a different test: either query's filter, either
 delete's `last_error`, and a delete that also clears `dirty` — which would drop
 the work rather than the complaint.
+
+### The task list lost this line twice over
+
+Both failures are ones TASKS.md's own rules exist to prevent, and neither was
+noticed until this branch tried to tick the line.
+
+It was filed by #267 as **F4** — an id already held by the share-card export
+bug. "Ids are never reused, so 'closes W2' in a commit message still means
+something a year later" is the rule, and for a while one id named two unrelated
+things.
+
+Then #270, resolving a conflict over that same region, **deleted the line
+altogether**. The rule there is "the line is never deleted, because a finished
+task is the record that it was considered", and the failure is worse than an
+untidy file: a task that vanishes mid-flight is indistinguishable from one
+nobody ever filed — while a draft PR claiming it was open and visible the whole
+time. That is precisely what the claim-by-draft-PR convention cannot catch,
+because the claim was never the thing that went missing.
+
+Re-filed here as F5.
 
 ### Open questions this leaves
 
