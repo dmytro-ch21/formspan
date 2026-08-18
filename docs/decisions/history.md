@@ -25193,6 +25193,76 @@ Open questions:
   techniques. That matches `item_count` and the curricula list cards, and is a
   different number from the "73 techniques" the history entry for #277 quotes.
   Both are correct about different things, which is not obvious from either.
+## 2026-08-18 — Nutrition on the phone: the Food tab, the outbox, and the phase screen that never existed (N25)
+
+The backend from N24 could hold a target and a food diary; nothing could log
+into it. This lands the mobile half: a fifth `Food` tab, the day screen, a
+two-tap quick-add, the Today Fuel card, and the offline outbox at schema v18.
+
+**A fifth tab, second in the bar.** The four-tab argument in `(tabs)/_layout.tsx`
+was always about *learnability*, not the literal number, and the bar has been
+four-or-five since `anyCatalog` gated Library — so a variable count is the
+established state, not a new one. Food earns a fixed slot on frequency: three
+to six logs a day, more than anything else in this app, and a stack route costs
+an extra tap every time on a screen whose contents move. Gated with `href: null`
+through a `hiddenFor(name)` helper, never by omitting `<Tabs.Screen>`, and keyed
+on the `has_food_log` **capability** rather than on `key === 'nutrition'`.
+
+**Two outbox shapes, not a third.** `food_entries` are append-mostly and
+push-only (`sequences.ts`'s shape); `foods` are a small catalog web also writes,
+so they get a pull as well (`workout_cache`'s shape). `last_used_at` and
+`use_count` are local-only and never pulled, which is what makes the recents
+list a single indexed read with no join and no network.
+
+**A race the tests found only in the full suite.** The compare-and-swap that
+protects a mid-push edit compares `updated_at` strings at millisecond
+resolution — so two writes landing in the same millisecond produced identical
+tokens, and an edit made during a push was silently marked as sent. The test
+passed alone and failed under load. `stamp()` now guarantees a strictly
+increasing value. Worth remembering the shape: a CAS token is only a token if it
+actually changes.
+
+**The phase screen is the part that was easy to miss.** `createPhase` and
+`endPhase` have been in `lib/body.ts` and in the API since the body module
+landed, with **zero callers anywhere in `apps/`**. Nothing depended on them, so
+nothing noticed — until a calorie target, which takes its direction and its rate
+from the live phase and has nothing to derive from without one. `app/phase/`
+asks for kind, and for a target weight and date only where they mean something:
+making weight fixes the required rate arithmetically, everywhere else the rate
+comes from the evidence-based band. Goal *pace* is deliberately not asked —
+letting somebody type "2 kg a week" would make the app the author of a target it
+then judges them against. The band copy is read off `RATE_TARGETS` rather than
+written out, so it cannot drift from the arithmetic.
+
+**No chart.** Every candidate fails the N5 carve-out: 7-day calorie bars fail
+"decided away from a desk", protein bars fail that *and* inform nothing the
+remaining number leaves open, intake-vs-weight fails "one question" outright.
+`RemainingBlock` carries a comment saying its in-day progress bar is not a chart
+— one quantity against one target, no time axis — so nobody files it as
+precedent later.
+
+**Two tests that passed for the wrong reason, both caught by mutation.**
+Deleting the entire schema-v18 upgrade block left the migration test green,
+because the unconditional `CREATE TABLE IF NOT EXISTS` section recreates the
+tables by design; the index assertion is what actually catches it, and the
+comment now says so rather than overclaiming. And the first `rescale` round-trip
+test used a fixture that divided evenly, so it would have passed whatever the
+arithmetic did. The measured drift is one rounding step — 355 kcal at two
+servings returns 355.1 — and both the docstring and the test say that instead of
+claiming exactness.
+
+### Open questions this leaves
+
+- **Not verified on a device or Simulator.** Typecheck, lint and 1,412 mobile
+  tests are green, and every guard was mutation-tested, but no screen here has
+  been looked at. `L1` records what that gap has cost before.
+- The Fuel card and the day screen both fetch the day's target over the network.
+  It is the one number the phone cannot compute, and a failure renders as "set a
+  target" rather than a wrong number — but a target that never loads in a gym
+  dead-spot reads identically to not having one. Caching the live target
+  locally is the obvious fix and is not done here.
+- Saving a meal from a slot with two or more entries is in the plan and is not
+  built. Quick-add covers the repeat case; that covers the repeat *combination*.
 
 
 ## Open items / known gaps as of this entry
