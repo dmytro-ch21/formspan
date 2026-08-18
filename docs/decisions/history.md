@@ -27223,6 +27223,41 @@ reached the code it was written to cover. It passed with the leak deliberately
 reintroduced; only mutation testing found it. Sixteen guards are mutation-tested
 across the schema, the quota query, the handler and the wire layer.
 
+### Four defects review found that a green suite did not
+
+**A typed nil made the unconfigured deploy panic.** `NewAnthropicEstimator`
+returned `*AnthropicEstimator`, and a nil pointer assigned into an `Estimator`
+interface is a NON-nil interface — so the handler's `estimator == nil` check
+read false, the 503 branch was skipped, and the first real request on a
+key-less deploy died on a nil receiver. The test meant to cover this passed an
+untyped `nil` literal, which is a different thing entirely, and stayed green
+throughout. The constructor returns the interface now, so the nil is genuine at
+the source and no call site has to remember.
+
+**A cancelled request escaped the meter.** The usage write used `r.Context()`,
+which is already done if the caller disconnects mid-call — after the tokens are
+spent. A cancel-loop is precisely the spend-somebody-else's-money shape the
+quota exists to bound. It uses `context.WithoutCancel` now, and logs the error
+rather than discarding it: the old code swallowed it with `_ =` while a comment
+claimed middleware would log it, which was false.
+
+**Decimal portions were impossible to type and silently logged ten times the
+value.** The draft's numeric fields were controlled on parsed numbers, so `"1."`
+round-tripped to `1`, redisplayed as `"1"`, and the next keystroke made `15` —
+worst in exactly the field a low-confidence warning tells the athlete to fix.
+This is the trap `checkin/[date].tsx` and the session logger both already
+record (draft state is TEXT, never numbers) and this screen fell into it anyway.
+Clearing a field collapsed it to `0` for the same reason.
+
+**`logAll` failed silently and duplicated on retry.** No `catch`, so a failure
+part-way left some rows logged and some not with nothing on screen, and a second
+tap re-logged the successes — `logFood` mints a fresh id per call, so the
+outbox's idempotency key does not protect a client-side replay. Rows are dropped
+as they land, so a retry logs only the remainder.
+
+The pattern across all four is the one this branch keeps repeating: the test
+existed, and it passed for a reason unrelated to its claim.
+
 ### Open questions this leaves
 
 - **Nothing has been run against the real API.** No key is configured here, so
@@ -27236,6 +27271,19 @@ across the schema, the quota query, the handler and the wire layer.
 - **`ANTHROPIC_API_KEY` is not set on Railway staging**, so the route serves 503
   there until it is. That is the intended degradation rather than a failure, but
   it does mean the feature is off until somebody sets it.
+- **`nutrition_estimates` grows forever** — one row per call, only the last 24
+  hours are ever read, nothing prunes it. Not urgent at this scale; filed rather
+  than fixed.
+- **The quota has a TOCTOU window.** `CheckQuota` and `Record` are two
+  statements, so N concurrent requests at `used = limit - 1` all pass. Overrun is
+  bounded by per-athlete concurrency and the caps are absurdity bounds rather
+  than billing, so this is a deliberate trade — recorded because it should be a
+  decision rather than an accident.
+- **A truncated response is reported as retryable when it is not.**
+  `stop_reason: max_tokens` fails the JSON parse and surfaces as a 502, but
+  truncation is deterministic for a given input: the retry costs the same tokens
+  and fails the same way. Distinguishing it would also tell us the budget is
+  wrong rather than reading as upstream flakiness.
 
 
 ## Open items / known gaps as of this entry
