@@ -23634,19 +23634,47 @@ Both siblings already had the clause: `plan.ts`'s upsert, whose comment
 describes this exact clobber, and `cacheWorkouts`. Sessions were the one outbox
 missing it.
 
-### Why it is not a bare `dirty = 0`
+### Why it is not a bare `dirty = 0` — and the reason I first gave was wrong
 
-The obvious fix breaks the app. This upsert has two kinds of caller —
-`saveLocalSession` writing an edit the athlete just made (`dirty = 1`) and the
-pull writing what the server returned (`dirty = 0`) — and an unconditional
-guard would decline every ordinary edit-on-top-of-an-edit, which is most of what
-logging is.
+The clause is `(excluded.dirty = 1 OR local_sessions.dirty = 0)`, keyed on the
+incoming row rather than on a parameter: a local write wins, a server write
+yields to anything outstanding.
 
-So the clause is `(excluded.dirty = 1 OR local_sessions.dirty = 0)`, keyed on
-the incoming row rather than on a parameter, and it reads as the rule it is: a
-local write always wins, a server write yields to anything outstanding. Two of
-the five tests exist only to keep the fix from being "make the pull safe by
-breaking editing".
+The first version of this entry justified that by saying an unconditional
+`dirty = 0` "would decline every ordinary edit-on-top-of-an-edit, which is most
+of what logging is", and named a `saveLocalSession` doing those writes. **Both
+halves are false, and review caught it.** There is no `saveLocalSession`
+anywhere in the app — the name existed only in my comments. Athlete edits
+(`saveLocalSets`, `renameLocalSession`, the delete) are direct `UPDATE`s that
+never pass through this upsert at all, and the only production caller passing
+`dirty = 1` is `startLocalSession`, which inserts a fresh uuid and therefore
+never conflicts. **An unconditional guard would behave identically in the app as
+it stands today.**
+
+The disjunct is still the right choice, for the reason the tombstone clause
+above it is written as an invariant rather than left to its callers: it says
+which write wins, so a future caller that does conflict gets the right answer
+instead of quietly losing an edit. That is a weaker claim than the one I made,
+and it is the true one.
+
+Recording it at length because this repo's expensive bugs come from exactly
+this — a confident comment nobody re-checks. The T6 entry says as much about
+its own predecessor.
+
+### `name_dirty` is deliberately absent, and that rests on something invisible
+
+A row can be name-dirty without being sets-dirty, so the obvious question is
+whether an unsent RENAME is still exposed. It is not — but only because
+`renameLocalSession` sets `dirty = 1` alongside `name_dirty = 1`, so the dirty
+half already covers it.
+
+The workout table takes the OPPOSITE convention on purpose, which is why
+`cacheWorkouts`'s guard has to check `name_dirty` and this one does not. Reshape
+a session rename to match the workout shape and this clause silently stops
+covering renames, with nothing to catch it — so the dependency is now written
+down at the clause. Adding `name_dirty = 0` here would be actively wrong: a
+benign lingering `dirty = 0, name_dirty = 1` state exists after a create, and
+guarding on it would make those rows pull-immune forever.
 
 ### The race is reproduced, not argued
 
@@ -23672,8 +23700,11 @@ The first version deleted a **dirty** row and asserted the server's copy did not
 land. It passed — and it passed with `deleted_at IS NULL` deleted from the SQL,
 because the new T8 clause was declining the write and the tombstone clause was
 never consulted. A clean tombstone is the only state where that clause is the
-one doing the work. Three mutations now: remove the T8 clause, make it
-unconditional, remove the tombstone clause — each fails a different test.
+one doing the work. Four mutations now, each failing a different test: remove the T8 clause, make
+it unconditional, remove the tombstone clause, and — the one review found still
+alive — `excluded.dirty = local_sessions.dirty`, a rule that only writes when
+the two AGREE. That one passed everything, because no test covered a local write
+landing on a CLEAN row. Four cells in the table, and I had pinned three.
 
 ### Open questions this leaves
 

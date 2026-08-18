@@ -16,12 +16,19 @@ import { migratedFixture, type FixtureDb } from './support/sqlite';
  * comment describes this exact clobber, and `cacheWorkouts`. Sessions were the
  * outbox missing it.
  *
- * **Why the guard is keyed on `excluded.dirty` and not on a parameter.** This
- * upsert has two kinds of caller: `saveLocalSession` writing an edit
- * (`dirty = 1`) and the pull writing the server's copy (`dirty = 0`). An
- * unconditional `dirty = 0` guard would have declined every ordinary
- * edit-on-top-of-an-edit, which is the whole app — so the first two tests below
- * exist to keep the fix from being "make the pull safe by breaking editing".
+ * **Why the guard is keyed on `excluded.dirty` and not on a parameter**, stated
+ * accurately after review corrected me. It is a BACKSTOP, not the hot path.
+ * Athlete edits — `saveLocalSets`, `renameLocalSession`, the delete — are
+ * direct `UPDATE`s that never come through this upsert, and the only production
+ * caller passing `dirty = 1` is `startLocalSession`, which inserts a fresh uuid
+ * and so never conflicts. An unconditional `dirty = 0` would behave identically
+ * in the app as it stands today.
+ *
+ * The disjunct earns its place the way the tombstone clause above it does: by
+ * stating which write wins, so a future caller that DOES conflict gets the
+ * right answer rather than silently losing an edit. The tests below pin that
+ * rule in all four cells of (incoming dirty × existing dirty), because a rule
+ * nothing exercises is a rule that decays into whatever the SQL happens to say.
  */
 
 const AT = '2026-08-01T10:00:00.000Z';
@@ -100,6 +107,16 @@ describe('the upsert both callers share', () => {
     await upsert(local({ name: 'Local' }), 'u1', false, true);
     await upsert(local({ name: 'FromServer' }), 'u1', false, true);
     expect(await row()).toEqual({ name: 'FromServer', dirty: 0 });
+  });
+
+  it('lets a local write land on a clean row', async () => {
+    // The fourth cell, and the one that was missing: incoming dirty = 1 over
+    // existing dirty = 0. Without it `excluded.dirty = local_sessions.dirty`
+    // — a mutant that only ever writes when the two AGREE — passed every test
+    // in this file. Found by review.
+    await upsert(local({ name: 'FromServer' }), 'u1', false, true);
+    await upsert(local({ name: 'MyEdit' }), 'u1', true, false);
+    expect(await row()).toEqual({ name: 'MyEdit', dirty: 1 });
   });
 
   it("REFUSES the server's copy over an unsent edit", async () => {
