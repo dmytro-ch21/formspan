@@ -188,7 +188,18 @@ export default function CurriculumDetailPage() {
                 : "bg-neutral-900 text-white hover:bg-neutral-700 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
             }`}
           >
-            {c.enrolled ? "Put down" : "Start working this"}
+            {/* Keyed on `countable_items` — the real property — and NOT on the
+            track, which CLAUDE.md calls a grouping hint that must never gate
+            anything. "Start working this" on a list with nothing completable
+            promises progress that can never arrive; on a reference syllabus
+            that is 73 items of it. Enrolment still works and is still worth
+            having: on a list with no criteria it is a bookmark, which is what
+            an athlete's own curriculum has always been. */}
+            {c.enrolled
+              ? "Put down"
+              : c.countable_items > 0
+                ? "Start working this"
+                : "Keep this handy"}
           </button>
         </div>
       </header>

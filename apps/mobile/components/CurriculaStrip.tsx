@@ -74,7 +74,21 @@ export function CurriculaStrip() {
     // setting belt on their own public curriculum put a dead-end card here
     // wearing a belt photograph. The review that added foundations flushed
     // the asymmetry out.
-    .filter((c) => (beltOf(c.belt) !== null || c.track === 'foundations') && !c.editable)
+    // Roadmaps only — the belt track and foundations. **The syllabus track is
+    // excluded deliberately, and by TRACK rather than by belt**: a reference
+    // syllabus carries a belt too, so filtering on `belt` alone would put a
+    // 73-item list that finishes nothing onto a strip labelled "Roadmaps",
+    // wearing a belt photograph, next to the roadmap it exists to support.
+    //
+    // It is web-only for now, per the platform rule: the roadmap is the worked
+    // path and belongs on the phone, the long-form reference is read at a desk.
+    // The map (#274) is the orientation a beginner needs on this device.
+    .filter(
+      (c) =>
+        (c.track === 'belt' || c.track === 'foundations') &&
+        (beltOf(c.belt) !== null || c.track === 'foundations') &&
+        !c.editable,
+    )
     .sort(
       (a, b) =>
         Number(b.enrolled) - Number(a.enrolled) ||

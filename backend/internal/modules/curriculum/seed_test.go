@@ -201,3 +201,89 @@ func TestEverySeededTechniqueExistsInTheLibrary(t *testing.T) {
 		}
 	}
 }
+
+// The syllabus track's defining property, asserted rather than assumed.
+//
+// A reference is consulted and a roadmap is worked, and the ONLY thing in the
+// data that separates them is whether items carry criteria: `countable_items`
+// is what both clients switch on to decide whether to draw progress at all. A
+// criterion authored onto a syllabus item would silently turn a reference into
+// a roadmap nobody can finish — 73 milestones on white belt alone — and no
+// existing test would notice, because a legal criterion is legal wherever it
+// appears.
+func TestNothingOnTheSyllabusTrackIsCompletable(t *testing.T) {
+	data, err := SeedData()
+	if err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+
+	carries := func(it SeedItem) bool {
+		return it.TargetScored != nil || it.TargetDefended != nil ||
+			it.TargetSessions != nil || it.MinHitRate != nil ||
+			it.TargetDrilledSessions != nil
+	}
+
+	syllabuses := 0
+	for _, c := range data {
+		if c.Track != "syllabus" {
+			continue
+		}
+		syllabuses++
+		items := 0
+		for _, ph := range c.Phases {
+			for _, it := range ph.Items {
+				items++
+				if carries(it) {
+					t.Errorf("%s: item %q carries criteria; a syllabus is reference, not a roadmap",
+						c.ID, it.TechniqueID+it.Title)
+				}
+			}
+		}
+		for _, it := range c.Items {
+			items++
+			if carries(it) {
+				t.Errorf("%s: item %q carries criteria; a syllabus is reference, not a roadmap",
+					c.ID, it.TechniqueID+it.Title)
+			}
+		}
+		if items == 0 {
+			t.Errorf("%s is on the syllabus track with no items, so this checked nothing", c.ID)
+		}
+	}
+	if syllabuses == 0 {
+		t.Fatal("no curriculum is on the syllabus track, so this test asserted nothing")
+	}
+}
+
+// The other half of the same distinction. Without this, deleting every
+// criterion in the file would satisfy the test above and quietly turn the whole
+// feature into reading material.
+func TestEveryBeltRoadmapStillHasMilestones(t *testing.T) {
+	data, err := SeedData()
+	if err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+	checked := 0
+	for _, c := range data {
+		if c.Track != "belt" {
+			continue
+		}
+		checked++
+		countable := 0
+		for _, ph := range c.Phases {
+			for _, it := range ph.Items {
+				if it.TargetScored != nil || it.TargetDefended != nil ||
+					it.TargetSessions != nil || it.MinHitRate != nil ||
+					it.TargetDrilledSessions != nil {
+					countable++
+				}
+			}
+		}
+		if countable == 0 {
+			t.Errorf("%s is a belt roadmap with nothing completable in it", c.ID)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no curriculum is on the belt track, so this test asserted nothing")
+	}
+}

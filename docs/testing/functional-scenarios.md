@@ -6589,6 +6589,29 @@ The round map (2026-08-18):
 - **Both sides of a position share one link.** "Mount" and "Under mount" both
   read about `mount`, so both counts are the family's. That is the glossary
   describing a position for both players, not a duplicate.
+The reference syllabuses (2026-08-18):
+
+- **A syllabus draws no progress anywhere.** `countable_items` is 0 on all four,
+  so the roadmap header, the progress card and the "N to master" line on the card
+  must all be absent — not zeroed. A "0 of 0 mastered" anywhere is the bug.
+- **The enrol button says "Keep this handy", not "Start working this"**, on any
+  curriculum with no criteria — which includes an athlete's own list, not just
+  these. Enrolment still works and still records `started_on`; it is a bookmark.
+- **The web list groups them under "Reference syllabuses", after Belt roadmaps
+  and Foundations.** Assert the section ORDER: somebody scanning for something to
+  work should meet the roadmaps first.
+- **They must NOT appear on the mobile Plan strip.** They carry a belt, so a
+  filter keyed on `belt` lets them through; the strip is keyed on `track`.
+  Regression test: the strip shows five cards (foundations + four belts), never
+  nine.
+- **Every technique id resolves.** Covered by a Go test against the embedded
+  catalogs, so an API-level check is a smoke test — but a syllabus rendering a row
+  with an empty name is the visible symptom if it ever regresses.
+- **A criterion must never appear on a syllabus item.** Guarded in Go from both
+  directions (syllabuses have none, roadmaps have some). Worth an API-level
+  assertion too, since it is the one property separating the two artifacts.
+- **Opening a 73-item syllabus is not slow.** It is the largest single-curriculum
+  read in the app by some margin; check the detail request and first paint.
 
 The map and the progression (2026-08-17):
 

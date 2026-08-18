@@ -24147,6 +24147,89 @@ Open questions:
 - The library's technique list is a hard dependency of the web screen: if that
   one ~197 KB fetch fails, the error state replaces a map that loaded fine.
   Mobile already tolerates it and renders without counts.
+## 2026-08-18 — The reference syllabus, and the derivation that was available and wrong
+
+**N20** (filed as N19; see the renumbering entry). The last of the three pieces
+the belt content needed: #272 gave it a map and a progression, #274 drew the map,
+and this is the complete per-belt list that the roadmaps are the worked path
+through.
+
+**It is curated, and the interesting part is that it did not have to be.**
+`typical_belt` covers **100%** of the 542-technique catalog — 158 White, 257
+Blue, 101 Purple, 25 Brown, 1 Black, none missing — so unlike the round map's
+`to_position` (170 of 542, entry above), a complete per-belt list is genuinely
+derivable here. It was nearly built that way. What stopped it: **a derived
+complete syllabus IS the Library's own belt filter, reorganised**, and the
+Library already has that, with search and position chips on top. Deriving would
+have produced 158 white belt items — over `MaxItems`, and a catalog rather than a
+syllabus.
+
+So what a syllabus adds over a filter is the part a filter cannot have: sections
+in the order a round happens, an objective for each, and a subset small enough to
+read in one sitting. That is curation, and curation is the deliverable.
+
+Four curricula on a new `syllabus` track: white 73 techniques over 11 sections,
+blue 71 over 9, purple 42 over 10, brown 35 over 7, plus 33 concepts. Every
+technique id resolves in the library — checked while authoring, which caught
+**28 invented ids** before any of them reached the seeder, exactly what
+`TestEverySeededTechniqueExistsInTheLibrary` exists to catch one step later.
+
+**White belt's list is 100% White-tagged techniques.** Blue is 55 Blue and 15
+White — fundamentals reappearing at a higher standard, which is the belt's own
+argument. Brown is the interesting distribution: only 25 techniques in the whole
+catalog are tagged Brown, and they are almost entirely the leg family and the
+late finishes. That matches the proposal's claim that brown is refinement rather
+than new material, so brown's list is the shortest of the four and says so.
+
+**The criteria distinction is the whole feature, and it is now asserted in both
+directions.** A reference is consulted and a roadmap is worked; the only thing in
+the data separating them is whether items carry criteria, because
+`countable_items` is what both clients already switch on to decide whether to
+draw progress at all (`isRoadmap`, which predates this and needed no change). A
+criterion authored onto a syllabus item would silently turn a reference into a
+roadmap nobody can finish — 73 milestones on white belt alone — and nothing would
+have noticed, since a legal criterion is legal wherever it appears.
+`TestNothingOnTheSyllabusTrackIsCompletable` refuses that.
+`TestEveryBeltRoadmapStillHasMilestones` refuses the inverse, because without it
+deleting every criterion in the file would satisfy the first test and turn the
+whole feature into reading material.
+
+**The mobile strip filters by TRACK now, not by belt.** A syllabus carries a belt
+too, so the old filter would have put a 73-item list that finishes nothing onto a
+strip labelled "Roadmaps", wearing a belt photograph, beside the roadmap it
+exists to support. Syllabuses are **web-only** for now, per the platform rule:
+the roadmap is the worked path and belongs on the phone, the long-form reference
+is read at a desk, and the phone already has the map for orientation.
+
+**The enrol button is keyed on `countable_items`, not on the track.** "Start
+working this" promises progress that cannot arrive on a list with no criteria, so
+it reads "Keep this handy" there instead. Enrolment itself stays — on a
+criteria-free list it is a bookmark, which is what an athlete's own curriculum
+has always been. Keyed on the real property rather than on `track`, which this
+repo's own rule calls a grouping hint that must never gate anything.
+
+Verified: seeded against a real database — 9 curricula, the four roadmaps with
+every technique countable and the four syllabuses with zero, which is the split
+stated as a table. Both new guards mutation-tested (a criterion added to a
+syllabus item, every criterion stripped from a roadmap), each red alone and green
+restored. Full `verify` chain green. **Not seen in a browser**: Clerk again.
+
+Open questions:
+
+- **Nothing links a roadmap to its syllabus, or back.** They are two lists about
+  one belt, discovered separately, and the athlete has to notice the pairing
+  themselves. A cross-link is the obvious next thing and is a small screen change
+  rather than a content one.
+- **The curation is one person's, defended by nothing but the prose.** Every id
+  is real and belt-appropriate, and no test can say whether the *right* 73 were
+  chosen. That is inherent to curation and worth stating rather than implying the
+  lists are authoritative.
+- Brown's list leans on 13 Blue-tagged techniques for the material it "holds to a
+  higher standard", which reads oddly in a list that also contains 14 Brown ones.
+  The alternative — repeating them with different notes — is worse, but the
+  present version does not make the two kinds visually distinct.
+- The `syllabus` track has no admin-console affordance: like every seeded
+  curriculum it is editable only by editing the file and deploying.
 
 
 ## Open items / known gaps as of this entry

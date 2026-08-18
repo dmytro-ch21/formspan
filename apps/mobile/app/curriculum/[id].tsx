@@ -204,7 +204,17 @@ export default function CurriculumScreen() {
         testID="curriculum-enrollment"
       >
         <Text style={[styles.primaryText, !curriculum.enrolled && { color: vola.bg }]}>
-          {curriculum.enrolled ? 'Put this down' : 'Start working this'}
+          {/* Keyed on `countable_items`, not on the track — a track is a
+              grouping hint and must never gate anything. "Start working this"
+              on a list with nothing completable promises progress that cannot
+              arrive. Enrolment itself stays: on a criteria-free list it is a
+              bookmark, which is what an athlete's own curriculum has always
+              been. */}
+          {curriculum.enrolled
+            ? 'Put this down'
+            : curriculum.countable_items > 0
+              ? 'Start working this'
+              : 'Keep this handy'}
         </Text>
       </Pressable>
 
