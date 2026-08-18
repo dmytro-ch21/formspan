@@ -25414,6 +25414,49 @@ test asserts both that the pair is indistinguishable on `editable` and that
   so; nothing enforces it.
 
 
+## 2026-08-18 — The same inference, one client behind
+
+**F8**, the web half of **F7**. That fix landed `official` on the wire and closed
+both mobile strips; `/dashboard/curricula` was still grouping on a field anybody
+can write.
+
+The Shared tab groups by `track`, and `track` has no validation on write — so a
+stranger publishing `track: "syllabus"` appeared under the **"Reference
+syllabuses"** heading, and `track: "belt"` under **"Belt roadmaps"**, with
+nothing on the card saying otherwise. The web `Curriculum` type never declared
+`official`, so the field F7 added was present on the wire and unread here.
+
+**The fix is deliberately NOT the mobile one.** Those strips drop non-official
+rows entirely, which is right for a surface that advertises VOLA content. This
+page exists *for* browsing other athletes' lists — it has a "From other athletes"
+section — so filtering them out would remove the feature in order to fix the
+label. A track is only **believed** from an official row instead; a stranger's
+keeps its place, under the heading that says whose it is.
+
+**`trackSections` moved to `lib/curriculumSections.ts`**, which is the same
+finding #285 had on mobile arriving one file later: the logic could not be
+guarded where it lived, so it was not. Seven tests now, and the one that matters
+compares **two rows** — a single-row test passes against this bug in both
+directions, since the defect is that VOLA content and a stranger's were treated
+the same, not that either was handled wrongly alone.
+
+Mutation-checked against the literal pre-fix line (three red) and against the
+tempting wrong fix, defaulting `official` to `true` for older servers (one red —
+the older-server case, which is exactly the one that fix would break). Omission
+is treated as attributing nothing: everything lands under "From other athletes",
+which over-attributes to strangers. That is the safe direction; the unsafe one
+is a VOLA heading over somebody's personal list.
+
+Open questions:
+
+- **Three surfaces now read `official` and each decided independently what to do
+  with an absent one** — two strips drop the row, this page reattributes it. Both
+  are right for their surface, and nothing states the rule in one place.
+- The web `Curriculum` type is a hand-maintained mirror of the mobile one and
+  they have now disagreed twice about the same field's meaning. `check:grip-parity`
+  exists for exactly this shape one level down; nothing equivalent watches these.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

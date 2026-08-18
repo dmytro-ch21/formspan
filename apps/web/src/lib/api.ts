@@ -2527,8 +2527,31 @@ export type CurriculumItem = {
 export type Curriculum = {
   id: string;
   /** Resolved server-side. Never compare user ids in the client to decide
-   *  this — that is how client-side authorization happens. */
+   *  this — that is how client-side authorization happens.
+   *
+   *  It says "you may edit this" and NOTHING about who wrote it. `false` is
+   *  also every other athlete's public curriculum. Use `official` for
+   *  provenance — see F7, which this list was one client behind on. */
   editable: boolean;
+  /**
+   * VOLA authored this — `owner_user_id IS NULL`, resolved server-side.
+   *
+   * OPTIONAL because that is what the wire can actually deliver: a server
+   * older than F7 omits it. Typed `boolean` it would be a lie, and the truthy
+   * filter below would be a doc comment rather than something the typechecker
+   * enforces.
+   *
+   * Test it as a TRUTHY filter and do not normalise it. An older server
+   * yields `undefined`, the row is dropped, and the section renders empty —
+   * which is the safe failure. The unsafe one is a heading that says
+   * "Reference syllabuses" over a stranger's list. Do not "fix" this by
+   * defaulting it to `true`.
+   *
+   * Mirrors `apps/mobile/lib/curriculum.ts`, deliberately, down to the
+   * optionality; the two clients had already disagreed once about what
+   * `editable` meant.
+   */
+  official?: boolean;
   name: string;
   description: string;
   /** A hint for ordering, never a gate. Working white-belt fundamentals at
