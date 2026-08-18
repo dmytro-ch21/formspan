@@ -70,21 +70,109 @@ async function authed<T>(
 }
 
 /**
+ * The teaching map of a round, served on the same response as the glossary.
+ *
+ * Nodes are SIDED and positions are not — the glossary describes closed guard
+ * once, for both players, which is right for a glossary and useless for a
+ * route: "sweep" and "get swept" would be the same arrow. So a node carries
+ * `position_id` (the glossary entry behind it) and `position` (the sided value,
+ * an exact match against a summary's `position`). Two nodes may share a
+ * `position_id` — being mounted and mounting are one position and opposite
+ * places to be.
+ */
+export type RoundMapNode = {
+  id: string;
+  label: string;
+  position_id: string;
+  position: string;
+  /**
+   * What the position is worth FROM YOUR SIDE — 5 on their back, -3 with your
+   * own back taken, 0 standing. ORDERING, NOT ARITHMETIC: the gap between two
+   * tiers means nothing and several nodes share one. Sort descending; never
+   * space anything proportionally to a difference of tiers.
+   */
+  tier: number;
+  note: string;
+};
+
+export type RoundMapEdgeKind = 'route' | 'recover' | 'concede';
+
+export type RoundMapEdge = {
+  from: string;
+  to: string;
+  label: string;
+  kind: RoundMapEdgeKind;
+};
+
+/**
+ * `bands` is the reading key for the ladder, ordered top down. A node belongs
+ * to the FIRST band whose `min_tier` it clears — see `bandOf`.
+ */
+export type RoundMapBand = { min_tier: number; label: string; note: string };
+
+export type RoundMap = {
+  title: string;
+  intro: string;
+  bands: RoundMapBand[];
+  nodes: RoundMapNode[];
+  edges: RoundMapEdge[];
+};
+
+/**
  * Positions, cached for the app's lifetime.
  *
  * Failures are not cached — a null cache retries, where an empty array would
  * render as a glossary with nothing in it. Same reasoning as `summaryCache`.
+ *
+ * The round map shares the request and the cache on purpose: its nodes name
+ * positions, so two caches could hold two versions of one vocabulary and a node
+ * would draw as a dead row.
  */
 let positionCache: Position[] | null = null;
+let roundMapCache: RoundMap | null = null;
+
+async function loadGlossary(getToken: TokenGetter, signal?: AbortSignal): Promise<void> {
+  const body = await authed<{ positions: Position[]; round_map?: RoundMap }>(
+    '/techniques/positions',
+    getToken,
+    signal,
+  );
+  positionCache = (body.positions ?? []).map(normalise);
+  // Optional on the wire even though the contract requires it. An app pointed
+  // at an API older than this build is the one case where it is absent, and
+  // this app ships to phones that update on their own schedule — a screen that
+  // throws would be a worse answer than one that says it has no map yet.
+  roundMapCache = body.round_map ?? null;
+}
 
 export async function fetchPositions(
   getToken: TokenGetter,
   signal?: AbortSignal,
 ): Promise<Position[]> {
   if (positionCache) return positionCache;
-  const body = await authed<{ positions: Position[] }>('/techniques/positions', getToken, signal);
-  positionCache = (body.positions ?? []).map(normalise);
-  return positionCache;
+  await loadGlossary(getToken, signal);
+  return positionCache ?? [];
+}
+
+/** Null means the API did not send one — callers render the absence. */
+export async function fetchRoundMap(
+  getToken: TokenGetter,
+  signal?: AbortSignal,
+): Promise<RoundMap | null> {
+  if (roundMapCache) return roundMapCache;
+  await loadGlossary(getToken, signal);
+  return roundMapCache;
+}
+
+/**
+ * Which band a node belongs to: the FIRST whose `min_tier` it clears.
+ *
+ * A find, not a range check. Bands arrive ordered top down and are exhaustive
+ * downward, so comparing against an upper bound too would reintroduce the gap
+ * the server's shape exists to prevent.
+ */
+export function bandOf(bands: RoundMapBand[], tier: number): RoundMapBand | null {
+  return bands.find((b) => tier >= b.min_tier) ?? null;
 }
 
 export async function fetchPosition(

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 import {
   buildEdgeIndex,
@@ -135,6 +137,32 @@ export default function LibraryPage() {
   const wantsTechniques = !known || techniqueKey !== undefined;
   const { getToken } = useAuth();
 
+  /**
+   * The one deep link into this page: `?position=<glossary id>`, which the
+   * round map emits so "read about side control" opens that position's panel.
+   *
+   * **It opens the PANEL, not the chip filter, and that distinction is the bug
+   * review found.** The position chips are keyed on FAMILY — "Mount", "Side
+   * Control", "Back" — while the glossary and the map speak in ids (`mount`,
+   * `side-control`, `back-control`). A link carrying an id filtered the grid to
+   * nothing and left no chip looking active, including "All positions": an
+   * invisible filter, which is the exact failure the chips' own docstring warns
+   * about. The panel takes an id, resolves by the glossary's own rule, and is
+   * the thing the map's technique count is counted with — so the number on the
+   * link and the list at the destination agree.
+   *
+   * READ ONCE, AS AN INITIAL VALUE, and never written back. This page keeps no
+   * filter state anywhere — sport and position both reset on reload — and
+   * pushing selection into the URL would turn that decision over quietly. An
+   * initial value is a different thing from persistence: it is the caller
+   * saying where to start.
+   *
+   * Unvalidated on purpose: an id that does not exist resolves to nothing and
+   * the panel reports it, which is the same path a stale bookmark already took.
+   */
+  const params = useSearchParams();
+  const initialPosition = params.get("position");
+
   const [sport, setSport] = useState("");
   const [position, setPosition] = useState("");
   const [belt, setBelt] = useState("");
@@ -198,7 +226,9 @@ export default function LibraryPage() {
   // error about content the reader never asked for.
   const [positions, setPositions] = useState<Position[]>([]);
 
-  const [selected, setSelected] = useState<Selection | null>(null);
+  const [selected, setSelected] = useState<Selection | null>(
+    initialPosition === null ? null : { kind: "position", id: initialPosition },
+  );
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Bumped by the retry button to re-run the debounced exercise effect. */
@@ -521,6 +551,26 @@ export default function LibraryPage() {
                 label on this page uses it bare, and matching them is the point:
                 this is a heading over content, not a control. */}
             <h2 className="eyebrow">Start with positions</h2>
+            {/* Above the cards, because it is the thing to read BEFORE any
+                single position: the glossary says what each place is, the map
+                says how they connect and which way is up. A beginner opening
+                "Closed Guard" first learns a definition with nothing to hang
+                it on. */}
+            <Link
+              href="/dashboard/library/map"
+              className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-raised px-4 py-3 text-sm hover:bg-surface-hover"
+            >
+              <span>
+                <span className="font-medium">How a round goes</span>
+                <span className="block text-text-muted">
+                  Every position on one map, stacked by what it is worth — and
+                  the ways between them.
+                </span>
+              </span>
+              <span aria-hidden className="text-text-dim">
+                →
+              </span>
+            </Link>
             <ul className="flex flex-wrap gap-2">
               {positions.map((p) => {
                 const [code, accent] = positionBadge(p.id);

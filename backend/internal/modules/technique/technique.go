@@ -148,7 +148,7 @@ type Summary struct {
 // to filter a list and useless to a beginner. "Armbar from Closed Guard" means
 // nothing until something says what closed guard is.
 //
-// Ten curated entries, so no filtering, paging or search — a client fetches
+// Eleven curated entries, so no filtering, paging or search — a client fetches
 // them once, like Rulesets. Unlike Rulesets, the ids are hand-authored and
 // stable rather than content-addressed, which is why there is no orphan-pruning
 // step and no ordering constraint against UpsertAll: positions are referenced by

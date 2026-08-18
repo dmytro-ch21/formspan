@@ -6542,6 +6542,54 @@ the schema rather than from taste:
   nothing rather than an error. Deliberate; test that an offline Plan tab still
   shows its templates.
 
+The round map (2026-08-18):
+
+- **`GET /v1/techniques/positions` carries `round_map`** beside `positions`, and
+  the two are one fetch on purpose. Assert both are present; a client holding a
+  map from one version and a glossary from another is the failure the single
+  response prevents.
+- **Every node's `position_id` is in the same response's `positions`**, and every
+  node's `position` matches at least one technique in `GET /v1/techniques`. Both
+  are covered by Go tests against the embedded catalogs, so the API-level check
+  is a smoke test rather than the guarantee.
+- **The API refuses to boot on a broken map** rather than serving a glossary
+  without one. Hard to exercise from a functional suite; recorded because the
+  alternative (a degraded response) would look identical to a feature that has
+  not shipped.
+- **Web `/dashboard/library/map`**: the diagram draws with `route` arrows only.
+  Toggling "Getting out" and "Losing ground" adds theirs; each toggle reports
+  its own count, so nothing is silently missing. Selecting a box opens the
+  panel with the glossary's description and priorities, and dims every edge not
+  touching it.
+- **The page never scrolls sideways.** The diagram is wider than a narrow
+  window and must scroll inside its own container. Check at 1024px and below.
+- **Every position also appears as text below the diagram**, best to worst. Not
+  a fallback for the SVG — this is reference material and should be readable
+  without clicking sixteen boxes.
+- **Mobile `/bjj/roundmap` is a ladder, not the diagram**, best at the top, with
+  a band heading opening each of the three bands exactly once. Tapping a row
+  expands its note, its edges as words, and the library link; the expanded state
+  must be announced (`accessibilityState`), since collapsed and expanded sound
+  identical otherwise.
+- **Do not confuse it with `/bjj/positions`**, which is the athlete's own
+  heatmap computed from their logs. Same word, different screens: assert the
+  titles ("How a round goes" against the position map's own).
+- **A node links to the POSITION, not to a filtered grid, and the number on the
+  link must equal the number at the destination.** Web `?position=side-control`
+  opens the library's position panel; mobile opens `/position/side-control`.
+  Both resolve with `techniquesInPosition`, and the link says "· N techniques" —
+  assert the two agree, since the first version counted a narrower sided set and
+  led somewhere listing nearly twice as many.
+- **A position id must never be sent to the position CHIPS.** They are keyed on
+  family ("Mount", "Side Control"), so a glossary id filters the grid to zero
+  with no chip looking active — not even "All positions". Regression test: the
+  map's links carry `position=<glossary id>` and the grid stays unfiltered.
+- **An unknown position id reports itself** rather than opening an empty panel —
+  the same path a stale bookmark already took.
+- **Both sides of a position share one link.** "Mount" and "Under mount" both
+  read about `mount`, so both counts are the family's. That is the glossary
+  describing a position for both players, not a duplicate.
+
 The map and the progression (2026-08-17):
 
 - **White belt's second phase is the map, and it moves no number.** `The map:

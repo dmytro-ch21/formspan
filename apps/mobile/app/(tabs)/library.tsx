@@ -828,6 +828,22 @@ export default function LibraryScreen() {
             <Text style={styles.glossaryLabel} accessibilityRole="header">
               Start with positions
             </Text>
+            {/* Above the cards, because it is what to read BEFORE any single
+                position: the glossary says what each place is, the map says how
+                they connect and which way is up. Opening "Closed Guard" first
+                gives a beginner a definition with nothing to hang it on. */}
+            <Pressable
+              onPress={() => router.push('/bjj/roundmap')}
+              accessibilityRole="button"
+              accessibilityLabel="How a round goes: every position on one map"
+              testID="library-roundmap-link"
+              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+            >
+              <Text style={styles.mapLinkTitle}>How a round goes</Text>
+              <Text style={styles.mapLinkNote}>
+                Every position on one map, stacked by what it is worth.
+              </Text>
+            </Pressable>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -1274,6 +1290,17 @@ const styles = StyleSheet.create({
   // a screen reader should still be handed the words. `apps/web`'s `.eyebrow`
   // does the same with `text-transform`, so both clients now announce the same
   // accessible name rather than one of them spelling it out.
+  mapLink: {
+    borderColor: vola.line,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 2,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mapLinkNote: { color: vola.textMuted, fontSize: 13, lineHeight: 18 },
+  mapLinkTitle: { color: vola.text, fontSize: 14, fontWeight: '700' },
   glossaryLabel: {
     color: vola.textMuted,
     fontSize: 11,
