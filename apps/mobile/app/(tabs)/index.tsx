@@ -15,6 +15,7 @@ import {
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 
 import { CheckinCard } from '@/components/CheckinCard';
+import { NutritionCard } from '@/components/NutritionCard';
 import { Text, View } from '@/components/Themed';
 import { Image } from 'expo-image';
 
@@ -65,6 +66,17 @@ import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
 import { listCheckins, listPhases, type Checkin, type Phase } from '@/lib/body';
+import { localEntries, logFood, recentsFor } from '@/lib/foodLog';
+import { hasFoodLog } from '@/lib/modules';
+import {
+  rankRecents,
+  scale,
+  slotForClock,
+  type Entry,
+  type Food,
+  type Target,
+} from '@/lib/nutrition';
+import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { accentGlow } from '@/lib/palette';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -538,6 +550,68 @@ export default function TodayScreen() {
   const [checkins, setCheckins] = useState<Checkin[]>([]);
   const [phase, setPhase] = useState<Phase | null>(null);
   const [checkinsLoaded, setCheckinsLoaded] = useState(false);
+
+  // Fuel. Read locally first, exactly like the day screen: the card must be
+  // right with no signal, because the log it reports is written offline.
+  const [foodEntries, setFoodEntries] = useState<Entry[]>([]);
+  const [foodTarget, setFoodTarget] = useState<Target | null>(null);
+  const [foodQuick, setFoodQuick] = useState<Food[]>([]);
+  const [foodLoaded, setFoodLoaded] = useState(false);
+  const foodEnabled = hasFoodLog(modules);
+
+  const refreshFood = useCallback(() => {
+    let live = true;
+    const today = dayString(new Date());
+    const slot = slotForClock(new Date());
+
+    (userId ? localEntries(userId, today) : Promise.resolve<Entry[]>([]))
+      .then((rows) => {
+        if (live) setFoodEntries(rows);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (live) setFoodLoaded(true);
+      });
+
+    // Ranked for the CURRENT slot, so the chips are porridge at breakfast and
+    // something else at dinner.
+    (userId ? recentsFor(userId, slot) : Promise.resolve([]))
+      .then((rs) => {
+        if (live) setFoodQuick(rankRecents(rs, today));
+      })
+      .catch(() => {});
+
+    // The one thing the phone cannot compute. A failure leaves it null, which
+    // renders as "set a target" rather than as a wrong number.
+    listTargets(getToken, { from: today, to: today })
+      .then((ts) => {
+        if (live) setFoodTarget(targetOn(ts, today));
+      })
+      .catch(() => {});
+
+    return () => {
+      live = false;
+    };
+  }, [getToken, userId]);
+
+  /** One tap from the card: log a serving of a ranked food, right now. */
+  const quickLog = useCallback(
+    async (food: Food) => {
+      if (!userId) return;
+      await logFood(userId, {
+        eaten_on: dayString(new Date()),
+        meal: slotForClock(new Date()),
+        name: food.name,
+        servings: 1,
+        serving_label: food.serving_label,
+        ...scale(food, 1),
+        source_food_id: food.id,
+      });
+      requestSync('food logged');
+      refreshFood();
+    },
+    [userId, refreshFood],
+  );
   /**
    * Refreshed on FOCUS, not once on mount.
    *
@@ -582,6 +656,7 @@ export default function TodayScreen() {
       refreshSessions();
       refreshPlan();
       refreshCheckins();
+      refreshFood();
       // On focus only, not on every day-step: the funnel is an aggregate over
       // every session ever logged and does not change because you looked at
       // Thursday.
@@ -592,7 +667,7 @@ export default function TodayScreen() {
       // Settings can have changed any of these while this screen sat mounted.
       const stop = readSuggestionPrefs();
       return stop;
-    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins]),
+    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins, refreshFood]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -1336,6 +1411,22 @@ export default function TodayScreen() {
           loaded={checkinsLoaded}
           unitsReady={unitsReady}
         />
+
+        {/* Fuel sits beside the check-in because both ASK for something rather
+            than reporting, and the two belong together above the blocks that
+            only report. Two numbers and nothing else: remaining calories and
+            remaining protein. */}
+        {foodEnabled && (
+          <NutritionCard
+            entries={foodEntries}
+            target={foodTarget}
+            quickAdd={foodQuick}
+            loaded={foodLoaded}
+            onLog={() => router.push('/food/add')}
+            onOpenDay={() => router.push('/food')}
+            onQuickAdd={(f) => void quickLog(f)}
+          />
+        )}
 
         {/*
           The week, summed up — what happened, against what was meant to, and
