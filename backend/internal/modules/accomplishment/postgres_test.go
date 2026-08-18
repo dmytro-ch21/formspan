@@ -487,3 +487,35 @@ func TestTheListReadsAsACareer(t *testing.T) {
 		prev = *a.AchievedOn
 	}
 }
+
+// The DRILLED side of the graduation must filter sport too, not just the
+// scored side.
+//
+// Review caught this and demonstrated it against a real database: without the
+// predicate, a `drilled` tag hanging off a strength session graduated a later
+// BJJ score. Not reachable through any writer today — PutDetail refuses to
+// attach a reflection to a session of another sport — which is exactly why it
+// needs a test rather than a reader's trust: nothing else in the suite would
+// notice the predicate being removed again.
+func TestADrillOnANonBjjSessionDoesNotGraduate(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	const user = "user_acc_grad_sport"
+	cleanupUser(t, pool, user)
+	tech := seedTechnique(t, pool, "ac_fx_guillotine_from_guard")
+
+	// The drill is on a barbell session, which cannot be mat evidence.
+	seedSession(t, pool, "acc_gs_1", user, "strength", "2026-02-10T18:00:00Z")
+	seedTag(t, pool, "acc_gs_1", user, "drilled", &tech)
+	// The score is genuinely on the mat.
+	seedSession(t, pool, "acc_gs_2", user, "bjj", "2026-03-03T18:00:00Z")
+	seedTag(t, pool, "acc_gs_2", user, "scored", &tech)
+
+	got := byKind(list(t, repo, user, "UTC"))
+	if _, ok := got[FirstDrilledScored]; ok {
+		t.Error("a drill logged against a strength session cannot complete the mat funnel")
+	}
+	// The score itself is still real evidence and still earns its own award.
+	if _, ok := got[FirstScored]; !ok {
+		t.Error("the scored tag is on a BJJ session and still counts")
+	}
+}

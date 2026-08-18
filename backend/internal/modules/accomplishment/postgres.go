@@ -31,10 +31,25 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 // listQuery derives every kind in ONE round trip.
 //
 // Seven `LIMIT 1` subqueries UNIONed rather than seven calls: each is a
-// first-row lookup on an index this schema already has
-// (`contests_user_held_idx`, `bjj_session_tags_user_technique_idx`), so the
-// whole thing is a handful of index probes, and the alternative is seven
-// sequential round trips to draw one small screen.
+// first-row lookup rather than seven sequential round trips, so the
+// whole thing is cheap. **That claim was optimistic and review measured it**;
+// three corrections, none needing action at today's sizes:
+//
+//   - The `won` CTE cannot use an index and seq-scans `contest_matches` across
+//     EVERY user. `contest_matches_user_method_idx` is partial on `method <> ”`
+//     and this must include wins whose method was never recorded, so the planner
+//     can never use it. This is the one part whose cost scales with everybody's
+//     data rather than the caller's; an index on (user_id, result) is the fix
+//     when it matters.
+//   - `contests_user_held_idx` is (user_id, held_on DESC NULLS LAST) and these
+//     branches order ASC NULLS LAST, which no scan direction of it produces --
+//     backwards gives ASC NULLS FIRST. So each competition branch is a top-N
+//     sort over the caller's own contests.
+//   - The `scored` CTE rides `bjj_session_tags_user_position_idx` on its
+//     `user_id` prefix only. The graduation EXISTS does get the technique index.
+//
+// An unmeasured claim in a comment is worse than a measured limitation, and
+// the alternative is still seven sequential round trips to draw one screen.
 //
 // Every branch returns the same nine columns in the same order, with explicit
 // casts on the NULLs — a UNION infers column types from the FIRST branch, so an
@@ -65,7 +80,10 @@ entries AS (
 -- submission. Computed once as sets rather than as two correlated EXISTS
 -- inside the branches.
 won AS (
-    SELECT DISTINCT m.contest_id, bool_or(m.method = 'submission') AS by_submission
+    -- No DISTINCT: GROUP BY already makes contest_id unique, and review measured
+    -- the redundant one adding a Sort + Unique node above the HashAggregate for
+    -- nothing.
+    SELECT m.contest_id, bool_or(m.method = 'submission') AS by_submission
     FROM contest_matches m
     WHERE m.user_id = $1 AND m.result = 'won'
     GROUP BY m.contest_id
@@ -134,6 +152,14 @@ UNION ALL
        FROM bjj_session_tags d
        JOIN sessions ds ON ds.id = d.session_id AND ds.user_id = d.user_id
        WHERE d.user_id = $1
+         -- ds.sport as well as ds.user_id. The scored side filters sport and this
+         -- side did not, which review caught and DEMONSTRATED: a drilled tag on a
+         -- strength session graduated a later BJJ score. Unreachable through any
+         -- writer today, since PutDetail refuses to attach a reflection to another
+         -- sport -- but that is precisely the "claim about today's writers" this
+         -- file says it does not rely on, applied to two of three session joins
+         -- and not the third.
+         AND ds.sport = $3
          AND d.technique_id = sc.technique_id
          AND d.event = 'drilled'
          AND ds.started_at < sc.started_at

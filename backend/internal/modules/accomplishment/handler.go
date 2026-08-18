@@ -32,6 +32,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if tz == "" {
 		tz = "UTC"
 	}
+	// Validated against Go's embedded tzdata, while the query resolves it
+	// against POSTGRES's zone database — two authorities that can disagree
+	// across tzdata releases. A name known to one and not the other passes here
+	// and then fails in the query, surfacing as a generic 500 rather than a
+	// 400. Rare, and it degrades safely; recorded so a future "why did tz=X
+	// return 500" has an answer.
 	if _, ok := ParseZone(tz); !ok {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			"tz must be an IANA timezone name, e.g. Europe/Berlin")

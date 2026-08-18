@@ -184,7 +184,17 @@ type Accomplishment struct {
 	// named no technique — "got the sweep" without saying which is real
 	// evidence the schema deliberately accepts — and also when the technique
 	// has since been retired from the library, since that FK is ON DELETE SET
-	// NULL precisely so the athlete's record outlives the catalog entry.
+	// NULL.
+	//
+	// **That survival is not uniform across kinds, which review pointed out
+	// and this comment used to overstate.** FirstScored survives a retired
+	// technique with only the name going nil. FirstDrilledScored does NOT: it
+	// requires a non-null technique_id on both sides to correlate the drill
+	// with the score, so retiring the catalog row retracts that award outright.
+	// There is no fix short of storing it, and storing it is what this module
+	// exists not to do — but "retracts when the session is deleted" and
+	// "retracts when the catalog row is retired" are both true, and only the
+	// first is obvious.
 	TechniqueName *string `json:"technique_name"`
 }
 

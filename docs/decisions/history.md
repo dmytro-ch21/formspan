@@ -24615,6 +24615,50 @@ Four guards were mutation-checked rather than assumed — dropping the sport
 filter, relaxing the graduation to same-session, sorting undated contests first,
 and dropping the caller scoping. Each fails a different test.
 
+### What review found: no blocking findings, and one predicate missing
+
+Review read the SQL adversarially and probed it against a real database rather
+than reasoning about it, which is what turned up the one change worth making.
+
+**The graduation award filtered sport on two of three session joins.** The
+`scored` CTE has `s.sport = $3`; the correlated EXISTS that finds the earlier
+drill did not — so a `drilled` tag hanging off a *strength* session graduated a
+later BJJ score. Demonstrated, not inferred. It is unreachable through any
+writer today, because `PutDetail` refuses to attach a reflection to a session of
+another sport — but "unreachable by construction" is exactly the reasoning this
+file's own comment says it does not rely on, and then it relied on it in one of
+three places. Fixed, with a test, and the predicate mutation-checked: nothing
+else in the suite noticed its absence.
+
+Three comments were also corrected, and the pattern is the same one the contests
+review found hours earlier — **a comment claiming more than the code delivers**:
+
+- **"A handful of index probes" was unmeasured, and wrong in three ways.** The
+  `won` CTE cannot use an index at all and seq-scans `contest_matches` across
+  every user, because `contest_matches_user_method_idx` is partial on
+  `method <> ''` and this query must include wins whose method was never
+  recorded. `contests_user_held_idx` is `DESC NULLS LAST` while these branches
+  order `ASC NULLS LAST`, which no scan direction of that index produces — so
+  each competition branch is a top-N sort. Only the graduation EXISTS gets the
+  index the comment claimed for everything. All small and bounded today, and all
+  now written down, because an unmeasured claim in a comment is worse than a
+  measured limitation.
+- **"The record outlives the catalog entry" is true for one kind and not the
+  other.** `first_scored` survives a retired technique with only the name going
+  nil; `first_drilled_scored` needs a non-null id on both sides to correlate, so
+  retiring the row retracts that award outright. Derive-on-read means retraction
+  is by design, but "retracts when the session is deleted" and "retracts when
+  the catalog row is retired" are both true and only the first was obvious.
+- **`tz` is validated against Go's embedded tzdata and resolved by Postgres.**
+  Two authorities that can disagree across releases, so a name known to one and
+  not the other passes validation and then fails in the query as a generic 500
+  rather than a 400. Rare and it degrades safely; recorded so the next person
+  seeing it has an answer.
+
+A redundant `DISTINCT` was also dropped from the `won` CTE — `GROUP BY` already
+makes `contest_id` unique, and review measured the extra one adding a Sort +
+Unique node above the HashAggregate for nothing.
+
 ### Gaps this leaves
 
 - **No client.** Deliberate, and the reason is coordination rather than scope:

@@ -305,7 +305,13 @@ components:
 
     Accomplishment:
       type: object
-      required: [kind, basis, achieved_on]
+      required:
+        # Every field is always present in the response — none is omitempty —
+        # so the contract states that rather than understating it. The
+        # evidence fields are nullable, and WHICH are non-null follows from
+        # `kind`; switch on that rather than sniffing.
+        [kind, basis, achieved_on, contest_id, contest_name, placement, entrants,
+         session_id, technique_id, technique_name]
       description: >
         One thing the athlete achieved, with the evidence that earned it.
 
