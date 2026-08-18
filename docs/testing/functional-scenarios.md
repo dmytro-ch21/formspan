@@ -694,9 +694,11 @@ Domain: a training session that **actually happened**, and the sets in it — re
   is visible in the row and impossible to remove.
 - **Carry-forward.** Add a set after one with a grip: the new row inherits it,
   the way weight and reps do. Effort (RIR/RPE) must NOT be inherited.
-- **Parity.** Whatever web offers for a movement, mobile offers the same and
-  the server accepts it. `check:grip-parity` enforces this in CI; a functional
-  test would catch a violation as a 400 on save.
+- **Parity.** Whatever web offers for a movement, mobile offers the same.
+  `check:grip-parity` enforces *that* in CI — it compares the three `gripsFor`
+  tables and nothing else. **Server acceptance is a separate guarantee**, held
+  by `ValidGrip` and the CHECK constraint, which the script never reads. A
+  functional test is what would catch the two disagreeing, as a 400 on save.
 
 ## Progression rules — double progression (`GET /v1/sessions/suggestions`, both clients)
 

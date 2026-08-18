@@ -26,7 +26,6 @@ import {
   replaceSets,
   setExerciseUnit,
   GRIPS,
-  gripApplies,
   offeredGrips,
   SET_TYPES,
   swapSuggestions,
@@ -1011,10 +1010,22 @@ function SetRow({
             it is the way back to UNRECORDED, which `offeredGrips` exists to
             keep reachable.
 
-            Offered only where the movement has a vocabulary — a leg press has
-            no grip worth recording, and an empty picker is a question with no
-            answers. */}
-        {editable && gripApplies(movementPattern) ? (
+            Gated on `offeredGrips`, NOT on `gripApplies` — mobile's copy of
+            this control carries the same warning and I shipped the wrong one
+            first. They differ in exactly one case and it is the one that traps
+            data: a set holding a grip on a movement whose subset is EMPTY (the
+            console recategorised the exercise after it was logged, a newer
+            server grew a pattern, or the exercise failed to load so the pattern
+            is undefined). `gripApplies` is false there, so the picker would
+            disappear while the grip stayed visible in the row — unclearable,
+            and re-sent by every wholesale PUT forever. `offeredGrips` returns
+            that held grip, so the select renders with exactly one option and
+            the "Not recorded" escape.
+
+            Where there is neither a vocabulary nor a held grip — a leg press,
+            normally — it returns nothing and no picker appears, which is the
+            original intent: an empty picker is a question with no answers. */}
+        {editable && offeredGrips(movementPattern, set.grip).length > 0 ? (
           <select
             className="ml-1 rounded border border-line bg-transparent text-xs text-text-dim"
             value={set.grip ?? ""}
@@ -1029,7 +1040,11 @@ function SetRow({
               )
             }
           >
-            <option value="">—</option>
+            {/* Named, not "—": this option is the way back to unrecorded,
+                and an em dash is announced as "em dash" or as nothing at all,
+                making the one load-bearing choice the one with no
+                comprehensible name. */}
+            <option value="">Not recorded</option>
             {offeredGrips(movementPattern, set.grip).map((g) => (
               <option key={g.key} value={g.key}>
                 {g.label}

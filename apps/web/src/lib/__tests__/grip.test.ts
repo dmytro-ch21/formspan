@@ -24,6 +24,12 @@ import {
  * `gripsFor` would make these tests agree with whatever the function currently
  * says, which is the "a mock supplying the behaviour under test" mistake this
  * repo has shipped before.
+ *
+ * **Scope, precisely:** this file pins WEB's copy against a written-down table.
+ * It cannot see Go or mobile drifting — that is `scripts/check-grip-parity.py`'s
+ * job, and the two together are the guarantee. An earlier version of this
+ * comment claimed drift "fails here", which was only ever true of one of the
+ * three copies.
  */
 
 const EXPECTED: Record<string, Grip[]> = {
@@ -125,6 +131,18 @@ describe("the chips a row actually shows", () => {
   it("offers nothing at all where the movement has no vocabulary", () => {
     expect(offeredGrips("squat", null)).toEqual([]);
   });
+
+  it("STILL offers a grip a set holds on a movement with no vocabulary", () => {
+    // The case the picker's gate turns on, and it was untested until review
+    // pointed at it. A squat that carries a grip — the console recategorised
+    // the exercise after it was logged, or a newer server grew a pattern this
+    // build does not know — must still be offered, or the grip is visible in
+    // the row, unclearable, and re-sent by every wholesale PUT forever.
+    expect(offeredGrips("squat", "regular").map((g) => g.key)).toEqual([
+      "regular",
+    ]);
+    expect(offeredGrips(undefined, "hook").map((g) => g.key)).toEqual(["hook"]);
+  });
 });
 
 describe("a new set carries the grip forward", () => {
@@ -147,6 +165,11 @@ describe("a new set carries the grip forward", () => {
     // REVERSED by N10. Web used to refuse this, and rightly, because it had no
     // control to unmake the recording with. It has one now.
     expect(emptySet("deadlift", 2, prev).grip).toBe("mixed");
+    // A SECOND value, because one is indistinguishable from a hardcode:
+    // `grip: from ? "mixed" : undefined` passed the single-value version of
+    // this test and the whole web suite. Found by review.
+    expect(emptySet("deadlift", 2, { ...prev, grip: "hook" }).grip).toBe("hook");
+    expect(emptySet("deadlift", 2, { ...prev, grip: null }).grip).toBeNull();
   });
 
   it("still refuses to carry effort", () => {

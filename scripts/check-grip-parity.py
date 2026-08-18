@@ -35,6 +35,9 @@ GO = ROOT / "backend/internal/modules/session/session.go"
 MOBILE = ROOT / "apps/mobile/lib/sessions.ts"
 WEB = ROOT / "apps/web/src/lib/api.ts"
 
+#: Sentinel for the `default:` branch, compared like any movement pattern.
+DEFAULT_KEY = "<default>"
+
 
 def parse_ts(path: Path) -> dict[str, list[str]]:
     body = _body(path.read_text(), r"export function gripsFor\([^)]*\)[^{]*\{")
@@ -51,12 +54,34 @@ def parse_ts(path: Path) -> dict[str, list[str]]:
                 table[p] = vals
             pending = []
         if "default:" in line:
-            pending = []
+            # NOT discarded. The default decides what EVERY unlisted movement
+            # pattern offers, so one app "helpfully" returning the full four
+            # there while the others return nothing is real, athlete-visible
+            # drift across every pattern outside the eight — and the first
+            # version of this script could not see it. Found by review.
+            pending = [DEFAULT_KEY]
     return table
 
 
+def go_const_values(src: str) -> dict[str, str]:
+    """Map `GripMixed` -> "mixed" from the const block.
+
+    Resolved rather than assumed. The first version lowercased the constant
+    NAME, so a constant whose wire value differed from its name (`GripHook Grip
+    = "hook_grip"`) would have been reported as agreeing with TS while the two
+    genuinely disagreed on the wire — and a legitimately snake_case value
+    (`GripMixedLeft = "mixed_left"`) would have been reported as false drift.
+    Found by review.
+    """
+    return dict(re.findall(r"\b(Grip\w+)\s+Grip\s*=\s*\"([^\"]+)\"", src))
+
+
 def parse_go(path: Path) -> dict[str, list[str]]:
-    body = _body(path.read_text(), r"func GripsFor\([^)]*\)[^{]*\{")
+    src = path.read_text()
+    consts = go_const_values(src)
+    if not consts:
+        raise SystemExit("check-grip-parity: parsed no Grip constants from Go — the parser needs updating, not deleting")
+    body = _body(src, r"func GripsFor\([^)]*\)[^{]*\{")
     table: dict[str, list[str]] = {}
     pending: list[str] = []
     for line in body.splitlines():
@@ -66,15 +91,34 @@ def parse_go(path: Path) -> dict[str, list[str]]:
         ret = re.search(r"return \[\]Grip\{(.*?)\}", line)
         if ret:
             inner = ret.group(1)
-            vals = re.findall(r"Grip(\w+)", inner)
-            if not vals:
+            names = re.findall(r"\bGrip\w+", inner)
+            if names:
+                vals = [consts.get(n) or _unknown(n) for n in names]
+            else:
                 vals = [v.strip().strip('"') for v in inner.split(",") if v.strip()]
             for p in pending:
-                table[p] = [v.lower() for v in vals]
+                table[p] = vals
             pending = []
         if "default:" in line:
-            pending = []
+            pending = [DEFAULT_KEY]
+    # Go writes its fallback as a trailing `return nil` AFTER the switch, not as
+    # a `default:` — so the sentinel has to be filled from there or Go reports
+    # None while both TS copies report [], and the check fails on a difference
+    # in SPELLING rather than in behaviour. `nil` and `[]` are the same answer:
+    # this movement offers no grips.
+    if DEFAULT_KEY not in table:
+        tail = re.search(r"\n\treturn (nil|\[\]Grip\{\s*\})\s*$", body)
+        if not tail:
+            raise SystemExit(
+                "check-grip-parity: Go's GripsFor has neither a `default:` nor a "
+                "trailing `return nil` — the parser needs updating, not deleting"
+            )
+        table[DEFAULT_KEY] = []
     return table
+
+
+def _unknown(name: str) -> str:
+    raise SystemExit(f"check-grip-parity: Go names {name} in GripsFor but no `{name} Grip = \"...\"` const — parser or code out of step")
 
 
 def _body(src: str, header: str) -> str:
