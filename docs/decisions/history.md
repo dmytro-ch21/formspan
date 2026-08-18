@@ -23195,6 +23195,113 @@ Three cases in `planSync.test.ts`, all deterministic:
   guard, and it was the one nothing was testing; the two that had no guard were
   never noticed because nothing tested them either.
 
+## 2026-08-17 — A deadlifter can say how they pull, and a guard that widening disarmed
+
+`N9`. The grip column shipped in 000054 with four values — regular, neutral,
+reverse, angled — and the picker deliberately withheld from hinges, carries and
+olympic lifts, because their real answer is `mixed` or `hook` and offering four
+values that cannot express it would collect `regular` for a mixed pull. A false
+entry rather than a missing one.
+
+That was the right call with four values and the wrong state to stay in: it is
+**93 of 762 exercises**, and they are the ones where grip matters most. A
+deadlifter could not record how they pull.
+
+Both values exist now, and 000058 widens the CHECK.
+
+### Two decisions
+
+**`mixed` records no side.** One hand is over and one is under, lifters
+deliberately alternate which, and that alternation is the reason they care —
+asymmetric loading is the whole argument against a fixed mixed grip. It is still
+not recorded: nothing consumes it, and "which hand?" asked between sets with
+twenty seconds to answer collects a careless tap, which is the confident-wrong
+answer this column's entire design refuses. #256 is what makes deferring safe
+rather than lazy — the server refuses an unknown grip with a code the client
+acts on, and an old build keeps what it holds rather than nulling it, so
+`mixed_left`/`mixed_right` can land later without a stale-client story.
+
+**Which grips a movement offers is a subset, not the whole list.** `GripsFor`
+replaces `GripApplies` (which survives as `len(GripsFor(p)) > 0`). Pushes, pulls
+and isolation keep the original four; hinges get regular/neutral/mixed/hook;
+carries and olympic lifts get regular/neutral/hook.
+
+Two of those read wrong until you check the catalog, which is why the test says
+so:
+
+- **Hinges include `neutral`** — the Hex Bar Deadlift and four kettlebell and
+  dumbbell swings sit in those 55 rows.
+- **Olympic lifts include `neutral`**, and harder: 22 of its 25 rows are
+  kettlebell or dumbbell cleans and snatches. `hook` is the barbell answer;
+  `neutral` is what most of the bucket actually is.
+
+`mixed` is offered on hinges **alone**. You do not mix-grip a snatch, and a
+mixed farmer's carry is not a thing — offering it there would relocate the
+false-entry mistake rather than remove it.
+
+### The subset is not enforced server-side, deliberately
+
+`ValidGrip` still checks only the vocabulary. The subset governs what a client
+ASKS; making it a constraint would turn a question-quality rule into a
+data-integrity one and invent a new false negative — a hook-gripped shrug is
+`isolation`, real, and nobody's business to refuse. This is the same split
+000054 shipped with, where `GripApplies` gated the picker and the server checked
+the vocabulary; it is only more visible now that the gate has four branches.
+
+### T4 told this PR to check something, and it was right to
+
+#256's entry ended: *"Nothing yet sends a fifth grip. N9 is unblocked, not done,
+and the first PR to add one should confirm an old build round-trips it rather
+than trusting this entry."*
+
+Doing that found the guard rotting. `grip.test.ts` asserted that `repairSet`
+keeps an unrecognised grip, and its two probes were `'banana'` and `'mixed'` —
+so **adding `mixed` to the vocabulary turned half of that test into a check that
+a known value survives**, still green, covering nothing. The probe has to be a
+value outside the CURRENT list, so it is `'mixed_left'` now, with a note that
+whoever ships that must move it again. Restoring the old null-anything-unknown
+behaviour fails 24 tests, so the guard is armed.
+
+The picker has the same problem in UI form, and `offeredGrips` is the answer: it
+shows the movement's subset PLUS whatever the set already holds. Without that
+second half a set carrying a grip this build's subset does not list is visible
+in the summary line with no chip to tap — so the one route back to "unrecorded"
+disappears and the athlete is stuck with it.
+
+### Also
+
+- **Web's union was missing both values.** It displays grips (it cannot author
+  them — that is `N10`), and its render already falls back to the raw key, so a
+  `mixed` set showed "mixed" instead of "Mix". Degraded, not broken, which is
+  why nothing caught it.
+- **The migration drops and re-adds the CHECK, and its NAME is load-bearing.**
+  `translatePgError` matches the substring `grip` to return `ErrInvalidGrip`
+  rather than a generic `ErrInvalidInput`, and that difference is the wire code
+  the phone repairs on. Re-adding it as `session_sets_hold_valid` would migrate
+  cleanly, keep refusing bad grips, and silently stop every stale client from
+  repairing itself. That is asserted against the live database now, not trusted:
+  renaming the constraint fails two tests.
+- The down migration **clears** `mixed` and `hook` rows before narrowing the
+  CHECK. That loses data, and it is the honest cost — there is no narrower grip
+  to demote a mixed pull to, and `regular` would be the false entry 000054
+  refused to invent. Unrecorded is at least true.
+
+### Gaps
+
+- **The per-pattern mapping is duplicated in Go and TypeScript**, exactly as
+  `GripApplies` was, but it is a four-branch table now rather than a boolean, so
+  the drift surface grew. Filed as `N16`: serve it from `GET /v1/exercises`
+  instead, which also means a seventh grip needs no app release — the half #256
+  did not finish, since the server decides how many grips exist but not yet
+  which apply.
+- **Not seen on a phone.** The picker now renders on 93 exercises it never
+  appeared on, and `hook` is the first four-character short label on that row of
+  chips. Joins `L1`.
+- **Nothing reads a grip back.** It is recorded and displayed, never summed or
+  filtered — so an athlete alternating mixed grips has the data and no surface
+  that tells them. That is the argument for a side on `mixed`, and it should be
+  made with a consumer in hand rather than by widening the enum first.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

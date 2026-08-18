@@ -39,7 +39,7 @@ const (
 // rule and the personal records each see half the sets.
 //
 // Six values, and which of them are OFFERED depends on the movement — see
-// `GripsFor`. `mixed` and `hook` were absent until #PR, which is why that
+// `GripsFor`. `mixed` and `hook` were absent until #266, which is why that
 // function exists: they are how a heavy deadlift is held and they are not
 // variations of the other four, so a hinge that could only answer `regular`
 // collected a false entry rather than a missing one. The old fix was to

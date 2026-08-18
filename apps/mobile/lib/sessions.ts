@@ -21,7 +21,7 @@ const API_BASE = `${API_URL}/v1`;
  * hurt. A catalog row per grip could express neither — it would multiply the
  * 762-row catalog toward 3,000 — and would split one exercise's history in two.
  *
- * `mixed` and `hook` joined in #PR. Before that the list held four and the
+ * `mixed` and `hook` joined in #266. Before that the list held four and the
  * picker was withheld from hinges, carries and olympic lifts — 93 of 762
  * exercises, and the ones where grip matters most — because a hinge that could
  * only answer `regular` would collect a false entry rather than a missing one.
