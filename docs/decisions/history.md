@@ -25285,6 +25285,33 @@ newly-wired foods pull, which re-ran the edit and re-dirtied the row, so
 removing the guard under test left them green. One-shot now, and all three
 compare-and-swap guards go red under mutation.
 
+**The fix for the offline hole had a hole of its own, and the review found it.**
+Wiring the foods pull looked complete and could not write a single row:
+`foods.created_at` and `cached_at` are `NOT NULL` with no default, and the
+insert omitted both. Two things made it invisible. The `catch` around the pull
+swallowed everything — a failed pull is genuinely not a failed sync, so nothing
+surfaced. And **every sync test resolved `{}`**, so `listFoods` returned an
+empty array and the pull loop ran zero times: a fixture that STARVES the code
+under test hides a bug exactly as well as one that supplies the behaviour, which
+is the mirror image of the mistake this suite was started over. Confirmed
+against the real engine, including the surprising half — SQLite enforces NOT
+NULL *before* resolving the primary-key conflict, so the upsert path fails too,
+not just the insert.
+
+The pull now supplies both columns, deletes rows the server dropped (guarded on
+`remote = 1 AND dirty = 0`, so a food saved here and not yet pushed is never
+mistaken for a deletion), and records its error instead of swallowing it. Five
+fixture tests feed it actual foods; all three guards go red under mutation,
+including the original `NOT NULL` bug.
+
+Two of those tests were wrong on the first attempt in an instructive way: they
+mocked a server that accepted a push and then listed back a *different* value.
+Within one sync pass the push runs first, so that server cannot exist, and the
+tests were asserting against an impossible history rather than against the
+guard. Reaching the state they meant to test needs a push that fails
+**transiently** — a 5xx is not offline, so the pull still runs while the row is
+still owed.
+
 ### Open questions this leaves
 
 - **Not verified on a device or Simulator.** `verify` is green, 1,424 mobile
@@ -25300,6 +25327,12 @@ compare-and-swap guards go red under mutation.
 - A reinstalled phone has an empty diary: entries never pull, so history lives
   on the server and the device cannot fetch it back. Acceptable while the phone
   is the only writer; it stops being acceptable at N28.
+- **The target cache's fetched-marker is device-global while the cache fills a
+  day-window at a time.** Stepping back, offline, to a day before the earliest
+  target ever fetched reports `none` where the truth is `unknown` — the sentence
+  the union exists to prevent, in a narrower window. Fixing it means recording
+  fetched windows rather than one timestamp; the limitation is stated in
+  `localTargetView` rather than left to be discovered.
 - Saving a meal from a slot with two or more entries is in the plan and is not
   built. Quick-add covers the repeat case; that covers the repeat *combination*.
 - The training row on the day screen is not built either. Its docstring states
