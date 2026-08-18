@@ -608,8 +608,19 @@ async function pushRow(
         // no validation failure to hit) and because the alternative — leaving
         // it dirty — re-pushes a session the server just refused to let us
         // touch. Worth knowing rather than discovering.
+        //
+        // `name_dirty` goes too, and it is the one flag this branch used to
+        // leave behind. It is the only real producer of `name_dirty = 1` with
+        // `dirty = 0`, and the session loop selects on `dirty` alone — so a
+        // renamed-then-deleted session whose DELETE was permanently refused
+        // kept a name the phone would never send again, stranded until some
+        // later edit happened to re-dirty the row. The workout twin self-heals
+        // because `workoutOwed` also reads `name_dirty`; this one did not.
+        // Clearing it matches the posture stated above: the server refused to
+        // let us touch this row, so we stop owing it anything.
         await db.runAsync(
-          `UPDATE local_sessions SET deleted_at = NULL, dirty = 0 WHERE id = ? AND user_id = ?`,
+          `UPDATE local_sessions SET deleted_at = NULL, dirty = 0, name_dirty = 0
+             WHERE id = ? AND user_id = ?`,
           row.id,
           userID,
         );
