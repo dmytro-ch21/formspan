@@ -37,10 +37,13 @@ describe("trackSections", () => {
     // `track: "syllabus"`. Before this it landed under "Reference syllabuses"
     // with nothing on the card saying otherwise.
     //
-    // Two rows on purpose. A single-row test passes against the bug in both
-    // directions — check only the VOLA row and the grouping looks right;
-    // check only the stranger's and "it grouped by track" also looks right.
-    // The defect is that the two were treated the SAME.
+    // Two rows on purpose, and the claim is about THIS test rather than the
+    // suite: it is the only single test that fails under a mutation in either
+    // direction, because the defect is that the two rows were treated the
+    // same. The suite would catch either on its own — the official-only and
+    // stranger-only tests above and below bracket them — so this is belt and
+    // braces, not the sole guard. Review measured that; an earlier version of
+    // this comment overstated it.
     const sections = trackSections([
       c({ id: "vola", track: "syllabus", official: true }),
       c({ id: "stranger", track: "syllabus", official: false }),
@@ -88,7 +91,11 @@ describe("trackSections", () => {
     ]);
   });
 
-  it("renders no empty sections", () => {
+  it("returns nothing at all for an empty list", () => {
+    // A tripwire, not a real guard: no path in this implementation can produce
+    // an empty section, because groups are built from rows and demotion MOVES
+    // a row rather than filtering it — unlike the mobile strips. This would
+    // only catch a rewrite to hardcoded headings. Named for what it does.
     expect(titles([])).toEqual([]);
   });
 

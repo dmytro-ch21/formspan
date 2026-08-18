@@ -25440,9 +25440,19 @@ compares **two rows** — a single-row test passes against this bug in both
 directions, since the defect is that VOLA content and a stranger's were treated
 the same, not that either was handled wrongly alone.
 
-Mutation-checked against the literal pre-fix line (three red) and against the
-tempting wrong fix, defaulting `official` to `true` for older servers (one red —
-the older-server case, which is exactly the one that fix would break). Omission
+Mutation-checked against the literal pre-fix line (three red), against the
+tempting wrong fix of defaulting `official` to `true` for older servers (one red
+— the older-server case, which is exactly the one that fix would break), and
+against demoting everything (three red). Review re-ran all three and measured
+one claim down: the two-row test is the only SINGLE test that fails in both
+directions, but the suite would catch either mutation without it, so it is belt
+and braces rather than the sole guard. The comment said otherwise and now
+does not.
+
+A side effect nobody was looking for: it also closes a duplicate-React-key
+vector. Sections are keyed on their title, so a stranger publishing
+`track: "belt roadmaps"` rendered a title colliding with the official belt
+section's key. Only seeder-controlled tracks can mint a titled section now. Omission
 is treated as attributing nothing: everything lands under "From other athletes",
 which over-attributes to strangers. That is the safe direction; the unsafe one
 is a VOLA heading over somebody's personal list.
@@ -25455,6 +25465,15 @@ Open questions:
 - The web `Curriculum` type is a hand-maintained mirror of the mobile one and
   they have now disagreed twice about the same field's meaning. `check:grip-parity`
   exists for exactly this shape one level down; nothing equivalent watches these.
+- **A stranger's card still renders belt cover art and a belt pill** off its
+  unvalidated `belt` field, inside the strangers' section. F7's complaint was
+  literally "wearing a belt word". It makes no VOLA claim where it now sits, and
+  `belt` is documented as a hint — so this is a conscious no rather than an
+  oversight, recorded because it is the same class of unvalidated signal.
+- **T9 named two call sites for the sequences version of this inference and
+  there are three** — `sequences/[id]/edit/page.tsx` says "This is a reference
+  sequence and cannot be edited" off the same `!editable`. Found reviewing this
+  PR and added to that task's line, so its fix does not stop at two.
 
 
 ## Open items / known gaps as of this entry
