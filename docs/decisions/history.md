@@ -25619,6 +25619,46 @@ whose sets cannot be compared to each other. Moving it per-set was considered
 and declined; `offersTimerTarget` still excludes dual-mode exercises, so the two
 affordances cannot compete for the same row.
 
+**Review caught two blocking defects in the first version, and both were in the
+half that looked finished.**
+
+The first is the one worth remembering, because the bug was created by the fix.
+Rendering the timer field on `set.seconds != null` alone tied its *mount* to a
+value that goes null on transient keystrokes — and in minutes mode `0` is the
+first character of `0.5`, converting to zero seconds, which the server refuses.
+So the field unmounted and the switch flipped off under the athlete's finger
+before the second character could be typed: **a sub-minute target could not be
+entered at all.** Two changes fix it. The showing-flag is now sticky UI state,
+turned off only by the switch and forced on whenever a duration is stored, so no
+parse can unmount the field. And a non-positive or unparseable entry now writes
+*nothing* rather than null — `timerTargetEdit` in `lib/duration.ts`, returning a
+tagged result precisely because "write null" and "write nothing" are the two
+states a nullable number cannot tell apart. Writing null was the actual wipe:
+`Field` adopts an externally-changed value, so the store going null made the
+field overwrite the `0` the athlete had just typed. Note this half was wrong
+*before* this branch too; the always-mounted field merely hid it.
+
+The second was an accessibility defect that defeated the feature's own premise.
+`GuideSheet`'s scrim was a `Pressable` carrying a role and a label — and a
+`Pressable` is accessible by default, which on iOS collapses its whole subtree
+into one element. A VoiceOver user who invoked the custom "What is this?" action
+got a sheet announcing itself as "Close, button", with the title, the definition
+and the Done button unreachable: the one control added *for* screen readers
+opened a panel screen readers could not read. The scrim is now
+`accessible={false}` with no role or label; tap-outside still works for sighted
+users because `onPress` does not require accessibility, and `Done` is the screen
+reader's dismissal. **Not verified on a device** — the reasoning is the
+documented RN default plus iOS grouping behaviour, and it wants a VoiceOver pass.
+
+Three smaller review findings landed with them: the group now actually closes
+after a pick (the doc comment claimed it did and the code did not); the group
+header announces its row — "Type for set 2 of Back Squat: Working" rather than
+six identical "Type: Working" headers down a session; and the definition card no
+longer blanks mid-fade, by splitting `visible` from `entry` so the caller holds
+the content across the close. That last one was first written with a ref read
+during render, which cost five lint warnings against a ratchet set at 54 — the
+state version is both correct and free.
+
 Covered by `lib/__tests__/setGuide.test.ts`, driven off `GRIPS` and `SET_TYPES`
 rather than a list repeated in the test — so a seventh grip added without copy
 fails, rather than silently shipping a pill whose long press says "no

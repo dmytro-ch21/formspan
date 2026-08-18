@@ -110,3 +110,42 @@ export const durationUnitKey = (exerciseID: string) => `dur:${exerciseID}`;
 export function parseDurationUnit(value: string | null): DurationUnit | null {
   return value === 'minutes' || value === 'seconds' ? value : null;
 }
+
+/**
+ * What a keystroke in the timer-target field should do to the stored value.
+ *
+ * Three outcomes, not two, and the third is the one this exists for.
+ *
+ *  - **Empty** → write `null`. That is the deliberate route back to untimed,
+ *    and it is unambiguous because an empty field is not on its way anywhere.
+ *  - **A positive duration** → write it.
+ *  - **Anything else** — zero, negative, or not a number yet → write NOTHING.
+ *
+ * The third case is the fix for a bug that made a sub-minute target impossible
+ * to enter, and the mechanism is invisible at the call site. In minutes mode
+ * `0` is the first character of `0.5`, and it converts to zero seconds, which
+ * the server refuses (`seconds <= 0`) and so must never be stored. The obvious
+ * reading — store `null` for anything invalid — is what broke it: `Field`
+ * adopts an externally-changed value, so the store going to `null` makes the
+ * field notice that `null` is not what its text parses to and overwrite the
+ * text. The `0` is wiped and the `.5` lands in an empty box.
+ *
+ * Writing nothing leaves the stored value untouched, `Field` sees no change,
+ * and the digits survive until they mean something. A `0` typed and then
+ * abandoned leaves the previous target in place, which is the right way round:
+ * the alternative is a row that syncs 400 or a countdown that fires instantly.
+ *
+ * Returned as a tagged result rather than `number | null | undefined` because
+ * "write null" and "write nothing" are exactly the two states a nullable
+ * number cannot tell apart, and confusing them is the whole bug.
+ */
+export type TimerTargetEdit = { write: false } | { write: true; seconds: number | null };
+
+export function timerTargetEdit(text: string, u: DurationUnit): TimerTargetEdit {
+  const t = text.trim();
+  if (t === '') return { write: true, seconds: null };
+  const raw = Number(t.replace(',', '.'));
+  if (!Number.isFinite(raw)) return { write: false };
+  const seconds = fromDisplayDuration(raw, u);
+  return seconds > 0 ? { write: true, seconds } : { write: false };
+}

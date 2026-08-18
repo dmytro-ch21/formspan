@@ -8035,6 +8035,8 @@ training. Everything here is about it telling the truth.
 - **Clearing the Timer field to empty is the same state as switching Timed off.** Both must end with `seconds: null`; a field that reads empty while the switch reads on is two answers to one question.
 - Typing `0` or a negative number in the Timer field stores `null`, not `0` — the server rejects `seconds <= 0`, so keeping it would be a row that 400s on sync and a countdown that fires instantly.
 - In minutes mode the Timer accepts a decimal (`1.5` = 90s); in seconds mode it is whole numbers only.
+- **Type a sub-minute target one character at a time in minutes mode: `0`, then `.`, then `5`.** The field must stay mounted, the switch must stay on, and the digits must survive — the result is 30s. The first version of this failed on the first keystroke, because `0` converts to zero seconds and the field's mount was tied to the stored value. A non-positive or unparseable entry must write *nothing* to the set, not null.
+- A `0` typed and then abandoned leaves the previous target in place. That is deliberate: zero would sync 400 and arm a countdown that fires instantly.
 - **`Timed` must never appear on a dual-mode exercise** (`load_type: 'reps'` — burpees, mountain climbers). Writing `seconds` there flips the set into time mode and hides its rep count; those exercises get the exercise-header reps/time toggle instead. Same gate as N4 (`offersTimerTarget`).
 - **A grip this build does not know about still opens a panel.** Log a set carrying a grip outside the app's union (a newer server's value, or a movement re-categorised after the set was logged): the pill renders, holding it says the value is *recorded* and merely undescribed, and it must not crash or imply the data is broken.
 - A set type or grip added to `SET_TYPES` / `GRIPS` without copy in `lib/setGuide.ts` must fail the suite, not ship a pill whose info panel says "no description yet".
@@ -8043,8 +8045,14 @@ training. Everything here is about it telling the truth.
 
 - Each group header is announced with its **answer** — "Type: Working", not "Type" — and reports its expanded state.
 - Every pill exposes a **custom action** ("What is this?"). VoiceOver does not forward a long press, so without it the definitions are unreachable for the people most likely to want them read aloud.
+- **The info panel itself must be readable under VoiceOver** — title, body and Done each focusable. Its scrim must stay `accessible={false}`: a `Pressable` is accessible by default and iOS then collapses the whole card into one "Close, button" element, which silently undoes the custom action above. Worth a real VoiceOver pass, not just a code read.
+- Group headers announce their row ("Type for set 2 of Back Squat: Working"). Without the context every set in the session sounds identical.
 - `Timed` is a `switch`, announced with its checked state, not a button.
 - Every pill and both add buttons clear 44pt of touch target (`hitSlop` counts).
+
+### Notes for whoever automates this
+
+- **Both `set-N-timer` and `set-N-grip-<key>` are conditionally mounted now.** The timer field needs the `Timed` switch on (`set-N-timed`); the grip pills need the group opened first via its header (`set-N-grip`). A test that reaches straight for the old testID will fail for the wrong reason.
 
 ### Layout
 

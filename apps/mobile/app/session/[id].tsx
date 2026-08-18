@@ -28,6 +28,7 @@ import {
   durationInputUnit,
   durationUnitKey,
   fromDisplayDuration,
+  timerTargetEdit,
   parseDurationUnit,
   toDisplayDuration,
   type DurationUnit,
@@ -2049,6 +2050,32 @@ function SetRow({
 }) {
   const accent = useAccent();
   const [open, setOpen] = useState(false);
+  /*
+    Whether the Timed field is SHOWING, which is not quite the same question as
+    whether the set carries a duration — and conflating them made a real target
+    impossible to type.
+
+    Rendering the field on `set.seconds != null` alone meant every transient
+    parse unmounted it mid-keystroke. In minutes mode `0` is the first character
+    of `0.5`, and `fromDisplayDuration(0)` is not positive, so the field
+    vanished and the switch flipped off under the athlete's finger before the
+    second character could be typed. A sub-minute target could not be entered at
+    all.
+
+    So the flag is sticky: turned on by the switch, turned off only by the
+    switch, and FORCED on whenever a duration is actually stored — a reload,
+    carry-forward from the previous set, or a template that prescribed one all
+    have to show their field without anyone having tapped anything.
+
+    The invariant the switch exists for is unaffected and still holds in the
+    direction that matters: turning it off nulls `seconds`, so the switch can
+    never read "off" over a live duration that is still arming the play button.
+    The other direction — on, with the field empty — is a row being typed into,
+    and it behaves exactly as off does everywhere it counts: `workSecondsFor`
+    is null, so no play button, and `canRun` will not take it.
+  */
+  const [timedOn, setTimedOn] = useState(set.seconds != null);
+  const timed = timedOn || set.seconds != null;
   // Mode-aware: burpees switched to time show a duration field and no reps one,
   // which is the whole point of the switch. Going through `measuresFor` directly
   // would offer the one number the row is not keeping.
@@ -2245,8 +2272,9 @@ function SetRow({
             <View style={styles.timed}>
               <TogglePill
                 label="Timed"
-                on={set.seconds != null}
-                onToggle={(next) =>
+                on={timed}
+                onToggle={(next) => {
+                  setTimedOn(next);
                   onChange(
                     withSetChange(set, {
                       // Turning it OFF clears the number rather than hiding it.
@@ -2256,8 +2284,8 @@ function SetRow({
                       // 60 would be describing a row that still behaves as timed.
                       seconds: next ? DEFAULT_TIMER_SECONDS : null,
                     }),
-                  )
-                }
+                  );
+                }}
                 guide={TIMER_GUIDE}
                 accessibilityLabel={`Timed ${setName} of ${exerciseName}`}
                 testID={`set-${index}-timed`}
@@ -2265,30 +2293,16 @@ function SetRow({
               {/* Beside the switch, not below it: the switch's whole purpose is
                   to produce this field, and a number that appears a row further
                   down reads as an unrelated thing that happened to arrive. */}
-              {set.seconds != null && (
+              {timed && (
                 <View style={styles.timedField}>
                   <Field
                     label={`Timer (${durationInputUnit(duration)})`}
-                    value={toDisplayDuration(set.seconds, duration)}
+                    value={set.seconds == null ? null : toDisplayDuration(set.seconds, duration)}
                     onChangeText={(text) => {
-                      const t = text.trim();
-                      if (t === '') {
-                        onChange(withSetChange(set, { seconds: null }));
-                        return;
-                      }
-                      const raw = Number(t.replace(',', '.'));
-                      if (!Number.isFinite(raw)) {
-                        onChange(withSetChange(set, { seconds: null }));
-                        return;
-                      }
-                      const canonical = fromDisplayDuration(raw, duration);
-                      // A zero or negative duration is refused rather than stored:
-                      // the server rejects `seconds <= 0` outright, so keeping it
-                      // would be a row that syncs 400 and a timer that fires the
-                      // instant it starts. Null is the honest reading of "no" —
-                      // and clearing the field to empty is now also how the
-                      // switch goes back off, since the two are one state.
-                      onChange(withSetChange(set, { seconds: canonical > 0 ? canonical : null }));
+                      // Three outcomes, and the third — write nothing — is what
+                      // makes `0.5` typeable in minutes mode. See its note.
+                      const edit = timerTargetEdit(text, duration);
+                      if (edit.write) onChange(withSetChange(set, { seconds: edit.seconds }));
                     }}
                     integer={duration !== 'minutes'}
                     // Built from the unit-bearing label, exactly as the measure
@@ -2389,6 +2403,7 @@ function SetRow({
             onSelect={(key) => onChange({ ...set, set_type: key as SetType })}
             guideFor={setTypeGuide}
             describe={(o) => `${o.label} set, for ${setName} of ${exerciseName}`}
+            context={`${setName} of ${exerciseName}`}
             testID={`set-${index}-type`}
           />
 
@@ -2422,6 +2437,7 @@ function SetRow({
               onSelect={(key) => onChange({ ...set, grip: key as Grip | null })}
               guideFor={gripGuide}
               describe={(o) => `${o.label} grip for ${setName} of ${exerciseName}`}
+              context={`${setName} of ${exerciseName}`}
               testID={`set-${index}-grip`}
             />
           )}
@@ -2714,24 +2730,11 @@ const styles = StyleSheet.create({
     backgroundColor: vola.bg,
     textAlign: 'center',
   },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   // The switch and its field on one line, baseline-agnostic: `Field` carries a
   // label above the input, so `alignItems: 'flex-end'` is what puts the pill
   // level with the input rather than with the label.
   timed: { flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
   timedField: { flex: 1 },
-  chip: {
-    borderWidth: 1,
-    borderColor: vola.line,
-    borderRadius: 999,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  chipActive: {},
-  chipText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
-  chipTextActive: { color: vola.navy },
   hintRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

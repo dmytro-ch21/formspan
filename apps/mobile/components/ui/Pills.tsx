@@ -73,6 +73,7 @@ export function PillGroup({
   clearable = false,
   emptyLabel = 'Not recorded',
   describe,
+  context,
   testID,
 }: {
   /** Shown in small caps at the head of the row — `TYPE`, `GRIP`. */
@@ -87,11 +88,24 @@ export function PillGroup({
   emptyLabel?: string;
   /** The full spoken label for one pill — the screen knows the set and exercise. */
   describe: (option: PillOption) => string;
+  /**
+   * What this group is ABOUT, spoken — "set 2 of Back Squat".
+   *
+   * The header is the always-visible control, and it is identical on every set
+   * of every exercise. Without this a VoiceOver user swiping a three-set
+   * session hears "Type: Working" six times with nothing to tell the rows
+   * apart, while the pills inside each group are fully labelled. Sighted users
+   * get the context from position on screen; this is the equivalent.
+   */
+  context: string;
   testID?: string;
 }) {
   const accent = useAccent();
   const [open, setOpen] = useState(false);
+  // The entry survives the close so the card does not blank mid-fade;
+  // `guideOpen` is what the modal's visibility keys on. See `GuideSheet`.
   const [guide, setGuide] = useState<GuideEntry | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const current = options.find((o) => o.key === selected);
 
@@ -104,7 +118,7 @@ export function PillGroup({
         // The header states the answer, so it has to SAY the answer — a
         // VoiceOver user who hears only "Type" has to open the group to learn
         // something a sighted user reads without touching anything.
-        accessibilityLabel={`${label}: ${current?.label ?? emptyLabel}`}
+        accessibilityLabel={`${label} for ${context}: ${current?.label ?? emptyLabel}`}
         accessibilityHint={open ? 'Collapses the options' : 'Opens the options'}
         accessibilityState={{ expanded: open }}
         hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
@@ -130,8 +144,17 @@ export function PillGroup({
             return (
               <Pressable
                 key={o.key}
-                onPress={() => onSelect(on && clearable ? null : o.key)}
-                onLongPress={() => setGuide(guideFor(o.key))}
+                onPress={() => {
+                  onSelect(on && clearable ? null : o.key);
+                  // Closing is the documented behaviour and was missing: the
+                  // pick is a decision that ends, and a group left open puts
+                  // the screen back into the wall of chips this replaced.
+                  setOpen(false);
+                }}
+                onLongPress={() => {
+                  setGuide(guideFor(o.key));
+                  setGuideOpen(true);
+                }}
                 // Below the 500ms default: this is a reference lookup between
                 // sets, not a destructive confirm, so it should not feel like
                 // one. `HoldToConfirm` is the component that earns a long hold.
@@ -148,7 +171,9 @@ export function PillGroup({
                 }
                 accessibilityActions={INFO_ACTION}
                 onAccessibilityAction={(e) => {
-                  if (e.nativeEvent.actionName === 'info') setGuide(guideFor(o.key));
+                  if (e.nativeEvent.actionName !== 'info') return;
+                  setGuide(guideFor(o.key));
+                  setGuideOpen(true);
                 }}
                 hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
                 testID={testID ? `${testID}-${o.key}` : undefined}
@@ -161,7 +186,7 @@ export function PillGroup({
         </RNView>
       )}
 
-      <GuideSheet entry={guide} onClose={() => setGuide(null)} />
+      <GuideSheet entry={guide} visible={guideOpen} onClose={() => setGuideOpen(false)} />
     </RNView>
   );
 }
@@ -218,7 +243,7 @@ export function TogglePill({
         <Text style={[styles.pillText, on && styles.pillTextOn]}>{label}</Text>
       </Pressable>
 
-      <GuideSheet entry={open ? guide : null} onClose={() => setOpen(false)} />
+      <GuideSheet entry={guide} visible={open} onClose={() => setOpen(false)} />
     </RNView>
   );
 }
@@ -236,29 +261,61 @@ export function TogglePill({
  * kept as well, because a scrim is not a discoverable control and VoiceOver
  * has nothing to land on otherwise.
  */
-function GuideSheet({ entry, onClose }: { entry: GuideEntry | null; onClose: () => void }) {
+function GuideSheet({
+  entry,
+  visible,
+  onClose,
+}: {
+  /**
+   * The definition to show — kept by the CALLER across a close.
+   *
+   * Visibility and content are two props rather than one nullable one, and
+   * that separation fixes a real glitch: nulling the entry to close blanks the
+   * card for the length of the fade, so the definition looks snatched away as
+   * it leaves. The caller drops `visible` and holds `entry`, and the card
+   * fades out still showing what it said.
+   *
+   * Kept in the caller's state rather than in a ref here: reading or writing a
+   * ref during render is what `react-hooks/refs` forbids, and this app holds a
+   * warning ratchet that the ref version broke by five.
+   */
+  entry: GuideEntry | null;
+  visible: boolean;
+  onClose: () => void;
+}) {
   const accent = useAccent();
   return (
     <Modal
-      visible={entry !== null}
+      visible={visible}
       transparent
       animationType="fade"
       onRequestClose={onClose}
     >
-      <Pressable
-        style={styles.scrim}
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel="Close"
-      >
+      {/*
+        `accessible={false}` and NO role or label, and this is the finding that
+        made the whole hold-for-info contract worth having.
+
+        A `Pressable` is accessible by default, and on iOS an accessible view
+        collapses its entire subtree into ONE element. With a role and a label
+        on the scrim, a VoiceOver user who invoked "What is this?" got a sheet
+        that announced itself as "Close, button" — the title, the definition and
+        the Done button were not reachable, so the one control added FOR screen
+        readers opened a panel screen readers could not read.
+
+        Tap-outside survives for sighted users, because `onPress` does not need
+        the view to be accessible. `Done` is the screen-reader dismissal and
+        `onRequestClose` covers the system back gesture, so nothing is lost.
+      */}
+      <Pressable style={styles.scrim} onPress={onClose} accessible={false}>
         {/* Swallows the press, so a tap on the card itself does not dismiss
             what it is trying to read. `onStartShouldSetResponder` rather than a
-            nested Pressable: this View must not announce itself as a control. */}
+            nested Pressable: this View must not announce itself as a control.
+            No `accessibilityViewIsModal` — it hides a receiver's SIBLINGS, and
+            this card has none; `Modal` already scopes VoiceOver to its window. */}
         <View
           style={styles.card}
           lightColor={vola.surfaceRaised}
           darkColor={vola.surfaceRaised}
-          accessibilityViewIsModal
           onStartShouldSetResponder={() => true}
         >
           <Text style={styles.cardTitle}>{entry?.title}</Text>

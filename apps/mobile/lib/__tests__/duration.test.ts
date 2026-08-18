@@ -6,6 +6,7 @@ import {
   formatDuration,
   fromDisplayDuration,
   parseDurationUnit,
+  timerTargetEdit,
   toDisplayDuration,
 } from '../duration';
 
@@ -111,5 +112,51 @@ describe('the input suffix', () => {
   it('names the unit the field takes', () => {
     expect(durationInputUnit('seconds')).toBe('s');
     expect(durationInputUnit('minutes')).toBe('min');
+  });
+});
+
+describe('timerTargetEdit', () => {
+  /**
+   * The three-way result exists because "store null" and "store nothing" are
+   * different, and collapsing them made a sub-minute target impossible to
+   * enter. These assertions are about that distinction, not about arithmetic.
+   */
+
+  it('lets a sub-minute target be typed one character at a time', () => {
+    // `0` is the first keystroke of `0.5`. It must NOT reach the store — zero
+    // seconds is a row the server refuses — but it must also not clear it,
+    // because `Field` adopts an external change and would wipe the digit on
+    // its way to meaning something. This is the regression; before the fix the
+    // `.5` landed in an emptied box and 30s could not be entered at all.
+    expect(timerTargetEdit('0', 'minutes')).toEqual({ write: false });
+    expect(timerTargetEdit('0.', 'minutes')).toEqual({ write: false });
+    expect(timerTargetEdit('0.5', 'minutes')).toEqual({ write: true, seconds: 30 });
+  });
+
+  it('writes nothing for a value on its way to being a number', () => {
+    expect(timerTargetEdit('.', 'seconds')).toEqual({ write: false });
+    expect(timerTargetEdit('-', 'seconds')).toEqual({ write: false });
+    expect(timerTargetEdit('abc', 'seconds')).toEqual({ write: false });
+  });
+
+  it('refuses a non-positive duration outright', () => {
+    // Both would sync 400 (`seconds <= 0`) and both would arm a countdown that
+    // fires the instant it starts.
+    expect(timerTargetEdit('0', 'seconds')).toEqual({ write: false });
+    expect(timerTargetEdit('-5', 'seconds')).toEqual({ write: false });
+  });
+
+  it('clears to untimed ONLY on an empty field', () => {
+    // The deliberate route back, and the one input that is unambiguous: an
+    // empty field is not on its way anywhere.
+    expect(timerTargetEdit('', 'seconds')).toEqual({ write: true, seconds: null });
+    expect(timerTargetEdit('   ', 'seconds')).toEqual({ write: true, seconds: null });
+  });
+
+  it('stores a real target in either unit', () => {
+    expect(timerTargetEdit('45', 'seconds')).toEqual({ write: true, seconds: 45 });
+    expect(timerTargetEdit('1.5', 'minutes')).toEqual({ write: true, seconds: 90 });
+    // A comma decimal, which this app accepts everywhere else a weight is typed.
+    expect(timerTargetEdit('1,5', 'minutes')).toEqual({ write: true, seconds: 90 });
   });
 });
