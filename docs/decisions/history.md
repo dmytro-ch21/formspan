@@ -24952,7 +24952,13 @@ because #276 was mid-flight in the three files a badge renders in. This wires
 it anyway, at the user's explicit direction after the collision was raised
 twice. The comment that has sat in `app/bjj/session/[id].tsx` since the
 celebration card was built — "it stays honest until the accomplishments work
-lands" — is gone, and the card can now carry a badge on the mat.
+lands" — is rewritten, and the card can now carry a badge on the mat.
+
+(An earlier draft of this entry said that comment was "gone". It was not:
+review found it still sitting there, intact, four hundred lines above the
+render it now contradicted. Recorded rather than quietly corrected, because it
+is the same failure this project keeps finding — **a claim about the code that
+the code does not support** — and it was in the history file this time.)
 
 ### The phone still decides nothing
 
@@ -25028,11 +25034,60 @@ enumerated at runtime; a bare union cannot be, so nothing could have compared
 it. The test also asserts the regex found anything at all, since an empty list
 would make every comparison vacuously true.
 
-**Not tested: the chime precedence and the badge rendering.** Both live in
-`SessionCelebration.tsx`, and covering them means a component test this suite
-deliberately does not usually write. The wiring is three lines and the logic
-they call is tested; that is the honest boundary, not a claim it is fully
-covered.
+**The badge precedence IS tested, because review pointed out it did not have to
+live in the card.** It was a `??` inside the render; `badgeFor` now takes the
+accomplishment as a second argument, which turns "records, then an
+accomplishment, then nothing" from JSX into a rule with three tests and two
+mutations behind it. A rule expressed in a render is one nothing can pin.
+
+**Still not tested: the chime precedence and the rendering itself.** Both need
+a component test this suite deliberately does not usually write, and what
+remains uncovered is two lines of wiring over logic that is covered. That is
+the honest boundary rather than a claim of completeness.
+
+### What review found: the settle rule was inconsistent, and said so in three places
+
+No blocking findings. The one worth the space is a rule this branch got wrong
+in a way that was self-consistent enough to look right.
+
+**A failed lookup now settles, matching the strength card.** My first version
+never settled on failure, with a comment saying that was "the honest outcome the
+PR row already chose". The PR row chose the opposite — `session/[id].tsx` uses
+`.finally` with its own comment: *"a failure still settles: offline the answer
+is 'no records', and the streak chime must not wait forever."* So two sports had
+two rules, and both files claimed to be following the other.
+
+The concrete cost was narrow and real: history succeeds while the badge lookup
+fails (one endpoint 500s; full offline kills both), and BJJ would then render a
+streak line while never chiming it, forever. Suppressing a streak the athlete
+genuinely carried, because an unrelated endpoint failed, punishes them for a
+server fault. One rule for both sports now.
+
+**The badge is announced.** It had no `accessibilityLiveRegion`, while the
+streak line and records list beside it both do — and it arrives after render,
+which is exactly when that matters. For strength the omission was masked,
+because the announced records list carries the same news; on the mat this badge
+is the ONLY representation of the first, so a VoiceOver athlete got flares, a
+chime, and no words.
+
+Two smaller ones: `badgeSettled` compared `badge?.sessionID === id`, which is
+`undefined === undefined` when both are absent and would open the streak gate
+before anything was looked up (unreachable today, closed anyway); and
+`accomplishmentsFromSession` lacked the empty-id guard its stated model
+`recordsFromSession` has.
+
+### A race this inherits rather than introduces
+
+`requestSync('bjj-session-finished')` is fire-and-forget and the badge fetch
+starts the moment the card opens, so the server can honestly answer "no firsts"
+**before the just-finished session's rows have landed**. The badge then settles
+null, the streak chimes, and nothing refetches — a genuinely earned first,
+silently missed.
+
+Strength records have the identical single-shot exposure and it was accepted
+there, so accepting it here is consistent rather than new. It is written down
+because review found it by reading, not by seeing it happen, and an
+acknowledged limitation is a different thing from an unnoticed one.
 
 ### Gaps
 

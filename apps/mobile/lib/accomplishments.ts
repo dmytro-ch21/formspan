@@ -92,6 +92,10 @@ export function accomplishmentsFromSession(
   all: Accomplishment[],
   sessionID: string,
 ): Accomplishment[] {
+  // Parity with `recordsFromSession`, which guards the same way. Structurally
+  // safe today — `session_id` is a string or null, never '' — so this is
+  // about the two staying the same shape rather than a live hazard.
+  if (!sessionID) return [];
   return all.filter((a) => a.session_id === sessionID);
 }
 

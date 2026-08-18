@@ -7872,9 +7872,11 @@ training. Everything here is about it telling the truth.
 
 - **A competition award never appears on a session card.** Winning gold earns `first_gold`, which carries a contest and no session — it must not surface on whichever mat session is logged next.
 - An award belonging to a *different* session never appears on this one.
-- **Offline, no badge and no claim.** The lookup never answers, the card opens on local numbers, and nothing is asserted — silence is not a claim, a wrong medal is.
+- **Offline, no badge and no claim.** The card opens on local numbers and nothing is asserted — silence is not a claim, a wrong medal is. **The lookup must still SETTLE on failure**, matching the strength card: otherwise a carried streak renders its line and never chimes, forever, because one endpoint failed.
+- **A first earned by the session just finished may be missed**, and this is a known limitation rather than a bug to assert against: the sync push is fire-and-forget, so the server can answer "no firsts" before that session's rows land. Nothing refetches. Strength personal records have the identical exposure.
 - A kind the installed build does not know (server vocabulary ahead of the app) renders as "A first" rather than an empty badge.
-- The card must never show a badge and a personal-record badge together — a session is one sport, so they cannot both exist.
+- The card must never show a badge and a personal-record badge together — a session is one sport, so they cannot both exist. If both ever did, the **record** wins: the measured thing outranks the reported one.
+- **The badge is announced to a screen reader.** It arrives after the card renders, and on the mat it is the only representation of the first — without a live region a VoiceOver athlete gets the flares and the chime and no words.
 
 ### Regression trap
 

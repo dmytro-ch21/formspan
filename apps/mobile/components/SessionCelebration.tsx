@@ -12,7 +12,6 @@ import {
   feltFor,
   statsFor,
   subtitleFor,
-  type Badge,
   type SessionSummary,
 } from '@/lib/celebration';
 import { RECORD_LABEL } from '@/lib/records';
@@ -146,9 +145,7 @@ export function SessionCelebration({
   testID?: string;
 }) {
   const accent = useAccent();
-  const badge: Badge | null =
-    badgeFor(summary) ??
-    (accomplishment ? { key: 'accomplishment', label: accomplishment.label } : null);
+  const badge = badgeFor(summary, accomplishment);
   const stats = statsFor(summary, formatTonnage);
   const felt = feltFor(summary);
 
@@ -260,7 +257,21 @@ export function SessionCelebration({
           <Text style={styles.subtitle}>{subtitleFor(summary)}</Text>
 
           {badge && (
-            <RNView style={[styles.badge, { borderColor: accent.accent }]}>
+            /*
+              `polite`, for the same reason the streak line and the records list
+              below carry it: this arrives AFTER the card has rendered, once the
+              network answers, so a screen reader has already moved past it.
+
+              It matters more here than it did for records. A strength athlete
+              hears the news anyway from the announced records list underneath;
+              on the mat this badge is the ONLY representation of the first, so
+              without it a VoiceOver athlete gets flares and a chime and no
+              words at all.
+            */
+            <RNView
+              accessibilityLiveRegion="polite"
+              style={[styles.badge, { borderColor: accent.accent }]}
+            >
               <Text style={[styles.badgeText, { color: accent.ink }]} testID="celebration-badge">
                 {badge.label}
               </Text>

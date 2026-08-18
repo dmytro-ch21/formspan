@@ -112,6 +112,11 @@ describe('accomplishmentsFromSession', () => {
   it('is empty when the session earned nothing, which is the normal case', () => {
     expect(accomplishmentsFromSession([award({ session_id: 'ses-9' })], 'ses-1')).toEqual([]);
   });
+
+  it('is empty for a missing id rather than matching anything', () => {
+    // Parity with `recordsFromSession`'s own guard.
+    expect(accomplishmentsFromSession([award({ session_id: 'ses-1' })], '')).toEqual([]);
+  });
 });
 
 describe('accomplishmentBadge', () => {

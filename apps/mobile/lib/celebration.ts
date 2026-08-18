@@ -103,10 +103,29 @@ export type Badge = { key: 'record' | 'accomplishment'; label: string };
  * all. That gap is its own piece of work, and inventing a "you showed up"
  * badge to fill it in the meantime is the exact wallpaper this avoids.
  */
-export function badgeFor(summary: Pick<SessionSummary, 'records'>): Badge | null {
+export function badgeFor(
+  summary: Pick<SessionSummary, 'records'>,
+  /**
+   * The mat's half, already resolved by the caller — a BJJ first, from
+   * `lib/accomplishments.ts`. Second argument rather than a field on the
+   * summary because it arrives from a network call the card does not make.
+   *
+   * Taking it here rather than falling back at the call site is what makes the
+   * precedence testable: "records win, then an accomplishment, then nothing" is
+   * a rule, and a rule living in JSX is one nothing can pin.
+   */
+  accomplishment?: { label: string } | null,
+): Badge | null {
   const n = summary.records.length;
-  if (n === 0) return null;
-  return { key: 'record', label: n === 1 ? 'Personal record' : `${n} personal records` };
+  if (n > 0) {
+    return { key: 'record', label: n === 1 ? 'Personal record' : `${n} personal records` };
+  }
+  // Records first, and it is not a real contest: a session is one sport, so a
+  // strength session never has an accomplishment and a BJJ session never has
+  // records. The order is stated so that if that ever stops being true, the
+  // measured thing wins rather than whichever happened to be checked first.
+  if (accomplishment) return { key: 'accomplishment', label: accomplishment.label };
+  return null;
 }
 
 /**

@@ -176,20 +176,31 @@ export default function BjjSessionScreen() {
     sessionID: string;
     value: { label: string } | null;
   } | null>(null);
-  const badgeSettled = badge?.sessionID === id;
-  const celebrationBadge = badgeSettled && badge ? badge.value : null;
+  // `badge != null` first: `badge?.sessionID === id` alone is `undefined ===
+  // undefined` when both are absent, which would open the streak gate before
+  // anything had been looked up. Unreachable today (a celebration needs a
+  // loaded session, which needs an id) and closed anyway, because it costs a
+  // comparison and the failure is silent.
+  const badgeSettled = badge != null && badge.sessionID === id;
+  const celebrationBadge = badgeSettled ? badge.value : null;
   useEffect(() => {
     if (!celebrating || !id) return;
     let live = true;
     fetchAccomplishments(getToken, localZone())
-      .then((all) => {
-        if (!live) return;
-        setBadge({ sessionID: id, value: accomplishmentBadge(accomplishmentsFromSession(all, id)) });
-      })
-      .catch(() => {
-        // Unreachable server, no badge and no claim. Deliberately NOT settling:
-        // settling would release the streak chime on the strength of a lookup
-        // that never answered, which is the race this flag exists to prevent.
+      .then((all) => accomplishmentBadge(accomplishmentsFromSession(all, id)))
+      // No network, no badge and no claim — silent, because a failed lookup is
+      // not an error to raise on a celebration screen.
+      .catch(() => null)
+      .then((value) => {
+        // A FAILURE STILL SETTLES, matching the strength card exactly: offline
+        // the answer is "nothing to show", and the streak chime must not wait
+        // forever for a lookup that is never coming back. An earlier version
+        // here never settled on failure and claimed that matched the PR row --
+        // it did the opposite, and review caught the contradiction. One rule
+        // for both sports; suppressing a streak the athlete really did carry,
+        // because an unrelated endpoint failed, punishes them for a server
+        // fault.
+        if (live) setBadge({ sessionID: id, value });
       });
     return () => {
       live = false;
@@ -304,11 +315,15 @@ export default function BjjSessionScreen() {
       requestSync('bjj-session-finished');
       /*
         BJJ gets the same card, with its own vocabulary — rounds and mat time
-        rather than sets and tonnage — and deliberately NO badge and no PR row.
-        There is no BJJ equivalent of a personal record yet (`lib/records.ts`
-        is strength-only), and inventing a "you showed up" badge to fill the
-        gap is precisely the wallpaper that would devalue the real ones. It
-        stays honest until the accomplishments work lands.
+        rather than sets and tonnage — and no PR row, because `lib/records.ts`
+        is strength-only.
+
+        It DOES now get a badge. This comment used to end "it stays honest
+        until the accomplishments work lands"; that work landed, and the badge
+        is a server-derived FIRST rather than the "you showed up" wallpaper the
+        old text was refusing. The distinction it was protecting is intact:
+        these fire once each in an athlete's life, so the common case here is
+        still no badge at all. See `lib/accomplishments.ts`.
       */
       /*
         Read back rather than taken from `session`.
