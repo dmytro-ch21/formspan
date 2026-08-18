@@ -23522,7 +23522,7 @@ movement patterns, identical across all three.
 - **`mixed` still has no side.** N9 decided that deliberately and recorded when
   to revisit; this picker inherits it, so an athlete cannot yet say which hand
   was over.
-## 2026-08-18 — N9's review landed after N9 did, and it found the half that was not pinned
+
 ## 2026-08-17 — N9's review landed after N9 did, and it found the half that was not pinned
 
 #266 merged while its second review pass was still running. Both reviewers came
