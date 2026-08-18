@@ -19,6 +19,7 @@ import {
   cacheTargets,
   localEntries,
   localEntry,
+  localFoods,
   localTargetView,
   logFood,
   pendingFoodCount,
@@ -27,7 +28,7 @@ import {
   saveFoodLocally,
   syncFood,
 } from '../foodLog';
-import type { Target } from '../nutrition';
+import type { Food, Target } from '../nutrition';
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 
 let db: FixtureDb;
@@ -360,6 +361,110 @@ describe('the pull', () => {
       { ...meal(), id: 'srv-1', source_food_id: null, notes: '' },
     ]);
     expect(await localEntries(USER, TODAY)).toHaveLength(0);
+  });
+});
+
+describe('the foods pull', () => {
+  /** A server food, as `listFoods` would hand it back. */
+  function serverFood(over: Partial<Food> = {}): Food {
+    return {
+      id: 'srv-1',
+      kind: 'food',
+      name: 'Web recipe',
+      brand: '',
+      serving_label: '1 portion',
+      serving_grams: null,
+      kcal: 500,
+      protein_g: 40,
+      carb_g: 50,
+      fat_g: 15,
+      fibre_g: null,
+      ...over,
+    };
+  }
+
+  /**
+   * Feed the pull ACTUAL FOODS.
+   *
+   * Every other sync test resolves `{}`, so `listFoods` returns `[]` and the
+   * pull loop runs zero times — the suite was green while the pull could not
+   * write a single row, because `foods.created_at` and `cached_at` are NOT NULL
+   * with no default and the insert omitted both. A mock that starves the code
+   * under test hides a bug just as thoroughly as one that supplies the
+   * behaviour; this is the same class of flaw, inverted.
+   */
+  function pullReturns(foods: Food[]) {
+    mockApi.mockImplementation(async (_t: unknown, path: string) =>
+      String(path).startsWith('/nutrition/foods') ? { foods } : {},
+    );
+  }
+
+  it('writes a server food the phone has never seen', async () => {
+    pullReturns([serverFood()]);
+    await syncFood(USER, token);
+    const local = await localFoods(USER);
+    expect(local.map((f) => f.name)).toContain('Web recipe');
+  });
+
+  it('does not clobber a food this device still owes', async () => {
+    const id = await saveFoodLocally(USER, {
+      kind: 'food', name: 'Mine', brand: '', serving_label: '1',
+      serving_grams: null, kcal: 100, protein_g: 1, carb_g: 1, fat_g: 1, fibre_g: null,
+    });
+    // The push FAILS transiently, so the row is still owed when the pull runs —
+    // a 5xx is not offline, so the pull is not skipped. That is the only
+    // coherent way to reach this state in one pass: with a successful push, a
+    // real server would list back the copy it just accepted, and a mock that
+    // says otherwise is testing a server that cannot exist.
+    mockApi.mockImplementation(async (_t: unknown, path: string, init?: { method?: string }) => {
+      if (init?.method === 'PUT') throw new ApiError('upstream', 'internal', 500);
+      return String(path).startsWith('/nutrition/foods')
+        ? { foods: [serverFood({ id, name: 'Theirs' })] }
+        : {};
+    });
+
+    await syncFood(USER, token);
+
+    const local = await localFoods(USER);
+    expect(local.find((f) => f.id === id)?.name).toBe('Mine');
+  });
+
+  it('removes a food the server dropped, but only one the phone has no stake in', async () => {
+    pullReturns([serverFood({ id: 'srv-keep' }), serverFood({ id: 'srv-gone' })]);
+    await syncFood(USER, token);
+    expect((await localFoods(USER)).map((f) => f.id)).toEqual(
+      expect.arrayContaining(['srv-keep', 'srv-gone']),
+    );
+
+    pullReturns([serverFood({ id: 'srv-keep' })]);
+    await syncFood(USER, token);
+    const after = (await localFoods(USER)).map((f) => f.id);
+    expect(after).toContain('srv-keep');
+    expect(after).not.toContain('srv-gone');
+  });
+
+  it('does not delete a local food the server has never heard of', async () => {
+    await saveFoodLocally(USER, {
+      kind: 'food', name: 'Unpushed', brand: '', serving_label: '1',
+      serving_grams: null, kcal: 100, protein_g: 1, carb_g: 1, fat_g: 1, fibre_g: null,
+    });
+    // Same shape: the push fails, so the row has genuinely never reached the
+    // server, and an empty list means "never heard of it" rather than
+    // "deleted". Deleting it here would throw away the athlete's own work.
+    mockApi.mockImplementation(async (_t: unknown, path: string, init?: { method?: string }) => {
+      if (init?.method === 'PUT') throw new ApiError('upstream', 'internal', 500);
+      return String(path).startsWith('/nutrition/foods') ? { foods: [] } : {};
+    });
+
+    await syncFood(USER, token);
+
+    expect((await localFoods(USER)).map((f) => f.name)).toContain('Unpushed');
+  });
+
+  it('is scoped to the athlete', async () => {
+    pullReturns([serverFood()]);
+    await syncFood(USER, token);
+    expect(await localFoods('u2')).toHaveLength(0);
   });
 });
 

@@ -284,6 +284,13 @@ export async function localTargetView(userId: string, on: string): Promise<Targe
   );
   if (row) return { state: 'set', target: row };
   const fetched = await readPref(userId, PREF_TARGETS_FETCHED_AT);
+  // KNOWN LIMITATION, stated rather than left to be found: the marker is
+  // device-global while the cache is filled a day-window at a time. So stepping
+  // back, offline, to a day BEFORE the earliest target this device ever
+  // fetched reports `none` when the truth is `unknown` — the very sentence this
+  // union exists to avoid, in a narrower window. Fixing it properly means
+  // recording which windows were fetched, not a single timestamp, and that is
+  // not worth the bookkeeping until somebody actually reads old days offline.
   return fetched ? { state: 'none' } : { state: 'unknown' };
 }
 
@@ -507,7 +514,11 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
       );
       if (kind === 'permanent') {
         // A 4xx will not become a 2xx. Stop owing it; keep the row and the
-        // reason so the sync screen can explain it.
+        // reason so the sync screen can explain it — with one honest exception:
+        // a rejected TOMBSTONE keeps both and is invisible to every read, all
+        // of which filter `deleted_at IS NULL`. Near-unreachable, since the
+        // delete is 204-always server-side, but the sentence above is not true
+        // of that case and should not pretend to be.
         await db.runAsync(
           `UPDATE food_entries SET dirty = 0
             WHERE id = ? AND user_id = ? AND updated_at = ?`,
@@ -567,16 +578,23 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
   // The foods PULL. `foods` is the half of this outbox that is not push-only —
   // web authors recipes and the phone saves what it just ate, and both have to
   // survive the other, which is why this table copies `workout_cache`'s shape
-  // rather than `sequences.ts`'s. Runs last and only when the pushes got
-  // through, so a local edit is never overwritten by a server copy that
-  // predates it.
+  // rather than `sequences.ts`'s. Runs last and only while the connection held
+  // — NOT only when every push succeeded: after a permanent rejection the
+  // server's copy IS the truth, because the local values are the ones it
+  // refused, so the upsert takes them and clears the now-meaningless
+  // `last_error`. What it must never overwrite is a row still owed, which is
+  // what the `dirty = 0` guard in `cacheFoods` is for.
   if (!stalled && result.errorKind !== 'offline') {
     try {
       await cacheFoods(userId, await api.listFoods(getToken));
-    } catch {
-      // A failed pull is not a failed sync. Everything owed has already gone,
-      // and the catalog this refreshes is a convenience — the recents list is
-      // built from local entries and does not need it.
+    } catch (err) {
+      // A failed pull is not a failed sync — everything owed has already gone,
+      // and the recents list is built from local entries and does not need
+      // this. But it is RECORDED rather than swallowed: the first version of
+      // this catch hid a NOT NULL violation that made the pull incapable of
+      // writing a single row, in production, silently and forever. A branch
+      // that cannot fail is a branch nobody finds out about.
+      result.error = result.error ?? (err instanceof Error ? err.message : 'pull failed');
     }
   }
 
@@ -596,21 +614,38 @@ async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
   const db = await getDb();
   await withTransaction(db, async () => {
     const now = stamp();
+    const ids = foods.map((f) => f.id);
+    const placeholders = ids.length ? ids.map(() => '?').join(',') : `''`;
+    // A food dropped on the server goes here too — but ONLY one this device has
+    // no stake in. `remote = 1 AND dirty = 0` is the whole guard: a food saved
+    // here and not yet pushed is absent from the server for the ordinary reason
+    // that it has never heard of it, and deleting it would throw away the
+    // athlete's work. Same rule `cacheEntries` states.
+    await db.runAsync(
+      `DELETE FROM foods
+        WHERE user_id = ? AND id NOT IN (${placeholders})
+          AND dirty = 0 AND remote = 1 AND deleted_at IS NULL`,
+      userId, ...ids,
+    );
     for (const f of foods) {
       await db.runAsync(
         `INSERT INTO foods (
            id, user_id, kind, name, brand, serving_label, serving_grams,
-           kcal, protein_g, carb_g, fat_g, fibre_g, updated_at, dirty, remote)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+           kcal, protein_g, carb_g, fat_g, fibre_g,
+           created_at, updated_at, cached_at, dirty, remote)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind, name = excluded.name, brand = excluded.brand,
            serving_label = excluded.serving_label, serving_grams = excluded.serving_grams,
            kcal = excluded.kcal, protein_g = excluded.protein_g,
            carb_g = excluded.carb_g, fat_g = excluded.fat_g, fibre_g = excluded.fibre_g,
-           remote = 1
+           cached_at = excluded.cached_at, remote = 1,
+           -- The row now holds the server's numbers, so a reason that described
+           -- the local ones is no longer about anything in it.
+           last_error = NULL
          WHERE foods.dirty = 0 AND foods.deleted_at IS NULL`,
         f.id, userId, f.kind, f.name, f.brand, f.serving_label, f.serving_grams,
-        f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g, now,
+        f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g, now, now, now,
       );
     }
   });

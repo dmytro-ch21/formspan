@@ -55,6 +55,7 @@ export default function EditEntryScreen() {
   // Once a macro is typed, servings stop rescaling. See the docstring.
   const [manual, setManual] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [gone, setGone] = useState(false);
 
   useEffect(() => {
     if (!userId || !id) return;
@@ -149,6 +150,12 @@ export default function EditEntryScreen() {
       });
       request('food edited');
       router.back();
+    } catch {
+      // `editEntry` throws when the row has gone — deleted from the day screen
+      // while this editor sat open. Without this the button simply un-dimmed,
+      // which is the same silent-failure shape the target screen's `accept()`
+      // had.
+      setGone(true);
     } finally {
       setSaving(false);
     }
@@ -252,6 +259,12 @@ export default function EditEntryScreen() {
         />
       </View>
 
+      {gone ? (
+        <Text style={styles.problem}>
+          This entry has been deleted, so there is nothing left to correct.
+        </Text>
+      ) : null}
+
       <View style={styles.actions}>
         <Pressable
           onPress={() => void save()}
@@ -302,6 +315,7 @@ const styles = StyleSheet.create({
   scroll: { padding: 16, gap: 14, paddingBottom: 48 },
   gone: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   goneText: { fontSize: 14, color: vola.textMuted },
+  problem: { fontSize: 13, color: vola.danger, lineHeight: 18 },
   serving: { fontSize: 12, color: vola.textDim },
   slots: { flexDirection: 'row', gap: 8 },
   slotPill: {

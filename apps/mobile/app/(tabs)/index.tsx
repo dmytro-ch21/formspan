@@ -581,16 +581,19 @@ export default function TodayScreen() {
     // a failed fetch leaves the cached answer standing rather than falling back
     // to "set a target", which would be a false claim about an athlete who set
     // one on web. See TargetView.
+    // Sequenced rather than raced, same as the day screen: started in parallel
+    // a slow cache read can land after a fast network answer and overwrite it.
+    let answered = false;
     (userId ? localTargetView(userId, today) : Promise.resolve<TargetView>({ state: 'unknown' }))
+      .catch((): TargetView => ({ state: 'unknown' }))
       .then((v) => {
-        if (live) setFoodView(v);
+        if (live && !answered) setFoodView(v);
+        return listTargets(getToken, { from: today, to: today });
       })
-      .catch(() => {});
-
-    listTargets(getToken, { from: today, to: today })
       .then(async (ts) => {
         if (userId) await cacheTargets(userId, today, today, ts);
         if (!live) return;
+        answered = true;
         const t = targetOn(ts, today);
         setFoodView(t ? { state: 'set', target: t } : { state: 'none' });
       })

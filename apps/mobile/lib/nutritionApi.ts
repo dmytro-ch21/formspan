@@ -74,6 +74,12 @@ export function saveFood(getToken: TokenGetter, id: string, input: FoodInput): P
   });
 }
 
+/**
+ * **No production caller yet** — there is no delete-a-saved-food affordance on
+ * the phone. Kept because the wire layer mirrors the contract rather than the
+ * screens built against it so far, and noted here so its absence reads as a
+ * missing screen rather than as dead code somebody should tidy away.
+ */
 export function deleteFood(getToken: TokenGetter, id: string): Promise<void> {
   return apiRequest<void>(getToken, `/nutrition/foods/${id}`, { method: 'DELETE' });
 }

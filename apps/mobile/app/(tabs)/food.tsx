@@ -96,16 +96,21 @@ export default function FoodScreen() {
     // day with no cache and no successful fetch ever renders as `unknown`,
     // never as "set a target": telling an athlete who set one on web to go and
     // set it again is the app being wrong rather than uninformed.
+    // SEQUENCED, not raced. Started in parallel, a slow cache read can resolve
+    // after a fast network answer and overwrite it — a target just deleted on
+    // web would reappear until the next focus. The cache read is local and
+    // quick, so chaining costs nothing and removes the ordering question.
+    let answered = false;
     (userId ? localTargetView(userId, on) : Promise.resolve<TargetView>({ state: 'unknown' }))
+      .catch((): TargetView => ({ state: 'unknown' }))
       .then((v) => {
-        if (live) setDated({ on, view: v });
+        if (live && !answered) setDated({ on, view: v });
+        return listTargets(getToken, { from: on, to: on });
       })
-      .catch(() => {});
-
-    listTargets(getToken, { from: on, to: on })
       .then(async (ts) => {
         if (userId) await cacheTargets(userId, on, on, ts);
         if (!live) return;
+        answered = true;
         const t = targetOn(ts, on);
         setDated({ on, view: t ? { state: 'set', target: t } : { state: 'none' } });
       })
