@@ -382,7 +382,17 @@ func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteTarget(r.Context(), userID, r.PathValue("date")); err != nil {
+	// Validated here rather than left to Postgres: a malformed date raises
+	// 22007 (invalid_datetime_format), which `translate` does not map, so it
+	// would surface as a 500 for what is plainly a bad request. The PUT path
+	// gets this for free via Target.Validate; DELETE has no body to validate.
+	on := r.PathValue("date")
+	if !isDate(on) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"date must be a date, as YYYY-MM-DD")
+		return
+	}
+	if err := h.repo.DeleteTarget(r.Context(), userID, on); err != nil {
 		writeError(w, r, err)
 		return
 	}

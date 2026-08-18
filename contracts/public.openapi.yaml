@@ -170,26 +170,35 @@ components:
             updated_at: { type: string, format: date-time }
 
     NutritionFoodInput:
-      allOf:
-        - $ref: "#/components/schemas/NutritionMacros"
-        - type: object
-          description: >
-            For `kind: recipe`, send `items` and `yield_servings` and the macros
-            are derived — any sent are ignored. For `kind: food`, send the macros
-            for one serving and omit both.
-          required: [name, serving_label]
-          properties:
-            kind: { type: string, enum: [food, recipe], default: food }
-            name: { type: string, minLength: 1, maxLength: 120 }
-            brand: { type: string, maxLength: 80 }
-            serving_label: { type: string, minLength: 1, maxLength: 40 }
-            serving_grams: { type: number, nullable: true }
-            yield_servings: { type: number, nullable: true }
-            items:
-              type: array
-              maxItems: 100
-              items: { $ref: "#/components/schemas/NutritionRecipeItem" }
-            barcode: { type: string, nullable: true }
+      type: object
+      description: >
+        For `kind: food`, the macros are REQUIRED and are the figures for one
+        serving. For `kind: recipe`, send `items` and `yield_servings` instead —
+        the per-serving macros are derived from them and any sent are ignored.
+
+
+        The macro fields are therefore declared here rather than inherited from
+        `NutritionMacros`: inheriting them would make them required on a recipe
+        too, and required-but-ignored is a contradiction a generated client
+        cannot satisfy.
+      required: [name, serving_label]
+      properties:
+        kind: { type: string, enum: [food, recipe], default: food }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        brand: { type: string, maxLength: 80 }
+        serving_label: { type: string, minLength: 1, maxLength: 40 }
+        serving_grams: { type: number, nullable: true }
+        kcal: { type: number, description: Required for a food; ignored for a recipe. }
+        protein_g: { type: number, description: Required for a food; ignored for a recipe. }
+        carb_g: { type: number, description: Required for a food; ignored for a recipe. }
+        fat_g: { type: number, description: Required for a food; ignored for a recipe. }
+        fibre_g: { type: number, nullable: true }
+        yield_servings: { type: number, nullable: true }
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/NutritionRecipeItem" }
+        barcode: { type: string, nullable: true }
 
     NutritionDay:
       allOf:

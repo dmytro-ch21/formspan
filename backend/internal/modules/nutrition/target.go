@@ -23,6 +23,7 @@
 package nutrition
 
 import (
+	"fmt"
 	"math"
 	"time"
 )
@@ -419,24 +420,36 @@ func phaseOrMaintenance(k PhaseKind) PhaseKind {
 	return k
 }
 
-// clampKcal applies the rails in order and reports which one bound.
-func clampKcal(want, tdee, rmr float64) (int, bool, string) {
-	floor := rmr * minKcalOverResting
-	if want < tdee*(1-maxDeficitFraction) {
-		want = tdee * (1 - maxDeficitFraction)
-		return roundTo10(want), true, "the deficit was capped at 25% of maintenance"
+// clampKcal applies every rail in order and reports which one bound last.
+//
+// **The rails fall through rather than returning early, and that is the whole
+// point.** They used to `return` on the first hit, which made the resting-rate
+// floor — the one the comments call the harder of the two — unreachable
+// whenever a percentage cap fired first. That is not a corner case: the
+// reference athlete (RMR 1780) sedentary with no logged training has a TDEE of
+// 2136, so an ordinary cut wants 1476, the 30% cap catches it at 1495 and
+// returns **1500 kcal — 280 below the athlete's own resting rate** — while the
+// Basis cheerfully reported that only the deficit cap had bound. Found in
+// review.
+//
+// The floor is applied LAST so its message wins, which is what the original
+// comment intended and the control flow prevented.
+func clampKcal(want, tdee, rmr float64) (kcal int, clamped bool, reason string) {
+	if lo := tdee * (1 - maxDeficitFraction); want < lo {
+		want, clamped = lo, true
+		reason = fmt.Sprintf("the deficit was capped at %.0f%% of maintenance", maxDeficitFraction*100)
 	}
-	if want > tdee*(1+maxSurplusFraction) {
-		want = tdee * (1 + maxSurplusFraction)
-		return roundTo10(want), true, "the surplus was capped at 20% of maintenance"
+	if hi := tdee * (1 + maxSurplusFraction); want > hi {
+		want, clamped = hi, true
+		reason = fmt.Sprintf("the surplus was capped at %.0f%% of maintenance", maxSurplusFraction*100)
 	}
-	// Checked last so its message wins: a target under resting is the one an
-	// athlete most needs told, and on a small person an aggressive phase can
-	// hit it without tripping the percentage rails above.
-	if want < floor {
-		return roundTo10(floor), true, "the target was raised to stay above your resting rate"
+	// A target under resting is the one an athlete most needs told, and a
+	// percentage cap can land below it — which is exactly what happened.
+	if floor := rmr * minKcalOverResting; want < floor {
+		want, clamped = floor, true
+		reason = "the target was raised to stay above your resting rate"
 	}
-	return roundTo10(want), false, ""
+	return roundTo10(want), clamped, reason
 }
 
 // macros splits a calorie target into grams.

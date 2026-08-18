@@ -620,6 +620,12 @@ type Repository interface {
 	// window return nothing, and the client honestly reports "no target" for a
 	// week the athlete was eating to one.
 	ListTargets(ctx context.Context, userID, from, to string) ([]Target, error)
+	// TargetOn has no route yet: the clients read a window through ListTargets
+	// and resolve the live one themselves. It exists because the weekly
+	// adjustment rule (N24) needs exactly one target for exactly one day, and
+	// because DayTotals' lateral join is the same question in SQL — keeping the
+	// two able to disagree would be the drift this module keeps guarding
+	// against. Covered by its own test.
 	TargetOn(ctx context.Context, userID, on string) (Target, error)
 	SaveTarget(ctx context.Context, t Target) (Target, error)
 	DeleteTarget(ctx context.Context, userID, on string) error

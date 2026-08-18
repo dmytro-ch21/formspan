@@ -1,7 +1,9 @@
 package nutrition
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -243,6 +245,47 @@ func TestClampsBindAndSaySo(t *testing.T) {
 		}
 		if float64(got.Kcal) < 2400*minKcalOverResting-10 {
 			t.Fatalf("kcal %d fell below resting × %g = %.0f", got.Kcal, minKcalOverResting, 2400*minKcalOverResting)
+		}
+	})
+
+	// THE CASE THE SUBTEST ABOVE CANNOT SEE, and the one review found.
+	//
+	// Its numbers (RMR 2400 against a TDEE of 3420) never trip a percentage
+	// rail, so it only ever exercised the floor on the path where no cap fired.
+	// The rails used to return early, which made the floor unreachable the
+	// moment a cap fired first — and this is an ordinary athlete, not a corner
+	// case: the reference RMR of 1780, sedentary, no logged training, on a
+	// standard cut. The cap lands at 1500 and resting is 1780.
+	t.Run("the floor still binds when a percentage cap fired first", func(t *testing.T) {
+		in := refInputsWithPhase(PhaseCut)
+		in.TrainingKcalPerDay = 0
+		got := suggest(t, in, ActivitySedentary)
+
+		if float64(got.Kcal) < refRMR {
+			t.Fatalf("proposed %d kcal against a resting rate of %.0f — the floor was "+
+				"skipped because a percentage cap returned first (clamp reason: %q)",
+				got.Kcal, refRMR, got.Basis.ClampReason)
+		}
+		if !got.Basis.Clamped {
+			t.Error("a rail bound but Clamped is false")
+		}
+		if got.Basis.ClampReason != "the target was raised to stay above your resting rate" {
+			t.Errorf("clamp reason is %q — the floor is applied last so its message "+
+				"should win over the cap's", got.Basis.ClampReason)
+		}
+	})
+
+	// The explanation the athlete reads is built from the constants, so tuning
+	// a rail can never leave a stale percentage in the sentence beside it. The
+	// message said "25%" for a while after the cap moved to 30%.
+	t.Run("the clamp message quotes the constant it enforces", func(t *testing.T) {
+		in := refInputsWithPhase(PhaseCut)
+		in.WeightKG = f(160)
+		got := suggest(t, in, ActivitySedentary)
+		want := fmt.Sprintf("%.0f%%", maxDeficitFraction*100)
+		if got.Basis.Clamped && strings.Contains(got.Basis.ClampReason, "capped") &&
+			!strings.Contains(got.Basis.ClampReason, want) {
+			t.Fatalf("clamp reason %q does not quote the actual cap (%s)", got.Basis.ClampReason, want)
 		}
 	})
 }

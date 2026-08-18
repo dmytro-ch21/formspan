@@ -127,6 +127,12 @@ CREATE TABLE nutrition_foods (
 -- The picker's only query: this user's foods, by name.
 CREATE INDEX nutrition_foods_user_name_idx ON nutrition_foods (user_id, lower(name));
 
+-- The target of nutrition_entries' composite provenance FK below. Redundant
+-- with the primary key for uniqueness, but a composite FK needs a matching
+-- unique constraint to point at, and pinning the OWNER into that reference is
+-- what stops the FK answering "does any athlete have this food id".
+ALTER TABLE nutrition_foods ADD CONSTRAINT nutrition_foods_user_id_unique UNIQUE (user_id, id);
+
 -- DELIBERATELY NOT UNIQUE on (user_id, name). Two 'Chicken breast' rows from
 -- two brands is a real state, not a mistake — and a 409 raised while an offline
 -- outbox is flushing a batch is a worse failure than a duplicate row the
@@ -154,10 +160,16 @@ CREATE TABLE nutrition_recipe_items (
     fat_g     NUMERIC(7, 2) NOT NULL CHECK (fat_g     >= 0 AND fat_g     < 2000),
     fibre_g   NUMERIC(7, 2) CHECK (fibre_g IS NULL OR (fibre_g >= 0 AND fibre_g < 500)),
 
-    -- Provenance only, never read for nutrition. SET NULL rather than CASCADE
-    -- so deleting a favourite cannot silently remove an ingredient from a
-    -- recipe that still contains it.
-    source_food_id UUID REFERENCES nutrition_foods (id) ON DELETE SET NULL,
+    -- Provenance only, never read for nutrition — and deliberately NOT a
+    -- foreign key.
+    --
+    -- A plain reference here would answer "does any athlete have this food id",
+    -- because a foreign id would succeed while a nonexistent one errored. That
+    -- is the existence oracle this module refuses everywhere else. Items are
+    -- only ever written through SaveFood, which is already owner-scoped, so the
+    -- column is an opaque id carried for "where did this ingredient come from"
+    -- and nothing enforces or reads it.
+    source_food_id UUID,
 
     PRIMARY KEY (food_id, position)
 );
@@ -194,7 +206,22 @@ CREATE TABLE nutrition_entries (
     fat_g     NUMERIC(7, 2) NOT NULL CHECK (fat_g     >= 0 AND fat_g     < 2000),
     fibre_g   NUMERIC(7, 2) CHECK (fibre_g IS NULL OR (fibre_g >= 0 AND fibre_g < 500)),
 
-    source_food_id UUID REFERENCES nutrition_foods (id) ON DELETE SET NULL,
+    -- Provenance only, never read for nutrition.
+    --
+    -- The FK is COMPOSITE on (user_id, source_food_id) rather than on the id
+    -- alone, and that is a security property rather than tidiness: a plain
+    -- reference succeeds for another athlete's food id and errors for a
+    -- nonexistent one, which makes it an oracle for "does any athlete have this
+    -- id". Pinning the owner into the reference makes both cases the same
+    -- error, which is the standard this module holds everywhere else.
+    --
+    -- `SET NULL (source_food_id)` names the column because the default form
+    -- nulls EVERY referencing column, and user_id is NOT NULL — the unqualified
+    -- version fails at delete time rather than at migration time. Needs
+    -- Postgres 15+; this repo runs 16.
+    source_food_id UUID,
+    FOREIGN KEY (user_id, source_food_id)
+        REFERENCES nutrition_foods (user_id, id) ON DELETE SET NULL (source_food_id),
 
     notes      TEXT NOT NULL DEFAULT '' CHECK (length(notes) <= 500),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -203,6 +230,13 @@ CREATE TABLE nutrition_entries (
 
 -- Every read of this table is one user's window of days.
 CREATE INDEX nutrition_entries_user_day_idx ON nutrition_entries (user_id, eaten_on);
+
+-- Not for any read — for the DELETE. `source_food_id` is an ON DELETE SET NULL
+-- target, so without this every DeleteFood sequential-scans this table, which
+-- is the one expected to grow largest. Partial, because the column is null for
+-- every quick-add and there is nothing to find among those rows.
+CREATE INDEX nutrition_entries_source_food_idx
+    ON nutrition_entries (user_id, source_food_id) WHERE source_food_id IS NOT NULL;
 
 -- THERE IS DELIBERATELY NO CHECK RECONCILING kcal AGAINST 4P + 4C + 9F.
 --

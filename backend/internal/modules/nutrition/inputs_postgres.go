@@ -25,6 +25,10 @@ func (r *PostgresRepository) TargetInputs(ctx context.Context, userID, on string
 	// The weight is the latest check-in ON OR BEFORE the day being derived for,
 	// not simply the newest. That is what makes re-deriving an old target
 	// reproducible rather than quietly using today's body.
+	// A plain nullable string rather than a custom sql.Scanner: the LEFT JOIN
+	// misses for an athlete with no weigh-ins, and that is the whole of the
+	// special case.
+	var measuredOn *string
 	err := r.pool.QueryRow(ctx, `
 		SELECT p.height_cm,
 		       to_char(p.date_of_birth, 'YYYY-MM-DD'),
@@ -38,7 +42,7 @@ func (r *PostgresRepository) TargetInputs(ctx context.Context, userID, on string
 			ORDER BY measured_on DESC LIMIT 1
 		) c ON true
 		WHERE p.user_id = $1`, userID, on).
-		Scan(&in.HeightCM, &in.DateOfBirth, &in.Sex, &in.WeightKG, &weightOn{&in})
+		Scan(&in.HeightCM, &in.DateOfBirth, &in.Sex, &in.WeightKG, &measuredOn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// No profile at all is a legitimate state, not an error: a brand-new
 		// athlete asking what they should eat gets told which fields to fill
@@ -47,6 +51,9 @@ func (r *PostgresRepository) TargetInputs(ctx context.Context, userID, on string
 	}
 	if err != nil {
 		return in, fmt.Errorf("nutrition: target inputs: %w", err)
+	}
+	if measuredOn != nil {
+		in.WeightMeasuredOn = *measuredOn
 	}
 
 	// The live phase. At most one by construction — body_phases carries a
@@ -72,23 +79,6 @@ func (r *PostgresRepository) TargetInputs(ctx context.Context, userID, on string
 		return in, err
 	}
 	return in, nil
-}
-
-// weightOn lets the weight and its date be scanned in the same row without a
-// second nullable string variable escaping into Inputs when the LEFT JOIN
-// misses. A missing check-in leaves WeightMeasuredOn empty rather than "".
-type weightOn struct{ in *Inputs }
-
-func (w *weightOn) Scan(src any) error {
-	if src == nil {
-		w.in.WeightMeasuredOn = ""
-		return nil
-	}
-	if s, ok := src.(string); ok {
-		w.in.WeightMeasuredOn = s
-		return nil
-	}
-	return fmt.Errorf("nutrition: unexpected measured_on %T", src)
 }
 
 // trainingLoad averages the NET cost of the trailing window's sessions.

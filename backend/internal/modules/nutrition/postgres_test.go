@@ -216,6 +216,71 @@ func TestAForeignFoodIsNotFoundAndWritesNothing(t *testing.T) {
 	}
 }
 
+// Provenance cannot point at somebody else's food, and — the part that matters
+// — a foreign id and a nonexistent one produce the SAME answer.
+//
+// A plain single-column FK succeeds for a foreign id and errors for a
+// nonexistent one, which turns the column into an oracle for "does any athlete
+// have this food id". The FK is composite on (user_id, source_food_id) for that
+// reason. Raised in review.
+func TestProvenanceCannotNameAnotherAthletesFood(t *testing.T) {
+	r := repoFor(t, uid, other)
+
+	theirs := aFood(foodID, "Theirs", 180)
+	theirs.UserID = other
+	if _, err := r.SaveFood(ctx(), theirs); err != nil {
+		t.Fatalf("save theirs: %v", err)
+	}
+
+	foreign := anEntry(entryID, theirs, 1)
+	foreign.UserID = uid // my entry, pointing at their food
+	_, errForeign := r.SaveEntry(ctx(), foreign)
+
+	nonexistent := anEntry(entryID, theirs, 1)
+	nonexistent.UserID = uid
+	missing := "99999999-9999-4999-8999-999999999999"
+	nonexistent.SourceFoodID = &missing
+	_, errMissing := r.SaveEntry(ctx(), nonexistent)
+
+	if errForeign == nil {
+		t.Fatal("stored provenance pointing at another athlete's food")
+	}
+	if errMissing == nil {
+		t.Fatal("stored provenance pointing at a food that does not exist")
+	}
+	if errForeign.Error() != errMissing.Error() {
+		t.Fatalf("the two cases are distinguishable, which makes the column an "+
+			"existence oracle:\n  foreign:     %v\n  nonexistent: %v", errForeign, errMissing)
+	}
+}
+
+// Deleting a food nulls ONLY the provenance column. The unqualified SET NULL
+// form nulls every referencing column, and user_id is NOT NULL — which would
+// fail at delete time rather than at migration time.
+func TestDeletingAFoodNullsOnlyTheProvenanceColumn(t *testing.T) {
+	r := repoFor(t, uid)
+	food, _ := r.SaveFood(ctx(), aFood(foodID, "Chicken thigh", 180))
+	if _, err := r.SaveEntry(ctx(), anEntry(entryID, food, 2)); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := r.DeleteFood(ctx(), uid, foodID); err != nil {
+		t.Fatalf("delete food: %v", err)
+	}
+	back, err := r.ListEntries(ctx(), uid, "2026-08-01", "2026-08-31", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(back) != 1 {
+		t.Fatalf("got %d entries", len(back))
+	}
+	if back[0].UserID != uid {
+		t.Fatalf("user_id was nulled to %q", back[0].UserID)
+	}
+	if back[0].SourceFoodID != nil {
+		t.Fatalf("provenance survived the delete: %v", *back[0].SourceFoodID)
+	}
+}
+
 // Idempotent, because an outbox retries. A second delete recording a permanent
 // failure would leave a correctly-gone row stuck on the athlete's sync screen.
 func TestDeletingTwiceIsNotAnError(t *testing.T) {

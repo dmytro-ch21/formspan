@@ -24825,6 +24825,51 @@ minimum — on both sides at once. It printed "3 phases" and passed. There is no
 a floor on the parsed count, because a parity check that has quietly stopped
 comparing things is worse than none.
 
+### What review caught
+
+Two blocking findings, and the first is the more interesting because the code
+read correctly.
+
+**The resting-rate floor was dead code.** `clampKcal` applied three rails —
+deficit cap, surplus cap, then "never below resting" — and each one `return`ed
+early. The comment beside the floor said it was "checked last so its message
+wins"; the control flow meant it was not checked at all whenever a percentage
+cap fired first. That is not a corner case: the reference athlete, sedentary
+with no logged training, has a TDEE of 2136, so an ordinary cut wants 1476, the
+cap catches it at 1495, and the function returns **1500 kcal against a resting
+rate of 1780** — 280 below — while the Basis reported cheerfully that only the
+deficit cap had bound. The rails now fall through and the floor is applied last,
+which is what the comment always claimed. The existing "never below resting"
+subtest missed it because its numbers never tripped a cap.
+
+A related one from the same finding: the clamp message still read "capped at
+25% of maintenance" after the constant moved to 30%. That string is rendered
+verbatim in the explanation the athlete reads, so it was arithmetic that did not
+reconcile with the number beside it — precisely what `Clamped` exists to
+prevent. The messages are built from the constants now.
+
+**The provenance foreign key was an existence oracle.** `source_food_id`
+referenced `nutrition_foods (id)`, so an entry naming *another athlete's* food
+id succeeded while a nonexistent one errored — the FK answered "does any athlete
+have this id". Guessing a v4 UUID is infeasible, which is why it was filed as a
+suggestion, but it is the standard this module holds everywhere else and it also
+stored a durable cross-user link. The FK is now composite on
+`(user_id, source_food_id)`, which makes both cases the same error. It needs
+Postgres 15's column-scoped `ON DELETE SET NULL (source_food_id)` — the
+unqualified form nulls *every* referencing column, and `user_id` is `NOT NULL`,
+so it would have failed at delete time rather than at migration time. Recipe
+items dropped the FK entirely and carry the column as opaque provenance, since
+they have no owner column of their own and are only ever written through an
+owner-scoped path.
+
+Also fixed: `nutrition_entries.source_food_id` had no index while being an
+`ON DELETE SET NULL` target, so every food deletion sequential-scanned the table
+expected to grow largest; a malformed date on `DELETE /targets/{date}` reached
+`$2::date` and 500'd, because 22007 is not in the error map; and the OpenAPI
+input schema inherited required macros while its own description said a recipe's
+are ignored — required-but-ignored is a contradiction a generated client cannot
+satisfy.
+
 ### `check:rate-parity`
 
 The rate bands are now a second copy of `RATE_TARGETS` in `anthropometry.ts`.
