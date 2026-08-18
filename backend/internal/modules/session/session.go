@@ -112,10 +112,10 @@ func GripApplies(movementPattern string) bool {
 //
 //   - **Hinges get `neutral`**, which looks wrong for a deadlift until you
 //     count them: 20 of those 55 rows are kettlebell, dumbbell or hex-bar.
-//     Not all of those are palms-facing — the four swings are held overhand,
-//     which is `regular` — but the hex bar and the dumbbells-at-the-sides work
-//     carry the argument on their own, and that is why `regular` is on this
-//     list too.
+//     Not all of those are palms-facing — the four swings are held overhand —
+//     but the hex bar and the dumbbells-at-the-sides work carry the argument
+//     on their own. (`regular` is on this list for the 13 barbell rows, not
+//     for the swings; four of 55 would not earn a value.)
 //   - **Olympic lifts get `neutral`** for the same reason: 12 of those 25 rows
 //     are kettlebell (11) or dumbbell (1), none of which hook-grips anything.
 //     Barbell is 13 — a bare majority, not a plurality, and stating it the
@@ -127,11 +127,7 @@ func GripApplies(movementPattern string) bool {
 // farmer's carry is not a thing — offering it there would be the same
 // false-entry mistake in a new place.
 //
-// The four original patterns are unchanged, including `isolation`: 210 rows,
-// the catalog's honest bucket for the single-joint long tail, carrying calf
-// raises (grip is meaningless) alongside hammer and reverse curls (the purest
-// grip variations there are). A false positive is an optional control somebody
-// ignores; a false negative is the feature not existing where it is clearest.
+// The five original patterns are unchanged.
 //
 // Derived from the catalog's existing `movement_pattern` vocabulary rather than
 // a new column, deliberately: a `grips_vary` flag would be 762 more rows of
@@ -149,9 +145,12 @@ func GripApplies(movementPattern string) bool {
 // conditioning, core, mobility, rotation. `GripApplies` is that emptiness.
 // Together the eight patterns here are 496 of the catalog's 762 exercises; it
 // was 403 before N9 added the last three.
-// Each branch returns a FRESH slice, deliberately: `offeredGrips` on the client
-// appends the set's own grip to this list, and a package-level table would be
-// corrupted by the first caller that did the same here.
+// Each branch returns a FRESH slice, deliberately — and the mechanism matters,
+// because the first version of this note named the wrong one. `append` is NOT
+// the hazard: a slice literal has len == cap, so appending reallocates and the
+// caller's copy diverges harmlessly. The hazard is an in-place write or a
+// `sort` on the returned slice, which a package-level table would carry into
+// every later caller. Pinned by `TestGripsForReturnsAFreshSliceEachCall`.
 func GripsFor(movementPattern string) []Grip {
 	switch movementPattern {
 	case "horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation":

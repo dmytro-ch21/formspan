@@ -163,10 +163,41 @@ func TestTheGripConstraintKeepsTheNameTheWireCodeDependsOn(t *testing.T) {
 // own copy of this list — so without a test nothing pins it at all, and an
 // uncalled source of truth is exactly how the two copies drift apart.
 //
-// The exclusions are the half worth pinning. Hinges, carries and olympic lifts
-// are absent BECAUSE the enum has no `mixed` or `hook`; if someone adds those
-// values later and this list is not revisited, the picker stays hidden on the
-// movements the new values exist for.
+// The exclusions are the half worth pinning: squats, jumps and conditioning,
+// where no vocabulary would make the question worth asking.
+//
+// This comment used to say hinges, carries and olympic lifts were absent
+// "BECAUSE the enum has no `mixed` or `hook`", and warned that adding those
+// values without revisiting the list would leave the picker hidden. N9 added
+// them and DID revisit the list — but not this paragraph, which then sat as a
+// flat self-contradiction directly above a body asserting all three are
+// present. Three separate review passes swept for exactly this class of rot and
+// all three missed it, including the one that found six other instances.
+// GripsFor must hand every caller its own slice.
+//
+// The doc above declares this deliberate and load-bearing, and review measured
+// it surviving: swapping the literals for package-level tables passed both
+// existing tests. Unobservable today — there is no backend caller — but the
+// client's `offeredGrips` builds on this list, and a shared table that one
+// caller sorts is corrupted for every later one.
+func TestGripsForReturnsAFreshSliceEachCall(t *testing.T) {
+	for _, p := range []string{"hinge", "carry", "olympic", "horizontal_push", "isolation"} {
+		a, b := GripsFor(p), GripsFor(p)
+		if len(a) == 0 {
+			t.Fatalf("GripsFor(%q) is empty; the fixture is wrong", p)
+		}
+		if &a[0] == &b[0] {
+			t.Errorf("GripsFor(%q) returns the SAME backing array twice — one caller "+
+				"sorting or writing in place corrupts it for every later one", p)
+		}
+		// And prove it concretely rather than by pointer identity alone.
+		a[0] = GripHook
+		if GripsFor(p)[0] == GripHook && b[0] != GripHook {
+			t.Errorf("writing to GripsFor(%q)'s result changed what later callers see", p)
+		}
+	}
+}
+
 func TestGripIsAskedWhereTheVocabularyCanAnswerIt(t *testing.T) {
 	for _, p := range []string{
 		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation",

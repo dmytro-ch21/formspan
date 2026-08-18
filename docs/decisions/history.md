@@ -23523,6 +23523,7 @@ movement patterns, identical across all three.
   to revisit; this picker inherits it, so an athlete cannot yet say which hand
   was over.
 ## 2026-08-18 — N9's review landed after N9 did, and it found the half that was not pinned
+## 2026-08-17 — N9's review landed after N9 did, and it found the half that was not pinned
 
 #266 merged while its second review pass was still running. Both reviewers came
 back with no blocking findings, but two of the suggestions were worth a
@@ -23552,7 +23553,9 @@ N9 made all six wrong at once — and two of them were rewritten *by N9's own fi
 round* into a state that was still wrong ("knows six values… the moment a fifth
 value ships… reads a legitimate `mixed`", with `mixed` by then shipped).
 
-Fixed by removing the number rather than updating it. The sentence is now "a
+Five of the six are fixed by removing the number rather than updating it (the
+sixth, `sessions.test.ts`, was already past-tensed by N9's round and reads as
+the history it became). The sentence is now "a
 build knows a FIXED list; the server decides how many exist", which cannot go
 stale, plus an explicit instruction not to write the current count in present
 tense and a note that doing so is what rotted six files simultaneously.
