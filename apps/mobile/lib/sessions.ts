@@ -397,6 +397,21 @@ export const DEFAULT_WORK_SECONDS = 60;
  * alone — and `measuresForSet` returns `['reps']` for a dual-mode set in reps
  * mode, so the field rendered exactly where it does the damage.
  */
+/**
+ * What a set's timer target starts at when the Timed switch is turned on.
+ *
+ * A minute, because the sets this is for are circuit and paced work, where a
+ * round is the unit. Deliberately NOT `DEFAULT_MODE_SECONDS` (40), which
+ * answers a different question — how long a rep-counted exercise runs once it
+ * is being MEASURED in time. Sharing one constant between a measurement and a
+ * target is how the two concepts start being treated as one.
+ *
+ * It is only a starting point: the field opens beside the switch, populated,
+ * so changing it is one tap away and nothing is committed by flipping the
+ * switch except the row gaining a countdown.
+ */
+export const DEFAULT_TIMER_SECONDS = 60;
+
 export function offersTimerTarget(loadType: Exercise['load_type'] | undefined): boolean {
   if (loadType === undefined) return false;
   return !measuresFor(loadType).includes('seconds') && !isDualMode(loadType);

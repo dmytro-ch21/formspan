@@ -8019,3 +8019,34 @@ training. Everything here is about it telling the truth.
 - **An accomplishment must latch the streak chime out.** It takes the personal record's slot in the precedence, so `celebratesStreak` has to be passed "earned a badge of either kind", not the records-only flag. Passing the records flag chimes the streak straight over a BJJ first, and every existing test still passes.
 - **`recordsSettled` is no longer true by construction on BJJ.** There is now a real network lookup that can answer late; hard-coding it true lets a fast history chime the streak and latch the first out — the exact race the strength card documents.
 - **The phone must not decide what counts as a first.** It filters the server's awards by `session_id`; re-deriving the rule locally is a second opinion that can disagree with the accomplishments list elsewhere in the app.
+## The set editor's option pills and timer switch (F6, mobile — `components/ui/Pills.tsx`)
+
+### Happy path
+
+- Expand a set: `TYPE` reads `Working` and `GRIP` reads its recorded value or `Not recorded`, both collapsed, before anything is tapped.
+- Tap the `TYPE` header, pick `Back-off`: the group closes, the header now reads `Back-off`, and the row's badge changes to `B`.
+- Tap the `GRIP` header, pick `Neutral`, tap `Neutral` again: the grip returns to `Not recorded`. This is the only route back to unrecorded and it must not be lost.
+- Hold any pill: a panel opens naming it and saying what it means. Tap the scrim or `Done` to close.
+- Turn `Timed` on: the `Timer` field appears beside it, already holding 60s (or `1` in minutes mode), and a start button appears on the collapsed set row.
+- Turn `Timed` off: the field disappears **and the stored duration is cleared** — the start button must go with it.
+
+### Edge cases & errors
+
+- **Clearing the Timer field to empty is the same state as switching Timed off.** Both must end with `seconds: null`; a field that reads empty while the switch reads on is two answers to one question.
+- Typing `0` or a negative number in the Timer field stores `null`, not `0` — the server rejects `seconds <= 0`, so keeping it would be a row that 400s on sync and a countdown that fires instantly.
+- In minutes mode the Timer accepts a decimal (`1.5` = 90s); in seconds mode it is whole numbers only.
+- **`Timed` must never appear on a dual-mode exercise** (`load_type: 'reps'` — burpees, mountain climbers). Writing `seconds` there flips the set into time mode and hides its rep count; those exercises get the exercise-header reps/time toggle instead. Same gate as N4 (`offersTimerTarget`).
+- **A grip this build does not know about still opens a panel.** Log a set carrying a grip outside the app's union (a newer server's value, or a movement re-categorised after the set was logged): the pill renders, holding it says the value is *recorded* and merely undescribed, and it must not crash or imply the data is broken.
+- A set type or grip added to `SET_TYPES` / `GRIPS` without copy in `lib/setGuide.ts` must fail the suite, not ship a pill whose info panel says "no description yet".
+
+### Accessibility
+
+- Each group header is announced with its **answer** — "Type: Working", not "Type" — and reports its expanded state.
+- Every pill exposes a **custom action** ("What is this?"). VoiceOver does not forward a long press, so without it the definitions are unreachable for the people most likely to want them read aloud.
+- `Timed` is a `switch`, announced with its checked state, not a button.
+- Every pill and both add buttons clear 44pt of touch target (`hitSlop` counts).
+
+### Layout
+
+- `+ Set` and `+ Drop` are equal halves of one row; with the drop not offered (a set carrying no weight), `+ Set` takes the full width. Neither may shrink-wrap its label.
+- **No dashed border with a corner radius anywhere on iOS.** It renders squared-off with an uneven dash phase — that combination is the original defect, not a value to be tuned.

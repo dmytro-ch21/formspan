@@ -25548,6 +25548,82 @@ none of them is in any doc:
   during this run). Left deliberately: the phone holds it locally as clean and
   synced, so deleting it server-side invites an orphan rather than tidiness.
 
+## 2026-08-18 — The set editor says what is true, and the two buttons under it stop looking broken
+
+Four complaints from a screenshot of a live session, three of them about the
+same screen and one of them a genuine rendering bug rather than a taste
+argument.
+
+**`+ Set` and `+ Drop` were the actual defect.** `styles.addSet` set
+`borderStyle: 'dashed'` together with `borderRadius: 12`, and iOS does not
+support that combination: it squares the corners off and restarts the dash
+phase per edge, so the outline comes back ragged and unrounded. It is not a
+value that can be tuned — RN has never implemented dashed-plus-radius on iOS.
+They also had no width of their own, so each shrink-wrapped its own two words
+and the pair sat left-aligned in a full-width row at two different widths,
+reading as two fragments of one broken control. They are now `flex: 1` halves
+on a solid hairline over `surface`, `minHeight: 44`, which matches
+`styles.primary` immediately below them; when the drop is not offered the
+remaining button simply takes the row.
+
+**Twelve chips became two rows that state their answer.** Expanding one set
+dropped six set-type chips and up to six grip chips onto the screen, all
+permanently open, all the same weight. The height cost is real — that is most
+of a phone screen, so the fields you came to edit go under the keyboard — but
+the worse problem is that an always-open list of equal chips does not say what
+is *currently true*. The answer is in there, tinted, among eleven alternatives.
+`components/ui/PillGroup` collapses each to `TYPE  Working`, a statement, and
+opening it is the deliberate act of changing that statement — the same shape
+the set row itself already uses to collapse to `12 × 100lb`. It closes again
+after a pick, because picking a type is a decision that ends.
+
+**The pills answer for themselves now.** "Back-off", "AMRAP", "Hook" and
+"Angled" are jargon, and an athlete who does not know them had no way to find
+out from inside the app — so the field went unrecorded, or recorded wrongly. A
+long press opens the entry from the new `lib/setGuide.ts`. Two things about
+that module are load-bearing rather than tidy. Its lookups are **total over
+unknown keys**, because `offeredGrips` deliberately renders a grip this build
+has never heard of (#256 — the server decides how many grips exist), and a
+partial lookup would make that one pill the only pill that crashes on long
+press. And the copy is allowed to claim only the two behaviours the code
+actually implements, both checked against `contributesVolume` / `countsAsSet`:
+a warm-up adds neither tonnage nor a set, and a drop adds tonnage but is not
+counted as a set. `backoff`, `amrap` and `failure` change nothing the app
+computes, and the sentences say so rather than implying a progression rule that
+does not exist.
+
+**Long press is invisible, so it is announced twice** — a hint line under an
+opened group for sighted athletes, and an `accessibilityActions` entry on every
+pill for VoiceOver, because a long press is not a gesture the screen reader
+forwards. Without the custom action the definitions would be unreachable for
+exactly the people most likely to want one read aloud.
+
+**Timed is a switch that produces its field.** N4's per-set timer target was
+already per-set; it was just a permanently-present `Timer (s)` input on every
+`weight_reps` set, mostly empty, competing with the numbers that matter.
+It is now a `TogglePill` beside the field it reveals, and the two are one
+state in both directions: flipping it on seeds `DEFAULT_TIMER_SECONDS` (60 —
+deliberately *not* `DEFAULT_MODE_SECONDS`, which answers the different question
+of how long a rep-counted exercise runs once it is being *measured* in time),
+and flipping it off clears the number rather than hiding it. That last half is
+the one worth stating: a stored duration is what puts the play button on the
+row and what lets the set join a hands-free run, so a switch reading "off" over
+a live 60 would be describing a row that still behaves as timed.
+
+**What this deliberately did not do.** The request was for "timed at the set
+level", and there are two different time concepts on this screen. The one moved
+here is the timer *target*. The other is `setMode`'s reps↔time switch, which is
+per **exercise** on purpose — `setMode.ts` argues at length that nobody does set
+1 of burpees in reps and set 2 in seconds, and that offering it creates a group
+whose sets cannot be compared to each other. Moving it per-set was considered
+and declined; `offersTimerTarget` still excludes dual-mode exercises, so the two
+affordances cannot compete for the same row.
+
+Covered by `lib/__tests__/setGuide.test.ts`, driven off `GRIPS` and `SET_TYPES`
+rather than a list repeated in the test — so a seventh grip added without copy
+fails, rather than silently shipping a pill whose long press says "no
+description yet". Mutation-checked: blanking `hook`'s entry turns it red.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

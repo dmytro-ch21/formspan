@@ -100,17 +100,21 @@ import {
   timedSetStillAt,
   elapsedBelongsInSeconds,
   offersTimerTarget,
+  DEFAULT_TIMER_SECONDS,
   workSecondsFor,
   offeredGrips,
   SET_TYPES,
   type LoggedSet,
   type Measure,
+  type Grip,
   type Session,
   type SetType,
   type Suggestion,
   type SuggestionCode,
   type Volume,
 } from '@/lib/sessions';
+import { PillGroup, TogglePill } from '@/components/ui/Pills';
+import { gripGuide, setTypeGuide, TIMER_GUIDE } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';
 
 /**
@@ -2238,39 +2242,66 @@ function SetRow({
               circuits N4 says fall out of this. Clearing it back to empty takes
               both away again, which is the intended undo. */}
           {offersTimerTarget(exercise?.load_type) && (
-            <View style={styles.fieldRow}>
-              <Field
-                label={`Timer (${durationInputUnit(duration)})`}
-                value={set.seconds == null ? null : toDisplayDuration(set.seconds, duration)}
-                onChangeText={(text) => {
-                  const t = text.trim();
-                  if (t === '') {
-                    onChange(withSetChange(set, { seconds: null }));
-                    return;
-                  }
-                  const raw = Number(t.replace(',', '.'));
-                  if (!Number.isFinite(raw)) {
-                    onChange(withSetChange(set, { seconds: null }));
-                    return;
-                  }
-                  const canonical = fromDisplayDuration(raw, duration);
-                  // A zero or negative duration is refused rather than stored:
-                  // the server rejects `seconds <= 0` outright, so keeping it
-                  // would be a row that syncs 400 and a timer that fires the
-                  // instant it starts. Null is the honest reading of "no".
-                  onChange(withSetChange(set, { seconds: canonical > 0 ? canonical : null }));
-                }}
-                hint="optional"
-                integer={duration !== 'minutes'}
-                // Built from the unit-bearing label, exactly as the measure
-                // fields above are. Without the unit a VoiceOver user in
-                // minutes mode hears "Timer" and has no way to know that 1.5
-                // means ninety seconds.
-                accessibilityLabel={`Timer in ${
-                  duration === 'minutes' ? 'minutes' : 'seconds'
-                } for ${setName} of ${exerciseName}, optional`}
-                testID={`set-${index}-timer`}
+            <View style={styles.timed}>
+              <TogglePill
+                label="Timed"
+                on={set.seconds != null}
+                onToggle={(next) =>
+                  onChange(
+                    withSetChange(set, {
+                      // Turning it OFF clears the number rather than hiding it.
+                      // A stored duration is not decoration: it is what puts the
+                      // play button on the row and what lets the set join a
+                      // hands-free run, so a switch that said "off" over a live
+                      // 60 would be describing a row that still behaves as timed.
+                      seconds: next ? DEFAULT_TIMER_SECONDS : null,
+                    }),
+                  )
+                }
+                guide={TIMER_GUIDE}
+                accessibilityLabel={`Timed ${setName} of ${exerciseName}`}
+                testID={`set-${index}-timed`}
               />
+              {/* Beside the switch, not below it: the switch's whole purpose is
+                  to produce this field, and a number that appears a row further
+                  down reads as an unrelated thing that happened to arrive. */}
+              {set.seconds != null && (
+                <View style={styles.timedField}>
+                  <Field
+                    label={`Timer (${durationInputUnit(duration)})`}
+                    value={toDisplayDuration(set.seconds, duration)}
+                    onChangeText={(text) => {
+                      const t = text.trim();
+                      if (t === '') {
+                        onChange(withSetChange(set, { seconds: null }));
+                        return;
+                      }
+                      const raw = Number(t.replace(',', '.'));
+                      if (!Number.isFinite(raw)) {
+                        onChange(withSetChange(set, { seconds: null }));
+                        return;
+                      }
+                      const canonical = fromDisplayDuration(raw, duration);
+                      // A zero or negative duration is refused rather than stored:
+                      // the server rejects `seconds <= 0` outright, so keeping it
+                      // would be a row that syncs 400 and a timer that fires the
+                      // instant it starts. Null is the honest reading of "no" —
+                      // and clearing the field to empty is now also how the
+                      // switch goes back off, since the two are one state.
+                      onChange(withSetChange(set, { seconds: canonical > 0 ? canonical : null }));
+                    }}
+                    integer={duration !== 'minutes'}
+                    // Built from the unit-bearing label, exactly as the measure
+                    // fields above are. Without the unit a VoiceOver user in
+                    // minutes mode hears "Timer" and has no way to know that 1.5
+                    // means ninety seconds.
+                    accessibilityLabel={`Timer in ${
+                      duration === 'minutes' ? 'minutes' : 'seconds'
+                    } for ${setName} of ${exerciseName}`}
+                    testID={`set-${index}-timer`}
+                  />
+                </View>
+              )}
             </View>
           )}
 
@@ -2348,28 +2379,18 @@ function SetRow({
           </View>
           )}
 
-          <View style={styles.chips}>
-            {SET_TYPES.map((t) => (
-              <Pressable
-                key={t.key}
-                onPress={() => onChange({ ...set, set_type: t.key as SetType })}
-                style={[
-                  styles.chip,
-                  set.set_type === t.key && [
-                    styles.chipActive,
-                    { backgroundColor: accent.accent, borderColor: accent.accent },
-                  ],
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: set.set_type === t.key }}
-                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-              >
-                <Text style={[styles.chipText, set.set_type === t.key && styles.chipTextActive]}>
-                  {t.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          <PillGroup
+            label="Type"
+            options={SET_TYPES}
+            selected={set.set_type}
+            // Never null — the group is not `clearable`, so the only value it
+            // can emit is one of its own keys. The cast is the price of a
+            // component that also serves grips, where null is a real answer.
+            onSelect={(key) => onChange({ ...set, set_type: key as SetType })}
+            guideFor={setTypeGuide}
+            describe={(o) => `${o.label} set, for ${setName} of ${exerciseName}`}
+            testID={`set-${index}-type`}
+          />
 
           {/* How the bar was held.
               Which values are offered depends on the movement — `gripsFor`
@@ -2392,32 +2413,17 @@ function SetRow({
               it a mis-tap is permanent — and unrecorded is a real state here,
               not an absence. */}
           {offeredGrips(exercise?.movement_pattern, set.grip).length > 0 && (
-            <View style={styles.chips}>
-              {offeredGrips(exercise?.movement_pattern, set.grip).map((g) => {
-                const on = set.grip === g.key;
-                return (
-                  <Pressable
-                    key={g.key}
-                    onPress={() => onChange({ ...set, grip: on ? null : g.key })}
-                    style={[
-                      styles.chip,
-                      on && [
-                        styles.chipActive,
-                        { backgroundColor: accent.accent, borderColor: accent.accent },
-                      ],
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
-                    accessibilityLabel={`${g.label} grip for ${setName} of ${exerciseName}`}
-                    accessibilityHint={on ? 'Tap again to clear the grip' : undefined}
-                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                    testID={`set-${index}-grip-${g.key}`}
-                  >
-                    <Text style={[styles.chipText, on && styles.chipTextActive]}>{g.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <PillGroup
+              label="Grip"
+              options={offeredGrips(exercise?.movement_pattern, set.grip)}
+              selected={set.grip ?? null}
+              clearable
+              emptyLabel="Not recorded"
+              onSelect={(key) => onChange({ ...set, grip: key as Grip | null })}
+              guideFor={gripGuide}
+              describe={(o) => `${o.label} grip for ${setName} of ${exerciseName}`}
+              testID={`set-${index}-grip`}
+            />
           )}
 
           <Pressable
@@ -2709,6 +2715,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  // The switch and its field on one line, baseline-agnostic: `Field` carries a
+  // label above the input, so `alignItems: 'flex-end'` is what puts the pill
+  // level with the input rather than with the label.
+  timed: { flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
+  timedField: { flex: 1 },
   chip: {
     borderWidth: 1,
     borderColor: vola.line,
@@ -2771,7 +2782,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hintApplyText: { color: vola.navy, fontWeight: '700', fontSize: 14 },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  /*
+    Both buttons share the row EVENLY (`flex: 1` on each), rather than each
+    shrink-wrapping its own two words. Sized by their labels, "+ Set" and
+    "+ Drop" came out different widths, left-aligned in a full-width row, and
+    read as two fragments of a broken control rather than a pair of choices —
+    which is what they are. Even halves, or one full-width button when the drop
+    is not offered, is the only arrangement that says that.
+  */
+  addRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
   // Indented and rule-marked, so a drop reads as hanging off the row above
   // rather than sitting beside it. The accent is deliberately NOT used: a drop
   // is not an achievement, and this app reserves the accent for what was
@@ -2783,14 +2802,30 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
   },
   addSet: {
+    flex: 1,
     borderWidth: 1,
-    borderStyle: 'dashed',
+    /*
+      SOLID, and this is the actual fix rather than a taste change. iOS renders
+      `borderStyle: 'dashed'` together with a `borderRadius` by falling back to
+      an unrounded, unevenly-dashed box — the corners square off and the dash
+      phase restarts per edge, which is the ragged outline in the report. RN has
+      never supported the combination on iOS; it is not a value that can be
+      tuned. A filled surface with a hairline reads as "another one of these"
+      just as well as a dashed one, and it matches `styles.primary` directly
+      below it.
+    */
     borderColor: vola.line,
+    backgroundColor: vola.surface,
     borderRadius: 12,
+    // 44 is the floor, not the target: these are pressed with a thumb, standing
+    // up, between sets.
+    minHeight: 44,
     paddingVertical: 12,
+    paddingHorizontal: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  addSetText: { fontWeight: '700' },
+  addSetText: { fontWeight: '700', fontSize: 14 },
   primary: {
     backgroundColor: vola.surfaceRaised,
     borderRadius: 12,
