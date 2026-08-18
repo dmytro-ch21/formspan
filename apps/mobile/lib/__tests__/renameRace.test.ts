@@ -1,5 +1,6 @@
 import {
   countPendingSessions,
+  deleteLocalSession,
   pushSession,
   renameLocalSession,
 } from '../sessionStore';
@@ -142,9 +143,45 @@ describe('a session renamed while its push is in flight', () => {
     expect(after.name_dirty).toBe(0);
   });
 
+  it('composes with the tombstone guard when both land in the same push', async () => {
+    // T6 and T7 guard the same statement with different clauses, and the
+    // scenarios doc claims they compose. Claiming is not testing — this is the
+    // only line of that section that had no counterpart here.
+    const mockDelete = jest.requireMock('../sessions').deleteSession as jest.Mock;
+    mockDelete.mockResolvedValue(undefined);
+
+    mockSets.mockImplementationOnce(async () => {
+      await renameLocalSession('u1', 's1', 'B');
+      await deleteLocalSession('u1', 's1');
+    });
+
+    await pushSession('u1', 's1', token);
+
+    // Declined on BOTH counts, so the row still owes everything.
+    const after = await db.getFirstAsync<{
+      dirty: number;
+      name_dirty: number;
+      deleted_at: string | null;
+    }>(`SELECT dirty, name_dirty, deleted_at FROM local_sessions WHERE id = 's1'`);
+    expect(after).toMatchObject({ dirty: 1, name_dirty: 1 });
+    expect(after!.deleted_at).not.toBeNull();
+    expect(await countPendingSessions('u1')).toBe(1);
+
+    // And the next pass deletes. The rename is subsumed rather than sent — the
+    // athlete's later intent was to remove the session, so a PATCH naming it
+    // would be a request for a row about to stop existing.
+    await pushSession('u1', 's1', token);
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+  });
+
   it('goes clean when nothing was renamed underneath it', async () => {
-    // The control. Without this, "never clear name_dirty" passes both tests
-    // above while re-sending the same PATCH on every foreground forever.
+    // The control. Without this, "never clear name_dirty" passes the tests
+    // above while the row re-sends the same PATCH on every push it is ever
+    // picked up for again. (Not "every foreground" — sessions are selected on
+    // `dirty = 1`, so a settled row is not re-picked; it is every push after
+    // any later edit, which for a live session is every debounced save. The
+    // workout loop, which also reads `name_dirty`, IS the every-foreground
+    // case.)
     await pushSession('u1', 's1', token);
 
     const after = await flags();

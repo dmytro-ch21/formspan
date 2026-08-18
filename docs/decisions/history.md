@@ -23761,6 +23761,31 @@ delivers "B"** is the property, and it is what fails with the bug restored —
 control: without it, "never clear `name_dirty`" would satisfy the first two
 while re-sending the same PATCH on every foreground for the life of the install.
 
+### What review added
+
+It enumerated every write to `local_sessions` to check the folding claim, and
+found the state I had argued was unreachable **is** reachable — by the
+permanent-rejection restore, which cleared `dirty` and left `name_dirty` set. A
+session renamed, then deleted, whose DELETE the server refuses permanently, kept
+a name the phone would never send again. The workout twin self-heals there
+because its loop reads `name_dirty` too; the session loop does not. That branch
+clears both flags now, which also matches its own stated posture — the server
+refused to let us touch this row, so we stop owing it anything.
+
+It also found a fixture false via the wrong operand: `bjjPush.test.ts`'s "does
+NOT send it for a session the server has never seen" seeded `remote: 0` and
+inherited `name_dirty: 0`, so the guard was false for the wrong reason and
+**dropping `wasRemote` survived the entire suite** — in the test whose whole
+purpose is to pin that operand. It seeds both now, and the mutation fails.
+
+And the composed rename-plus-delete case was asserted in the scenarios doc while
+existing nowhere in jest. It does now, and it confirms the two guards are
+independent conjuncts: the swap declines on both counts, the row keeps
+everything it owed, and the next pass deletes — the rename subsumed rather than
+sent, since removing the session was the athlete's later intent.
+
+Worth carrying to `T8`: its guard must check **both** flags, not `dirty` alone.
+
 ### Gaps
 
 - **`T8` is the same family and still open**, in the same file: the pull's
