@@ -424,11 +424,17 @@ export async function readLocalBjjDetail(
  * tombstone costs one sync cycle and needs no network, so it clears on the
  * next attempt whether online or not.
  *
- * The interleaving is safe because the tombstone bumps `updated_at`: a push
- * already in flight finds its CAS
- * (`UPDATE ... SET dirty = 0 ... AND updated_at = ?`) no longer matches, so
+ * The interleaving is safe because the closing compare-and-swap declines, so
  * the row stays dirty and the *next* pass sees the tombstone with `remote`
  * now correctly 1.
+ *
+ * **That used to rest on `updated_at` alone, and it was not enough.** This
+ * function stamps `updated_at` from the same wall clock the swap compares
+ * against, so a delete landing in the same millisecond as the push's snapshot
+ * wrote an identical string, the swap matched, and the tombstone was marked
+ * clean — never sent, because the push loop selects on `dirty = 1`. The swap
+ * now also requires `deleted_at IS NULL`, which is the clause `plan.ts` had
+ * all along and these two did not (T6).
  */
 export async function deleteLocalSession(userID: string, id: string): Promise<void> {
   const db = await getDb();
@@ -784,7 +790,16 @@ async function pushRow(
     `UPDATE local_sessions SET dirty = 0 WHERE id = ? AND user_id = ?
      -- Only if nothing changed underneath us mid-push, or we'd mark a newer
      -- edit as already sent and silently drop it.
-     AND updated_at = ?`,
+     AND updated_at = ?
+     -- And never on a row that became a TOMBSTONE while this push was in
+     -- flight. updated_at is millisecond-resolution ISO text and the delete
+     -- stamps it from the same wall clock, so a delete landing in the same
+     -- millisecond as the snapshot writes an IDENTICAL string, the swap above
+     -- matches, and the tombstone is marked as already sent. The push loop
+     -- selects on dirty = 1, so it is then never sent at all: gone from this
+     -- phone, alive on the server, pending reading zero, nothing retrying.
+     -- Reproduced before it was fixed; tombstoneRace.test.ts holds it.
+     AND deleted_at IS NULL`,
     s.id,
     userID,
     row.updated_at,
@@ -1755,7 +1770,16 @@ async function pushWorkoutRow(
     `UPDATE workout_cache SET dirty = 0, name_dirty = 0 WHERE id = ? AND user_id = ?
      -- Only if nothing changed underneath us mid-push, or we would mark a
      -- newer edit as already sent and silently drop it.
-     AND updated_at = ?`,
+     AND updated_at = ?
+     -- And never on a row that became a TOMBSTONE while this push was in
+     -- flight. updated_at is millisecond-resolution ISO text and the delete
+     -- stamps it from the same wall clock, so a delete landing in the same
+     -- millisecond as the snapshot writes an IDENTICAL string, the swap above
+     -- matches, and the tombstone is marked as already sent. The push loop
+     -- selects on dirty = 1, so it is then never sent at all: gone from this
+     -- phone, alive on the server, pending reading zero, nothing retrying.
+     -- Reproduced before it was fixed; tombstoneRace.test.ts holds it.
+     AND deleted_at IS NULL`,
     row.id, userID, row.updated_at,
   );
 }
