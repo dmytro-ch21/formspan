@@ -320,3 +320,53 @@ export function rescale(entry: Macros & { servings: number }, servings: number):
 function round1(v: number): number {
   return Math.round(v * 10) / 10;
 }
+
+/**
+ * Where "fix your profile first" should actually send you.
+ *
+ * The Food target refuses to derive until it has four things, and the screen's
+ * one button used to go to `/profile` — a route that **does not exist**. There
+ * is `/profile/edit`; there has never been a `/profile`. So the button did
+ * nothing an athlete could interpret: Expo Router lands on `+not-found`, from a
+ * screen whose whole job is to explain why it cannot answer yet.
+ *
+ * Pointing it at `/profile/edit` would fix the crash and only half the bug,
+ * because **one of the four is not on that screen**. `weight_kg` is a
+ * weigh-in — it comes from a check-in, not from the profile — so an athlete
+ * with a complete profile and no weigh-in would have been sent to a form with
+ * nothing on it to fill in. The server can and does return that case alone
+ * (`Suggest` appends each of the four independently).
+ *
+ * Hence a rule rather than a route. Profile fields win when both kinds are
+ * missing: you have to go there anyway, and the weigh-in is one tap from Today
+ * afterwards — whereas the reverse order strands you a second time.
+ *
+ * Returns `null` when nothing is missing, so a caller cannot render a
+ * fix-this button for a target that is already derivable.
+ */
+export type ProfileGap = {
+  /**
+   * WHICH screen, not the path to it.
+   *
+   * Deliberately not an href. Returning a string would force the call site to
+   * cast it into `Href`, and that cast is the exact type-checking that catches
+   * a route which does not exist — the check this whole function exists
+   * because nothing performed. The literals stay in the screen, where Expo
+   * Router's generated types can see them.
+   */
+  kind: 'profile' | 'weigh-in';
+  /** The button's words, which have to match where it goes. */
+  label: string;
+};
+
+/** The three the profile form actually edits — see `app/profile/edit.tsx`. */
+const PROFILE_FIELDS = ['height_cm', 'date_of_birth', 'sex'];
+
+export function profileGap(missing: string[]): ProfileGap | null {
+  if (missing.length === 0) return null;
+  if (missing.some((f) => PROFILE_FIELDS.includes(f))) {
+    return { kind: 'profile', label: 'Open profile' };
+  }
+  // Only the weigh-in is outstanding, and that is a check-in, not the profile.
+  return { kind: 'weigh-in', label: 'Record a weigh-in' };
+}

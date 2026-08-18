@@ -39,7 +39,7 @@ import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
-import { todayString } from '@/lib/nutrition';
+import { profileGap, todayString } from '@/lib/nutrition';
 import { saveTarget, suggestedTarget, type Suggested } from '@/lib/nutritionApi';
 
 /**
@@ -114,6 +114,9 @@ export default function TargetScreen() {
   }, [data, getToken, on, router, saving]);
 
   const s = data?.suggestion ?? null;
+  // Null once a target is derivable, so the fix-this button cannot render for a
+  // screen that has nothing left to fix.
+  const gap = profileGap(data?.missing ?? []);
   const b = s?.basis ?? null;
 
   return (
@@ -152,20 +155,29 @@ export default function TargetScreen() {
 
         {!failed && !data && <Text style={styles.note}>Working it out…</Text>}
 
-        {data && !s && (
+        {data && !s && gap && (
           <View style={styles.gap}>
             <Text style={styles.note}>
-              A target needs a few things from your profile first:{' '}
-              {data.missing.map(profileLabel).join(', ')}.
+              A target needs a few things first: {data.missing.map(profileLabel).join(', ')}.
             </Text>
+            {/* Where this goes depends on WHICH thing is missing — see
+                `profileGap`. It used to be a hardcoded `/profile`, a route this
+                app has never had, so the one button on a screen explaining why
+                it cannot answer led to the not-found screen. */}
             <Pressable
-              onPress={() => router.push('/profile')}
+              onPress={() =>
+                // The literals live HERE so Expo Router's generated types check
+                // them. `profileGap` deliberately returns a kind rather than a
+                // path, because a path would need a cast and the cast is what
+                // stopped `/profile` being caught in the first place.
+                router.push(gap.kind === 'profile' ? '/profile/edit' : `/checkin/${todayString()}`)
+              }
               style={[styles.primary, { backgroundColor: accent.accent }]}
               accessibilityRole="button"
-              accessibilityLabel="Open your profile"
+              accessibilityLabel={gap.label}
               testID="target-profile"
             >
-              <Text style={[styles.primaryText, { color: accent.on }]}>Open profile</Text>
+              <Text style={[styles.primaryText, { color: accent.on }]}>{gap.label}</Text>
             </Pressable>
           </View>
         )}
