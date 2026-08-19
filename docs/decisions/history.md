@@ -26298,6 +26298,92 @@ only today's drills. Now "Working on & drilled today".
   removes the cost rather than relocating it, and is not started.
 - **`first_scored` is unaffected**: it never needed a technique.
 
+## 2026-08-19 — Spec: dictate the session, correct the draft (N33)
+
+Design only — no code, and none is possible yet. Written after the N31 work
+established that the reflection wizard *can* attribute a technique to a live
+outcome, at the cost of a tap on the right row. Dictation is the version that
+removes that cost instead of relocating it: "hit an armbar from closed guard"
+already names the technique.
+
+Filed as **N33**, spec'd in `bjj-tracking-design.md` §7.
+
+### It is an extension of something that doc already wanted
+
+§3 item 6 has always read *"Free note, ideally voice. Hold-to-dictate on the
+walk to the car."* The new idea is not voice — it is that the same dictation
+can fill the **structured** half, not only the note the chips cannot hold.
+
+### The input is text, which answers an open question rather than adding one
+
+The doc's open question 4 asked whether voice transcription should be
+on-device or server-side, and noted a server would make "a privacy promise we
+have to write down". **Answered: on-device, via the system keyboard.** The app
+never handles audio — iOS hands it a string — so there is no transcription
+vendor, no upload, no microphone permission beyond the keyboard's, and the
+promise shrinks to one sentence about the text. A record-and-upload path buys
+better punctuation and nothing else.
+
+### Why BJJ is a better fit for this than food
+
+N26 is the precedent and the shape is identical — a **draft the athlete
+corrects, never a logged entry** — but the target here is a *closed*
+vocabulary: six categories, five event directions, eleven positions, 542
+technique ids. That is enum-mapping with a fixed answer set, where portion size
+from a photo is an open-ended numeric guess. The model is not asked to know
+anything; it is asked to map a sentence onto an enum this repo already defines.
+
+### The catalog goes in the prompt, and the id is validated in Go
+
+The hard part is resolving "armbar from closed guard" to `armbar-closed-guard`.
+There is no Go text ranker on the backend — `rankTechniques` is mobile's and
+`techniqueSearch` is web's — so building one means a third copy of a fuzzy
+matcher, which is the drift shape this repo keeps arguing against. A trigram
+shortlist plus a second model call is two round trips for one sentence.
+
+So: send the catalog. ~10K tokens as `id · name · position`, behind a cache
+breakpoint, which is ~0.1× on every call after the first. The model emits real
+ids, and **Go validates every one against the catalog** — an unknown id becomes
+an unresolved phrase the athlete picks from the normal picker, never a guess
+and never a silent drop. The catalog is rendered deterministically because
+caching is a prefix match and one moved byte re-bills the whole prefix.
+
+### The schema cannot express the constraints, and that is fine
+
+Structured outputs support `enum` and `additionalProperties: false` — which
+covers category, event, position and gi exactly — but not `minimum` or
+`maxLength`. So the schema cannot say "count is at least 1". **The existing Go
+validation is the gate, exactly as it is for a hand-typed reflection**: model
+output is untrusted input validated by the rules a client's payload already
+passes, not by a second set written for the model.
+
+### Sized rather than guessed
+
+~$0.019 per warm call at Opus 5 rates ($5/$25 per MTok) with a ~11.5K cached
+prefix and a ~500-token draft; ~$0.085 on a cold cache. **Output dominates a
+warm call**, so the lever is a tight schema rather than a shorter catalog.
+Cheaper tiers are a genuine option for a task this constrained — but that is a
+decision to make against an eval set of real dictations, not by assumption, and
+building that eval set is the first piece of work either way. It outlives
+whichever model is current.
+
+### What it must never do
+
+Never invent a number the athlete did not say — no RPE, no round count, no
+gi/no-gi guess. Absent means absent, and the draft leaves a field blank rather
+than filling a plausible value the athlete then has to notice and undo. Never
+create or finish a session. And the **confirmation step can never be skipped**:
+a tag is already `reported` basis, and a dictated tag is one step further
+removed — the athlete said it and a model parsed it. Confirming is what makes
+it their claim again, which is why there is deliberately no "log it for me".
+
+### Blocked, and on what
+
+**No LLM provider is wired anywhere in this repo** — no client, no key, no
+dependency, in backend, apps or Railway config. That is an account and
+key-management decision before any code, and it is shared with N26 and N7,
+which are blocked on the same thing.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
