@@ -203,6 +203,110 @@ components:
             serving_label: { type: string, minLength: 1, maxLength: 40 }
             source_food_id: { type: string, format: uuid, nullable: true }
 
+    CatalogFood:
+      type: object
+      description: >
+        One row of the shared food catalog. Distinct from `NutritionFood`, which
+        is an athlete's own saved food: this has no owner, a slug id rather than
+        a client-generated UUID, and a `source` recording who owns the CONTENT
+        (`seed` = deploy-managed, `admin` = a human edited it and a deploy will
+        no longer touch it).
+
+
+        Macros are per one serving, and every seeded row's serving is `100 g`,
+        which is the basis USDA states its values on.
+      required:
+        [id, name, brand, category, aliases, serving_label, kcal, protein_g,
+         carb_g, fat_g, market, source]
+      properties:
+        id: { type: string, example: chicken-breast }
+        name: { type: string, maxLength: 120 }
+        brand: { type: string, maxLength: 80 }
+        category:
+          type: string
+          description: >
+            Coarse food group. Also what the coverage endpoint counts, so an
+            empty search can say what the catalog holds instead of leaving its
+            shape to be guessed.
+          example: poultry
+        aliases:
+          type: array
+          description: >
+            Other names for THIS food — "aubergine" on the eggplant row. Kept as
+            an array rather than a joined string so a search term cannot match
+            across the boundary between two unrelated aliases.
+          items: { type: string }
+        serving_label: { type: string, example: "100 g" }
+        serving_grams:
+          type: number
+          nullable: true
+          description: >
+            Null when a serving has no honest gram weight. Inventing one would
+            make every gram-based total quietly fictional.
+        kcal: { type: number }
+        protein_g: { type: number }
+        carb_g: { type: number }
+        fat_g: { type: number }
+        fibre_g:
+          type: number
+          nullable: true
+          description: >
+            Null is NOT zero. A source that does not state fibre is not claiming
+            there is none, and averaging unstated as zero drags every figure
+            down.
+        market:
+          type: string
+          description: >
+            Which region's food supply this row describes. Present so that "we
+            do not stock this food" and "we do not cover your region" can stay
+            different answers.
+          example: us
+        source: { type: string, enum: [seed, admin] }
+        external_id:
+          type: string
+          nullable: true
+          description: The upstream row these numbers came from, so any figure can be checked.
+        external_source:
+          type: string
+          nullable: true
+          enum: [usda, off]
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CatalogCoverage:
+      type: object
+      description: >
+        What the catalog actually holds. Exists because an empty search result
+        is uninterpretable without it.
+      required: [foods, markets, categories, barcode]
+      properties:
+        foods: { type: integer }
+        markets:
+          type: array
+          items: { type: string }
+        categories:
+          type: array
+          items:
+            type: object
+            required: [category, foods]
+            properties:
+              category: { type: string }
+              foods: { type: integer }
+        barcode:
+          type: object
+          required: [enabled, provider, cached]
+          properties:
+            enabled:
+              type: boolean
+              description: >
+                False when no barcode provider is configured. A scanning client
+                needs this to tell "this build cannot look packets up" from
+                "this packet is unknown".
+            provider: { type: string, example: openfoodfacts }
+            cached:
+              type: integer
+              description: How many barcodes this deploy has already resolved.
+
     NutritionFood:
       allOf:
         - $ref: "#/components/schemas/NutritionMacros"
@@ -945,8 +1049,20 @@ components:
                 - not_found
                 - already_exists
                 - rate_limited
+                - unavailable
                 - internal
               description: >
+                `unavailable` accompanies `503` and means the request was fine
+                and the server could not answer it — an upstream lookup that
+                timed out, refused, or is not configured on this deploy. It is
+                deliberately NOT `not_found`: "this barcode is not in the
+                database" and "I could not reach the database" look identical to
+                a client that only sees an empty result, and they are opposite
+                instructions. It is not `internal` either — `internal` means
+                this server is broken, `unavailable` means something it depends
+                on is.
+
+
                 `invalid_grip` is a narrower `invalid_input`, split out because
                 it is the one rejection a client can settle by itself: a set
                 names a grip this server does not know, so the client drops the
@@ -8820,6 +8936,209 @@ paths:
                     items: { $ref: "#/components/schemas/NutritionDay" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/catalog:
+    get:
+      operationId: searchFoodCatalog
+      summary: Search the shared food catalog
+      description: >
+        The catalog every athlete searches, as distinct from
+        `/nutrition/foods`, which is the caller's OWN saved foods. Both exist
+        and neither replaces the other.
+
+
+        **An empty result is a 200, never a 404, and it always says WHICH kind
+        of empty it is.** An athlete who searches "skyr" and gets nothing back
+        cannot otherwise tell whether the food is missing, their query was
+        unusable, or the catalog failed to load — and those need different
+        reactions. `outcome` is the answer, and only `no_match` means "we do not
+        have this food":
+
+
+        - `ok` — there are results.
+
+        - `no_match` — the catalog is loaded, covers the market asked for, and
+          does not have this. The only value where offering to add the food by
+          hand is the right next step.
+
+        - `query_unusable` — the query held no searchable term at all (`%`,
+          `!!!`). Nothing was actually asked, so nothing can be concluded.
+
+        - `catalog_empty` — the catalog holds no rows. This is a server-side
+          failure, never the athlete's, and must not be shown as a missing food.
+
+        - `market_not_covered` — nothing is stocked for the market requested.
+          Not fixable by rephrasing.
+
+
+        `coverage` is attached whenever the result is empty, because that is
+        exactly when a client needs to know what the catalog contains in order
+        to render the nothing it got.
+
+
+        Matching is per-word and ANDed, so every typed word must appear — in the
+        name or in one of the row's aliases. Ranking prefers rows whose name
+        LEADS with a typed word, which is what separates "Chicken, ..., breast"
+        from "Lunchmeat, chicken breast".
+      tags: [Nutrition]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100 }
+        - name: category
+          in: query
+          required: false
+          schema: { type: string, maxLength: 40 }
+        - name: market
+          in: query
+          required: false
+          description: >
+            Restricts to one market. Omitted means any market the catalog
+            stocks, which is the right default while only one is stocked.
+          schema: { type: string, maxLength: 16 }
+        - name: limit
+          in: query
+          required: false
+          description: Clamped to 100 rather than rejected.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: The matching foods, with an outcome explaining the set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [foods, total, outcome]
+                properties:
+                  foods:
+                    type: array
+                    items: { $ref: "#/components/schemas/CatalogFood" }
+                  total:
+                    type: integer
+                    description: >
+                      How many matched before `limit`, so a client can say
+                      "showing 20 of 63" rather than implying it has everything.
+                  outcome:
+                    type: string
+                    enum: [ok, no_match, query_unusable, catalog_empty, market_not_covered]
+                  coverage:
+                    $ref: "#/components/schemas/CatalogCoverage"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/catalog/coverage:
+    get:
+      operationId: getFoodCatalogCoverage
+      summary: What the food catalog actually contains
+      description: >
+        The availability answer on its own. Asked in two situations: by a client
+        rendering an empty state, and by a human checking whether a deploy
+        seeded correctly. Counts are live rather than declared, because a stale
+        coverage figure is worse than none.
+      tags: [Nutrition]
+      responses:
+        "200":
+          description: Live counts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogCoverage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /nutrition/catalog/barcode/{barcode}:
+    get:
+      operationId: lookupFoodByBarcode
+      summary: Resolve a scanned barcode to a food
+      description: >
+        Cache first, then Open Food Facts. A resolution is cached so one
+        athlete's scan warms it for everyone; a MISS is never cached, because a
+        barcode the provider did not know last week may be known today and
+        caching the miss would make "not added upstream yet" permanent.
+
+
+        **Three outcomes, and keeping them apart is the point of this
+        endpoint:**
+
+
+        - `400 invalid_input` — not a barcode. Fix the input.
+
+        - `404 not_found` — the provider does not have it, or has it with no
+          usable numbers. Offer manual entry.
+
+        - `503 unavailable` — we could not ask. Try again shortly.
+
+
+        A network failure must never surface as `not_found`: that would tell an
+        athlete their food does not exist because a DNS lookup blinked. A
+        product the provider holds with no name or no energy value is
+        `not_found` too — returning it would put a nameless zero-calorie food in
+        front of someone as though it had been measured.
+
+
+        Values are per 100 g, matching the rest of the catalog.
+      tags: [Nutrition]
+      parameters:
+        - name: barcode
+          in: path
+          required: true
+          description: 6 to 14 digits. A string, not a number — leading zeros are significant.
+          schema: { type: string, pattern: "^[0-9]{6,14}$" }
+      responses:
+        "200":
+          description: The resolved food.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [food, source, provider, cached]
+                properties:
+                  food: { $ref: "#/components/schemas/CatalogFood" }
+                  source:
+                    type: string
+                    enum: [catalog, off]
+                    description: >
+                      Whose data this is. A cached Open Food Facts row is still
+                      Open Food Facts data — it does not become `catalog` by
+                      having been stored, because ODbL attribution depends on
+                      the distinction.
+                  provider:
+                    type: string
+                    description: Who answered, e.g. `openfoodfacts`.
+                  cached:
+                    type: boolean
+                    description: Whether this came from our store rather than a live call.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: >
+            The provider could not be reached, or none is configured. NOT the
+            same as the food being unknown.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /nutrition/catalog/{id}:
+    get:
+      operationId: getCatalogFood
+      summary: One catalog food by its slug
+      tags: [Nutrition]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: The food.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogFood" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /nutrition/foods:
     get:

@@ -29120,6 +29120,209 @@ otherwise.
 - **Still no real photograph through the whole path**, end to end. That gap is
   now two features wide.
 
+## 2026-08-19 — A food catalog, and an empty result that says which kind of empty it is
+
+N26's line said the food-database work was unscheduled because *"if describing
+a meal in a sentence works, a food database is largely redundant."* N40 (#313)
+measured that assumption against a real photograph: the estimator **invented
+one item and doubled a quantity** — and it flagged the invention three separate
+ways (`portion_confidence: low`, a hedged assumption, a note naming it unclear)
+while flagging the miscount **not at all**. That is the case for a catalog. It
+is exact where the model guesses, and the model cannot tell you when it is
+guessing about quantity.
+
+### The source decision, which was already half-made
+
+Open Food Facts or USDA was posed as an open question. It was not quite: the
+`nutrition_foods` table has carried `source IN ('user','seed','usda','off')`
+since migration 000059, with a comment saying those are "the two integrations
+already decided on". The same comment carries the constraint that settled the
+rest — Open Food Facts is **ODbL**, and its share-alike obligation "must never
+reach our own data".
+
+So the split, confirmed with the user:
+
+- **USDA FoodData Central** — the seeded generic catalog. US public domain, no
+  share-alike, and it is the half that answers "chicken breast" and "oats".
+- **Open Food Facts** — **barcode resolution only**, fetched on demand and
+  cached. Branded packaged goods, which is where estimation is worst and a
+  database is most complete. Never bulk-imported.
+
+The cheap option and the safe option agree here, which is worth writing down
+because the next person will be tempted to bulk-import for speed. Bulk-ingesting
+ODbL rows into the table our authored catalog lives in is exactly what that
+comment forbids, and it is expensive in storage and sync besides.
+
+Region was asked separately and answered **US primarily**. That is luck rather
+than good reasoning: USDA is a US dataset, so the seeded catalog and the market
+it will be judged against agree. Had the answer been Europe, USDA-as-the-seed
+would have been the wrong recommendation.
+
+### The API is unusable for this, and the bulk download is better anyway
+
+The obvious build — resolve a few hundred foods through the FoodData Central
+search API — cannot work. `DEMO_KEY` is rate limited to **10 requests an hour**
+(measured, `x-ratelimit-limit: 10`), and SR Legacy is 7,793 foods. Worse,
+search results are not stable, so a catalog built from live queries could not be
+rebuilt identically tomorrow.
+
+The bulk download has neither problem: **no API key**, and SR Legacy is
+**frozen at 2018-04**. A released, superseded dataset that will never change
+under us is the ideal input for a version-controlled seed. `scripts/import_usda_foods.py`
+reads the 13 MB download (not committed; it expands to 210 MB) and writes
+`foods.json`, pinning the **FDC id of every row** so any number in the catalog
+can be checked against its origin. `--check` rebuilds and **exits non-zero** on
+drift, because a checker that only reports is one nobody notices.
+
+Not "import everything", and that is not laziness. 7,793 rows would make search
+*worse*: the long tail is baby food, school lunches and branded fast food, and
+an athlete logging dinner wants one row for chicken breast, not forty. 173
+curated foods, each resolving to exactly one SR Legacy row by include/exclude
+terms.
+
+**The resolver needed a deterministic tie-break, and finding out why was the
+useful part.** Picking the shortest matching description is a good rule, but
+four entries had two candidates of *exactly equal length*, where the winner
+would be decided by the order rows happen to sit in a 210 MB file. Two of the
+four were wrong: `bacon` resolved to **"Pork, bacon, rendered fat, cooked"**,
+which is not bacon. They are disambiguated in the spec now, and the fdcId
+tie-break plus a hard failure on any remaining ambiguity stops the next one
+being silent.
+
+### Search: the third failure mode
+
+The technique library taught this repo that search is where a catalog fails
+(*"The library was not missing the techniques, the search was"* — `arm bar`
+returned nothing while `armbar` returned 21). The exercise catalog repeated it
+in a different vocabulary. A food catalog fails in both of those ways **plus a
+third**, because its rows are written by a government nutrient database and read
+by someone standing in a kitchen:
+
+| typed | catalog row |
+|---|---|
+| `chicken breast` | `Chicken, broiler or fryers, breast, skinless, meat only, raw` |
+| `greek yoghurt` | `Yogurt, Greek, plain, nonfat` |
+| `courgette` | `Squash, summer, zucchini, includes skin, raw` |
+
+Word order, spelling, vocabulary — and only the first is fixed by fuzzy
+matching. So: per-word matching, ANDed across words and ORed within a word's
+meanings; name and per-row `aliases` kept **apart** rather than concatenated, so
+a term cannot straddle two unrelated aliases; and a deliberately small general
+synonym list (`courgette`→`zucchini`, `mince`→`ground`, `pb`→`peanut butter`)
+separate from per-row aliases, because a per-food name in the synonym map would
+apply to every query in the catalog.
+
+**Ranking needed a second signal, and the case that proved it is the one USDA
+itself gets wrong.** With trigram similarity alone, "chicken breast" ranks
+*"Lunchmeat, chicken breast, sliced"* above the actual breast — it contains the
+typed phrase contiguously and is the shorter string, which a trigram ratio
+rewards. (The live FDC API does exactly this too; it was the first thing
+measured.) A USDA description is head-noun first, so the **earliest position at
+which any typed word appears** is a better signal of what a row is *about* than
+how much of the string the query covers. Lead position sorts first, similarity
+breaks its ties, and `id` makes the sort total — without that last one, paging
+over a similarity sort silently repeats rows on one page and skips them on the
+next.
+
+Measured over 50 realistic queries against the seeded catalog: **46 hit**. The
+misses are `skyr`, `weetabix` and `haggis` — genuinely not in a 2018 US nutrient
+database — and `%%%`, which is the unusable-query case. Two real gaps the
+measurement exposed were fixed rather than explained away: `garbanzo beans`
+missed because "bean" appears nowhere in "Chickpeas, cooked" and terms are
+ANDed, and `protein shake` missed because the catalog had no protein powder at
+all. Both are now in it.
+
+### Availability — the half that gets skipped
+
+An athlete who searches "skyr" and sees an empty list cannot tell whether the
+food is missing, their query was unusable, or the catalog never loaded. Those
+need different reactions and an empty list answers none of them. This repo has
+been bitten by that exact shape more than once — CI with no checks reading as
+passing, a skipped test printing `ok`.
+
+So every search carries an `outcome`, and only one value means "we do not have
+this food":
+
+- `ok`
+- `no_match` — loaded, covers the market, does not have it. The only one where
+  offering manual entry is right.
+- `query_unusable` — no searchable term (`%`, `!!!`). Decided **before** the
+  query runs, not inferred from its result.
+- `catalog_empty` — the table is empty. **Our** failure, established by actually
+  counting rows, and never shown as a missing food.
+- `market_not_covered` — nothing stocked for the market asked for.
+
+`coverage` (live counts by category and market, plus whether barcode lookup is
+configured at all) is attached whenever the result is empty, because that is
+exactly when it is needed to interpret the nothing. `market` is a column rather
+than a global assumption, so "we do not stock this" and "we do not cover your
+region" can stay different answers without a migration.
+
+### Barcode, and three outcomes rather than two
+
+The scan path landed here rather than in N41 (the user's call: N41 ships the
+scanner, this ships the lookup). Two findings, both measured against the live
+API and both capable of producing a confidently wrong implementation:
+
+**HTTP status is not the signal.** Open Food Facts returns **HTTP 200 with
+`"status": 0`** for a barcode it does not have. Keying on the HTTP status gets
+it exactly inverted — every unknown packet becomes a success, every outage
+becomes a missing product.
+
+**A found product can still be unusable.** OFF is crowd-sourced and carries
+placeholder entries; a real barcode with no name or no energy value is a normal
+state there. Mapping that to `kcal: 0` would write "this meal was zero calories"
+into an athlete's day as a *fact* — worse than returning nothing, because a
+confident zero prompts no correction.
+
+So three outcomes, kept strictly apart: `400 invalid_input` (not a barcode),
+`404 not_found` (the provider does not have it, or has nothing usable), and
+`503 unavailable` (we could not ask). A network failure must never surface as
+"not in the database". That needed a new error code — `unavailable` — added to
+the contract alongside `rate_limited`, and distinct from `internal` because
+`internal` means we are broken and this means somebody we depend on is.
+
+Cached OFF results live in **their own table**, `food_barcode_cache`, and the
+reasoning is worth keeping because the obvious framing is a false choice.
+"Separable" and "not shared" are different properties: a dedicated table is
+fully separable from our authored data while still being shared, so one
+athlete's scan warms the cache for everyone *and* no ODbL row ever sits in
+`food_catalog`. If we ever had to stop using OFF it is one `TRUNCATE`. There is
+deliberately **no negative cache** — a barcode the provider did not know last
+week may be known today, and caching the miss would make "not added upstream
+yet" permanent.
+
+### The fifth `source` value
+
+AI-generated foods came into scope mid-build, and `nutrition_foods.source` had
+no value for one. Added `'ai'` on the reasoning the original comment gives —
+"adding a value to a CHECK later is a migration where declaring it now costs
+nothing", and a migration was already being written.
+
+Its own value rather than folded into `'user'`, because of N40 again: a model
+cannot reliably say which of its own numbers to distrust, so an AI-drafted food
+has to stay permanently distinguishable from a measured one. Folded together,
+nothing downstream — including N27's kcal adjustments — could ever weight them
+differently, and there would be no way to find them again to re-verify when a
+better model lands.
+
+### Known gaps
+
+- **Household portions are not imported.** Every row is per 100 g, which is what
+  USDA states; the source *does* carry "1 medium banana, 118 g" and it is not
+  used yet. An athlete logging a banana currently has to think in grams.
+- **`chicken` alone ranks "Chicken wing" first**, because among rows that all
+  lead with the word, similarity prefers the shorter name. Fixing it properly
+  needs a prominence or popularity signal the catalog does not have.
+- **The cache has no expiry.** `fetched_at` is recorded so one can be added
+  without a backfill, but nothing re-checks a product whose recipe changed.
+- **`market` is a column with one value.** The mechanism is there; only `us` is
+  stocked, so `market_not_covered` is currently unreachable in production.
+- **No admin console surface.** The `seed`/`admin` provenance split works and is
+  tested, but nothing writes `admin` yet — `/content/foods` does not exist. The
+  ownership half is ready for it.
+- **The trigram index is unused at 173 rows**, exactly as on `exercises`; the
+  planner seq-scans. Kept as headroom on a table written only by a seeder.
 
 ## Open items / known gaps as of this entry
 
