@@ -152,6 +152,17 @@ write them — both measured. If the step fails, `typecheck:mobile` fails; a
 generator that quietly produced nothing would restore the silence it exists to
 end.
 
+**Two sessions can run it at once, as of N45 (#333)** — it used to pin port
+8099 and the second concurrent `verify` died. It now binds port 0 and reads the
+assignment back, so the kernel picks; `EXPO_TYPEGEN_PORT` pins one anyway for a
+run you need to find in `lsof`, and a pinned port is never retried. Worth
+knowing if you ever see it fail: the symptom was never the `EADDRINUSE` it
+looks like — Expo notices the busy port and asks `Use port 8100 instead?`, then
+dies because `CI=1` makes it non-interactive, so grepping the logs for
+`EADDRINUSE` finds nothing. Measured both ways: two concurrent runs of the old
+script still reproduce it, two of the new one both pass on adjacent
+kernel-assigned ports.
+
 **If you add a check to CI, add it to `verify` too.** It already missed
 `typecheck:admin` once — an admin type error passed locally and failed in CI,
 which is the same "failing typecheck scrolled past" it exists to prevent, just

@@ -45,9 +45,36 @@
  * back to a loose `Href` and CI would stay green. The timeout is an error, not
  * a warning.
  *
- * **Picks a port unlikely to collide.** Several dev servers run on this repo's
- * machines at once (8081, and whatever a session has pinned); 8099 is out of
- * that range, and `--port` is honoured before any bind.
+ * **Asks the OS for a free port instead of pinning one.** This used to pin
+ * 8099, on the reasoning that it was out of the range dev servers use. That is
+ * true and was not the problem: the contended resource is not the *range*, it
+ * is the single port, and **this repo's normal state is several sessions on one
+ * machine** — six ran on the day this was fixed. Two concurrent
+ * `pnpm run verify` runs both wanted 8099 and the second one died (N45).
+ *
+ * The failure was worth measuring rather than assuming, because it is not the
+ * `EADDRINUSE` it was reported as. Expo NOTICES the busy port and tries to be
+ * helpful:
+ *
+ *     › Port 8099 is running vola in another window
+ *     Input is required, but 'npx expo' is in non-interactive mode.
+ *     Required input:
+ *     > Use port 8100 instead?
+ *     › Skipping dev server
+ *
+ * So Expo would have moved aside by itself if anything could answer it, and
+ * under `CI=1` nothing can. It surfaces here as `Could not generate route
+ * types`, which reads exactly like a broken checkout and is nothing of the
+ * sort — it passes on a rerun once the port frees, which is what makes it
+ * expensive rather than merely annoying.
+ *
+ * Binding port 0 hands the choice to the kernel, which is the one allocator
+ * that already knows what every other session is holding. Note the port is the
+ * ONLY thing that collides across sessions: `.expo/types` lives inside the
+ * worktree, so two worktrees never contend for the file itself.
+ *
+ * `EXPO_TYPEGEN_PORT` pins one anyway, for debugging a run you need to find in
+ * `lsof`. A pinned port is never retried — you asked for that port.
  *
  * **Carries the IPv4 flag.** `apps/mobile/package.json`'s scripts all prefix
  * `NODE_OPTIONS=--dns-result-order=ipv4first`, because Node resolves
@@ -57,6 +84,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,8 +92,20 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MOBILE = join(ROOT, 'apps', 'mobile');
 const TYPES = join(MOBILE, '.expo', 'types', 'router.d.ts');
-const PORT = '8099';
 const TIMEOUT_MS = 120_000;
+/**
+ * How many ports to try before giving up.
+ *
+ * A kernel-assigned port is free at the moment it is assigned, but we close the
+ * probe socket before Expo binds — so there is a real window, about as long as
+ * Expo takes to start, in which another session's probe could be handed the
+ * same number. Small, and not zero, and a fix for a concurrency flake that is
+ * itself a concurrency flake would be a poor trade.
+ *
+ * Retries are deliberately narrow: only a recognised port collision is retried,
+ * and everything else fails on the first attempt exactly as it did before.
+ */
+const PORT_ATTEMPTS = 3;
 const POLL_MS = 250;
 /**
  * What a COMPLETE file ends with — see the generator's own template.
@@ -88,6 +128,42 @@ const POLL_MS = 250;
  */
 const COMPLETE_SUFFIX = '}';
 const MIN_BYTES = 200;
+
+/**
+ * A port the kernel says is free right now.
+ *
+ * Binding 0 and reading the assignment back is the only way to choose a port
+ * without knowing what every other process on the machine is holding — which
+ * is precisely the knowledge a hardcoded constant cannot have.
+ *
+ * No host argument, deliberately: that binds the unspecified address the same
+ * way Metro does, so a port free for this probe is free for Metro. Probing
+ * 127.0.0.1 would clear a port that something else already holds on `::`.
+ */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.on('error', reject);
+    probe.listen(0, () => {
+      const { port } = probe.address();
+      probe.close((err) => (err ? reject(err) : resolve(port)));
+    });
+  });
+}
+
+/**
+ * Does this failure look like somebody else got the port first?
+ *
+ * Matched against Expo's output, which is fragile — so it is arranged to fail
+ * in the SAFE direction. A pattern that stops matching means a collision is
+ * reported as an ordinary failure: noisy, and correct. Nothing here can turn a
+ * genuine failure into a pass, which is the constraint that matters (N35).
+ */
+function looksLikePortCollision(message) {
+  return /EADDRINUSE/i.test(message)
+    || /Port \d+ is running/i.test(message)
+    || /Use port \d+ instead\?/i.test(message);
+}
 
 /**
  * Removed first, so a stale file cannot be mistaken for a fresh one.
@@ -152,36 +228,58 @@ function waitForTypes(child) {
   });
 }
 
-clearStaleTypes();
+/** One full attempt on one port: clear, start Metro, wait, stop. */
+async function generateOn(port) {
+  clearStaleTypes();
 
-const child = spawn(
-  'npx',
-  ['--no-install', 'expo', 'start', '--port', PORT],
-  {
-    cwd: MOBILE,
-    env: { ...process.env, NODE_OPTIONS: '--dns-result-order=ipv4first', CI: '1' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    // Its own process GROUP, so the kill below can take Metro's workers with
-    // it. Without this, `process.kill(-pid)` has nothing to address and the
-    // workers survive holding the port.
-    detached: true,
-  },
-);
+  const child = spawn(
+    'npx',
+    ['--no-install', 'expo', 'start', '--port', String(port)],
+    {
+      cwd: MOBILE,
+      env: { ...process.env, NODE_OPTIONS: '--dns-result-order=ipv4first', CI: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // Its own process GROUP, so the kill below can take Metro's workers with
+      // it. Without this, `process.kill(-pid)` has nothing to address and the
+      // workers survive holding the port.
+      detached: true,
+    },
+  );
+
+  try {
+    return await waitForTypes(child);
+  } finally {
+    // `SIGTERM` then the process group: Metro spawns workers, and killing only
+    // the parent leaves them holding the port, which turns the NEXT run of this
+    // script into a mysterious timeout.
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      child.kill('SIGTERM');
+    }
+  }
+}
+
+// A pinned port is used as given and never retried — moving off a port
+// somebody asked for by name would defeat the reason they pinned it.
+const pinned = process.env.EXPO_TYPEGEN_PORT?.trim();
 
 let failure = null;
-try {
-  const ms = await waitForTypes(child);
-  console.log(`Route types generated in ${(ms / 1000).toFixed(1)}s → ${TYPES}`);
-} catch (err) {
-  failure = err;
-} finally {
-  // `SIGTERM` then the process group: Metro spawns workers, and killing only
-  // the parent leaves them holding the port, which turns the NEXT run of this
-  // script into a mysterious timeout.
+for (let attempt = 1; attempt <= PORT_ATTEMPTS; attempt += 1) {
+  const port = pinned || (await freePort());
   try {
-    process.kill(-child.pid, 'SIGTERM');
-  } catch {
-    child.kill('SIGTERM');
+    const ms = await generateOn(port);
+    console.log(`Route types generated in ${(ms / 1000).toFixed(1)}s on port ${port} → ${TYPES}`);
+    failure = null;
+    break;
+  } catch (err) {
+    failure = err;
+    const lastAttempt = attempt === PORT_ATTEMPTS;
+    if (pinned || lastAttempt || !looksLikePortCollision(err.message)) break;
+    // Reported rather than swallowed. A retry that happened silently would hide
+    // the very contention this script was changed to survive, and the count is
+    // what tells somebody the machine is busier than they thought.
+    console.warn(`Port ${port} was taken between probe and bind; retrying on a new port (${attempt}/${PORT_ATTEMPTS - 1}).`);
   }
 }
 
