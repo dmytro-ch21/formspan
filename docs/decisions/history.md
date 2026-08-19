@@ -28260,6 +28260,96 @@ Open questions:
   this entry to that moment.
 
 
+## 2026-08-19 — Five rows a human decided, and the pin that only a ruling could justify
+
+W7 is closed, and it closed the only way it could: somebody looked at five
+exercises and said what they are. The line had said so for weeks — "wants a
+human, not another inference" — and that was not modesty. Names cannot settle
+these. `bottoms-up-kettlebell-press` reads equally well as one bell or two, and
+the catalog's own fields agreed with the wrong reading.
+
+The rulings:
+
+| Row | Ruling |
+| --- | --- |
+| `bottoms-up-kettlebell-press` | x2 → **x1**, `is_unilateral` false → **true** |
+| `double-dumbbell-kickstand-deadlift` | `is_unilateral` false → **true** (stays x2) |
+| `dumbbell-pistol-squat` | confirmed x1 |
+| `kettlebell-pistol-squat` | confirmed x1 |
+| `single-leg-kettlebell-romanian-deadlift` | confirmed x1 |
+
+### The unsafe row moved on both fields, exactly as its own line predicted
+
+`bottoms-up-kettlebell-press` was the one to take first because x2 **invents**
+tonnage — every set reported double the weight actually moved. W7's line argued
+that its `is_unilateral: false` corroborated the two-bell reading, so the row was
+internally coherent as a double press, and that *if it was wrong, both fields
+were wrong together*. It was, and they were.
+
+That prediction is why the second half was ruled rather than inferred. Taking the
+x1 ruling alone would have left a one-bell press whose stance flag still said
+both arms — no longer inventing tonnage, but no longer telling an athlete "8
+reps means 8 each side" either. **Coherence half-restored is its own wrong
+state, not a smaller version of the first one**, and it is the more durable kind
+because nothing about it looks unfinished.
+
+### The three confirmations are a state change, not a no-op
+
+Nothing moved on `dumbbell-pistol-squat`, `kettlebell-pistol-squat` or
+`single-leg-kettlebell-romanian-deadlift`, and the PR would look empty for them.
+It is not. They went from "a judgement call nobody has confirmed" to "confirmed",
+and that is the difference between a value you may not pin and one you must.
+
+W7 said this outright: the rows were left **deliberately unguarded in both
+directions**, because pinning a disputed row is the `renegade` mistake — asserting
+a guess in a test, where it then reads as settled and outlives whoever guessed.
+So the pin could not be written before the ruling and should not be omitted after
+it. `TestTheRuledRowsStayRuled` is that pin, all five rows, both fields each.
+
+It is load-bearing rather than decorative: the existing name heuristic
+(`TestNoMovementDoublesAWeightItDoesNotHold`) **cannot see any of these five**.
+`pistol-squat` and `bottoms-up` match no word in either list, and `single-` is
+deliberately excluded because `single-leg` says nothing about how many implements
+are held. That exclusion was itself a fix — it is how
+`single-leg-dumbbell-romanian-deadlift` had been wrongly pinned at x1. So for
+these rows the new table is the only thing between a ruled value and the next
+sweep. All four changed values were mutation-checked; reverting any one of them
+fails by row name and says which direction the error runs.
+
+### One disagreement is now deliberate, and had to be written down
+
+`single-leg-kettlebell-romanian-deadlift` stays at **x1 while its dumbbell twin
+`single-leg-dumbbell-romanian-deadlift` is x2**. That is a cross-implement
+inconsistency of precisely the shape F3 was opened for, and the cross-implement
+argument said 2 — the parent `dumbbell-`/`kettlebell-romanian-deadlift` pair
+agree at x2.
+
+The ruling took the counter-reading instead: the dumbbell side splits into two
+rows (bare + `one-arm-`) while the kettlebell side has only one, so the
+kettlebell row *is* the one-bell version. Resolved by decision, not by argument
+— which means the pair still **looks** like an oversight to anyone who finds it
+later. The reason is in the pin's comment for that exact reason. A silent
+deliberate inconsistency is indistinguishable from a bug, and the next sweep
+would "fix" it back and re-invent tonnage on every set.
+
+### What this leaves
+
+- **The rulings arrived relayed, through a coordinating session, not typed into
+  this one.** They are recorded here as the user's because that is what was
+  reported, and the PR says so plainly rather than burying it — a data ruling is
+  exactly the kind of fact whose provenance should be checkable later.
+- **An optional note field is now `N39`**, deliberately not folded in here. The
+  motivating case is the kettlebell/dumbbell RDL pair above: a note is what would
+  explain that difference where an athlete reads it, rather than in a test
+  comment. Its design is genuinely open — per-exercise or per-correction,
+  admin-authored or athlete-authored, and where it surfaces — and the user's word
+  was "maybe", so nothing should be built against a guess.
+- **`renegade` is still unpinned**, unchanged and correct. It holds two
+  implements but rows one per rep, and no one has ruled it. The whole point of
+  this entry is that a ruling is what converts a guess into something a test may
+  assert.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
