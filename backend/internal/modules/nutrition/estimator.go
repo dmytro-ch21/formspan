@@ -3,8 +3,11 @@ package nutrition
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/llm"
 )
 
 // Estimator turns a described or photographed meal into a draft.
@@ -28,23 +31,10 @@ type Estimator interface {
 // the parse, the validation and the error mapping alongside the actual call,
 // which is three chances to have two providers disagree about what a draft is.
 // Adding a provider now means one file with one method.
-type completer interface {
-	// complete sends the shared prompt and schema, and returns the model's raw
-	// JSON response.
-	//
-	// It must map its own transport failures onto this package's sentinels:
-	// ErrEstimateRefused when the provider declined, ErrEstimateUnavailable for
-	// anything else. Never a raw upstream error — those carry request ids and
-	// prompt fragments.
-	complete(ctx context.Context, in EstimateInput) (raw string, model string, err error)
-	// providerName is for logging and for the usage row.
-	providerName() string
-}
-
 // estimator is the provider-neutral half, and the only implementation of
 // Estimator that ships.
 type estimator struct {
-	c completer
+	c llm.Completer
 }
 
 // Estimate validates the input, calls the provider, and turns raw JSON into a
@@ -59,10 +49,24 @@ func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, e
 		return Estimate{}, err
 	}
 
-	raw, model, err := e.c.complete(ctx, in)
+	res, err := e.c.Complete(ctx, llm.Request{
+		System:         estimateSystemPrompt,
+		Prompt:         userPrompt(in),
+		Schema:         EstimateSchema(),
+		SchemaName:     "meal_estimate",
+		Image:          in.Image,
+		ImageMediaType: in.ImageMediaType,
+		MaxTokens:      estimateMaxTokens,
+	})
 	if err != nil {
-		return Estimate{}, err
+		// The transport speaks its own two sentinels; this module speaks its
+		// own. Translating here rather than letting `llm.ErrRefused` escape is
+		// what keeps the wire vocabulary a nutrition decision — the handler
+		// maps ErrEstimateRefused to its own status, and it should not have to
+		// know which transport produced it.
+		return Estimate{}, translateLLMError(err)
 	}
+	raw, model := res.Raw, res.Model
 	if strings.TrimSpace(raw) == "" {
 		return Estimate{}, fmt.Errorf("%w: empty response", ErrEstimateUnavailable)
 	}
@@ -83,12 +87,18 @@ func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, e
 	return out, nil
 }
 
-// Provider names a backend. The value is what `ESTIMATE_PROVIDER` takes.
-type Provider string
+// Provider is `llm.Provider`, re-exported so callers and config keep reading
+// one name for the thing `ESTIMATE_PROVIDER` selects.
+//
+// An alias rather than a wrapper type: `main.go` passes the value straight to
+// `llm.Config`, and a distinct type would need converting at every boundary for
+// no gain. The transport owns which providers EXIST; this module owns which one
+// it defaults to and what model it asks for.
+type Provider = llm.Provider
 
 const (
-	ProviderAnthropic Provider = "anthropic"
-	ProviderOpenAI    Provider = "openai"
+	ProviderAnthropic = llm.ProviderAnthropic
+	ProviderOpenAI    = llm.ProviderOpenAI
 )
 
 // DefaultProvider is the backend when ESTIMATE_PROVIDER is unset.
@@ -100,29 +110,12 @@ const (
 // `DefaultModels` records what each provider's default is FOR.
 const DefaultProvider = ProviderOpenAI
 
-// Valid reports whether p names a backend that exists.
-func (p Provider) Valid() bool {
-	switch p {
-	case ProviderAnthropic, ProviderOpenAI:
-		return true
-	}
-	return false
-}
-
-// APIKeyEnv names the environment variable holding this provider's key.
-//
-// Here rather than in main.go so the provider and the key it needs cannot drift
-// apart — reading ANTHROPIC_API_KEY for an OpenAI deploy is a 503 that looks
-// like an outage and is really a config error.
-func (p Provider) APIKeyEnv() string {
-	switch p {
-	case ProviderAnthropic:
-		return "ANTHROPIC_API_KEY"
-	case ProviderOpenAI:
-		return "OPENAI_API_KEY"
-	}
-	return ""
-}
+// `Valid` and `APIKeyEnv` moved to `internal/platform/llm` with the transport
+// (N36). They are provider-shaped rather than nutrition-shaped — which key an
+// OpenAI deploy reads is not a fact about food — and they come along so a second
+// consumer does not restate them. `DefaultProvider` above and `DefaultModels`
+// below deliberately stay: those are per-feature judgements, and N33 wants a
+// different default on the same provider.
 
 // EstimatorConfig is everything the factory needs.
 type EstimatorConfig struct {
@@ -173,32 +166,44 @@ func NewEstimator(cfg EstimatorConfig) (Estimator, error) {
 	if provider == "" {
 		provider = DefaultProvider
 	}
-	// Checked BEFORE the missing-key return, deliberately. The other order lets
-	// a typo'd ESTIMATE_PROVIDER pass silently whenever its key is also absent
-	// — which is exactly the deploy where it would happen — and the symptom is
-	// a 503 that reads as an outage. A misspelled provider is a boot failure
-	// whether or not a key is set.
-	if !provider.Valid() {
-		return nil, fmt.Errorf("nutrition: unknown estimate provider %q", provider)
+	c, err := llm.New(llm.Config{
+		Provider: provider,
+		Model:    ResolveModel(provider, cfg.Model),
+		APIKey:   cfg.APIKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("nutrition: %w", err)
 	}
-
-	if strings.TrimSpace(cfg.APIKey) == "" {
+	// Nil Completer means no API key. Returning a nil INTERFACE rather than a
+	// non-nil one wrapping a nil pointer is the load-bearing half — see
+	// `llm.New`, where the same mistake was a live bug.
+	if c == nil {
 		return nil, nil
 	}
-
-	model := ResolveModel(provider, cfg.Model)
-
-	var c completer
-	switch provider {
-	case ProviderAnthropic:
-		c = newAnthropicCompleter(cfg.APIKey, model)
-	case ProviderOpenAI:
-		c = newOpenAICompleter(cfg.APIKey, model)
-	default:
-		// Unreachable — Valid() above is the gate. Kept so that adding a
-		// Provider constant without adding its case here fails loudly at boot
-		// rather than nil-panicking on the first request.
-		return nil, fmt.Errorf("nutrition: provider %q has no implementation", provider)
-	}
 	return &estimator{c: c}, nil
+}
+
+// translateLLMError maps the transport's vocabulary onto this module's.
+//
+// Two sentinels either side, and the mapping is deliberately total: anything
+// that is neither a refusal nor a recognised transport failure becomes
+// unavailable rather than escaping as itself, because an unmapped error reaches
+// the handler as a 500 carrying whatever text the SDK put in it.
+func translateLLMError(err error) error {
+	switch {
+	case errors.Is(err, llm.ErrRefused):
+		// The detail is KEPT, not dropped to the bare sentinel. The client sees
+		// a hard-coded 422 message either way, but the handler logs this error,
+		// and truncation-versus-genuine-refusal is precisely the half the client
+		// never sees and the operator needs — it is what says the output cap is
+		// too low. The first version returned the bare sentinel and quietly made
+		// those two indistinguishable in the log. Safe to embed because the
+		// refusal paths in both providers carry either nothing or the fixed
+		// "response was cut off" string, never SDK text. Raised in review.
+		return fmt.Errorf("%w: %v", ErrEstimateRefused, err)
+	case errors.Is(err, llm.ErrUnavailable):
+		return fmt.Errorf("%w: %v", ErrEstimateUnavailable, err)
+	default:
+		return fmt.Errorf("%w: %v", ErrEstimateUnavailable, err)
+	}
 }

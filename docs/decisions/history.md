@@ -2571,6 +2571,27 @@ than `!== undefined`, because a `null` in a cached payload would otherwise reach
 deleted, since keeping a TypeScript helper with no production caller while
 deleting Go's for exactly that would have been the inconsistency.
 
+**A third outcome, raised by the session that ran the dictation eval, and it is
+now written into the package rather than left to be rediscovered.** A model can
+return HTTP 200, valid JSON, schema-conformant, and empty of anything useful:
+fed a dictation carrying an injected instruction, `gpt-5.6-luna` neither obeyed
+nor failed — it dumped the sentence into the free-text field and returned no
+tags, including for the real technique the athlete had reported. No refusal stop
+reason, no `message.refusal`, no `length`. At the transport layer that is a
+successful call, and both sentinels are correctly wrong for it.
+
+The doc comment says **do not add an emptiness check here**, because emptiness
+is only legible against a schema and a domain: an empty item list is the correct
+answer for a photo of a wall, and an empty tag list is the correct answer for
+"reminder to buy a mouthguard". A check in this package would have to be wrong
+for one caller to be right for the other. That is exactly the kind of helpful
+addition a later session makes, and the comment is there to stop it.
+
+The `Config` note about per-feature defaults is now cited rather than asserted:
+same provider, `gpt-5.6-luna` scores a 0.0% invention rate against
+`gpt-5.4-nano`'s 24.2% on dictation, while nano was adequate for portion
+estimates. Both figures are #302's, checked against `main` before quoting them.
+
 ### Gaps this leaves
 
 - **No password reset**, which is now the most urgent hole in mobile auth and is
@@ -28033,6 +28054,168 @@ and the input never reaches the thing being tested.
   Bounded by the 14-day cooldown, which makes the overlap rare rather than
   impossible.
 
+## 2026-08-19 — The transport moves out, one consumer before it would have been a guess
+
+`internal/platform/llm` exists now: `Completer`, `Request`/`Response`,
+`Provider`/`Valid`/`APIKeyEnv`, the two SDK calls, and one pair of sentinels
+(`ErrRefused` / `ErrUnavailable`) both backends map onto. That is N36.
+
+The timing was the decision, and it was made jointly with the session building
+N26. Extracting **inside** #287 would have put a refactor behind evidence that
+had been paid for with real API calls; extracting **never** would have had N33
+write a second `anthropic.go`/`openai.go` pair, which N26's own comment calls
+"three chances for two backends to disagree". So: after #287 landed, before N33
+writes any provider code. With one consumer an interface is designed against a
+guess; with a second consumer that has not started, it is designed against two
+real shapes and costs nothing to get right.
+
+A third consumer arrived the same day, unplanned, and is the best evidence the
+shapes were real rather than guessed: **N7's machine-recognition camera call was
+decided for OpenAI** (entry above), which makes it an image request against a
+schema — a shape `Request` already carries, because N26 needed it for a plate
+photo. Nothing in this package had to change to accommodate it. That also means
+the model-defaults decision now has three feature judgements behind it instead
+of two: N7 chose its provider on cost against a comparable result, which is not
+the reasoning either of the other two used.
+
+### What stayed behind, which is the line that keeps the package honest
+
+`nutrition` keeps the prompt, the schema, the parse, the validation, and its own
+error vocabulary — `translateLLMError` maps the transport's two sentinels onto
+`ErrEstimateRefused` / `ErrEstimateUnavailable`, and is total by construction so
+an unmapped error cannot escape as itself carrying SDK text (request ids, prompt
+fragments) into a 500.
+
+`DefaultProvider` and `DefaultModels` stayed too, deliberately: which model is
+worth paying for is a per-feature judgement, and N26 and N33 want different
+defaults on the same provider. A package-level default in `llm` would quietly
+become one feature's opinion imposed on the other.
+
+That is measured from **both** directions now, by two other sessions, which is
+what turns it from a preference into an argument. On dictation, `gpt-5.4-nano`
+invented at 24.2% against `gpt-5.6-luna`'s 0.0% — disqualifying. On nutrition
+portions the same nano was perfectly adequate, its characteristic failure being
+that it compresses a stated quantity to `medium` where luna and Haiku say
+`high`: a wrong portion the athlete is looking at and can correct, not an
+invented food. Same provider, same prompt shape, opposite verdicts. A shared
+default map would be a saving for the feature that did not need it and a
+correctness bug for the one that did.
+
+### The four constraints the task line named, all carried and all mutation-checked
+
+Each was found rather than designed, which is why they are pinned rather than
+trusted:
+
+- **The factory returns the INTERFACE.** A nil `*openAICompleter` assigned into
+  an interface is a NON-nil interface, so the caller's nil check reads false and
+  the first request panics on a nil receiver. Deleting the nil guard fails
+  `TestNoKeyYieldsAGENUINELYNilInterface`.
+- **Validity is checked BEFORE the missing-key return.** The other order lets a
+  typo'd `ESTIMATE_PROVIDER` pass silently on exactly the deploy where its key is
+  also absent. Swapping them fails
+  `TestAnUnknownProviderFailsTheBootEVENWITHNoKey`.
+- **Truncation maps to REFUSED on both backends**, because the retry is
+  deterministic and bills twice. Changing OpenAI's to `ErrUnavailable` fails
+  `TestBothBackendsCallTruncationTheSameThing`, which moved here with the
+  providers — it used to grep two files in `nutrition` that no longer exist.
+- **No `effort` or `thinking` field**, because Haiku 4.5 400s on both. The
+  request type has no field for either, so it cannot be sent by accident.
+
+### What the move made testable for the first time
+
+The output cap was a struct field on the OpenAI completer, asserted by reading
+that field. It is now `Request.MaxTokens`, set by the caller — so
+`TestTheRequestCarriesEverythingTheProviderNeeds` asserts the cap, the system
+prompt, the user prompt, the schema, the schema name and the image all actually
+**cross to the transport**. Setting the cap to zero fails it twice, once on the
+value and once on the reason ("this endpoint turns a request directly into
+money").
+
+That test replaced a fake whose captured input was assigned and never read —
+`f.last` held an `EstimateInput` nothing asserted, so nothing checked that this
+module handed the provider the right anything. The seam N36 moved was the seam
+with no test on it.
+
+`Completer.Model()` is on the interface for a related reason: the factory test
+used to type-switch on the concrete completers to check which model was built,
+and those types are unexported here now. Re-deriving the model in the test would
+assert `ResolveModel` against itself, so the transport reports what it was
+configured with — distinct from `Response.Model`, which is what the provider
+says it actually used, and the two differ routinely when an alias resolves to a
+dated snapshot.
+
+### Three things the review round added, all of them about the same failure mode
+
+None was blocking, and all three are the same shape — **a config error wearing
+an outage's clothes**, which is the failure this package is most prone to because
+it sits between an env var and a billed endpoint.
+
+- **`translateLLMError` was dropping the truncation detail.** It returned the
+  bare `ErrEstimateRefused`, and the handler logs that error — so "the model
+  declined" and "the output cap is too low" became indistinguishable in the one
+  place an operator would look, while the client (correctly) sees the same 422
+  either way. Now `fmt.Errorf("%w: %v", …)`, which is safe precisely because both
+  providers' refusal paths carry either nothing or the fixed "response was cut
+  off" string, never SDK text.
+- **`Request.MaxTokens` was documented as load-bearing and unvalidated.** Zero is
+  not "no cap", it is a cap of zero: the field is sent either way, so it fails
+  every call and surfaces as `ErrUnavailable` — an outage, for a caller bug. It
+  now fails before the SDK is touched, with a plain error rather than a sentinel,
+  so a caller's translation still returns the right STATUS while the log carries
+  the real reason. This is the same guard `New`'s empty-model check already was,
+  one layer down.
+- **The package had no test of its own contract.** `New`'s three-way behaviour
+  was pinned only through `nutrition`'s tests, which was fine while nutrition was
+  the only consumer and stops being fine the moment N33 calls `llm.New` directly
+  — a guard N33 depends on would live in a package it does not own, and a
+  nutrition refactor that stopped exercising a branch would silently unpin it for
+  everyone. `provider_test.go` pins it locally now.
+
+Two of those tests **enumerate the `Provider` constants rather than listing
+backends by hand**, deliberately. Every provider must build, report itself, and
+reject an impossible request; a third provider added without a case in `New`
+fails here by name instead of nil-panicking on somebody's first call. That is the
+lesson from N16 in this codebase's own recent history, where a second constructor
+nobody remembered shipped an admin endpoint serving `null` — two implementations
+means one of them gets forgotten, so the test drives off the list rather than
+repeating it.
+
+All four guards were mutation-checked: dropping either provider's `validate()`
+call, weakening `<=` to `<`, returning a nil concrete pointer from `New`, and
+swapping the validity check back behind the key check each turn the suite red.
+
+### Gaps this leaves
+
+- ~~Nothing has been run against a real API.~~ **Closed, by the session that
+  raised it.** Both providers were called through this package at `3b65511` and
+  returned schema-conformant JSON with the right answer: `Name()`, `Model()` and
+  a non-empty `Response.Model` all correct. The refactor is clean by measurement
+  now, not only by construction. One detail arrived unarranged and is the best
+  evidence the `Model()` distinction was worth making: Anthropic reported
+  `claude-haiku-4-5-20251001` for a configured `claude-haiku-4-5` — the alias
+  resolving to a dated snapshot, exactly what that comment reasons about, on the
+  first live call.
+- **The live test is committed, gated on `LLM_LIVE=1`** (`live_smoke_test.go`),
+  and gated on an explicit flag rather than on a key being present, because a
+  test that runs whenever a key is in the environment runs in somebody's CI
+  eventually. Two changes were made to the version handed over: it now **fails**
+  rather than skips when `LLM_LIVE=1` is set with no key — an operator who asked
+  for a live run and got a silent skip has been told success for a test that
+  never ran — and its `.env`-scavenging fallback was **removed**. That fallback
+  walked up to six parent directories looking for credentials, which is a real
+  convenience (a worktree has no `backend/.env`, the same trap that costs mobile
+  builds their Clerk key) and a bad habit to encode: above the repo root it is
+  reading files that are none of its business. Export the variable.
+- **`llm` still has no offline test of a SUCCESSFUL call** — no fake HTTP
+  server, no recorded response. `provider_test.go` covers construction and
+  rejection, both of which stop before the wire; the truncation grep is a text
+  assertion; nutrition's fake stands in for the provider entirely. So no test in
+  the default `go test ./...` has ever seen a response parsed. A recorded
+  fixture is the honest next step and needs a decision about where those live.
+- **`Model()` widened the interface.** It earns its place (the alternative was a
+  test reaching across a package boundary or re-deriving what it was checking),
+  but every method on `Completer` is one more thing a third provider must
+  implement.
 
 ## 2026-08-19 — Vitest measured, and deliberately left alone
 
