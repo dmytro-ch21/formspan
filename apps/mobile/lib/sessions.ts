@@ -122,26 +122,38 @@ export function offeredGrips(
  * they cannot explain; showing this build's last known answer is wrong only if
  * the server has since changed its mind, and it self-heals on the next fetch.
  *
- * Which is why the distinction below is `!== undefined` and not truthiness: an
- * empty array is the server SAYING no grips apply, and must not be mistaken for
- * "the server has not said".
+ * Which is why the distinction below is not truthiness: an empty array is the
+ * server SAYING no grips apply, and must not be mistaken for "the server has
+ * not said".
+ *
+ * It is `Array.isArray` rather than `!== undefined` for a reason review found.
+ * The type says `string[] | undefined`, but nothing validates network JSON or
+ * the `payload_json` blob it was cached from — so a `null` can reach here at
+ * runtime, and `!== undefined` would hand it straight to `keys.map(...)` and
+ * crash the session screen. Worse, a bad payload is CACHED, so the crash would
+ * survive going offline. Today's server provably cannot send it (`scanExercise`
+ * substitutes `[]`), which is why this is belt and braces rather than a fix —
+ * but the cost is one word and the failure mode is a screen an athlete cannot
+ * open mid-workout.
  */
 function gripsToOffer(
   exercise: { movement_pattern?: string; offered_grips?: string[] } | undefined,
 ): Grip[] {
-  if (exercise?.offered_grips !== undefined) return exercise.offered_grips as Grip[];
+  if (Array.isArray(exercise?.offered_grips)) return exercise.offered_grips as Grip[];
   return gripsFor(exercise?.movement_pattern);
 }
 
-/**
- * Whether a grip is worth asking about at all — the emptiness of the offer.
- * Kept as its own name because that is what the call site is asking.
- */
-export function gripApplies(
-  exercise: { movement_pattern?: string; offered_grips?: string[] } | undefined,
-): boolean {
-  return gripsToOffer(exercise).length > 0;
-}
+/*
+  `gripApplies` used to live here — the emptiness of the offer, as a named
+  boolean. It is gone, and for the reason this whole change is about: it had no
+  production caller. Both pickers gate on `offeredGrips(...).length > 0`, which
+  is not the same question (see the session screen's note — the offer includes a
+  grip the set already holds, so it can be non-empty where the subset is empty,
+  and that difference is what keeps a stray grip clearable).
+
+  Deleting Go's `GripApplies` for exactly this and keeping the TypeScript one
+  would have been the inconsistency, so it went too. Raised in review.
+*/
 
 export type SetType = 'warmup' | 'working' | 'backoff' | 'drop' | 'amrap' | 'failure';
 

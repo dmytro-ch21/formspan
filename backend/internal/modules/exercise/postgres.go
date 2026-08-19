@@ -37,19 +37,11 @@ func scanExercise(row scannable) (*Exercise, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Derived here rather than in a handler because this is the ONLY place a
-	// row becomes an Exercise — every read path, public and admin, comes
-	// through it. Put it in one serializer and the other one ships `null`.
-	//
-	// Normalised to a non-nil slice, because a nil one marshals to `null` and
-	// that is a THIRD state clients would have to handle: absent (stale row,
-	// fall back), `[]` (grip is meaningless here, show no picker) and `null`
-	// (…the same as which?). A squat must serialize `[]`.
-	if g := OfferedGrips(e.MovementPattern); g != nil {
-		e.OfferedGrips = g
-	} else {
-		e.OfferedGrips = []string{}
-	}
+	// Derived here rather than in a handler, and via a shared helper because
+	// this is one of TWO scanners: `scanContent` in `content_postgres.go` is the
+	// admin half. The first version of this said "the ONLY place", which was
+	// wrong and shipped `offered_grips: null` on every admin response.
+	applyOfferedGrips(&e)
 	return &e, nil
 }
 

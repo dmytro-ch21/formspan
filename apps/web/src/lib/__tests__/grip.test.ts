@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  GRIPS,
   emptySet,
   offeredGrips,
   type Grip,
@@ -9,37 +8,22 @@ import {
 } from "../api";
 
 /**
- * Web's copy of the grip vocabulary.
+ * What web does with the grips it is GIVEN.
  *
- * **These tests exist because the rule is duplicated three times** — Go's
- * `GripsFor`, mobile's `gripsFor`, and this one — with no shared package to put
- * it in. A comment asking the next person to update all three is not a
- * guarantee; a table pinned entry by entry is, because drift fails here rather
- * than shipping a picker that offers a grip the server will refuse or hides one
- * it would accept.
+ * This file used to pin web's own copy of the per-pattern table, longhand,
+ * against Go and mobile — three copies with no shared package, policed by
+ * `scripts/check-grip-parity.py`. Web has no copy any more (N16): the server
+ * sends `offered_grips` on every exercise and this app renders it. There is no
+ * fallback here either, because web fetches on render and has no cached row
+ * that could predate the field — mobile keeps one for exactly that case.
  *
- * The table below is written out longhand ON PURPOSE. Deriving it from
- * `gripsFor` would make these tests agree with whatever the function currently
- * says, which is the "a mock supplying the behaviour under test" mistake this
- * repo has shipped before.
+ * So the subsets are not asserted here, and a longhand `EXPECTED` table went
+ * with them: it would now be a fixture agreeing with itself. They are pinned
+ * where the rule lives, in `backend/internal/modules/exercise/grips_test.go`.
  *
- * **Scope, precisely:** this file pins WEB's copy against a written-down table.
- * It cannot see Go or mobile drifting — that is `scripts/check-grip-parity.py`'s
- * job, and the two together are the guarantee. An earlier version of this
- * comment claimed drift "fails here", which was only ever true of one of the
- * three copies.
+ * What is left is web's actual responsibility — turning a served list plus a
+ * held value into the chips a row shows.
  */
-
-const EXPECTED: Record<string, Grip[]> = {
-  horizontal_push: ["regular", "neutral", "reverse", "angled"],
-  horizontal_pull: ["regular", "neutral", "reverse", "angled"],
-  vertical_push: ["regular", "neutral", "reverse", "angled"],
-  vertical_pull: ["regular", "neutral", "reverse", "angled"],
-  isolation: ["regular", "neutral", "reverse", "angled"],
-  hinge: ["regular", "neutral", "mixed", "hook"],
-  carry: ["regular", "neutral", "hook"],
-  olympic: ["regular", "neutral", "hook"],
-};
 
 /*
   The per-pattern SUBSETS are no longer asserted here.

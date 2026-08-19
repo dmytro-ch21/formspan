@@ -3,7 +3,6 @@ import {
   describeSet,
   emptyDropSet,
   emptySet,
-  gripApplies,
   gripsFor,
   offeredGrips,
   repairSet,
@@ -47,7 +46,7 @@ describe('which movements ask about grip', () => {
       'vertical_pull',
       'isolation',
     ]) {
-      expect(gripApplies({ movement_pattern: p })).toBe(true);
+      expect(offeredGrips({ movement_pattern: p }, null).length > 0).toBe(true);
     }
   });
 
@@ -55,7 +54,7 @@ describe('which movements ask about grip', () => {
     // A squat has no grip worth recording, and asking on every set of every
     // movement is how an optional field becomes noise nobody reads.
     for (const p of ['squat', 'lunge', 'jump', 'locomotion', 'mobility', 'core']) {
-      expect(gripApplies({ movement_pattern: p })).toBe(false);
+      expect(offeredGrips({ movement_pattern: p }, null).length > 0).toBe(false);
     }
   });
 
@@ -66,7 +65,7 @@ describe('which movements ask about grip', () => {
     // `hook` in the vocabulary the question is answerable, so 93 exercises that
     // had no grip control now have one.
     for (const p of ['hinge', 'carry', 'olympic']) {
-      expect(gripApplies({ movement_pattern: p })).toBe(true);
+      expect(offeredGrips({ movement_pattern: p }, null).length > 0).toBe(true);
     }
   });
 
@@ -144,7 +143,7 @@ describe('which movements ask about grip', () => {
   it('does not ask when the exercise has not loaded yet', () => {
     // The catalog is fetched separately and can be absent offline; a picker
     // that appears on nothing is better than one that appears on everything.
-    expect(gripApplies(undefined)).toBe(false);
+    expect(offeredGrips(undefined, null).length > 0).toBe(false);
   });
 });
 
@@ -328,14 +327,14 @@ describe('server-served grips beat the local table', () => {
       'mixed',
       'hook',
     ]);
-    expect(gripApplies({ movement_pattern: 'hinge' })).toBe(true);
+    expect(offeredGrips({ movement_pattern: 'hinge' }, null).length > 0).toBe(true);
   });
 
   it('treats an empty served list as an ANSWER, not as silence', () => {
     // The mutation this exists for: `offered_grips?.length ? served : fallback`
     // passes every other test in this file and quietly restores the local table
     // wherever the server said "none".
-    expect(gripApplies({ movement_pattern: 'hinge', offered_grips: [] })).toBe(false);
+    expect(offeredGrips({ movement_pattern: 'hinge', offered_grips: [] }, null).length > 0).toBe(false);
   });
 
   it('still surfaces a held grip the offer does not contain', () => {
@@ -345,4 +344,23 @@ describe('server-served grips beat the local table', () => {
       offeredGrips({ movement_pattern: 'squat', offered_grips: [] }, 'hook').map((g) => g.key),
     ).toEqual(['hook']);
   });
+});
+
+it('survives a null offered_grips without crashing the screen', () => {
+  // Not reachable from today's server — `scanExercise` substitutes `[]` — but
+  // nothing validates network JSON or the cached `payload_json` it came from,
+  // and a bad payload is CACHED, so the crash would follow the athlete offline.
+  // `!== undefined` handed null straight to `.map()`; `Array.isArray` treats it
+  // as "the server has not said" and falls back, which is the safe reading.
+  const rogue = { movement_pattern: 'hinge', offered_grips: null } as unknown as {
+    movement_pattern?: string;
+    offered_grips?: string[];
+  };
+  expect(() => offeredGrips(rogue, null)).not.toThrow();
+  expect(offeredGrips(rogue, null).map((g) => g.key)).toEqual([
+    'regular',
+    'neutral',
+    'mixed',
+    'hook',
+  ]);
 });

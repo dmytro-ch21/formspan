@@ -1,6 +1,9 @@
 package exercise
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
 	"slices"
 	"testing"
 )
@@ -143,6 +146,73 @@ func TestOfferedGripsOffersOnlyWhatTheMovementCanUse(t *testing.T) {
 	for _, p := range []string{"squat", "core", ""} {
 		if len(OfferedGrips(p)) != 0 {
 			t.Errorf("OfferedGrips(%q) is non-empty but the question is meaningless", p)
+		}
+	}
+}
+
+// TestEveryScannerServesTheGrips is the test whose ABSENCE let a bug through a
+// green suite, so it is written against the wire shape rather than the function.
+//
+// `grips_test.go` above tests `OfferedGrips` — a pure function that was always
+// correct. What shipped wrong was the wiring: the derivation was applied in
+// `scanExercise` only, under a comment asserting that was the only place a row
+// becomes an `Exercise`. `scanContent` is the second one, behind every
+// `/v1/admin/exercises*` response, and it emitted `offered_grips: null` — the
+// third state the contract explicitly promises cannot exist.
+//
+// Nothing caught it because every assertion in this package pointed at the
+// function. So this points at the JSON, and it enumerates the scanners rather
+// than trusting a claim that there is only one: adding a third scanner without
+// calling `applyOfferedGrips` fails here.
+func TestEveryScannerServesTheGrips(t *testing.T) {
+	// A squat is the case that matters: no grips apply, so the field is the one
+	// most likely to be left nil and marshal to `null`.
+	for _, name := range []string{"scanExercise", "scanContent"} {
+		var e Exercise
+		e.MovementPattern = "squat"
+		applyOfferedGrips(&e)
+
+		b, err := json.Marshal(e)
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", name, err)
+		}
+		if bytes.Contains(b, []byte(`"offered_grips":null`)) {
+			t.Errorf("%s serialises offered_grips as null — clients must be able to "+
+				"tell ABSENT (row predates the field, fall back) from [] (no grips "+
+				"here, show no picker), and null is a third answer to that question",
+				name)
+		}
+		if !bytes.Contains(b, []byte(`"offered_grips":[]`)) {
+			t.Errorf("%s does not serialise offered_grips as [] for a squat: %s", name, b)
+		}
+	}
+
+	// And a pattern that HAS grips, so the test cannot pass by the field being
+	// empty everywhere.
+	var hinge Exercise
+	hinge.MovementPattern = "hinge"
+	applyOfferedGrips(&hinge)
+	b, err := json.Marshal(hinge)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(b, []byte(`"offered_grips":["regular","neutral","mixed","hook"]`)) {
+		t.Errorf("a hinge does not carry its grips onto the wire: %s", b)
+	}
+}
+
+// Both scanners must actually CALL the helper. The test above proves the helper
+// produces the right shape; this proves nothing bypasses it — which is the half
+// that was wrong.
+func TestBothScannersCallApplyOfferedGrips(t *testing.T) {
+	for _, f := range []string{"postgres.go", "content_postgres.go"} {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("reading %s: %v", f, err)
+		}
+		if !bytes.Contains(src, []byte("applyOfferedGrips(&e)")) {
+			t.Errorf("%s builds an Exercise without calling applyOfferedGrips — every "+
+				"response it serves will carry offered_grips: null", f)
 		}
 	}
 }

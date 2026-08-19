@@ -2540,6 +2540,37 @@ its removal and documented coverage living in another file. That is the same
 class as the bug — something that reads as true and is not — arriving in the
 commit that fixes it.
 
+**Review found the uniqueness claim was false, which is the finding worth
+keeping.** The derivation went into `scanExercise` under a comment saying it was
+"the ONLY place a row becomes an `Exercise` — every read path, public and admin,
+comes through it." It is not. `scanContent` is a second, parallel scanner behind
+every `/v1/admin/exercises*` response — the authored list, the search, create,
+patch, publish and restore — and it emitted **`offered_grips: null` on all of
+them**, which is precisely the third state the contract had just been made to
+promise cannot exist. Revisions were persisting that null into
+`exercise_revisions.payload` too.
+
+I asserted the uniqueness rather than enumerating it, which is the same mistake
+as claiming `TrainingSummary` was `streakRange`'s only caller two days ago. The
+fix is a shared `applyOfferedGrips` helper that both scanners call.
+
+**The reason it survived a green suite is the more useful half.** Every
+assertion in the package pointed at `OfferedGrips`, a pure function that was
+always correct; nothing pointed at the wire. `TestEveryScannerServesTheGrips`
+now marshals and asserts on the JSON, and `TestBothScannersCallApplyOfferedGrips`
+enumerates the scanners rather than trusting a claim there is one — reverting
+`content_postgres.go` fails it by filename.
+
+Four smaller ones landed with it: `PatternsWithGrips()` is exported so the
+vocabulary guard derives its inputs instead of mirroring a hardcoded list that
+would silently miss a ninth pattern; `offered_grips` is `required` in the
+contract, since the absent case is about a client's cached row and never about a
+response this server emits; mobile's fallback gate is `Array.isArray` rather
+than `!== undefined`, because a `null` in a cached payload would otherwise reach
+`.map()` and crash the session screen offline; and mobile's `gripApplies` was
+deleted, since keeping a TypeScript helper with no production caller while
+deleting Go's for exactly that would have been the inconsistency.
+
 ### Gaps this leaves
 
 - **No password reset**, which is now the most urgent hole in mobile auth and is
@@ -26805,10 +26836,18 @@ therefore stops the two naming different things, so
   re-syncs. Accepted, because over-offering cannot 400.
 - **Nothing has been seen on a phone.** The picker still renders from a list;
   only its source moved. L1 unchanged.
-- **`GripApplies` is gone as an exported name** — the boolean had no caller once
-  the table was served, and it survives as a test helper in `exercise`. Anything
-  that wanted "is this question worth asking" now asks for the list and checks
-  its length, which is what both clients already did.
+- **`GripApplies` is gone on both sides** — Go's and mobile's. The boolean had
+  no production caller anywhere; both pickers ask for the list and check its
+  length, which is not the same question (the offer includes a grip the set
+  already holds, so it can be non-empty where the subset is empty — that
+  difference is what keeps a stray grip clearable).
+- **Deploy the API before web.** Web has no fallback by design, so against an
+  older API that does not send `offered_grips` the picker simply does not
+  render. Mobile is unaffected — that is what its fallback is for.
+- **Revisions now snapshot a field documented as "never stored".**
+  `recordRevision` marshals the whole scanned `Exercise`, so an old revision
+  carries the grip table as it was. Harmless — `Restore`'s SET clause does not
+  include it — but the value in a stored revision is decorative, not a record.
 
 ## Open items / known gaps as of this entry
 

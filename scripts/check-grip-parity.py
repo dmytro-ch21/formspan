@@ -127,7 +127,7 @@ def parse_go(path: Path) -> dict[str, list[str]]:
 
 
 def _unknown(name: str) -> str:
-    raise SystemExit(f"check-grip-parity: Go names {name} in GripsFor but no `{name} Grip = \"...\"` const — parser or code out of step")
+    raise SystemExit(f"check-grip-parity: Go names {name} in OfferedGrips but no `{name} Grip = \"...\"` const — parser or code out of step")
 
 
 def _body(src: str, header: str) -> str:

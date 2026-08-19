@@ -2542,11 +2542,12 @@ function SetRow({
               question is meaningless there rather than merely hard to
               answer.
 
-              Gated on `offeredGrips`, NOT on `gripApplies`. They differ in
+              Gated on the OFFER's length, never on the subset's. They differ in
               exactly one case and it is the one that traps data: a set holding
               a grip on a movement whose subset is empty — an exercise the
               console re-categorised after it was logged, or a pattern a newer
-              server grew. `gripApplies` hides the row, and the grip is then
+              server grew. The subset is empty there, so gating on it hides the
+              row — and the grip is then
               visible in the summary line with no chip to tap, so the single
               route back to "unrecorded" is gone.
 

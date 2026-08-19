@@ -80,6 +80,20 @@ package exercise
 // must not depend on the logging module. The vocabulary is still one
 // vocabulary — `TestEveryOfferedGripIsInTheVocabulary` over in `session` fails
 // if these two ever name different things.
+// PatternsWithGrips is every movement pattern the switch below answers for.
+//
+// Exported so guards can DERIVE their inputs rather than mirror them. The
+// vocabulary check in `session` iterated a hardcoded copy of this list, which
+// meant a ninth pattern gaining grips would have gone vocabulary-unchecked
+// silently — a list that has to be updated in two places to stay honest is the
+// same shape as the table this change exists to stop copying.
+func PatternsWithGrips() []string {
+	return []string{
+		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull",
+		"isolation", "hinge", "carry", "olympic",
+	}
+}
+
 func OfferedGrips(movementPattern string) []string {
 	switch movementPattern {
 	case "horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation":
@@ -90,4 +104,27 @@ func OfferedGrips(movementPattern string) []string {
 		return []string{"regular", "neutral", "hook"}
 	}
 	return nil
+}
+
+// applyOfferedGrips fills the served field, normalising nil to an empty slice.
+//
+// A helper rather than two call sites doing it, because two call sites is
+// exactly how this shipped wrong: the first version derived the field in
+// `scanExercise` under a comment claiming that was "the ONLY place a row becomes
+// an Exercise". It is not — `scanContent` is a second, parallel scanner behind
+// every `/v1/admin/exercises*` response, and it emitted `offered_grips: null`
+// on all of them, which is precisely the third state the contract promises
+// cannot exist. Found in review; the uniqueness claim was asserted rather than
+// enumerated.
+//
+// The nil normalisation is the other half. A nil Go slice marshals to `null`,
+// and clients must distinguish absent (a row cached before the field existed —
+// fall back) from `[]` (grip is meaningless here — show no picker). `null` is a
+// third answer to a two-answer question.
+func applyOfferedGrips(e *Exercise) {
+	if g := OfferedGrips(e.MovementPattern); g != nil {
+		e.OfferedGrips = g
+		return
+	}
+	e.OfferedGrips = []string{}
 }

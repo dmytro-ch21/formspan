@@ -174,10 +174,13 @@ func TestTheGripConstraintKeepsTheNameTheWireCodeDependsOn(t *testing.T) {
 // it and nothing sticks. Lives on this side because this side owns the
 // vocabulary; a test-only import of `exercise` creates no production cycle.
 func TestEveryOfferedGripIsInTheVocabulary(t *testing.T) {
-	for _, p := range []string{
-		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull",
-		"isolation", "hinge", "carry", "olympic",
-	} {
+	// Derived, not mirrored: a ninth pattern gaining grips is checked the day it
+	// is added, rather than the day somebody remembers this list exists.
+	patterns := exercise.PatternsWithGrips()
+	if len(patterns) == 0 {
+		t.Fatal("PatternsWithGrips is empty, so this test would pass vacuously")
+	}
+	for _, p := range patterns {
 		for _, g := range exercise.OfferedGrips(p) {
 			if !ValidGrip(Grip(g)) {
 				t.Errorf("OfferedGrips(%q) offers %q, which ValidGrip refuses", p, g)

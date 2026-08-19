@@ -2951,7 +2951,7 @@ components:
       required:
         [id, name, sport, movement_pattern, primary_muscles,
          secondary_muscles, equipment, load_type, load_mode, implements, is_unilateral,
-         instructions, media, movement_pattern_detail, created_at, updated_at]
+         instructions, media, movement_pattern_detail, offered_grips, created_at, updated_at]
       properties:
         id:
           type: string
@@ -3061,7 +3061,7 @@ components:
 
 
             **Advisory, not a constraint.** The server does not refuse a grip
-            outside this list — `PUT /v1/sessions/{id}/sets` checks the
+            outside this list — `PUT /v1/sessions/{sessionID}/sets` checks the
             vocabulary and stops there, deliberately, because a hook-gripped
             shrug is real and nobody's business to refuse. That is what makes a
             stale client safe: it over- or under-offers, and never 400s.
@@ -3069,9 +3069,17 @@ components:
 
             **An empty array is not the same as an absent field.** `[]` is the
             server saying grip is meaningless here (a squat) and a client shows
-            no picker; absent means the response predates this field, where a
-            client falls back rather than concluding the picker should vanish.
-            A squat therefore serializes `[]`, never `null`.
+            no picker; absent means the row predates this field, where a client
+            falls back rather than concluding the picker should vanish.
+
+
+            `required`, because THIS server always sends it — on every path,
+            public and admin. The absent case is about a row a client cached
+            before the field existed, not about a response. A squat therefore
+            serializes `[]`, never `null`, and both scanners are pinned to it
+            (`TestEveryScannerServesTheGrips`): the first version derived it in
+            one of the two and shipped `null` from every `/v1/admin/exercises*`
+            response.
         implements:
           type: integer
           enum: [1, 2]
