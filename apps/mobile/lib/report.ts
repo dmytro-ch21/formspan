@@ -1,4 +1,5 @@
 import { capture } from './telemetryClient';
+import type { ReportKind } from './telemetry';
 
 /**
  * Tells the server about a failure it has no way to observe.
@@ -9,7 +10,10 @@ import { capture } from './telemetryClient';
  * would have carried the data never gets made again — which is exactly why the
  * client has to say so.
  */
-export type ReportKind = 'client_error' | 'sync_blocked';
+// Re-exported rather than declared a second time. It was declared here AND in
+// `telemetry.ts`, which is two copies of one vocabulary that the server's CHECK
+// constraint is the real source of — the shape this repo has drifted on before.
+export type { ReportKind } from './telemetry';
 
 /**
  * Fire-and-forget by construction, and that is the whole design.
@@ -24,6 +28,12 @@ export type ReportKind = 'client_error' | 'sync_blocked';
  * two are ranked, not balanced.
  */
 export function report(
+  /**
+   * @deprecated Ignored. Attribution comes from the token source installed at
+   * the root by `installTelemetry`, so passing one here controls nothing.
+   * Kept only so the existing call site is unchanged; new callers should use
+   * `capture` from `telemetryClient` directly.
+   */
   _getToken: () => Promise<string | null>,
   kind: ReportKind,
   message: string,

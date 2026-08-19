@@ -8926,6 +8926,13 @@ stopped reporting would pass every test that only checks it did not crash.
 
 - **Coalescing.** Fire the same error 60 times without a flush; assert **one**
   event is buffered carrying `count: 60` — not 60 events.
+- **Coalescing must survive generated ids in the message.** Fire
+  `lock held by job_kf93ha` with a different token each time and assert it
+  still coalesces. The normaliser originally caught uuids, hex, digits and
+  quoted strings but not mixed alphanumerics, so such a message fingerprinted
+  differently every occurrence — and then coalescing never coalesced, the cap
+  never bound, and the size trigger fired a POST every ten occurrences. Every
+  other guard is intact while that happens, which is what makes it dangerous.
 - **Offline coalescing.** Fire 5,000 occurrences spread over two simulated
   hours with no drain; assert still one event. This is the reconnect-flood case
   and it is the one most likely to regress.
@@ -8948,8 +8955,15 @@ stopped reporting would pass every test that only checks it did not crash.
   Without this the cap is a way of lying rather than a way of being cheap.
 - **An evicted event must be counted.** Overflow the ring and assert
   `takeLost()` reports what fell off, and that it clears once told.
-- **A failed flush must be counted, not swallowed.** Make the POST reject and
-  assert the loss lands in the tally rather than the batch silently vanishing.
+- **A failed flush must be counted, not swallowed** — and this needs an
+  EARLIER tally to be a real test. Failing a single event passes even when the
+  bug is present, because the tally is zero at that point and `batch.length`
+  alone is accidentally right; that version was green against the exact defect
+  it was named for. Fail two flushes in a row and assert the third carries the
+  sum of both.
+- **`lost_events` is batch-scoped and must appear on ONE event**, not stamped
+  on every one — otherwise summing it multiplies by batch size, a made-up
+  number in the field whose whole job is to be honest about loss.
 - **The counters must reach the server.** Assert `occurrences`, `suppressed` and
   `lost_events` are present in the posted payload. A bounded reporter and a
   broken one are indistinguishable without them.
@@ -8970,16 +8984,38 @@ stopped reporting would pass every test that only checks it did not crash.
 ### The global handlers
 
 - An unhandled JS error is captured, with `fatal` when the runtime says fatal.
-- **The previous handler is always called.** This is the one to assert
-  explicitly: a reporter that replaces the default swallows the red box in
-  development and changes production behaviour, turning a visible crash into an
-  app that quietly misbehaves.
-- An unhandled promise rejection is captured — the sync path is almost entirely
-  promises, so `ErrorUtils` alone would miss the bugs this exists for.
+- **The previous handler is always called**, including when describing the
+  error throws. Assert with an `Error` whose `message` getter throws: a
+  reporter that skips the chain swallows the red box in development and changes
+  production behaviour, for exactly the strange errors most worth seeing.
 - **Installation is idempotent.** Install twice and assert the previous handler
   is not wrapped twice (Fast Refresh re-runs module bodies).
 - Capturing while signed out, or with the reporter unreachable, **degrades to
   silence** — never to an exception of its own.
+
+#### The rejection hook needs a DEVICE, and this is the important one
+
+- **`unhandledrejection` does not exist in React Native.** The first version
+  hooked `globalThis.addEventListener('unhandledrejection')` with optional
+  chaining, so it installed nothing, silently, and the half of the feature that
+  matters most did not exist — while every unit test stayed green. A hook that
+  installs nothing is invisible to any test that does not run the real runtime.
+- So: **on a simulator or device**, throw an un-awaited rejecting promise and
+  assert it reaches the buffer and then the Health screen. This is the single
+  check that proves the wiring; nothing in jest can stand in for it.
+- Assert `rejectionTrackingActive()` is `true` after install, and that a failed
+  install buffers a `client_error` rather than being swallowed — the point is
+  that the gap is *visible* rather than silent.
+- Assert RN's own `onUnhandled` still runs (the development warning is
+  unchanged): the reporter observes, it does not intercept.
+
+### One athlete's events must never be sent under another's token
+
+- Buffer an event, sign out, sign in as someone else, flush — assert **nothing**
+  is posted. `clearTelemetryForSignOut` is what makes this true and its absence
+  was a real privacy bug: the events, and the accumulated loss tally, would have
+  been attributed to the second athlete in `health_events`.
+- Assert the second athlete's own events post under the second athlete's token.
 
 ### `POST /v1/client-errors` (server)
 

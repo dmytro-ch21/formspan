@@ -7715,10 +7715,18 @@ paths:
         content:
           application/json:
             schema:
-              oneOf:
+              # `anyOf`, not `oneOf`. A body carrying both `kind` and a valid
+              # `events` array matches the report schema AND the batch schema,
+              # which `oneOf` rejects while the handler accepts it as a batch —
+              # spec stricter than code is drift in the direction that makes a
+              # valid request look invalid. `minItems` on the inline array
+              # matches the handler's "no events" refusal; without it the spec
+              # accepted `[]` and the handler 400'd. Both found in review.
+              anyOf:
                 - $ref: "#/components/schemas/ClientErrorReport"
                 - $ref: "#/components/schemas/ClientErrorBatch"
                 - type: array
+                  minItems: 1
                   maxItems: 50
                   items:
                     $ref: "#/components/schemas/ClientErrorReport"

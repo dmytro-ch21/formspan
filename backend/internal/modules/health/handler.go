@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -33,6 +34,8 @@ type Handler struct {
 	repo Repository
 }
 
+var errNullBody = errors.New("health: body is null")
+
 // decodeReports accepts either a single report object or `{"events": [...]}`.
 //
 // Discriminated on the first non-space byte rather than by trying one shape and
@@ -43,6 +46,14 @@ func decodeReports(raw []byte) ([]NewEvent, error) {
 	trimmed := bytes.TrimLeft(raw, " \t\r\n")
 	if len(trimmed) == 0 {
 		return nil, nil
+	}
+	// A literal `null` is rejected here rather than left to decode into a
+	// zero-valued report that `Validate` happens to refuse for having no kind.
+	// The outcome is the same 400 either way — but one is a decision and the
+	// other is an accident, and an accident stops holding the moment somebody
+	// gives `Kind` a default. Found by a test written from a review note.
+	if bytes.Equal(bytes.TrimRight(trimmed, " \t\r\n"), []byte("null")) {
+		return nil, errNullBody
 	}
 	if trimmed[0] == '[' {
 		var list []NewEvent
@@ -96,6 +107,17 @@ func (h *Handler) Report(w http.ResponseWriter, r *http.Request) {
 	// own trouble is exactly the client least able to be upgraded first.
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxReportBytes))
 	if err != nil {
+		// Told apart from malformed JSON on purpose. `MaxBytesReader` fails the
+		// read, and the old code conflated the two — so a client author sending
+		// a valid but large batch got "invalid JSON body" and had nothing to go
+		// on. That is now the likelier trip of the two, since a batch of 50 is
+		// a much bigger body than a single report ever was.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			apihttp.WriteError(w, http.StatusRequestEntityTooLarge, apihttp.CodeInvalidInput,
+				"that report is too large")
+			return
+		}
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}
@@ -131,8 +153,9 @@ func (h *Handler) Report(w http.ResponseWriter, r *http.Request) {
 	userID := claims.UserID
 	requestID := httplog.RequestIDFromContext(r.Context())
 	traceID := httplog.TraceIDFromContext(r.Context())
+	events := make([]Event, 0, len(reports))
 	for _, req := range reports {
-		ev := Event{
+		events = append(events, Event{
 			Source:    SourceClient,
 			Kind:      req.Kind,
 			UserID:    &userID,
@@ -145,11 +168,16 @@ func (h *Handler) Report(w http.ResponseWriter, r *http.Request) {
 			// the server-side line for that call.
 			RequestID: requestID,
 			TraceID:   traceID,
-		}
-		if err := h.repo.Record(r.Context(), ev); err != nil {
-			apihttp.WriteInternal(w, r, "health", err)
-			return
-		}
+		})
+	}
+	// One statement, atomically. A loop of single inserts that failed partway
+	// would commit a prefix and return 500 — and since the client never
+	// retries, the events it then counts as `lost_events` would include ones
+	// that were in fact stored. A reporter that misreports its own loss is the
+	// failure this endpoint exists to end. Found in review.
+	if err := h.repo.RecordBatch(r.Context(), events); err != nil {
+		apihttp.WriteInternal(w, r, "health", err)
+		return
 	}
 
 	// 202 rather than 201: the client is telling us something, not creating a

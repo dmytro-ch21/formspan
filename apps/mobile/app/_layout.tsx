@@ -1,6 +1,6 @@
 import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useAuthToken } from '@/lib/useAuthToken';
-import { installTelemetry } from '@/lib/telemetryClient';
+import { clearTelemetryForSignOut, installTelemetry } from '@/lib/telemetryClient';
 import { initSounds } from '@/lib/sounds';
 import { initVoice } from '@/lib/voice';
 import { clearSessionToken } from '@/lib/session';
@@ -165,7 +165,19 @@ function RootLayoutNav() {
   // chained, so the red box in development and the runtime's own behaviour in
   // production are unchanged. See `installTelemetry`.
   useEffect(() => {
-    installTelemetry(isSignedIn ? getToken : async () => null);
+    if (!isSignedIn) {
+      // **Clear on sign-out, before anything else can flush.** Without this,
+      // events buffered under one athlete — and that athlete's accumulated
+      // loss tally — are POSTed under the NEXT athlete's token and attributed
+      // to them in `health_events`. The window is real: a flush fires on a
+      // 30s timer or at ten buffered events, so a fast account switch beats
+      // it easily. Same reasoning as `setSyncIdentity` above, and review
+      // found this missing. Handlers stay installed; only the buffer and the
+      // token source are per-account.
+      clearTelemetryForSignOut();
+      return;
+    }
+    installTelemetry(getToken);
   }, [isSignedIn, getToken]);
 
   // Fill the caches once, so the app is usable before it is ever offline.

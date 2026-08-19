@@ -34,6 +34,8 @@ let buffer = new TelemetryBuffer();
 let timer: ReturnType<typeof setInterval> | null = null;
 let tokenSource: (() => Promise<string | null>) | null = null;
 let installed = false;
+let previousErrorHandler: ((e: unknown, isFatal?: boolean) => void) | null = null;
+let rejectionTrackingInstalled = false;
 
 /**
  * One trace id for the whole app run.
@@ -82,20 +84,31 @@ export function capture(
  */
 export async function flush(): Promise<void> {
   let batch: BufferedEvent[] = [];
+  let lost = 0;
   try {
     if (buffer.size === 0) return;
     batch = buffer.drain(Date.now());
     if (batch.length === 0) return;
 
+    // `useAuthToken`'s getter returns a token or THROWS `OfflineError` — it
+    // never returns null — so this branch is reached when signed out, not when
+    // offline. Offline lands in the catch below, which accounts for the loss
+    // the same way. Stated because the first version of this comment claimed
+    // the opposite and review caught it.
     const token = await tokenSource?.();
     if (!token) {
-      // Not signed in, or Clerk is unreachable. The events are already out of
-      // the buffer, so account for them rather than pretending they sent.
+      // The events are already out of the buffer, so account for them rather
+      // than pretending they sent.
       buffer.recordLoss(batch.length);
       return;
     }
 
-    const lost = buffer.takeLost();
+    // Taken before the send, so it has to be given back on every failure path
+    // below. Taking it and dropping it on a 4xx was the bug review found: ten
+    // ring evictions plus a failed flush of five ended the tally at five, not
+    // fifteen — events dropped with nothing counted, which is the one thing
+    // this design forbids.
+    lost = buffer.takeLost();
     const res = await fetch(`${API_BASE}/client-errors`, {
       method: 'POST',
       headers: {
@@ -104,7 +117,7 @@ export async function flush(): Promise<void> {
         traceparent: traceparent(runTraceId),
       },
       body: JSON.stringify({
-        events: batch.map((e) => ({
+        events: batch.map((e, i) => ({
           kind: e.kind,
           message: e.message,
           error_code: e.level,
@@ -117,7 +130,11 @@ export async function flush(): Promise<void> {
             // bounded reporter and a broken one look identical.
             occurrences: e.count,
             suppressed: e.dropped,
-            lost_events: lost,
+            // Batch-scoped, so it goes on the FIRST event only. Stamped on
+            // every event it would multiply by batch size the moment anyone
+            // summed it — a made-up number in the field whose whole job is to
+            // be trustworthy about loss. Found in review.
+            ...(i === 0 && lost > 0 ? { lost_events: lost } : null),
             first_at: new Date(e.firstAt).toISOString(),
             last_at: new Date(e.lastAt).toISOString(),
             fingerprint: e.fingerprint,
@@ -127,11 +144,12 @@ export async function flush(): Promise<void> {
     });
     if (!res.ok) {
       // A 4xx means this batch will never be accepted, so there is nothing to
-      // retry — but the loss is real and is carried forward.
-      buffer.recordLoss(batch.length);
+      // retry — but the loss is real and is carried forward, INCLUDING the
+      // earlier tally this send was carrying.
+      buffer.recordLoss(batch.length + lost);
     }
   } catch {
-    buffer.recordLoss(batch.length);
+    buffer.recordLoss(batch.length + lost);
   }
 }
 
@@ -149,9 +167,7 @@ export function installTelemetry(getToken: () => Promise<string | null>): void {
   installed = true;
 
   // Unhandled JS errors. `ErrorUtils` is React Native's, not the DOM's, and it
-  // is the only hook that sees an error thrown outside a component tree — which
-  // is where the sync path throws, since it runs off a timer rather than in a
-  // render.
+  // is the only hook that sees an error thrown outside a component tree.
   const errorUtils = (
     globalThis as {
       ErrorUtils?: {
@@ -161,43 +177,154 @@ export function installTelemetry(getToken: () => Promise<string | null>): void {
     }
   ).ErrorUtils;
 
-  const previous = errorUtils?.getGlobalHandler?.();
+  previousErrorHandler = errorUtils?.getGlobalHandler?.() ?? null;
+  const chainTo = previousErrorHandler;
   errorUtils?.setGlobalHandler?.((e: unknown, isFatal?: boolean) => {
-    capture(isFatal ? 'fatal' : 'error', 'client_error', describe(e), {
-      reason: 'unhandled',
-    });
-    // **Always chain.** Replacing the default handler without calling it
-    // swallows the red box in development and, worse, stops the runtime doing
-    // whatever it would have done in production — turning a visible crash into
-    // an app that quietly misbehaves. The reporter observes; it does not
-    // intercept.
-    previous?.(e, isFatal);
+    try {
+      capture(isFatal ? 'fatal' : 'error', 'client_error', describe(e), { reason: 'unhandled' });
+    } catch {
+      // Swallowed as well as chained. `describe(e)` runs as an ARGUMENT, so it
+      // is inside this try — and letting it escape would throw a NEW error out
+      // of the runtime's own error handler, from the reporter, while it was
+      // reporting. Reporting a problem must never create one.
+    } finally {
+      // **`finally`, not after the call.** `describe(e)` is evaluated as an
+      // ARGUMENT, so it runs outside `capture`'s own try/catch — and it can
+      // throw, on a hostile proxy or an Error subclass whose `name` getter
+      // throws. When it did, the chain below was skipped and the reporter had
+      // swallowed the red box in development and the runtime's fatal handling
+      // in production, for exactly the strange errors most worth seeing.
+      // Found in review.
+      chainTo?.(e, isFatal);
+    }
   });
 
-  // Unhandled promise rejections. The offline sync path is almost entirely
-  // promises, so this is the hook that actually covers the bugs N43 was filed
-  // for; `ErrorUtils` alone would miss them.
-  const g = globalThis as unknown as {
-    addEventListener?: (t: string, cb: (ev: { reason?: unknown }) => void) => void;
-  };
-  g.addEventListener?.('unhandledrejection', (ev) => {
-    capture('error', 'client_error', describe(ev?.reason), { reason: 'unhandled_rejection' });
-  });
+  installRejectionTracking();
 
   if (!timer) {
     timer = setInterval(() => {
       if (buffer.shouldFlush(Date.now())) void flush();
     }, DEFAULTS.flushAfterMs);
-    // Do not hold the event loop open for a reporter.
     (timer as unknown as { unref?: () => void }).unref?.();
   }
 }
 
-/** Tear down, for tests and for a sign-out that must not leak one account's
- *  buffered events into the next account's flush. */
+/**
+ * Unhandled promise rejections — and this is NOT `addEventListener`.
+ *
+ * The first version used `globalThis.addEventListener('unhandledrejection')`,
+ * which is a DOM API. **React Native does not have it**, so that install was a
+ * silent no-op and the half of N43 that matters most — the offline sync path is
+ * almost entirely promises — did not exist. Review suspected it; the runtime
+ * confirms it: RN polyfills promises in `Core/polyfillPromise.js` and enables
+ * `promise/setimmediate/rejection-tracking` with the options in
+ * `Libraries/promiseRejectionTrackingOptions.js`, whose `onUnhandled` calls
+ * `ExceptionsManager.handleException` **directly**, bypassing the `ErrorUtils`
+ * global handler entirely. So neither hook above would ever have seen one.
+ *
+ * The fix is to re-enable rejection tracking with options that wrap RN's own,
+ * which is what every reporter that works on RN does. RN's `onUnhandled` is
+ * still called, so the development warning is unchanged.
+ *
+ * **If this cannot be installed, it says so out loud.** A reporter whose
+ * rejection half is quietly missing is the exact failure this project keeps
+ * meeting — a CI run with no checks reading as passing, a skipped test printing
+ * `ok`, an empty array meaning both "none" and "we never asked". So a failure
+ * here buffers a `client_error` rather than being swallowed: the Health screen
+ * shows the gap instead of showing nothing.
+ */
+function installRejectionTracking(): void {
+  try {
+    // Required lazily and defensively: these are RN-internal paths, stable
+    // across versions in practice but not contractually. A version that moves
+    // them must degrade to "rejections not captured, and we said so" rather
+    // than to a crash on launch.
+    // `require`, not `import`, and the rule is disabled rather than the
+    // headroom spent: a static import would be hoisted and evaluated at module
+    // load, so a React Native version that moved either path would crash the
+    // app on launch instead of degrading to "rejections not captured, and we
+    // said so". Being lazy is the whole safety property here.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const tracking = require('promise/setimmediate/rejection-tracking') as {
+      enable: (opts: Record<string, unknown>) => void;
+    };
+    const rnOptions =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      (require('react-native/Libraries/promiseRejectionTrackingOptions') as {
+        default?: Record<string, unknown>;
+      }).default ?? {};
+
+    const rnUnhandled = rnOptions.onUnhandled as
+      | ((id: unknown, rejection: unknown) => void)
+      | undefined;
+
+    tracking.enable({
+      ...rnOptions,
+      allRejections: true,
+      onUnhandled: (id: unknown, rejection: unknown) => {
+        try {
+          capture('error', 'client_error', describe(rejection), {
+            reason: 'unhandled_rejection',
+          });
+        } catch {
+          // Same rule as above: never throw out of a handler we do not own.
+        } finally {
+          // Same rule as the error handler: observe, never intercept. RN's own
+          // handler still runs, so the dev warning and the exception report
+          // are unchanged.
+          rnUnhandled?.(id, rejection);
+        }
+      },
+    });
+    rejectionTrackingInstalled = true;
+  } catch {
+    rejectionTrackingInstalled = false;
+    // Deliberately visible. This is the one failure that would otherwise leave
+    // the feature half-missing with everything looking fine.
+    capture('error', 'client_error', 'telemetry: rejection tracking unavailable', {
+      reason: 'install_failed',
+    });
+  }
+}
+
+/** Whether the rejection hook is live. Read by tests, and worth having as a
+ *  fact rather than an assumption, given the first version was a no-op. */
+export function rejectionTrackingActive(): boolean {
+  return rejectionTrackingInstalled;
+}
+
+/**
+ * Clear the buffer and forget the account.
+ *
+ * **Must be called on sign-out.** Without it, events buffered under athlete A —
+ * plus A's accumulated loss tally — are POSTed under athlete B's token at the
+ * next flush and attributed to B in `health_events`. That is a real privacy
+ * bug and review found it: this function existed and documented the hazard,
+ * and nothing called it. The adjacent `setSyncIdentity` effect clears identity
+ * on sign-out for exactly the same reason.
+ *
+ * It deliberately does NOT set `installed = false`. Uninstalling and
+ * reinstalling would stack a second wrapper on top of the first — each one
+ * chaining to the last — so every error would be captured twice and the count
+ * would be a lie. The handlers are process-wide and account-independent; only
+ * the buffer and the token source are per-account.
+ */
+export function clearTelemetryForSignOut(): void {
+  buffer = new TelemetryBuffer();
+  tokenSource = null;
+}
+
+/** Full teardown, for tests. Unhooks what it installed, so a reinstall in the
+ *  same process cannot layer handlers. */
 export function resetTelemetry(): void {
   if (timer) clearInterval(timer);
   timer = null;
+  const errorUtils = (
+    globalThis as { ErrorUtils?: { setGlobalHandler?: (h: unknown) => void } }
+  ).ErrorUtils;
+  if (previousErrorHandler) errorUtils?.setGlobalHandler?.(previousErrorHandler);
+  previousErrorHandler = null;
+  rejectionTrackingInstalled = false;
   installed = false;
   tokenSource = null;
   buffer = new TelemetryBuffer();
@@ -215,5 +342,15 @@ export function resetTelemetry(): void {
 function describe(e: unknown): string {
   if (e instanceof Error) return `${e.name}: ${e.message}`;
   if (typeof e === 'string') return e;
+  // Object-shaped rejections: read a message or code if there is one rather
+  // than mapping every one of them to a single string. All of them collapsing
+  // to "unknown error" made distinct bugs share one fingerprint AND one cap
+  // slot, so each suppressed the others. Found in review.
+  if (e && typeof e === 'object') {
+    const o = e as { message?: unknown; code?: unknown; name?: unknown };
+    const parts = [o.name, o.code, o.message].filter((v) => typeof v === 'string');
+    if (parts.length > 0) return parts.join(': ');
+  }
   return 'unknown error';
 }
+

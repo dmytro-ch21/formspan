@@ -121,6 +121,11 @@ export type TelemetryConfig = {
  * batch on a timer, and a burst reaches the size threshold first.
  */
 export const DEFAULTS: TelemetryConfig = {
+  // **Must stay under the server's `MaxBatch` (50).** A batch is validated
+  // all-or-nothing, so a drain larger than that is refused whole and every
+  // event in it is lost — raising this past 50 would silently kill all
+  // reporting rather than degrade it. The coupling is real and was stated
+  // nowhere until review pointed at it.
   capacity: 40,
   maxSendsPerFingerprint: 3,
   windowMs: 15 * 60 * 1000,
@@ -172,12 +177,51 @@ export function fingerprintOf(kind: string, message: string): string {
     .toLowerCase()
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<id>')
     .replace(/0x[0-9a-f]+/g, '<hex>')
+    // Generated ids that are NOT pure hex and NOT pure digits — `req_8fka2`,
+    // `sess_2NNEqLxyz`, a base64 fragment. Any run of six or more
+    // alphanumerics containing at least one digit.
+    //
+    // **This is the one that mattered most, and it was missing.** Without it
+    // every occurrence of such a message fingerprints differently, so
+    // coalescing never coalesces, the per-fingerprint cap never binds, `sends`
+    // grows per occurrence, and the size trigger fires a POST every
+    // `flushAtCount` occurrences — roughly 21,600 requests an hour on a 60/s
+    // loop, which is precisely the "thousands of writes" this module exists to
+    // prevent. Every other guard here is intact while that happens, which is
+    // what makes it dangerous. Found in review.
+    .replace(/\b(?=[a-z0-9_-]*\d)[a-z0-9_-]{6,}\b/g, '<tok>')
     .replace(/\d+/g, '<n>')
     .replace(/["'`][^"'`]*["'`]/g, '<str>')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 120);
   return `${kind}:${hash(normalised)}`;
+}
+
+/**
+ * Strip quoted content out of a message before it is stored or sent.
+ *
+ * `redact()` is an allowlist over `details`; the MESSAGE had no guard at all.
+ * App code that interpolates athlete content into a thrown error — a note, a
+ * food name, a partner's handle — would ship it on the crash path, unprompted,
+ * which is exactly what N26's disclosure rules forbid harder here than
+ * anywhere. The same `<str>` replacement the fingerprinter already uses.
+ *
+ * The diagnostic cost is small: what sits inside the quotes is nearly always
+ * the variable part, which fingerprinting discards anyway.
+ */
+export function scrubMessage(message: string): string {
+  return message.replace(/["'`][^"'`]*["'`]/g, '<str>');
+}
+
+/** Bound a Map by dropping its oldest entries. Insertion order is Map's own
+ *  guarantee, so this needs no timestamps. */
+function trimOldest(m: Map<string, unknown>, max: number): void {
+  if (m.size <= max) return;
+  for (const k of m.keys()) {
+    if (m.size <= max) break;
+    m.delete(k);
+  }
 }
 
 /** djb2. A correlation key, not a security primitive — the same reasoning
@@ -259,7 +303,12 @@ export class TelemetryBuffer {
   ): boolean {
     if (RANK[level] < RANK[this.cfg.minLevel]) return false;
 
-    const text = String(message ?? '').slice(0, MAX_MESSAGE);
+    // Scrubbed HERE, so every path is covered. It was applied only in
+    // `describe()`, which meant a direct `capture(...)` with an interpolated
+    // message — the sync path's own reports — shipped quoted content
+    // unscrubbed. One boundary, not one per caller. Found by a test written
+    // from a review note.
+    const text = scrubMessage(String(message ?? '')).slice(0, MAX_MESSAGE);
     const fingerprint = fingerprintOf(kind, text);
 
     const existing = this.events.get(fingerprint);
@@ -268,6 +317,12 @@ export class TelemetryBuffer {
       // and however long the device has been offline.
       existing.count += 1;
       existing.lastAt = now;
+      // Re-insert so eviction below is least-RECENTLY-seen rather than
+      // first-inserted. Without this the most active problem — inserted first
+      // and still firing — is evicted before a stale one-off that arrived
+      // later, which is exactly backwards. Found in review.
+      this.events.delete(fingerprint);
+      this.events.set(fingerprint, existing);
       return true;
     }
 
@@ -279,8 +334,9 @@ export class TelemetryBuffer {
     }
 
     if (this.events.size >= this.cfg.capacity) {
-      // Fixed-size ring: evict the OLDEST distinct problem. Map preserves
-      // insertion order, so the first key is the oldest.
+      // Fixed-size ring: evict the LEAST RECENTLY SEEN problem. Map preserves
+      // insertion order and coalescing re-inserts, so the first key is the one
+      // that has gone quietest.
       const oldest = this.events.keys().next().value;
       if (oldest !== undefined) {
         this.events.delete(oldest);
@@ -322,6 +378,7 @@ export class TelemetryBuffer {
    * loss without paying for it in memory.
    */
   drain(now: number): BufferedEvent[] {
+    this.sweep(now);
     const out = [...this.events.values()];
     for (const e of out) {
       // Attach any occurrences the cap hid since this fingerprint last got
@@ -351,6 +408,33 @@ export class TelemetryBuffer {
   /** A flush that failed. The events are gone; the fact that they existed is not. */
   recordLoss(n: number): void {
     this.lost += n;
+  }
+
+  /**
+   * Drop cap-window entries whose window has expired, and hard-bound both
+   * bookkeeping maps.
+   *
+   * **`sends` was unbounded**, which quietly defeated the whole "fixed size"
+   * claim: `windowFor` INSERTS an entry for every fingerprint ever seen, even
+   * at count zero, and nothing ever removed one. Under fingerprint churn that
+   * is one entry per occurrence for the lifetime of the process. `events` was
+   * a bounded ring sitting next to two maps that were not. Found in review,
+   * after being suspected and flagged rather than assumed away.
+   *
+   * Called from `drain`, which is already O(batch) and is the only place that
+   * runs on a schedule rather than on an occurrence.
+   */
+  private sweep(now: number): void {
+    for (const [fp, seen] of this.sends) {
+      if (now - seen.windowStart >= this.cfg.windowMs) this.sends.delete(fp);
+    }
+    // A hard bound as well as the sweep. The sweep alone is enough only if
+    // windows expire faster than fingerprints arrive, and under churn they do
+    // not — so the ceiling is what actually guarantees the bound. Oldest
+    // entries go first; losing a cap window means at worst one extra payload
+    // for a problem nobody has seen recently.
+    trimOldest(this.sends as Map<string, unknown>, this.cfg.capacity * 4);
+    trimOldest(this.pendingDropped as Map<string, unknown>, this.cfg.capacity * 4);
   }
 
   private windowFor(fingerprint: string, now: number): { count: number; windowStart: number } {
