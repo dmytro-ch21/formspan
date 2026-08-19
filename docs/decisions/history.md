@@ -28545,6 +28545,199 @@ N26's and N33's, on the same provider.
   per-request query would put a table read on a latency budget that already has a
   vision round-trip in it.
 
+## 2026-08-19 — Nutrition on web, and the first client N27 never had (N28)
+
+`/dashboard/nutrition` in `apps/web`, four screens: the analytical surface,
+target setting with its derivation shown, recipe authoring, and correcting a
+past day. No backend change and no new endpoint — everything here consumes
+contracts that already shipped, which is why `contracts/public.openapi.yaml` is
+untouched.
+
+**Web, not mobile, and the hard rule decides it rather than taste.** Every one
+of the four is authoring or review: building a recipe is fourteen ingredients
+and a keyboard, reading a quarter back is a wide screen, and correcting a day
+is something you do at a desk having noticed the total was wrong. N5's mobile
+carve-out does not apply and this is not a step toward moving the analytical
+surface — that carve-out is for a single-question chart with no metric picker
+and no axes to read values off, and this screen is the opposite of all three on
+purpose.
+
+### The join is the screen
+
+Intake bars, the target as a step line, the 7-day mean, bodyweight trend on a
+second axis, and training days as a strip underneath — one timeline. That
+combination is the thing the project considers its reason to exist, and it is
+worth saying why rather than treating it as a nicer chart: none of the three
+answers anything alone. A calorie chart cannot tell you whether you are eating
+too little. A weight chart cannot tell you whether a plateau is food or a
+training block. The answer only exists in how they move against each other, and
+it needs a surface wide enough to hold all three at once.
+
+SVG by hand, following `LoadHistoryChart` and `VolumeTrend`: rects and three
+polylines, where the dependency would outweigh the drawing. It also lets the
+accessible reading be a real list of every day in words underneath, rather than
+an `aria-label` describing a picture.
+
+### The two honesty rules are arithmetic, so they live in a pure module
+
+`apps/web/src/lib/nutritionSeries.ts` builds the day series and both rules are
+structural in it rather than remembered at each render site.
+
+**An unlogged day is a gap, never a zero.** `totals` is `null` for a day with no
+entries; the chart draws nothing there and the mean and weight lines BREAK
+across it rather than interpolating. The server already gets this right —
+`DayTotals` returns rows only for days that have entries — so the entire danger
+was on the client side, in the reflex to `?? 0` a lookup that missed. Two
+consequences worth stating: a zero-filled day is a claim that somebody ate
+nothing, and it propagates — five unlogged days around two 2,000 kcal days
+turns an honest mean of 2,000 into 571. And a line drawn straight across a gap
+is the more persuasive kind of lie, because it looks like data.
+
+**An average is labelled with how many days it came from.** Every mean in the
+module is a `{ value, days, considered }` and never a bare number, so a caller
+cannot render the figure without having the count in hand. Four of seven is a
+different statement from seven of seven, and "7-day average" quietly meaning
+"the four I bothered with" is exactly the dishonesty. The headline stat renders
+it as body text next to the number rather than in a tooltip, because the number
+is the thing an athlete screenshots and argues from.
+
+**Both are mutation-tested rather than assumed.** Making `buildSeries` zero-fill
+missing days turns **11 of 25** assertions red; dropping the trend-reading floor
+turns 3 red. Checked in both directions and restored — this repo's own record
+says a suite that passes against the bug it is named after is worse than no
+suite.
+
+One consequence that only appears once the rules are real: the rolling mean at
+the LEFT EDGE of a window is computed from a truncated lookback, so the page
+fetches a six-day lead-in and renders from `from`. The counts would have been
+truthful without it, but "3 days" would have meant "the window started" rather
+than "you logged three days" — the same label over a different fact.
+
+### N27 gets its client, and the proposal stays a proposal
+
+The weekly adjustment endpoint shipped with **no UI at all**, deliberately,
+because where a proposal surfaces belongs with target authoring. This is that.
+Three properties the screen has to carry or the backend's guards are wasted:
+
+- **It never auto-applies.** Nothing writes until Accept is pressed. There is no
+  "we've updated your target" and no countdown to one. The endpoint cannot
+  write; this screen is what makes that *visible* rather than merely true.
+- **The arithmetic is shown, not summarised.** Trend weight now, trend weight a
+  week earlier, observed rate, the phase's target rate, the gap, × 7,700 ÷ 7,
+  the raw figure, the cap and why, the final delta. An athlete who disagrees can
+  point at the line they disagree with. The **raw** delta is shown precisely
+  *because* it was capped — hiding it would make the final number look like the
+  arithmetic's answer when it deliberately is not.
+- **A withheld proposal is a normal answer with real estate**, not a spinner and
+  not an apology. Each of the six `blocked_by` values gets plain language about
+  what would unblock it and why the guard exists — "the first week after a
+  change measures the water shift the change caused, not the change".
+
+Declining is doing nothing, and the screen says so rather than offering a
+Decline button. A button would imply something is recorded; nothing is, because
+a stored dismissal would be stale the moment the next weigh-in landed.
+
+The derived target gets the same treatment: resting rate, the activity factor
+and its NEAT, the training average with the window it came from, maintenance,
+the phase delta, the target — with the clamp called out as its own line when it
+binds, since without that the last line of the arithmetic does not follow from
+the one above and an athlete checking the sums would conclude the app cannot
+add up. A **manual** target shows no explanation and says why: "you typed this
+one, so there is no arithmetic to show". That is what the `source` distinction
+is for.
+
+### Correcting a past day, designed around N40's asymmetry
+
+N40 (#313) had just measured the estimator against a real plate: four items
+correct, one invented, one quantity doubled. The invention came back flagged
+three ways; **the miscount was flagged not at all** — `medium` confidence,
+stated flatly.
+
+That asymmetry is the design input, and it inverts the obvious priority. A
+phantom row is self-evidently wrong and gets deleted on sight; it needs nothing
+from the UI. A `2` where there was a `1` is one glance from being accepted,
+because the item is real, the name is right, and only the number is wrong. So:
+
+- Quantity is on the row, not inside an edit form, with **halve and double**
+  controls next to it — a factor of two in one direction or the other is the
+  error an estimate actually makes, not a nudge.
+- The per-serving figure is always shown beside the total. "1 egg at 90 kcal"
+  next to "180 kcal" is a sentence you can check; "180 kcal" alone is not.
+- The screen states outright that a confidence rating describes whether the food
+  was **identified**, never whether it was **counted**. Without that sentence an
+  athlete correctly infers the opposite from a `medium` that reads as calm.
+
+The mechanism underneath: an entry's macros are ABSOLUTE for the quantity
+logged, so the editor works in per-serving terms and multiplies back on save.
+An editor that let servings move while kcal stayed put would record "one egg,
+280 kcal" — a correction that makes the row *more* wrong than the miscount it
+was fixing.
+
+### Recipe authoring, and a seam left deliberately empty
+
+A recipe's items copy their components' numbers, same rule as a logged entry,
+and the screen says so where an author can see it — somebody who assumes a
+later correction propagates is wrong about their own history. Per-serving
+figures preview live by mirroring `Food.PerServing()`, including its fibre rule
+(summed only if some item states it, so the recipe reports "not stated" rather
+than a total assembled from silence), but the **server is authoritative**: it
+recomputes at write time and its answer is what is stored.
+
+**No food-catalog search picker, and that is a decision rather than a gap.**
+Items are composed by typing a name and its numbers. A catalog with an honest
+not-found answer is N42 and barcode scanning is N41, both filed in #318 and
+both landing in exactly this surface; a thin version here would be something
+N42 has to replace instead of land in. The only place this section reads
+`/nutrition/foods` is listing the athlete's own saved recipes.
+
+### Style: `apps/web`'s tokens, not `apps/admin`'s
+
+Stated because `CLAUDE.md` warns against silently starting a third one.
+`apps/web`'s `globals.css` already carries a coherent `@theme` block with
+light/dark `--c-*` pairs and the AA-checked `*-ink` variants the existing charts
+depend on, and it is already on Barlow via `--font-display`/`--font-body`.
+Importing admin's tokens for one section would make the reconciliation harder,
+not easier. Everything here uses semantic token classes (`bg-surface`,
+`border-line`, `fill-lime`, `text-text-dim`), so if that reconciliation ever
+happens it reaches these components through the tokens without touching markup.
+
+### Smaller things
+
+`api.ts` gained one line — `export const apiRequest = request` — so
+`lib/nutritionApi.ts` could reuse the bearer/trace/error handling rather than
+become a third copy of it. `modules.ts` has the second copy and its header
+explains why that one is a server-boundary exception rather than a precedent.
+
+Body check-ins are read through `nutritionApi.ts` rather than a `body.ts` this
+app does not have. Web has no check-in screens — weighing yourself is a
+phone-by-the-scale thing and the platform split leaves it there — and the
+analytical surface is the only web consumer of a weigh-in. A whole module for
+one GET would be a file nobody can explain.
+
+The Nutrition rail entry is **ungated**, unlike the four above it. The registry
+gates on what an athlete trains; eating is orthogonal to all of it, and a
+BJJ-only athlete and a powerlifter have exactly the same nutrition screen.
+
+### What this leaves open
+
+- **Not verified against a real backend with real data.** The screens were
+  driven against a running dev server with an empty account, which exercises
+  the empty states and the auth path and nothing else. Every gap-versus-zero
+  claim above is pinned by the unit tests, not by a screenshot of a populated
+  chart.
+- **The adjustment card has never rendered a live proposal**, because producing
+  one needs an account with 14 days on a target, 10 logged days and 8 weigh-ins
+  split across two halves. Its blocked states are the ones that have actually
+  been seen. The arithmetic rows are written from `adjustment.go`'s field
+  semantics rather than from an observed response.
+- Accepting an adjustment stores `basis: null`, because `AdjustmentBasis` is a
+  different shape from the `Basis` a target row carries. `source: "adjustment"`
+  records where the number came from, but the arithmetic behind it is shown
+  once and not kept — the screen says so rather than leaving a blank. Storing
+  it would need a second basis column or a union, which is a backend change.
+- Recipe editing loads via the foods list rather than a `GET
+  /nutrition/foods/{id}`, which the repository has and nothing exposes. One
+  request either way at a 200-row cap, so no endpoint was added for it.
 
 ## Open items / known gaps as of this entry
 

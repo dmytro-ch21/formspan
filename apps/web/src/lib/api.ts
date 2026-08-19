@@ -840,6 +840,13 @@ export function isConflict(err: unknown): boolean {
   return err instanceof ApiError && err.status === 409;
 }
 
+/**
+ * The one fetch helper.
+ *
+ * Aliased as `apiRequest` below so a sibling client module can reuse it rather
+ * than growing a second copy of it — `modules.ts` has one, and its header says
+ * why that is a server-boundary exception rather than a precedent to follow.
+ */
 async function request<T>(
   getToken: Token,
   path: string,
@@ -873,6 +880,16 @@ async function request<T>(
   }
   return body as T;
 }
+
+/**
+ * The shared fetch helper, for client modules that split off from this file.
+ *
+ * `nutritionApi.ts` is the only caller so far. It lives apart because this
+ * file is already 3,000 lines and nutrition adds four screens' worth of wire
+ * types — but it must not add a third copy of the bearer/trace/error handling,
+ * which is what this export prevents.
+ */
+export const apiRequest = request;
 
 export async function listWorkouts(
   getToken: Token,
