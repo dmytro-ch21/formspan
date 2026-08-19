@@ -65,7 +65,16 @@ jobs:
         # package's fixtures are inside those counts. Latent on main and
         # reproducible the moment a second package seeds library rows —
         # measured 3 failures in 6 concurrent runs, 0 with -p 1.
-        run: go test -p 1 ./...
+        #
+        # -timeout 3m: Go's default is 10 MINUTES per package, and a test that
+        # hangs rather than fails burns all of it. Measured, not hypothetical —
+        # F11 deleted a deferred `tx.Rollback` and the leaked connection kept
+        # `pgxpool.Close` waiting forever, so the package could not exit even
+        # after its assertions had already named the cause. Slowest package here
+        # is ~2s locally and ~45s under the parallel-session contention
+        # CLAUDE.md documents, so 3m is roughly four times the worst seen and
+        # still bounds a hang at a third of the default.
+        run: go test -p 1 -timeout 3m ./...
 
       - name: Build Docker image
         run: docker build -f Dockerfile -t vola-api:ci .
