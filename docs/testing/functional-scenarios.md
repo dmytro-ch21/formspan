@@ -9167,3 +9167,49 @@ which is unchanged.
   handler is covered" was not true here even though the module looked
   well-tested. If a future change moves logic back into `main.go`, that
   invisibility comes back with it.
+## Food search on mobile (N51 — `app/food/add.tsx` + the catalog)
+
+The quick-add sheet searches two sources: the athlete's own saved foods (local
+SQLite) and the shared catalog at `/v1/nutrition/catalog`.
+
+**The scenario that matters most needs a FRESH account**, because that is the
+only state the original bug was visible in. An account with saved foods hides it
+completely, which is why it reached a real phone before it reached a test.
+
+### Happy path
+
+- **On a brand-new account, searching "oats" returns results.** Before N51 it
+  returned nothing and read as a broken search. This is the whole task.
+- A saved food and a catalog food both appear, under separate headings, and the
+  saved one is listed first.
+- Logging a catalog row records the right calories and **does not** set
+  `source_food_id` — that column is a foreign key into the athlete's own foods.
+- A food the athlete has already saved appears **once**, not twice.
+- A capped result says "Showing 20 of 63" rather than implying it is everything.
+
+### Edge cases & errors — an empty result must say WHICH kind of empty
+
+Each of these is a different thing being wrong, and only the first is a
+statement about the food. Exercise them by stubbing the `outcome`:
+
+- **`no_match`** — the catalog does not have it. This is the only case that may
+  say so, and the only one that should offer to add it by hand.
+- **`query_unusable`** (search for `%` or `!!!`) — nothing was actually asked.
+  Must not say the food is missing.
+- **`catalog_empty`** — a deploy that never seeded. **Must say it is our
+  problem**, not the athlete's, and must say their saved foods still work.
+  Reachable for real: point the app at an API whose catalog was never seeded.
+- **`market_not_covered`** — cannot be fixed by rephrasing.
+- **An unrecognised outcome** (a value added server-side later) must not be
+  read as "we do not have this food".
+- **Offline, or a 5xx** — must say the catalog could not be reached, and must
+  not claim the food is missing. The athlete's own saved foods still search.
+
+### Regression trap
+
+- **Type fast.** A result for "chick" must never render under "chicken" — the
+  window is *inside* the 250ms debounce, before the next request starts, not
+  while one is in flight. A test that waits for the request tests the wrong
+  moment and passes with the guard removed.
+- **The empty-state element must not exist at all** when no answer is current.
+  An empty `Text` node is findable and reads as a message.

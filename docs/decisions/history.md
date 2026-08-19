@@ -30151,6 +30151,116 @@ and a `mock.calls[0][3]` were both compile errors while the suite was green.
 That is the second time on these two branches that running the checks
 separately would have shipped something the chain catches, which is the
 argument `verify` was written to make.
+## 2026-08-19 — The search was asking the wrong list (N51)
+
+Food search on the phone queried the athlete's **own saved foods** and nothing
+else. On a fresh account that list is empty, so every query returned nothing and
+the quick-add sheet read as broken.
+
+Reported from a real phone, and that is the only place it could have been
+reported from: every session that has ever tested this had foods saved, and a
+populated list hides the bug completely. N42 shipped the catalog — 177 USDA
+foods, search hitting 46 of 50 realistic queries — and nothing on mobile
+consumed its search half. The only `/nutrition/catalog` consumer in the app was
+the barcode lookup.
+
+### Two sources, kept as two sections
+
+The catalog is an **additional** source. An athlete's own recipes and saved
+foods are still theirs and still searched first.
+
+They render apart rather than merged, for three reasons that all point the same
+way. A saved food carries the athlete's own serving size and a catalog row
+carries a reference one. A saved food records provenance when logged and a
+catalog row **cannot** — `source_food_id` is a foreign key into the personal
+table, and a catalog id belongs to a different id space, so writing it there
+would dangle. And merging them hides which of the two a tap is about to log,
+when the two log different numbers.
+
+The catalog copy of a food already saved is suppressed, deduplicated **on name**
+rather than id — the id spaces can never collide, so an id-based dedupe would
+silently do nothing and every saved food would appear twice.
+
+### An empty answer has five meanings and only one is about the food
+
+This is the part that would have rotted first, and N42 built the endpoint around
+it: the response carries an `outcome`, not just an array.
+
+- `no_match` — the catalog is loaded, covers this market, and does not have it.
+  **The only value that licenses "we do not have that food"**, and the only one
+  where offering to add it by hand is the right next step.
+- `query_unusable` — the query held no searchable term. Nothing was asked, so
+  nothing can be concluded.
+- `market_not_covered` — the athlete cannot fix this by rephrasing.
+- `catalog_empty` — **our** failure, a deploy that never seeded. Reported as a
+  missing food, this would send every athlete off to type their whole diet in by
+  hand while nothing ever surfaced the real cause.
+
+A sixth case sits outside the enum: the request failed. That throws, so it
+cannot be rendered as an empty catalog — the same rule the barcode lookup
+follows, and for the same reason.
+
+An **unrecognised** outcome narrows to `unknown` and never to `no_match`. That
+is the open-at-the-server, closed-at-the-client trap N41 hit hours earlier on
+`source`, where an unknown provider fell through to claiming it was our own
+catalog. The server owns these vocabularies and can extend them; a client union
+closed over today's values mislabels tomorrow's, always in the most confident
+direction available.
+
+### The dedupe turned a good answer into a failure message
+
+Review caught this and reproduced it, and it is the mainline case rather than an
+edge one.
+
+The empty-state block was gated on the **post-dedupe** count and then fed the
+**pre-dedupe** answer to the message. So when every catalog row collided with
+something the athlete had already saved — which is exactly what happens to
+anyone who has saved a common food — the answer was `ok`, the catalog had
+answered perfectly, and the screen rendered *"The catalog could not answer that
+one"* directly beneath the saved row that had just answered it.
+
+That is the feature's own invariant broken from the client side: only `no_match`
+may say the catalog failed to help, and this said something worse about an `ok`.
+The message now keys on the ANSWER's emptiness, and a fully-deduped answer
+renders nothing at all.
+
+Two smaller ones from the same review. The cap line counted pre-dedupe rows, so
+it claimed to be "showing 20 of 63" above eighteen. And the row displayed the
+bare name while the log recorded brand-plus-name, so an athlete tapped a row
+saying one thing and found another in their diary — both now go through one
+function.
+
+The dedupe key also gained `brand`. On name alone a brandless saved "Greek
+Yogurt" suppressed every branded Greek yogurt in the catalog, which is the
+opposite failure to the one dedupe exists to prevent.
+
+**The test for dedupe could not have caught any of this**, and the reason is
+worth keeping: it asserted only that the colliding row DISAPPEARED, so a change
+that suppressed the entire catalog section whenever the saved list was non-empty
+passed it. An absence test needs a survivor. It now sends two rows, one
+colliding and one not, and asserts the second is still there.
+
+### A stale answer, and a test that could not see it
+
+Answers are paired with the query they answer. Without that, a result for
+"chick" renders under "chicken" until the next one lands, so an athlete who
+keeps typing reads "No chick in the food catalog yet" and then watches the
+screen change its mind. Pairing is cheaper than cancelling the request.
+
+**The first test for this passed with the pairing removed.** It advanced past
+the debounce into a pending request, where `searching` is true and the empty
+block is gated off regardless — so it was asserting on a window the bug does not
+live in. The bug lives *inside* the debounce, before any new request starts.
+
+Caught by the rule the previous branch had to learn: check that the mutation
+**applied**, then ask whether the suite went red. It had applied, and the suite
+was green, which is the signature of a test aimed at the wrong moment rather
+than a missing guard.
+
+Fixing the test also turned up a real defect it had been masking: the empty
+block rendered a `Text` node with an empty string whenever no answer was
+current — a stray element saying nothing, and one a test can find and mistake
+for a message. It now renders nothing at all.
 
 ## 2026-08-19 — A ceiling that survives a deploy (N48)
 

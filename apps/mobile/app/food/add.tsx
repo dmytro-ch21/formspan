@@ -15,11 +15,30 @@
  * ## The escape row
  *
  * Typing something with no match offers `Add "chicken thigh"` as the last row,
- * prefilled. **The search box still covers the athlete's own saved foods and
- * nothing else** — the catalog behind a barcode is reached by scanning, not by
- * typing, until N42 lands a searchable one. So the empty state stays worded as
- * "nothing SAVED by that name": it must not imply a catalog was searched and
- * came back empty, which is a different and much stronger claim.
+ * prefilled.
+ *
+ * ## Two sources, kept apart on purpose
+ *
+ * The box searches the athlete's own saved foods AND the shared catalog N42
+ * shipped. Until N51 it searched only the first, so a fresh account got nothing
+ * from every query and the screen read as broken — reported from a real phone,
+ * which is the only place it could be found, since nobody with a populated
+ * saved list ever sees it.
+ *
+ * They render as two sections rather than one list. A saved food is the
+ * athlete's own, carries their serving size, and records provenance when
+ * logged; a catalog row is reference data whose id belongs to a different id
+ * space and must NOT be written to `source_food_id`. Merging them would hide
+ * which of the two a tap is about to log.
+ *
+ * ## An empty result says which kind of empty it is
+ *
+ * "Nothing saved by that name" is a claim about the athlete's list. "We do not
+ * have that food" is a claim about the catalog, and only the server's
+ * `no_match` outcome licenses it — not `query_unusable`, not `catalog_empty`
+ * (which is a deploy that never seeded, i.e. our failure), not
+ * `market_not_covered`, and emphatically not a failed request. See
+ * `emptySearchMessage`.
  */
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -33,6 +52,12 @@ import { Icon } from '@/components/ui/Icon';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import {
+  emptySearchMessage,
+  searchCatalog,
+  type CatalogFood,
+  type CatalogSearch,
+} from '@/lib/catalogApi';
 import { localFoods, logFood, recentsFor, saveFoodLocally } from '@/lib/foodLog';
 import {
   MEALS,
@@ -46,11 +71,49 @@ import {
   type Meal,
 } from '@/lib/nutrition';
 import { request } from '@/lib/sync';
+import { useAuthToken } from '@/lib/useAuthToken';
+
+/**
+ * A catalog answer, tied to the query it answers.
+ *
+ * The pairing is the point: a response that arrives after the athlete has kept
+ * typing is an answer to a question they are no longer asking, and rendering it
+ * is how a search appears to change its mind.
+ */
+type CatalogState = { forQuery: string; result: CatalogSearch | 'unreachable' };
+
+/**
+ * The key two food lists are compared on.
+ *
+ * Brand AND name, lowercased and trimmed. Name alone is not identifying — a
+ * brandless saved "Greek Yogurt" would suppress every branded one in the
+ * catalog — and id is useless here because the two lists do not share an id
+ * space.
+ */
+function foodKey(f: { name: string; brand: string }): string {
+  return `${f.brand.trim().toLowerCase()}|${f.name.trim().toLowerCase()}`;
+}
+
+/**
+ * What a catalog row is called — used for the ROW and for the logged entry,
+ * from one place.
+ *
+ * They were computed separately and disagreed: the row showed the bare name
+ * while the log recorded brand-plus-name, so an athlete tapped a row saying one
+ * thing and found another in their diary. Raised in review.
+ */
+function catalogName(food: CatalogFood): string {
+  if (!food.brand) return food.name;
+  return food.name.toLowerCase().includes(food.brand.toLowerCase())
+    ? food.name
+    : `${food.brand} ${food.name}`;
+}
 
 export default function AddFoodScreen() {
   const router = useRouter();
   const accent = useAccent();
   const { userId } = useAuth();
+  const getToken = useAuthToken();
   const params = useLocalSearchParams<{ meal?: string; date?: string }>();
 
   const date = params.date ?? todayString();
@@ -61,6 +124,17 @@ export default function AddFoodScreen() {
   const [recents, setRecents] = useState<Food[]>([]);
   const [matches, setMatches] = useState<Food[]>([]);
   const [creating, setCreating] = useState(false);
+
+  /**
+   * The catalog half of the search.
+   *
+   * `null` while nothing has been asked; a `CatalogSearch` once an answer has
+   * arrived; `'unreachable'` when the request failed. Three states rather than
+   * an array, because an empty array cannot say WHY it is empty and that is the
+   * whole question an athlete has when a search finds nothing.
+   */
+  const [catalog, setCatalog] = useState<CatalogState | null>(null);
+  const [searching, setSearching] = useState(false);
 
   const load = useCallback(() => {
     if (!userId) return;
@@ -82,7 +156,81 @@ export default function AddFoodScreen() {
 
   useEffect(() => load(), [load]);
 
-  const shown = q.trim() ? matches : recents;
+  /**
+   * The catalog search, debounced and network-bound.
+   *
+   * Kept in its own effect rather than folded into `load` because the two are
+   * not alike: `load` is a local SQLite read that should feel instant on every
+   * keystroke, and this is a request. Debounced so typing "chicken breast" is
+   * one search rather than fourteen, and `live` guards the response so a slow
+   * answer to "chick" cannot land after a fast answer to "chicken" — the
+   * out-of-order render that makes a search feel haunted.
+   */
+  useEffect(() => {
+    const query = q.trim();
+    let live = true;
+    // Everything happens inside the timer, including the empty-query reset —
+    // a synchronous setState in an effect body cascades renders, and the rule
+    // that says so is a warning this app's ratchet will not absorb.
+    const t = setTimeout(() => {
+      if (!query) {
+        setCatalog(null);
+        setSearching(false);
+        return;
+      }
+      setSearching(true);
+      searchCatalog(getToken, { q: query, limit: 20 })
+        .then((r) => {
+          if (live) setCatalog({ forQuery: query, result: r });
+        })
+        .catch(() => {
+          // A failed request is NOT an empty catalog. Rendering it as one
+          // would tell the athlete their food is missing because their signal
+          // was bad — the absence-reads-as-answer failure this repo keeps
+          // meeting, and the one the barcode screen is shaped around.
+          if (live) setCatalog({ forQuery: query, result: 'unreachable' });
+        })
+        .finally(() => {
+          if (live) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [q, getToken]);
+
+  const searched = q.trim();
+  /**
+   * The answer, ONLY if it is an answer to what is currently typed.
+   *
+   * Without the `forQuery` check a result for "chick" renders under "chicken"
+   * for as long as the next request takes — so an athlete who kept typing sees
+   * a stale empty state claiming their food is missing, then watches it change
+   * its mind. Tying the answer to its own question is cheaper than trying to
+   * cancel the request.
+   */
+  const answer = catalog && catalog.forQuery === searched ? catalog.result : null;
+  /**
+   * Catalog rows the athlete has not already saved.
+   *
+   * Deduplicated on BRAND AND NAME rather than id, because the two lists have
+   * different id spaces — a saved food's id is client-generated and a catalog
+   * id is not, so nothing would ever collide and every saved food would appear
+   * twice. Brand is part of the key because name alone is not identifying: a
+   * brandless saved "Greek Yogurt" would otherwise suppress every branded
+   * Greek yogurt in the catalog.
+   */
+  const savedNames = useMemo(
+    () => new Set(matches.map(foodKey)),
+    [matches],
+  );
+  const catalogOnly = useMemo(() => {
+    if (!answer || answer === 'unreachable') return [];
+    return answer.foods.filter((f) => !savedNames.has(foodKey(f)));
+  }, [answer, savedNames]);
+
+  const shown = searched ? matches : recents;
   const exact = useMemo(
     () => matches.some((f) => f.name.toLowerCase() === q.trim().toLowerCase()),
     [matches, q],
@@ -105,6 +253,42 @@ export default function AddFoodScreen() {
       // one reads it locally. Awaiting a push would put the network back
       // between the tap and the number moving.
       request('food logged');
+      router.back();
+    },
+    [userId, date, meal, router],
+  );
+
+  /**
+   * Log a catalog row.
+   *
+   * Separate from `log` because of the last argument. `source_food_id` is a
+   * foreign key into the athlete's OWN saved foods, and a catalog id is not one
+   * — pointing it there would be a dangling reference the database would refuse
+   * or silently null. Same reasoning as the barcode draft, which is the other
+   * place a food arrives from outside the athlete's list.
+   *
+   * It is also why this does not quietly save the row first: the athlete asked
+   * to log a food, not to add one to their list, and a saved-foods list that
+   * fills up with everything ever tapped stops being the two-tap shortlist it
+   * exists to be.
+   */
+  const logCatalog = useCallback(
+    async (food: CatalogFood) => {
+      if (!userId) return;
+      await logFood(userId, {
+        eaten_on: date,
+        meal,
+        name: catalogName(food),
+        servings: 1,
+        serving_label: food.serving_label,
+        kcal: food.kcal,
+        protein_g: food.protein_g,
+        carb_g: food.carb_g,
+        fat_g: food.fat_g,
+        fibre_g: food.fibre_g,
+        source_food_id: null,
+      });
+      request('catalog food logged');
       router.back();
     },
     [userId, date, meal, router],
@@ -154,10 +338,10 @@ export default function AddFoodScreen() {
         style={styles.search}
         value={q}
         onChangeText={setQ}
-        placeholder="Search your foods"
+        placeholder="Search your foods and the catalog"
         placeholderTextColor={vola.textDim}
         autoCorrect={false}
-        accessibilityLabel="Search your saved foods"
+        accessibilityLabel="Search your foods and the catalog"
         testID="add-search"
       />
 
@@ -184,11 +368,73 @@ export default function AddFoodScreen() {
 
       {shown.length === 0 && (
         <Text style={styles.empty}>
-          {q.trim()
+          {searched
             ? 'Nothing saved by that name.'
             : 'Log something once and it will be here next time.'}
         </Text>
       )}
+
+      {/* The catalog, as a SECOND section rather than merged into the first.
+          The athlete's own foods are theirs and carry their own serving sizes;
+          a catalog row is reference data. Merging them would also hide which
+          of the two a tap is about to log, and they behave differently — a
+          saved food records provenance and a catalog row cannot. */}
+      {searched && catalogOnly.length > 0 ? (
+        <>
+          <SectionHeader label="From the food catalog" />
+          {catalogOnly.map((f) => (
+            <Pressable
+              key={f.id}
+              style={styles.row}
+              onPress={() => void logCatalog(f)}
+              accessibilityRole="button"
+              accessibilityLabel={`Log ${catalogName(f)} from the food catalog`}
+              testID={`add-catalog-${f.id}`}
+            >
+              <View style={styles.rowMain}>
+                <Text style={styles.rowName} numberOfLines={1}>
+                  {catalogName(f)}
+                </Text>
+                <Text style={styles.rowServing}>{f.serving_label}</Text>
+              </View>
+              <Text style={styles.rowKcal}>{Math.round(f.kcal)}</Text>
+            </Pressable>
+          ))}
+          {/* Honest about the cap. "20 of 63" beats a list that silently
+              stops and implies it is everything. */}
+          {/* Counts what is ACTUALLY on screen. `answer.foods.length` is the
+              pre-dedupe figure, so with two rows suppressed it claimed to be
+              showing twenty above eighteen. */}
+          {answer && answer !== 'unreachable' && answer.total > catalogOnly.length ? (
+            <Text style={styles.empty} testID="add-catalog-more">
+              Showing {catalogOnly.length} of {answer.total}. Keep typing to narrow it.
+            </Text>
+          ) : null}
+        </>
+      ) : null}
+
+      {/* Says WHICH kind of nothing. Only `no_match` is a statement about the
+          food; the rest are about the query, the deploy, the region, or the
+          network, and reporting any of them as "we do not have that food"
+          sends the athlete off to type it in by hand forever. */}
+      {/* Gated on the ANSWER being empty, not on `catalogOnly` being empty.
+          Those differ, and the difference was a live bug: when every catalog
+          row was deduped away against the athlete's saved foods — the MAINLINE
+          case for anyone who has saved a common food — an `ok` answer fell
+          through to the failure copy, so "The catalog could not answer that
+          one" rendered directly beneath the saved row that had just answered
+          it. The catalog answered perfectly. Found in review, reproduced.
+
+          `answer &&` also matters on its own: without it the block renders an
+          empty `Text` between the keystroke and the debounce — a stray node
+          saying nothing that a test can find and mistake for a message. */}
+      {searched && answer && !searching && (answer === 'unreachable' || answer.foods.length === 0) ? (
+        <Text style={styles.empty} testID="add-catalog-empty">
+          {answer === 'unreachable'
+            ? 'Could not reach the food catalog. Your own saved foods are still searched.'
+            : emptySearchMessage(answer, searched)}
+        </Text>
+      ) : null}
 
       {/* Above the describe row, because a packet with a barcode should never
           be described: a scan gives the numbers printed on it, and describing
