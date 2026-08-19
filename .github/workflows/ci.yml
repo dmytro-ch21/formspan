@@ -182,6 +182,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Belt and braces. `fetch-depth: 0` gives the history a merge base needs,
+      # but `actions/checkout` does not promise a `refs/remotes/origin/main` ref
+      # on a PR checkout — that lands detached on `refs/pull/N/merge`. This
+      # creates it, is a no-op when it already exists, and carries NO `--depth`,
+      # which is precisely what broke the merge base the first time.
+      - name: Make origin/main available (for the TASKS.md merge base)
+        run: git fetch --no-tags origin main:refs/remotes/origin/main || true
+
       # No actions/setup-python on purpose. The check is stdlib-only and
       # version-agnostic, the runner image ships python3 already, and every
       # extra action is one more thing to download before any of this repo's
