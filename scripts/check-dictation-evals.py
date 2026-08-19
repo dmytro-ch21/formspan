@@ -80,8 +80,24 @@ def to_tag_category(library_category: str) -> str:
     return LIBRARY_TO_TAG.get(library_category, "control")
 
 
+# Words that carry no identifying weight and appear on only one side as often as
+# both. "the knee cut" and "knee cut" are the same claim about the catalog; a
+# matcher that disagrees reports the first as matching NOTHING, which reads as
+# "not in the catalog" — the exact wrong answer, since it is in there seven
+# times. Stripped from BOTH the phrase and the catalog name, so an exact match
+# on "Armbar from Closed Guard" still holds.
+STOPWORDS = {
+    "a", "an", "and", "at", "for", "from", "in", "into", "of", "on", "or",
+    "the", "to", "with", "my", "his", "her", "their", "its",
+}
+
+
 def _norm(text: str) -> list[str]:
-    return re.sub(r"[^a-z0-9 ]", " ", text.lower().replace("-", " ")).split()
+    words = re.sub(r"[^a-z0-9 ]", " ", text.lower().replace("-", " ")).split()
+    stripped = [w for w in words if w not in STOPWORDS]
+    # An all-stopword phrase keeps its words rather than becoming a match for
+    # every entry in the catalog.
+    return stripped or words
 
 
 def resolve(phrase: str, techniques: dict) -> list[str]:
