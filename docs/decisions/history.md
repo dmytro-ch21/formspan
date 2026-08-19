@@ -29187,6 +29187,34 @@ the image picker and the reason is the same: `lib/sounds.ts` sets
 a binary that asked for one would contradict the app's own guard. A barcode is
 decoded from video frames; no audio is involved at any point.
 
+### One camera permission string, declared twice, deliberately identical
+
+Rebasing onto #325 (N44's camera surface) put **two plugins declaring
+`cameraPermission` in one `app.json`** — `expo-image-picker`, which N26 and N44
+use to photograph a meal or a machine, and `expo-camera`, which this feature
+uses to decode a barcode. Both write the same `NSCameraUsageDescription` key.
+
+`@expo/config-plugins`' `applyPermissions` resolves that as
+`infoPlist[permission] = permissions[permission] || infoPlist[permission] ||
+default`, so **an explicitly provided string always wins and plugins run in
+order** — meaning the later entry's text silently replaces the earlier one's.
+Left alone, the barcode justification would have become the prompt shown to
+somebody photographing their dinner. Nothing in the JS, no test and no CI job
+would have caught it, because the artefact is a string in a built binary.
+
+Both entries now carry the **same** string, covering all three uses and staying
+truthful about the difference that matters: a photo is sent to VOLA to be read,
+a barcode is decoded on the phone and never leaves it. Identical rather than
+"put the right one last", because order-dependence is the actual hazard — the
+next plugin added between them would move the answer again.
+
+The microphone flags survived the merge on both entries and were checked
+individually rather than by eye: `expo-image-picker` keeps #325's
+`microphonePermission: false`, and `expo-camera` carries both that and
+`recordAudioAndroid: false`. Two plugins, the same silent default, the same
+contradiction with `lib/sounds.ts` — which makes it an ecosystem default worth
+knowing rather than one package's quirk.
+
 ### Three endings, and each one says which it is
 
 The screen's `Phase` is a tagged union rather than a set of booleans, for the
