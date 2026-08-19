@@ -6589,6 +6589,21 @@ The round map (2026-08-18):
 - **Both sides of a position share one link.** "Mount" and "Under mount" both
   read about `mount`, so both counts are the family's. That is the glossary
   describing a position for both players, not a duplicate.
+Authorship on sequences (2026-08-18):
+
+- **No chain carries "· reference" today**, because nothing seeds an ownerless
+  sequence. That is correct, not a regression — the label used to appear off
+  `!editable` and now appears off `official`.
+- **When a reference chain does land**, it shows "· reference" on the list and
+  the edit route says "This is a reference sequence and cannot be edited."
+- **A chain you cannot edit for any other reason says only that** — "This
+  sequence cannot be edited" — with no claim about who wrote it. The gate is
+  still `editable`; only the sentence asks `official`.
+- **Against a server that omits `official`, nothing is labelled.** Unlabelled is
+  the safe failure; calling somebody else's chain VOLA's is not.
+- **Neither refusal message offers to copy the chain.** There is no copy
+  affordance and no endpoint behind one (F9); the message must not name one.
+
 Authorship on the web curricula list (2026-08-18):
 
 - **A stranger's public curriculum with `track: "syllabus"` appears under "From

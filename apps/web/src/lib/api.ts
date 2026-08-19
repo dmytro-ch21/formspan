@@ -2758,17 +2758,25 @@ export type Sequence = {
   /** Whether the CALLER may change this — resolved server-side so no client
    *  compares user ids to decide whether to show an edit affordance.
    *
-   *  False only for VOLA-authored reference chains **TODAY, and only because
-   *  `sequence`'s `visibleTo` has no public arm** — you can see your own and
-   *  VOLA's, nothing else, and sharing is by copy. So the sequences list can
-   *  still say "· reference" off `!editable` and be right.
-   *
-   *  **The day sequences gain a public arm, that label becomes a lie**, and it
-   *  is the exact bug F7 fixed for curricula: `editable` is owner-is-caller,
-   *  so it is false for VOLA's AND for every stranger's. The fix there was a
-   *  separate `official` field carrying `owner_user_id IS NULL`. Do the same
-   *  here rather than rediscovering it. */
+   *  It says NOTHING about who wrote this. Do not label a chain "reference"
+   *  off `!editable`; that is what `official` below is for. Three sites here
+   *  did, and were right only because `visibleTo` has no public arm — see T9,
+   *  and F7 for the same inference on curricula, where a public arm did exist
+   *  and the label was a lie about strangers. */
   editable: boolean;
+  /** VOLA authored this — `owner_user_id IS NULL`, resolved server-side.
+   *
+   *  OPTIONAL because that is what the wire can deliver: a server older than
+   *  T9 omits it. Test it as a TRUTHY filter and do not normalise it — an
+   *  older server yields `undefined`, nothing is labelled "reference", and an
+   *  unlabelled chain is the safe failure. The unsafe one is calling somebody
+   *  else's chain VOLA's. Do not "fix" this by defaulting it to `!editable`,
+   *  which is the inference the field exists to retire.
+   *
+   *  Nothing seeds an ownerless sequence yet, so today this is false
+   *  everywhere and no chain carries the label. That is correct: there are no
+   *  reference chains. */
+  official?: boolean;
   name: string;
   description: string;
   start_position_id: string | null;

@@ -26074,6 +26074,78 @@ Nothing here retracts the previous entry. The badge does render, it was seen,
 and `first_drilled_scored` **is** earnable — for an athlete with the technique on
 their focus list. What changes is the reason the evidence had to be inserted by
 hand: not that no client could write it, but that this account had no focus list.
+## 2026-08-18 — Sequences say who wrote them, and a test that proved nothing
+
+**T9**, the third and last surface of the inference F7 and F8 removed from
+curricula: a client reading `editable` as authorship.
+
+`Sequence.editable` is owner-is-caller. Three web sites labelled a chain
+"reference" off `!editable`, and all three were **right by accident** —
+`sequence`'s `visibleTo` is `(owner_user_id IS NULL OR owner_user_id = $1)`,
+with no public arm, so an athlete sees their own and VOLA's and nothing else.
+The day sequences gain a browse surface that label becomes a lie in the same
+breath, and nothing would fail. `official` lands now, carrying
+`owner_user_id IS NULL`, trustworthy for the same reason curricula's is:
+`bjj_sequences_source_matches_owner` is bidirectional, so ownership and
+provenance cannot drift apart.
+
+Nothing seeds an ownerless sequence yet, so **today the field is false
+everywhere and no chain carries the label** — which is correct, because there
+are no reference chains. The change is behaviour-neutral now and right later.
+
+**The edit page needed a split rather than a substitution**, and it is the one
+judgement in here worth reading. `if (!s.editable)` gates the builder from
+mounting, and that is the CORRECT use of `editable`: you may not edit this
+whoever wrote it, and mounting would offer a Save the API answers 403 to. Only
+the message — "This is a reference sequence" — was making an authorship claim.
+The gate stayed; the sentence now asks `official` and otherwise says only what
+it can see.
+
+**The first version of the test was worthless, and only the mutation said so.**
+It compared two rows, VOLA's and the caller's own, with a paragraph explaining
+that a single-row test could not see this defect and a comparison could. Then
+`Official = !Editable` — the exact inference the field exists to retire —
+passed it. Of course it did: with no public arm those two rows agree on both
+fields, so nothing in the fixture could separate them. It takes a **third** row,
+a stranger's, and no endpoint can return one today. The test scans the real
+column list without `visibleTo`, which is the shape a public arm would create;
+if sequences ever gain one, the test already describes that world. All three
+mutations are red now — the inference, hard-coded true, hard-coded false.
+
+A smaller trap found on the way: `user(t, pool)` derives its id from `t.Name()`,
+so calling it twice in one test returns the SAME id. The stranger was the caller
+for one run, which turned the third case into a duplicate of the second and
+failed loudly — the good kind.
+
+**And the third row turned out to close a pre-existing hole nobody was looking
+for.** Review noticed it and I measured it: mutate `Editable` to
+`s.OwnerUserID != nil` — "editable by anyone, if owned by anyone" — and before
+this branch the ENTIRE sequence suite passed. `TestCreateAndGetRoundTrip` only
+ever observes the owner's own row (true either way) and
+`TestReferenceChainIsReadableAndNotWritable` only the ownerless one (false
+either way); no reachable read surfaced a stranger's row, so the discriminating
+case did not exist. With the new test the only failing assertion in the suite is
+that third row's `editable`. The test hardens the permission field, not just the
+provenance one.
+
+Review also found the refusal message promising something that does not exist:
+"Copy it to make it yours" — there is no copy affordance for sequences anywhere
+in `apps/web`, and no endpoint behind one, since `CopyTo` is reachable only by
+accepting a share from a friend. Pre-existing copy, and this branch would have
+duplicated it into a second branch. The promise is gone; the affordance is filed
+as **F9**, because a reference chain you cannot adapt is a chain you can only
+admire.
+
+Open questions:
+
+- **Four surfaces now read `official` and each decided independently what an
+  absent one means** — two mobile strips drop the row, the web curricula list
+  reattributes it, and the sequences sites simply omit a label. All three are
+  right for their surface; nothing states the rule in one place.
+- Nothing seeds a reference sequence, so this whole field is untested against
+  real content and will stay that way until one exists. The stranger case is the
+  only part exercised against a row that could not otherwise appear.
+
 
 ## 2026-08-18 — A button to a route that was never there, and the check that could not see it
 

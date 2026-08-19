@@ -685,3 +685,84 @@ func TestClientIDCharsetAndLength(t *testing.T) {
 		}
 	}
 }
+
+// Authorship is a fact the server states, not one a client infers from the
+// absence of permission.
+//
+// **THREE rows, and the third is the only one that proves anything.** Two —
+// VOLA's and the athlete's own — is what this test had first, and it was
+// worthless: with no public arm on `visibleTo`, `!Editable` and `Official`
+// coincide on both, so replacing the implementation with the very inference
+// this field retires (`Official = !Editable`) passed. Measured, not assumed.
+//
+// The row that separates them is a STRANGER's, and it cannot be reached
+// through `Get` or `List` today — that is precisely T9's point: the label is
+// correct by accident, and the accident is the visibility predicate. So the
+// third case scans the real column list WITHOUT `visibleTo`, which is the
+// shape a public arm would create. If sequences ever gain one, this test
+// already describes the world it lands in.
+func TestASequenceSaysWhetherVolaWroteIt(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	uid := user(t, pool)
+	// NOT a second user(t, pool): that helper derives the id from t.Name(), so
+	// two calls in one test return the SAME id — which silently made the
+	// stranger the caller and the third case a duplicate of the second.
+	stranger := uid + "-stranger"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM bjj_sequences WHERE owner_user_id = $1`, stranger)
+	})
+
+	var volaID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO bjj_sequences (owner_user_id, source, name)
+		VALUES (NULL, 'seed', 'A reference chain') RETURNING id`).Scan(&volaID); err != nil {
+		t.Fatalf("seed VOLA sequence: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM bjj_sequences WHERE id = $1`, volaID) })
+
+	mine, err := repo.Create(ctx, uid, NewSequence{Name: "Mine"})
+	if err != nil {
+		t.Fatalf("create own sequence: %v", err)
+	}
+	theirs, err := repo.Create(ctx, stranger, NewSequence{Name: "Theirs"})
+	if err != nil {
+		t.Fatalf("create stranger sequence: %v", err)
+	}
+
+	vola, err := repo.Get(ctx, volaID, uid)
+	if err != nil {
+		t.Fatalf("get VOLA sequence: %v", err)
+	}
+	own, err := repo.Get(ctx, mine.ID, uid)
+	if err != nil {
+		t.Fatalf("get own sequence: %v", err)
+	}
+	// Deliberately not through Get, which would 404 — see the note above.
+	other, err := scanSequence(
+		pool.QueryRow(ctx, selectSequence+` WHERE s.id = $1`, theirs.ID), uid)
+	if err != nil {
+		t.Fatalf("scan stranger sequence: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name               string
+		got                Sequence
+		official, editable bool
+	}{
+		{"VOLA's", vola, true, false},
+		{"the caller's own", own, false, true},
+		// The case the whole field exists for: not yours AND not VOLA's.
+		// `!editable` says "reference" here; `official` must not.
+		{"a stranger's", other, false, false},
+	} {
+		if tc.got.Official != tc.official {
+			t.Errorf("%s: official = %v, want %v", tc.name, tc.got.Official, tc.official)
+		}
+		if tc.got.Editable != tc.editable {
+			t.Errorf("%s: editable = %v, want %v", tc.name, tc.got.Editable, tc.editable)
+		}
+	}
+}

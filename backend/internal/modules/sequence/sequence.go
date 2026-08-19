@@ -89,7 +89,29 @@ type Sequence struct {
 	// Editable is computed per caller. It exists so a client never compares
 	// user ids to decide whether to show an edit affordance — that shape is
 	// how client-side authorization gets written by accident.
-	Editable    bool   `json:"editable"`
+	//
+	// It answers "may you edit this" and NOTHING about who wrote it. Today the
+	// two happen to coincide here, because `visibleTo` has no public arm: you
+	// see your own and VOLA's, nothing else. That coincidence is what made
+	// three clients label a chain "reference" off `!editable` — see T9, and
+	// F7 for the same inference on curricula, where a public arm DID exist and
+	// the label became a lie about strangers.
+	Editable bool `json:"editable"`
+	// Official reports that VOLA authored this — the positive fact, so a client
+	// never infers authorship from the ABSENCE of permission.
+	//
+	// `owner_user_id IS NULL` is the definition, and
+	// `bjj_sequences_source_matches_owner` makes it trustworthy for the same
+	// reason curricula's twin does: `(owner_user_id IS NULL) = (source <>
+	// 'user')` is BIDIRECTIONAL, so an owned row cannot claim `seed`/`admin`
+	// and an ownerless one cannot claim `user`. Ownership and provenance cannot
+	// drift apart, which is what lets one boolean stand for both.
+	//
+	// **Nothing seeds an ownerless sequence yet**, so today this is false for
+	// every row that exists. That is the point of landing it now: the day a
+	// browse surface or a `visibility` column arrives, the clients are already
+	// asking the right question and nothing has to be remembered.
+	Official    bool   `json:"official"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 
