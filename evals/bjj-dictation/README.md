@@ -97,6 +97,45 @@ in `why`. A scorer that demands exactness there is measuring its own rigidity.
 
 ---
 
+## Which models to run, and what we predict
+
+Write the prediction down before the run, or the result is unfalsifiable — the
+same reason `expect` is filled before a model sees the case.
+
+N26 ran a two-provider bake-off on a structurally identical problem (prose →
+JSON schema → validated draft) and found something that transfers here:
+
+- Both providers were **12/12 correct** and refused gibberish 3/3, so this is
+  not a reliability split.
+- The split was the **confidence field**, and the precise shape matters.
+  `gpt-5.4-nano` marked "two scrambled eggs" as `medium` — where the quantity is
+  *stated in the sentence*, so `high` is simply correct, and both Haiku 4.5 and
+  `gpt-5.6-luna` give it. That is **not caution; it is noise.**
+
+**Why noise hurts this eval more than it hurt N26.** There, confidence only
+pre-focuses a quantity field — a wrong `medium` costs the athlete one glance.
+Here, the equivalent judgement *is* the scored metric: "should this have been
+`unresolved`?" is metric 1, weighted above everything else. Noise on that
+judgement lands directly on the primary score.
+
+So the prediction, on the record:
+
+> `gpt-5.4-nano` will score materially worse on **invention rate** than a
+> better-calibrated model, while plausibly matching or beating it on tag F1 —
+> because F1 rewards committing to an answer and invention rate punishes
+> committing to the wrong one.
+
+Run it anyway, explicitly, as the **expected-to-lose baseline**. A metric that
+only ever sees models that do well on it is not measuring anything. If nano
+*doesn't* lose on invention rate, that is a finding about the metric, not about
+nano.
+
+**Do not pick a tier from a price table.** N26 measured `gpt-5.6-luna` at 1.87×
+nano's cost per call *despite a lower list output price*, because it emitted
+2.3× the output tokens on an identical prompt and schema. Dictation's input is
+longer prose than a meal description, so the ratio here is unmeasured — treat
+every figure as needing its own run.
+
 ## The format
 
 ```jsonc

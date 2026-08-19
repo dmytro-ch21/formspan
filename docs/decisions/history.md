@@ -26733,6 +26733,88 @@ Open questions:
 - Mobile has neither copy path. It has no sequence route at all, and its workout
   screens do not offer copying.
 
+## 2026-08-19 — N26's measurements land on N33, and correct it
+
+Cross-session, and the useful kind: N26 (`feat/nutrition-estimate`) had already
+built the provider seam, wired both an Anthropic and an OpenAI client behind it,
+and run a two-provider bake-off. N33 spec'd the same shape a day later and got
+two things wrong that its measurements settle.
+
+Most of what was needed came out of **their history entry rather than a
+conversation** — the bake-off, the config seam, the cost figures. That is the
+documentation convention doing exactly what it is for; the only thing that
+needed asking was a decision.
+
+### The spec was wrong about thinking and effort
+
+§7 said "use thinking on at low or medium effort" without qualifying it. That is
+Opus-5 advice. **Haiku 4.5 — the tier N26 actually landed on — rejects both
+`thinking` and `effort` with real 400s**, measured there rather than inferred.
+Left alone it would have been read as a general instruction and reintroduced a
+bug that work had already paid for. The paragraph now says which models it
+applies to, and the platform constraint that follows: any `effort` knob has to
+be per-backend optional, never a required field.
+
+### And its cost model was arithmetic where a measurement now exists
+
+§7 computed ~$0.019 per warm call at Opus 5 rates. N26 measured ~0.24c on Haiku
+4.5 and ~0.054c on `gpt-5.4-nano` for a comparable extraction — roughly an order
+of magnitude under. The spec now carries the measurement and keeps the
+arithmetic labelled as arithmetic.
+
+The sharper lesson is theirs: **the price table pointed the wrong way.**
+`gpt-5.6-luna` measured 1.87× nano's cost per call *despite a lower list output
+price*, because it emitted 2.3× the output tokens on an identical prompt and
+schema. Reading a tier off a price list is not a substitute for a run.
+
+### The extraction is N33's, and that was decided rather than assumed
+
+N26's `completer` is package-private and typed to `EstimateInput`. Promoting it
+to a platform package is filed as **N36**, to be done by N33 on top after #287
+lands — agreed with that session. Their reasoning is the part worth keeping:
+with one consumer the interface would be designed against a guess, and the right
+generalisation is only visible once a second concrete shape exists.
+
+Four constraints ride along, all **found rather than designed**, each looking
+like boilerplate somebody would tidy away: the factory must return the
+interface rather than the concrete pointer (a nil `*openAICompleter` inside a
+non-nil interface reads as non-nil, skips the 503 branch and panics on the first
+request — live in N26, caught by review, missed by a test that used an untyped
+`nil`); refusal is shaped per-provider and cannot be normalised in transport;
+truncation maps to **refused** rather than unavailable, because the retry is
+deterministic and bills a second time; and no required `effort` field.
+
+**`DefaultModels` deliberately does not move**, and N33's own finding is the
+argument. A model that is noisy on a confidence field costs N26 one glance at a
+pre-focused quantity box and costs N33 a scored metric, so the two features want
+different defaults on the same provider. A platform-level map would force one to
+fight the other's choice.
+
+### A prediction, written down before the run
+
+N26 refined the finding N33 had borrowed. `gpt-5.4-nano` marking "two scrambled
+eggs" as `medium` — where the quantity is stated in the sentence, and both
+Haiku 4.5 and `gpt-5.6-luna` say `high` — is **not caution, it is noise on the
+confidence field.** Noise is worse for N34 than for N26: there it costs a
+glance, here the same judgement *is* metric 1.
+
+So `evals/bjj-dictation/README.md` now carries the prediction, on the record and
+before any run: nano scores materially worse on **invention rate** while
+plausibly matching on tag F1, because F1 rewards committing to an answer and
+invention rate punishes committing to the wrong one. It is to be run explicitly
+as the **expected-to-lose baseline** — a metric that only ever sees models that
+do well on it is not measuring anything, and if nano does not lose, that is a
+finding about the metric rather than about nano.
+
+### One stale line, found by not assuming
+
+Their entry listed "Nothing has been run against the real API. No key is
+configured here" three bullets above a bake-off that plainly describes live
+calls. Flagging it rather than believing it got it corrected at source: ~30
+live calls have happened, so the feature's premise is proven. What has never
+run is the *application* path — every handler, quota and refusal test still uses
+a fake estimator, and no request has reached a provider through the endpoint
+itself.
 
 ## Open items / known gaps as of this entry
 

@@ -294,6 +294,16 @@ prefix (catalog + instructions + schema) and a ~500-token draft:
 | Subsequent calls (cache read, 0.1×) | **~$0.019** |
 | Of which output | ~$0.013 |
 
+**Those are arithmetic, and N26 has since measured the real thing on a
+comparable call — treat the measurement as the better number.** For a
+structured extraction of the same shape it recorded ~0.24c on Haiku 4.5 and
+~0.054c on `gpt-5.4-nano`, roughly an order of magnitude under the figures
+above, which were computed at Opus 5 rates. N26's own note is the lesson:
+**the price table pointed the wrong way.** `gpt-5.6-luna` measured 1.87× nano's
+cost per call *despite a lower list output price*, because it emitted 2.3× the
+output tokens on an identical prompt and schema. Dictation's inputs are longer
+prose than a meal description, so re-measure rather than reading either table.
+
 **Output dominates a warm call**, so the lever is a tight schema, not a
 shorter catalog. Cache reads are ~0.1× and writes ~1.25× at the 5-minute TTL,
 so two calls inside the window already pay for the write; a 1-hour TTL doubles
@@ -320,10 +330,19 @@ one is plausible, pre-ticked, and one tap from being confirmed. Optimising F1
 would happily trade inventions for recall, which is the wrong trade for a
 screen whose whole job is to be confirmed quickly.
 
-Use **thinking on at low or medium effort** — it is an extraction task, not a
-reasoning one. Do not disable thinking: on this model that is capped at `high`
-effort anyway, and it introduces two failure modes (tool calls emitted as
-plain text, `<thinking>` tags leaking into output) for no benefit here.
+**Thinking and effort are per-model, and the guidance here was wrong.** This
+paragraph used to say "thinking on at low or medium effort" without qualifying
+it. That is Opus-5 advice, and **Haiku 4.5 — the tier N26 actually landed on —
+rejects both `thinking` and `effort` with real 400s** (measured by that work,
+not inferred). A generic `effort` knob is therefore a bug waiting to be
+reintroduced; if the transport ever grows one it has to be per-backend
+optional, never a required field.
+
+On a model that supports them, low or medium effort is right: this is an
+extraction task, not a reasoning one. Do not *disable* thinking on Opus 5 —
+that is capped at `high` effort anyway and introduces two failure modes (tool
+calls emitted as plain text, `<thinking>` tags leaking into output) for no
+benefit here.
 
 ### Failure modes, all of which degrade to the wizard
 
@@ -338,11 +357,54 @@ plain text, `<thinking>` tags leaking into output) for no benefit here.
 - **An explicit disclosure in the UI**, not only in a privacy page: this text
   is sent to draft your reflection.
 
+### The transport is N26's, and the extraction is this feature's job
+
+N26 built the provider seam: an `Estimator` the handler depends on, and a
+smaller `completer` underneath it that a provider implements in one file with
+one method — prompt, schema, parse, validation and error vocabulary all live
+above it and are shared. Selection is config (`ESTIMATE_PROVIDER`,
+`ESTIMATE_MODEL`), and an unknown provider fails the boot rather than falling
+back, since a silent fallback bills the wrong account while reading as applied.
+
+That `completer` is `nutrition`-package-private and typed to `EstimateInput`.
+**Promoting it to a platform package is N33's work, done on top after N26
+lands** — agreed with that session rather than assumed. The reasoning is worth
+keeping: with one consumer the interface would be designed against a guess, and
+the right generalisation is only visible once a second concrete shape exists.
+N33 is that shape.
+
+Four things any extraction has to carry across. All four were **found rather
+than designed**, and each looks like boilerplate somebody would tidy away:
+
+- **The factory returns the interface, not the concrete pointer.** A nil
+  `*openAICompleter` assigned into a non-nil interface reads as non-nil, so the
+  handler's 503 branch is skipped and the first request panics on a nil
+  receiver. That was live in N26; review caught it, and its own test missed it
+  because the test used an untyped `nil`.
+- **Refusal is shaped differently per provider and cannot be normalised in the
+  transport.** Anthropic signals it via `stop_reason`; OpenAI via
+  `message.refusal` on the choice. Code ported across without reading the API
+  treats an OpenAI refusal as an empty response and reports an outage.
+- **Truncation (`finish_reason: "length"`) maps to refused, not unavailable.**
+  The retry is deterministic — same input, same truncation, same bill — so
+  "unavailable" tells the client to retry into a guaranteed second charge.
+- **No required `effort` field**, per the correction above.
+
+**`DefaultModels` deliberately does NOT move.** The per-provider default is a
+per-*feature* judgement rather than a platform fact, and this feature's own
+finding is the argument: a model that is noisy on a confidence field costs N26
+one glance at a pre-focused quantity box, and costs N33 a scored metric. Two
+features want different defaults on the same provider, so a platform-level map
+would force one to fight the other's choice. The platform package takes a model
+id; the consumer chooses it.
+
 ### Open questions this leaves
 
-1. **No provider is wired anywhere in this repo** — no client, no key, no
-   dependency, in backend, apps or Railway. That is an account and
-   key-management decision before any code.
+1. ~~**No provider is wired anywhere in this repo**~~ — **resolved by N26.**
+   Both an Anthropic and an OpenAI client exist behind the `completer` seam,
+   the keys are real, and ~30 live calls have been made across both providers.
+   What remains for N33 is the platform extraction above, not a provider
+   decision.
 2. **Does the draft merge with existing tags or replace them?** Replace is
    simpler and matches how the wizard already treats a step. Merge is what
    somebody dictating a second time actually wants.
