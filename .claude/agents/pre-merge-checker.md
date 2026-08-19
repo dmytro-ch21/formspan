@@ -19,7 +19,21 @@ pnpm run verify      # from repo root — the authoritative gate
 
 As of this writing `verify` is:
 
-`validate_palette` → `generate_icons --check` → `check:python` → `fmt:api` → `vet:api` → `build:api` → `lint:openapi` → `lint:mobile` → `test:mobile` → `typecheck:mobile` → `check:brand-copies` → `lint:web` → `typecheck:web` → `test:web` → `lint:admin` → `typecheck:admin` → `test:admin`
+**Read the chain out of `package.json` rather than trusting the list below.**
+It is one line and it is authoritative:
+
+```bash
+node -e "console.log(require('./package.json').scripts.verify.split('&&').map(s=>s.trim()).join('\n'))"
+```
+
+This listing has now been stale **three times** — it missed `lint:mobile`'s
+ratchet, then `check:grip-parity` and `check:rate-parity`, then `check:evals` —
+and each time a session was told two real gates did not exist. A hardcoded copy
+of a chain that grows is a copy that rots; the command above cannot.
+
+As of 2026-08-19 the chain is 20 links:
+
+`validate_palette` → `generate_icons --check` → `check:python` → `check:grip-parity` → `check:rate-parity` → `check:evals` → `fmt:api` → `vet:api` → `build:api` → `lint:openapi` → `lint:mobile` → `test:mobile` → `typecheck:mobile` → `check:brand-copies` → `lint:web` → `typecheck:web` → `test:web` → `lint:admin` → `typecheck:admin` → `test:admin`
 
 ## Everything CI runs, by job
 
@@ -54,17 +68,43 @@ pnpm run lint:mobile
 pnpm run typecheck:mobile
 pnpm run test:mobile
 
-# --- scripts ---
+# --- scripts (all four are in `verify` AND in CI's "Scripts (Python)" job) ---
 python3 scripts/check-python-syntax.py     # = pnpm run check:python
+python3 scripts/check-grip-parity.py       # = pnpm run check:grip-parity
+python3 scripts/check-rate-parity.py       # = pnpm run check:rate-parity
+python3 scripts/check-dictation-evals.py   # = pnpm run check:evals
 ```
 
+The three parity/corpus checks each guard a duplicated vocabulary that has no
+shared home — grips across Go/mobile/web, the rate bands across
+`anthropometry.ts` and `nutrition/target.go`, and the dictation eval
+expectations against the real technique catalog. They are cheap, they are
+stdlib-only, and they are the reason those duplications are survivable. Do not
+skip them because they look like linting.
+
 Note `build:web`, `build:admin`, `test:api` and the Docker build are **not** in `verify` (each is slow or needs setup) but **are** in CI — so they are exactly the checks a local `verify` will not catch for you.
+
+The asymmetry runs the other way too, and it is safe: `validate_palette` and
+`generate_icons --check` are in `verify` and in **no** CI job. `verify` is the
+stricter of the two there, so a green CI run is not evidence those passed.
 
 ## The three that need more than "it exited 0"
 
 **`-p 1` on the backend tests is load-bearing, not decoration.** `go test ./...` runs packages in parallel against ONE shared database and several tests assert global counts; that measured 3 failures in 6 concurrent runs. If you run without `-p 1` you will produce failures CI would never see.
 
 **`lint:mobile` carries a `--max-warnings` ratchet** (`eslint . --max-warnings=54` in `apps/mobile/package.json`). It currently passes with **zero headroom**, so the next warning anyone adds anywhere in that app fails the gate. Always report the warning count and the cap, not just pass/fail — "54 of 54" is information the caller needs and "passed" hides it.
+
+**`typecheck:mobile` boots a Metro server, and its failures are real.** It is
+`pnpm run routes:mobile && tsc --noEmit`, and `routes:mobile` starts a dev
+server for ~5s to generate Expo Router's typed routes into a gitignored
+`.expo/` before killing it. That is not incidental slowness to route around:
+those types are what let `tsc` check route literals at all, and without them a
+clean checkout type-checks every `router.push('/nowhere')` as valid. That gap
+shipped N32 — a button whose only job was to unblock the athlete pushed a route
+the app has never had, and it surfaced only because one worktree happened to be
+carrying a stale generated file. The step **fails closed** by design, so a red
+Mobile job here is a real failure, never a flake — do not retry it away, and do
+not report it as environmental.
 
 **Backend integration tests skip silently without `TEST_DATABASE_URL`**, and a skipped test is indistinguishable from a passing one in the default output. If a local Postgres is reachable (`docker compose ps`), set it and:
 
