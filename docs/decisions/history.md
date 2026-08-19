@@ -30000,6 +30000,98 @@ misreports its own loss is the failure this whole feature exists to end.
 - The admin Health screen does not yet surface `occurrences`, `suppressed` or
   `lost_events` — they are in `details` and readable, but nothing draws
   attention to a device that has started losing events.
+## 2026-08-19 — The id that was only ever a slug (N47)
+
+Five follow-ups the frontend reviewer left on N44's identify screen (#325).
+None was blocking. The first was not latent either, which is the part worth
+recording.
+
+### An id put through a name search
+
+`choose()` resolved the picked candidate with
+`fetchExercises(getToken, { q: exerciseID })` and then `.find(e => e.id ===
+exerciseID)`. It worked, on every row of the catalog, because exercise ids are
+slugs of exercise names — a property nothing promises and the write path
+deliberately breaks: renaming an exercise keeps its id, which is the whole
+point of `TestRenamingKeepsTheID`.
+
+**The filing said N39 made this reachable. That was wrong, and checking it
+changed the priority rather than confirming it.** Renaming landed
+**2026-08-04 in #113**, fifteen days earlier; N39's diff touches only the note
+column. So this was live for a fortnight, and the first name to diverge from
+its slug would have triggered it.
+
+What the athlete would have seen is the worst available outcome: `SearchClause`
+requires every token to appear in `name`, so "Seated Cable Row" renamed to
+"Cable Row Machine" makes `seated-cable-row` match nothing, and the screen says
+**"That exercise is no longer in the catalog"** about a row the server returned
+two seconds earlier. A confident wrong answer — the class this screen's
+shortlist exists to prevent.
+
+The fix is `fetchExercise(id)` against `GET /v1/exercises/{exerciseID}`, which
+already existed. Three lines, and *cheaper* than the search it replaces, since
+it pulls one row instead of a ranked list with media.
+
+It also goes through `apiRequest` rather than `fetchExercises`' hand-rolled
+failure, and that is the half that matters beyond this bug. A bare `Error`
+cannot tell a caller "this id is gone" from "I could not ask", so the old path
+would have announced that the catalog had dropped an exercise **whenever the
+phone was offline**. Now a 404 says it is gone and everything else says
+something true. Same distinction N41's barcode lookup turns on, one screen
+over.
+
+### The other four
+
+**A swap threw away numbers it had the information to keep.** `swapExercise`
+received `undefined` as `fromLoadType`, so `sameShape` was always false and
+logged reps and weight were cleared even between two `weight_reps` machines.
+The screen's own comment says the full row is fetched *so that a swap knows
+whether numbers can carry* — and then discarded it. The replaced exercise's
+`load_type` is fetched too now; a failure there falls back to the old
+conservative behaviour rather than refusing the swap, because losing the
+carry-over is worse than nothing and much better than blocking the swap.
+
+**The error text was invisible and silent.** No colour where both sibling
+screens use `vola.danger`, and no `accessibilityLiveRegion` — so a VoiceOver
+user standing at the machine was never told the identification had failed, in
+precisely the one-handed-in-a-gym case the screen was designed for.
+
+**The record described UI that does not exist**, and the resolution was to
+correct the record. Both N44's task line and this screen's own header claimed
+`confidence` "is displayed"; it never was. Adding it would have been the wrong
+repair: `confidence` is per candidate and is not calibrated to correctness — the
+model has never seen this catalog — so four differing numbers, one beside each
+choice, at the exact moment of choosing, would be read as a ranking whatever the
+docstring called it. That is a "best match" badge in all but name, and the
+screen's central rule is that no candidate may be privileged. The client
+contract sanctions both readings ("display it or ignore it"), so ignoring it is
+a choice the screen is entitled to make and now states.
+
+**Two honest-state nits.** `retryable` survived a commit failure, so a stale
+`true` could render "You can try again." beneath "Session not found on this
+device" — a hint contradicting its own message. And an empty `candidates` array
+would have rendered "Looks like a cable stack. Which one is it?" above nothing
+at all. The contract says that is a 422 and never a 200, so this is defence
+against the contract breaking rather than against today — but answer-shaped
+nothing is the failure this repo keeps meeting, and it now says it is absence.
+
+### The screen had no test, which is why (1) survived review
+
+`app/__tests__/identifyScreen.test.tsx` is new and covers the commit path
+rather than the camera, which jest cannot drive. Its `@/lib/exercises` mock
+makes `fetchExercises` **throw**, so a regression to the search path fails
+loudly instead of quietly working for as long as ids stay slug-shaped.
+
+All five fixes were mutation-tested. Reverting the first turns four tests red,
+and the other four turn exactly one each.
+
+One process note. `pnpm run verify` caught two type errors in that new test file
+that `jest` alone had passed — mock signatures inferred as zero-arg, so a spread
+and a `mock.calls[0][3]` were both compile errors while the suite was green.
+That is the second time on these two branches that running the checks
+separately would have shipped something the chain catches, which is the
+argument `verify` was written to make.
+
 
 ## Open items / known gaps as of this entry
 

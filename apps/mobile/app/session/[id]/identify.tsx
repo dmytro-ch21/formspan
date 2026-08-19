@@ -7,6 +7,7 @@ import { useAuth } from '@clerk/clerk-expo';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { isNotFound } from '@/lib/apiError';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
@@ -17,7 +18,7 @@ import {
 } from '@/lib/identifyApi';
 import { emptySet, swapExercise } from '@/lib/sessions';
 import { readLocalSession, saveLocalSets } from '@/lib/sessionStore';
-import { fetchExercises, type Exercise } from '@/lib/exercises';
+import { fetchExercise, type Exercise } from '@/lib/exercises';
 import { request as requestSync } from '@/lib/sync';
 
 /**
@@ -42,10 +43,19 @@ import { request as requestSync } from '@/lib/sync';
  * doubled quantity — the dangerous outcome is the one that looks like an
  * answer. Every candidate here is an equal, deliberate tap.
  *
- * `confidence` is shown but never thresholded and never re-sorted on. It is not
- * calibrated to correctness — the model has never seen this catalog — so it
- * reads as "how clear was the photo", which helps somebody decide whether to
- * retake it and cannot help anybody decide which exercise this is.
+ * `confidence` is deliberately **not shown**, and never thresholded or
+ * re-sorted on. This paragraph used to claim it was displayed and the code has
+ * never displayed it; review caught the mismatch (N47), and correcting the
+ * claim is the right way round rather than adding the number.
+ *
+ * The reason is the rule above. `MachineCandidate.confidence` is per candidate,
+ * and it is not calibrated to correctness — the model has never seen this
+ * catalog — so at best it means "how clearly can I see a machine". Four
+ * differing numbers, one beside each choice, at the exact moment of choosing,
+ * would be read as a ranking no matter what it is called. That is a "best
+ * match" badge in all but name, and the note above says why one must not exist.
+ * The client contract sanctions both ("display it or ignore it"), so ignoring
+ * it is a choice this screen is entitled to make and now says it makes.
  */
 export default function IdentifyMachineScreen() {
   const { id, swap } = useLocalSearchParams<{ id: string; swap?: string }>();
@@ -117,22 +127,56 @@ export default function IdentifyMachineScreen() {
   async function choose(exerciseID: string) {
     if (!id || !userId || committing) return;
     setCommitting(exerciseID);
+    setError(null);
     try {
-      const matches = await fetchExercises(getToken, { q: exerciseID });
-      const exercise: Exercise | undefined =
-        matches.find((e) => e.id === exerciseID) ?? undefined;
-      if (!exercise) throw new Error('That exercise is no longer in the catalog.');
+      // BY ID. This used to put the id through the NAME search and then find
+      // the id in the results, which held only while ids stayed slugs of names
+      // — and renaming an exercise deliberately keeps its id, so the first
+      // diverged name would have reported an exercise the server had just
+      // returned as missing from the catalog. See `fetchExercise`.
+      let exercise: Exercise;
+      try {
+        exercise = await fetchExercise(getToken, exerciseID);
+      } catch (err) {
+        // "Gone" and "could not ask" are different answers and only one of
+        // them is about the catalog. Saying the first when the second is true
+        // is a confident false statement, which is the failure this whole
+        // screen is shaped around.
+        throw new Error(
+          isNotFound(err)
+            ? 'That exercise is no longer in the catalog.'
+            : 'Could not load that exercise. Try again when you have signal, or search for it by name.',
+        );
+      }
 
       const session = await readLocalSession(userId, id);
       if (!session) throw new Error('Session not found on this device.');
+      // The exercise being replaced, so `swapExercise` can tell whether the
+      // logged numbers carry over. Passing `undefined` made `sameShape` always
+      // false and wiped reps and weight even between two `weight_reps`
+      // machines — the row is fetched anyway, and this is the reason the
+      // comment above says it is. A failure here is NOT fatal: losing the
+      // carry-over is worse than nothing but far better than refusing the
+      // swap, so it falls back to the old conservative behaviour.
+      let fromLoadType: Exercise['load_type'] | undefined;
+      if (swapping) {
+        fromLoadType = await fetchExercise(getToken, swap)
+          .then((e) => e.load_type)
+          .catch(() => undefined);
+      }
       const next = swapping
-        ? swapExercise(session.sets, swap, exercise, undefined)
+        ? swapExercise(session.sets, swap, exercise, fromLoadType)
         : [...session.sets, emptySet(exercise.id, session.sets.length)];
       await saveLocalSets(userId, id, next);
       requestSync('exercise-added');
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      // A commit failure is not the photo's fault, and `retryable` is about the
+      // IDENTIFICATION. Left as it was, a stale `true` from an earlier network
+      // failure renders "You can try again." under "Session not found on this
+      // device", which is a hint that contradicts its own message.
+      setRetryable(false);
       setCommitting(null);
     }
   }
@@ -160,16 +204,37 @@ export default function IdentifyMachineScreen() {
           {busy ? <ActivityIndicator /> : <Text style={[styles.shootText, { color: accent.on }]}>Take a photo</Text>}
         </Pressable>
 
+        {/* Announced, and coloured. It rendered in the same weight as the lead
+            copy while both sibling screens use `vola.danger`, and a VoiceOver
+            user standing at the machine got no announcement at all that
+            identify had failed — which matters most in exactly the
+            one-handed-in-a-gym case this screen is designed for. */}
         {error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{error}</Text>
+          <View style={styles.errorBox} accessibilityLiveRegion="assertive">
+            <Text style={styles.errorText} testID="identify-error">
+              {error}
+            </Text>
             <Text style={styles.errorHint}>
               {retryable ? 'You can try again.' : 'Take another photo, or search instead.'}
             </Text>
           </View>
         ) : null}
 
-        {result ? (
+        {/* `candidates.length > 0`, not just `result`. The contract says an
+            empty list is a 422 and never a 200, so this is defence against the
+            contract being violated rather than against a case that happens
+            today — but the failure mode if it ever is would be the worst kind
+            here: a heading reading "Looks like a cable stack. Which one is
+            it?" above nothing at all, which is answer-shaped and answers
+            nothing. Absence must say it is absence. */}
+        {result && result.candidates.length === 0 ? (
+          <Text style={styles.none} testID="identify-empty">
+            That looks like a {result.equipment.replace(/-/g, ' ')}, but nothing in the catalog
+            matched it. Go back and search for it by name.
+          </Text>
+        ) : null}
+
+        {result && result.candidates.length > 0 ? (
           <View style={styles.results}>
             <Text style={styles.resultsHead}>
               Looks like a {result.equipment.replace(/-/g, ' ')}. Which one is it?
@@ -213,7 +278,7 @@ const styles = StyleSheet.create({
   shootBusy: { opacity: 0.6 },
   shootText: { fontWeight: '600', fontSize: 16 },
   errorBox: { gap: 4, paddingVertical: 8 },
-  errorText: { fontSize: 14, lineHeight: 20 },
+  errorText: { fontSize: 14, lineHeight: 20, color: vola.danger },
   errorHint: { fontSize: 12, opacity: 0.7 },
   results: { gap: 8, marginTop: 8 },
   resultsHead: { fontSize: 14, opacity: 0.8, marginBottom: 2 },
