@@ -76,8 +76,8 @@ export function setFocus(getToken: TokenGetter, techniqueIDs: string[]): Promise
 export type FocusRow = TechniqueRef & { name: string };
 
 /**
- * The technique rows the live step shows: the focus list, plus anything this
- * session already has live evidence for.
+ * The technique rows the live step shows: the focus list, plus every technique
+ * this session names — drilled today, or already carrying live evidence.
  *
  * The union is the part that matters. Focus alone would strand rows — drop a
  * technique from the list on web after logging against it, and its `attempted`
@@ -89,7 +89,23 @@ export type FocusRow = TechniqueRef & { name: string };
  * Focus entries win on collision: they carry the library's name, where a tag
  * carries only an id.
  */
-export function focusRows(focus: Focus[], tags: Tag[]): FocusRow[] {
+export function focusRows(
+  focus: Focus[],
+  tags: Tag[],
+  /**
+   * Library id -> display name, for rows that come from a TAG rather than a
+   * focus entry. A tag carries only an id, and since drilled techniques now
+   * produce rows (below) the common case is a technique the athlete picked by
+   * name one screen earlier — showing them `armbar-closed-guard` back would
+   * read as a different thing entirely.
+   *
+   * Optional, and the fallback is still the id: the caller's lookup is the
+   * technique library, which is unavailable on a cold launch with no signal —
+   * exactly when a gym reflection is being written. A readable slug beats a
+   * blank label, which is the trade the tag path already made.
+   */
+  names?: ReadonlyMap<string, string>,
+): FocusRow[] {
   const byID = new Map<string, FocusRow>();
   for (const f of focus) {
     // An empty id would draw two dead counters — 0 forever, untappable
@@ -120,15 +136,33 @@ export function focusRows(focus: Focus[], tags: Tag[]): FocusRow[] {
     // Reachable without anyone dropping a focus technique: `LiveStep`
     // swallows a `fetchFocus` failure on purpose, so every offline reflection
     // at a gym takes this path.
-    if (t.event === 'drilled' || t.event === 'conceded') continue;
+    // `conceded` only. `drilled` USED to be skipped here too, on the reasoning
+    // that a technique with no live outcome had nothing to edit — which was
+    // true, and was the whole problem: the wizard asked what you drilled on one
+    // screen and then offered no way to say it landed on the next, unless the
+    // technique happened to be on the focus list. An athlete with no focus list
+    // could not attribute a live outcome at ALL, which quietly made the
+    // technique funnel drilled-only and `first_drilled_scored` unreachable
+    // (N31).
+    //
+    // `bumpTechniqueOutcome` was already written for this: its doc says the
+    // source is "a drilled tag, or a focus entry", and it inherits category and
+    // position from whichever named the technique. The row was the only missing
+    // half.
+    //
+    // `conceded` stays out. It is the category grid's "Them" column and carries
+    // no technique; the per-technique defensive event is `defended`, which the
+    // grid does offer. A conceded row here would draw counters that no tap
+    // could ever fill.
+    if (t.event === 'conceded') continue;
     if (byID.has(t.technique_id)) continue;
     byID.set(t.technique_id, {
       technique_id: t.technique_id,
       category: t.category,
       position: t.position,
-      // No library lookup available for a technique that is no longer in
-      // focus; the id is a readable slug and beats a blank label.
-      name: t.technique_id,
+      // The caller's lookup when it has one — see `names` above — and the id
+      // otherwise, which is a readable slug and beats a blank label.
+      name: names?.get(t.technique_id) ?? t.technique_id,
     });
   }
   return [...byID.values()];

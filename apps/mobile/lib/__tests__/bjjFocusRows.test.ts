@@ -65,17 +65,71 @@ describe('focusRows', () => {
     expect(rows[0].name).toBe('Armbar from Guard');
   });
 
-  it('ignores untagged rows and drilled-only techniques', () => {
-    // Untagged rows belong to the category grid — pulling them in here would
-    // put the same event in two controls again, which is the whole thing this
-    // change exists to stop. And a technique that was only drilled has no live
-    // outcome to edit; it appears if it is in focus, not because it was
-    // drilled.
+  it('ignores untagged rows, which belong to the category grid', () => {
+    // Pulling them in here would put the same event in two controls again,
+    // which is the whole thing that separation exists to stop.
     const tags: Tag[] = [
       { category: 'sweep', event: 'scored', position: 'Guard', count: 3 },
-      { category: 'submission', event: 'drilled', position: 'Mount', technique_id: 'americana', count: 1 },
     ];
     expect(focusRows([], tags)).toEqual([]);
+  });
+
+  /*
+    A technique DRILLED today gets a row — the reversal, and the point of N31.
+
+    This test previously asserted the opposite: "a technique that was only
+    drilled has no live outcome to edit; it appears if it is in focus, not
+    because it was drilled." True, and it was the bug. The wizard asks what you
+    drilled on one screen and then, on the next, offered no way to say it
+    landed — unless the technique happened to be on the focus list. An athlete
+    with no focus list could attribute nothing at all, which silently made the
+    technique funnel drilled-only.
+
+    The old property is retired deliberately rather than left passing beside the
+    new one, because the two cannot both hold.
+  */
+  it('gives a technique drilled this session a live row', () => {
+    const tags: Tag[] = [
+      { category: 'submission', event: 'drilled', position: 'Mount', technique_id: 'americana', count: 6 },
+    ];
+    const rows = focusRows([], tags);
+    expect(rows).toHaveLength(1);
+    // Category and position are INHERITED from the drilled tag rather than
+    // recomputed — `bumpTechniqueOutcome` relies on that so the live row it
+    // writes joins the drilled one in the funnel.
+    expect(rows[0]).toEqual({
+      technique_id: 'americana',
+      category: 'submission',
+      position: 'Mount',
+      name: 'americana',
+    });
+  });
+
+  it('still leaves `conceded` out', () => {
+    // The category grid's "Them" column, which carries no technique. The
+    // per-technique defensive event is `defended`, which the grid does offer —
+    // a conceded row would draw counters no tap could fill.
+    const tags: Tag[] = [
+      { category: 'sweep', event: 'conceded', position: 'Guard', technique_id: 'scissor-sweep', count: 2 },
+    ];
+    expect(focusRows([], tags)).toEqual([]);
+  });
+
+  it('names a tag-derived row from the library when it can', () => {
+    const tags: Tag[] = [
+      { category: 'submission', event: 'drilled', position: 'Mount', technique_id: 'americana', count: 1 },
+    ];
+    const rows = focusRows([], tags, new Map([['americana', 'Americana from Mount']]));
+    expect(rows[0].name).toBe('Americana from Mount');
+  });
+
+  it('falls back to the id when the library is not loaded', () => {
+    // The offline gym case: `fetchTechniques` fails, the map is empty, and a
+    // readable slug beats a blank label. The counters work either way.
+    const tags: Tag[] = [
+      { category: 'submission', event: 'drilled', position: 'Mount', technique_id: 'americana', count: 1 },
+    ];
+    expect(focusRows([], tags, new Map())[0].name).toBe('americana');
   });
 
   it('returns [] for an athlete with no focus and no evidence', () => {
@@ -140,10 +194,13 @@ describe('defensive-only evidence', () => {
     expect(rows.map((r) => r.technique_id)).toEqual(['armbar-from-guard']);
   });
 
-  it('still ignores drilled and conceded, which have their own surfaces', () => {
-    // `drilled` is edited on the previous step; `conceded` is the category
-    // grid's right-hand column and carries no technique.
-    expect(focusRows([], [{ ...stopped, event: 'drilled' }])).toEqual([]);
+  it('still ignores conceded, which has its own surface', () => {
+    // `conceded` is the category grid's right-hand column and carries no
+    // technique. `drilled` used to be asserted here too and is now the
+    // opposite — see "gives a technique drilled this session a live row". Two
+    // tests pinned that exclusion and only one of them was obvious; this is
+    // the second, and it is why the reversal needed a full run rather than a
+    // single targeted test.
     expect(focusRows([], [{ ...stopped, event: 'conceded' }])).toEqual([]);
   });
 });

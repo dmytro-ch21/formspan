@@ -783,6 +783,26 @@ function LiveStep({
 }) {
   const [position, setPosition] = useState('');
   const [focus, setFocus] = useState<Focus[]>([]);
+  /*
+    Library names for the rows that come from a tag rather than from focus.
+
+    Needed since a technique DRILLED today gets a row (N31): the athlete picked
+    it by name on the previous screen, and handing back `armbar-closed-guard`
+    would read as something else. `fetchTechniques` is module-cached, so on the
+    ordinary path — step 1, then step 2 — this resolves without a request.
+
+    Silent on failure, and the same accelerator argument the focus fetch makes:
+    the fallback is the id, the counters work either way, and an error banner
+    about the library would be noise on the fastest screen in the flow.
+  */
+  const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map());
+  useEffect(() => {
+    const c = new AbortController();
+    fetchTechniques(getToken, c.signal)
+      .then((all) => setNames(new Map(all.map((t) => [t.id, t.name]))))
+      .catch(() => {});
+    return () => c.abort();
+  }, [getToken]);
 
   useEffect(() => {
     const c = new AbortController();
@@ -803,7 +823,7 @@ function LiveStep({
   // control able to edit them — stranded exactly the way the old drilled-step
   // counters stranded rows when a chip was removed. The union is what keeps
   // "what is displayed" and "what is stored" the same set.
-  const rows = useMemo(() => focusRows(focus, detail.tags), [focus, detail.tags]);
+  const rows = useMemo(() => focusRows(focus, detail.tags, names), [focus, detail.tags, names]);
 
   // Live tags recorded under some position other than the one on screen.
   //
@@ -877,8 +897,13 @@ function LiveStep({
 
       {rows.length > 0 && (
         <>
+          {/* NOT "Working on" alone any more. Rows can now be something
+              drilled once today, and for an athlete with no focus list the
+              section contains ONLY today's drills — so the old header named
+              a list they had never made. The footnote covers it, but a
+              footnote is read once and a header is read every time. */}
           <Text style={styles.label} accessibilityRole="header">
-            Working on
+            Working on & drilled today
           </Text>
           <RNView
             style={styles.gridHead}
@@ -928,7 +953,7 @@ function LiveStep({
             </RNView>
           ))}
           <Text style={styles.footnote}>
-            The techniques you&apos;re working on. “Missed” means you went for it and it
+            The techniques you&apos;re working on, and what you drilled today. “Missed” means you went for it and it
             didn&apos;t land, so missed plus landed is how often you went for it — and landed out of
             that is your hit rate, which is what a roadmap reads. “Stopped theirs” is the other
             direction — they went for it and you shut it down. Record it here rather than in the grid
