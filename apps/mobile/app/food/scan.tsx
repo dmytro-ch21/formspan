@@ -663,7 +663,7 @@ function messageForLookupFailure(err: unknown): string {
     return "You're offline, so a new barcode can't be looked up. A food you've scanned on this phone before still works without signal.";
   }
   if (err instanceof ApiError && err.status === 404 && err.code !== 'not_found') {
-    return 'Barcode lookup isn\u2019t switched on in this build yet. Describing the food works now.';
+    return 'The server this app is talking to does not have barcode lookup. Describing the food works now.';
   }
   if (err instanceof Error && err.message) return err.message;
   return 'The food lookup could not be reached. Try again in a moment.';
@@ -697,6 +697,12 @@ function provenanceCopy(source: CachedSource, cached: boolean): string {
       return `Drafted from your own description, not read off the packet — worth checking against the label.${where}`;
     case 'off':
       return `From Open Food Facts, which is crowd-sourced — worth a glance against the packet.${where}`;
+    case 'other':
+      // Named neither, because we do not know which. Claiming the VOLA catalog
+      // would be false and naming Open Food Facts would be false about someone
+      // else — the same mistake the describe screen's photo disclosure warns
+      // about, where a specific wrong recipient is worse than a vague one.
+      return `From an outside food database — worth a glance against the packet.${where}`;
     default:
       return `From the VOLA food catalog.${where}`;
   }

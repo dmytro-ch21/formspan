@@ -29308,9 +29308,30 @@ permanently.
 
 ### What is not built, and why
 
-**No backend.** The user scoped N41 to the phone half explicitly, so this ships
-against `GET /v1/nutrition/catalog/barcode/{barcode}`, which does not exist yet;
-it is filed as **N46**. Until it lands every scan ends in "couldn't check this
+**No backend.** The user scoped N41 to the phone half explicitly, so this was
+written against `GET /v1/nutrition/catalog/barcode/{barcode}` before that route
+existed, and for a while every scan correctly reported that it could not check.
+**N42 (#319) landed it while this PR was in review**, with the `not_found` /
+`unavailable` split the phone keys on — so the separate N46 claim (#326) was
+closed and the line is ticked as delivered there.
+
+Reading the shipped handler changed one thing here rather than merely
+confirming the contract. Its `sourceOf` returns `off`, `catalog`, or **the
+provider's own name**, so a provider added later reaches the phone as a string
+this build has never seen — and the client's `source` union had no room for it,
+which meant an unrecognised provider fell through to the catalog copy and told
+the athlete a third party's row came from VOLA. Naming Open Food Facts instead
+would have been the mirror error. There is now an `other` value with copy that
+claims neither, on the same reasoning the describe screen already records about
+its photo disclosure: a specific wrong recipient is worse than a vague one.
+
+Worth noting what the endpoint does that the contract did not ask for, because
+it is stricter in the right direction: `404 not_found` covers **both** an Open
+Food Facts 404 and an OFF `200` carrying `status: 0` (it genuinely does both,
+depending on whether the code is unallocated or malformed), while transport
+failures, 5xx and a 404 carrying HTML get a distinct `503 unavailable`. That is
+why the phone keys on the CODE and never on the HTTP status — a plain 200 from
+that provider can mean either found or not-found. Until it lands every scan ends in "couldn't check this
 one" — the honest failure, and not a usable feature. The source decision, shared
 with N42: **Open Food Facts, fetched on demand and cached, never bulk-ingested**,
 which is both the cheap answer and the one the ODbL constraint forces.

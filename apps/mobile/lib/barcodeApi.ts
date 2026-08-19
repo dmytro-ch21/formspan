@@ -61,7 +61,22 @@ export type ScannedFood = Macros & {
  * `off` is crowd-sourced from Open Food Facts and can be wrong in ways a
  * curated row is not.
  */
-export type ScanSource = 'catalog' | 'off';
+/**
+ * Whose data a resolved food is.
+ *
+ * `other` exists because the server's `sourceOf` does not promise these two: it
+ * returns `off` for Open Food Facts, `catalog` for our own row, and otherwise
+ * **the provider's own name** — so a third provider added later arrives here as
+ * a string this build has never seen. Widening the union is not defensive
+ * padding; without it an unrecognised provider falls through to the catalog
+ * copy and the screen tells the athlete a USDA row came from VOLA, or names
+ * Open Food Facts for data that is not theirs.
+ *
+ * That second failure is one the describe screen already records in its own
+ * words: naming the wrong recipient is worse than saying nothing, because it is
+ * a specific false statement rather than a vague one.
+ */
+export type ScanSource = 'catalog' | 'off' | 'other';
 
 /**
  * Where a CACHED row came from — the lookup's two sources, plus one the server
@@ -87,7 +102,19 @@ export type BarcodeLookup =
   /** The server answered and has nothing. `code` is echoed back for the copy. */
   | { status: 'unknown'; code: string };
 
-type BarcodeResponse = { food: ScannedFood; source: ScanSource };
+/**
+ * `source` is typed as a bare string on purpose: it is whatever the server
+ * sent, and narrowing happens once, deliberately, in `narrowSource`. Declaring
+ * it as `ScanSource` would be asserting a guarantee the endpoint does not make
+ * and would let an unknown provider masquerade as a known one at the type
+ * level, where nothing would ever check it.
+ */
+type BarcodeResponse = { food: ScannedFood; source: string };
+
+/** Anything this build does not recognise is `other`, never `catalog`. */
+function narrowSource(source: string): ScanSource {
+  return source === 'catalog' || source === 'off' ? source : 'other';
+}
 
 /**
  * Ask the server what this barcode is.
@@ -112,7 +139,7 @@ export async function lookupBarcode(
       getToken,
       `/nutrition/catalog/barcode/${encodeURIComponent(code)}`,
     );
-    return { status: 'found', food: res.food, source: res.source };
+    return { status: 'found', food: res.food, source: narrowSource(res.source) };
   } catch (err) {
     if (err instanceof ApiError && err.status === 404 && err.code === 'not_found') {
       return { status: 'unknown', code };

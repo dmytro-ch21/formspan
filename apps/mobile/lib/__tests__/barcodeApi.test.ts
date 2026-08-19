@@ -80,3 +80,38 @@ it('rethrows a server error rather than calling it a miss', async () => {
   mockApi.mockRejectedValue(new ApiError('Boom.', 'internal', 500));
   await expect(lookupBarcode(getToken, '4006381333931')).rejects.toBeInstanceOf(ApiError);
 });
+
+/**
+ * The server's `sourceOf` returns `off`, `catalog`, or **the provider's own
+ * name** — so a provider added later arrives as a string this build has never
+ * seen. It must not fall through to the catalog copy, which would tell the
+ * athlete a third party's row came from VOLA, and it must not be called Open
+ * Food Facts either, which would name the wrong company for someone else's
+ * data.
+ */
+describe('an unrecognised provider', () => {
+  it('is reported as neither ours nor Open Food Facts', async () => {
+    mockApi.mockResolvedValue({ food: FOOD, source: 'usda' });
+    const res = await lookupBarcode(getToken, '4006381333931');
+    expect(res).toEqual({ status: 'found', food: FOOD, source: 'other' });
+  });
+
+  it.each(['catalog', 'off'] as const)('passes %s through unchanged', async (source) => {
+    mockApi.mockResolvedValue({ food: FOOD, source });
+    const res = await lookupBarcode(getToken, '4006381333931');
+    expect(res).toMatchObject({ source });
+  });
+});
+
+/**
+ * The shipped endpoint answers 503 `unavailable` for a transport failure and
+ * 404 `not_found` for a genuine miss, and the split is keyed on the CODE rather
+ * than the status — a plain 200 from Open Food Facts can mean either found or
+ * not-found, so status alone cannot carry it.
+ */
+it('treats the server\'s 503 unavailable as could-not-ask, not a miss', async () => {
+  mockApi.mockRejectedValue(
+    new ApiError('could not reach the barcode provider', 'unavailable', 503),
+  );
+  await expect(lookupBarcode(getToken, '4006381333931')).rejects.toBeInstanceOf(ApiError);
+});

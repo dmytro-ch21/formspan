@@ -8815,10 +8815,19 @@ and a device test would need a physical packet. So everything below is written
 against the code path *after* a decode, plus one manual device case at the end
 that nothing automated can replace.
 
-**Note the lookup endpoint (N46) does not exist yet.** Until it does, every
-scenario in "A barcode we do not have" and "A resolved barcode" will report
-*could not check* instead. That is the correct behaviour for a missing endpoint,
-and it is why the unreachable cases below are the ones worth running first.
+**The lookup endpoint now exists** — N42 (#319) shipped
+`GET /v1/nutrition/catalog/barcode/{barcode}`, so these scenarios are runnable
+end to end against a deployed API. Two things it does that the scenarios below
+depend on: a genuine miss is `404 not_found` (covering both an Open Food Facts
+404 **and** an OFF `200` carrying `status: 0`), and a transport failure is a
+distinct `503 unavailable`. **Assert on the error CODE, never the HTTP status** —
+a plain 200 from that provider can mean either found or not-found, so status
+alone cannot carry the distinction the screen is built on.
+
+**Do not use an arbitrary well-formed barcode as a not-found fixture.** Open
+Food Facts returns `status: 1` with a full product for codes that were simply
+invented — `5012345678900` comes back with 267 fields and 406 kcal. `5690550000001`
+is the code #319 measured as a real 404.
 
 ### Happy path
 
@@ -8883,9 +8892,15 @@ and it is why the unreachable cases below are the ones worth running first.
 ### Regression trap
 
 - **A bare, unrouted 404 must not read as "we do not have this one".** Point the
-  app at a build where the endpoint is absent: every scan must report *could not
-  check*, never a missing product. This is the live state of the app until N46
-  lands, so it is testable today.
+  app at a deployment predating #319: every scan must report *could not check*,
+  never a missing product. This is **version skew and therefore permanent** — an
+  installed mobile build updates on the App Store's schedule, so a phone can
+  outrun the deployed API by weeks.
+- **A `503 unavailable` must not read as a missing product either.** It is the
+  provider being unreachable, and the server's own message says so in as many
+  words.
+- **An unrecognised `source`** (a provider added server-side that this build
+  does not know) must claim neither the VOLA catalog nor Open Food Facts.
 - **Symbology normalisation.** The same product scanned as UPC-A (12 digits) and
   as EAN-13 (13) must resolve to the same food. A US packet that misses while
   its EU twin resolves is this feature's one silent failure, and it surfaces as

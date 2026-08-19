@@ -294,19 +294,22 @@ describe('camera permission', () => {
   });
 });
 
-describe('the endpoint that is not deployed yet', () => {
+describe('a server without the barcode route', () => {
   /**
-   * The guaranteed production experience until N46 lands: an unrouted path
-   * 404s with no error envelope, so `apiRequest` fills the code with
-   * `unknown`. It must not read as a missing product, and it must not show the
-   * raw "Request failed (404)." to somebody holding a packet.
+   * Was the guaranteed experience until N42 (#319) shipped the endpoint; now
+   * it is VERSION SKEW, which is a permanent condition rather than a temporary
+   * one — an installed mobile build updates on the App Store's schedule, so a
+   * phone can outrun the deployed API by weeks. An unrouted path 404s with no
+   * error envelope, so `apiRequest` fills the code with `unknown`: it must not
+   * read as a missing product, and it must not show a raw
+   * "Request failed (404)." to somebody holding a packet.
    */
   it('explains itself rather than blaming the catalog', async () => {
     mockLookup.mockRejectedValue(new ApiError('Request failed (404).', 'unknown', 404));
     await scan();
     await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
     expect(screen.queryByTestId('scan-unknown')).toBeNull();
-    expect(screen.getByText(/switched on in this build yet/i)).toBeTruthy();
+    expect(screen.getByText(/does not have barcode lookup/i)).toBeTruthy();
   });
 });
 
@@ -345,5 +348,33 @@ describe('a lookup that is taking too long', () => {
     await waitFor(() => expect(screen.getByTestId('scan-hint')).toBeTruthy());
     expect(screen.queryByTestId('scan-looking-up')).toBeNull();
     release({ status: 'unknown', code: CODE });
+  });
+});
+
+describe('a food from a provider this build does not know', () => {
+  it('claims neither the VOLA catalog nor Open Food Facts', async () => {
+    mockLookup.mockResolvedValue({ status: 'found', food: OATS, source: 'other' });
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-provenance')).toBeTruthy());
+    const text = screen.getByTestId('scan-provenance');
+    expect(text).toHaveTextContent(/outside food database/i);
+    expect(text).not.toHaveTextContent(/VOLA food catalog/i);
+    expect(text).not.toHaveTextContent(/Open Food Facts/i);
+  });
+});
+
+describe('the shipped endpoint\'s unavailable code', () => {
+  /**
+   * 503 `unavailable` means the provider could not be reached. It is emphatically
+   * not "we do not have this one", and the server's own message says so.
+   */
+  it('renders as could-not-ask', async () => {
+    mockLookup.mockRejectedValue(
+      new ApiError('could not reach the barcode provider — this is not the same as the food being unknown', 'unavailable', 503),
+    );
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
+    expect(screen.queryByTestId('scan-unknown')).toBeNull();
+    expect(screen.getByText(/not the same as the food being unknown/i)).toBeTruthy();
   });
 });

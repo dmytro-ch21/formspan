@@ -84,7 +84,7 @@ export async function cachedBarcode(
     // unknown provenance being treated as a guess errs the safe way. Claiming
     // `catalog` for an unrecognised row would be the unsafe direction.
     source:
-      row.source === 'catalog' || row.source === 'off' || row.source === 'ai'
+      row.source === 'catalog' || row.source === 'off' || row.source === 'ai' || row.source === 'other'
         ? row.source
         : 'ai',
   };
