@@ -86,6 +86,16 @@ func (r *PostgresRepository) AdjustmentInputs(ctx context.Context, userID, on st
 	// A day counts when its total clears half the live target. Counting any day
 	// with a single row would let a fortnight of near-silence pass the guard
 	// that exists to catch exactly that.
+	//
+	// The bar is the CURRENT target's, applied across the whole window, which
+	// would misjudge days eaten under a previous target. It cannot affect a
+	// shipped proposal, and the reason is an invariant rather than luck:
+	// `MinDaysOnTarget` (14) is not less than `AdjustmentWindowDays` (14), so
+	// whenever a proposal is actually produced every day in the window falls
+	// after the target took effect. While `too_soon` is blocking, a stale bar
+	// can only make `not_logging` appear or vanish in `blocked_by` — cosmetic.
+	// **If either constant moves, that stops holding**, and this query needs
+	// the target that was live on each day instead.
 	err = r.pool.QueryRow(ctx, `
 		SELECT count(*)
 		FROM (

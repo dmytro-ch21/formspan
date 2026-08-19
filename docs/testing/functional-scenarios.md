@@ -7380,8 +7380,11 @@ a scenario that spoils two at once cannot tell which guard fired:
 - **The step is capped** at the smaller of 250 kcal and 10% of the target, and
   a capped proposal says so — assert both limits, since whichever is looser
   never gets exercised.
-- **Never below 110% of resting rate**, and the floor rounds UP: a floor that
-  rounds to nearest is not a floor.
+- **Never below resting rate** — the SAME floor the derivation uses, not a
+  multiple of it. A scenario asserting 110% would be asserting the bug: at 1.1
+  the rail binds on an ordinary derived target, and when it binds here it
+  proposes RAISING intake for someone failing to lose. The floor rounds up and
+  the step cap rounds down, each so it stays the bound it claims to be.
 - **Evidence outside the fortnight is ignored** — an old weigh-in or a
   month-old logged day must not count.
 

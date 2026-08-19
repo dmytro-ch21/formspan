@@ -8812,7 +8812,9 @@ paths:
 
 
         **The step is capped** at whichever is smaller of 250 kcal and 10% of
-        the current target, and never falls below 110% of resting rate. A capped
+        the current target, and never falls below resting rate — the same floor
+        the derivation applies, so a target this API is willing to derive is
+        never one it immediately proposes raising. A capped
         proposal says so in `basis.capped`, with `basis.raw_delta_kcal` showing
         what the arithmetic asked for — so the explanation reads as "we stopped
         here" rather than as arithmetic whose last line does not follow.

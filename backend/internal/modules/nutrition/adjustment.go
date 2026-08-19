@@ -264,14 +264,24 @@ func ProposeAdjustment(in AdjustmentInputs) (*Adjustment, []string) {
 	delta, capped, reason := capStep(rawDelta, in.TargetKcal)
 	to := in.TargetKcal + delta
 
-	if floor := in.RMRKcal * 1.1; in.RMRKcal > 0 && float64(to) < floor {
-		// Rounded UP, not to nearest. `roundTo10` would put a floor of 1874 at
-		// 1870 — four calories under the number this branch exists to hold, on
-		// the one rail whose whole purpose is being a lower bound. A floor that
-		// rounds downward is not a floor.
+	// `minKcalOverResting`, the SAME floor the derivation uses, and not the
+	// 1.1 multiplier this file first shipped.
+	//
+	// `target.go` removed that margin deliberately and says why: at 1.1 it
+	// bound on the reference athlete, whose 1954 kcal target on a standard
+	// 0.75%/week cut is one any coach would sign off — RMR 1780 puts the rail
+	// at 1958. Reintroducing it here is worse than leaving it in the
+	// derivation, because of what this file does when a rail binds: it would
+	// propose RAISING intake for an athlete who is failing to lose, and report
+	// it as a safety measure. That is the exact failure the sign of this
+	// correction is guarded against, arriving through a floor instead.
+	//
+	// One floor, one rationale. Rounded UP, because a floor that rounds to
+	// nearest is not a floor.
+	if floor := in.RMRKcal * minKcalOverResting; in.RMRKcal > 0 && float64(to) < floor {
 		to = ceilTo10(floor)
 		delta = to - in.TargetKcal
-		capped, reason = true, "held at 10% above resting metabolic rate"
+		capped, reason = true, "held at your resting metabolic rate"
 	}
 	basis.Capped, basis.CapReason = capped, reason
 
@@ -299,11 +309,15 @@ func ProposeAdjustment(in AdjustmentInputs) (*Adjustment, []string) {
 // capStep bounds one move to whichever of the two limits is tighter.
 func capStep(raw float64, current int) (delta int, capped bool, reason string) {
 	limit := math.Min(MaxStepKcal, float64(current)*MaxStepFraction)
+	// Rounded DOWN, for the mirror of the reason the floor rounds up: a 10%
+	// limit of 245 would become a 250 step under `roundTo10`, exceeding the cap
+	// this function exists to impose. A ceiling that rounds up is not a
+	// ceiling.
 	switch {
 	case raw > limit:
-		return roundTo10(limit), true, "increase capped to one step"
+		return floorTo10(limit), true, "increase capped to one step"
 	case raw < -limit:
-		return -roundTo10(limit), true, "decrease capped to one step"
+		return -floorTo10(limit), true, "decrease capped to one step"
 	}
 	return roundTo10(raw), false, ""
 }
@@ -334,12 +348,16 @@ func splitHalves(all []Weighin, on string) (recent, earlier []Weighin) {
 // while still obeying the module's coarse-rounding rule.
 func ceilTo10(v float64) int { return int(math.Ceil(v/10) * 10) }
 
+// floorTo10 rounds down, so a ceiling stays a ceiling.
+func floorTo10(v float64) int { return int(math.Floor(v/10) * 10) }
+
 // dayAfter is the next calendar day.
 //
 // Uses time arithmetic on a parsed date rather than string surgery, so month
-// and year ends are the calendar's problem. A malformed date returns itself,
-// which the handler turns into no proposal rather than a target dated to the
-// zero year.
+// and year ends are the calendar's problem. A malformed date returns itself
+// rather than a target dated to the zero year — unreachable over HTTP, since
+// the handler rejects a bad `on` with a 400 before the rule runs, but this
+// function does not get to assume its only caller.
 func dayAfter(on string) string {
 	t, err := parseDay(on)
 	if err != nil {

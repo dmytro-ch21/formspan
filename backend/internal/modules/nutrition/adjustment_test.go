@@ -179,6 +179,15 @@ func TestOneStepIsCappedBothWays(t *testing.T) {
 		// Both rows are needed: whichever limit is looser never gets exercised,
 		// so a single row passes against a rule that only ever applies one.
 		{"a small target caps at 10% instead", 80.0, 1500, 150},
+		// A limit that is NOT a multiple of ten: 10% of 2450 is 245. Rounding
+		// to nearest would return 250 and exceed the cap this function exists
+		// to impose, and every row above is a round number, so none of them can
+		// tell the two roundings apart.
+		{"a limit off the ten-boundary rounds down", 80.0, 2450, 240},
+		// Losing too fast, so the cap binds on an INCREASE. Every row above
+		// takes the decrease branch; a mutation to the increase branch survives
+		// a table that never enters it.
+		{"an increase is capped too", 77.0, 3000, MaxStepKcal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := goodInputs("2026-08-19")
@@ -199,21 +208,56 @@ func TestOneStepIsCappedBothWays(t *testing.T) {
 	}
 }
 
-func TestTheProposalNeverGoesBelowTheRestingFloor(t *testing.T) {
-	// Below RMR*1.1 is not a cut, it is a hazard, and the arithmetic will ask
-	// for it whenever somebody stalls on an already-low target.
+func TestTheProposalNeverGoesBelowResting(t *testing.T) {
+	// The floor is the athlete's resting rate, and NOT a multiple of it.
+	//
+	// This first shipped as RMR*1.1, taken from the spec. `target.go` had
+	// already removed that exact margin and recorded why — at 1.1 it binds on
+	// the reference athlete, whose 1954 kcal target on a standard cut is one
+	// any coach would sign off, because RMR 1780 puts the rail at 1958. Here
+	// the consequence is worse than a noisy explanation: when this rail binds
+	// it proposes RAISING intake for somebody failing to lose, and calls it
+	// safety. Found by review.
 	in := goodInputs("2026-08-19")
 	in.TargetKcal = 1800
-	in.RMRKcal = 1700 // floor is 1870, above the current target already
+	in.RMRKcal = 1700
 	adj, blocked := ProposeAdjustment(in)
 	if adj == nil {
 		t.Fatalf("no proposal: %v", blocked)
 	}
-	if float64(adj.ToKcal) < in.RMRKcal*1.1 {
-		t.Fatalf("to_kcal = %d, below the floor of %.0f", adj.ToKcal, in.RMRKcal*1.1)
+	if float64(adj.ToKcal) < in.RMRKcal*minKcalOverResting {
+		t.Fatalf("to_kcal = %d, below resting (%.0f)", adj.ToKcal, in.RMRKcal*minKcalOverResting)
 	}
 	if !adj.Basis.Capped {
 		t.Error("a proposal held at the floor must report itself capped")
+	}
+}
+
+func TestTheAdjustmentFloorIsTheDERIVATIONSFloor(t *testing.T) {
+	// The invariant behind the test above, asserted directly rather than
+	// implied by a number.
+	//
+	// Two files each owning a floor is how they drift, and drift here is not
+	// cosmetic: a target the derivation blesses would be one the adjustment
+	// immediately proposes raising, so the two halves of the same feature would
+	// disagree about the same athlete on the same day. A reference athlete
+	// makes it concrete — 1954 kcal against RMR 1780 is legal to derive, so it
+	// must also be legal to hold.
+	const referenceRMR, referenceTarget = 1780.0, 1954
+	if float64(referenceTarget) < referenceRMR*minKcalOverResting {
+		t.Fatalf("the derivation's own reference target %d is below its floor — the constant moved",
+			referenceTarget)
+	}
+	in := goodInputs("2026-08-19")
+	in.TargetKcal = referenceTarget
+	in.RMRKcal = referenceRMR
+	adj, blocked := ProposeAdjustment(in)
+	if adj == nil {
+		t.Fatalf("no proposal: %v", blocked)
+	}
+	if adj.DeltaKcal > 0 {
+		t.Fatalf("delta = %+d — a steady weight on a cut must not RAISE intake; the floor is binding where the derivation would not",
+			adj.DeltaKcal)
 	}
 }
 

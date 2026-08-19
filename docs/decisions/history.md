@@ -27946,12 +27946,31 @@ precisely the athlete sitting on weight before a competition, for a reason its
 own comment misdescribed. Removed, with a test pinning that a stalled
 making-weight athlete still gets a proposal.
 
-### A floor that rounded down
+### Two rails that were not the bounds they claimed to be
 
 `roundTo10` rounds to nearest, so a resting floor of 1874 became 1870 — four
 calories under the number the rail exists to hold. A floor that rounds downward
 is not a floor; it uses `ceilTo10` now. Found by a test assertion failing on
-floating-point, which is a duller cause than the defect it exposed.
+floating-point, which is a duller cause than the defect it exposed. Review then
+found the mirror: the STEP CAP rounded to nearest too, so a 10% limit of 245
+became a 250 step. `floorTo10` now, and the test table gained a limit off the
+ten-boundary — every existing row was a round number, so none of them could
+tell the two roundings apart.
+
+### The floor was the wrong number entirely, and review caught it
+
+It shipped as `RMR * 1.1`, taken from the spec. `target.go` had already removed
+that exact margin and recorded why: at 1.1 it binds on the reference athlete,
+whose 1954 kcal target on a standard 0.75%/week cut is one any coach would sign
+off, because RMR 1780 puts the rail at 1958.
+
+Reintroducing it here is worse than leaving it in the derivation, because of
+what THIS file does when a rail binds. It would propose **raising** intake for
+an athlete who is failing to lose, and report it as a safety measure — the
+exact failure the sign of the correction is guarded against, arriving through a
+floor instead of through arithmetic. The adjustment now uses
+`minKcalOverResting`, the derivation's own constant, and a test asserts the two
+agree by running the reference case rather than by restating a number.
 
 ### What the mutation pass covered
 

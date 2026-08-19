@@ -409,6 +409,7 @@ func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 // NOT a 400. The request was fine; the profile is missing something, and the
 // client's fix is a form rather than a retry — the same shape body uses for a
 // check-in with no bodyweight.
+
 // Adjustment proposes a change to the live target, or says why it will not.
 //
 // **Never an error and never a write.** A withheld proposal is 200 with
