@@ -26784,6 +26784,16 @@ request — live in N26, caught by review, missed by a test that used an untyped
 truncation maps to **refused** rather than unavailable, because the retry is
 deterministic and bills a second time; and no required `effort` field.
 
+A third session read the seam at `46b2476` and relayed the same conclusion, with
+two additions worth keeping. The binding is **one parameter** — `complete(ctx,
+in EstimateInput)` and its reaching for `EstimateSchema()`,
+`estimateSystemPrompt` and `userPrompt(in)` — so swapping it for a
+provider-neutral request makes this a package move, green on both sides with no
+behaviour change and no paid re-run of the bake-off. And the sequencing is
+tighter than "after #287": the extraction is cheap only while it is justified
+*and* not yet duplicated, so it has to happen **before N33 writes any provider
+code**, not merely before it ships.
+
 **`DefaultModels` deliberately does not move**, and N33's own finding is the
 argument. A model that is noisy on a confidence field costs N26 one glance at a
 pre-focused quantity box and costs N33 a scored metric, so the two features want
