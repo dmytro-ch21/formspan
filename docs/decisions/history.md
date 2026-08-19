@@ -28528,12 +28528,12 @@ N26's and N33's, on the same provider.
 - **Nothing has been run against a real photograph**, which is the same gap N40
   closed for nutrition and found two errors in one image. This feature should
   expect the same treatment before anyone trusts its accuracy.
-- **The mobile camera surface is not built.** Per the platform rule this is
-  unambiguously a phone thing — it is done standing in front of a machine — and
-  the backend is the half that makes the tier choice measurable, so it went
-  first. No id is filed for the mobile half here on purpose: an id inside a diff
-  is invisible to `gh pr list` until it merges, which is how two sessions
-  allocated N39 this same afternoon.
+- **The mobile camera surface is not built** — that is **N44**. Per the platform
+  rule it is unambiguously a phone thing, done standing in front of a machine,
+  and the backend is the half that makes the tier choice measurable, so it went
+  first. The id was allocated and broadcast **separately** rather than written
+  into this diff, because an id inside an open PR is invisible to `gh pr list`
+  until it merges — which is how two sessions allocated N39 this same afternoon.
 - **The spend bound is a rate limit, not a quota.** 20 per 30 minutes, keyed on
   the account. Weaker than nutrition's persisted daily quota, which survives a
   deploy and reports a remaining count; this is in-memory and resets on restart.
