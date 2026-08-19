@@ -43,7 +43,9 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "VOLA uses your photos so you can attach a progress picture to a check-in. Pictures stay private to your account and are never shown to anyone else."
+          "photosPermission": "VOLA uses your photos so you can attach a progress picture to a check-in. Pictures stay private to your account and are never shown to anyone else.",
+          "cameraPermission": "VOLA uses the camera so you can photograph a meal to estimate it, or a gym machine to identify it. Photos are sent to VOLA to read, and are not stored.",
+          "microphonePermission": false
         }
       ],
       "expo-sharing"

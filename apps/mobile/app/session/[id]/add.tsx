@@ -199,6 +199,26 @@ export default function AddExerciseToSessionScreen() {
         testID="session-add-search"
       />
 
+      {/* The camera route (N44), beside search rather than instead of it.
+          Searching is the fast path when you know the name; this is for the
+          machine you cannot name, which is the only case it helps with. It
+          stays visible while searching so an empty result set is not the only
+          way to discover it. */}
+      <Pressable
+        onPress={() =>
+          router.push(
+            swapping
+              ? `/session/${id}/identify?swap=${encodeURIComponent(swap)}`
+              : `/session/${id}/identify`,
+          )
+        }
+        accessibilityRole="button"
+        accessibilityLabel="Identify a machine with the camera"
+        style={styles.identify}
+      >
+        <Text style={styles.identifyText}>Don&apos;t know its name? Photograph the machine</Text>
+      </Pressable>
+
       {error && (
         <Text style={styles.error} accessibilityLiveRegion="polite">
           {error}
@@ -249,6 +269,16 @@ export default function AddExerciseToSessionScreen() {
 }
 
 const styles = StyleSheet.create({
+  identify: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: vola.line,
+  },
+  identifyText: { fontSize: 14, opacity: 0.9 },
   container: { flex: 1, padding: 16, gap: 12 },
   search: {
     borderWidth: 1,

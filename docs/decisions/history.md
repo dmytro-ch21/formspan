@@ -29034,6 +29034,93 @@ A guard whose outcome is redundant and a test that no longer reaches its subject
 both look exactly like working apparatus.
 
 
+## 2026-08-19 — The camera surface, and a permission the binary declared that the code refused
+
+N44: `app/session/[id]/identify.tsx`. Point the phone at a machine you cannot
+name, get N7's shortlist, tap one. Reached from the add-exercise screen, beside
+search rather than instead of it — searching is the fast path when you know the
+name, and this only helps with the case where you do not.
+
+### The rule the screen exists to obey
+
+**The top candidate is not pre-selected, and must never become so.**
+
+That is not styling. Nothing on the server can tell a correct `seated-cable-row`
+from a plausible wrong one — which is exactly why four candidates come back
+instead of one answer. Pre-selecting the first looks like good UX and destroys
+the mechanism: an athlete who taps confirm on a pre-selected wrong row **has
+logged the wrong exercise without ever making a choice**, and afterwards neither
+they nor the server can tell. Every candidate is an equal, deliberate tap.
+
+`confidence` is displayed, never thresholded and never re-sorted on. It cannot be
+calibrated to correctness by a model that has never seen this catalog.
+
+The 422 path gets its own treatment for the same family of reason: a refusal is
+**deterministic**, so the screen offers "take another photo" rather than "try
+again". One word apart in the UI, opposite in effect — a retry button there is a
+button that cannot work.
+
+### No new native dependency, contrary to the brief
+
+The task line said `expo-camera` already shipped; a later correction said it was
+absent and N44 would need it, a dev-client rebuild, and coordination with N41 to
+avoid two branches adding it.
+
+Both were wrong in the same direction. **`expo-camera` is not installed and is
+not needed.** `expo-image-picker` already ships, is already a plugin, and
+`launchCameraAsync` already opens the system camera in `food/describe.tsx` — the
+meal photo path has been doing this since N26. So: no new dependency, no
+rebuild, no collision, and the interaction is the one athletes have already met.
+
+Worth recording as a method rather than a fact: the answer came from grepping
+for what the app already calls, not from reading either briefing. Two sessions
+in a row asserted the dependency state confidently and neither had looked.
+
+### The finding on the way: a permission the binary declared and the code refused
+
+`lib/sounds.ts` sets `allowsRecording: false`, with a test whose comment reads
+*"Asking for the microphone as a side effect of wanting a bell would be
+indefensible."* Somebody thought about this and guarded it.
+
+The built `Info.plist` says:
+
+```
+"NSMicrophoneUsageDescription" => "Allow $(PRODUCT_NAME) to access your microphone"
+```
+
+`expo-image-picker`'s config plugin adds it — and `RECORD_AUDIO` on Android —
+unless you explicitly pass `microphonePermission: false`. The runtime guard
+prevents the *prompt*; the build still *declares the capability*, which is what
+App Store review and the privacy label read. **The guard was honoured and the
+binary contradicted it**, and nothing connected the two.
+
+Now `microphonePermission: false`. The same block gained real
+`cameraPermission` copy, which had been falling through to Expo's generic
+`"Allow $(PRODUCT_NAME) to access your camera"` while the photos string beside it
+was carefully written VOLA prose — a gap the meal photo path was already
+shipping, and one N44 would have doubled.
+
+This is the day's recurring shape once more, in a fourth costume: **a guard that
+looks like it settled the question while the thing it guards against is declared
+somewhere else.** The test passes, the intent is documented, and the binary says
+otherwise.
+
+### What is not done
+
+- **Unverified on a device.** The screen has never rendered. Mobile cannot be
+  checked through Expo web here (`expo-sqlite`'s web build breaks the bundle for
+  every route), so this needs a Simulator or a real phone, and a permission
+  change needs a **rebuild** to take effect — `microphonePermission: false`
+  changes generated native config, not JS.
+- **The spend bound is still N7's server-side rate limit** (20 per 30 minutes),
+  not the persisted daily quota the task line asks for. That wants a table and a
+  remaining-count in the response; deliberately deferred rather than half-built,
+  and the caps should be sized against a measurement, since N26's were wrong by
+  ~35x when the cost was finally measured.
+- **Still no real photograph through the whole path**, end to end. That gap is
+  now two features wide.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
