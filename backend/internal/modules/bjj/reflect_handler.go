@@ -131,6 +131,16 @@ func (h *DraftHandler) Draft(w http.ResponseWriter, r *http.Request) {
 	// A failure to record is LOGGED and never fails the request: the athlete
 	// should not lose a draft they have already paid for because the meter
 	// write lost a race.
+	//
+	// **A transport failure that spent NOTHING is charged too, and that is the
+	// unhappy edge of this rule.** A refused connection or a revoked key never
+	// reached a token, but the sentinel cannot say so — `ErrDraftUnavailable`
+	// covers both "failed before the call" and "failed after it". So during a
+	// provider outage the 503's implicit advice to retry burns the athlete's ten
+	// and can lock them out for the rest of the day after service returns.
+	// Charging is still the right default (the alternative lets a caller loop on
+	// a failure mode they can induce), but the interaction is real and is filed
+	// as F16 rather than left for somebody to rediscover during an outage.
 	if err := h.usage.RecordDraft(context.WithoutCancel(r.Context()), DraftRecord{
 		UserID: userID, Succeeded: draftErr == nil,
 		Model: draft.Model, TagCount: len(draft.Tags),
@@ -172,6 +182,20 @@ func (h *DraftHandler) Draft(w http.ResponseWriter, r *http.Request) {
 		after.Used++
 		if after.Remaining > 0 {
 			after.Remaining--
+		}
+		if after.ResetsAt == nil {
+			// The pre-call figure had nothing in the window, so it carried no
+			// reset — but this call is now in it, and it is the oldest, so it
+			// ages out a window from now. Leaving it nil would report
+			// `used: 1, resets_at: null`, which contradicts the field's own
+			// contract ("null when nothing is used") on the one path a client
+			// cannot check for itself.
+			//
+			// When `Used` was already non-zero the stale value is exact rather
+			// than approximate: a new call never changes when the OLDEST one
+			// ages out.
+			resets := now.Add(DraftQuotaWindow)
+			after.ResetsAt = &resets
 		}
 		httplog.FromContext(r.Context()).Warn("bjj: draft quota re-read failed",
 			"user_id", userID, "err", err)
@@ -259,11 +283,29 @@ func humaniseDraftWait(d time.Duration) string {
 	return fmt.Sprintf("about %d hours", h)
 }
 
-// draftRetryAfterSeconds is the header value: whole seconds, never below one,
-// since a Retry-After of 0 invites the immediate retry the quota just refused.
+// draftRetryAfterSeconds is the header value: whole seconds, never below one.
+//
+// **ROUNDED UP, and that is the contract rather than a preference.**
+// `docs/architecture/api-conventions.md` promises a `Retry-After` "rounded up so
+// that obeying it exactly succeeds", and `internal/platform/ratelimit` honours
+// it with `roundUpSecond`. Truncating instead is a real bug and not a cosmetic
+// one: the window is `created_at > since`, so a client that waits exactly the
+// advertised number of seconds is still INSIDE the window by the fractional
+// part, gets a second 429, and learns that obeying the header does not work.
+//
+// Never below one for the same family of reason — a `Retry-After: 0` invites the
+// immediate retry the quota just refused.
+//
+// (`nutrition.retryAfterSeconds` still truncates; this was copied from it before
+// the rounding rule was checked. Filed as F15 rather than fixed here, because
+// that endpoint's own tests pin its arithmetic.)
 func draftRetryAfterSeconds(d time.Duration) int {
-	if s := int(d.Seconds()); s > 0 {
-		return s
+	if d <= 0 {
+		return 1
 	}
-	return 1
+	s := int((d + time.Second - 1) / time.Second)
+	if s < 1 {
+		return 1
+	}
+	return s
 }

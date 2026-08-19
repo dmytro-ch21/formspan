@@ -1148,7 +1148,12 @@ components:
       properties:
         field:
           type: string
-          description: Path in the draft — "rounds", "tags[2].count".
+          description: >
+            Path into THIS response — "rounds", "tags[2].count". A `tags[N]`
+            index always resolves against the `tags` array as returned, never
+            against the model's own answer: notices belonging to a tag that was
+            cut by the 40-tag limit are dropped with it, since an explanation of
+            a change to something absent has nothing to explain.
           example: tags[2].count
         was:
           type: string
@@ -6693,7 +6698,10 @@ paths:
         that fills the reflection wizard's chips.
 
 
-        **This writes nothing.** No session, no tag, no row of any kind. The
+        **No session and no tag is written.** The only row this endpoint writes
+        is a usage-metering one — a count, a model id and a timestamp, carrying
+        none of what was said and none of what came back — which is what the
+        quota below is derived from, and why a failed call still counts. The
         athlete corrects the draft and the confirmed version goes through
         PUT /v1/bjj/sessions/{sessionID} like any other reflection. A tag
         written without confirmation is indistinguishable from one the athlete
@@ -6718,8 +6726,10 @@ paths:
         a wrong id is checkable in a way a wrong quantity never is.
 
 
-        **Numbers are checked against the words.** A count or a scalar that does
-        not appear in what the athlete said is dropped, with a `not_spoken`
+        **Numbers are checked against the words.** A scalar that does not appear
+        in what the athlete said is dropped to null and a tag `count` is floored
+        to 1 — the tag itself is evidence the thing happened at least once, and
+        only the repetitions are unverifiable — each with a `not_spoken`
         notice. An invented row is visible to somebody correcting a draft; an
         invented number is not — "rolled five" coming back as six reads exactly
         like a correct draft and is one tap from being confirmed. No confidence

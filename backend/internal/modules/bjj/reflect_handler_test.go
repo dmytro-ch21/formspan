@@ -366,3 +366,72 @@ func TestHumaniseDraftWaitReadsLikeSomebodySayingIt(t *testing.T) {
 		t.Errorf("draftRetryAfterSeconds(negative) = %d, want 1", got)
 	}
 }
+
+// **Retry-After is rounded UP**, which api-conventions.md states as a promise:
+// obeying it exactly has to succeed. Truncating is not a rounding preference —
+// the window is `created_at > since`, so a client that waits the advertised
+// whole seconds is still inside it by the fraction that was dropped, and gets a
+// second 429 for doing exactly what it was told.
+func TestRetryAfterRoundsUpSoObeyingItWorks(t *testing.T) {
+	for _, tc := range []struct {
+		d    time.Duration
+		want int
+	}{
+		{30 * time.Second, 30},
+		{30*time.Second + time.Millisecond, 31},
+		{500 * time.Millisecond, 1},
+		{time.Hour + 200*time.Millisecond, 3601},
+	} {
+		if got := draftRetryAfterSeconds(tc.d); got != tc.want {
+			t.Errorf("draftRetryAfterSeconds(%v) = %d, want %d", tc.d, got, tc.want)
+		}
+	}
+}
+
+// The degraded path, when the post-call quota re-read fails. The response still
+// has to obey the field's own contract — `resets_at` is null only when nothing
+// is used, and this call has just used one.
+func TestADegradedQuotaStillReportsWhenOneComesBack(t *testing.T) {
+	usage := &memDraftUsage{quotaFn: func() DraftQuota { return NewDraftQuota(0, nil) }}
+	h := NewDraftHandler(&fakeDrafter{out: goodDraft()}, usage)
+	// The re-read fails by returning an error the second time; the fake has one
+	// answer, so the failure is simulated by making the re-read error directly.
+	h.usage = &failOnSecondRead{inner: usage}
+
+	w := callDraft(t, h, `{"dictation":"swept him"}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body struct {
+		Quota DraftQuota `json:"quota"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Quota.Used != 1 || body.Quota.Remaining != DailyReflectionDrafts-1 {
+		t.Errorf("quota = %+v, want the call just made counted by hand", body.Quota)
+	}
+	if body.Quota.ResetsAt == nil {
+		t.Error("resets_at is null while one draft is used — the client is told nothing ever comes back")
+	}
+}
+
+// failOnSecondRead answers the gate and then fails the re-read, which is the
+// only ordering in which the handler's fallback arithmetic runs.
+type failOnSecondRead struct {
+	inner *memDraftUsage
+	reads int
+}
+
+func (f *failOnSecondRead) DraftQuota(ctx context.Context, u string, now time.Time) (DraftQuota, error) {
+	f.reads++
+	if f.reads > 1 {
+		return DraftQuota{}, context.DeadlineExceeded
+	}
+	return f.inner.DraftQuota(ctx, u, now)
+}
+
+func (f *failOnSecondRead) RecordDraft(ctx context.Context, rec DraftRecord) error {
+	return f.inner.RecordDraft(ctx, rec)
+}

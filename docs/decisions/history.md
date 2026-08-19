@@ -31115,6 +31115,44 @@ of inheriting a claim.
 - **The double-count `/v1/bjj/positions` documents applies here too.** A draft can
   produce a technique-tagged row and an untagged category row for the same
   exchange, and nothing links them at write time.
+- **The quota gate is advisory under concurrency.** Count-then-act with no lock,
+  so simultaneous requests from one athlete can overshoot the cap by the number
+  in flight. Bounded and priced in fractions of a cent, and now stated on
+  `CheckDraftQuota` rather than left for a reviewer to find.
+- **A provider outage burns the allowance** — filed as **F16**. A transport
+  failure that spent no tokens is metered identically to a refusal, because the
+  `llm` sentinels cannot distinguish "failed before the call" from "failed after
+  it", so an outage plus the 503's implicit retry advice can lock an athlete out
+  for the rest of the day. The real fix is a third outcome in the transport, and
+  it applies to `/v1/nutrition/estimate` equally.
+
+### What review changed
+
+Both blocking findings were things the code claimed and did not do, which is the
+pair worth recording.
+
+**`Retry-After` rounded the wrong way.** `api-conventions.md` promises the header
+is "rounded up so that obeying it exactly succeeds", and
+`internal/platform/ratelimit` honours it — but this truncated, copied from
+`nutrition`'s estimate handler before the rule was checked. The window is
+`created_at > since`, so a client that waited exactly the advertised seconds was
+still inside it and got a second 429 for doing what it was told. Fixed and pinned
+here; **nutrition still has it**, filed as **F15**, because that endpoint's own
+arithmetic tests should move with the fix.
+
+**The contract said "no row of any kind".** It writes one metering row per call —
+which the migration comment, this entry and the 429 documentation all state
+plainly, while the endpoint description denied it. A contract that overstates a
+guarantee is worse than one that stays quiet, because it is the artefact a client
+author reads instead of the code.
+
+Three smaller ones taken: `Notice.Field` now indexes the tag list the client
+RECEIVES rather than the model's answer (they diverge exactly when the 40-tag cut
+fires, so a notice could point past the end); the degraded quota path no longer
+reports `used: 1, resets_at: null`, which contradicted the field's own contract;
+and the number vocabulary gained the compounds and half-hour forms whose absence
+would have dropped a correct value — "twenty five", "half an hour", "an hour and a
+half". Each is mutation-checked.
 
 
 ## Open items / known gaps as of this entry

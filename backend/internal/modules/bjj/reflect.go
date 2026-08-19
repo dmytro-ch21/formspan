@@ -365,8 +365,21 @@ func ResolveDraft(raw Draft, cat Catalog, dictation string) Draft {
 		unresolved = append(unresolved, u)
 	}
 
+	// Per-tag notices are collected ALONGSIDE the tags rather than appended
+	// straight onto the draft, so that `Notice.Field` can index the list the
+	// client actually receives.
+	//
+	// The two lists diverge in both directions: a tag with a broken vocabulary
+	// is skipped, and the whole list is truncated at MaxDraftTags AFTER the
+	// per-tag checks have run. Using the model's own index would therefore emit
+	// `tags[44].count` on a response holding forty tags, and a client resolving
+	// that path would index into nothing. Notices belonging to a truncated tag
+	// are dropped with it — the tag is not in the answer, so an explanation of a
+	// change made to it has nothing to explain.
 	tags := make([]DraftTag, 0, len(raw.Tags))
-	for i, t := range raw.Tags {
+	tagNotices := make([][]Notice, 0, len(raw.Tags))
+	for _, t := range raw.Tags {
+		var notices []Notice
 		if !t.Category.Valid() || !t.Event.Valid() {
 			// Unreachable through a structured-output enum, and checked anyway:
 			// this package's contract is that every tag it returns is one the
@@ -386,10 +399,10 @@ func ResolveDraft(raw Draft, cat Catalog, dictation string) Draft {
 				// the athlete resolves with the ordinary picker, so an invented
 				// id costs a tap instead of writing a technique nobody named.
 				unresolved = append(unresolved, UnresolvedPhrase{
-					Phrase: id, Category: t.Category, Event: t.Event,
+					Phrase: humanisePhrase(id), Category: t.Category, Event: t.Event,
 				})
-				out.Notices = append(out.Notices, Notice{
-					Field: fmt.Sprintf("tags[%d].technique_id", i), Was: id, Reason: NoticeUnknownTechnique,
+				notices = append(notices, Notice{
+					Field: "technique_id", Was: id, Reason: NoticeUnknownTechnique,
 				})
 				t.TechniqueID = nil
 			default:
@@ -411,8 +424,8 @@ func ResolveDraft(raw Draft, cat Catalog, dictation string) Draft {
 
 		switch {
 		case t.Count < 1:
-			out.Notices = append(out.Notices, Notice{
-				Field: fmt.Sprintf("tags[%d].count", i), Was: strconv.Itoa(t.Count), Reason: NoticeCountBelowOne,
+			notices = append(notices, Notice{
+				Field: "count", Was: strconv.Itoa(t.Count), Reason: NoticeCountBelowOne,
 			})
 			t.Count = 1
 		case t.Count > 1 && !spokenNumber(dictation, t.Count):
@@ -420,8 +433,8 @@ func ResolveDraft(raw Draft, cat Catalog, dictation string) Draft {
 			// happened at least once; only the repetitions are unverifiable, and
 			// keeping the event while dropping the multiplier is the reading
 			// that discards the least.
-			out.Notices = append(out.Notices, Notice{
-				Field: fmt.Sprintf("tags[%d].count", i), Was: strconv.Itoa(t.Count), Reason: NoticeNotSpoken,
+			notices = append(notices, Notice{
+				Field: "count", Was: strconv.Itoa(t.Count), Reason: NoticeNotSpoken,
 			})
 			t.Count = 1
 		case t.Count > maxTagCount:
@@ -429,13 +442,14 @@ func ResolveDraft(raw Draft, cat Catalog, dictation string) Draft {
 			// so the trace above catches it first. Kept because `Tag.Validate`
 			// enforces the same ceiling and this package's promise is that every
 			// tag it emits would pass it.
-			out.Notices = append(out.Notices, Notice{
-				Field: fmt.Sprintf("tags[%d].count", i), Was: strconv.Itoa(t.Count), Reason: NoticeUnknownValue,
+			notices = append(notices, Notice{
+				Field: "count", Was: strconv.Itoa(t.Count), Reason: NoticeUnknownValue,
 			})
 			t.Count = 1
 		}
 
 		tags = append(tags, t)
+		tagNotices = append(tagNotices, notices)
 	}
 
 	if len(tags) > MaxDraftTags {
@@ -443,6 +457,13 @@ func ResolveDraft(raw Draft, cat Catalog, dictation string) Draft {
 			Field: "tags", Was: strconv.Itoa(len(tags)), Reason: NoticeTooManyTags,
 		})
 		tags = tags[:MaxDraftTags]
+		tagNotices = tagNotices[:MaxDraftTags]
+	}
+	for i, notices := range tagNotices {
+		for _, n := range notices {
+			n.Field = fmt.Sprintf("tags[%d].%s", i, n.Field)
+			out.Notices = append(out.Notices, n)
+		}
 	}
 
 	out.Tags = tags
@@ -519,12 +540,26 @@ var numberWords = map[int][]string{
 	18: {"eighteen"},
 	19: {"nineteen"},
 	20: {"twenty"},
-	30: {"thirty"},
+	30: {"thirty", "half an hour", "half hour"},
 	40: {"forty"},
 	45: {"forty five", "fortyfive"},
 	50: {"fifty"},
 	60: {"sixty", "hour"},
-	90: {"ninety"},
+	90: {"ninety", "hour and a half"},
+}
+
+// humanisePhrase turns an invented id into something a person can read.
+//
+// The athlete is about to see this in the picker as "what you said", and
+// `armbar-closed-gard` renders as a system artefact rather than as their own
+// words. The raw id is kept on the notice's `Was`, so nothing is lost — this is
+// only what is shown.
+//
+// A deliberate divergence from `postprocess` in run.py, which puts the raw id
+// in the phrase. It cannot move a score: the eval reads `unresolved` only for
+// its category and event, never its text.
+func humanisePhrase(id string) string {
+	return strings.TrimSpace(strings.ReplaceAll(id, "-", " "))
 }
 
 var wordSplit = regexp.MustCompile(`[^a-z0-9]+`)
@@ -580,6 +615,19 @@ func spokenNumber(dictation string, n int) bool {
 	for _, form := range numberWords[n] {
 		if strings.Contains(joined, " "+form+" ") {
 			return true
+		}
+	}
+	// A compound in the twenties and up — "twenty five", and "twenty-five" too,
+	// since the split above has already dropped the hyphen. Built rather than
+	// enumerated: eight tens by nine units is seventy-two map entries for a
+	// range nobody says out loud about rounds, but which round LENGTHS and
+	// minute counts reach routinely.
+	if n > 20 && n < 100 && n%10 != 0 {
+		tens, units := numberWords[(n/10)*10], numberWords[n%10]
+		if len(tens) > 0 && len(units) > 0 {
+			if strings.Contains(joined, " "+tens[0]+" "+units[0]+" ") {
+				return true
+			}
 		}
 	}
 	return false

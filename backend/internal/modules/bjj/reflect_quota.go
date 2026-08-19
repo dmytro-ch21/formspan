@@ -128,6 +128,19 @@ type DraftUsageRepository interface {
 // spend that has already happened, which is not a quota but a receipt — and the
 // handler test asserts the completer was called zero times when this refuses,
 // because that is the only way to know the ordering did not quietly invert.
+//
+// # It is advisory under concurrency, deliberately
+//
+// Count-then-act with no lock and no transaction, so N simultaneous requests
+// from one athlete at `used = 9` all pass and the cap overshoots by up to the
+// number in flight. That is a decision rather than an oversight: the exposure is
+// bounded by concurrency and priced in fractions of a cent, and the alternatives
+// — a serialisable transaction or an advisory lock — put a write-path lock in
+// front of a call that already carries a model round-trip.
+//
+// `NewDraftQuota` clamps `Remaining` at zero, so an overshoot reports as
+// exhausted rather than as a negative count. Written down because a future
+// reviewer will find it, and an unstated trade-off reads as a bug.
 func CheckDraftQuota(ctx context.Context, repo DraftUsageRepository, userID string, now time.Time) (DraftQuota, error) {
 	q, err := repo.DraftQuota(ctx, userID, now)
 	if err != nil {

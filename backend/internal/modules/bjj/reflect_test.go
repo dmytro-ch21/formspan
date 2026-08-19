@@ -2,6 +2,7 @@ package bjj
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +49,9 @@ func TestAnUnknownTechniqueIDBecomesSomethingTheAthletePicks(t *testing.T) {
 	if got.Tags[0].TechniqueID != nil {
 		t.Errorf("technique_id = %q, want nil — an invented id must never reach a client", *got.Tags[0].TechniqueID)
 	}
-	if len(got.Unresolved) != 1 || got.Unresolved[0].Phrase != "flying-armbar-from-the-moon" {
+	// HUMANISED, because the athlete sees this in the picker as "what you
+	// said", and a slug reads as a system artefact rather than as their words.
+	if len(got.Unresolved) != 1 || got.Unresolved[0].Phrase != "flying armbar from the moon" {
 		t.Fatalf("unresolved = %+v, want the phrase moved there for the athlete to pick", got.Unresolved)
 	}
 	if got.Unresolved[0].Category != CategorySubmission || got.Unresolved[0].Event != EventScored {
@@ -56,6 +59,46 @@ func TestAnUnknownTechniqueIDBecomesSomethingTheAthletePicks(t *testing.T) {
 	}
 	if len(got.Notices) != 1 || got.Notices[0].Reason != NoticeUnknownTechnique {
 		t.Fatalf("notices = %+v, want one %s — a silent drop is as bad as a silent guess", got.Notices, NoticeUnknownTechnique)
+	}
+	// The RAW id survives on the notice, so humanising the phrase loses nothing
+	// an operator or a bug report would need.
+	if got.Notices[0].Was != "flying-armbar-from-the-moon" {
+		t.Errorf("notice.was = %q, want the id exactly as the model wrote it", got.Notices[0].Was)
+	}
+	if got.Notices[0].Field != "tags[0].technique_id" {
+		t.Errorf("notice.field = %q, want a path into the returned tag list", got.Notices[0].Field)
+	}
+}
+
+// `Notice.Field` has to resolve against the list the client RECEIVES, not
+// against the model's answer. The two diverge exactly when the list is
+// truncated — and a notice pointing past the end is worse than no notice, since
+// a client resolving the path indexes into nothing.
+func TestNoticePathsIndexTheReturnedTagsAfterTruncation(t *testing.T) {
+	raw := Draft{}
+	for i := 0; i < MaxDraftTags+5; i++ {
+		// Every tag carries an unsaid count, so every one of them earns a
+		// notice — including the five that are about to be cut.
+		raw.Tags = append(raw.Tags, DraftTag{Category: CategoryControl, Event: EventDrilled, Count: 7})
+	}
+
+	got := ResolveDraft(raw, fixtureCatalog(), "drilled a lot")
+
+	if len(got.Tags) != MaxDraftTags {
+		t.Fatalf("tags = %d, want %d", len(got.Tags), MaxDraftTags)
+	}
+	for _, n := range got.Notices {
+		if n.Reason == NoticeTooManyTags {
+			continue // the list-level notice, which names no index
+		}
+		var idx int
+		if _, err := fmt.Sscanf(n.Field, "tags[%d].", &idx); err != nil {
+			t.Errorf("notice field %q is not a tag path: %v", n.Field, err)
+			continue
+		}
+		if idx >= len(got.Tags) {
+			t.Errorf("notice %q points past the %d tags actually returned", n.Field, len(got.Tags))
+		}
 	}
 }
 
@@ -173,6 +216,31 @@ func TestACountTheAthleteDidSaySurvives(t *testing.T) {
 		}
 		if len(got.Notices) != 0 {
 			t.Errorf("%q: notices = %+v, want none", tc.dictation, got.Notices)
+		}
+	}
+}
+
+// The forms people actually say. Each of these was a false DROP before it was
+// added — a correct number the guard could not find, which costs the athlete a
+// blank field. That is the cheap failure by design, but it is still a failure,
+// and the fix is always to widen the vocabulary rather than to loosen the rule.
+func TestTheNumberVocabularyCoversHowPeopleSayIt(t *testing.T) {
+	for _, tc := range []struct {
+		dictation string
+		n         int
+		want      bool
+	}{
+		{"rounds were twenty five minutes somehow", 25, true},
+		{"we went twenty-five minutes", 25, true},
+		{"drilled for half an hour", 30, true},
+		{"rolled for an hour and a half", 90, true},
+		{"six five-minute rounds", 5, true},
+		// And the guard still bites: a number nobody said stays unfound.
+		{"drilled for half an hour", 25, false},
+		{"six rounds", 7, false},
+	} {
+		if got := spokenNumber(tc.dictation, tc.n); got != tc.want {
+			t.Errorf("spokenNumber(%q, %d) = %v, want %v", tc.dictation, tc.n, got, tc.want)
 		}
 	}
 }
