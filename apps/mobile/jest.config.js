@@ -29,6 +29,26 @@
  */
 module.exports = {
   preset: 'jest-expo',
+  /**
+   * Above the 10s `asyncUtilTimeout` five component suites configure, because
+   * jest's own default is 5000ms and it wins.
+   *
+   * Measured, not inferred: a `waitFor` configured at 10s dies at 5003ms with
+   * jest's "Exceeded timeout of 5000 ms", and a bare 9s test dies at 5001ms.
+   * So those files were asking for ten seconds of polling and getting five —
+   * losing exactly the headroom they were given to survive a slow render under
+   * load, which is the condition they were widened for.
+   *
+   * 15s rather than "off": a bound that a hung test hits in fifteen seconds is
+   * worth keeping, and this is still two orders of magnitude under the ten
+   * minutes the Go suite ran unbounded until F12. It raises the ceiling so the
+   * configured budget is reachable; it does not remove one.
+   *
+   * NOTE this does not by itself fix the oversubscription flake CLAUDE.md
+   * documents — that is `--maxWorkers`, deliberately unset here. It removes a
+   * contradiction that was making those tests fail earlier than intended.
+   */
+  testTimeout: 15_000,
   testMatch: ['**/__tests__/**/*.test.ts?(x)'],
   collectCoverageFrom: ['lib/**/*.ts', 'components/**/*.tsx', 'app/**/*.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
