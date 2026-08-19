@@ -303,9 +303,22 @@ margin.
 
 Cheaper tiers are a real option for a task this constrained — Sonnet 5 is
 $3/$15 and Haiku 4.5 $1/$5 — but that is a decision to make against an eval
-set of real dictations, not by assumption. **Build the eval set first**: fifty
-recorded sentences with hand-written expected drafts is the artefact that
-makes the model choice measurable, and it outlives whichever model is current.
+set of real dictations, not by assumption.
+
+**The eval set exists** (N34): `evals/bjj-dictation/`, with its scoring metric
+in the README and a validator wired into `verify` and CI. It is the half of
+this work that was never blocked on a provider, and it pins the rules below
+before any model sees them. Thirty authored cases so far and **no recorded
+ones**, which its own README is blunt about: an authored corpus scores
+self-consistency rather than reality, and a tier comparison run against it is
+directional at best.
+
+The metric's shape is the part worth carrying here. **Invention rate is ranked
+above accuracy**, and the reason is who catches the error: a missing tag is
+visible — the athlete is looking at the draft and adds it — while an invented
+one is plausible, pre-ticked, and one tap from being confirmed. Optimising F1
+would happily trade inventions for recall, which is the wrong trade for a
+screen whose whole job is to be confirmed quickly.
 
 Use **thinking on at low or medium effort** — it is an extraction task, not a
 reasoning one. Do not disable thinking: on this model that is capped at `high`
