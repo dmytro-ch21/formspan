@@ -1,4 +1,4 @@
-package nutrition
+package llm
 
 import (
 	"context"
@@ -12,51 +12,49 @@ import (
 
 // The OpenAI backend.
 //
-// Added to answer a pricing question with a measurement rather than a table:
-// on our shape the budget tier lists at roughly a quarter of Haiku's cost, and
-// whether it holds up on portion confidence — the thing this feature actually
-// sells — is not something a price list can say.
+// The output cap is `req.MaxTokens` rather than a field on this struct. It used
+// to be a field so a test could set it low enough to actually PROVOKE
+// truncation against the live API — otherwise the `length` branch below is
+// reasoned about and never run, which is how it came to carry a comment
+// describing a budget that did not exist. A per-request value keeps that
+// ability and hands it to every caller.
 //
-// It is given the SAME prompt and the SAME schema as every other provider (see
-// prompt.go), because a comparison where each side gets its own instructions
+// Moved here from `nutrition` with N36. It is given whatever prompt and schema
+// the caller supplies, which is the property that made the original bake-off
+// mean anything: a comparison where each side gets its own instructions
 // measures the instructions rather than the models.
 type openAICompleter struct {
 	client openai.Client
 	model  string
-	// maxTokens is the output ceiling. A field rather than the constant used
-	// directly so a test can set it low enough to actually PROVOKE truncation
-	// against the live API — otherwise the `length` branch below is reasoned
-	// about and never run, which is how it came to carry a comment describing a
-	// budget that did not exist.
-	maxTokens int64
 }
 
-func newOpenAICompleter(apiKey, model string) *openAICompleter {
+func newOpenAI(apiKey, model string) *openAICompleter {
 	return &openAICompleter{
-		client:    openai.NewClient(option.WithAPIKey(apiKey)),
-		model:     model,
-		maxTokens: estimateMaxTokens,
+		client: openai.NewClient(option.WithAPIKey(apiKey)),
+		model:  model,
 	}
 }
 
-func (o *openAICompleter) providerName() string { return string(ProviderOpenAI) }
+func (o *openAICompleter) Model() string { return o.model }
 
-func (o *openAICompleter) complete(ctx context.Context, in EstimateInput) (string, string, error) {
+func (o *openAICompleter) Name() string { return string(ProviderOpenAI) }
+
+func (o *openAICompleter) Complete(ctx context.Context, req Request) (Response, error) {
 	parts := make([]openai.ChatCompletionContentPartUnionParam, 0, 2)
-	if len(in.Image) > 0 {
+	if len(req.Image) > 0 {
 		// A data URI rather than a URL: the bytes are in hand and are never
 		// stored anywhere they could be fetched from, which is the point.
 		parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
 			URL: fmt.Sprintf("data:%s;base64,%s",
-				in.ImageMediaType, base64.StdEncoding.EncodeToString(in.Image)),
+				req.ImageMediaType, base64.StdEncoding.EncodeToString(req.Image)),
 		}))
 	}
-	parts = append(parts, openai.TextContentPart(userPrompt(in)))
+	parts = append(parts, openai.TextContentPart(req.Prompt))
 
 	resp, err := o.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 		Model: openai.ChatModel(o.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(estimateSystemPrompt),
+			openai.SystemMessage(req.System),
 			openai.UserMessage(parts),
 		},
 		// The output ceiling, and it matters more here than on the other
@@ -70,11 +68,11 @@ func (o *openAICompleter) complete(ctx context.Context, in EstimateInput) (strin
 		// covers reasoning tokens, so the latter would cap the visible answer
 		// and leave the expensive half unbounded — a cap that reads as present
 		// and is not.
-		MaxCompletionTokens: openai.Int(o.maxTokens),
+		MaxCompletionTokens: openai.Int(req.MaxTokens),
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
 				JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
-					Name: "meal_estimate",
+					Name: req.SchemaName,
 					// `strict` is what makes this structured output rather than
 					// a suggestion. Our schema already satisfies its rules —
 					// `additionalProperties: false` everywhere and every
@@ -82,16 +80,16 @@ func (o *openAICompleter) complete(ctx context.Context, in EstimateInput) (strin
 					// outputs demand the same, which is the happy reason one
 					// schema serves both.
 					Strict: openai.Bool(true),
-					Schema: EstimateSchema(),
+					Schema: req.Schema,
 				},
 			},
 		},
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("%w: %v", ErrEstimateUnavailable, err)
+		return Response{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	if len(resp.Choices) == 0 {
-		return "", "", fmt.Errorf("%w: no choices returned", ErrEstimateUnavailable)
+		return Response{}, fmt.Errorf("%w: no choices returned", ErrUnavailable)
 	}
 
 	choice := resp.Choices[0]
@@ -100,7 +98,7 @@ func (o *openAICompleter) complete(ctx context.Context, in EstimateInput) (strin
 	// in a stop reason, so code ported across without reading the API would
 	// silently treat a refusal as an empty response and report an outage.
 	if choice.Message.Refusal != "" {
-		return "", "", ErrEstimateRefused
+		return Response{}, ErrRefused
 	}
 	// `length` means the response hit `MaxCompletionTokens` mid-object. Reported
 	// as a refusal rather than as unavailable because a retry is deterministic —
@@ -111,7 +109,7 @@ func (o *openAICompleter) complete(ctx context.Context, in EstimateInput) (strin
 	// no budget set, `length` fires only at the model's own maximum, which this
 	// prompt cannot approach. The comment claimed a budget that was not there.
 	if choice.FinishReason == "length" {
-		return "", "", fmt.Errorf("%w: response was cut off", ErrEstimateRefused)
+		return Response{}, fmt.Errorf("%w: response was cut off", ErrRefused)
 	}
-	return choice.Message.Content, resp.Model, nil
+	return Response{Raw: choice.Message.Content, Model: resp.Model}, nil
 }
