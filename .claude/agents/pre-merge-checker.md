@@ -19,7 +19,21 @@ pnpm run verify      # from repo root — the authoritative gate
 
 As of this writing `verify` is:
 
-`validate_palette` → `generate_icons --check` → `check:python` → `fmt:api` → `vet:api` → `build:api` → `lint:openapi` → `lint:mobile` → `test:mobile` → `typecheck:mobile` → `check:brand-copies` → `lint:web` → `typecheck:web` → `test:web` → `lint:admin` → `typecheck:admin` → `test:admin`
+**Read the chain out of `package.json` rather than trusting the list below.**
+It is one line and it is authoritative:
+
+```bash
+node -e "console.log(require('./package.json').scripts.verify.split('&&').map(s=>s.trim()).join('\n'))"
+```
+
+This listing has now been stale **three times** — it missed `lint:mobile`'s
+ratchet, then `check:grip-parity` and `check:rate-parity`, then `check:evals` —
+and each time a session was told two real gates did not exist. A hardcoded copy
+of a chain that grows is a copy that rots; the command above cannot.
+
+As of 2026-08-19 the chain is 20 links:
+
+`validate_palette` → `generate_icons --check` → `check:python` → `check:grip-parity` → `check:rate-parity` → `check:evals` → `fmt:api` → `vet:api` → `build:api` → `lint:openapi` → `lint:mobile` → `test:mobile` → `typecheck:mobile` → `check:brand-copies` → `lint:web` → `typecheck:web` → `test:web` → `lint:admin` → `typecheck:admin` → `test:admin`
 
 ## Everything CI runs, by job
 
@@ -54,11 +68,25 @@ pnpm run lint:mobile
 pnpm run typecheck:mobile
 pnpm run test:mobile
 
-# --- scripts ---
+# --- scripts (all four are in `verify` AND in CI's "Scripts (Python)" job) ---
 python3 scripts/check-python-syntax.py     # = pnpm run check:python
+python3 scripts/check-grip-parity.py       # = pnpm run check:grip-parity
+python3 scripts/check-rate-parity.py       # = pnpm run check:rate-parity
+python3 scripts/check-dictation-evals.py   # = pnpm run check:evals
 ```
 
+The three parity/corpus checks each guard a duplicated vocabulary that has no
+shared home — grips across Go/mobile/web, the rate bands across
+`anthropometry.ts` and `nutrition/target.go`, and the dictation eval
+expectations against the real technique catalog. They are cheap, they are
+stdlib-only, and they are the reason those duplications are survivable. Do not
+skip them because they look like linting.
+
 Note `build:web`, `build:admin`, `test:api` and the Docker build are **not** in `verify` (each is slow or needs setup) but **are** in CI — so they are exactly the checks a local `verify` will not catch for you.
+
+The asymmetry runs the other way too, and it is safe: `validate_palette` and
+`generate_icons --check` are in `verify` and in **no** CI job. `verify` is the
+stricter of the two there, so a green CI run is not evidence those passed.
 
 ## The three that need more than "it exited 0"
 
