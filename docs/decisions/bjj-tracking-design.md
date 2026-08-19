@@ -156,6 +156,190 @@ one mechanism:
    weight behind system-design's "leave Expo Go before the real logging
    increment" call.
 
+## 7. Say it, and it fills the chips (N33)
+
+§3 item 6 already wants voice: *"Free note, ideally voice. Hold-to-dictate on
+the walk to the car."* This is that same dictation filling the **structured**
+half as well — not just the note the chips cannot hold.
+
+The claim is narrow. An athlete says *"rolled five rounds, hit an armbar from
+closed guard in the second, got passed from half guard twice, knee felt off at
+the end"* and gets back a **draft reflection they correct** — chips already
+ticked, rounds filled, the body note carried across. Nothing is logged until
+they confirm.
+
+### Why BJJ suits this better than food does
+
+N26 (`nutrition-design.md` §6) is the precedent, and the same shape works here
+for a reason that is stronger, not weaker: **the target vocabulary is closed
+and small.** Six categories, five event directions, eleven positions, 542
+technique ids. That is a structured-output problem with a fixed answer set,
+where portion estimation from a photo is an open-ended numeric guess. The
+model is not being asked to know anything — it is being asked to map a
+sentence onto an enum this repo already defines.
+
+It also removes a cost rather than relocating it. **N31** made a technique
+attributable by adding a row and a tap; dictation attaches the technique for
+free, because "hit an armbar from closed guard" already names it. That is the
+argument for building this at all: the fast path is three taps and every
+structured field beyond that has to be *earned*, so the only honest way to get
+richer evidence is to stop charging taps for it.
+
+### The input is TEXT, and that answers Open question 4
+
+**No audio leaves the device, because no audio is sent.** iOS's own keyboard
+dictation turns speech into text in the field the athlete is already typing
+into; the app sees a string. That means:
+
+- no audio upload, no transcription provider, no second vendor;
+- no new native dependency, no microphone permission beyond what the keyboard
+  already has;
+- **Open question 4 is answered — transcription is on-device, by the system
+  keyboard**, and the privacy promise reduces to one sentence: the *text* you
+  dictated is sent to draft a reflection, and only when you ask for one.
+
+A dedicated record-and-upload path buys better punctuation and nothing else.
+It is not worth a vendor.
+
+### Draft, never logged
+
+The response is a `SessionDetail`-shaped **draft** that lands in the existing
+wizard with chips pre-ticked. The athlete edits and saves through
+`PUT /v1/bjj/sessions/{id}` exactly as today. Three consequences:
+
+- **The confirmation is what makes it the athlete's claim.** A tag is already
+  `reported` basis — the athlete said it and nobody checked. A *dictated* tag
+  is one step further removed: the athlete said it and a model parsed it. The
+  confirm step is what closes that gap, so it can never be skipped, and there
+  is deliberately no "log it for me" button.
+- **No new write path.** The endpoint writes nothing. Everything still goes
+  through the validation `PutDetail` already enforces.
+- **Re-running replaces the draft, never the saved session.**
+
+### The endpoint
+
+`POST /v1/bjj/reflect/draft` — server-side only, so the key never enters an app
+bundle, there is one place to meter it, and the provider can change without an
+app release. Body is the dictated text plus the session id for context (kind,
+gi, what is already tagged). Response is a draft plus a per-field note of what
+the model was unsure about.
+
+Nothing about it is BJJ-specific in shape; it is BJJ-specific in vocabulary.
+
+### Resolving techniques: put the catalog in the prompt
+
+The hard part is "armbar from closed guard" → `armbar-closed-guard`. Three
+options were considered and the third wins on cost and simplicity:
+
+1. **A Go text ranker.** There is none on the backend — `rankTechniques` lives
+   in mobile and `techniqueSearch` in web — so this means porting a third copy
+   of a fuzzy matcher, which is the drift shape this repo keeps arguing
+   against.
+2. **A trigram shortlist, then a second model call to choose.** Two round
+   trips for one sentence.
+3. **Send the catalog.** 542 entries as `id · name · position` is ~10K tokens.
+   With a cache breakpoint on the system block it costs **~0.1× on every call
+   after the first**, and the model emits real ids directly.
+
+Option 3, with two hard rules:
+
+- **The emitted id is validated against the catalog in Go.** A model can
+  produce a plausible id that does not exist; an unknown id is dropped into an
+  `unresolved` list with the phrase that produced it, for the athlete to pick
+  from the normal picker. **It is never guessed at and never silently
+  dropped.**
+- **The catalog is rendered deterministically** — sorted by id, no timestamps,
+  no per-user content — because caching is a prefix match and a single moved
+  byte re-bills the whole prefix.
+
+Enumerating all 542 ids in the JSON schema would make an invalid id
+structurally impossible, and is worth testing — but it roughly doubles the
+cached prefix (the model still needs the *names* to map onto), and schema
+compile time at that size is unmeasured. Ship the validated-string version
+first.
+
+### What the schema can and cannot say
+
+Structured outputs constrain the response to a JSON schema, and the supported
+subset matters here: `enum` and `additionalProperties: false` **are**
+supported, which covers category, event, position and gi exactly. Numeric and
+length constraints (`minimum`, `maxLength`) **are not**.
+
+So the schema cannot express "count is at least 1" or "session RPE is 1–10" —
+**the Go validation is the gate, as it already is for a hand-typed
+reflection.** That is the property to hold onto: model output is untrusted
+input, validated by the same rules a client's payload passes through, not by a
+second set written for the model.
+
+### What it must not do
+
+- **Never invent a number the athlete did not say.** No RPE, no round count,
+  no gi/no-gi guess. Absent means absent — the schema makes every field
+  nullable and the draft leaves it blank rather than filling a plausible value
+  the athlete then has to notice and undo.
+- **Never create, finish or delete a session.**
+- **Never emit a technique on anything but a submission**, matching the rule
+  `contest` already enforces for its matches.
+- **Never carry the prose through as tags.** The free note stays the free
+  note; the chips are what the model extracted.
+
+### Cost and latency
+
+Sized against Claude Opus 5 at $5/$25 per MTok, with a ~11.5K-token cached
+prefix (catalog + instructions + schema) and a ~500-token draft:
+
+| | per call |
+|---|---|
+| First call (cache write, 1.25×) | ~$0.085 |
+| Subsequent calls (cache read, 0.1×) | **~$0.019** |
+| Of which output | ~$0.013 |
+
+**Output dominates a warm call**, so the lever is a tight schema, not a
+shorter catalog. Cache reads are ~0.1× and writes ~1.25× at the 5-minute TTL,
+so two calls inside the window already pay for the write; a 1-hour TTL doubles
+the write and suits evening bursts where a whole gym finishes within the hour.
+Opus 5's cacheable minimum is 512 tokens, so the prefix clears it by a wide
+margin.
+
+Cheaper tiers are a real option for a task this constrained — Sonnet 5 is
+$3/$15 and Haiku 4.5 $1/$5 — but that is a decision to make against an eval
+set of real dictations, not by assumption. **Build the eval set first**: fifty
+recorded sentences with hand-written expected drafts is the artefact that
+makes the model choice measurable, and it outlives whichever model is current.
+
+Use **thinking on at low or medium effort** — it is an extraction task, not a
+reasoning one. Do not disable thinking: on this model that is capped at `high`
+effort anyway, and it introduces two failure modes (tool calls emitted as
+plain text, `<thinking>` tags leaking into output) for no benefit here.
+
+### Failure modes, all of which degrade to the wizard
+
+- **Offline** — no draft, and the wizard is unchanged and complete on its own.
+  This is an accelerator, never a dependency.
+- **A refusal** (`stop_reason: "refusal"`) or a truncated response — treat as
+  no draft. **Never partially apply an incomplete JSON draft**; a half-parsed
+  reflection is worse than none, because the athlete cannot see what is
+  missing.
+- **A per-user quota**, because this is the first endpoint in the app where a
+  loop costs real money.
+- **An explicit disclosure in the UI**, not only in a privacy page: this text
+  is sent to draft your reflection.
+
+### Open questions this leaves
+
+1. **No provider is wired anywhere in this repo** — no client, no key, no
+   dependency, in backend, apps or Railway. That is an account and
+   key-management decision before any code.
+2. **Does the draft merge with existing tags or replace them?** Replace is
+   simpler and matches how the wizard already treats a step. Merge is what
+   somebody dictating a second time actually wants.
+3. **Is the raw dictation retained?** Useful for debugging and for building
+   the eval set; it is also the athlete's own words about their body. Default
+   to not storing it, and make the eval set opt-in.
+4. **Web too?** The platform rule puts reflection on the phone, and dictation
+   is a phone affordance — but the same endpoint would accept typed prose from
+   the web session editor at no extra cost.
+
 ## Open questions
 
 1. **Rounds granularity.** Is a session one aggregate record, or is a
@@ -168,6 +352,9 @@ one mechanism:
 3. **Where does reflection prompting live** relative to the sRPE prompt
    system-design §Open-2 already asks about — same notification, or does
    stacking both prompts hurt completion of the floor log?
-4. **Voice transcription: on-device or server?** On-device is private and
-   offline-friendly but platform-fragmented; server is consistent but makes a
-   privacy promise we have to write down.
+4. ~~**Voice transcription: on-device or server?**~~ **Answered by §7:
+   on-device, via the system keyboard.** The app never handles audio — the
+   keyboard hands it text — so there is no transcription vendor, no upload,
+   and the privacy promise shrinks to one sentence about the text. What
+   remains open is whether the *text* is retained for debugging (§7, open
+   question 3).
