@@ -8680,3 +8680,36 @@ ruling, and without the note that reads as a bug.
   makes the kettlebell and dumbbell RDLs agree on `implements`, the note becomes
   *wrong* rather than merely stale — which is worse than having none.
   `TestTheRuledRowsCarryTheirExplanations` asserts the pair still disagrees.
+
+## Machine identification, camera surface (`apps/mobile`, `app/session/[id]/identify.tsx`)
+
+Domain: N44, the phone half of N7. Reached from the add-exercise screen mid-session. Photograph a machine, get a ranked shortlist from `POST /v1/exercises/identify`, tap one to add it to the session (or to swap the current exercise for it).
+
+**Happy path**
+- From a live session → Add exercise → "Photograph the machine" → camera opens → shoot → 1–4 candidates appear, each tappable.
+- Tapping one adds it to the session and returns to the session screen; the set list contains it.
+- Arriving with `?swap=<exerciseID>` swaps that exercise in place instead of appending, preserving the sets already logged.
+- The candidate's name matches what the catalog calls it everywhere else in the app.
+
+**The rule the screen exists to obey — test this hardest**
+- **No candidate is pre-selected.** No highlighted first row, no "best match" badge, no default. Adding one would mean an athlete can confirm a wrong exercise without ever choosing, and nothing downstream could tell.
+- **Confidence is never a filter.** A low-confidence candidate is still shown and still tappable; the list order is the server's, never re-sorted client-side.
+- Every candidate takes the same number of taps as every other.
+
+**Edge cases & errors**
+- **Permission denied** → an explanatory message naming Settings, and no retry prompt (a retry cannot grant permission).
+- **Camera cancelled** → returns to the screen with no error and no spinner left running.
+- **422 (nothing matched)** → the message names what would help (straighter shot, whole machine, label in frame) and the screen offers **"take another"**, never "try again". A retry of the identical photo is deterministic and cannot succeed.
+- **429** → the message says to wait, and does not invite an immediate retry — every attempt costs money.
+- **503 / no API key on the deploy** → an honest "unavailable" plus the search fallback, so an athlete mid-session is never stranded.
+- **Offline** → the network message, and the search path still works from the previous screen.
+- Every failure path must still leave "search for it by name" reachable.
+
+**Privacy and permissions**
+- **The disclosure appears before the camera opens**, not after the photo is taken — the athlete's photo leaves the device.
+- The iOS camera prompt shows VOLA's own copy, not `Allow VOLA to access your camera` (the Expo default).
+- **`NSMicrophoneUsageDescription` must NOT be in the built `Info.plist`**, and `RECORD_AUDIO` must not be in the Android manifest. The app never records; `expo-image-picker`'s plugin adds both unless `microphonePermission: false` is set, and this shipped declared-but-unused until N44. Check the built binary, not the config — that is the whole point of the finding.
+
+**Not covered yet**
+- **Never verified on a device.** The screen has not rendered; Expo web cannot bundle this app, so it needs a Simulator or a real phone. The permission change additionally needs a **rebuild** to take effect, since it alters generated native config rather than JS.
+- **No persisted quota.** Spend is bounded only by N7's server-side rate limit (20 per 30 minutes, in-memory, resets on deploy).

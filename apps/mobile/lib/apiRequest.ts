@@ -35,7 +35,7 @@ export async function apiRequest<T>(
   // header by hand yields `multipart/form-data` with no boundary, which the
   // server cannot parse — and the failure reads as a malformed upload rather
   // than as a missing header, so it gets diagnosed on the wrong side of the
-  // wire. The meal-photo upload is the only FormData body in this app.
+  // wire. Two FormData bodies now: the meal photo and the machine photo (N44).
   const isForm = typeof FormData !== 'undefined' && init.body instanceof FormData;
 
   const res = await netFetch(`${API_BASE}${path}`, {
