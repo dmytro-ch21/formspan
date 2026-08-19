@@ -30790,6 +30790,39 @@ compile error from a test failure.
 `lint:mobile` stays at 54 of 54 — the new files add no warnings, which matters
 because the ratchet has no headroom.
 
+### What review found, and three of them were bugs rather than polish
+
+No blocking findings; all six load-bearing properties held. But three of the
+eight suggestions were real defects that tests then had to be written for, and
+they share a shape worth naming: **each one looked correct in the diff.**
+
+- **The note field unmounted mid-edit.** It was gated on the LIVE value, so
+  backspacing a note to empty removed the input — keyboard gone, section
+  unreachable, and no way to get it back on that screen. Gating on what the
+  MODEL extracted is the fix. Reading the line, `{!!detail.note && …}` looks
+  exactly like the right condition.
+- **A body note was saved sight-unseen.** `draftToDetail` carried `body_note`
+  through and nothing rendered it, so "knee popped in round three" went into the
+  record unread — on a screen whose entire premise is that what it saves arrived
+  editable.
+- **One message stood for three different states.** The picker said "couldn't
+  load the library" when the library was still loading, when it had failed, AND
+  when it had loaded fine and the client's ranker simply scored nothing. The
+  last is a real case, because the server's matcher and `rankTechniques` are
+  different algorithms and nothing makes them agree — so the screen sent people
+  to fix a connection that was fine. Saying the wrong reason is worse than
+  saying none.
+
+The performance one is worth recording too: each `PickOne` fetched the 197 KB
+technique library independently, and `fetchTechniques`' cache only dedups after
+the first call RESOLVES — so N unresolved phrases mounting together fired N
+parallel requests. Hoisted to one fetch for the screen, which also removed a
+refetch when the list re-keyed after a dismissal.
+
+Four accessibility fixes: the tag steppers were three indistinguishable "One
+fewer" buttons to a screen reader, and the blank stepper's em dash read as
+"em dash" rather than "not set".
+
 ### Left open
 
 **No device run.** This is a screen with a keyboard, a network call and a

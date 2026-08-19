@@ -203,3 +203,88 @@ it('lets a miscounted round be corrected before anything is saved', async () => 
   });
   expect((saveLocalBjjDetail as jest.Mock).mock.calls[0][2].rounds).toBe(5);
 });
+
+it('keeps the note field mounted when it is emptied', async () => {
+  // It was gated on the LIVE value, so backspacing the note to empty unmounted
+  // the input mid-edit — keyboard gone, section unreachable, text unrecoverable
+  // on this screen. Gating on what the model extracted is what fixes it, and
+  // this is the only thing that would catch the regression.
+  mockResponse = {
+    draft: { ...baseDraft, note: 'Felt sharp.' },
+    quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+  };
+
+  await speak();
+  await waitFor(() => {
+    expect(screen.getByLabelText('Session note')).toBeTruthy();
+  });
+
+  fireEvent.changeText(screen.getByLabelText('Session note'), '');
+  // Still there, still editable.
+  expect(screen.getByLabelText('Session note')).toBeTruthy();
+  fireEvent.changeText(screen.getByLabelText('Session note'), 'Actually, felt flat.');
+
+  fireEvent.press(screen.getByLabelText('Save this session'));
+  await waitFor(() => {
+    expect(saveLocalBjjDetail).toHaveBeenCalled();
+  });
+  expect((saveLocalBjjDetail as jest.Mock).mock.calls[0][2].note).toBe('Actually, felt flat.');
+});
+
+it('shows a body note rather than saving it sight-unseen', async () => {
+  // The screen's premise is that everything it saves arrived editable. A body
+  // note is exactly the kind of thing that must not be written unread.
+  mockResponse = {
+    draft: { ...baseDraft, body_note: 'Knee popped in round three.' },
+    quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+  };
+
+  await speak();
+  await waitFor(() => {
+    expect(screen.getByLabelText('Note about your body')).toBeTruthy();
+  });
+  expect(screen.getByDisplayValue('Knee popped in round three.')).toBeTruthy();
+});
+
+it('tells "nothing matched" apart from "could not load"', async () => {
+  // One branch said "couldn't load the library" for three different states,
+  // which was wrong in two of them — it flashed on every first load, and it was
+  // permanently wrong when the library HAD loaded and the client's ranker
+  // simply scored nothing. Sending someone to fix a connection that is fine is
+  // worse than saying nothing.
+  mockResponse = {
+    draft: {
+      ...baseDraft,
+      unresolved: [{ phrase: 'the spinny thing', category: 'sweep', event: 'scored' }],
+    },
+    quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+  };
+
+  await speak();
+
+  await waitFor(() => {
+    expect(screen.getByText(/which one\?/i)).toBeTruthy();
+  });
+  // The catalog loads fine and contains no match for this phrase.
+  await waitFor(() => {
+    expect(screen.getByText(/nothing in the library matches/i)).toBeTruthy();
+  });
+  expect(screen.queryByText(/couldn’t load the library/i)).toBeNull();
+});
+
+it('says how many are left even when the draft came back empty', async () => {
+  // An empty draft still spends one. Inviting a retry without saying so sends
+  // the athlete into a 429 they had no way to see coming.
+  mockResponse = {
+    draft: { ...baseDraft, tags: [], empty: true },
+    quota: { used: 10, limit: 10, remaining: 0, resets_at: null },
+  };
+
+  await speak('remind me to buy a mouthguard');
+
+  await waitFor(() => {
+    expect(screen.getByTestId('dictate-empty')).toBeTruthy();
+  });
+  expect(screen.getByTestId('dictate-quota')).toBeTruthy();
+  expect(screen.getByText(/last one for today/i)).toBeTruthy();
+});

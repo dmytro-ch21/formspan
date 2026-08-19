@@ -44,7 +44,7 @@
 
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -95,10 +95,36 @@ export default function DictateReflectionScreen() {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [unresolved, setUnresolved] = useState<UnresolvedPhrase[]>([]);
 
+  // The technique library, fetched ONCE for the whole screen rather than once
+  // per unresolved phrase. `fetchTechniques` caches, but only after the first
+  // call resolves — so N phrases mounting together fired N parallel 197 KB
+  // requests before this was hoisted.
+  const [catalog, setCatalog] = useState<TechniqueSummary[] | null>(null);
+  const [catalogFailed, setCatalogFailed] = useState(false);
+
   const [saving, setSaving] = useState(false);
   // Reuse a session created by a failed attempt rather than minting a second —
   // the trap `log.tsx` documents, where a retry puts the class in history twice.
   const createdRef = useRef<string | null>(null);
+
+  // Loaded when the first phrase might need it, not on mount: most dictations
+  // resolve cleanly and never open a picker.
+  useEffect(() => {
+    if (unresolved.length === 0 || catalog !== null || catalogFailed) return;
+    let cancelled = false;
+    fetchTechniques(getToken)
+      .then((list) => {
+        if (!cancelled) setCatalog(list);
+      })
+      .catch(() => {
+        // The phrase stays unresolved, which is the honest outcome — it costs
+        // the athlete nothing they had, and the wizard can still add it.
+        if (!cancelled) setCatalogFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [unresolved.length, catalog, catalogFailed, getToken]);
 
   async function read() {
     const said = text.trim();
@@ -257,9 +283,20 @@ export default function DictateReflectionScreen() {
             It didn’t read as a session. Try again with what you drilled and what happened in the
             rounds — or log it by hand instead.
           </Text>
-          <Pressable onPress={() => { setDraft(null); setDetail(null); }} style={styles.secondary}>
+          <Pressable
+            onPress={() => {
+              setDraft(null);
+              setDetail(null);
+            }}
+            style={styles.secondary}
+            accessibilityRole="button"
+            accessibilityLabel="Try saying it again"
+          >
             <Text style={[styles.secondaryLabel, { color: accent.ink }]}>Try again</Text>
           </Pressable>
+          {/* An empty draft still spent one. Inviting a retry without saying so
+              sends the athlete into a 429 they had no way to see coming. */}
+          <QuotaLine quota={quota} />
         </View>
       )}
 
@@ -358,6 +395,8 @@ export default function DictateReflectionScreen() {
                 <PickOne
                   key={`${p.phrase}-${i}`}
                   phrase={p}
+                  catalog={catalog}
+                  failed={catalogFailed}
                   onPick={(t) => resolvePhrase(p, t)}
                   onSkip={() => dismissPhrase(p)}
                 />
@@ -381,7 +420,11 @@ export default function DictateReflectionScreen() {
             </>
           )}
 
-          {!!detail.note && (
+          {/* Gated on what the MODEL extracted, never on the live value —
+              gating on `detail.note` unmounted the field the moment the athlete
+              backspaced it empty, dropping the keyboard mid-edit with no way to
+              bring the section back. */}
+          {!!draft.note && (
             <>
               <SectionHeader label="Note" />
               <View style={styles.card}>
@@ -391,6 +434,25 @@ export default function DictateReflectionScreen() {
                   onChangeText={(v) => patch({ note: v })}
                   multiline
                   accessibilityLabel="Session note"
+                />
+              </View>
+            </>
+          )}
+
+          {/* Shown for the same reason the note is: this screen's premise is
+              that everything it saves arrived editable. A body note the model
+              pulled out — "knee popped in round three" — is exactly the kind of
+              thing that must not be written sight-unseen. */}
+          {!!draft.body_note && (
+            <>
+              <SectionHeader label="Body" />
+              <View style={styles.card}>
+                <TextInput
+                  style={styles.noteInput}
+                  value={detail.body_note}
+                  onChangeText={(v) => patch({ body_note: v })}
+                  multiline
+                  accessibilityLabel="Note about your body"
                 />
               </View>
             </>
@@ -413,16 +475,22 @@ export default function DictateReflectionScreen() {
             Nothing’s been saved yet. You can keep correcting this in the next screen.
           </Text>
 
-          {quota && quota.remaining <= 3 && (
-            <Text style={styles.muted} testID="dictate-quota">
-              {quota.remaining === 0
-                ? 'That was your last one for today.'
-                : `${quota.remaining} more of these today.`}
-            </Text>
-          )}
+          <QuotaLine quota={quota} />
         </>
       )}
     </KeyboardAwareScrollView>
+  );
+}
+
+/** Says how many are left, but only once it is worth saying. */
+function QuotaLine({ quota }: { quota: DraftQuota | null }) {
+  if (!quota || quota.remaining > 3) return null;
+  return (
+    <Text style={styles.muted} testID="dictate-quota">
+      {quota.remaining === 0
+        ? 'That was your last one for today.'
+        : `${quota.remaining} more of these today.`}
+    </Text>
   );
 }
 
@@ -473,7 +541,10 @@ function Stepper({
         >
           <Text style={styles.stepGlyph}>−</Text>
         </Pressable>
-        <Text style={[styles.stepValue, value === null && styles.stepBlank]}>
+        <Text
+          style={[styles.stepValue, value === null && styles.stepBlank]}
+          accessibilityLabel={value === null ? `${label}: not set` : `${label}: ${value}`}
+        >
           {value === null ? '—' : value}
         </Text>
         <Pressable
@@ -498,29 +569,31 @@ function TagRow({
   onCount: (c: number) => void;
   onRemove: () => void;
 }) {
+  // Named, because with three tags "One fewer" × 3 is three indistinguishable
+  // buttons to anyone using a screen reader.
+  const title = `${tag.event} ${tag.category}${tag.position ? ` · ${tag.position}` : ''}`;
   return (
     <View style={styles.tagRow}>
       <View style={styles.tagText}>
-        <Text style={styles.tagTitle}>
-          {tag.event} {tag.category}
-          {tag.position ? ` · ${tag.position}` : ''}
-        </Text>
+        <Text style={styles.tagTitle}>{title}</Text>
       </View>
       <View style={styles.stepper}>
         <Pressable
           onPress={() => (tag.count <= 1 ? onRemove() : onCount(tag.count - 1))}
           style={styles.stepButton}
           accessibilityRole="button"
-          accessibilityLabel="One fewer"
+          accessibilityLabel={tag.count <= 1 ? `Remove ${title}` : `One fewer ${title}`}
         >
           <Text style={styles.stepGlyph}>−</Text>
         </Pressable>
-        <Text style={styles.stepValue}>{tag.count}</Text>
+        <Text style={styles.stepValue} accessibilityLabel={`${tag.count} ${title}`}>
+          {tag.count}
+        </Text>
         <Pressable
           onPress={() => onCount(tag.count + 1)}
           style={styles.stepButton}
           accessibilityRole="button"
-          accessibilityLabel="One more"
+          accessibilityLabel={`One more ${title}`}
         >
           <Text style={styles.stepGlyph}>+</Text>
         </Pressable>
@@ -538,57 +611,84 @@ function TagRow({
  */
 function PickOne({
   phrase,
+  catalog,
+  failed,
   onPick,
   onSkip,
 }: {
   phrase: UnresolvedPhrase;
+  /** null while the library is still loading. */
+  catalog: TechniqueSummary[] | null;
+  failed: boolean;
   onPick: (t: TechniqueSummary) => void;
   onSkip: () => void;
 }) {
   const accent = useAccent();
-  const getToken = useAuthToken();
-  const [all, setAll] = useState<TechniqueSummary[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchTechniques(getToken)
-      .then((list) => {
-        if (!cancelled) setAll(list);
-      })
-      .catch(() => {
-        // A failed catalog fetch leaves the picker empty rather than the screen
-        // broken: the phrase stays unresolved, which is the honest outcome and
-        // costs the athlete nothing they had.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [getToken]);
+  // Memoised on the phrase and the library, not recomputed on every parent
+  // render — otherwise this re-ranks 542 entries per keystroke in the note
+  // field, times the number of unresolved phrases.
+  const matches = useMemo(
+    () => (catalog ? rankTechniques(catalog, phrase.phrase).slice(0, 6) : []),
+    [catalog, phrase.phrase],
+  );
 
-  const matches = all.length ? rankTechniques(all, phrase.phrase).slice(0, 6) : [];
+  /**
+   * Three different states, told apart.
+   *
+   * They were one `matches.length === 0` branch reading "couldn't load the
+   * library", which was wrong in two of the three: it flashed during every
+   * first load, and it was permanently wrong when the library HAD loaded and
+   * the client's ranker simply scored nothing — the server's matcher and
+   * `rankTechniques` are different algorithms and nothing makes them agree.
+   * Saying the wrong reason is worse than saying none, because it sends the
+   * athlete to fix a connection that is fine.
+   */
+  let body: React.ReactNode;
+  if (failed) {
+    body = (
+      <Text style={styles.muted}>
+        Couldn’t load the library just now. You can add this in the next screen.
+      </Text>
+    );
+  } else if (catalog === null) {
+    body = <ActivityIndicator accessibilityLabel="Loading the technique library" />;
+  } else if (matches.length === 0) {
+    body = (
+      <Text style={styles.muted}>
+        Nothing in the library matches that. You can add it in the next screen.
+      </Text>
+    );
+  } else {
+    body = (
+      <>
+        {matches.map((t) => (
+          <Pressable
+            key={t.id}
+            onPress={() => onPick(t)}
+            style={styles.pickOption}
+            accessibilityRole="button"
+            accessibilityLabel={`${t.name}, for “${phrase.phrase}”`}
+          >
+            <Text style={styles.pickOptionLabel}>{t.name}</Text>
+          </Pressable>
+        ))}
+      </>
+    );
+  }
 
   return (
     <View style={styles.card}>
       <Text style={styles.pickPrompt}>
         You said <Text style={styles.pickPhrase}>“{phrase.phrase}”</Text> — which one?
       </Text>
-      {matches.length === 0 ? (
-        <Text style={styles.muted}>
-          Couldn’t load the library just now. You can add this in the next screen.
-        </Text>
-      ) : (
-        matches.map((t) => (
-          <Pressable
-            key={t.id}
-            onPress={() => onPick(t)}
-            style={styles.pickOption}
-            accessibilityRole="button"
-          >
-            <Text style={styles.pickOptionLabel}>{t.name}</Text>
-          </Pressable>
-        ))
-      )}
-      <Pressable onPress={onSkip} style={styles.secondary} accessibilityRole="button">
+      {body}
+      <Pressable
+        onPress={onSkip}
+        style={styles.secondary}
+        accessibilityRole="button"
+        accessibilityLabel={`Skip “${phrase.phrase}”`}
+      >
         <Text style={[styles.secondaryLabel, { color: accent.ink }]}>Skip this one</Text>
       </Pressable>
     </View>
