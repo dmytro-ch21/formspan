@@ -29676,6 +29676,86 @@ non-fatal by design, so nothing stopped the value. Implausible figures are now
   at any plausible scan volume; `pg_class.reltuples` is the fix if it ever shows
   up. Raised in review and deliberately not pre-optimised.
 
+## 2026-08-19 — Two sessions can typecheck mobile at once (N45)
+
+`scripts/generate_route_types.mjs` hardcoded port 8099, so a second concurrent
+`pnpm run verify` — or `typecheck:mobile` alone — died. Metro never started, the
+typed routes were never generated, and it surfaced as
+`Could not generate route types`, which reads exactly like a broken checkout and
+is nothing of the sort. It passes on a rerun once the port frees, which is what
+made it expensive rather than merely annoying: it cost a confusing ten minutes
+and taught the wrong lesson. Found by `pre-merge-checker` during N28 (#316).
+
+The old comment argued 8099 was "out of the range dev servers use", which was
+true and was not the problem. **The contended resource is the single port, not
+the range**, and this repo's normal state is several sessions on one machine —
+six ran the day this was fixed. CLAUDE.md already documents the jest equivalent
+(`--maxWorkers=3`, measured over 74 runs); this is the same shape, and it was
+the default case rather than an edge case.
+
+**The reported symptom was not quite the real one, and the difference is worth
+recording.** It is not the `EADDRINUSE` it was filed as. Expo NOTICES the busy
+port and tries to be helpful:
+
+```
+› Port 8099 is running vola in another window
+Input is required, but 'npx expo' is in non-interactive mode.
+Required input:
+> Use port 8100 instead?
+› Skipping dev server
+```
+
+So Expo would have stepped aside by itself if anything could answer it, and
+under `CI=1` nothing can. Worth knowing because it means the failure is not a
+bind error at all, and anybody grepping for `EADDRINUSE` in the logs will find
+nothing.
+
+**The fix is to bind port 0 and read the assignment back**, handing the choice
+to the kernel — the one allocator that already knows what every other session
+is holding. The probe binds the unspecified address, the way Metro does, so a
+port free for the probe is free for Metro; probing `127.0.0.1` would clear a
+port something else already holds on `::`. `EXPO_TYPEGEN_PORT` still pins one
+for a run you need to find in `lsof`, and a pinned port is never retried.
+
+There is a residual window — the probe closes before Expo binds — so a
+recognised collision is retried on a fresh port up to three times. The retry is
+deliberately narrow, and it is arranged to fail SAFE: the matcher works on
+Expo's output, and a pattern that stops matching reports a collision as an
+ordinary failure, which is noisy and correct. Nothing in it can turn a genuine
+failure into a pass.
+
+**That last part is the constraint that mattered, because the obvious bad fix
+here is the opposite trap.** N35 exists because a silent no-op let a button
+point at a route that never existed: Expo Router's typed routes are generated
+into a gitignored directory, so a clean checkout without them type-checks route
+literals against a loose `Href` and passes everything. A fix that swallowed the
+failure to make the symptom go away would restore exactly that silence. So the
+brief was to stop the collision and never soften the error, and all four
+verifications went in both directions rather than only the passing one:
+
+- **The bug still reproduces on the old script.** Two concurrent runs of
+  `HEAD`'s version: one exits 0, the other exits 1 on `Use port 8100 instead?`.
+  Without this the rest proves nothing — a green pair of runs might just mean
+  the machine was quiet.
+- **Two concurrent runs of the new script both exit 0**, on adjacent
+  kernel-assigned ports (53130 and 53131), with zero collision markers in
+  either log. And with 8099 deliberately occupied by a squatter, it succeeds on
+  a kernel port — so it no longer depends on 8099 at all.
+- **A pinned-but-occupied port fails loudly with zero retries** (exit 1), and a
+  spawn failure (`npx` off `PATH`) fails fast with zero retries. The N35
+  property is intact in both directions.
+- **The collision matcher is tested against the REAL captured failure text**,
+  not an invented string: the genuine baseline log matches, the genuine
+  non-port failure log does not. This is deliberate after the day's other
+  finding — #319's barcode resolver had a green, thorough, mutation-tested
+  suite that confirmed the wrong thing because every stub returned the status
+  its author believed OFF returned. A fixture built from an assumption cannot
+  falsify it.
+
+Nothing user-facing changes, so `docs/testing/functional-scenarios.md` gets no
+entry. The one behavioural note for anybody reading logs: the success line now
+names the port it used.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
