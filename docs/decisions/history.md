@@ -30839,6 +30839,81 @@ screen is where that gets found out, and it has not been found out yet.
 **#322 has not merged**, so the endpoint this calls is not on `main` and nothing
 here has been exercised against a running server — only against its contract.
 
+## 2026-08-19 — A gate that stops running while the build stays green (N66)
+
+`verify` is one ~1,300-character `&&` chain in `package.json` that every task
+appends to. Two branches touching it always conflict, and always in a way where
+taking one side looks like a correct resolution while silently deleting the
+other's link.
+
+**A dropped link is not a broken build. It is a gate that stops running while
+`verify` still exits 0.** Nothing goes red. Nothing is missing from the tree.
+The script is still there and still passes when invoked by hand. The next person
+to find out is whoever ships the bug it existed to catch.
+
+That is worse than the `README.md` merge trap it resembles — that one loses a
+sentence, this one loses a guarantee — and it is not hypothetical: it nearly
+happened on N50, where `main` had added `check:tasks` at the front of the chain
+while the branch added `check:telemetry-parity` in the middle.
+
+`scripts/check-verify-chain.py` asserts every gate is reachable from `verify`,
+transitively, unless named in `ALLOWED_OUTSIDE` with a reason — and each
+excluded gate must still be run by CI, so an exclusion cannot quietly become a
+gate that runs nowhere.
+
+### The first design passed every case it was written for
+
+It asserted "reachable from `verify` **OR** from CI". Under it, deleting
+`check:telemetry-parity` from the chain was **green**. So was deleting
+`check:tasks`. So was deleting `lint:web`. All three, because **CI independently
+runs each of them** and CI mirrors `verify` almost exactly — the `or CI` clause
+swallowed exactly the failure the script exists to detect.
+
+It was caught by running the check in the failing direction, not by reading it.
+The reasoning that produced it is worth recording because it is the tolerant,
+sensible-looking generalisation: `build:web` genuinely is outside `verify` on
+purpose, so "or CI" reads like the correct way to accommodate that. It is also
+the escape hatch that makes the check unable to fail.
+
+The exclusion list is the right shape instead — three names, each with a reason
+somebody had to write, each still required to run in CI, and a stale entry
+naming a script nobody has is itself an error, because an exclusion that guards
+nothing looks exactly like a considered decision.
+
+### Verification
+
+Nine failure modes, each seen red: five different links deleted from the chain
+(`check:telemetry-parity`, `check:tasks`, `lint:web`, `typecheck:mobile`,
+`test:mobile`), a new gate nobody wired up, an exclusion CI does not run either,
+a stale exclusion, and **its own link removed** — the check requires itself.
+
+One of those nine started as a bad test rather than a bug: the
+exclusion-not-in-CI case first used `check:python`, which CI genuinely does run,
+so the checker was right and the test was wrong. Worth noting because a
+failing-direction test that fails for the wrong reason is the same
+false-confidence problem in the other direction.
+
+Coverage is transitive: `typecheck:mobile` runs `routes:mobile`, so a gate
+invoked inside another gate counts without being its own link. Checking only the
+top-level chain would cry wolf on a correct setup, and a checker that cries wolf
+is one somebody eventually silences.
+
+`gate_runs_in_ci` matches the alias **or the command behind it**, because the
+backend job runs `go test -p 1 -timeout 3m ./...` directly rather than
+`pnpm run test:api`. That was found on the script's very first run, when it
+reported a correct setup as broken.
+
+### What this leaves open
+
+- **It reads names, not behaviour.** A link that is present but neutered — `||
+  true` appended, say — passes. The check knows something invokes the gate; it
+  cannot know the gate still means anything.
+- **`verify` is still one line.** The better long-term shape is a
+  `scripts/verify.mjs` or a newline-delimited list, so two additions in
+  different places merge cleanly instead of conflicting as one line. This check
+  makes the current shape survivable rather than fixing it, which is the same
+  trade the parity checkers make.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

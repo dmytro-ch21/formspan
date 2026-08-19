@@ -225,6 +225,16 @@ jobs:
       - name: Rate band parity
         run: python3 scripts/check-rate-parity.py
 
+      # `verify` is one long `&&` chain in package.json that every task appends
+      # to, so two branches touching it always conflict — and always in a way
+      # where taking one side looks like a correct resolution while silently
+      # deleting the other's link. A dropped link is not a broken build: it is
+      # a gate that stops running while `verify` still exits 0. This asserts
+      # every gate is either in the chain or explicitly excluded with a reason
+      # and run here instead.
+      - name: Every gate is reachable
+        run: python3 scripts/check-verify-chain.py
+
       # The telemetry buffer is duplicated between apps/mobile and apps/web
       # because a shared workspace package was built and measured worse here —
       # four bundlers to satisfy, two of them already failing, and no precedent.
