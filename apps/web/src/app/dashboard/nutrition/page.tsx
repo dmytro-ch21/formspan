@@ -16,6 +16,7 @@ import {
 } from "@/lib/nutritionApi";
 import {
   MEAN_WINDOW_DAYS,
+  MIN_TREND_READINGS,
   adherence,
   buildSeries,
   fromDays,
@@ -100,8 +101,11 @@ export default function NutritionTrendPage() {
       setLoaded(true);
     } catch (e) {
       if (c.signal.aborted) return;
+      // `loaded` stays false: rendering the surfaces below a failed load means
+      // an empty chart, "— / nothing logged in this period" tiles and the
+      // gaps caption, all of which state something about the athlete's eating
+      // that this request never learned.
       setError(e instanceof Error ? e.message : "Could not load your nutrition history.");
-      setLoaded(true);
     } finally {
       if (!c.signal.aborted) setLoading(false);
     }
@@ -149,12 +153,25 @@ export default function NutritionTrendPage() {
             </button>
           ))}
         </div>
-        <Link
-          href="/dashboard/nutrition/days"
-          className="text-xs font-semibold text-text-muted underline underline-offset-4 hover:text-text"
-        >
-          Correct a day
-        </Link>
+        <div className="flex items-center gap-4">
+          {/* Read, not just written. Once a load has succeeded the period
+              buttons keep the OLD chart on screen while the new range fetches,
+              which is right — a flash of "Loading…" on every click is worse
+              than a moment of stale data — but only if the staleness is
+              announced. A `loading` flag nothing renders is the "written but
+              never read" shape this codebase has already paid for once. */}
+          {loading && loaded && (
+            <p role="status" className="text-xs text-text-dim">
+              Updating…
+            </p>
+          )}
+          <Link
+            href="/dashboard/nutrition/days"
+            className="text-xs font-semibold text-text-muted underline underline-offset-4 hover:text-text"
+          >
+            Correct a day
+          </Link>
+        </div>
       </div>
 
       {error && (
@@ -163,8 +180,8 @@ export default function NutritionTrendPage() {
         </p>
       )}
 
-      {loading && !loaded ? (
-        <p className="text-sm text-text-dim">Loading…</p>
+      {!loaded ? (
+        error ? null : <p className="text-sm text-text-dim">Loading…</p>
       ) : (
         <>
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -197,7 +214,12 @@ export default function NutritionTrendPage() {
               detail={
                 weightChange
                   ? `${weightChange.from} to ${weightChange.to}`
-                  : `needs a ${MEAN_WINDOW_DAYS}-day run of weigh-ins at both ends`
+                  : // The real rule is MIN_TREND_READINGS weigh-ins inside the
+                    // trailing window, at two separate points — not a
+                    // consecutive run. The copy said "a 7-day run", which
+                    // overstates it badly enough to talk somebody out of
+                    // weighing in at all.
+                    `needs ${MIN_TREND_READINGS} weigh-ins within ${MEAN_WINDOW_DAYS} days, at both ends of the period`
               }
             />
           </section>

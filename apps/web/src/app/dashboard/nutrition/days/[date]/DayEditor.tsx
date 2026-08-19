@@ -110,6 +110,58 @@ function trim(v: number): string {
   return String(Math.round(v * 100) / 100);
 }
 
+/**
+ * Parse the macro fields, refusing anything that is not a number.
+ *
+ * A blank field is 0 — black coffee is a real zero-calorie entry, and there is
+ * no honest alternative reading of an empty box. **Garbage is not**: coercing
+ * `"12o"` to 0 would save a claim that the item had no calories, which is
+ * precisely the "a zero is a claim" posture the rest of this branch is built
+ * on. Servings was already rejected on the same ground; the macros were not,
+ * and review caught the inconsistency.
+ */
+function parseMacros(
+  d: Pick<Draft, "kcal" | "protein_g" | "carb_g" | "fat_g" | "fibre_g">,
+): { kcal: number; protein_g: number; carb_g: number; fat_g: number; fibre_g: number | null } | string {
+  const fields: [keyof typeof d, string][] = [
+    ["kcal", "Calories"],
+    ["protein_g", "Protein"],
+    ["carb_g", "Carbs"],
+    ["fat_g", "Fat"],
+  ];
+  const out: Record<string, number> = {};
+  for (const [key, label] of fields) {
+    const raw = d[key].trim();
+    if (raw === "") {
+      out[key] = 0;
+      continue;
+    }
+    const n = Number(raw);
+    // A positive assertion, not `< 0 || isNaN`: both halves of a negated test
+    // are false for NaN, which is how a NaN reaches an average and poisons it.
+    // The backend's own `Macros.validate` is written this way for this reason.
+    if (!(Number.isFinite(n) && n >= 0)) return `${label} has to be a number, and not a negative one.`;
+    out[key] = n;
+  }
+  const fibreRaw = d.fibre_g.trim();
+  let fibre: number | null = null;
+  if (fibreRaw !== "") {
+    const n = Number(fibreRaw);
+    if (!(Number.isFinite(n) && n >= 0)) return "Fibre has to be a number, and not a negative one.";
+    fibre = n;
+  }
+  return {
+    kcal: out.kcal,
+    protein_g: out.protein_g,
+    carb_g: out.carb_g,
+    fat_g: out.fat_g,
+    // Absent stays absent. An entry that never stated fibre is not a
+    // zero-fibre entry, and a correction must not turn silence into a
+    // measurement.
+    fibre_g: fibre,
+  };
+}
+
 export function DayEditor({ date }: { date: string }) {
   const { getToken } = useAuth();
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -119,7 +171,13 @@ export function DayEditor({ date }: { date: string }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // Whether a load has ever SUCCEEDED. Not "is it loading": the day total
+  // below says "nothing was logged on this day", which is a claim, and an
+  // ungated version made it from no data — on every first paint and then
+  // permanently after a failed fetch. That is rule 1 being violated through
+  // the render path rather than through the arithmetic, and it is the exact
+  // misreading the rule exists to prevent. Found in review.
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -127,7 +185,6 @@ export function DayEditor({ date }: { date: string }) {
     abortRef.current?.abort();
     const c = new AbortController();
     abortRef.current = c;
-    setLoading(true);
     setError(null);
     try {
       const [e, t] = await Promise.all([
@@ -141,11 +198,12 @@ export function DayEditor({ date }: { date: string }) {
       // breakfast, dinner, lunch, snack — which reads as a bug to everyone.
       setMeals(e.meals);
       setTargets(t);
+      setLoaded(true);
     } catch (err) {
       if (c.signal.aborted) return;
+      // `loaded` deliberately stays false. A failed load must leave the alert
+      // alone on screen rather than the alert plus a confident gap claim.
       setError(err instanceof Error ? err.message : "Could not load that day.");
-    } finally {
-      if (!c.signal.aborted) setLoading(false);
     }
   }, [getToken, date]);
 
@@ -182,10 +240,11 @@ export function DayEditor({ date }: { date: string }) {
         setError("Servings has to be more than zero.");
         return;
       }
-      const num = (v: string) => {
-        const n = Number(v);
-        return Number.isFinite(n) && n >= 0 ? n : 0;
-      };
+      const macros = parseMacros(d);
+      if (typeof macros === "string") {
+        setError(macros);
+        return;
+      }
       setBusy(entry.id);
       setError(null);
       try {
@@ -196,14 +255,11 @@ export function DayEditor({ date }: { date: string }) {
           servings,
           serving_label: d.serving_label.trim(),
           // Multiplied back up: the wire carries the total for the quantity.
-          kcal: num(d.kcal) * servings,
-          protein_g: num(d.protein_g) * servings,
-          carb_g: num(d.carb_g) * servings,
-          fat_g: num(d.fat_g) * servings,
-          // Absent stays absent. An entry that never stated fibre is not a
-          // zero-fibre entry, and a correction must not turn silence into a
-          // measurement.
-          fibre_g: d.fibre_g.trim() === "" ? null : num(d.fibre_g) * servings,
+          kcal: macros.kcal * servings,
+          protein_g: macros.protein_g * servings,
+          carb_g: macros.carb_g * servings,
+          fat_g: macros.fat_g * servings,
+          fibre_g: macros.fibre_g == null ? null : macros.fibre_g * servings,
           // Provenance is preserved across a correction — this is still the
           // row that came from that food, even after the numbers changed.
           source_food_id: entry.source_food_id,
@@ -219,6 +275,48 @@ export function DayEditor({ date }: { date: string }) {
       }
     },
     [getToken, date, load],
+  );
+
+  /**
+   * Halve or double, computed from the entry's OWN numbers.
+   *
+   * Deliberately not `commit(e, {...perServing(e), servings: n})`, which was
+   * the first version: `perServing` rounds each figure to two decimals to make
+   * it typeable, so a round-trip through it mutated macros that nobody edited
+   * (100 kcal over 3 servings, doubled, came back 199.98) and made
+   * halve-then-double non-inverse below a quarter serving. Scaling the stored
+   * numbers directly is exact, and it is also what the control claims to do:
+   * "there was half this much", not "re-enter this at half".
+   */
+  const scale = useCallback(
+    async (entry: Entry, factor: number) => {
+      const servings = entry.servings * factor;
+      if (!(servings > 0)) return;
+      setBusy(entry.id);
+      setError(null);
+      try {
+        await saveEntry(getToken, entry.id, {
+          eaten_on: entry.eaten_on,
+          meal: entry.meal,
+          name: entry.name,
+          servings,
+          serving_label: entry.serving_label,
+          kcal: entry.kcal * factor,
+          protein_g: entry.protein_g * factor,
+          carb_g: entry.carb_g * factor,
+          fat_g: entry.fat_g * factor,
+          fibre_g: entry.fibre_g == null ? null : entry.fibre_g * factor,
+          source_food_id: entry.source_food_id,
+          notes: entry.notes,
+        });
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not change that quantity.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [getToken, load],
   );
 
   const remove = useCallback(
@@ -270,6 +368,14 @@ export function DayEditor({ date }: { date: string }) {
         </p>
       )}
 
+      {!loaded ? (
+        // Nothing below this point may render before a load succeeds. Every
+        // one of those regions makes a positive statement about the day — what
+        // was eaten, what the target was, that nothing was logged — and none
+        // of them is knowable yet. On an error the alert above stands alone.
+        error ? null : <p className="text-sm text-text-dim">Loading…</p>
+      ) : (
+        <>
       <section className="rounded-card border border-line bg-surface p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="eyebrow">Day total</h3>
@@ -294,10 +400,7 @@ export function DayEditor({ date }: { date: string }) {
         )}
       </section>
 
-      {loading && entries.length === 0 ? (
-        <p className="text-sm text-text-dim">Loading…</p>
-      ) : (
-        meals.map((meal) => {
+      {meals.map((meal) => {
           const rows = entries.filter((e) => e.meal === meal);
           if (rows.length === 0) return null;
           return (
@@ -326,11 +429,7 @@ export function DayEditor({ date }: { date: string }) {
                           setEditing(e.id);
                           setDraft(perServing(e));
                         }}
-                        onScale={(factor) => {
-                          const d = perServing(e);
-                          const next = Number(d.servings) * factor;
-                          commit(e, { ...d, servings: trim(next) });
-                        }}
+                        onScale={(factor) => scale(e, factor)}
                         onDelete={() => remove(e)}
                       />
                     )}
@@ -339,21 +438,30 @@ export function DayEditor({ date }: { date: string }) {
               </ul>
             </section>
           );
-        })
-      )}
+      })}
 
-      <AddEntry
-        date={date}
-        meals={meals}
-        open={adding}
-        onOpen={() => setAdding(true)}
-        onClose={() => setAdding(false)}
-        onAdded={async () => {
-          setAdding(false);
-          await load();
-        }}
-        onError={setError}
-      />
+      {adding ? (
+        <AddEntry
+          date={date}
+          meals={meals}
+          onClose={() => setAdding(false)}
+          onAdded={async () => {
+            setAdding(false);
+            await load();
+          }}
+          onError={setError}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="self-start rounded-control border border-line px-4 py-2 text-sm font-semibold"
+        >
+          Add something you missed
+        </button>
+      )}
+        </>
+      )}
     </div>
   );
 }
@@ -545,19 +653,26 @@ function EntryForm({
   );
 }
 
+/**
+ * Adding something that was missed.
+ *
+ * **Mounted only while open**, which is what makes the meal default correct:
+ * the draft is initialised once, and an always-mounted version initialised it
+ * on the very first render — before `/nutrition/entries` had returned the
+ * server's meal vocabulary — so the default came from a hardcoded fallback
+ * rather than from the list the picker actually renders. Harmless while
+ * breakfast is first in both, and exactly the sort of agreement that stops
+ * being true silently.
+ */
 function AddEntry({
   date,
   meals,
-  open,
-  onOpen,
   onClose,
   onAdded,
   onError,
 }: {
   date: string;
   meals: Meal[];
-  open: boolean;
-  onOpen: () => void;
   onClose: () => void;
   onAdded: () => void;
   onError: (m: string) => void;
@@ -577,18 +692,6 @@ function AddEntry({
     notes: "",
   });
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={onOpen}
-        className="self-start rounded-control border border-line px-4 py-2 text-sm font-semibold"
-      >
-        Add something you missed
-      </button>
-    );
-  }
-
   return (
     <EntryForm
       draft={draft}
@@ -602,10 +705,11 @@ function AddEntry({
           onError("An entry needs a name and a quantity above zero.");
           return;
         }
-        const num = (v: string) => {
-          const n = Number(v);
-          return Number.isFinite(n) && n >= 0 ? n : 0;
-        };
+        const macros = parseMacros(draft);
+        if (typeof macros === "string") {
+          onError(macros);
+          return;
+        }
         setBusy(true);
         try {
           await saveEntry(getToken, crypto.randomUUID(), {
@@ -617,11 +721,11 @@ function AddEntry({
             name: draft.name.trim(),
             servings,
             serving_label: draft.serving_label.trim() || "serving",
-            kcal: num(draft.kcal) * servings,
-            protein_g: num(draft.protein_g) * servings,
-            carb_g: num(draft.carb_g) * servings,
-            fat_g: num(draft.fat_g) * servings,
-            fibre_g: draft.fibre_g.trim() === "" ? null : num(draft.fibre_g) * servings,
+            kcal: macros.kcal * servings,
+            protein_g: macros.protein_g * servings,
+            carb_g: macros.carb_g * servings,
+            fat_g: macros.fat_g * servings,
+            fibre_g: macros.fibre_g == null ? null : macros.fibre_g * servings,
             notes: draft.notes,
           });
           onAdded();

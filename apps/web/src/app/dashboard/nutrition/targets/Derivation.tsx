@@ -103,10 +103,16 @@ export function Derivation({
               r.total ? "border-t border-line font-semibold" : ""
             }`}
           >
-            <div className="min-w-0">
-              <dt className="text-sm">{r.label}</dt>
-              <p className="text-[0.6875rem] font-normal text-text-dim">{r.detail}</p>
-            </div>
+            {/* The detail lives INSIDE the <dt>. A <p> between <dt> and <dd>
+                is invalid content for a <dl>'s wrapper div, and a screen
+                reader may detach the explanation from the term it explains —
+                which on this component is the explanation's whole job. */}
+            <dt className="min-w-0 text-sm">
+              {r.label}
+              <span className="block text-[0.6875rem] font-normal text-text-dim">
+                {r.detail}
+              </span>
+            </dt>
             <dd className="shrink-0 font-display text-base tabular-nums">{r.value}</dd>
           </div>
         ))}
@@ -116,7 +122,13 @@ export function Derivation({
         // A clamp is not a footnote. Without it the last line of the
         // arithmetic does not follow from the line above, and an athlete
         // checking the sums would conclude the app cannot add up.
-        <p className="rounded-control border border-warn/40 bg-warn/10 p-2 text-xs text-warn">
+        // `text-text`, NOT `text-warn`. Light-mode `--c-warn` (#b06a00) on a
+        // 10% wash of its own hue is around 4.2:1 at this size — under AA, the
+        // same pairing problem `--c-lime-ink` was minted for. There is no
+        // `--c-warn-ink` token, and adding one to the shared palette for one
+        // callout is a wider change than this branch should make; the border
+        // and ground carry the warning colour, the words stay readable.
+        <p className="rounded-control border border-warn/40 bg-warn/10 p-2 text-xs text-text">
           Held back: {basis.clamp_reason}. The arithmetic above asked for more
           than that, and this is where it stopped.
         </p>

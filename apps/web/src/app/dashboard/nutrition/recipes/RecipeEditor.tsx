@@ -41,6 +41,11 @@ import { saveFood, type Food, type Macros, type RecipeItemInput } from "@/lib/nu
  */
 
 type ItemDraft = {
+  /** A stable identity for the list key. Indexes look fine here because the
+   *  inputs are fully controlled, so the VALUES stay correct — but removing a
+   *  middle row renumbers everything after it, and focus and IME composition
+   *  follow the key rather than the value. */
+  key: string;
   name: string;
   quantity: string;
   serving_label: string;
@@ -51,16 +56,19 @@ type ItemDraft = {
   fibre_g: string;
 };
 
-const EMPTY_ITEM: ItemDraft = {
-  name: "",
-  quantity: "1",
-  serving_label: "100 g",
-  kcal: "",
-  protein_g: "",
-  carb_g: "",
-  fat_g: "",
-  fibre_g: "",
-};
+function emptyItem(): ItemDraft {
+  return {
+    key: crypto.randomUUID(),
+    name: "",
+    quantity: "1",
+    serving_label: "100 g",
+    kcal: "",
+    protein_g: "",
+    carb_g: "",
+    fat_g: "",
+    fibre_g: "",
+  };
+}
 
 function num(v: string): number {
   const n = Number(v);
@@ -106,6 +114,7 @@ export function perServing(items: ItemDraft[], yieldServings: number): Macros {
 
 function toDraft(food: Food): ItemDraft[] {
   return food.items.map((it) => ({
+    key: crypto.randomUUID(),
     name: it.name,
     quantity: String(it.quantity),
     serving_label: it.serving_label,
@@ -128,7 +137,7 @@ export function RecipeEditor({ existing }: { existing?: Food }) {
     String(existing?.yield_servings ?? 4),
   );
   const [items, setItems] = useState<ItemDraft[]>(
-    existing ? toDraft(existing) : [{ ...EMPTY_ITEM }],
+    existing ? toDraft(existing) : [emptyItem()],
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -231,7 +240,7 @@ export function RecipeEditor({ existing }: { existing?: Food }) {
 
         <ul className="flex flex-col gap-3">
           {items.map((it, i) => (
-            <li key={i} className="rounded-card border border-line bg-surface p-4">
+            <li key={it.key} className="rounded-card border border-line bg-surface p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="grid flex-1 gap-3 sm:grid-cols-3">
                   <Field
@@ -282,7 +291,7 @@ export function RecipeEditor({ existing }: { existing?: Food }) {
 
         <button
           type="button"
-          onClick={() => setItems((prev) => [...prev, { ...EMPTY_ITEM }])}
+          onClick={() => setItems((prev) => [...prev, emptyItem()])}
           className="self-start rounded-control border border-line px-4 py-2 text-sm font-semibold"
         >
           Add an ingredient

@@ -8442,6 +8442,17 @@ average with no denominator looks fine.
   days` are present.
 - **A zero-kcal logged day is distinguishable from an unlogged one.** Rare but
   real: it must render as a logged day with a total, not as "Nothing logged".
+- **A day that FAILED TO LOAD is not a day that was not logged**, and this is
+  the half that is easy to miss: an empty array means both, and every screen
+  here originally read it as "nothing logged". Fail each fetch (offline, 500)
+  and assert **no gap claim appears anywhere** — not "Nothing logged" rows in
+  the day list, not "Nothing was logged on this day" in the day editor, not
+  "No recipes yet", not an empty chart with "nothing logged in this period"
+  tiles. The error alert should stand alone. This is worth a test per screen;
+  it is where the two blocking review findings were, and both looked correct
+  in the happy path.
+- **Nothing may claim a gap before the first fetch returns either.** Assert the
+  same on a slow response, not only on a failed one.
 
 ### The analytical surface (`/dashboard/nutrition`)
 
@@ -8541,12 +8552,25 @@ average with no denominator looks fine.
   this control exists to prevent, and it passes any test that only checks
   servings.
 - Doubling does the same in the other direction.
+- **Halve then double returns the original numbers exactly.** Log 3 servings
+  totalling 100 kcal, double, halve, and assert 3 servings and 100 kcal — not
+  99.99. The first version round-tripped through a two-decimal per-serving
+  draft and drifted; scaling must come off the stored row.
+- **Halve then double is inverse at small quantities too.** 0.25 servings is
+  the case that broke: rounding the intermediate to 2 dp gave 0.13, and
+  doubling that gave 0.26.
 - Removing an entry drops it and the day total falls.
 - Adding a missed entry files it on **that page's date**, not today.
 - The edit form shows `servings × per-serving kcal = total` live as you type.
 
 #### Edge cases & errors
 - Servings of 0 or a negative is refused with a message, not sent.
+- **A garbled macro field is refused, not coerced to zero.** Type `12o` into
+  calories and assert the save is rejected with a message. Silently saving 0
+  would record a claim that the item had no calories — the same "a zero is a
+  claim" failure as a zero-filled day, arriving through the input instead.
+- A BLANK macro field is 0, and that is correct — black coffee is a real
+  zero-calorie entry. Blank fibre stays `null`.
 - An entry with no fibre keeps `fibre_g: null` through a correction — a save
   must not turn silence into a measured zero.
 - `source_food_id` survives a correction, so provenance is not lost by editing.

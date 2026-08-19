@@ -24,6 +24,12 @@ export default function RecipesPage() {
   const { getToken } = useAuth();
   const [foods, setFoods] = useState<Food[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  /** Which recipe is one click from being deleted. A two-step confirm rather
+   *  than a modal: the destructive action is irreversible on the server and a
+   *  recipe can hold fourteen hand-typed ingredients, so a stray click is
+   *  expensive — but it is still one row in a list, and a dialog for it would
+   *  be heavier than the risk. */
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -37,8 +43,10 @@ export default function RecipesPage() {
       if (!c.signal.aborted) setFoods(all.filter((f) => f.kind === "recipe"));
     } catch (e) {
       if (!c.signal.aborted) {
+        // `foods` stays null. Setting it to `[]` rendered the "No recipes yet"
+        // empty state directly beneath the error — a confident claim about
+        // what the athlete has, made from a request that failed.
         setError(e instanceof Error ? e.message : "Could not load your recipes.");
-        setFoods([]);
       }
     }
   }, [getToken]);
@@ -75,7 +83,7 @@ export default function RecipesPage() {
       )}
 
       {foods === null ? (
-        <p className="text-sm text-text-dim">Loading…</p>
+        error ? null : <p className="text-sm text-text-dim">Loading…</p>
       ) : foods.length === 0 ? (
         <p className="rounded-card border border-line bg-surface p-4 text-sm text-text-muted">
           No recipes yet. A recipe is worth building for anything you make in a
@@ -107,25 +115,46 @@ export default function RecipesPage() {
                 {Math.round(f.carb_g)}C / {Math.round(f.fat_g)}F
                 <span className="text-text-dim"> per portion</span>
               </p>
-              <button
-                type="button"
-                disabled={busy === f.id}
-                onClick={async () => {
-                  setBusy(f.id);
-                  setError(null);
-                  try {
-                    await deleteFood(getToken, f.id);
-                    await load();
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : "Could not delete that recipe.");
-                  } finally {
-                    setBusy(null);
-                  }
-                }}
-                className="text-xs font-semibold text-danger-ink underline underline-offset-4 disabled:opacity-50"
-              >
-                Delete
-              </button>
+              {confirming === f.id ? (
+                <span className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={busy === f.id}
+                    onClick={async () => {
+                      setBusy(f.id);
+                      setError(null);
+                      try {
+                        await deleteFood(getToken, f.id);
+                        setConfirming(null);
+                        await load();
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : "Could not delete that recipe.");
+                      } finally {
+                        setBusy(null);
+                      }
+                    }}
+                    className="text-xs font-semibold text-danger-ink underline underline-offset-4 disabled:opacity-50"
+                  >
+                    {busy === f.id ? "Deleting…" : `Really delete ${f.name}?`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(null)}
+                    className="text-xs font-semibold text-text-muted underline underline-offset-4 hover:text-text"
+                  >
+                    Keep
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirming(f.id)}
+                  aria-label={`Delete ${f.name}`}
+                  className="text-xs font-semibold text-danger-ink underline underline-offset-4"
+                >
+                  Delete
+                </button>
+              )}
             </li>
           ))}
         </ul>

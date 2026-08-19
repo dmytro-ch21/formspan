@@ -35,7 +35,12 @@ export default function CorrectDayPage() {
 
   const [days, setDays] = useState<DayTotals[]>([]);
   const [jump, setJump] = useState(now);
-  const [loading, setLoading] = useState(true);
+  // Set only when a load SUCCEEDS. `days` cannot carry this: an empty array is
+  // both "you logged nothing" and "the request failed", and the list below
+  // renders every date in range, so the failed case printed six weeks of
+  // "Nothing logged" under the error banner — forty-two fabricated claims
+  // about days nobody had asked the server about. Found in review.
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -43,17 +48,16 @@ export default function CorrectDayPage() {
     abortRef.current?.abort();
     const c = new AbortController();
     abortRef.current = c;
-    setLoading(true);
     setError(null);
     try {
       const d = await listDays(getToken, { from, to: now }, c.signal);
-      if (!c.signal.aborted) setDays(d);
+      if (c.signal.aborted) return;
+      setDays(d);
+      setLoaded(true);
     } catch (e) {
       if (!c.signal.aborted) {
         setError(e instanceof Error ? e.message : "Could not load your days.");
       }
-    } finally {
-      if (!c.signal.aborted) setLoading(false);
     }
   }, [getToken, from, now]);
 
@@ -104,8 +108,8 @@ export default function CorrectDayPage() {
         </p>
       )}
 
-      {loading && days.length === 0 ? (
-        <p className="text-sm text-text-dim">Loading…</p>
+      {!loaded ? (
+        error ? null : <p className="text-sm text-text-dim">Loading…</p>
       ) : (
         <section className="rounded-card border border-line bg-surface">
           <ul className="divide-y divide-line-soft">

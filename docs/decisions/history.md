@@ -28601,11 +28601,15 @@ different statement from seven of seven, and "7-day average" quietly meaning
 it as body text next to the number rather than in a tooltip, because the number
 is the thing an athlete screenshots and argues from.
 
-**Both are mutation-tested rather than assumed.** Making `buildSeries` zero-fill
-missing days turns **11 of 25** assertions red; dropping the trend-reading floor
-turns 3 red. Checked in both directions and restored — this repo's own record
-says a suite that passes against the bug it is named after is worse than no
-suite.
+**Both are mutation-tested rather than assumed**, and from both ends, because
+the rule has an arithmetic half and a drawing half and either can be broken
+alone. Making `buildSeries` zero-fill missing days turns **11 of 25** pure
+assertions and **5 of 6** render assertions red; dropping the trend-reading
+floor turns 3 pure ones red; leaving the arithmetic intact and making the
+CHART draw every day and span its gaps with one path turns **3 of 6** render
+assertions red. Every figure was measured, seen red, and restored — this
+repo's own record says a suite that passes against the bug it is named after
+is worse than no suite.
 
 One consequence that only appears once the rules are real: the rolling mean at
 the LEFT EDGE of a window is computed from a truncated lookback, so the page
@@ -28717,6 +28721,50 @@ one GET would be a file nobody can explain.
 The Nutrition rail entry is **ungated**, unlike the four above it. The registry
 gates on what an athlete trains; eating is orthogonal to all of it, and a
 BJJ-only athlete and a powerlifter have exactly the same nutrition screen.
+
+### What review caught, and it was all one shape
+
+`/pre-merge`'s `frontend-reviewer` found two `[blocking]` defects and both were
+the SAME failure as one this session had already found itself — rule 1 holding
+perfectly in the arithmetic and the chart, and being violated on the **loading
+and error render paths**.
+
+`DayEditor` rendered "Nothing was logged on this day. That is recorded as a
+gap" before its first fetch returned, and permanently after a failed one. The
+day list was worse by volume: a failed fetch left `days` empty while the list
+still iterated the calendar, printing **forty-two** "Nothing logged" rows under
+the error banner. Both are confident claims about days nobody had successfully
+asked the server about. The recipes list and the trend page had the softer
+version — an empty state or an empty chart rendered beneath an alert.
+
+The lesson is worth keeping because it is not obvious: **"an unlogged day is a
+gap" and "a day we failed to load is not a day" are different statements, and
+getting the first one right does nothing for the second.** An empty array means
+both, and every one of these screens read it as the first. All four now gate
+every claim-making region on a load that actually SUCCEEDED — `loaded`, set
+only in the `try`, never in the `catch` — so a failure leaves the alert
+standing alone.
+
+Also from that review: halve/double now scales the entry's stored numbers
+directly instead of round-tripping through the two-decimal per-serving draft,
+which mutated macros nobody edited and made halve-then-double non-inverse below
+a quarter serving; garbled macro input is rejected rather than coerced to zero,
+which is the same "a zero is a claim" posture applied to input; `AddEntry`
+mounts only when open, so its meal default comes from the server's vocabulary
+rather than a fallback; the targets page no longer refetches a year of targets
+and re-runs the adjustment check on every activity-chip click; the clamp
+callout's `text-warn` on `bg-warn/10` was below AA and there is no
+`--c-warn-ink` token to reach for, so the words are `text-text` and the border
+carries the colour; the `<dl>` rows put their detail inside the `<dt>` rather
+than in a `<p>` between `<dt>` and `<dd>`; recipe item rows got stable keys;
+and deleting a recipe now takes a second click.
+
+The `pre-merge-checker` was green on everything runnable here, including
+`build:web`, `build:admin` and the backend Docker image, and it caught one
+thing the green would have hidden: the first `vitest.config.mts` glob was
+`.tsx` under `src/app` and `.ts` under `src/lib`, so a future test file on the
+wrong side of that split would have been silently uncollected — and an
+uncollected test file reports nothing at all. It is one symmetric glob now.
 
 ### What this leaves open
 

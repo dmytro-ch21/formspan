@@ -36,6 +36,13 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/lib/__tests__/**/*.test.ts", "src/app/**/__tests__/**/*.test.tsx"],
+    // Both extensions under both trees. The first version was
+    // `src/lib/**/*.test.ts` plus `src/app/**/*.test.tsx`, which silently
+    // dropped a `.ts` test under `src/app` or a `.tsx` one under `src/lib` —
+    // an uncollected test file reports nothing at all, which is the one
+    // failure mode a test suite cannot tell you about. Flagged by the
+    // pre-merge checker, which listed the collected files rather than
+    // trusting the green.
+    include: ["src/{lib,app}/**/__tests__/**/*.test.{ts,tsx}"],
   },
 });

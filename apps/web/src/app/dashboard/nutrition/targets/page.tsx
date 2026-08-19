@@ -66,7 +66,18 @@ export default function NutritionTargetPage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const suggestRef = useRef<AbortController | null>(null);
 
+  /**
+   * The two reads that do NOT depend on the activity chip.
+   *
+   * Split from the suggestion deliberately. When all three shared one
+   * `useCallback` keyed on `activity`, every chip click refetched a year of
+   * targets and re-ran the weekly adjustment check — neither of which the chip
+   * can affect — and re-gated the whole page on `Loading…` while it happened,
+   * so the proposal card blinked out on a click that had nothing to do with
+   * it. Found in review.
+   */
   const load = useCallback(async () => {
     abortRef.current?.abort();
     const c = new AbortController();
@@ -74,24 +85,37 @@ export default function NutritionTargetPage() {
     setLoading(true);
     setError(null);
     try {
-      const [t, s, a] = await Promise.all([
+      const [t, a] = await Promise.all([
         // A year back, so the history reads as a sequence of decisions rather
         // than as one row. The window also carries in the target live at its
         // start, which is what makes "what was I eating to last spring"
         // answerable at all.
         listTargets(getToken, { from: addDays(now, -365), to: now }, c.signal),
-        suggestedTarget(getToken, now, activity, c.signal),
         fetchAdjustment(getToken, now, c.signal),
       ]);
       if (c.signal.aborted) return;
       setTargets(t);
-      setSuggested(s);
       setAdjustment(a);
     } catch (e) {
       if (c.signal.aborted) return;
       setError(e instanceof Error ? e.message : "Could not load your targets.");
     } finally {
       if (!c.signal.aborted) setLoading(false);
+    }
+  }, [getToken, now]);
+
+  /** The derivation, which is the only thing the activity chip changes. */
+  const loadSuggestion = useCallback(async () => {
+    suggestRef.current?.abort();
+    const c = new AbortController();
+    suggestRef.current = c;
+    try {
+      const s = await suggestedTarget(getToken, now, activity, c.signal);
+      if (!c.signal.aborted) setSuggested(s);
+    } catch (e) {
+      if (!c.signal.aborted) {
+        setError(e instanceof Error ? e.message : "Could not derive a target.");
+      }
     }
   }, [getToken, now, activity]);
 
@@ -105,6 +129,12 @@ export default function NutritionTargetPage() {
     load();
     return () => abortRef.current?.abort();
   }, [load]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadSuggestion();
+    return () => suggestRef.current?.abort();
+  }, [loadSuggestion]);
 
   const live = useMemo(() => {
     let best: Target | null = null;

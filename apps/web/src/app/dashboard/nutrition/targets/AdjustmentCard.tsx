@@ -182,14 +182,14 @@ export function AdjustmentCard({
             value={`${up ? "+" : "−"}${Math.abs(adjustment.delta_kcal)} kcal`}
             total
           />
-          <div className="mt-3 border-t border-line pt-2 text-[0.6875rem] text-text-dim">
+          <div role="presentation" className="mt-3 border-t border-line pt-2 text-[0.6875rem] text-text-dim">
             {/* Rule 2 again, on the evidence rather than on an average: the
                 proposal is only as good as the fortnight behind it, and the
                 fortnight is not visible in the number. */}
             Based on {b.days_logged} of {b.days_considered} days logged, and{" "}
             {b.days_on_current_target} days on your current target.
           </div>
-          <div className="mt-2 text-[0.6875rem] text-text-dim">
+          <div role="presentation" className="mt-2 text-[0.6875rem] text-text-dim">
             New macros: {adjustment.protein_g} g protein · {adjustment.fat_g} g fat ·{" "}
             {adjustment.carb_g} g carbs · {adjustment.fibre_g} g fibre
             {b.relaxed ? ` — adjusted to fit: ${b.relaxed}` : ""}
@@ -235,10 +235,13 @@ function Row({
         total ? "border-t border-line font-semibold" : ""
       }`}
     >
-      <div className="min-w-0">
-        <dt className="text-sm">{label}</dt>
-        <p className="text-[0.6875rem] font-normal text-text-dim">{detail}</p>
-      </div>
+      {/* Detail inside the <dt> — see `Derivation.tsx`: a <p> between <dt>
+          and <dd> is invalid `dl` content and can detach the explanation from
+          its term. */}
+      <dt className="min-w-0 text-sm">
+        {label}
+        <span className="block text-[0.6875rem] font-normal text-text-dim">{detail}</span>
+      </dt>
       <dd className="shrink-0 font-display text-sm tabular-nums">{value}</dd>
     </div>
   );
