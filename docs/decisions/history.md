@@ -30413,6 +30413,120 @@ says when the next one frees up, but a client cannot show "3 left today" without
 a read endpoint, which nutrition also lacks. Whether that is worth having is a
 product question nobody has asked yet.
 
+## 2026-08-19 — The file every check was blind to (N64)
+
+`scripts/check-tasks-integrity.py`, in `verify` and in CI.
+
+`docs/TASKS.md` is the shared task list and the claiming convention's whole
+substrate. It is also **prose to every check this repo runs**: lint, typecheck,
+every test suite and every parity script look straight past it. So a task
+silently reverting from `[x]` to `[ ]`, an id duplicated, or a line dropped
+entirely will pass `verify`, pass CI, and merge.
+
+### Three near-misses in one evening, all on green branches
+
+- **A hand resolution** took one side of a conflicted hunk wholesale. `main` had
+  two ids ticked, the branch had them stale, and either side taken whole
+  regressed finished work to open.
+- **A helper written to make those resolutions safer produced a duplicate id**,
+  by re-adding a ticked line whose counterpart sat outside the conflict hunk.
+  Automation aimed at the problem created a fresh instance of it.
+- **A clean auto-merge produced no conflict at all** and still needed auditing,
+  because an auto-merge picks a side just as silently and leaves no marker to
+  notice. This is the case a conflict-triggered fix would miss entirely, and it
+  is why the check runs on every build rather than only when git spoke up.
+
+The damage is quiet in the way that costs most: an id reverted to `[ ]` reads as
+*still to do*, so the next session picks it up and redoes finished work — the
+exact loss the claiming convention exists to prevent. Two full rounds of work
+were lost that way in one afternoon before the convention was written.
+
+### Why this is the enforcement half rather than the cadence half
+
+N63 reduces how OFTEN the risk is taken, by landing green PRs in bursts instead
+of one at a time. That is worth doing — one branch paid four rebase cycles in an
+evening, each an independent chance to regress the file.
+
+But the framing that produced N64 is that **a rebase is cheap in time and
+expensive in risk, and the risk was invisible**. Nothing in `verify` and nothing
+in CI could see any of the three failures above. The only thing between them and
+a merge was an assertion somebody happened to write because they had been warned
+— and a guard that depends on having been warned is not a guard.
+
+### What it promises, and what it does not
+
+Three assertions against `origin/main`: no duplicate ids, nothing `[x]` there
+appearing as `[ ]` here, nothing dropped.
+
+**It fails rather than skips when the baseline is unreachable.** A check that
+passes when it cannot do its job is a failure this repo has already shipped —
+`curriculum`'s `TestEverySeededTechniqueExistsInTheLibrary` skipped on every CI
+run for months while its package printed `ok`. So CI fetches the base branch
+explicitly, and deleting that step turns this red instead of quietly disarming
+it.
+
+Two limits worth stating rather than implying. A **stale `origin/main` weakens
+it**: a baseline predating a tick cannot see that tick reverted. And it **reads
+structure, not prose** — a line rewritten to say something false, or a task
+ticked that was never done, is out of scope.
+
+### It was tested in the failing direction
+
+Four mutations, each verified to have applied and then to go red: un-tick,
+duplicate, drop, baseline-missing. Separately, that `pnpm run verify` itself
+goes red rather than only the script, since the wiring is as capable of being
+wrong as the code.
+
+That discipline is the day's own lesson turned on the thing written to enforce
+the day's other lessons: **a checker nobody has watched fail is one more thing
+that looks like it is watching.**
+
+### And it was still wrong, in the way the day was about
+
+The first version compared against **`origin/main`'s tip**. Review measured what
+that does: it fails any branch that is merely BEHIND — and being behind is
+structurally incapable of causing the damage, because git's three-way merge
+resolves against the merge base and never regresses a line the branch did not
+touch. Proven rather than argued: the stale branch was merged and every one of
+main's ticks survived.
+
+So the check fired on undamaged trees and told their authors they had regressed
+a task they had never touched. Three ordinary situations went red for no reason
+— a **stacked PR** (whose merge ref carries its feature base, not main's newest
+ticks, and `ci.yml` deliberately supports stacked PRs), a **push to `main`**
+racing another merge, and, worst, **every local `verify` on every in-flight
+branch** after any merge anywhere, since this runs first and blocks the chain.
+A check that cries wolf on undamaged trees gets deleted, which is the single
+outcome that leaves the file unguarded again. `git merge-base HEAD origin/main`
+fixes all three and loses none of the real catches.
+
+**And the first version of this entry claimed a false positive as a success.**
+It said the check "caught a real regression on its first live run", naming two
+ids. It had not: the branch was two ids *behind* main, which is exactly the
+false alarm above, and its only `TASKS.md` edit was its own tick. The one piece
+of live evidence offered for the check working was an instance of its worst bug,
+recorded permanently as proof. That is the same
+comment-describes-behaviour-that-does-not-exist defect this branch had already
+hit twice — a `confidence` docstring, and an accessibility comment claiming a
+VoiceOver announcement that iOS ignores — and committing it a third time, inside
+the record of the tool built to make such things visible, is the most useful
+thing in this entry.
+
+The corrected claim is smaller and true: **the check has never yet caught a real
+regression.** It has been shown to fail correctly on four constructed ones.
+
+### What it does not promise
+
+Two limits the first draft omitted, both now in the docstring. It is **blind to
+a branch losing its OWN work** — a bad resolution reverting this branch's own
+tick and dropping the new id it filed prints `tasks intact`, because only the
+upstream-facing side of a two-point comparison is guarded. And a **qualified id
+may appear only once**: `**N7 (backend)**` parses as `N7`, so adding
+`**N7 (mobile)**` reads as a duplicate. Keying on id-plus-qualifier instead
+would miss a real duplicate where one copy gained a qualifier, which is the
+worse trade — split with a new id.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

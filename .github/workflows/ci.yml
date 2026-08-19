@@ -164,7 +164,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # `fetch-depth: 0`, and it has to be. `check-tasks-integrity.py` compares
+      # against the MERGE BASE with `origin/main`, and a merge base needs shared
+      # history: a shallow checkout plus a `--depth=1` fetch of main gives two
+      # commits with no common ancestor, so `git merge-base` finds nothing.
+      #
+      # That was tried and CI caught it — the first version fetched main at
+      # depth 1 and the step failed with "cannot read docs/TASKS.md at the merge
+      # base". Which is the designed behaviour working: the script FAILS rather
+      # than skips when the baseline is unreachable, so a misconfigured fetch
+      # turns the build red instead of quietly disarming the check. Weakening
+      # either half — this depth, or that refusal — puts it back.
+      #
+      # Full history for one file is the price. This is the cheapest job in the
+      # matrix (no toolchain, no install), so it is the right one to pay it in.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Belt and braces. `fetch-depth: 0` gives the history a merge base needs,
+      # but `actions/checkout` does not promise a `refs/remotes/origin/main` ref
+      # on a PR checkout — that lands detached on `refs/pull/N/merge`. This
+      # creates it, is a no-op when it already exists, and carries NO `--depth`,
+      # which is precisely what broke the merge base the first time.
+      - name: Make origin/main available (for the TASKS.md merge base)
+        run: git fetch --no-tags origin main:refs/remotes/origin/main || true
 
       # No actions/setup-python on purpose. The check is stdlib-only and
       # version-agnostic, the runner image ships python3 already, and every
@@ -173,6 +197,16 @@ jobs:
       # ("Failed to resolve action download info").
       - name: Python version
         run: python3 --version
+
+      # docs/TASKS.md is the one load-bearing file every other check is blind
+      # to — it is prose to lint, typecheck and every test suite. A task
+      # silently reverting from [x] to [ ], a duplicated id, or a dropped line
+      # all pass everything else and merge. All three nearly landed in one
+      # evening on 2026-08-19, on branches that were green: two from rebase
+      # resolutions taking a side wholesale, and one from a CLEAN AUTO-MERGE
+      # that produced no conflict to notice.
+      - name: Task list integrity
+        run: python3 scripts/check-tasks-integrity.py
 
       # The grip vocabulary is duplicated in Go, mobile and web because there
       # is no shared package to put it in. This is what makes that survivable:
