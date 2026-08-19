@@ -28125,14 +28125,30 @@ dated snapshot.
 
 ### Gaps this leaves
 
-- **Nothing has been run against a real API on this branch.** The refactor is
-  behaviour-preserving by construction and the bake-off numbers stay valid, but
-  "no behaviour change" is an argument, not a measurement. The first real call
-  through the new package will be N33's or the next N26 deploy's.
-- **`llm` has no test of its own for the happy path** — no fake HTTP server, no
-  golden response. The providers are exercised only by the truncation grep and
-  by nutrition's fake. A recorded-response test would be the honest next step
-  and needs a decision about fixtures.
+- ~~Nothing has been run against a real API.~~ **Closed, by the session that
+  raised it.** Both providers were called through this package at `3b65511` and
+  returned schema-conformant JSON with the right answer: `Name()`, `Model()` and
+  a non-empty `Response.Model` all correct. The refactor is clean by measurement
+  now, not only by construction. One detail arrived unarranged and is the best
+  evidence the `Model()` distinction was worth making: Anthropic reported
+  `claude-haiku-4-5-20251001` for a configured `claude-haiku-4-5` — the alias
+  resolving to a dated snapshot, exactly what that comment reasons about, on the
+  first live call.
+- **The live test is committed, gated on `LLM_LIVE=1`** (`live_smoke_test.go`),
+  and gated on an explicit flag rather than on a key being present, because a
+  test that runs whenever a key is in the environment runs in somebody's CI
+  eventually. Two changes were made to the version handed over: it now **fails**
+  rather than skips when `LLM_LIVE=1` is set with no key — an operator who asked
+  for a live run and got a silent skip has been told success for a test that
+  never ran — and its `.env`-scavenging fallback was **removed**. That fallback
+  walked up to six parent directories looking for credentials, which is a real
+  convenience (a worktree has no `backend/.env`, the same trap that costs mobile
+  builds their Clerk key) and a bad habit to encode: above the repo root it is
+  reading files that are none of its business. Export the variable.
+- **`llm` still has no OFFLINE happy-path test** — no fake HTTP server, no
+  recorded response — so the default `go test ./...` still exercises the
+  providers only through the truncation grep and nutrition's fake. A recorded
+  fixture is the honest next step and needs a decision about where those live.
 - **`Model()` widened the interface.** It earns its place (the alternative was a
   test reaching across a package boundary or re-deriving what it was checking),
   but every method on `Completer` is one more thing a third provider must

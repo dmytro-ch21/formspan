@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -22,6 +20,19 @@ import (
 // Deliberately gated rather than skipped-on-missing-key: this spends money, and
 // a test that runs whenever a key happens to be in the environment will run in
 // somebody's CI eventually.
+//
+// **The key comes from the environment and nowhere else.** The version this was
+// cherry-picked from fell back to reading `.env` files by walking up to six
+// parent directories — a real convenience, because a git worktree has no
+// `backend/.env` (it is gitignored, the same trap that costs mobile builds
+// their Clerk key). It is dropped anyway: a test that goes hunting for
+// credentials outside its own tree is a bad habit to encode, and above the repo
+// root it is reading files that are none of its business. Export the variable.
+//
+// And it FAILS rather than skips when `LLM_LIVE=1` is set without a key,
+// because at that point the operator has asked for a live run and a silent skip
+// would report success for a test that never ran — the failure mode this whole
+// package's history is made of.
 func TestLiveComplete(t *testing.T) {
 	if os.Getenv("LLM_LIVE") != "1" {
 		t.Skip("set LLM_LIVE=1 to make real API calls (spends money)")
@@ -45,9 +56,10 @@ func TestLiveComplete(t *testing.T) {
 		{ProviderAnthropic, "claude-haiku-4-5"},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
-			key := envFromFile(t, tc.provider.APIKeyEnv())
+			key := os.Getenv(tc.provider.APIKeyEnv())
 			if key == "" {
-				t.Skipf("%s not set", tc.provider.APIKeyEnv())
+				t.Fatalf("LLM_LIVE=1 but %s is not set — export it; this test does "+
+					"not go looking for it", tc.provider.APIKeyEnv())
 			}
 			c, err := New(Config{Provider: tc.provider, Model: tc.model, APIKey: key})
 			if err != nil {
@@ -91,27 +103,4 @@ func TestLiveComplete(t *testing.T) {
 			t.Logf("OK  configured=%s reported=%s  raw=%s", c.Model(), resp.Model, resp.Raw)
 		})
 	}
-}
-
-// envFromFile reads a key from the environment, falling back to backend/.env —
-// which a git worktree never has, being gitignored, so walk to the primary
-// checkout the same way the eval runner does.
-func envFromFile(t *testing.T, name string) string {
-	t.Helper()
-	if v := os.Getenv(name); v != "" {
-		return v
-	}
-	for _, dir := range []string{"../../..", "../../../../../.."} {
-		b, err := os.ReadFile(filepath.Join(dir, ".env"))
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(b), "\n") {
-			k, v, ok := strings.Cut(line, "=")
-			if ok && strings.TrimSpace(k) == name {
-				return strings.Trim(strings.TrimSpace(v), `"'`)
-			}
-		}
-	}
-	return ""
 }
