@@ -28375,6 +28375,68 @@ mirror it.** The bullet now does.
 Kept rather than quietly rewritten, because the failure is more instructive than
 the fix and it is a shape this file invites: every entry here is written at the
 moment of most confidence about work that is still moving.
+## 2026-08-19 — A real plate, and the error that was not flagged
+
+**N40.** N26 shipped the photo path and its own entry recorded the limitation
+plainly: the bake-off was four inputs and one SYNTHETIC image, both providers
+scored 12/12 which "mostly says the harness is too easy", and **no real
+photograph of a real plate had been through either**. So the refusal boundary
+was measured — gibberish and a plate of coloured ovals both correctly refused —
+and accuracy on actual food was not measured at all.
+
+One real photograph has now been through it. Ground truth was written down
+**before** the model saw the image, so the comparison is not reconstructed
+afterwards: one fried egg yolk-intact, a potato hash with tomato through it and
+dill on top, pickled mushrooms, five or six dill pickle rounds, one thick slice
+of open-crumb white bread.
+
+`gpt-5.6-luna`, 11.5s, six items, 955 kcal:
+
+| On the plate | What came back | |
+|---|---|---|
+| 1 fried egg | "Fried eggs", **servings 2**, 190 kcal, `medium` | quantity DOUBLED |
+| potato hash, tomato, dill | "Roasted potatoes with vegetables", 250 g, 320 kcal, `low` | hit; peppers invented in the assumption, dill missed |
+| pickled mushrooms | "Mushrooms", 100 g, 40 kcal, `low` | hit |
+| dill pickles | "Pickles", 100 g, 15 kcal, `medium` | hit |
+| 1 thick bread slice | "Bread", 1 slice at 80 g, 210 kcal, `medium` | hit |
+| — | **"Cured meat", 40 g, 180 kcal, `low`** | INVENTED |
+
+Four clean identifications, one doubled quantity, one invented item. Net about
+**29% over** on calories — roughly 275 kcal of the 955, split between the
+phantom meat and the extra egg.
+
+**The finding that matters is which error the draft flagged.** The invention
+came back `portion_confidence: low`, its assumption hedged in as many words
+("the dark reddish pieces *appear to be* a small portion of bacon"), and the
+top-level note named it unprompted: "the dark cured-meat pieces are unclear".
+The model surfaced its own worst row three separate ways. That is the
+correct-the-draft design working exactly as intended.
+
+The doubled egg did none of that. It is `medium`, its assumption states the
+wrong fact flatly ("Estimated as two large fried eggs"), and nothing in the
+response hints at doubt. **And it is the more dangerous of the two.** A phantom
+"Cured meat" row on a plate with no meat is visibly wrong to the athlete
+correcting the draft — they delete it. A `2` where there was a `1` is one glance
+from being accepted, because the item is real and only the number is wrong.
+
+So the assumption field earns its keep on inventions and does nothing for
+miscounts. Confidence is genuinely differentiated here — a mix of `medium` and
+`low` across six items, not the compression to `medium` measured on
+`gpt-5.4-nano` — but it is calibrated to *"can I identify this"* rather than
+*"can I count it"*.
+
+Open questions:
+
+- **One photograph is one photograph.** This is a first data point against a
+  recorded gap, not an accuracy measurement. Whether egg-doubling is a pattern
+  or this instance is unknown, and it is the cheapest possible follow-up.
+- **Nothing measures quantity accuracy separately from identification.** The
+  bake-off scored 12/12 on identification-shaped questions; both failures here
+  were about count and amount. A harness that cannot separate the two will keep
+  reporting a model that names food well as a model that logs food well.
+- The estimate was run through the Estimator directly, gated on `LLM_LIVE=1`,
+  not through the HTTP route — so the quota, the handler and the 422 path are
+  still only covered by their own tests.
 
 
 ## Open items / known gaps as of this entry
