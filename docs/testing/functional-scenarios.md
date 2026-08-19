@@ -6589,6 +6589,15 @@ The round map (2026-08-18):
 - **Both sides of a position share one link.** "Mount" and "Under mount" both
   read about `mount`, so both counts are the family's. That is the glossary
   describing a position for both players, not a duplicate.
+The copy transaction (2026-08-19):
+
+- **Nothing about copying changed for the user in F11** — it is a refactor. The
+  scenarios above for sequences and workouts are the coverage; re-run them.
+- **A copy that fails halfway leaves nothing behind.** Not reachable from the
+  API (no natural input makes a real `CopyTo` fail mid-way), which is why it is
+  covered by a unit test with an injected failure rather than here. Recorded so
+  nobody writes an E2E for it and concludes it cannot be tested.
+
 Copying a workout (2026-08-19):
 
 - **Three sources are copyable**: a VOLA template, another athlete's PUBLIC

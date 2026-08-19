@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 )
 
 type PostgresRepository struct {
@@ -379,25 +381,16 @@ func (r *PostgresRepository) Describe(ctx context.Context, resourceID, sharerID 
 // somebody, which is the existence oracle this module's Get already refuses to
 // be.
 func (r *PostgresRepository) Copy(ctx context.Context, id, userID string) (Sequence, error) {
-	tx, err := r.pool.Begin(ctx)
+	newID, ok, err := database.CopySelf(ctx, r.pool, r.CopyTo, id, userID)
 	if err != nil {
-		return Sequence{}, translate(err, "copy begin")
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	newID, ok, err := r.CopyTo(ctx, tx, id, userID, userID)
-	if err != nil {
-		return Sequence{}, err
+		return Sequence{}, translate(err, "copy")
 	}
 	if !ok {
 		return Sequence{}, ErrNotFound
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return Sequence{}, translate(err, "copy commit")
-	}
-	// Read back through the ordinary path so the response is byte-for-byte what
-	// a subsequent GET returns — including `editable` and `official`, which are
-	// per-caller and would have to be hand-set here otherwise.
+	// Read back through the ordinary path, so the response is byte-for-byte
+	// what a subsequent GET returns — including `editable` and `official`,
+	// which are per-caller and would have to be hand-set here otherwise.
 	return r.Get(ctx, newID, userID)
 }
 

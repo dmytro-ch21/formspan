@@ -26734,6 +26734,90 @@ Open questions:
   screens do not offer copying.
 
 
+## 2026-08-19 — One copy transaction, and a mutation that deadlocks instead of failing
+
+**F11.** `sequence.Copy` and `workout.Copy` (#294, #298) were the same seventeen
+lines twice: begin, `CopyTo`, refuse if not visible, commit, read back. They now
+call `platform/database.CopySelf` and are six lines each, keeping their own
+`ErrNotFound`, error wrapper and `Get` argument order — the module's vocabulary,
+and a helper returning somebody else's error type would leak this package into
+every handler's error mapping.
+
+**It takes a `CopyFunc`, not `share.Copier`, and that is not incidental.** The
+interface already exists over in `share` with exactly this signature — but the
+domain modules deliberately do not import `share`. The dependency runs the other
+way (they satisfy an interface declared there, `cmd/api` pairs them up) and both
+packages say so in as many words. A func value describes the same contract
+without reversing it.
+
+**The task as filed was wrong about the scope, and correcting it is the useful
+part.** It said share-accept does the same dance a third time. It does not:
+share-accept opens its transaction so the share's status flip commits WITH the
+copy, and on a missing source it DELETES the dead share and commits rather than
+refusing. Same shape, different operation. Folding it in would have traded real
+behaviour for a family resemblance. The duplication was two, not three.
+
+**The payoff is larger than the eleven lines, and it is the rollback.** Both
+#294 and #298 recorded, as an open question, that the transaction's actual
+guard was untested — that the row rolls back if the copy fails halfway. Neither
+module could test it: their `CopyTo` is real code copying real rows under intact
+foreign keys, and no natural input makes its second INSERT fail. A `CopyFunc` is
+injectable, so "write a row, then fail" is one closure away. That question is
+closed.
+
+**And the first version of that test proved less than it claimed** — review
+caught it, and the correction is the interesting part. Counting rows through the
+pool shows "not committed" and nothing more: MVCC hides an uncommitted insert
+from another connection, so a transaction merely LEFT OPEN reads identically to
+one rolled back. The count-0 assertion passed with the deferred rollback
+deleted. The only thing catching the leak was the cleanup's `DROP TABLE`
+blocking on the held lock — an unbounded lock wait rather than a deadlock, since
+the leaked transaction waits on nothing and Postgres's detector never fires — so
+it surfaced ten minutes later (no `-timeout` in `test:api` or CI) as a panic in
+teardown rather than as a failure.
+
+Two assertions now name it instead. `pool.Stat().AcquiredConns()` is the direct
+one: a closed transaction has returned its connection, and the pool knows even
+when the rows do not. And the cleanup's DROP runs under `SET lock_timeout =
+'3s'`, so teardown reports "a transaction is still holding it open" instead of
+waiting. Under the mutation both fire immediately and by name.
+
+**The process still cannot exit, and that is inherent rather than a defect.**
+`pgxpool.Close` waits for every connection to come back, so a leaked one blocks
+it forever whatever the test asserts first. What changed is that the two named
+errors are printed before the timeout instead of a bare panic in cleanup — the
+cause is legible, and only the exit is slow.
+
+**A measurement lesson, because it nearly went into this entry backwards.**
+Resuming the next morning, the mutation appeared to FAIL fast rather than hang,
+and the previous day's note was almost "corrected" on that basis. The database
+was down — Colima had stopped overnight — and with `TEST_DATABASE_URL` set but
+Postgres unreachable, `newTestRepo` calls `t.Fatalf` rather than `t.Skip`. So
+every test fails, in milliseconds, which is indistinguishable from a mutation
+being caught. **A red suite is only evidence once the baseline is green**: the
+unmutated run has to be measured in the same session, against the same
+database, before any mutation result means anything. Every measurement taken
+before that check was discarded.
+
+Open questions:
+
+- **The helper is used by exactly two callers**, which is the thinnest a shared
+  abstraction can be and still be one. It earns its place on the rollback test
+  rather than on the line count; if a third resource never arrives, that is
+  still the reason it exists.
+- **A leaked connection still costs the whole `-timeout` to die**, because
+  `pgxpool.Close` waits on it. The assertions name the cause first, so the
+  output is legible, but nothing makes the process exit promptly. Passing
+  `-timeout` in `test:api` and CI would bound it for every package, not just
+  this one — a one-line change nobody has made.
+- Share-accept's own transaction is now the only place that dance is written by
+  hand, deliberately. Nothing stops somebody "finishing the job" by folding it
+  in, and the comment on `CopySelf` is the only thing saying why not.
+- The scratch-table fixture creates and drops a real table per run. It is
+  isolated and cleaned up, but it is the first test in this repo to do that
+  rather than use the migrated schema.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
