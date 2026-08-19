@@ -28067,6 +28067,15 @@ writes any provider code. With one consumer an interface is designed against a
 guess; with a second consumer that has not started, it is designed against two
 real shapes and costs nothing to get right.
 
+A third consumer arrived the same day, unplanned, and is the best evidence the
+shapes were real rather than guessed: **N7's machine-recognition camera call was
+decided for OpenAI** (entry above), which makes it an image request against a
+schema — a shape `Request` already carries, because N26 needed it for a plate
+photo. Nothing in this package had to change to accommodate it. That also means
+the model-defaults decision now has three feature judgements behind it instead
+of two: N7 chose its provider on cost against a comparable result, which is not
+the reasoning either of the other two used.
+
 ### What stayed behind, which is the line that keeps the package honest
 
 `nutrition` keeps the prompt, the schema, the parse, the validation, and its own
