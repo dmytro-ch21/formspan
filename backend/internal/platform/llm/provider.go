@@ -41,9 +41,14 @@ func (p Provider) APIKeyEnv() string {
 // Config is everything New needs.
 //
 // No DEFAULT provider and no default model: both are per-feature judgements
-// that stay with the caller. N26 and N33 want different defaults on the same
-// provider, and a package-level default here would quietly become one feature's
-// opinion imposed on the other.
+// that stay with the caller, and that is measured rather than asserted.
+//
+// Same provider, same prompt shape, same schema discipline: on the dictation
+// eval (#302) `gpt-5.6-luna` scored a 0.0% invention rate against
+// `gpt-5.4-nano`'s 24.2%, which makes nano unusable there — while nano was
+// perfectly adequate for portion estimates, where the failure it is prone to
+// costs far less. A package-level default would quietly become one feature's
+// opinion imposed on the other, and the number that says so is 24.2%.
 type Config struct {
 	// Provider selects the backend. Required — the caller owns its own default.
 	Provider Provider
