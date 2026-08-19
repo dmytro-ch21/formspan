@@ -25,7 +25,7 @@
     "lint:admin": "pnpm --filter admin lint",
     "typecheck:admin": "pnpm --filter admin exec tsc --noEmit",
     "build:admin": "pnpm --filter admin build",
-    "verify": "pnpm run check:tasks && node scripts/validate_palette.mjs && node scripts/generate_icons.mjs --check && pnpm run check:python && pnpm run check:grip-parity && pnpm run check:rate-parity && pnpm run check:evals && pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run lint:mobile && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run check:brand-copies && pnpm run lint:web && pnpm run typecheck:web && pnpm run test:web && pnpm run lint:admin && pnpm run typecheck:admin && pnpm run test:admin",
+    "verify": "pnpm run check:tasks && node scripts/validate_palette.mjs && node scripts/generate_icons.mjs --check && pnpm run check:python && pnpm run check:grip-parity && pnpm run check:rate-parity && pnpm run check:telemetry-parity && pnpm run check:evals && pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run lint:mobile && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run check:brand-copies && pnpm run lint:web && pnpm run typecheck:web && pnpm run test:web && pnpm run lint:admin && pnpm run typecheck:admin && pnpm run test:admin",
     "check:brand-copies": "node scripts/check-brand-copies.mjs",
     "check:python": "python3 scripts/check-python-syntax.py",
     "check:grip-parity": "python3 scripts/check-grip-parity.py",
@@ -33,7 +33,8 @@
     "check:evals": "python3 scripts/check-dictation-evals.py",
     "check:tasks": "python3 scripts/check-tasks-integrity.py",
     "lint:mobile": "pnpm --filter mobile lint",
-    "test:admin": "pnpm --filter admin test"
+    "test:admin": "pnpm --filter admin test",
+    "check:telemetry-parity": "python3 scripts/check-telemetry-parity.py"
   },
   "devDependencies": {
     "@redocly/cli": "^2.41.0"

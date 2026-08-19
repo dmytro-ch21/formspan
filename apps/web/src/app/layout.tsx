@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+
+import { Telemetry } from "./Telemetry";
 import { clerkAppearance, clerkLocalization } from "./clerkAppearance";
 import { Barlow, Barlow_Condensed } from "next/font/google";
 import "./globals.css";
@@ -52,7 +54,15 @@ export default function RootLayout({
         <head>
           <ThemeScript />
         </head>
-        <body>{children}</body>
+        <body>
+          {/* Mounted at the root so the reporter is installed as early as it
+              can be. NOT "before any page renders": the endpoint is
+              authenticated, so the window listeners go live only once Clerk
+              resolves and somebody is signed in. Signed-out render crashes are
+              still caught, by `app/error.tsx`. Renders nothing. */}
+          <Telemetry />
+          {children}
+        </body>
       </html>
     </ClerkProvider>
   );
