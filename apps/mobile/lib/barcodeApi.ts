@@ -27,7 +27,7 @@
  * to. N41 is the phone half: the scanner, the draft, and the confirm.
  */
 
-import { ApiError, isNotFound } from './apiError';
+import { ApiError } from './apiError';
 import { apiRequest } from './apiRequest';
 import type { Macros } from './nutrition';
 import type { TokenGetter } from './useAuthToken';
@@ -114,7 +114,7 @@ export async function lookupBarcode(
     );
     return { status: 'found', food: res.food, source: res.source };
   } catch (err) {
-    if (isNotFound(err) && err instanceof ApiError && err.code === 'not_found') {
+    if (err instanceof ApiError && err.status === 404 && err.code === 'not_found') {
       return { status: 'unknown', code };
     }
     throw err;

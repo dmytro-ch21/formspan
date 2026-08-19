@@ -93,6 +93,16 @@ describe('normaliseBarcode', () => {
   });
 });
 
+/**
+ * A UPC-E's check digit is the check digit of its UPC-A EXPANSION, not of its
+ * own seven-digit prefix — which is why it can be verified at all, and is the
+ * relationship the entry point's guard rests on. Derived here rather than
+ * written as a literal so the test states that relationship instead of
+ * assuming it.
+ */
+const PAYLOAD = '123450';
+const FRAMED = `0${PAYLOAD}${expandUpcE(PAYLOAD)!.slice(-1)}`;
+
 describe('expandUpcE', () => {
   /**
    * Every compression rule, one case each, keyed on the last payload digit.
@@ -117,13 +127,9 @@ describe('expandUpcE', () => {
     expect(hasValidCheckDigit(expected)).toBe(true);
   });
 
-  it('accepts both the 6-digit payload and the 8-digit framed form', () => {
-    // The two platforms disagree about which form they hand back, and this app
-    // cannot settle that from a test — so it takes either, and what is pinned
-    // is that both routes land on the same product rather than one of them
-    // silently missing.
-    expect(expandUpcE('0123450' + checkDigit('0123450'))).toBe(expandUpcE('123450'));
-    expect(expandUpcE('123450')).toBe('012000003455');
+  it('reads the payload out of the 8-digit framed form', () => {
+    expect(expandUpcE(FRAMED)).toBe(expandUpcE(PAYLOAD));
+    expect(expandUpcE(PAYLOAD)).toBe('012000003455');
   });
 
   it('refuses a number system other than 0 or 1', () => {
@@ -136,8 +142,89 @@ describe('expandUpcE', () => {
   });
 
   /** A UPC-E reaches the catalog as a 13-digit GTIN like everything else. */
-  it('normalises through to 13 digits', () => {
-    expect(normaliseBarcode('0123450' + checkDigit('0123450'))).toBe('0012000003455');
+  it('normalises a framed UPC-E through to 13 digits', () => {
+    expect(normaliseBarcode(FRAMED, 'upc_e')).toBe('0012000003455');
+  });
+
+  /**
+   * The bug this file did not catch, found in review.
+   *
+   * `expandUpcE` **computes** the check digit it returns, so the old guard —
+   * `hasValidCheckDigit(expanded)` — was true by construction: it verified a
+   * digit we had just derived ourselves and said nothing about what the camera
+   * read. Every 8-digit vector written here was valid, so nothing went red.
+   *
+   * The consequence was the precise failure the feature exists to prevent: a
+   * garbled read expands to a syntactically perfect UPC-A, gets looked up, and
+   * is reported to the athlete as "we don't have this one" — or resolves to a
+   * DIFFERENT REAL PRODUCT, since the expansion of a misread is still a
+   * legitimate GTIN.
+   */
+  it('rejects a framed UPC-E whose scanned check digit disagrees', () => {
+    expect(normaliseBarcode(FRAMED, 'upc_e')).not.toBeNull();
+
+    // Same payload, every OTHER check digit. All nine must be refused — a loop
+    // rather than one bad digit, because a guard that happens to reject one
+    // value is not the same as one that accepts exactly the right value.
+    for (let d = 0; d <= 9; d += 1) {
+      const candidate = `0${PAYLOAD}${d}`;
+      if (candidate === FRAMED) continue;
+      expect(normaliseBarcode(candidate, 'upc_e')).toBeNull();
+    }
+  });
+
+  /**
+   * The 6-digit payload has no check digit to verify, so it cannot be
+   * protected against a misread at all. Scanners emit the framed form;
+   * accepting the bare payload was speculative generosity that cost the guard.
+   */
+  it('refuses the unverifiable 6-digit payload at the entry point', () => {
+    expect(normaliseBarcode('123450', 'upc_e')).toBeNull();
+    // The pure expansion still accepts it — it is a published algorithm and is
+    // tested above. It is the ENTRY POINT that must not take an unverifiable
+    // code.
+    expect(expandUpcE('123450')).toBe('012000003455');
+  });
+});
+
+describe('the check digit is verified as SCANNED, never as recomputed', () => {
+  /**
+   * The second instance of the same mistake. The ITF-14 path sliced off the
+   * indicator digit and recomputed the check for what remained, so the guard
+   * beneath it was again true by construction and a misread carton reached the
+   * network. Found in review, alongside the UPC-E one.
+   */
+  it('rejects an ITF-14 whose own check digit disagrees', () => {
+    const unit = '5000112637922';
+    const partial = `1${unit.slice(0, 12)}`;
+    const carton = `${partial}${checkDigit(partial)}`;
+    expect(normaliseBarcode(carton, 'itf14')).toBe(unit);
+
+    for (let d = 0; d <= 9; d += 1) {
+      const candidate = `${partial}${d}`;
+      if (candidate === carton) continue;
+      expect(normaliseBarcode(candidate, 'itf14')).toBeNull();
+    }
+  });
+
+  /**
+   * Eight digits is EAN-8 or UPC-E and the string alone cannot say which, so
+   * the scanner's own answer decides. Without this the module guessed — and
+   * the guess is what made the vacuous UPC-E check reachable for every 8-digit
+   * code beginning 0 or 1.
+   */
+  it('dispatches on the symbology the scanner reported', () => {
+    const ean8 = '96385074';
+    expect(normaliseBarcode(ean8, 'ean8')).toBe('0000096385074');
+    // The same eight digits read as UPC-E are a different product entirely,
+    // and here they do not verify as one.
+    expect(normaliseBarcode(ean8, 'upc_e')).toBeNull();
+  });
+
+  it('still works when no symbology is supplied, falling back to length', () => {
+    expect(normaliseBarcode('4006381333931')).toBe('4006381333931');
+    expect(normaliseBarcode('036000291452')).toBe('0036000291452');
+    expect(normaliseBarcode('96385074')).toBe('0000096385074');
   });
 });
 

@@ -55,7 +55,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { FOOD_BARCODE_TYPES, normaliseBarcode } from '@/lib/barcode';
 import { lookupBarcode, type CachedSource, type ScannedFood } from '@/lib/barcodeApi';
 import { cachedBarcode, rememberBarcode } from '@/lib/barcodeCache';
-import { isOffline } from '@/lib/apiError';
+import { ApiError, isOffline } from '@/lib/apiError';
 import { parseOr } from '@/lib/draftNumber';
 import { logFood } from '@/lib/foodLog';
 import { MEALS, scale, slotForClock, todayString, type Food, type Meal } from '@/lib/nutrition';
@@ -121,6 +121,19 @@ export default function ScanBarcodeScreen() {
   const handling = useRef(false);
 
   /**
+   * Whether a confirm is already in flight.
+   *
+   * A ref for the same reason `handling` is one, and the file already argues
+   * it: a state flag does not update until the next render, so two taps
+   * landing before React commits both read `saving === false` and both log.
+   * The window is narrow — a local SQLite write — but it is the identical
+   * pattern this screen names twenty lines up, and a duplicated meal is
+   * exactly the damage the draft-then-confirm rule exists to avoid. Raised in
+   * review.
+   */
+  const confirming = useRef(false);
+
+  /**
    * Show the drafted product and let the athlete correct it.
    *
    * Declared BEFORE `resolve`, which calls it. That ordering is enforced —
@@ -141,7 +154,13 @@ export default function ScanBarcodeScreen() {
 
   const resolve = useCallback(
     async (code: string) => {
-      if (!userId) return;
+      if (!userId) {
+        // Release the frame guard. Latched with a live camera and no phase
+        // change, every subsequent frame is silently swallowed and the screen
+        // looks broken rather than signed out. Raised in review.
+        handling.current = false;
+        return;
+      }
       setPhase({ kind: 'looking-up', code });
 
       // The local cache first, and BEFORE the network rather than as a
@@ -178,11 +197,7 @@ export default function ScanBarcodeScreen() {
         setPhase({
           kind: 'unreachable',
           code,
-          message: isOffline(err)
-            ? "You're offline, so a new barcode can't be looked up. A food you've scanned on this phone before still works without signal."
-            : err instanceof Error && err.message
-              ? err.message
-              : 'The food lookup could not be reached. Try again in a moment.',
+          message: messageForLookupFailure(err),
         });
       }
     },
@@ -190,9 +205,12 @@ export default function ScanBarcodeScreen() {
   );
 
   const onScanned = useCallback(
-    ({ data }: { data: string }) => {
+    // `type` is the SYMBOLOGY the camera decoded, and it is passed on rather
+    // than dropped: eight digits is EAN-8 or UPC-E and the string alone cannot
+    // say which. Guessing there is what let a misread through once already.
+    ({ data, type }: { data: string; type: string }) => {
       if (handling.current) return;
-      const code = normaliseBarcode(data);
+      const code = normaliseBarcode(data, type);
       if (!code) {
         // Keep scanning. A creased or curved packet fails its own check digit
         // routinely, and the honest reading of that is "aim again", not "we do
@@ -225,7 +243,8 @@ export default function ScanBarcodeScreen() {
    * cached product can never rewrite a meal already logged.
    */
   const confirm = useCallback(async () => {
-    if (phase.kind !== 'draft' || !userId || saving) return;
+    if (phase.kind !== 'draft' || !userId || confirming.current) return;
+    confirming.current = true;
     setSaving(true);
     setSaveError(null);
     try {
@@ -255,9 +274,10 @@ export default function ScanBarcodeScreen() {
         `${err instanceof Error && err.message ? err.message : 'That could not be saved.'} Nothing was logged.`,
       );
     } finally {
+      confirming.current = false;
       setSaving(false);
     }
-  }, [phase, userId, saving, servingsText, kcalText, proteinText, date, meal, router]);
+  }, [phase, userId, servingsText, kcalText, proteinText, date, meal, router]);
 
   // ---- render ------------------------------------------------------------
   // Every hook is above this line. Nothing below may introduce one: a hook
@@ -327,7 +347,10 @@ export default function ScanBarcodeScreen() {
           />
           <View style={styles.reticle} pointerEvents="none" />
         </View>
-        <Text style={styles.hint} testID="scan-hint">
+        {/* Announced, because it changes in place while the camera is the
+            focus: a VoiceOver user aiming at a packet would otherwise never
+            learn the read failed. */}
+        <Text style={styles.hint} testID="scan-hint" accessibilityLiveRegion="polite">
           {misread
             ? "That didn't read cleanly — try again, flatter to the light."
             : 'Point the camera at the barcode on the packet.'}
@@ -351,6 +374,19 @@ export default function ScanBarcodeScreen() {
         <Text style={styles.body} testID="scan-looking-up">
           Looking up {phase.code}…
         </Text>
+        {/* An exit, because there is no request timeout beneath this. On one
+            bar — not offline, just slow, which is this feature's own described
+            environment — the OS can take tens of seconds to give up, and a
+            spinner with no way out is indistinguishable from a hang. Raised in
+            review. */}
+        <Pressable
+          onPress={scanAgain}
+          accessibilityRole="button"
+          accessibilityLabel="Stop looking this up"
+          testID="scan-cancel-lookup"
+        >
+          <Text style={styles.link}>Cancel</Text>
+        </Pressable>
       </Shell>
     );
   }
@@ -506,7 +542,7 @@ export default function ScanBarcodeScreen() {
       </Text>
 
       {saveError ? (
-        <Text style={styles.error} testID="scan-save-error">
+        <Text style={styles.error} testID="scan-save-error" accessibilityLiveRegion="assertive">
           {saveError}
         </Text>
       ) : null}
@@ -608,6 +644,29 @@ function Field({
       />
     </View>
   );
+}
+
+/**
+ * Why a lookup did not happen, in words the athlete can act on.
+ *
+ * The middle branch is not hypothetical housekeeping — it is the GUARANTEED
+ * experience until N46 ships the endpoint. `apiRequest` fills `code` with
+ * `unknown` when a response carries no error envelope, which is what an
+ * unrouted path returns, so without this the screen shows the raw
+ * "Request failed (404)." Honest, and useless to somebody holding a packet.
+ *
+ * Note it still renders under `unreachable` rather than `unknown`: we did not
+ * ask successfully, so we cannot say the catalog lacks the food.
+ */
+function messageForLookupFailure(err: unknown): string {
+  if (isOffline(err)) {
+    return "You're offline, so a new barcode can't be looked up. A food you've scanned on this phone before still works without signal.";
+  }
+  if (err instanceof ApiError && err.status === 404 && err.code !== 'not_found') {
+    return 'Barcode lookup isn\u2019t switched on in this build yet. Describing the food works now.';
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return 'The food lookup could not be reached. Try again in a moment.';
 }
 
 /**

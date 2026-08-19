@@ -29287,6 +29287,46 @@ one" — the honest failure, and not a usable feature. The source decision, shar
 with N42: **Open Food Facts, fetched on demand and cached, never bulk-ingested**,
 which is both the cheap answer and the one the ODbL constraint forces.
 
+### The review finding: a guard that verified its own arithmetic
+
+The most important defect in this work was found by `frontend-reviewer`, not by
+the suite, and it is worth recording because the shape recurs.
+
+Two of the normalisation paths **validated a check digit they had just computed
+themselves**. `expandUpcE` derives a fresh check digit for the UPC-A it returns,
+and the ITF-14 reduction derives one for the 13 digits left after the indicator
+is dropped — so calling `hasValidCheckDigit` on either OUTPUT is true by
+construction. Both read like guards. Neither was one. The comment beside the
+first said "keep it only if it verifies", describing a check that did not exist.
+
+The consequence was precisely the failure this feature is built to prevent. Any
+eight digits beginning 0 or 1 — a garbled EAN-8 read off a creased packet —
+expand to a *syntactically perfect* UPC-A, get looked up, and come back as "we
+don't have this one": a false statement about the catalog caused by a bad scan.
+Or worse, they resolve to a **different real product**, because the expansion of
+a misread is still a legitimate GTIN.
+
+**No test could see it**, and the reason is the useful part: every eight-digit
+and ITF-14 vector written for those paths was VALID. A guard is only exercised
+by the input it is supposed to reject, and the suite contained none. The fix
+verifies the digit **as scanned** — the computed one is compared against what
+the camera actually read — and the new tests iterate all ten candidate check
+digits rather than trying one, since a guard that happens to reject one value is
+not the same as one that accepts exactly the right value.
+
+The reviewer's better suggestion was taken too: `onBarcodeScanned` reports the
+**symbology**, and that is now passed into `normaliseBarcode` instead of being
+discarded. Eight digits is EAN-8 or UPC-E and the string alone cannot say which
+— the module used to guess, and the guess is what made the vacuous UPC-E check
+reachable at all. The bare six-digit UPC-E payload is no longer accepted at the
+entry point either: it carries no check digit, so it cannot be verified, and
+accepting an unverifiable code is the same hole in a smaller form.
+
+This is the second time in this repo that an assertion passed for the wrong
+reason and only a deliberate attempt to break it revealed the fact. The first
+was the mobile suite's founding pair (a 300s token that never reached the
+offline path, and a 5s wait against a ladder already at 300s).
+
 ### Two existing guards caught real defects in this work
 
 Worth recording because both were written by earlier sessions for exactly this.

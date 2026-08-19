@@ -366,8 +366,14 @@ const CREATE_BARCODE_CACHE = `
     carb_g REAL NOT NULL DEFAULT 0,
     fat_g REAL NOT NULL DEFAULT 0,
     fibre_g REAL,
-    -- 'catalog' or 'off'. Kept because the two are not equally trustworthy and
-    -- a purge of ODbL rows has to be able to find them.
+    -- 'catalog', 'off' or 'ai' -- the last being a food the athlete described
+    -- because no catalog had the packet, kept distinct so a guess can never
+    -- wear a fact's provenance. Kept at all because a purge of ODbL rows has to
+    -- find exactly them: forgetOpenFoodFactsRows is scoped to source = 'off',
+    -- so this comment being right is what that scoping depends on. It said
+    -- "'catalog' or 'off'" while 'ai' was already being written; caught in
+    -- review. (No backticks in here: this is inside a template literal, and
+    -- one silently ends the string -- 40 suites went red.)
     source TEXT NOT NULL,
     cached_at TEXT NOT NULL,
     PRIMARY KEY (user_id, barcode)

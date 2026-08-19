@@ -41,18 +41,18 @@ function isDigits(s: string): boolean {
 }
 
 /**
- * Expand a compressed UPC-E to its full UPC-A twelve digits.
+ * Expand a compressed UPC-E payload to its full UPC-A twelve digits.
  *
  * UPC-E is the short code on things too small for a full barcode — a soda can,
  * a chocolate bar — so on a US-first product set this is not an exotic case.
  * The compression is a published, fully deterministic rule keyed on the LAST
  * digit of the six-digit payload; there is nothing to guess.
  *
- * **It accepts both the six-digit payload and the eight-digit form** (number
- * system + payload + check digit), because the two platforms do not agree on
- * which one they hand back and this app cannot verify that from a test. Taking
- * either is what stops that disagreement becoming a silent lookup miss on one
- * platform only.
+ * Accepts the six-digit payload or the eight-digit framed form (number system
+ * + payload + check digit). **The returned check digit is COMPUTED, never the
+ * one that was scanned** — which is why callers must not then "verify" the
+ * result and think they have checked anything. `normaliseBarcode` compares the
+ * computed digit against the scanned one instead; see the note there.
  *
  * Number system must be 0 or 1: UPC-E is not defined for any other, and a code
  * claiming otherwise is a misread rather than a product.
@@ -101,8 +101,8 @@ export function expandUpcE(raw: string): string | null {
  * The GTIN check digit for a code given WITHOUT it.
  *
  * Weights alternate 3 and 1 from the RIGHTMOST character of the partial code,
- * which is what makes this identical for EAN-8, UPC-A and EAN-13 rather than
- * three near-copies.
+ * which is what makes this identical for EAN-8, UPC-A, EAN-13 and ITF-14
+ * rather than four near-copies.
  */
 export function checkDigit(partial: string): string {
   let sum = 0;
@@ -120,56 +120,100 @@ export function hasValidCheckDigit(code: string): boolean {
 }
 
 /**
+ * Which symbology a scanned string is, preferring what the SCANNER said.
+ *
+ * The scanner knows; length does not. Eight digits is EAN-8 *or* UPC-E and
+ * nothing about the string settles it — the previous version of this module
+ * guessed, and guessing is what let a misread through (see `normaliseBarcode`).
+ * `type` comes straight from expo-camera's `BarcodeScanningResult`.
+ *
+ * Falls back to length only when the caller has no type to give, which is the
+ * test harness and nothing else on a device.
+ */
+function symbology(code: string, type?: string): 'upc_e' | 'itf14' | 'gtin' | null {
+  switch (type) {
+    case 'upc_e':
+      return 'upc_e';
+    case 'itf14':
+      return 'itf14';
+    case 'ean13':
+    case 'ean8':
+    case 'upc_a':
+      return 'gtin';
+    default:
+      break;
+  }
+  if (code.length === 14) return 'itf14';
+  if (code.length === 8 || code.length === 12 || code.length === 13) return 'gtin';
+  return null;
+}
+
+/**
  * The one form a lookup is made in: a 13-digit GTIN, or null if this was never
  * a food barcode.
  *
  * - **UPC-A (12)** gains the leading zero that the printed code leaves implied.
  *   This is the whole US/EU difference and the reason this function exists.
- * - **EAN-8 (8)** is zero-padded to 13. It is a distinct, shorter allocation —
- *   padding is the canonical GTIN-13 widening, not a guess.
+ * - **EAN-8 (8)** is zero-padded to 13. Leading zeros contribute nothing to the
+ *   weighted sum and do not shift any existing digit's position from the right,
+ *   so padding provably preserves the check digit rather than merely seeming to.
  * - **ITF-14 (14)** drops its leading packaging-level digit and is re-checked,
  *   so a multipack carton resolves to the unit inside it.
- * - **UPC-E** is expanded first, then handled as UPC-A.
+ * - **UPC-E** is expanded, then handled as UPC-A.
  *
- * **The check digit is verified, and a failure returns null.** A misread is a
- * real outcome of pointing a camera at a curved or creased packet, and an
- * unverified misread would be looked up, missed, and reported to the athlete
- * as "we do not have this one" — telling them something false about the
- * catalog when the truth is that the scan was bad and they should try again.
- * Distinguishing those two is most of this feature's honesty.
+ * ## Every path verifies the check digit AS SCANNED, before transforming
+ *
+ * This is the correctness rule of the whole module, and the first version of it
+ * got this wrong in two places in the same way. `expandUpcE` and the ITF-14
+ * reduction both **compute** a fresh check digit, so calling
+ * `hasValidCheckDigit` on their OUTPUT is true by construction — it verifies a
+ * digit we just derived and tells you nothing about what the camera read. Both
+ * looked like guards and neither was one, and no test could see it because
+ * every vector written for them was valid.
+ *
+ * The consequence was the exact failure this feature exists to avoid: a garbled
+ * 8-digit read expands to a *syntactically perfect* UPC-A, gets looked up, and
+ * comes back as "we do not have this one" — a false statement about the
+ * catalog — or, worse, as a different real product. Found in review.
+ *
+ * So a misread returns null and never reaches the network: for UPC-E the
+ * computed digit is compared against the **scanned** one, and ITF-14 is checked
+ * before its indicator is removed.
  */
-export function normaliseBarcode(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!isDigits(trimmed)) return null;
+export function normaliseBarcode(raw: string, type?: string): string | null {
+  const code = raw.trim();
+  if (!isDigits(code)) return null;
 
-  let code = trimmed;
+  switch (symbology(code, type)) {
+    case 'upc_e': {
+      // The 8-digit framed form ONLY. The 6-digit payload carries no check
+      // digit at all, so it cannot be verified — and accepting an unverifiable
+      // code is exactly the hole above. Scanners emit the framed form; the bare
+      // payload was speculative generosity that cost the guard.
+      if (code.length !== 8) return null;
+      const expanded = expandUpcE(code);
+      if (!expanded) return null;
+      // THE check. `expanded`'s last digit was computed from the payload; this
+      // asks whether it agrees with what the camera actually read.
+      if (expanded[expanded.length - 1] !== code[7]) return null;
+      return `0${expanded}`;
+    }
 
-  // UPC-E first: its 8-digit form collides with EAN-8 on length alone, and the
-  // two are told apart by the check digit, so try the expansion and keep it
-  // only if it verifies.
-  if (code.length === 6) {
-    const expanded = expandUpcE(code);
-    return expanded ? `0${expanded}` : null;
+    case 'itf14': {
+      if (code.length !== 14 || !hasValidCheckDigit(code)) return null;
+      // Drop the packaging indicator, then restore a correct check digit for
+      // the 13-digit code that remains — the carton's own is not the unit's.
+      const body = code.slice(1, 13);
+      return `${body}${checkDigit(body)}`;
+    }
+
+    case 'gtin': {
+      if (code.length !== 8 && code.length !== 12 && code.length !== 13) return null;
+      if (!hasValidCheckDigit(code)) return null;
+      return code.padStart(13, '0');
+    }
+
+    default:
+      return null;
   }
-  if (code.length === 8) {
-    const expanded = expandUpcE(code);
-    if (expanded && hasValidCheckDigit(expanded)) return `0${expanded}`;
-  }
-
-  if (code.length === 14) {
-    // Drop the packaging indicator, then restore a correct check digit for the
-    // 13-digit code that remains — the carton's own check digit is not the
-    // unit's.
-    const body = code.slice(1, 13);
-    code = `${body}${checkDigit(body)}`;
-  }
-
-  if (code.length === 8) {
-    code = code.padStart(13, '0');
-  } else if (code.length === 12) {
-    code = `0${code}`;
-  }
-
-  if (code.length !== 13) return null;
-  return hasValidCheckDigit(code) ? code : null;
 }

@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
+import { ApiError } from '@/lib/apiError';
+
 import ScanBarcodeScreen from '../food/scan';
 
 /**
@@ -289,5 +291,59 @@ describe('camera permission', () => {
     render(<ScanBarcodeScreen />);
     expect(screen.queryByTestId('scan-request-permission')).toBeNull();
     expect(screen.getByText(/Settings/)).toBeTruthy();
+  });
+});
+
+describe('the endpoint that is not deployed yet', () => {
+  /**
+   * The guaranteed production experience until N46 lands: an unrouted path
+   * 404s with no error envelope, so `apiRequest` fills the code with
+   * `unknown`. It must not read as a missing product, and it must not show the
+   * raw "Request failed (404)." to somebody holding a packet.
+   */
+  it('explains itself rather than blaming the catalog', async () => {
+    mockLookup.mockRejectedValue(new ApiError('Request failed (404).', 'unknown', 404));
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
+    expect(screen.queryByTestId('scan-unknown')).toBeNull();
+    expect(screen.getByText(/switched on in this build yet/i)).toBeTruthy();
+  });
+});
+
+describe('confirming twice', () => {
+  /**
+   * Two taps landing before React commits the re-render both read
+   * `saving === false`, so a state guard leaks and the meal logs twice. This
+   * screen already makes the same argument about `handling`; `confirming` is
+   * the same fix one control further on. Raised in review.
+   */
+  it('logs once, not twice', async () => {
+    mockLookup.mockResolvedValue({ status: 'found', food: OATS, source: 'off' });
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-log')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('scan-log'));
+      fireEvent.press(screen.getByTestId('scan-log'));
+    });
+    expect(mockLogFood).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a lookup that is taking too long', () => {
+  /**
+   * There is no request timeout beneath this screen, so on one bar the OS can
+   * take tens of seconds to give up. A spinner with no exit is
+   * indistinguishable from a hang.
+   */
+  it('offers a way out of the spinner', async () => {
+    let release: (v: unknown) => void = () => {};
+    mockLookup.mockReturnValue(new Promise((r) => { release = r; }));
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-looking-up')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('scan-cancel-lookup'));
+    await waitFor(() => expect(screen.getByTestId('scan-hint')).toBeTruthy());
+    expect(screen.queryByTestId('scan-looking-up')).toBeNull();
+    release({ status: 'unknown', code: CODE });
   });
 });

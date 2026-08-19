@@ -176,3 +176,70 @@ it('survives a zero-serving draft rather than caching Infinity', async () => {
   await waitFor(() => expect(mockRemember).toHaveBeenCalled());
   expect(Number.isFinite(mockRemember.mock.calls[0][2].kcal)).toBe(true);
 });
+
+/**
+ * The guard has to be about the DRAFT, not about the attempt.
+ *
+ * `logAll` drops each row as it lands, so a two-item draft whose first item
+ * logs and second fails leaves exactly one row on screen. A retry then looks
+ * like a single-item save — and caching that lone remainder against the packet
+ * is the same "whichever item happened to be first, forever" outcome the guard
+ * forbids, just with the last one instead. Found in review; the per-attempt
+ * version of this guard shipped in the first draft.
+ */
+it('does not learn the packet from the remainder of a failed multi-item save', async () => {
+  mockParams.barcode = '4006381333931';
+  mockDescribe.mockResolvedValue(estimate([item(), item({ name: 'Banana' })]));
+  mockLogFood.mockResolvedValueOnce('entry-1').mockRejectedValueOnce(new Error('offline'));
+
+  render(<DescribeMealScreen />);
+  fireEvent.changeText(screen.getByTestId('describe-input'), 'a bar and a banana');
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('describe-submit'));
+  });
+  await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
+
+  // First attempt: one lands, one fails and stays on screen.
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('describe-log'));
+  });
+  expect(mockRemember).not.toHaveBeenCalled();
+
+  // The retry now sees a single row. It must still refuse to teach the packet.
+  mockLogFood.mockResolvedValue('entry-2');
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('describe-log'));
+  });
+  expect(mockLogFood).toHaveBeenCalledTimes(3);
+  expect(mockRemember).not.toHaveBeenCalled();
+});
+
+/**
+ * The athlete can retype the description entirely, so the screen has to say
+ * what confirming will attach to the packet.
+ */
+it('says which barcode a confirm will be remembered for', async () => {
+  mockParams.barcode = '4006381333931';
+  mockDescribe.mockResolvedValue(estimate([item()]));
+
+  render(<DescribeMealScreen />);
+  fireEvent.changeText(screen.getByTestId('describe-input'), 'a protein bar');
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('describe-submit'));
+  });
+  await waitFor(() => expect(screen.getByTestId('describe-barcode-note')).toBeTruthy());
+  expect(screen.getByTestId('describe-barcode-note')).toHaveTextContent(/4006381333931/);
+});
+
+/** No barcode, no promise about one. */
+it('shows no barcode note when there was no barcode', async () => {
+  mockDescribe.mockResolvedValue(estimate([item()]));
+
+  render(<DescribeMealScreen />);
+  fireEvent.changeText(screen.getByTestId('describe-input'), 'a protein bar');
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('describe-submit'));
+  });
+  await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
+  expect(screen.queryByTestId('describe-barcode-note')).toBeNull();
+});

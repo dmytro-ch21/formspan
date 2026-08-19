@@ -87,11 +87,25 @@ export default function DescribeMealScreen() {
   // estimate so the original stays readable — the assumption beside a number
   // makes no sense once the number has been changed.
   const [rows, setRows] = useState<DraftRow[]>([]);
+  /**
+   * Whether the estimate that produced this draft named exactly ONE food.
+   *
+   * Held apart from `rows.length` because `rows` is TRIMMED as the save loop
+   * lands each item, so by the time the barcode is written `rows.length` is
+   * about this attempt rather than about the draft. The gap is reachable:
+   * a two-item draft whose first item logs and second fails leaves one row, and
+   * a retry then sees a single-item save and would cache that lone remainder
+   * against the packet — the same "whichever item happened to be first,
+   * forever" outcome the guard exists to prevent, just with the last one.
+   * Raised in review.
+   */
+  const [singleFood, setSingleFood] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const receive = useCallback((res: { estimate: MealEstimate; quota: EstimateQuota }) => {
     setEstimate(res.estimate);
     setRows(res.estimate.items.map(toDraft));
+    setSingleFood(res.estimate.items.length === 1);
     setQuota(res.quota);
   }, []);
 
@@ -235,7 +249,7 @@ export default function DescribeMealScreen() {
       // from a description, and N40 measured what an unlabelled estimate is
       // worth. Awaited rather than fired off, so the write cannot lose a race
       // with the screen unmounting — it is the last thing before `back()`.
-      if (params.barcode && logged.length === 1) {
+      if (params.barcode && singleFood && logged.length === 1) {
         const it = fromDraft(logged[0]);
         await rememberBarcode(
           userId,
@@ -265,7 +279,7 @@ export default function DescribeMealScreen() {
     } finally {
       setSaving(false);
     }
-  }, [userId, rows, saving, date, meal, router, params.barcode]);
+  }, [userId, rows, saving, date, meal, router, params.barcode, singleFood]);
 
   const updateRow = (key: string, patch: Partial<DraftRow>) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -392,6 +406,17 @@ export default function DescribeMealScreen() {
         <>
           <SectionHeader label="Check these before logging" />
           {estimate.note ? <Text style={styles.note}>{estimate.note}</Text> : null}
+          {/* Says the teaching out loud. The barcode came from a scan that
+              found nothing, and nothing else on this screen would tell the
+              athlete that confirming here is what makes the next scan of that
+              packet work — or that describing something else entirely would
+              attach the wrong food to it. Raised in review. */}
+          {params.barcode && singleFood ? (
+            <Text style={styles.note} testID="describe-barcode-note">
+              Confirming this will remember it for barcode {params.barcode}, so scanning that packet
+              finds it next time.
+            </Text>
+          ) : null}
 
           {rows.map((row, i) => (
             <View key={row.key} style={styles.row}>
