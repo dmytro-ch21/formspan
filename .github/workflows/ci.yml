@@ -164,19 +164,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-
-      # `check-tasks-integrity.py` compares docs/TASKS.md against the base
-      # branch, and the default checkout is shallow — `origin/main` simply is
-      # not there. Fetched explicitly rather than by `fetch-depth: 0`, which
-      # would clone the whole history for one file.
+      # `fetch-depth: 0`, and it has to be. `check-tasks-integrity.py` compares
+      # against the MERGE BASE with `origin/main`, and a merge base needs shared
+      # history: a shallow checkout plus a `--depth=1` fetch of main gives two
+      # commits with no common ancestor, so `git merge-base` finds nothing.
       #
-      # The script FAILS rather than skips when the baseline is missing, so
-      # deleting this step turns the check red instead of quietly disarming it.
-      # That is deliberate: a check that passes when it cannot do its job is the
-      # failure mode this repo has already shipped once.
-      - name: Fetch base branch (for the TASKS.md comparison)
-        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+      # That was tried and CI caught it — the first version fetched main at
+      # depth 1 and the step failed with "cannot read docs/TASKS.md at the merge
+      # base". Which is the designed behaviour working: the script FAILS rather
+      # than skips when the baseline is unreachable, so a misconfigured fetch
+      # turns the build red instead of quietly disarming the check. Weakening
+      # either half — this depth, or that refusal — puts it back.
+      #
+      # Full history for one file is the price. This is the cheapest job in the
+      # matrix (no toolchain, no install), so it is the right one to pay it in.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # No actions/setup-python on purpose. The check is stdlib-only and
       # version-agnostic, the runner image ships python3 already, and every
