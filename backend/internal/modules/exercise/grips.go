@@ -80,7 +80,19 @@ package exercise
 // must not depend on the logging module. The vocabulary is still one
 // vocabulary — `TestEveryOfferedGripIsInTheVocabulary` over in `session` fails
 // if these two ever name different things.
-// PatternsWithGrips is every movement pattern the switch below answers for.
+func OfferedGrips(movementPattern string) []string {
+	switch movementPattern {
+	case "horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation":
+		return []string{"regular", "neutral", "reverse", "angled"}
+	case "hinge":
+		return []string{"regular", "neutral", "mixed", "hook"}
+	case "carry", "olympic":
+		return []string{"regular", "neutral", "hook"}
+	}
+	return nil
+}
+
+// PatternsWithGrips is every movement pattern the switch above answers for.
 //
 // Exported so guards can DERIVE their inputs rather than mirror them. The
 // vocabulary check in `session` iterated a hardcoded copy of this list, which
@@ -92,18 +104,6 @@ func PatternsWithGrips() []string {
 		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull",
 		"isolation", "hinge", "carry", "olympic",
 	}
-}
-
-func OfferedGrips(movementPattern string) []string {
-	switch movementPattern {
-	case "horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation":
-		return []string{"regular", "neutral", "reverse", "angled"}
-	case "hinge":
-		return []string{"regular", "neutral", "mixed", "hook"}
-	case "carry", "olympic":
-		return []string{"regular", "neutral", "hook"}
-	}
-	return nil
 }
 
 // applyOfferedGrips fills the served field, normalising nil to an empty slice.
