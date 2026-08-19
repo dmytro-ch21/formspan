@@ -36,10 +36,22 @@ import { join, relative, sep } from 'node:path';
  * so a misspelt static sibling is invisible here. That is inherent to matching
  * patterns rather than resolving them the way the router does.
  *
- * If this ever needs to be stronger, the honest upgrade is generating the typed
- * routes in CI and letting `tsc` do it properly — that covers the computed
- * cases and the shadowed ones together, and it is the real fix this stands in
- * for. Do not make this regex cleverer instead.
+ * ## Its job changed when the typed routes reached CI (N35)
+ *
+ * `tsc` now checks route literals for real, and it is strictly stronger than
+ * this scanner — it reads ternaries, object hrefs and every form this regex
+ * cannot. So this is no longer the primary guard.
+ *
+ * It is kept for a narrower failure it alone can see: **config drift.** Drop
+ * `.expo/types` from `tsconfig.json`'s `include`, or lose
+ * `experiments.typedRoutes` in an app-config edit, and the generator still runs,
+ * still writes the file, and `tsc` silently stops reading it — green, with route
+ * literals unchecked again. That is N32's exact shape, relocated one level up.
+ * The last describe below pins those two settings; the scanner is the belt to
+ * their braces.
+ *
+ * Do not make this regex cleverer to close the gaps above — the answer to those
+ * is `tsc`, which already has them.
  */
 
 const MOBILE = join(__dirname, '..', '..');
@@ -213,5 +225,27 @@ describe('navigation targets', () => {
     }
     // Named rather than counted, so a failure says which button is broken.
     expect(dead).toEqual([]);
+  });
+});
+
+/*
+ * The two settings that decide whether `tsc` reads the generated types at all.
+ *
+ * Both are one edit away from turning route checking off everywhere while every
+ * check in the repo stays green — the generator would keep writing a file
+ * nothing consumes. Asserted here rather than trusted, because a silently
+ * disabled guard is what this whole area exists to stop happening twice.
+ */
+describe('the typed-routes wiring', () => {
+  it('has tsconfig reading the generated declarations', () => {
+    const tsconfig = JSON.parse(
+      readFileSync(join(MOBILE, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, ''),
+    );
+    expect(tsconfig.include).toEqual(expect.arrayContaining(['.expo/types/**/*.ts']));
+  });
+
+  it('has typed routes switched on in the app config', () => {
+    const app = JSON.parse(readFileSync(join(MOBILE, 'app.json'), 'utf8'));
+    expect(app.expo.experiments.typedRoutes).toBe(true);
   });
 });

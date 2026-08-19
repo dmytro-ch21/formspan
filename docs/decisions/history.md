@@ -26206,6 +26206,12 @@ Both were found by mutating the source back to the bug and watching the test
 - **The honest upgrade is generating the typed routes in CI** and letting `tsc`
   do this properly, which would cover the computed cases too. That is a build
   change, not a test, and it is the real fix this one stands in for.
+- **`app/__tests__/` screens are registered as routes**, so the generated union
+  now contains `/__tests__/youScreen.test` and friends, and pushing to one
+  typechecks. Pre-existing — that is where the screen tests live — but the typed
+  routes make the junk newly visible. Deliberately NOT given a task id here: an
+  id filed inside an unmerged PR is invisible to every other session (the N19
+  collision), so whoever picks it up should allocate one with their own claim.
 - **`apps/web` has the same class of exposure** and no equivalent guard; nothing
   here looked at it.
 
@@ -26485,6 +26491,81 @@ Open questions:
   phone — unchanged by this work, and recorded because the asymmetry keeps
   coming up.
 
+
+## 2026-08-19 — The route types exist, are correct, and now run where it matters
+
+`apps/mobile` has had `experiments.typedRoutes: true` for a long time, and
+`tsconfig.json` has included `.expo/types/**/*.ts` for just as long. So route
+literals were type-checked — on a developer's machine, and **nowhere else.**
+That file is written by the **Metro dev server** into a gitignored directory. CI
+checks out a clean tree, never starts a dev server, `Href` falls back to a loose
+string, and every route literal in the app passes unread.
+
+That is what let N32 ship: `router.push('/profile')`, a route this app has never
+had, on the only button of a screen whose job is to unblock the athlete. It
+surfaced only because one worktree happened to be carrying a `router.d.ts` from
+an earlier dev run — a check that is real where the code is written and absent
+where it is gated, which is worse than no check, because the repo reads as
+covered.
+
+**`scripts/generate_route_types.mjs` closes it**, and is chained into
+`typecheck:mobile` — so `verify` and CI both pick it up with no workflow change,
+which is the one place this could have drifted apart again.
+
+### Why it starts a dev server, which is not the obvious design
+
+Three alternatives were tested rather than reasoned about, and all three failed:
+
+- **There is no `expo typegen`.** The generator lives at
+  `@expo/cli/build/src/start/server/type-generation/routes.js` and is called
+  from `MetroBundlerDevServer`. Not a CLI command in SDK 57.
+- **`expo export` does not write them.** Measured: a full `--platform ios`
+  export completes in ~21s and leaves `.expo/types` absent. This was the
+  expected answer and it is wrong.
+- **The internal module is not resolvable.** `@expo/cli` is a transitive
+  dependency under pnpm's strict layout, so nothing in `apps/mobile` can
+  `require` it without reaching through another package's `node_modules` — and
+  it is unexported build output that can move between patch releases.
+
+So the script starts the server, waits for the file, and stops it: **3.5s
+locally, 5.5s measured on the CI runner** — a
+supported entry point doing what it normally does. It kills the process *group*,
+because Metro spawns workers and killing only the parent leaves them holding the
+port — which turns the next run into a mysterious timeout rather than an error.
+
+Two properties are deliberate. It **deletes any existing file first**, because a
+stale `router.d.ts` is exactly what made N32 hard to see, and waiting on a file
+that is already there would bake that in permanently. And it **fails the build
+if the file never appears** — a generator that quietly produces nothing would
+restore the precise silence it exists to end, with CI still green.
+
+### Proven end to end, from a clean tree
+
+Delete `.expo/`, reintroduce `/profile`, run `pnpm run typecheck:mobile`: it
+generates the types, then exits 1 naming `app/food/target.tsx` and the line. The
+same sequence before this change exited 0.
+
+`lib/__tests__/routes.test.ts` (N32) stays. It is now the weaker of the two —
+`tsc` reads ternaries, object hrefs and every literal it cannot — but it runs
+even when the types are absent, which is the failure mode the generator itself
+could develop. Defence in depth against the new mechanism, at 40ms.
+
+### Gaps this leaves
+
+- **A computed path is still unchecked by either.** `` `/session/${id}` ``
+  narrows to a template type, so a *renamed* dynamic route is caught, but a
+  wholly invented prefix assembled at runtime is not.
+- **`apps/web` has the same class of exposure** — Next.js typed routes are
+  opt-in and not enabled — and nothing here looked at it.
+- **CI now starts a Metro server during typecheck.** It is 5.5s there and
+  headless, but it is a heavier step than `tsc` alone, and if a future runner
+  cannot bind a port this fails closed rather than open. That is the right way
+  round, and it is a new way for the Mobile job to fail.
+- The local suite flaked once during this work — `bjjSessionScreen.test.tsx`
+  timing out under `verify`'s 9 workers while other sessions ran their own
+  suites, then passing 3/3 alone at `--maxWorkers=3`. That is the contention
+  already documented in CLAUDE.md, not a regression, but the milestone screen
+  tests are `waitFor`-based and are now among the first to feel it.
 
 ## Open items / known gaps as of this entry
 
