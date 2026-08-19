@@ -68,6 +68,12 @@ type exerciseRequest struct {
 	Implements   *int    `json:"implements"`
 	IsUnilateral *bool   `json:"is_unilateral"`
 	Instructions *string `json:"instructions"`
+	// The optional line explaining why this exercise's values are what they
+	// are. A pointer like everything else here, which is what makes a PATCH
+	// that never mentions it leave an authored note alone — the same guarantee
+	// `media` gets by having no field at all, and the one that matters most for
+	// a field the console's own form is not the only caller of.
+	Note *string `json:"note"`
 }
 
 // applyTo overlays the present fields onto a base — the zero Exercise for a
@@ -102,6 +108,12 @@ func (b exerciseRequest) applyTo(base Exercise) Exercise {
 	}
 	if b.Instructions != nil {
 		base.Instructions = *b.Instructions
+	}
+	// Present wins even when empty, so clearing a note is expressible — an
+	// explanation that has stopped being true has to be removable, and the
+	// alternative would be a field that can only ever grow.
+	if b.Note != nil {
+		base.Note = *b.Note
 	}
 	if b.PrimaryMuscles != nil {
 		base.PrimaryMuscles = *b.PrimaryMuscles

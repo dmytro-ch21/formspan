@@ -28786,6 +28786,138 @@ uncollected test file reports nothing at all. It is one symmetric glob now.
 - Recipe editing loads via the foods list rather than a `GET
   /nutrition/foods/{id}`, which the repository has and nothing exposes. One
   request either way at a 200-row cap, so no endpoint was added for it.
+## 2026-08-19 — The reason beside the number, and an ownership answer that came from the wrong file (N39)
+
+W7 (#311) ruled five per-side rows a human had to settle because the names
+could not: `bottoms-up-kettlebell-press` moved to one implement,
+`double-dumbbell-kickstand-deadlift` gained `is_unilateral`, and three pistol /
+single-leg rows were confirmed at one. That fixed the **count** and left the
+**reason invisible**.
+
+The sharpest case is the one that motivated this: `single-leg-kettlebell-romanian-deadlift`
+counts ONE implement while `dumbbell-romanian-deadlift` counts two — the same
+movement, deliberately counted differently, by human ruling. Nothing in the app
+said so, so it went on reading as an oversight to everyone who found it. The
+ruling lived in a migration comment and a test; the athlete lived in the app.
+
+So: an optional per-exercise note, admin-authored, rendered where the value is
+read. Column on `exercises` (migration 000061), on the public read and the admin
+write, authored at `/content/exercises`, shown on the mobile exercise screen and
+in the web library panel. **Five of 762 rows carry one** — the W7 five, written
+in this PR, because an empty column ships exactly as green as a populated one
+and proves nothing.
+
+### Absent is the normal case, and that is a design constraint
+
+757 rows have no note, so the field cannot leave an affordance behind. It is
+`omitempty` on the wire, has no heading on either client, and has no empty
+state. Absent and empty mean the same thing here — unlike `offered_grips`,
+where an empty array is the server saying "grip is meaningless for this
+movement" and absence means a stale row — so a falsy check is a client's entire
+handling and there is no third state to reason about.
+
+One consequence worth recording: the web panel's instructions empty state read
+*"No coaching notes yet."* An exercise with a note would have rendered it
+directly above a line denying it existed, so that copy is now *"No instructions
+yet."* The note is not `instructions`: that says how to PERFORM the movement,
+this says how it is RECORDED and why.
+
+### The ownership question, and why the first answer was wrong
+
+A console PATCH sets `source='admin'`, and the seeder's `WHERE source = 'seed'`
+skips those rows. So annotating a seeded exercise takes it out of deploy
+management **for every other field** — explain how `bench-press` is counted and
+it stops receiving catalog corrections. The rows most likely to be annotated are
+exactly the ones W7 just corrected, which makes that the wrong trade.
+
+#315 answered this by going around the seeder: `upsertSQL`'s `DO UPDATE SET` and
+its `IS DISTINCT FROM` guard are both explicit column lists, so a column omitted
+from both is never written or compared by a deploy, and the note's write path
+would be the one console edit that does not set `source='admin'`. That reasoning
+is correct about `upsertSQL` and was argued as *strictly less work*.
+
+**It was reasoned from one file, and `source` has another reader.**
+`cmd/exportcontent` calls `AdminAuthored`, which is `WHERE source = 'admin'`. A
+note that deliberately never flips `source` is therefore **invisible to the
+exporter**: it never reaches `exercises.json`, is never code-reviewed, and is
+gone on any fresh database. That inverts N39's purpose — the explanations of
+W7's rulings would have been strictly *less* durable than the rulings
+themselves, which are plain JSON in the repo.
+
+And the flip it was avoiding is **temporary, with an existing remedy**: the
+export writes the row into `exercises.json` and `AdoptAsSeeded`
+(`UPDATE exercises SET source='seed' WHERE source='admin' AND id = ANY($1)`)
+hands it back to the deploy. That loop is what `-adopt` is for.
+
+The user chose **ordinary catalog content**: the note flips `source` like any
+other edit, sits in both of the seeder's column lists, and is exported. The
+ruling and its explanation now live in the same file, in the same reviewable
+diff.
+
+**Two things here outlive N39.** `-adopt` is the general answer to "a console
+edit left this row out of deploy management" — reach for it before designing
+around ownership. And **reasoning about `source` from `upsertSQL` alone is
+incomplete**, because `exportcontent` reads it too; the failure shape was
+verifying one direction and asserting the converse.
+
+### What is guarded
+
+Both of `upsertSQL`'s lists are load-bearing and fail differently, so they are
+tested separately against real Postgres. Dropping `note` from the SET means a
+deploy cannot write one; dropping it from the change-detection tuple means a
+re-seed whose ONLY change is the note matches nothing and updates nothing — the
+row keeps a stale explanation forever while every other field still tracks the
+deploy, so nothing looks broken. Every guard was mutation-checked (eight
+mutations, each red, each restored):
+
+- a PATCH that never mentions the note leaves it alone — the `exercise_media`
+  guarantee, and it needs its own test because `media` gets it for free by
+  having no field at all while `note` gets it only from being a **pointer**. A
+  plain `string` there compiles, passes every other test, and silently wipes an
+  authored note on any save that omits one;
+- a note sent as `""` still clears, or an explanation that has stopped being
+  true could never be removed;
+- 500 characters, refused above and accepted exactly at the limit — a test that
+  only proves "too long fails" passes against an off-by-one that rejects the
+  documented maximum;
+- the five ruled rows carry explanations, **and** the RDL pair still disagrees
+  about `implements`. If a future change makes them agree, the note is now
+  *wrong* rather than merely missing, which is worse than having none.
+
+### Verified, not assumed
+
+Migration applied to an isolated `vola_test_n39` (000061 is unmerged, so the
+shared `vola_test` would have blocked every other branch); `cmd/seed` run
+end-to-end and the five notes read back out of Postgres beside their
+`implements` values; the down migration applied and the column re-added. Full
+backend suite green under `-p 1`, and `pnpm run verify` green.
+
+`gofmt` caught a struct misalignment, which is the check earning its place as
+the chain's first link. One self-inflicted trap worth recording: a
+`sed -i '' 's/[ \t]*$//'` intended to trim trailing whitespace **stripped
+trailing `t` characters** across a file — BSD `sed` reads `[ \t]` as the set
+{space, backslash, `t`}, not as a tab. It turned `<Stat` into `<Sta` in two
+places and truncated eight comments. Lint caught it (`react/jsx-no-undef`); a
+diff that is supposed to be pure additions showing deletions is the cheaper
+signal, and checking that is now part of finishing.
+
+One flake, not caused by this work: `bjjSessionScreen.test.tsx` failed under a
+full `verify` and passed alone, then passed with the whole suite at
+`--maxWorkers=3` (1515/1515) — the documented worker-oversubscription artefact
+of several sessions sharing this machine, at load 9.4.
+
+### Left open
+
+No device run. The mobile note is Simulator-unverified — it is a conditional
+`<View>` with a left rule, so the risk is cosmetic rather than behavioural, but
+it has not been seen on a phone. The console's note field is likewise untested
+against a running admin app; the write path is covered by handler and Postgres
+tests, not by a browser.
+
+Nothing yet writes a note through the console. All five that exist were authored
+as seed content in this PR, so the `admin` → `exportcontent` → `-adopt`
+round-trip for a note has been reasoned about and unit-tested but never actually
+run end to end.
 
 ## Open items / known gaps as of this entry
 

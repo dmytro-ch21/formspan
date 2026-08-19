@@ -934,13 +934,30 @@ function ExercisePanel({
         )}
       </dl>
 
+      {/* Why the facts above read as they do — placed directly under the list
+          it explains, and above the instructions rather than after them.
+
+          No heading, and no empty state. Absent is the normal case (5 of 762
+          catalog rows carry one), so a labelled section would be a heading that
+          vanishes for the other 757 — the empty affordance this field exists
+          not to leave behind. The instructions below DO get an empty state,
+          because absent is the notable case there. */}
+      {exercise.note && (
+        <p className="border-l-2 border-line pl-3 text-sm leading-relaxed text-text-muted">
+          {exercise.note}
+        </p>
+      )}
+
       {exercise.instructions ? (
         <p className="border-t border-line-soft pt-4 text-sm leading-relaxed text-text-muted">
           {exercise.instructions}
         </p>
       ) : (
         <p className="border-t border-line-soft pt-4 text-sm text-text-dim">
-          No coaching notes yet.
+          {/* "No coaching notes yet" until N39 — reworded because `note` is now
+              a real and separate field, and an exercise that HAS one would
+              otherwise render it directly above a line denying it exists. */}
+          No instructions yet.
         </p>
       )}
     </PanelShell>

@@ -78,6 +78,17 @@ function bodyFrom(form: FormData): ExerciseWrite {
     // is a POST endpoint in its own right, agree with a non-browser caller.
     is_unilateral: form.has("is_unilateral"),
     instructions: text(form.get("instructions")),
+    // Always sent, like every other field here — this action's contract is
+    // "the whole form, every save".
+    //
+    // Sending it means an emptied textarea CLEARS the note, which is the
+    // intended behaviour: an explanation that has stopped being true has to be
+    // removable. That is only safe because the field is on the form and
+    // rendered with its stored value, so "empty" is something the author saw
+    // and left empty. `media` is the opposite case and is handled the opposite
+    // way — it has no field here, so the request omits it and the API's PATCH
+    // merge is what stops a save clearing assets a deploy attached.
+    note: text(form.get("note")),
   };
 }
 

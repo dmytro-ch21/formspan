@@ -8608,3 +8608,75 @@ average with no denominator looks fine.
 - **Deleting a recipe must not alter days it was logged on.** `source_food_id`
   is `ON DELETE SET NULL`, so the entries keep their numbers — assert the day
   total is unchanged after the recipe is gone.
+## The optional per-exercise note (N39 — `exercises.note`, admin console, mobile + web)
+
+Why a catalog value is what it is, admin-authored, shown where the value is
+read. The motivating case is W7's: `single-leg-kettlebell-romanian-deadlift`
+counts one implement while `dumbbell-romanian-deadlift` counts two, by human
+ruling, and without the note that reads as a bug.
+
+### Happy path
+
+- `GET /v1/exercises/single-leg-kettlebell-romanian-deadlift` returns a `note`
+  explaining the one-bell count. Four other W7 rows carry one too
+  (`bottoms-up-kettlebell-press`, `double-dumbbell-kickstand-deadlift`,
+  `dumbbell-pistol-squat`, `kettlebell-pistol-squat`).
+- The mobile exercise screen shows it **above** "Your last session" — the note
+  is read while deciding what to type into the weight field, so it must be above
+  that decision, not under "How to do it" at the bottom of the screen.
+- The web library panel shows it directly under the fact list it explains, above
+  the instructions.
+- `/content/exercises/[id]` in the admin console renders the stored note in an
+  editable textarea; saving a new one changes what both clients show on their
+  next catalog fetch, with no app release.
+
+### Edge cases & errors
+
+- **Absent is the NORMAL case and must render nothing at all** — 757 of 762 rows
+  have none. No heading, no empty state, no placeholder on either client. A
+  labelled section that vanishes for 99% of the catalog is the affordance this
+  field exists not to leave behind.
+- **Absent and empty mean the same thing here.** The API omits the key entirely
+  when empty (`omitempty`), so a falsy check is a client's whole handling. This
+  is the OPPOSITE of `offered_grips` above, where `[]` and absent are different
+  facts — do not copy that reasoning across.
+- **A PATCH that never mentions `note` must not clear it.** The console form
+  always sends it, but the server action is its own POST endpoint and a
+  non-browser caller may omit it. Same guarantee `media` gets by having no field
+  at all.
+- **A note sent as `""` DOES clear it** — an explanation that has stopped being
+  true has to be removable. This is the endpoint's ordinary "empty clears" rule;
+  `load_mode` is the exception to it, not the pattern.
+- **Over 500 characters is a 400** naming the field. Exactly 500 is accepted.
+- A note on an exercise cached by an older mobile build is simply absent
+  (`payload_json` predates the field) and renders as no note — not as an error.
+
+### Auth / security
+
+- The note is writable only through `/v1/admin/exercises/{id}`, behind
+  `RequireAdmin`. There is no athlete-authored path; it is catalog content.
+- The public read serves it but never `source`, so a client cannot tell — or
+  change — who owns the row.
+
+### Regression trap
+
+- **`upsertSQL` has TWO explicit column lists and both matter, in different
+  ways.** Dropping `note` from `DO UPDATE SET` means a deploy can never write
+  one. Dropping it from the `IS DISTINCT FROM` guard is quieter and worse: a
+  re-seed whose only change is the note matches nothing and updates nothing, so
+  the row keeps a **stale** explanation forever while every other field still
+  tracks the deploy. Nothing looks broken. Test the two separately.
+- **A note must reach `exercises.json`.** `cmd/exportcontent` reads
+  `AdminAuthored` (`WHERE source = 'admin'`), so any scheme where a note write
+  does not flip `source` makes the note invisible to the exporter — never
+  reviewed, and gone on a fresh database. This was proposed and rejected; see
+  the 2026-08-19 N39 history entry.
+- **The note is not `instructions`.** Instructions say how to PERFORM the
+  movement; the note says how it is RECORDED and why. The web panel's
+  instructions empty state was reworded to "No instructions yet." for exactly
+  this reason — an exercise with a note would otherwise render it above a line
+  saying no notes existed.
+- **The note explains a difference that must keep existing.** If a future change
+  makes the kettlebell and dumbbell RDLs agree on `implements`, the note becomes
+  *wrong* rather than merely stale — which is worse than having none.
+  `TestTheRuledRowsCarryTheirExplanations` asserts the pair still disagrees.

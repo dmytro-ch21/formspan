@@ -444,6 +444,21 @@ export function ExerciseForm({
             className={inputClass}
           />
         </Field>
+        <Field
+          label="Note"
+          htmlFor="note"
+          hint="Why the values above are what they are — not how to perform it. Athletes see this on the exercise, and only when it is filled in. Leave it empty unless something above would look like a mistake without it: the counting rules are what most often need one. Max 500 characters."
+        >
+          <textarea
+            id="note"
+            name="note"
+            rows={3}
+            maxLength={500}
+            defaultValue={shown.note ?? ""}
+            placeholder="One bell here, against two for the dumbbell version — that difference is deliberate."
+            className={inputClass}
+          />
+        </Field>
       </Section>
 
       {mode === "edit" && (

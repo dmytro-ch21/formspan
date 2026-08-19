@@ -1,0 +1,50 @@
+-- An optional per-exercise note: the reason a catalog value is what it is,
+-- shown to an athlete where they read the exercise.
+--
+-- # What it is for
+--
+-- Migration 000057 gave the catalog three independent columns — `load_mode`,
+-- `implements`, `is_unilateral` — and W7 then RULED five rows a human had to
+-- settle because the names could not. `bottoms-up-kettlebell-press` moved to
+-- one implement; `single-leg-kettlebell-romanian-deadlift` stayed at one while
+-- `dumbbell-romanian-deadlift` counts two.
+--
+-- Those rulings fixed the NUMBER and left the REASON invisible. The sharpest
+-- case is that last pair: the same movement, one bell versus two dumbbells,
+-- deliberately counted differently — and it will keep reading as an oversight
+-- to everyone who finds it, because nothing in the app says otherwise. A test
+-- comment is not where an athlete looks.
+--
+-- So this column carries the explanation to the place the value is read.
+--
+-- # Ordinary catalog content, deliberately
+--
+-- The note is a fact about the exercise, not about a user and not about a
+-- correction, so it is a column on `exercises` rather than a side table — and
+-- it is written, exported and deployed exactly like `instructions`.
+--
+-- That was a decision with a real alternative. A console PATCH sets
+-- `source = 'admin'`, which the seeder's `WHERE source = 'seed'` then skips, so
+-- annotating a seeded row takes it out of deploy management for EVERY other
+-- field. The alternative was a column omitted from the seeder's lists entirely,
+-- which would keep annotating orthogonal to ownership.
+--
+-- It was rejected because that flip is TEMPORARY and already has a remedy:
+-- `cmd/exportcontent` writes admin-authored rows into `exercises.json` and
+-- `AdoptAsSeeded` hands them back to the deploy. Going around the seeder would
+-- have bought orthogonality at the price of durability — `AdminAuthored` reads
+-- `WHERE source = 'admin'`, so a note that never flipped `source` would never
+-- reach the seed file, would never be code-reviewed, and would be gone on any
+-- fresh database. The explanations of W7's rulings would then be less durable
+-- than the rulings themselves, which are plain JSON in the repo.
+--
+-- # NOT NULL DEFAULT ''
+--
+-- Matching every other text column here, and for the reason `contentReturning`
+-- spells out: absent and empty are not different facts for a note. There is
+-- nothing a NULL would say that '' does not, and a nullable column would make
+-- every reader handle a third state that carries no meaning.
+--
+-- Absent is the NORMAL case — 504 rows arrive with '' — so a client must render
+-- nothing at all rather than an empty affordance.
+ALTER TABLE exercises ADD COLUMN note TEXT NOT NULL DEFAULT '';

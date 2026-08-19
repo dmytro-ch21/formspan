@@ -71,6 +71,20 @@ export type Exercise = {
   implements?: number;
   is_unilateral: boolean;
   instructions: string;
+  /**
+   * Why this exercise's values are what they are — admin-authored, shown only
+   * when present.
+   *
+   * OPTIONAL because absent is the normal case: the API omits the key when
+   * empty, and 5 of 762 seeded rows carry one. Absent and empty mean the same
+   * thing, so a falsy check is the whole handling.
+   *
+   * Not `instructions`, which is how to PERFORM the movement. This says how it
+   * is RECORDED and why — a human ruling that would otherwise read as a bug,
+   * such as the single-leg kettlebell RDL counting one implement while its
+   * dumbbell twin counts two.
+   */
+  note?: string;
   media: Media[];
 };
 

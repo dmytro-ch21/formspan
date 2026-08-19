@@ -459,6 +459,20 @@ export type Exercise = {
   implements: number;
   is_unilateral: boolean;
   instructions: string;
+  /**
+   * The optional line explaining why this exercise's values are what they are.
+   *
+   * OPTIONAL because absent is the normal case — 5 of 762 seeded rows carry
+   * one, and the API omits the key entirely when empty. Absent and empty mean
+   * the same thing, so there is no third state; render nothing at all rather
+   * than an empty section.
+   *
+   * Not `instructions`: that says how to PERFORM the movement, this says how it
+   * is RECORDED and why. It exists because human rulings settled several
+   * `implements` values the names could not, and an unexplained ruling reads as
+   * a mistake to whoever finds it next.
+   */
+  note?: string;
   media?: { kind: string; url: string; is_default: boolean }[];
   /** "admin" for everything this console lists. Same caveat as Technique.source:
    *  populated only on /admin/*, so never derive ownership from it elsewhere. */

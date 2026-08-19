@@ -386,3 +386,104 @@ func TestAdoptOnlyTouchesAdminRows(t *testing.T) {
 			"would see it as changed", before.UpdatedAt, after.UpdatedAt)
 	}
 }
+
+// The ownership decision behind N39, checked against real Postgres.
+//
+// The note was very nearly built as a column the seeder ignores — omitted from
+// both of `upsertSQL`'s column lists — so that annotating a seeded exercise
+// could not take it out of deploy management. That was rejected: the flip is
+// temporary and `exportcontent`+`AdoptAsSeeded` is its remedy, while a column
+// the seeder ignores is one `AdminAuthored` (`WHERE source = 'admin'`) never
+// sees, so the note would never reach `exercises.json` and would die on a fresh
+// database.
+//
+// This test is what makes that choice a fact rather than a comment. It fails if
+// `note` is dropped from the SET clause OR from the IS DISTINCT FROM guard —
+// two separate lists, either of which silently disables a deploy's ability to
+// correct a note.
+func TestADeployCanCorrectTheNoteOnASeededRow(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	id := "test-note-seeded-row"
+	stored := seededFixture(t, repo, ctx, id)
+	if stored.Note != "" {
+		t.Fatalf("fixture started with note %q, want empty", stored.Note)
+	}
+
+	// A later deploy ships an explanation for this row — the W7 case exactly.
+	corrected := authored(id)
+	corrected.Name = stored.Name
+	corrected.Note = "One bell, so the weight counts once."
+	if err := repo.UpsertAll(ctx, []Exercise{corrected}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	after, err := repo.GetExercise(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if after.Note != "One bell, so the weight counts once." {
+		t.Fatalf("the deploy could not write a note onto a seeded row: %q", after.Note)
+	}
+
+	// ...and it can be corrected AGAIN, which is what the change-detection
+	// guard controls. If `note` is missing from the IS DISTINCT FROM tuple, a
+	// re-seed whose ONLY change is the note matches nothing and updates nothing
+	// — the row keeps a stale explanation forever, with every other field still
+	// tracking the deploy, so nothing looks broken.
+	corrected.Note = "One bell, held opposite the working leg, so it counts once."
+	if err := repo.UpsertAll(ctx, []Exercise{corrected}); err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+	again, err := repo.GetExercise(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if again.Note != corrected.Note {
+		t.Errorf("a note-only re-seed changed nothing: %q — note is missing from the change-detection guard", again.Note)
+	}
+}
+
+// The other half: a console-authored note is the row's, not the deploy's, and
+// survives a re-seed like every other admin-owned field.
+func TestAnAuthoredNoteSurvivesADeploy(t *testing.T) {
+	repo, ctx, id := contentFixture(t)
+
+	written := authored(id)
+	written.Note = "Counts once — one implement, not a pair."
+	if _, err := repo.CreateExercise(ctx, written, testActor); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	deploy := authored(id)
+	deploy.Note = "Whatever the seed file said."
+	if err := repo.UpsertAll(ctx, []Exercise{deploy}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	after, err := repo.GetExercise(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if after.Note != "Counts once — one implement, not a pair." {
+		t.Errorf("the deploy overwrote an authored note: %q", after.Note)
+	}
+
+	// And AdminAuthored — what cmd/exportcontent reads — carries it, which is
+	// the durability half of the ownership decision. A note the exporter cannot
+	// see never reaches exercises.json and dies with the database.
+	authoredRows, err := repo.AdminAuthored(ctx)
+	if err != nil {
+		t.Fatalf("admin authored: %v", err)
+	}
+	var found bool
+	for _, e := range authoredRows {
+		if e.ID == id {
+			found = true
+			if e.Note != "Counts once — one implement, not a pair." {
+				t.Errorf("AdminAuthored dropped the note: %q — the export would write '' over it", e.Note)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("%s is not in AdminAuthored", id)
+	}
+}

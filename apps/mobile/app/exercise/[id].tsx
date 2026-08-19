@@ -112,6 +112,23 @@ export default function ExerciseDetailScreen() {
         </Text>
       )}
 
+      {/* Why the numbers are what they are, placed BEFORE the logging history
+          rather than down with the instructions.
+
+          This is read at the moment the athlete is deciding what to type into
+          the weight field, so it has to sit above that decision — a counting
+          rule explained underneath "How to do it", at the bottom of the screen,
+          is one nobody reaches in the twenty seconds between sets.
+
+          Deliberately not a labelled section: absent is the normal case (5 of
+          762 catalog rows), and a heading that vanishes for the other 757 is
+          exactly the empty affordance this field exists not to leave behind. */}
+      {!!exercise?.note && (
+        <View style={styles.note} testID="exercise-note">
+          <Text style={styles.noteText}>{exercise.note}</Text>
+        </View>
+      )}
+
       <Text style={styles.sectionLabel}>Your last session</Text>
       {done ? (
         <View style={styles.card}>
@@ -246,4 +263,14 @@ const styles = StyleSheet.create({
   reason: { color: vola.textMuted, fontSize: 13, lineHeight: 18 },
   muted: { color: vola.textMuted, fontSize: 14, lineHeight: 20 },
   instructions: { color: vola.text, fontSize: 14, lineHeight: 21 },
+  note: {
+    marginTop: 12,
+    paddingLeft: 12,
+    // A left rule rather than a filled card: this is an aside about the exercise
+    // above it, and a card would give it the same weight as "Your last session",
+    // which is the screen's actual subject.
+    borderLeftWidth: 2,
+    borderLeftColor: vola.line,
+  },
+  noteText: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
 });

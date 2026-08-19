@@ -154,12 +154,23 @@ func ValidateForWrite(e Exercise) error {
 	case !validLoadTypes[e.LoadType]:
 		return fmt.Errorf("%w: %q has unknown load_type %q — one of: %s",
 			ErrInvalidInput, e.ID, e.LoadType, strings.Join(loadTypeNames(), ", "))
+	case len(e.Note) > maxNoteLen:
+		// Bounded because the note is rendered in full on a phone, inline with
+		// the exercise, with no "read more". A note long enough to need one has
+		// become instructions and belongs in that field, which is unbounded
+		// precisely because it has a section of its own.
+		return fmt.Errorf("%w: %q note is too long (max %d)", ErrInvalidInput, e.ID, maxNoteLen)
 	}
 	return nil
 }
 
 // maxNameLen bounds the name, and therefore the derived id.
 const maxNameLen = 200
+
+// maxNoteLen bounds the note. Two or three sentences — "one bell, held opposite
+// the working leg, so it counts once" is 48 characters, and the longest thing
+// this field should ever have to say is not much more.
+const maxNoteLen = 500
 
 func sortedKeys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
