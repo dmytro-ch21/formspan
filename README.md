@@ -107,6 +107,14 @@ python3 evals/bjj-dictation/run.py --dry-run              # build the prompt, ca
 python3 evals/bjj-dictation/run.py --model gpt-5.6-luna   # ~33 live calls, spends money
 ```
 
+To add a **recorded** case — one from an athlete who actually spoke, which is
+what the corpus is short of — dictate into a note app after training and:
+
+```bash
+python3 evals/bjj-dictation/record.py add --file ~/Desktop/monday.txt
+python3 evals/bjj-dictation/record.py promote
+```
+
 It reads `OPENAI_API_KEY` from `backend/.env` (and finds the primary checkout's
 copy when you are in a worktree, which never has one). Results land in
 `evals/bjj-dictation/results/`; the README there carries the current scores and

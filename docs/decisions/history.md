@@ -27763,6 +27763,62 @@ Open questions:
 - Three minutes is per PACKAGE, so a pathological run can still take 32 × 3m in
   the worst case. Bounding the whole job is a CI-level `timeout-minutes`, which
   this workflow does not set on any job.
+## 2026-08-19 — The capture path for recorded dictations, and the one thing tooling cannot do
+
+The eval corpus is 33 authored cases and 0 recorded, against a target of fifty
+recorded. The gap is the whole reason the README tells you not to trust the
+scores. This closes the *tooling* half of it.
+
+`record.py`: `add` stashes a dictation you actually said, `resolve` answers "do
+these words name one technique or seven", `promote` validates and merges,
+`stats` counts toward fifty.
+
+### What it refuses to do, on purpose
+
+**It never calls a model.** Not to draft an expectation, not to suggest tags,
+not to resolve a technique. That is the feature. Filling `expect` from model
+output is the rubber-stamp failure the README already names — the eval stops
+measuring the model and starts measuring its agreement with itself — and it is
+the single most tempting shortcut available here, because a model would do it
+instantly and the result would look fine.
+
+**It will not promote an invalid case.** Everything goes through the validator
+first and a failure is *held*, with the reason, rather than let in. Tested both
+ways: a well-formed case promotes and lands in the corpus, and one demanding
+`butterfly-sweep-basic` from the word "butterfly" is held naming the 26 entries
+that phrase matches.
+
+**And it cannot say the words.** A case written by reasoning about how an
+athlete talks is `authored` whoever types it — that is what the field means, and
+it is the corpus's only defence against testing itself. Yesterday's live run
+priced this exactly: six authored cases demanded a specific technique from words
+that pick out nothing, and two asserted things about the catalog that were false.
+All were written by careful reasoning; none survived contact with a model that
+was, on those cases, right.
+
+### A real bug found while building the helper
+
+`resolve` required every word of a phrase to appear in the catalog name —
+stopwords included. So **"the knee cut" matched nothing while "knee cut" matched
+seven.** Not a near miss: "matches nothing" is the signal for *not in the
+catalog*, so the helper would have told an athlete their technique was missing
+because they said "the".
+
+Stopwords are now stripped from **both** sides, which keeps exact matches like
+"Armbar from Closed Guard" working while making the matcher insensitive to the
+words that carry no weight. All four corpus guards were re-mutation-tested
+afterwards, since this changed a shipped check.
+
+### Where the real material might come from
+
+Two sources, neither of them a session's to decide. The local dev database has
+two BJJ sessions and no prose at all. Staging is where the real usage is, and
+`bjj_session_details.note` is genuinely the athlete's own words about real
+sessions — the closest thing to recorded that exists without dictating fresh.
+Reading it needs the user's say-so, since it is their own body data and the
+spec's open question 3 already leans toward not retaining raw dictation. The
+attempt to count those rows was blocked by the sandbox classifier, so even the
+size of that pool is currently unknown.
 
 
 ## Open items / known gaps as of this entry

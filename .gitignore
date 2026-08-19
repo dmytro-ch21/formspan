@@ -53,3 +53,4 @@ __pycache__/
 # is regenerable and would just be unused binaries in the history. Stated
 # without a count on purpose — this said "four" one sound-wiring PR later.
 assets/audio/
+evals/bjj-dictation/pending/

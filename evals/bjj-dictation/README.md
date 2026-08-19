@@ -40,18 +40,59 @@ Fifty **recorded** dictations is the target. Thirty authored ones are scaffoldin
 
 ## Adding a recorded case
 
-1. Dictate into any note app after training, exactly as you would to the phone.
-   Do not clean it up — the disfluency is the data.
-2. Add a case with `"source": "recorded"`.
-3. Fill `expect` by hand with what the draft *should* be, before running any
-   model against it. Writing the expectation after seeing model output turns the
-   eval into a rubber stamp.
-4. Run `pnpm run check:evals`. It will reject an expectation the app could never
-   produce — a technique id that does not exist, a category the technique does
-   not derive, a detailed position where the tag stores a family.
+**`record.py` does the paperwork. It cannot do the talking.**
+
+1. **Dictate into any note app after training**, exactly as you would to the
+   phone. Do not clean it up — the disfluency is the data, and so is whatever
+   the keyboard's transcription made of "omoplata".
+
+2. **Stash it**, from the Mac, whenever you get to it:
+
+   ```bash
+   python3 evals/bjj-dictation/record.py add "um so tonight was gi, five rounds..."
+   python3 evals/bjj-dictation/record.py add --file ~/Desktop/monday.txt
+   ```
+
+   It writes a template into `pending/` with every field present, and prints
+   which phrases in *your* sentence the catalog recognises. That list is the
+   542-id problem solved — and its more useful half is the phrases matching
+   **many** entries, because those are the ones whose honest expectation is
+   `unresolved`.
+
+3. **Fill `expect` with what the draft should have been — from the words
+   alone.** Do not run a model first. `record.py` never calls one, for this
+   reason: filling an expectation from model output turns the eval into a
+   rubber stamp, measuring the model's agreement with itself.
+
+   Stuck on whether a phrase names one technique or several:
+
+   ```bash
+   python3 evals/bjj-dictation/record.py resolve "the knee cut"
+   ```
+
+4. **Promote it.** Every case is validated first, and an invalid one is *held*
+   with the reason rather than let in:
+
+   ```bash
+   python3 evals/bjj-dictation/record.py promote
+   python3 evals/bjj-dictation/record.py stats     # progress toward fifty
+   ```
+
+`pending/` is **gitignored**. Your unedited speech about your own body does not
+enter git until you promote it deliberately — and if you want to redact, edit
+the dictation as a whole sentence rather than blanking a word out of the middle,
+because the dictation *is* the case's input.
 
 A case that is genuinely ambiguous to a human is a *good* case: record the
 ambiguity in `why` and put the honest answer in `expect`, usually `unresolved`.
+
+**Why nobody can write these for you.** A case invented by reasoning about how
+an athlete talks is `authored`, whoever types it — that is what the field means,
+and it is the corpus's only defence against testing itself. The first live run
+made the cost concrete: six authored cases demanded a specific technique from
+words that pick out nothing, and two asserted things about the catalog that were
+simply false. Every one was written by careful reasoning. None survived contact
+with a model that was, on those cases, right.
 
 ---
 
