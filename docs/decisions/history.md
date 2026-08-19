@@ -30713,6 +30713,131 @@ green checkmark.
 - **`packages/*` is still declared and empty.** The next person who wants a
   shared package will hit the same four bundlers; this entry is the map of
   where it breaks, not an argument that it can never work.
+## 2026-08-19 — The screen that makes N33 a feature (N60)
+
+N33 shipped `POST /v1/bjj/reflect/draft`, the drafter, the prompt, the quota, a
+migration and an OpenAPI entry — and **zero files under `apps/mobile`**. The
+user went looking for "BJJ logging with AI and voice" on a real phone and
+correctly found nothing.
+
+**The third instance of one pattern in a single day.** N42's food catalog
+shipped with no mobile search (N51). N7's identify shipped with no camera
+surface (N44). Now N33. A server route is not a feature, and the fact that it
+happened three times to three different sessions says it is a property of how
+work is being split rather than three oversights.
+
+`/bjj/dictate` is the surface, reached from `/bjj/log` above the manual form —
+an alternative to it, never a replacement. The three-tap floor stays: it works
+with no signal and spends nothing.
+
+### What the screen refuses to do
+
+**It never picks a technique for the athlete.** The server validates every id
+against the 542-row catalog and hands back the phrases that pick out more than
+one entry, deliberately declining to choose. The whole value of that is lost if
+the screen takes the top match — a guess arrives pre-ticked, plausible, and one
+tap from permanent, and it then looks like the athlete's own answer forever.
+That is the failure N44 was built to avoid and N47 was filed to fix.
+
+So an unresolved phrase renders as a prompt offering **more than one** option.
+Narrowing to one *is* the guess, which is why the test asserts two are visible
+rather than asserting a picker exists.
+
+**It never fills a number the words did not contain.** Blank is a real state and
+distinct from zero: it means the athlete did not say. N40 measured that this
+class of model flags what it invents while stating a miscount flatly — *"rolled
+five"* coming back as six is the error that survives review, because the item is
+real and only the number is wrong. Every count is therefore a thumb-reachable
+stepper rather than a field to squint at, and anything the server could not hear
+comes back empty with the reason beside it.
+
+**It never shows an empty confirm screen.** `empty` is a well-formed answer with
+nothing in it — the shape N37 measured when a prompt-injected sentence produced
+no tags and a long `note`. The screen says "nothing was picked up from that" and
+**withholds Save**, because a confirm screen with nothing on it reads as a
+successful reading and gets confirmed without being read.
+
+### Transcription is on-device, and that is the design
+
+The athlete dictates into the system keyboard's own microphone, so the app only
+ever handles text. No audio is recorded, none leaves the phone, and **no audio
+dependency was added** — which removes the retention question from the whole
+feature rather than answering it.
+
+What *does* leave is the sentence, which is about the athlete's training and
+sometimes their body. The screen says so before it sends, next to the button,
+rather than after — a privacy consequence discovered afterwards is not a choice
+anybody made. The wording keeps the two facts apart, because they are genuinely
+different: the listening is local, the words are not.
+
+### Verified
+
+Four guards mutation-checked, each confirmed to produce a **test failure**
+rather than a compile error, against a baseline green in the same session:
+auto-selecting the top match; offering Save on an empty draft; hiding the
+notices; and `draftToDetail` inventing tags from unresolved phrases. 21 tests,
+all confirmed to run.
+
+**The mutation harness was broken on the first attempt and reported nothing four
+times.** `J="pnpm --dir apps/mobile exec jest"` then `$J ...` does not
+word-split in zsh, so every mutation run executed no command at all — the same
+zsh property CLAUDE.md records for `set -- $pair`, hit within a day of it being
+written down. The tell was that the BASELINE printed no test count either; a
+harness that cannot produce a number for the known-good case cannot produce one
+for the mutation. It now asserts on a real `Tests:` line and distinguishes a
+compile error from a test failure.
+
+`lint:mobile` stays at 54 of 54 — the new files add no warnings, which matters
+because the ratchet has no headroom.
+
+### What review found, and three of them were bugs rather than polish
+
+No blocking findings; all six load-bearing properties held. But three of the
+eight suggestions were real defects that tests then had to be written for, and
+they share a shape worth naming: **each one looked correct in the diff.**
+
+- **The note field unmounted mid-edit.** It was gated on the LIVE value, so
+  backspacing a note to empty removed the input — keyboard gone, section
+  unreachable, and no way to get it back on that screen. Gating on what the
+  MODEL extracted is the fix. Reading the line, `{!!detail.note && …}` looks
+  exactly like the right condition.
+- **A body note was saved sight-unseen.** `draftToDetail` carried `body_note`
+  through and nothing rendered it, so "knee popped in round three" went into the
+  record unread — on a screen whose entire premise is that what it saves arrived
+  editable.
+- **One message stood for three different states.** The picker said "couldn't
+  load the library" when the library was still loading, when it had failed, AND
+  when it had loaded fine and the client's ranker simply scored nothing. The
+  last is a real case, because the server's matcher and `rankTechniques` are
+  different algorithms and nothing makes them agree — so the screen sent people
+  to fix a connection that was fine. Saying the wrong reason is worse than
+  saying none.
+
+The performance one is worth recording too: each `PickOne` fetched the 197 KB
+technique library independently, and `fetchTechniques`' cache only dedups after
+the first call RESOLVES — so N unresolved phrases mounting together fired N
+parallel requests. Hoisted to one fetch for the screen, which also removed a
+refetch when the list re-keyed after a dismissal.
+
+Four accessibility fixes: the tag steppers were three indistinguishable "One
+fewer" buttons to a screen reader, and the blank stepper's em dash read as
+"em dash" rather than "not set".
+
+### Left open
+
+**No device run.** This is a screen with a keyboard, a network call and a
+picker, none of which has been seen on a phone. The Expo web preview cannot
+render it (the documented `expo-sqlite` bundling failure), so the Simulator or a
+real device is the only route and neither has been used.
+
+**The eval corpus is 33 authored / 0 recorded**, so nothing anywhere in this
+feature has met real keyboard transcription. A green eval says the prompt works
+on sentences somebody typed; it is silent on what iOS dictation makes of
+"omoplata", which is the single most likely way this disappoints someone. The
+screen is where that gets found out, and it has not been found out yet.
+
+**#322 has not merged**, so the endpoint this calls is not on `main` and nothing
+here has been exercised against a running server — only against its contract.
 
 ## Open items / known gaps as of this entry
 
