@@ -26567,6 +26567,89 @@ could develop. Defence in depth against the new mechanism, at 40ms.
   already documented in CLAUDE.md, not a regression, but the milestone screen
   tests are `waitFor`-based and are now among the first to feel it.
 
+## 2026-08-19 — The dictation eval set, and ranking invention above accuracy
+
+**N34.** N33 spec'd a dictated reflection and ended "build the eval set first";
+this is that. `evals/bjj-dictation/` holds 30 cases pairing a dictated sentence
+with the draft a correct extraction returns, a scoring metric, and a
+stdlib-only validator wired into `verify` and CI.
+
+It is deliberately the half that was **never blocked on the provider decision**
+N33 waits on. It also pins the rules before any model sees them, which is the
+only order that works — an expectation written after seeing model output is a
+rubber stamp.
+
+### The metric ranks invention above accuracy, and that is the design
+
+Three metrics in strict priority: **invention rate**, then tag F1, then scalar
+exactness. Invention rate is the fraction of cases where the draft fills
+something the expectation says must stay empty — an RPE from a mood word, a tag
+from an *intention*, a confident technique id where only "armbar" was said.
+
+The ranking follows from **who catches the error**. A missing tag is visible:
+the athlete is looking at the draft and adds it. An invented one is plausible,
+pre-ticked, and one tap from being confirmed. An eval optimising F1 will
+happily trade inventions for recall, which is exactly the wrong trade for a
+screen whose entire job is to be confirmed quickly. Target is zero, not "low".
+
+Producing a technique id where the case expects `unresolved` scores as an
+invention, not a miss — the same reasoning.
+
+### The validator checks expectations, not answers
+
+`check-dictation-evals.py` cannot tell you whether a model is any good. What it
+catches is the failure mode nothing else in this repo would: **a hand-authored
+expectation the app could never produce.**
+
+A tag's `category` and `position` are DERIVED, not chosen — `toCategory()` maps
+the library's nine categories onto the tag vocabulary's six (a back take is
+`Transition`, which lands as `control`), and the tag stores the position
+*family*, so `Guard - Bottom` becomes `Guard`. An expectation writing
+`transition`, or the detailed position, describes a row the app cannot write —
+so a model producing the *correct* row is scored wrong, permanently, and it
+reads as a model failure forever after.
+
+So the script replicates `familyOf` and `toCategory` from `bjjSession.ts` and
+checks all 542 ids against the real catalog. Four mutations were run against it
+— a nonexistent id, a category the technique does not derive, a detailed
+position, an out-of-range RPE — and each fails. It also asserts `POSITIONS` in
+`bjjSession.ts` still matches `positions.json` families, a list CLAUDE.md
+records falling behind twice.
+
+### Every case is authored, and the README leads with why that matters
+
+None are recorded from a real athlete. A corpus written by reasoning about how
+people talk, graded against a prompt written the same way, measures
+**self-consistency rather than reality** — and will report a high score for a
+model that is confidently wrong about real speech.
+
+Four things it structurally cannot see: how people actually hedge and repair
+mid-sentence; which techniques get named colloquially; how often a real
+dictation contains nothing structured at all; and — invisible to the entire set
+— whether the keyboard's own transcription mangles jiu-jitsu vocabulary before
+the endpoint ever sees it, because every case starts from clean text.
+
+The validator prints the authored/recorded split on every run, so the gap stays
+visible rather than being something you have to remember. Fifty **recorded**
+dictations is the target; thirty authored ones are scaffolding.
+
+### What the cases cover
+
+Grouped by failure mode rather than by feature: direction confusion (hit vs got
+caught in vs went for and missed vs stopped theirs — the confusion that inverts
+a hit rate), ambiguity that must stay unresolved ("hit an armbar" names three
+catalog entries and no position), absent-means-absent, prose that is a plan or a
+counterfactual rather than an event, the library-to-tag category gap, position
+family mapping, disfluency, self-correction, and one empty input.
+
+### Gaps
+
+- **No scorer.** Nothing runs a model against these; the metric section is its
+  specification. That needs the provider decision.
+- **No recorded cases**, which is the whole caveat above.
+- **No transcription-error coverage**, and this is the one that will need real
+  device data rather than more authoring.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

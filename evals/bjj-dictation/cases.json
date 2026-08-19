@@ -1,0 +1,789 @@
+{
+  "$comment": "Eval cases for the dictated BJJ reflection (N33). READ THE README BEFORE TRUSTING A SCORE: every case here is AUTHORED, not recorded from a real athlete, and an authored corpus tests self-consistency rather than reality.",
+  "version": 1,
+  "cases": [
+    {
+      "id": "a-single-submission-scored",
+      "source": "authored",
+      "dictation": "Hit an armbar from closed guard tonight.",
+      "why": "The floor case. One technique, one direction, position stated in the prose.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "submission",
+            "event": "scored",
+            "position": "Guard",
+            "technique_id": "armbar-closed-guard",
+            "count": 1
+          }
+        ]
+      },
+      "must_not": [
+        "rounds",
+        "session_rpe",
+        "gi",
+        "kind"
+      ]
+    },
+    {
+      "id": "a-single-sweep-scored",
+      "source": "authored",
+      "dictation": "Landed a scissor sweep.",
+      "why": "Position is not said. The technique's own library position supplies the family; the model must not invent a different one.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "sweep",
+            "event": "scored",
+            "position": "Guard",
+            "technique_id": "scissor-sweep-closed-guard",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "a-conceded-pass",
+      "source": "authored",
+      "dictation": "Got passed from half guard twice.",
+      "why": "Conceded direction, a count, no technique. The bare category count is the fast path and must survive dictation.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "pass",
+            "event": "conceded",
+            "position": "Half Guard",
+            "technique_id": null,
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "b-compound-three-facts",
+      "source": "authored",
+      "dictation": "Rolled five rounds, hit an armbar from closed guard in the second, got passed from half guard twice.",
+      "why": "The spec's own example. Rounds plus two tags in opposite directions.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": 5,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "submission",
+            "event": "scored",
+            "position": "Guard",
+            "technique_id": "armbar-closed-guard",
+            "count": 1
+          },
+          {
+            "category": "pass",
+            "event": "conceded",
+            "position": "Half Guard",
+            "technique_id": null,
+            "count": 2
+          }
+        ]
+      },
+      "must_not": [
+        "session_rpe",
+        "round_minutes",
+        "gi"
+      ]
+    },
+    {
+      "id": "b-compound-with-note",
+      "source": "authored",
+      "dictation": "Six rounds of no-gi, five minutes each, about an eight. Swept two people with butterfly and got choked from the back once. His grip broke my posture before I could frame.",
+      "why": "Everything at once, and the last sentence is prose the chips cannot hold - it belongs in the note, not as a tag.",
+      "expect": {
+        "kind": null,
+        "gi": false,
+        "rounds": 6,
+        "round_minutes": 5,
+        "session_rpe": 8,
+        "note": "His grip broke my posture before I could frame.",
+        "body_note": null,
+        "tags": [
+          {
+            "category": "sweep",
+            "event": "scored",
+            "position": "Guard",
+            "technique_id": "butterfly-sweep-basic",
+            "count": 2
+          },
+          {
+            "category": "submission",
+            "event": "conceded",
+            "position": "Back",
+            "technique_id": "rear-naked-choke",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "c-attempted-not-scored",
+      "source": "authored",
+      "dictation": "Went for a triangle from closed guard but he postured out.",
+      "why": "Attempted, not scored. The most consequential confusion in the vocabulary: it inverts a hit rate.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "submission",
+            "event": "attempted",
+            "position": "Guard",
+            "technique_id": "triangle-closed-guard",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "c-conceded-not-scored",
+      "source": "authored",
+      "dictation": "Got caught in an armbar from mount.",
+      "why": "Conceded, not scored. 'Armbar' appears in both this and the scored case; only the verb separates them.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "submission",
+            "event": "conceded",
+            "position": "Mount",
+            "technique_id": "armbar-mount",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "c-defended-not-conceded",
+      "source": "authored",
+      "dictation": "He went for a bow and arrow twice and I stopped both.",
+      "why": "Defended - the symmetric half of attempted, from the other side. Not conceded, and not scored.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "submission",
+            "event": "defended",
+            "position": "Guard",
+            "technique_id": "bow-and-arrow-choke-from-guard",
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "c-drilled-then-scored",
+      "source": "authored",
+      "dictation": "Drilled the knee cut in class then actually hit it in rolling.",
+      "why": "One technique, two events in one sentence. Both rows must exist - this is the funnel N31 exists to feed.",
+      "expect": {
+        "kind": "class",
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "pass",
+            "event": "drilled",
+            "position": "Guard",
+            "technique_id": "headquarters-knee-cut",
+            "count": 1
+          },
+          {
+            "category": "pass",
+            "event": "scored",
+            "position": "Guard",
+            "technique_id": "headquarters-knee-cut",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "d-ambiguous-armbar",
+      "source": "authored",
+      "dictation": "Hit an armbar.",
+      "why": "THE case for the unresolved path. The catalog holds armbar-closed-guard, armbar-mount, armbar-back-control and more; no position is given, so no id is knowable. A confident guess here is the failure mode the whole design refuses.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "submission",
+            "event": "scored",
+            "position": "",
+            "technique_id": null,
+            "count": 1
+          }
+        ],
+        "unresolved": [
+          {
+            "phrase": "armbar",
+            "category": "submission",
+            "event": "scored"
+          }
+        ]
+      },
+      "must_not": [
+        "tags[0].technique_id"
+      ]
+    },
+    {
+      "id": "d-ambiguous-triangle",
+      "source": "authored",
+      "dictation": "Caught a triangle.",
+      "why": "Same shape as the armbar case, different technique, to catch a scorer that special-cases one word.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "submission",
+            "event": "scored",
+            "position": "",
+            "technique_id": null,
+            "count": 1
+          }
+        ],
+        "unresolved": [
+          {
+            "phrase": "triangle",
+            "category": "submission",
+            "event": "scored"
+          }
+        ]
+      }
+    },
+    {
+      "id": "d-technique-not-in-catalog",
+      "source": "authored",
+      "dictation": "Hit a twister from the back.",
+      "why": "A real technique the 542-entry catalog does not contain. Unresolved, never mapped to a near neighbour.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "submission",
+            "event": "scored",
+            "position": "Back",
+            "technique_id": null,
+            "count": 1
+          }
+        ],
+        "unresolved": [
+          {
+            "phrase": "twister",
+            "category": "submission",
+            "event": "scored"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e-no-rpe-mentioned",
+      "source": "authored",
+      "dictation": "Good session, hit a kimura from closed guard.",
+      "why": "'Good' is not an RPE. Filling one from a mood word is the invention class the metric weights heaviest.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "submission",
+            "event": "scored",
+            "position": "Guard",
+            "technique_id": "kimura-closed-guard",
+            "count": 1
+          }
+        ]
+      },
+      "must_not": [
+        "session_rpe",
+        "rounds",
+        "gi"
+      ]
+    },
+    {
+      "id": "e-no-rounds-mentioned",
+      "source": "authored",
+      "dictation": "Trained gi tonight, worked on escapes.",
+      "why": "Gi is stated, rounds are not. The one fact said is filled; nothing else is.",
+      "expect": {
+        "kind": null,
+        "gi": true,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "escape",
+            "event": "drilled",
+            "position": "",
+            "technique_id": null,
+            "count": 1
+          }
+        ]
+      },
+      "must_not": [
+        "rounds",
+        "round_minutes",
+        "session_rpe"
+      ]
+    },
+    {
+      "id": "e-hedged-count",
+      "source": "authored",
+      "dictation": "Swept him a couple of times, maybe three.",
+      "why": "A hedged, self-corrected count. Either 2 or 3 is defensible; inventing a precise number the athlete never settled on is not. Scored as correct on either value - see the README on tolerant fields.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "sweep",
+            "event": "scored",
+            "position": "",
+            "technique_id": null,
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "f-note-only",
+      "source": "authored",
+      "dictation": "Felt flat the whole time, could not get my grips going at all.",
+      "why": "No countable event anywhere. The correct draft is a note and nothing else - a model that manufactures a tag here fails.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": "Felt flat the whole time, could not get my grips going at all.",
+        "body_note": null,
+        "tags": []
+      },
+      "must_not": [
+        "tags",
+        "session_rpe",
+        "rounds"
+      ]
+    },
+    {
+      "id": "f-off-topic",
+      "source": "authored",
+      "dictation": "Reminder to buy a new mouthguard and email the coach about the schedule.",
+      "why": "Prose that is about training but contains no session evidence. Nothing structured, and it is not a body note either.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": "Reminder to buy a new mouthguard and email the coach about the schedule.",
+        "body_note": null,
+        "tags": []
+      },
+      "must_not": [
+        "tags",
+        "body_note",
+        "session_rpe"
+      ]
+    },
+    {
+      "id": "g-injury-to-body-note",
+      "source": "authored",
+      "dictation": "Five rounds, tweaked my knee in a scramble near the end.",
+      "why": "The injury belongs in body_note, not the general note and not a tag. Splitting these wrong buries an injury in prose.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": 5,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": "Tweaked my knee in a scramble near the end.",
+        "tags": []
+      }
+    },
+    {
+      "id": "h-numbers-as-words",
+      "source": "authored",
+      "dictation": "Did seven rounds of five minutes.",
+      "why": "Numbers spoken as words. Dictation writes them out; the parser must not require digits.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": 7,
+        "round_minutes": 5,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": []
+      }
+    },
+    {
+      "id": "h-self-correction",
+      "source": "authored",
+      "dictation": "Got swept twice - no, three times.",
+      "why": "Mid-sentence self-correction. The final value stands; a model that sums them reports six.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "sweep",
+            "event": "conceded",
+            "position": "",
+            "technique_id": null,
+            "count": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "h-filler-and-repair",
+      "source": "authored",
+      "dictation": "Um, so, yeah, I think I hit like two sweeps? From butterfly.",
+      "why": "Disfluency, hedging and a question intonation - what dictation of real speech looks like. The facts survive it.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "sweep",
+            "event": "scored",
+            "position": "Guard",
+            "technique_id": "butterfly-sweep-basic",
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "h-nogi-phrasing",
+      "source": "authored",
+      "dictation": "Nogi today, just positional from side control.",
+      "why": "Kind and gi from colloquial phrasing; 'positional' is a session kind, not a tag.",
+      "expect": {
+        "kind": "positional",
+        "gi": false,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": []
+      },
+      "must_not": [
+        "tags",
+        "rounds"
+      ]
+    },
+    {
+      "id": "i-position-family-mapping",
+      "source": "authored",
+      "dictation": "Escaped side control three times.",
+      "why": "Prose says 'side control'; the tag stores the FAMILY. A tag written as 'Side Control - Bottom' does not join the funnel.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "escape",
+            "event": "scored",
+            "position": "Side Control",
+            "technique_id": null,
+            "count": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "i-position-not-a-family",
+      "source": "authored",
+      "dictation": "Kept getting stuck in fifty-fifty.",
+      "why": "A position the eleven-entry list does not carry as a family. Empty position is the honest answer, not a nearest guess.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "control",
+            "event": "conceded",
+            "position": "",
+            "technique_id": null,
+            "count": 1
+          }
+        ]
+      },
+      "must_not": [
+        "tags[0].position"
+      ]
+    },
+    {
+      "id": "j-transition-maps-to-control",
+      "source": "authored",
+      "dictation": "Took the back from closed guard twice.",
+      "why": "A back take is library category 'Transition', which has no symmetric tag category - it lands as 'control'. The gap between the library's nine categories and the tag vocabulary's six is real and this pins it.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "control",
+            "event": "scored",
+            "position": "Guard",
+            "technique_id": "closed-guard-underhook-back-take",
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "j-takedown",
+      "source": "authored",
+      "dictation": "Hit a double leg in the standup round.",
+      "why": "Takedown is its own tag category and the only one that comes from Standing.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": [
+          {
+            "category": "takedown",
+            "event": "scored",
+            "position": "Standing",
+            "technique_id": null,
+            "count": 1
+          }
+        ],
+        "unresolved": [
+          {
+            "phrase": "double leg",
+            "category": "takedown",
+            "event": "scored"
+          }
+        ]
+      }
+    },
+    {
+      "id": "k-intent-not-event",
+      "source": "authored",
+      "dictation": "Want to start working on my half guard next week.",
+      "why": "An intention, not something that happened. Nothing is logged from a plan - this is the tense trap.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": "Want to start working on my half guard next week.",
+        "body_note": null,
+        "tags": []
+      },
+      "must_not": [
+        "tags",
+        "rounds",
+        "session_rpe"
+      ]
+    },
+    {
+      "id": "k-hypothetical",
+      "source": "authored",
+      "dictation": "If I had got the underhook I would have swept him.",
+      "why": "A counterfactual. No sweep occurred; a tag here records something that did not happen.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": "If I had got the underhook I would have swept him.",
+        "body_note": null,
+        "tags": []
+      },
+      "must_not": [
+        "tags"
+      ]
+    },
+    {
+      "id": "l-long-messy",
+      "source": "authored",
+      "dictation": "Alright so tonight was gi, we did about an hour, drilled the scissor sweep for most of class and then five rounds after. I hit the sweep twice in rolling which never happens. Got mounted a lot though, probably four times, and tapped once to an ezekiel from mount. Shoulder is a bit sore.",
+      "why": "The realistic end of the range: kind, gi, drilling, a funnel completion, a conceded count, a submission conceded with a technique, and a body note - in one unstructured breath.",
+      "expect": {
+        "kind": null,
+        "gi": true,
+        "rounds": 5,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": "Shoulder is a bit sore.",
+        "tags": [
+          {
+            "category": "sweep",
+            "event": "drilled",
+            "position": "Guard",
+            "technique_id": "scissor-sweep-closed-guard",
+            "count": 1
+          },
+          {
+            "category": "sweep",
+            "event": "scored",
+            "position": "Guard",
+            "technique_id": "scissor-sweep-closed-guard",
+            "count": 2
+          },
+          {
+            "category": "control",
+            "event": "conceded",
+            "position": "Mount",
+            "technique_id": null,
+            "count": 4
+          },
+          {
+            "category": "submission",
+            "event": "conceded",
+            "position": "Mount",
+            "technique_id": "ezekiel-choke-mount",
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "l-empty-input",
+      "source": "authored",
+      "dictation": "",
+      "why": "Empty dictation. The endpoint returns an empty draft rather than an error, and certainly rather than a hallucinated session.",
+      "expect": {
+        "kind": null,
+        "gi": null,
+        "rounds": null,
+        "round_minutes": null,
+        "session_rpe": null,
+        "note": null,
+        "body_note": null,
+        "tags": []
+      },
+      "must_not": [
+        "tags",
+        "note",
+        "rounds",
+        "session_rpe",
+        "gi",
+        "kind"
+      ]
+    }
+  ]
+}
