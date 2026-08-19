@@ -15,9 +15,11 @@
  * ## The escape row
  *
  * Typing something with no match offers `Add "chicken thigh"` as the last row,
- * prefilled. There is no external food database in this build, so the sheet
- * must never imply one — it searches the athlete's own saved foods and nothing
- * else.
+ * prefilled. **The search box still covers the athlete's own saved foods and
+ * nothing else** — the catalog behind a barcode is reached by scanning, not by
+ * typing, until N42 lands a searchable one. So the empty state stays worded as
+ * "nothing SAVED by that name": it must not imply a catalog was searched and
+ * came back empty, which is a different and much stronger claim.
  */
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -187,6 +189,22 @@ export default function AddFoodScreen() {
             : 'Log something once and it will be here next time.'}
         </Text>
       )}
+
+      {/* Above the describe row, because a packet with a barcode should never
+          be described: a scan gives the numbers printed on it, and describing
+          it hands the same job to an estimator that N40 measured doubling a
+          quantity without flagging it. Below the recents, because the two-tap
+          repeat still beats both. */}
+      <Pressable
+        style={styles.newRow}
+        onPress={() => router.push(`/food/scan?meal=${meal}&date=${date}`)}
+        accessibilityRole="button"
+        accessibilityLabel="Scan a barcode"
+        testID="add-scan"
+      >
+        <Icon name="plus" size={14} color={accent.ink} />
+        <Text style={[styles.newText, { color: accent.ink }]}>Scan a barcode</Text>
+      </Pressable>
 
       {/* The escape hatch BELOW the list rather than above it: recents are the
           two-tap path and this is for the meal that is not in them. Offered

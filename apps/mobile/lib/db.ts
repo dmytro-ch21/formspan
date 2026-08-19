@@ -322,6 +322,64 @@ const CREATE_FOODS = `
   );
 `;
 
+/**
+ * Foods a barcode has resolved to on this device.
+ *
+ * ## Its own table rather than a row in `foods`, for three reasons
+ *
+ * **Licensing.** A scan result can come from Open Food Facts, which is ODbL
+ * and carries a share-alike obligation. Migration `000059`'s own comment says
+ * that obligation "must never reach our own data", and the cheapest way to
+ * keep that true is for the ODbL-derived rows to live somewhere that could be
+ * emptied in one statement without touching anything we authored. Mixing them
+ * into `foods` would make separating them later a query rather than a
+ * `DELETE FROM`.
+ *
+ * **`foods` PUSHES.** Its rows carry `dirty`/`remote`/`deleted_at` and flush
+ * through the outbox, so a scan result written there would upload itself as a
+ * personal saved food the athlete never chose to save. A scan proposes; it
+ * does not save, and it does not save a *food* either.
+ *
+ * **The quick-add list.** `foods` is what the two-tap repeat reads. Every
+ * packet ever pointed at would accumulate in it, pushing the porridge an
+ * athlete actually eats down the list.
+ *
+ * `cached_at` is what a future eviction would read. Nothing evicts today — a
+ * product's macros change when the manufacturer reformulates, which is rare
+ * and is not something a phone can detect — but a cache with no age on its
+ * rows cannot grow one later without a migration.
+ */
+const CREATE_BARCODE_CACHE = `
+  CREATE TABLE IF NOT EXISTS barcode_cache (
+    user_id TEXT NOT NULL,
+    -- The NORMALISED 13-digit GTIN, never the scanner's raw string. A US
+    -- upc_a scan and an EU ean13 scan of the same box differ by a leading
+    -- zero, and keying on the raw form would cache the same product twice and
+    -- miss on the other symbology.
+    barcode TEXT NOT NULL,
+    name TEXT NOT NULL,
+    brand TEXT NOT NULL DEFAULT '',
+    serving_label TEXT NOT NULL,
+    serving_grams REAL,
+    kcal REAL NOT NULL,
+    protein_g REAL NOT NULL DEFAULT 0,
+    carb_g REAL NOT NULL DEFAULT 0,
+    fat_g REAL NOT NULL DEFAULT 0,
+    fibre_g REAL,
+    -- 'catalog', 'off' or 'ai' -- the last being a food the athlete described
+    -- because no catalog had the packet, kept distinct so a guess can never
+    -- wear a fact's provenance. Kept at all because a purge of ODbL rows has to
+    -- find exactly them: forgetOpenFoodFactsRows is scoped to source = 'off',
+    -- so this comment being right is what that scoping depends on. It said
+    -- "'catalog' or 'off'" while 'ai' was already being written; caught in
+    -- review. (No backticks in here: this is inside a template literal, and
+    -- one silently ends the string -- 40 suites went red.)
+    source TEXT NOT NULL,
+    cached_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, barcode)
+  );
+`;
+
 const CREATE_NUTRITION_TARGETS = `
   CREATE TABLE IF NOT EXISTS nutrition_targets (
     user_id TEXT NOT NULL,
@@ -364,7 +422,7 @@ const CREATE_NUTRITION_TARGETS = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -377,7 +435,8 @@ type LocalTable =
   | 'planned_sessions'
   | 'sequences'
   | 'food_entries'
-  | 'foods';
+  | 'foods'
+  | 'barcode_cache';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -455,6 +514,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_FOOD_ENTRIES);
   await db.execAsync(CREATE_FOODS);
   await db.execAsync(CREATE_NUTRITION_TARGETS);
+  await db.execAsync(CREATE_BARCODE_CACHE);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -758,6 +818,16 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // version the table arrived in is readable from `migrate()` rather than
     // only from git.
     await db.execAsync(CREATE_NUTRITION_TARGETS);
+  }
+
+  if (current < 20) {
+    // Foods a barcode has resolved to, so a re-scan works with no signal.
+    //
+    // A no-op against the unconditional CREATE above, same as 18's and 19's
+    // were; it is here so the version the table arrived in is readable from
+    // `migrate()` rather than only from git. The BUMP is what makes a device
+    // already stamped 19 reach the CREATE at all.
+    await db.execAsync(CREATE_BARCODE_CACHE);
   }
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);

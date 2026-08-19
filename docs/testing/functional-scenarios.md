@@ -8805,3 +8805,111 @@ Three outcomes, and the whole point is that they stay apart:
 - **A stub cannot falsify the assumption it was built from.** The suite that
   missed the 404 bug was green and thorough and stubbed 200 throughout. Any test
   asserting provider semantics is only as good as the last live measurement.
+## Barcode scanning (N41 — `app/food/scan.tsx`, mobile only)
+
+Point the camera at a packet and log what is actually in it. Mobile-only by the
+platform rule: this is live logging, done standing in a kitchen or a shop.
+
+**The camera cannot be driven by a functional test** — a Simulator has no camera,
+and a device test would need a physical packet. So everything below is written
+against the code path *after* a decode, plus one manual device case at the end
+that nothing automated can replace.
+
+**The lookup endpoint now exists** — N42 (#319) shipped
+`GET /v1/nutrition/catalog/barcode/{barcode}`, so these scenarios are runnable
+end to end against a deployed API. Two things it does that the scenarios below
+depend on: a genuine miss is `404 not_found` (covering both an Open Food Facts
+404 **and** an OFF `200` carrying `status: 0`), and a transport failure is a
+distinct `503 unavailable`. **Assert on the error CODE, never the HTTP status** —
+a plain 200 from that provider can mean either found or not-found, so status
+alone cannot carry the distinction the screen is built on.
+
+**Do not use an arbitrary well-formed barcode as a not-found fixture.** Open
+Food Facts returns `status: 1` with a full product for codes that were simply
+invented — `5012345678900` comes back with 267 fields and 406 kcal. `5690550000001`
+is the code #319 measured as a real 404.
+
+### Happy path
+
+- Quick-add → **Scan a barcode** opens the scanner with the meal slot and date
+  carried through from the sheet.
+- A decoded, known barcode shows the product, its brand, what one serving is,
+  and a servings field with the cursor in it — **and logs nothing**. The day's
+  remaining figure must not move until *Log it* is pressed.
+- Changing servings to `2` updates the "Logs as …" line before anything is
+  written, and logging stores the **scaled** macros with `servings: 2`.
+- The logged entry carries `source_food_id: null`. A scanned product is not one
+  of the athlete's own saved foods, and pointing that FK at a cache row would
+  dangle the moment the cache is cleared.
+- Scanning the same packet again, with the device in airplane mode, resolves
+  from the local cache and says it is held on this phone.
+
+### Edge cases & errors
+
+- **A barcode the catalog does not have** says "We don't have this one", shows
+  the digits it read, and offers *Describe it instead*. It must never be an
+  empty screen or a spinner that stops.
+- **A lookup that could not be made** (airplane mode, first scan of a packet;
+  or a 500) says *Couldn't check this one* and explains why. It must **not**
+  say we do not have the food — that is a false claim about the catalog caused
+  by signal. Assert the two messages are distinguishable, because this is the
+  failure the whole screen is shaped around.
+- The unreachable screen offers *Try again*, and a retry after signal returns
+  resolves normally without re-scanning.
+- **A misread code** (a creased packet, a wrong check digit) leaves the scanner
+  running and says it did not read cleanly. It must not perform a lookup, since
+  a lookup on a misread returns a miss that reads as a missing product.
+- A **QR code** on the packaging does nothing at all — the scanner is restricted
+  to food symbologies, so a marketing QR must not produce a confident scan that
+  resolves to nothing.
+- **Camera permission refused**: the screen explains what the camera is for and
+  states that no picture is taken and nothing is uploaded, *before* the OS
+  prompt. Once the prompt can no longer be shown it points at Settings instead,
+  and both states still offer the describe path.
+- Confirming with the calorie field **cleared** keeps the packet's own figure
+  rather than logging zero. Typing `1.` then `5` into servings logs `1.5`, not
+  `15`.
+
+### The describe fallback (the third rung)
+
+- From *not found* → *Describe it instead*, confirming a **single-item** draft
+  teaches this phone the packet: re-scanning it resolves, and the draft says
+  the numbers were **drafted from your description, not read off the packet**.
+- Confirming a **multi-item** draft logs every item and teaches the phone
+  nothing — a barcode names one product. Assert the meal still logs; the
+  barcode simply stays unknown.
+- From *could not check* → *Describe it instead* must **not** teach the phone
+  that barcode, because the catalog may hold the real product and a cached
+  guess would shadow it permanently.
+
+### Auth / security
+
+- The barcode cache is scoped per athlete. Signing out and in as another account
+  on the same device must not resolve the first athlete's scans.
+- Nothing about a scan is uploaded except the digits. Assert no image is sent —
+  this is the claim the permission screen makes to the athlete.
+
+### Regression trap
+
+- **A bare, unrouted 404 must not read as "we do not have this one".** Point the
+  app at a deployment predating #319: every scan must report *could not check*,
+  never a missing product. This is **version skew and therefore permanent** — an
+  installed mobile build updates on the App Store's schedule, so a phone can
+  outrun the deployed API by weeks.
+- **A `503 unavailable` must not read as a missing product either.** It is the
+  provider being unreachable, and the server's own message says so in as many
+  words.
+- **An unrecognised `source`** (a provider added server-side that this build
+  does not know) must claim neither the VOLA catalog nor Open Food Facts.
+- **Symbology normalisation.** The same product scanned as UPC-A (12 digits) and
+  as EAN-13 (13) must resolve to the same food. A US packet that misses while
+  its EU twin resolves is this feature's one silent failure, and it surfaces as
+  an ordinary "we do not have this".
+
+### Manual, on a device (nothing above covers these)
+
+- A real packet, in a shop, one-handed: does the reticle frame a barcode at a
+  natural distance, and does a decode happen without holding still?
+- A curved packet (a tin, a bottle) and a creased one — do they read, and when
+  they do not, is the "didn't read cleanly" hint what actually appears?
+- The keyboard must not cover the servings field when it focuses.

@@ -37,6 +37,8 @@ import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { rememberBarcode } from '@/lib/barcodeCache';
+import { parseOr } from '@/lib/draftNumber';
 import {
   describeMeal,
   itemToEntry,
@@ -46,7 +48,7 @@ import {
   type MealEstimate,
 } from '@/lib/estimateApi';
 import { logFood } from '@/lib/foodLog';
-import { MEALS, slotForClock, todayString, type Meal } from '@/lib/nutrition';
+import { MEALS, slotForClock, todayString, type Macros, type Meal } from '@/lib/nutrition';
 import { request as requestSync } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -55,7 +57,18 @@ export default function DescribeMealScreen() {
   const accent = useAccent();
   const getToken = useAuthToken();
   const { userId } = useAuth();
-  const params = useLocalSearchParams<{ meal?: string; date?: string; q?: string }>();
+  const params = useLocalSearchParams<{
+    meal?: string;
+    date?: string;
+    q?: string;
+    /**
+     * Set when the athlete arrived here from a barcode the catalog did not
+     * have. It is the third rung of the scan ladder — catalog, then Open Food
+     * Facts, then describe it yourself — and it is what lets a confirmed draft
+     * teach this phone the packet.
+     */
+    barcode?: string;
+  }>();
 
   const date = params.date ?? todayString();
   const [meal, setMeal] = useState<Meal>(
@@ -74,11 +87,25 @@ export default function DescribeMealScreen() {
   // estimate so the original stays readable — the assumption beside a number
   // makes no sense once the number has been changed.
   const [rows, setRows] = useState<DraftRow[]>([]);
+  /**
+   * Whether the estimate that produced this draft named exactly ONE food.
+   *
+   * Held apart from `rows.length` because `rows` is TRIMMED as the save loop
+   * lands each item, so by the time the barcode is written `rows.length` is
+   * about this attempt rather than about the draft. The gap is reachable:
+   * a two-item draft whose first item logs and second fails leaves one row, and
+   * a retry then sees a single-item save and would cache that lone remainder
+   * against the packet — the same "whichever item happened to be first,
+   * forever" outcome the guard exists to prevent, just with the last one.
+   * Raised in review.
+   */
+  const [singleFood, setSingleFood] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const receive = useCallback((res: { estimate: MealEstimate; quota: EstimateQuota }) => {
     setEstimate(res.estimate);
     setRows(res.estimate.items.map(toDraft));
+    setSingleFood(res.estimate.items.length === 1);
     setQuota(res.quota);
   }, []);
 
@@ -190,7 +217,9 @@ export default function DescribeMealScreen() {
     setError(null);
     try {
       // A copy, because `rows` is trimmed inside the loop.
-      for (const row of [...rows]) {
+      const snapshot = [...rows];
+      const logged: DraftRow[] = [];
+      for (const row of snapshot) {
         await logFood(userId, {
           eaten_on: date,
           meal,
@@ -201,9 +230,47 @@ export default function DescribeMealScreen() {
           // confirmed, whoever typed it first.
           source_food_id: null,
         });
+        logged.push(row);
         setRows((rs) => rs.filter((r) => r.key !== row.key));
       }
       requestSync('meal estimated');
+      // Teach this phone the packet, so the next scan of it resolves — the
+      // promise the scan screen's "this barcode will find it next time" makes.
+      //
+      // **Only when the draft was a single row**, and the guard is not
+      // fussiness: a barcode identifies ONE product, and caching a three-item
+      // draft against it would resolve that packet to whichever item happened
+      // to be first, forever, with no way for the athlete to tell. A photo of
+      // a label ordinarily yields one item; when it does not, the meal is
+      // still logged and the barcode simply stays unknown, which is the honest
+      // outcome.
+      //
+      // Cached as `ai`, never `catalog` or `off`: these numbers were drafted
+      // from a description, and N40 measured what an unlabelled estimate is
+      // worth. Awaited rather than fired off, so the write cannot lose a race
+      // with the screen unmounting — it is the last thing before `back()`.
+      if (params.barcode && singleFood && logged.length === 1) {
+        const it = fromDraft(logged[0]);
+        await rememberBarcode(
+          userId,
+          params.barcode,
+          {
+            name: it.name,
+            brand: '',
+            serving_label: it.serving_label,
+            serving_grams: null,
+            // Per SERVING, because that is what the cache stores and what the
+            // scan screen scales. The draft's figures are the total for the
+            // item, so they are divided back out by its own servings count.
+            ...perServing(it),
+          },
+          'ai',
+        ).catch(() => {
+          // A cache write that fails costs one re-describe later. The meal is
+          // already logged, and interrupting that with an error about a cache
+          // would be reporting a failure the athlete cannot act on.
+        });
+      }
       router.back();
     } catch (err) {
       // Silent failure here would leave the athlete unable to tell what was
@@ -212,7 +279,7 @@ export default function DescribeMealScreen() {
     } finally {
       setSaving(false);
     }
-  }, [userId, rows, saving, date, meal, router]);
+  }, [userId, rows, saving, date, meal, router, params.barcode, singleFood]);
 
   const updateRow = (key: string, patch: Partial<DraftRow>) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -339,6 +406,17 @@ export default function DescribeMealScreen() {
         <>
           <SectionHeader label="Check these before logging" />
           {estimate.note ? <Text style={styles.note}>{estimate.note}</Text> : null}
+          {/* Says the teaching out loud. The barcode came from a scan that
+              found nothing, and nothing else on this screen would tell the
+              athlete that confirming here is what makes the next scan of that
+              packet work — or that describing something else entirely would
+              attach the wrong food to it. Raised in review. */}
+          {params.barcode && singleFood ? (
+            <Text style={styles.note} testID="describe-barcode-note">
+              Confirming this will remember it for barcode {params.barcode}, so scanning that packet
+              finds it next time.
+            </Text>
+          ) : null}
 
           {rows.map((row, i) => (
             <View key={row.key} style={styles.row}>
@@ -539,11 +617,28 @@ function fromDraft(row: DraftRow): EstimatedItem {
   };
 }
 
-function parseOr(raw: string, fallback: number): number {
-  const trimmed = raw.trim().replace(',', '.');
-  if (trimmed === '') return fallback;
-  const n = Number(trimmed);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
+/**
+ * A drafted item's figures restated PER SERVING.
+ *
+ * The draft carries the total for the item alongside how many servings that
+ * was, which is the right shape for a log entry and the wrong one for a cache
+ * — the scan screen multiplies a per-serving figure by whatever the athlete
+ * ate next time. Dividing here rather than there keeps that conversion in the
+ * one place that knows the draft's units.
+ *
+ * A zero or negative `servings` cannot be divided by, so it falls back to the
+ * figures as given rather than producing an Infinity that would reach the
+ * cache and then a log entry.
+ */
+function perServing(it: EstimatedItem): Macros {
+  const n = it.servings > 0 ? it.servings : 1;
+  return {
+    kcal: it.kcal / n,
+    protein_g: it.protein_g / n,
+    carb_g: it.carb_g / n,
+    fat_g: it.fat_g / n,
+    fibre_g: it.fibre_g == null ? null : it.fibre_g / n,
+  };
 }
 
 /**

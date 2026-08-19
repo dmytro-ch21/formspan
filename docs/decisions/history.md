@@ -29119,6 +29119,278 @@ otherwise.
   ~35x when the cost was finally measured.
 - **Still no real photograph through the whole path**, end to end. That gap is
   now two features wide.
+## 2026-08-19 — A barcode is the one input where the numbers are facts (N41)
+
+Scanning a barcode to log a packaged food, on the phone. `app/food/scan.tsx`,
+reached from the quick-add sheet, plus `lib/barcode.ts` (normalisation),
+`lib/barcodeApi.ts` (the lookup client) and `lib/barcodeCache.ts` (the on-device
+cache).
+
+### Why this reverses N26's recorded decision
+
+N26's line said the food-database work was unscheduled: *"if describing a meal
+in a sentence works, a food database is largely redundant."* That was a
+reasonable bet and N40 (#313) measured it failing. The first real photograph
+through the estimator identified four items correctly, **invented one**, and
+**doubled one quantity** — two fried eggs where there was one, about 29% over on
+the day.
+
+The asymmetry is the finding, not the error rate. The invention came back
+flagged three separate ways: `portion_confidence: low`, a hedged assumption, and
+a note calling it unclear. The miscount came back `medium` and stated flatly,
+hinting at nothing. **The estimator can tell you it might have made a food up.
+It cannot tell you it counted wrong.**
+
+A barcode is the one input where quantity and macros are facts rather than
+estimates — they are printed on the packet — so it covers precisely the failure
+the AI path has no way to signal, on precisely the foods (packaged) where
+estimation is worst and a database is most complete.
+
+### The rule it inherits, and the one thing it deliberately does differently
+
+**A scan proposes an entry; it never logs one.** That is N26's draft-then-confirm
+rule, taken whole.
+
+What is NOT taken is the confidence badge and the assumption line. Those exist on
+the describe screen because a model guessed at a quantity, and they are what make
+a wrong estimate fixable rather than merely wrong. Rendering them beside a figure
+read off a label would be **manufacturing doubt about the one source in this app
+that does not need any**. So the scan draft shows the product, a servings field
+with the cursor already in it — the one number a barcode cannot tell us — and the
+total it will log as.
+
+### Two claims about the dependency, both confidently made, both false
+
+The task brief said `expo-camera` "already ships in the dev client, so this needs
+no new native dependency". It does not: absent from `package.json`, from
+`pnpm-lock.yaml`, and from `node_modules`.
+
+A coordinating session then corrected that in the other direction — that
+`expo-image-picker` is already installed and `launchCameraAsync` already opens
+the system camera, so nothing new is needed. That is also false, and it is the
+more interesting error: **`expo-image-picker` has no barcode API at all.** It
+captures a photo. Capture is not decode, and only `expo-camera` decodes
+(`CameraView`'s `onBarcodeScanned`, or `scanFromURLAsync`). The correction is
+right for N44, which genuinely only needs a still image of a machine; it is wrong
+for this.
+
+Both claims were settled the same way, by reading the installed package rather
+than reasoning about it. So N41 does add a native dependency, and the consequence
+is real: **anyone pulling this branch must run `pnpm --dir apps/mobile run ios`,
+not `start`.** Metro cannot deliver a native module, and the failure is a
+runtime module-load crash that reads as a bug in the screen.
+
+Its config plugin adds `NSMicrophoneUsageDescription` and Android `RECORD_AUDIO`
+unless told otherwise, so both are explicitly `false`. #325 found the same trap on
+the image picker and the reason is the same: `lib/sounds.ts` sets
+`allowsRecording: false` and its test calls a microphone request indefensible, so
+a binary that asked for one would contradict the app's own guard. A barcode is
+decoded from video frames; no audio is involved at any point.
+
+### One camera permission string, declared twice, deliberately identical
+
+Rebasing onto #325 (N44's camera surface) put **two plugins declaring
+`cameraPermission` in one `app.json`** — `expo-image-picker`, which N26 and N44
+use to photograph a meal or a machine, and `expo-camera`, which this feature
+uses to decode a barcode. Both write the same `NSCameraUsageDescription` key.
+
+`@expo/config-plugins`' `applyPermissions` resolves that as
+`infoPlist[permission] = permissions[permission] || infoPlist[permission] ||
+default`, so **an explicitly provided string always wins and plugins run in
+order** — meaning the later entry's text silently replaces the earlier one's.
+Left alone, the barcode justification would have become the prompt shown to
+somebody photographing their dinner. Nothing in the JS, no test and no CI job
+would have caught it, because the artefact is a string in a built binary.
+
+Both entries now carry the **same** string, covering all three uses and staying
+truthful about the difference that matters: a photo is sent to VOLA to be read,
+a barcode is decoded on the phone and never leaves it. Identical rather than
+"put the right one last", because order-dependence is the actual hazard — the
+next plugin added between them would move the answer again.
+
+The microphone flags survived the merge on both entries and were checked
+individually rather than by eye: `expo-image-picker` keeps #325's
+`microphonePermission: false`, and `expo-camera` carries both that and
+`recordAudioAndroid: false`. Two plugins, the same silent default, the same
+contradiction with `lib/sounds.ts` — which makes it an ecosystem default worth
+knowing rather than one package's quirk.
+
+### Three endings, and each one says which it is
+
+The screen's `Phase` is a tagged union rather than a set of booleans, for the
+reason `nutrition.ts`'s `TargetView` gives about the same choice — the states
+that matter are the ones that must not collapse:
+
+- **Resolved** → a draft to confirm.
+- **Not in the catalog** → "We don't have this one", naming the digits it read,
+  with the describe path behind it.
+- **Could not ask** → says *that* instead. "We don't have this one" is a **false
+  statement about the catalog** when the truth is a basement with no signal, and
+  the two arrive as the same rejected promise unless something separates them.
+
+`lookupBarcode` returns the miss and throws the failure, so a caller cannot merge
+them by accident — and a 404 is only read as a miss when it carries the
+contract's `not_found` envelope. An unrouted path also 404s, which is this
+branch's actual state until the endpoint exists; treating that as a miss would
+tell every athlete the catalog lacked their food. There is a test for exactly
+that, and deleting the envelope check turns it red while everything else stays
+green.
+
+### Normalisation is where this fails silently, so it is the most-tested part
+
+A scanner does not hand back "the barcode", it hands back whichever symbology it
+read — and the **same box of cereal is `upc_a` in a US shop and `ean13` in an EU
+one**, twelve digits versus thirteen, differing by a leading zero that is implied
+rather than printed. Open Food Facts keys on the thirteen. A code passed through
+unchanged therefore finds the EU product and misses the US one, and the miss is
+invisible: it comes back as an ordinary "we do not have this".
+
+So UPC-A widening, UPC-E expansion (the short code on a soda can, and both the
+6- and 8-digit framings, because the platforms disagree about which they return),
+EAN-8 padding and ITF-14 carton reduction all land on one 13-digit GTIN. **A
+failed check digit never reaches the network**, which is the honesty half: a
+creased or curved packet misreads routinely, and looking a misread up returns a
+miss that gets reported to the athlete as a missing product.
+
+The test vectors are real published GTINs derived independently. The first draft
+invented them, and they agreed with whatever the implementation did — which is
+no evidence at all, and two of them were simply wrong.
+
+### Offline, and why the cache is its own table
+
+A resolved barcode is cached on-device so a re-scan works in a shop with no
+signal. A first scan of a product genuinely needs network — the phone cannot know
+what is in a packet it has never seen — and the screen says so rather than
+spinning. That asymmetry is worth stating because it is the one place this
+feature cannot be as offline-tolerant as the rest of nutrition.
+
+It is a new `barcode_cache` table (schema v20), **not** a row in `foods`, for
+three reasons and the first is a licence one:
+
+- **`foods` pushes.** Its rows carry `dirty`/`remote`/`deleted_at` and flush
+  through the outbox, so a scan result written there would upload itself as a
+  personal saved food the athlete never chose to save.
+- **ODbL separability.** Migration `000059`'s own comment says Open Food Facts'
+  share-alike obligation "must never reach our own data". Keeping the derived
+  rows in their own table makes walking away one statement, and
+  `forgetOpenFoodFactsRows` exists — scoped to `source = 'off'` — as the proof
+  rather than the intention.
+- **The quick-add list.** `foods` is what the two-tap repeat reads. Every packet
+  ever pointed at would accumulate in it.
+
+A confirmed scan **copies** the numbers into the log entry rather than referencing
+the cache, which is this schema's house style (`nutrition_recipe_items` copies its
+components for the same reason) and buys something extra here: an athlete's own
+history stops depending on a cache we may need to purge.
+
+### An AI-drafted food stays labelled as one, forever
+
+The third rung of the ladder — catalog, then Open Food Facts, then describe it
+yourself — writes what the athlete confirms back against the barcode, so the next
+scan of that packet finds something. It is cached as `ai`, never `off` or
+`catalog`, and an unrecognised source in the column narrows to `ai` rather than
+to `catalog`, because that is the cautious direction: `ai` is the only value
+whose copy tells the athlete the numbers were drafted rather than read off a
+packet.
+
+This is N40's finding applied structurally. The estimator cannot tell you which
+of its own numbers to distrust, so letting a drafted row wear a curated row's
+provenance would hand a guess the credibility of a fact — in the one screen built
+entirely on the premise that a barcode's numbers are facts.
+
+Two guards around it. It is cached **only when the draft is a single row**: a
+barcode names one product, and caching a three-item draft against it would
+resolve that packet to whichever item sorted first, forever, with nothing on
+screen to say so. And the barcode is carried into the describe path **only from
+the `unknown` branch**, never from `unreachable` — there we do not know the
+catalog lacks it, so caching a guess would shadow the real product on this phone
+permanently.
+
+### What is not built, and why
+
+**No backend.** The user scoped N41 to the phone half explicitly, so this was
+written against `GET /v1/nutrition/catalog/barcode/{barcode}` before that route
+existed, and for a while every scan correctly reported that it could not check.
+**N42 (#319) landed it while this PR was in review**, with the `not_found` /
+`unavailable` split the phone keys on — so the separate N46 claim (#326) was
+closed and the line is ticked as delivered there.
+
+Reading the shipped handler changed one thing here rather than merely
+confirming the contract. Its `sourceOf` returns `off`, `catalog`, or **the
+provider's own name**, so a provider added later reaches the phone as a string
+this build has never seen — and the client's `source` union had no room for it,
+which meant an unrecognised provider fell through to the catalog copy and told
+the athlete a third party's row came from VOLA. Naming Open Food Facts instead
+would have been the mirror error. There is now an `other` value with copy that
+claims neither, on the same reasoning the describe screen already records about
+its photo disclosure: a specific wrong recipient is worse than a vague one.
+
+Worth noting what the endpoint does that the contract did not ask for, because
+it is stricter in the right direction: `404 not_found` covers **both** an Open
+Food Facts 404 and an OFF `200` carrying `status: 0` (it genuinely does both,
+depending on whether the code is unallocated or malformed), while transport
+failures, 5xx and a 404 carrying HTML get a distinct `503 unavailable`. That is
+why the phone keys on the CODE and never on the HTTP status — a plain 200 from
+that provider can mean either found or not-found. Until it lands every scan ends in "couldn't check this
+one" — the honest failure, and not a usable feature. The source decision, shared
+with N42: **Open Food Facts, fetched on demand and cached, never bulk-ingested**,
+which is both the cheap answer and the one the ODbL constraint forces.
+
+### The review finding: a guard that verified its own arithmetic
+
+The most important defect in this work was found by `frontend-reviewer`, not by
+the suite, and it is worth recording because the shape recurs.
+
+Two of the normalisation paths **validated a check digit they had just computed
+themselves**. `expandUpcE` derives a fresh check digit for the UPC-A it returns,
+and the ITF-14 reduction derives one for the 13 digits left after the indicator
+is dropped — so calling `hasValidCheckDigit` on either OUTPUT is true by
+construction. Both read like guards. Neither was one. The comment beside the
+first said "keep it only if it verifies", describing a check that did not exist.
+
+The consequence was precisely the failure this feature is built to prevent. Any
+eight digits beginning 0 or 1 — a garbled EAN-8 read off a creased packet —
+expand to a *syntactically perfect* UPC-A, get looked up, and come back as "we
+don't have this one": a false statement about the catalog caused by a bad scan.
+Or worse, they resolve to a **different real product**, because the expansion of
+a misread is still a legitimate GTIN.
+
+**No test could see it**, and the reason is the useful part: every eight-digit
+and ITF-14 vector written for those paths was VALID. A guard is only exercised
+by the input it is supposed to reject, and the suite contained none. The fix
+verifies the digit **as scanned** — the computed one is compared against what
+the camera actually read — and the new tests iterate all ten candidate check
+digits rather than trying one, since a guard that happens to reject one value is
+not the same as one that accepts exactly the right value.
+
+The reviewer's better suggestion was taken too: `onBarcodeScanned` reports the
+**symbology**, and that is now passed into `normaliseBarcode` instead of being
+discarded. Eight digits is EAN-8 or UPC-E and the string alone cannot say which
+— the module used to guess, and the guess is what made the vacuous UPC-E check
+reachable at all. The bare six-digit UPC-E payload is no longer accepted at the
+entry point either: it carries no check digit, so it cannot be verified, and
+accepting an unverifiable code is the same hole in a smaller form.
+
+This is the second time in this repo that an assertion passed for the wrong
+reason and only a deliberate attempt to break it revealed the fact. The first
+was the mobile suite's founding pair (a 300s token that never reached the
+offline path, and a 5s wait against a ladder already at 300s).
+
+### Two existing guards caught real defects in this work
+
+Worth recording because both were written by earlier sessions for exactly this.
+
+`components/__tests__/keyboardCoverage.test.ts` rejected the screen for using a
+bare `ScrollView` with text inputs — the servings field the screen tells the
+athlete to check would have sat under the keyboard. `lib/__tests__/schema.test.ts`
+caught the version bump and made the v19→v20 upgrade path explicit, which is what
+stops a device already stamped 19 returning early and simply not having the
+table. Neither was found by review; both were found by the suite.
+
+And `react-hooks/immutability` rejected `resolve` reading `openDraft` above its
+declaration — the reference would have captured the binding before
+initialisation. That rule is an error in this app for the reason CLAUDE.md
+records, and it earned it again here.
 
 ## 2026-08-19 — A food catalog, and an empty result that says which kind of empty it is
 
