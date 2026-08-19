@@ -381,6 +381,10 @@ func main() {
 	mux.Handle("POST /v1/sequences", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Create)))
 	mux.Handle("GET /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Get)))
 	mux.Handle("PATCH /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Update)))
+	// POST, not PUT: it CREATES a sequence, and calling it twice gives you two
+	// copies rather than one — which is the honest semantics for "copy this
+	// again" and the reason it is not idempotent.
+	mux.Handle("POST /v1/sequences/{sequenceID}/copy", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Copy)))
 	mux.Handle("DELETE /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Delete)))
 
 	// Username lookup — the first athlete-to-athlete read, and the reason it

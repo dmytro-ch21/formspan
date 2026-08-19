@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
@@ -56,15 +57,23 @@ export default function EditSequencePage() {
     // actually see. T9; the same split F7 drew for curricula.
     return (
       <p className="text-sm text-neutral-500">
-        {/* No "Copy it to make it yours" — review found that sentence naming an
-            affordance that does not exist. There is no copy button for
-            sequences anywhere in this app, and no endpoint behind one either:
-            `CopyTo` is reachable only by ACCEPTING a share from a friend. It
-            was pre-existing copy and this branch would have duplicated it into
-            a second branch. Filed as F9. */}
+        {/* The instruction is back, and now there is something behind it: F9
+            added `POST /sequences/{id}/copy` and the button on the detail
+            page. It was removed in #289 precisely because it named an
+            affordance that did not exist — so it says where the button IS
+            rather than telling you to copy and leaving you to find out how. */}
         {s.official
-          ? "This is a reference sequence and cannot be edited."
-          : "This sequence cannot be edited."}
+          ? "This is a reference sequence and cannot be edited. "
+          : "This sequence cannot be edited. "}
+        {/* A link, not the words "its page". This route is only reachable by
+            typing the URL — the detail page hides Edit when you cannot edit —
+            so the reader arrived WITHOUT passing the page being pointed at.
+            The sentence exists to name a reachable affordance; one click beats
+            a treasure hunt. */}
+        <Link href={`/dashboard/sequences/${s.id}`} className="underline">
+          Copy it from its page
+        </Link>{" "}
+        to make it yours.
       </p>
     );
   }

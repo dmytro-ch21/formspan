@@ -2869,6 +2869,29 @@ export async function deleteSequence(
   });
 }
 
+/**
+ * Duplicates a sequence you can see into one you own, and returns the new one.
+ *
+ * What makes a reference chain usable rather than only readable — VOLA's are
+ * visible to everyone and editable by nobody. The server does the whole thing
+ * in one transaction, which is why this is a single call rather than the
+ * create-then-replace-items dance the workouts page does: that one can leave an
+ * empty workout behind if the second call fails.
+ *
+ * NOT idempotent. Calling it twice gives two copies, so the caller has to
+ * disable its own button while it is in flight.
+ */
+export async function copySequence(
+  getToken: Token,
+  id: string,
+): Promise<Sequence> {
+  return request<Sequence>(
+    getToken,
+    `/sequences/${encodeURIComponent(id)}/copy`,
+    { method: "POST" },
+  );
+}
+
 /* ── Friends and sharing ─────────────────────────────────────────────────────
  *
  * Everyone is addressed by HANDLE, never by user id — the API does not accept

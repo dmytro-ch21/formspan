@@ -26383,6 +26383,108 @@ it their claim again, which is why there is deliberately no "log it for me".
 dependency, in backend, apps or Railway config. That is an account and
 key-management decision before any code, and it is shared with N26 and N7,
 which are blocked on the same thing.
+## 2026-08-19 — A reference chain you can do something with
+
+**F9**, and it is the smallest kind of gap: a sentence promising a button, found
+by review of #289 while removing the sentence.
+
+VOLA sequences are visible to everyone and editable by nobody, and there was no
+copy path anywhere — not in `apps/web`, and no endpoint behind one either.
+`sequence.CopyTo` existed but was reachable only by ACCEPTING a share from a
+friend. So a reference chain was something an athlete could read and never use,
+while the edit route told them to "copy it to make it yours".
+
+**The repository method delegates rather than reimplements**, and that is the
+whole implementation: `CopyTo` already re-applies `visibleTo` and renumbers the
+steps in a single statement, and passing the caller as BOTH the sharer and the
+new owner is exactly the self-copy case — the visibility check then runs against
+the person asking. A second copy routine would have been a second place for the
+renumbering and the visibility predicate to drift.
+
+**Visibility gates it, not ownership.** You may copy anything you may read,
+including your own. Ownership of the result is unconditional: a new row owned
+outright, so editing the copy cannot touch the original and a deploy refreshing
+a seeded chain cannot reach into the copy. A chain you cannot see answers 404 —
+the same answer `Get` gives, because "you may not copy that" would confirm an id
+belongs to somebody, which is the existence oracle this module is careful not to
+be.
+
+**Not idempotent, deliberately.** POST, and calling it twice gives two copies,
+which is the honest reading of "copy this again". The button disables itself
+while in flight because of that, not despite it.
+
+**A better endpoint than the precedent it was modelled on.** The workouts page
+copies CLIENT-side — create, then replace items, two calls — which can leave an
+empty workout behind if the second fails. Sequences already had the transaction,
+so this is one call that cannot half-copy.
+
+The detail page's button appears exactly where Edit does not, and `official`
+picks the WORDS rather than deciding whether you may copy. The edit route's
+instruction is restored — it now says where the button is rather than telling
+you to copy and leaving you to find out how.
+
+**A surviving mutation was read as evidence about the mutation, and it was
+evidence about the tests.** Passing an empty sharer id to `CopyTo` survived both
+tests, and the conclusion drawn — written into the PR description — was "the
+mutation changed no behaviour, an empty string does not match a stranger's owner
+id either". Wrong, and review caught it: it breaks copying a chain you **own**,
+because `owner_user_id = $1` stops matching. Both tests stayed green because
+neither copied an owned chain — while the contract's most-quoted promise is "you
+may copy anything you may read, **including your own**". Measured after the fact:
+with that mutation, a copy-your-own test fails with `sequence: not found`. The
+right reading of a surviving mutation is "which case does this break that I am
+not testing", never "this mutation is meaningless".
+
+`TestCopyingYourOwnSequenceWorksToo` exists now and is the only test that makes
+the `owner_user_id = $1` arm load-bearing in the copy path.
+
+Two more assertions were vacuous for the same family of reason. The step fixture
+seeded `sort_order` 0,1,2 — already dense — so `CopyTo`'s promise that "a source
+with gaps yields a dense one" could not fail; copying `sort_order` verbatim
+passed. The fixture is gapped (0, 10, 20) now. And `notes`, `ends_at_position_id`
+and `description` were never compared, so a mutation blanking any of them
+passed; they are asserted. One comment was also claiming more than its path
+exercises — a refused copy has nothing to roll back, since no INSERT has run —
+and now says so.
+
+The guards that did hold: widening `visibleTo` with `OR TRUE`, a not-visible row
+returning no error, a skipped commit, and editing the copy reaching the
+original.
+
+**The client half had two lifecycle bugs, both from one false premise.** The
+handler's comment said "on success this unmounts" — it does not. `router.push`
+to another sequence stays inside the `[id]` segment, so Next REUSES the
+component, which is the same fact the edit route's `key={s.id}` exists for, in
+this branch, thirty lines away. So `copying` survived the navigation: copy,
+press Back, and the original's button sat disabled at "Copying…" for the life of
+the instance. And the copy's error fed the page's full-page `error` early
+return, which is right for a sequence that will not load and wrong for an action
+that failed — it replaced the chain, the share control and the retry with one
+line of red, and nothing ever cleared it.
+
+Both fixed by DERIVING rather than resetting: the state holds *which* sequence
+is copying and *which* one an error belongs to, and the flags are computed
+during render, so changing `id` makes them false with nothing to clear. The
+first attempt was a reset inside the load effect, and
+`react-hooks/set-state-in-effect` refused it — correctly, and pointing at the
+better design, exactly as the same rule did on mobile in #282. Action errors now
+render inline beside the button, matching what the workouts page already did.
+
+Open questions:
+
+- **Workouts still copy client-side** and can strand an empty workout on a
+  partial failure. It also has the identical stuck-flag bug this branch fixed —
+  it pushes into its own `[id]` segment after copying — and that is untouched
+  here. The pattern to copy is now the sequence one, and nothing obliges anybody
+  to.
+- The copy keeps the original's name, matching both existing copy paths
+  (share-accept and workouts). Two identically named chains in one list are
+  distinguishable only by the "· reference" label on the original. A "(copy)"
+  suffix here would diverge from the share path, which uses the same function.
+- Mobile has no sequence route at all, so none of this is reachable from the
+  phone — unchanged by this work, and recorded because the asymmetry keeps
+  coming up.
+
 
 ## Open items / known gaps as of this entry
 

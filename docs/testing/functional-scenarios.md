@@ -6589,6 +6589,31 @@ The round map (2026-08-18):
 - **Both sides of a position share one link.** "Mount" and "Under mount" both
   read about `mount`, so both counts are the family's. That is the glossary
   describing a position for both players, not a duplicate.
+Copying a sequence (2026-08-19):
+
+- **A VOLA reference chain has a "Copy to my sequences" button; your own does
+  not.** The button appears exactly where Edit does not.
+- **The copy is yours**: editable, not `official`, same name, same steps in the
+  same order, and it opens on the new sequence's page.
+- **Editing the copy does not touch the original.** Rename the copy, then
+  re-open the reference chain and assert its name is unchanged.
+- **Copying twice gives two copies.** Not idempotent by design; check the button
+  disables itself while in flight so a double-click does not do it by accident.
+- **Copy, then press Back to the original — its button is live again, not stuck
+  at "Copying…".** `router.push` stays inside the `[id]` segment, so the page
+  component is REUSED rather than remounted and transient state survives unless
+  the load effect clears it. Found by review; the same shape exists on the
+  workouts detail page.
+- **A failed copy leaves the page intact**, with the error beside the button and
+  the button retryable — not a full-page replacement that survives until a hard
+  reload. Same for a failed delete.
+- **You can copy your own chain too.** The API gates on visibility, not
+  ownership; the button is simply not offered for a chain you can already edit.
+- **Copying something you cannot see is a 404**, the same answer as fetching it
+  — and it must leave no row behind. `POST /v1/sequences/{someone-elses}/copy`.
+- **The edit route points at the button** rather than telling you to copy with
+  no way to do it, which is what it did before F9.
+
 Authorship on sequences (2026-08-18):
 
 - **No chain carries "· reference" today**, because nothing seeds an ownerless
