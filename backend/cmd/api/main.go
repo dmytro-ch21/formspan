@@ -238,6 +238,59 @@ func main() {
 	}
 	bodyHandler := body.NewHandler(body.NewPostgresRepository(pool), photoStore)
 	nutritionHandler := nutrition.NewHandler(nutrition.NewPostgresRepository(pool))
+	// The AI estimate endpoint. `NewEstimator` returns nil on an empty key and
+	// the handler serves 503 for that, so a deploy without the selected
+	// provider's key runs every other nutrition route normally rather than
+	// refusing to start — this is the only feature in the API that needs one.
+	//
+	// Which model drafts a meal is CONFIG, not code. `ESTIMATE_PROVIDER` picks
+	// the backend and `ESTIMATE_MODEL` overrides its default, so trying a
+	// different model is an env change and a restart rather than a deploy —
+	// which is the point, since the only way to know whether a model holds up
+	// on portion confidence is to run it against real meals.
+	//
+	// The key is read from the variable the RESOLVED provider names, so the two
+	// cannot drift apart. Reading the wrong one yields a 503 that looks like an
+	// outage and is really a missing env var.
+	estimateProvider := nutrition.Provider(os.Getenv("ESTIMATE_PROVIDER"))
+	if estimateProvider == "" {
+		estimateProvider = nutrition.DefaultProvider
+	}
+	estimateKey := ""
+	if env := estimateProvider.APIKeyEnv(); env != "" {
+		estimateKey = os.Getenv(env)
+	}
+	// Nil-safe: NewEstimator returns the Estimator INTERFACE, so an absent key
+	// is a true nil rather than a non-nil interface wrapping a nil pointer.
+	mealEstimator, err := nutrition.NewEstimator(nutrition.EstimatorConfig{
+		Provider: estimateProvider,
+		Model:    os.Getenv("ESTIMATE_MODEL"),
+		APIKey:   estimateKey,
+	})
+	if err != nil {
+		// A typo in ESTIMATE_PROVIDER fails the boot rather than silently
+		// falling back, which would bill the wrong account and read as the
+		// config having been applied.
+		logger.Error("nutrition: estimator config", "err", err)
+		os.Exit(1)
+	}
+	// Logged ONCE, here, because which model drafts a meal is deploy config
+	// rather than per-request data — and because the per-request failure log
+	// deliberately does not carry it. This is the line a support case reads to
+	// find out what was actually running, and the line that shows an
+	// ESTIMATE_MODEL typo took effect (an unknown model id is not rejected at
+	// boot; it fails on the first call).
+	if mealEstimator == nil {
+		logger.Info("nutrition: estimation disabled", "reason", "no "+estimateProvider.APIKeyEnv())
+	} else {
+		logger.Info("nutrition: estimation enabled",
+			"provider", string(estimateProvider),
+			"model", nutrition.ResolveModel(estimateProvider, os.Getenv("ESTIMATE_MODEL")))
+	}
+	estimateHandler := nutrition.NewEstimateHandler(
+		mealEstimator,
+		nutrition.NewPostgresEstimateUsage(pool),
+	)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
@@ -275,6 +328,10 @@ func main() {
 	mux.Handle("PUT /v1/nutrition/entries/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveEntry)))
 	mux.Handle("DELETE /v1/nutrition/entries/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteEntry)))
 	mux.Handle("GET /v1/nutrition/days", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.Days)))
+	// Computes a DRAFT and writes nothing. Rate-limited per athlete on top of
+	// the global limiter, because this is the one route where a loop costs
+	// real money rather than CPU.
+	mux.Handle("POST /v1/nutrition/estimate", verifier.RequireAuth(http.HandlerFunc(estimateHandler.Estimate)))
 	mux.Handle("GET /v1/nutrition/foods", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.ListFoods)))
 	mux.Handle("PUT /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveFood)))
 	mux.Handle("DELETE /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteFood)))

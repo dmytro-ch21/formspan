@@ -27,12 +27,23 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const token = await getToken();
 
+  // `Content-Type` is set for every body EXCEPT FormData, where it must be
+  // left to the runtime.
+  //
+  // A multipart body's Content-Type carries a generated boundary token, and
+  // fetch appends it only when it is the one writing the header. Setting the
+  // header by hand yields `multipart/form-data` with no boundary, which the
+  // server cannot parse — and the failure reads as a malformed upload rather
+  // than as a missing header, so it gets diagnosed on the wrong side of the
+  // wire. The meal-photo upload is the only FormData body in this app.
+  const isForm = typeof FormData !== 'undefined' && init.body instanceof FormData;
+
   const res = await netFetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       ...init.headers,
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
+      ...(isForm ? null : { 'Content-Type': 'application/json' }),
       traceparent: traceparent(newTraceId()),
     },
   });

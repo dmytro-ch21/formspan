@@ -188,6 +188,25 @@ export default function AddFoodScreen() {
         </Text>
       )}
 
+      {/* The escape hatch BELOW the list rather than above it: recents are the
+          two-tap path and this is for the meal that is not in them. Offered
+          whether or not anything was typed, because "I cannot describe this in
+          a search box" is exactly when it is wanted. */}
+      <Pressable
+        style={styles.newRow}
+        onPress={() =>
+          router.push(
+            `/food/describe?meal=${meal}&date=${date}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`,
+          )
+        }
+        accessibilityRole="button"
+        accessibilityLabel="Describe a meal or photograph it"
+        testID="add-describe"
+      >
+        <Icon name="plus" size={14} color={accent.ink} />
+        <Text style={[styles.newText, { color: accent.ink }]}>Describe a meal, or photograph it</Text>
+      </Pressable>
+
       {q.trim().length > 0 && !exact && (
         <Pressable
           style={styles.newRow}
