@@ -324,14 +324,19 @@ func EstimateSchema() map[string]any {
 			"carb_g":    map[string]any{"type": "number", "description": "Carbohydrate in grams for the whole quantity."},
 			"fat_g":     map[string]any{"type": "number", "description": "Fat in grams for the whole quantity."},
 			"fibre_g": map[string]any{
-				"type":        []any{"number", "null"},
-				"description": "Fibre in grams, or null if you are not stating it. Null is not zero — leave it null rather than guessing.",
+				"type": []any{"number", "null"},
+				"description": "Fibre in grams for the whole quantity. State it for every item. " +
+					"Zero is the correct answer for foods that contain none — meat, eggs, cheese, oil — and is not the same as declining to answer. " +
+					"Use null only when you genuinely cannot say; the athlete sees null as a blank they have to fill in themselves.",
 			},
 			"portion_confidence": map[string]any{
 				"type": "string",
 				"enum": []any{"high", "medium", "low"},
-				"description": "How sure you are about the QUANTITY, not about what the food is. " +
-					"A clearly identified food at an unclear portion is 'low'. Judging portion size from a photo is genuinely hard; say so rather than committing to a number you cannot see.",
+				"description": "How sure you are about the QUANTITY, not about what the food is. A clearly identified food at an unclear portion is 'low'. " +
+					"'high': the amount is stated or directly countable — 'two eggs', a labelled packet, three visible slices. " +
+					"'medium': a recognisable item at an ordinary serving. " +
+					"'low': the amount is genuinely unclear — a mixed dish, a restaurant plate with nothing for scale. " +
+					"Do not claim 'high' because the food is obvious, and do not retreat to 'low' when the athlete has told you the amount.",
 			},
 			"assumption": map[string]any{
 				"type": "string",

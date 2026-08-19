@@ -11,14 +11,27 @@ import (
 // # Why two numbers and not one
 //
 // **MEASURED, after an earlier version of this comment claimed a photo cost
-// ~50x a description and was wrong by nearly two orders of magnitude.** With
-// `count_tokens` against the real schema: text-only is ~1,500 input tokens and
-// a 1080px photo ~2,600 — the image adds ~1,100. On Haiku 4.5 that is roughly
-// 0.26c against 0.37c, a ratio of about **1.4x**.
+// ~50x a description and was wrong by nearly two orders of magnitude.** The
+// mistake was costing the image and ignoring the floor: the JSON schema plus
+// system prompt are sent on EVERY call, so they dominate and the picture is an
+// addition rather than a multiplier.
 //
-// The mistake was costing the image and ignoring the floor: the JSON schema
-// plus system prompt are ~1,500 tokens on EVERY call, so they dominate and the
-// picture is an addition rather than a multiplier.
+// On the shipped configuration (gpt-5.6-luna, from live calls rather than
+// `count_tokens`): a text call is 1,337 input and ~726 output tokens, about
+// **0.11c**. The same request carrying a 768px image is 1,837 input — the
+// picture adds ~500 tokens, roughly **0.01c**, since output dominates the bill
+// on a reasoning-billed model. The ratio is therefore about **1.1x**, milder
+// still than the 1.4x measured on Haiku.
+//
+// Caveat on that figure: the photo output length is taken from the text case,
+// because no photograph of a real plate has been through this yet — the image
+// used to measure was synthetic and correctly refused, which produces a short
+// response. The INPUT half is measured; the output half is inferred.
+//
+// Note the input is nearly all cache-eligible — 1,334 of 1,337 tokens came
+// back `cached` on the second call — because the prompt and schema are byte
+// identical across athletes. That is the reverse of the usual worry about a
+// long prompt: past ~1k tokens it starts paying for itself.
 //
 // Two counters are still right, for a reason that survives the correction: a
 // photo is the more expensive path and the one a runaway client would hammer,

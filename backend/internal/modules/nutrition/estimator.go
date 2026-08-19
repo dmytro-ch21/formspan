@@ -91,11 +91,42 @@ const (
 	ProviderOpenAI    Provider = "openai"
 )
 
+// DefaultProvider is the backend when ESTIMATE_PROVIDER is unset.
+//
+// OpenAI, on a measurement rather than a preference. Both providers named every
+// item correctly across the bake-off; the split was calibration and price, and
+// gpt-5.6-luna marks a stated quantity `high` where the cheaper tier says
+// `medium` while costing a fraction of Haiku. Switching is one env var, and
+// `DefaultModels` records what each provider's default is FOR.
+const DefaultProvider = ProviderOpenAI
+
+// Valid reports whether p names a backend that exists.
+func (p Provider) Valid() bool {
+	switch p {
+	case ProviderAnthropic, ProviderOpenAI:
+		return true
+	}
+	return false
+}
+
+// APIKeyEnv names the environment variable holding this provider's key.
+//
+// Here rather than in main.go so the provider and the key it needs cannot drift
+// apart — reading ANTHROPIC_API_KEY for an OpenAI deploy is a 503 that looks
+// like an outage and is really a config error.
+func (p Provider) APIKeyEnv() string {
+	switch p {
+	case ProviderAnthropic:
+		return "ANTHROPIC_API_KEY"
+	case ProviderOpenAI:
+		return "OPENAI_API_KEY"
+	}
+	return ""
+}
+
 // EstimatorConfig is everything the factory needs.
 type EstimatorConfig struct {
-	// Provider selects the backend. Empty means Anthropic — the default rather
-	// than an error, so an existing deploy that only sets an API key keeps
-	// working across this change.
+	// Provider selects the backend. Empty means DefaultProvider.
 	Provider Provider
 	// Model overrides the provider's default. Empty takes the default, which is
 	// the cheapest model measured to do this job well on that provider.
@@ -112,7 +143,7 @@ type EstimatorConfig struct {
 // and two overturned assumptions.
 var DefaultModels = map[Provider]string{
 	ProviderAnthropic: "claude-haiku-4-5",
-	ProviderOpenAI:    "gpt-5.4-nano",
+	ProviderOpenAI:    "gpt-5.6-luna",
 }
 
 // NewEstimator builds the configured backend.
@@ -126,14 +157,23 @@ var DefaultModels = map[Provider]string{
 // check would read false and the first request would panic on a nil receiver.
 // That was a live bug here, found by review.
 func NewEstimator(cfg EstimatorConfig) (Estimator, error) {
+	provider := cfg.Provider
+	if provider == "" {
+		provider = DefaultProvider
+	}
+	// Checked BEFORE the missing-key return, deliberately. The other order lets
+	// a typo'd ESTIMATE_PROVIDER pass silently whenever its key is also absent
+	// — which is exactly the deploy where it would happen — and the symptom is
+	// a 503 that reads as an outage. A misspelled provider is a boot failure
+	// whether or not a key is set.
+	if !provider.Valid() {
+		return nil, fmt.Errorf("nutrition: unknown estimate provider %q", provider)
+	}
+
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, nil
 	}
 
-	provider := cfg.Provider
-	if provider == "" {
-		provider = ProviderAnthropic
-	}
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
 		model = DefaultModels[provider]
@@ -146,10 +186,10 @@ func NewEstimator(cfg EstimatorConfig) (Estimator, error) {
 	case ProviderOpenAI:
 		c = newOpenAICompleter(cfg.APIKey, model)
 	default:
-		// A typo in ESTIMATE_PROVIDER is a startup error rather than a silent
-		// fallback: falling back would bill the wrong account and read as the
-		// config having been applied.
-		return nil, fmt.Errorf("nutrition: unknown estimate provider %q", provider)
+		// Unreachable — Valid() above is the gate. Kept so that adding a
+		// Provider constant without adding its case here fails loudly at boot
+		// rather than nil-panicking on the first request.
+		return nil, fmt.Errorf("nutrition: provider %q has no implementation", provider)
 	}
 	return &estimator{c: c}, nil
 }

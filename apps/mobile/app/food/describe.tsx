@@ -241,9 +241,15 @@ export default function DescribeMealScreen() {
 
       <SectionHeader label="Or photograph it" />
       {/* Stated BEFORE the camera opens. A privacy consequence discovered
-          afterwards is not a choice the athlete made. */}
+          afterwards is not a choice the athlete made.
+
+          NAMES THE REAL RECIPIENT, so it has to track the backend's
+          `nutrition.DefaultProvider`. A disclosure that names the wrong company
+          is worse than a vague one: it is a specific false statement about
+          where a photograph of somebody's kitchen went. If the provider
+          changes, this string changes in the same PR. */}
       <Text style={styles.disclosure}>
-        The photo is sent to Anthropic to be read, and is not stored — by VOLA or
+        The photo is sent to OpenAI to be read, and is not stored — by VOLA or
         by them. Describing the meal in words works nearly as well and sends no
         picture at all.
       </Text>

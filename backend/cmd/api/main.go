@@ -238,22 +238,27 @@ func main() {
 	}
 	bodyHandler := body.NewHandler(body.NewPostgresRepository(pool), photoStore)
 	nutritionHandler := nutrition.NewHandler(nutrition.NewPostgresRepository(pool))
-	// The AI estimate endpoint. `NewAnthropicEstimator` returns nil on an empty
-	// key and the handler serves 503 for that, so a deploy without
-	// ANTHROPIC_API_KEY runs every other nutrition route normally rather than
-	// refusing to start — this is the only feature in the API that needs it.
+	// The AI estimate endpoint. `NewEstimator` returns nil on an empty key and
+	// the handler serves 503 for that, so a deploy without the selected
+	// provider's key runs every other nutrition route normally rather than
+	// refusing to start — this is the only feature in the API that needs one.
+	//
 	// Which model drafts a meal is CONFIG, not code. `ESTIMATE_PROVIDER` picks
 	// the backend and `ESTIMATE_MODEL` overrides its default, so trying a
 	// different model is an env change and a restart rather than a deploy —
-	// which is the point, since the only way to know whether a cheaper model
-	// holds up on portion confidence is to run it against real meals.
+	// which is the point, since the only way to know whether a model holds up
+	// on portion confidence is to run it against real meals.
 	//
-	// Defaults to Anthropic, so a deploy that only sets ANTHROPIC_API_KEY is
-	// unaffected by any of this.
+	// The key is read from the variable the RESOLVED provider names, so the two
+	// cannot drift apart. Reading the wrong one yields a 503 that looks like an
+	// outage and is really a missing env var.
 	estimateProvider := nutrition.Provider(os.Getenv("ESTIMATE_PROVIDER"))
-	estimateKey := os.Getenv("ANTHROPIC_API_KEY")
-	if estimateProvider == nutrition.ProviderOpenAI {
-		estimateKey = os.Getenv("OPENAI_API_KEY")
+	if estimateProvider == "" {
+		estimateProvider = nutrition.DefaultProvider
+	}
+	estimateKey := ""
+	if env := estimateProvider.APIKeyEnv(); env != "" {
+		estimateKey = os.Getenv(env)
 	}
 	// Nil-safe: NewEstimator returns the Estimator INTERFACE, so an absent key
 	// is a true nil rather than a non-nil interface wrapping a nil pointer.

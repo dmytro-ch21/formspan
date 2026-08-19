@@ -44,10 +44,12 @@ pnpm run dev:mobile               # Expo — Metro on :8081 for the development 
 pnpm --filter admin dev --port 3001   # admin console on :3001 (needs its own port — apps/web also defaults to :3000)
 ```
 
-**`ANTHROPIC_API_KEY` in `backend/.env` is optional.** It powers one route —
+**`OPENAI_API_KEY` in `backend/.env` is optional.** It powers one route —
 `POST /v1/nutrition/estimate`, the describe-or-photograph meal draft. Without
 it that route serves 503 and everything else runs normally, so you only need a
-key if you are working on that feature.
+key if you are working on that feature. Set `ESTIMATE_PROVIDER=anthropic` (plus
+`ANTHROPIC_API_KEY`) to run it against Claude instead — the key read is always
+the one the selected provider names.
 
 **The mobile app runs on a development build, not Expo Go.** The first run on a
 machine — and any run after a new native dependency lands — has to compile and

@@ -87,14 +87,24 @@ func TestAnInvalidInputNeverReachesAProvider(t *testing.T) {
 
 func TestTheFactoryPicksABackendFromConfig(t *testing.T) {
 	// The whole point of the config seam: swapping models is an env change.
+	//
+	// This asserts WHICH backend and WHICH model, which it did not always do.
+	// It used to check only that the estimator was non-nil, under subtest names
+	// that claimed a particular provider — so it passed identically whatever
+	// the default was, and went on passing unchanged when the default moved
+	// from Anthropic to OpenAI. A test whose name is the only place its claim
+	// appears is not testing that claim.
 	for _, tc := range []struct {
-		name string
-		cfg  EstimatorConfig
+		name         string
+		cfg          EstimatorConfig
+		wantProvider Provider
+		wantModel    string
 	}{
-		{"anthropic by default", EstimatorConfig{APIKey: "k"}},
-		{"anthropic explicitly", EstimatorConfig{Provider: ProviderAnthropic, APIKey: "k"}},
-		{"openai", EstimatorConfig{Provider: ProviderOpenAI, APIKey: "k"}},
-		{"a named model", EstimatorConfig{Provider: ProviderOpenAI, Model: "gpt-5.6-luna", APIKey: "k"}},
+		{"the default provider", EstimatorConfig{APIKey: "k"}, DefaultProvider, DefaultModels[DefaultProvider]},
+		{"anthropic explicitly", EstimatorConfig{Provider: ProviderAnthropic, APIKey: "k"}, ProviderAnthropic, DefaultModels[ProviderAnthropic]},
+		{"openai explicitly", EstimatorConfig{Provider: ProviderOpenAI, APIKey: "k"}, ProviderOpenAI, DefaultModels[ProviderOpenAI]},
+		{"a named model overrides the default", EstimatorConfig{Provider: ProviderOpenAI, Model: "gpt-5.4-nano", APIKey: "k"}, ProviderOpenAI, "gpt-5.4-nano"},
+		{"a named model on anthropic", EstimatorConfig{Provider: ProviderAnthropic, Model: "claude-opus-5", APIKey: "k"}, ProviderAnthropic, "claude-opus-5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			est, err := NewEstimator(tc.cfg)
@@ -103,6 +113,25 @@ func TestTheFactoryPicksABackendFromConfig(t *testing.T) {
 			}
 			if est == nil {
 				t.Fatal("nil estimator with a key present")
+			}
+			inner, ok := est.(*estimator)
+			if !ok {
+				t.Fatalf("factory returned %T, not *estimator", est)
+			}
+			if got := Provider(inner.c.providerName()); got != tc.wantProvider {
+				t.Errorf("provider = %q, want %q", got, tc.wantProvider)
+			}
+			var gotModel string
+			switch c := inner.c.(type) {
+			case *anthropicCompleter:
+				gotModel = c.model
+			case *openAICompleter:
+				gotModel = c.model
+			default:
+				t.Fatalf("unknown completer %T — add its model accessor here", c)
+			}
+			if gotModel != tc.wantModel {
+				t.Errorf("model = %q, want %q", gotModel, tc.wantModel)
 			}
 		})
 	}
@@ -129,12 +158,84 @@ func TestNoKeyYieldsAGENUINELYNilInterface(t *testing.T) {
 	}
 }
 
-func TestEveryProviderHasADefaultModel(t *testing.T) {
-	// A provider added without one would send an empty model id, which reads as
-	// an upstream error rather than as a missing map entry.
+func TestAnUnknownProviderFailsTheBootEVENWITHNoKey(t *testing.T) {
+	// The order inside NewEstimator matters and this is what pins it. With the
+	// missing-key return placed first, a typo'd provider passes silently
+	// whenever its key is also absent — which is precisely the deploy where a
+	// typo happens — and the symptom is a 503 that reads as an outage rather
+	// than as the config error it is.
+	if _, err := NewEstimator(EstimatorConfig{Provider: "gemini"}); err == nil {
+		t.Fatal("an unknown provider with no key was accepted")
+	}
+}
+
+func TestEveryProviderIsCompletelyConfigured(t *testing.T) {
+	// Three things have to be added together for a provider to work, and each
+	// omission fails somewhere unhelpful: no default model sends an empty model
+	// id (reads as an upstream error), no key variable reads an empty key
+	// (reads as an outage), and no Valid() case fails the boot. One test so
+	// that adding a fourth provider cannot half-land.
 	for _, p := range []Provider{ProviderAnthropic, ProviderOpenAI} {
+		if !p.Valid() {
+			t.Errorf("provider %q is not Valid()", p)
+		}
 		if DefaultModels[p] == "" {
 			t.Errorf("provider %q has no default model", p)
 		}
+		if p.APIKeyEnv() == "" {
+			t.Errorf("provider %q names no API key variable", p)
+		}
+		est, err := NewEstimator(EstimatorConfig{Provider: p, APIKey: "k"})
+		if err != nil || est == nil {
+			t.Errorf("provider %q did not build: est=%v err=%v", p, est, err)
+		}
+	}
+}
+
+func TestTheDefaultProviderResolvesToARealBackend(t *testing.T) {
+	// An empty ESTIMATE_PROVIDER is the normal deploy, so the default has to be
+	// a provider that is fully configured rather than merely a named constant.
+	if !DefaultProvider.Valid() {
+		t.Fatalf("DefaultProvider %q is not a real backend", DefaultProvider)
+	}
+	if DefaultProvider.APIKeyEnv() == "" {
+		t.Fatalf("DefaultProvider %q names no API key variable", DefaultProvider)
+	}
+	est, err := NewEstimator(EstimatorConfig{APIKey: "k"})
+	if err != nil || est == nil {
+		t.Fatalf("the default configuration did not build: est=%v err=%v", est, err)
+	}
+}
+
+func TestAnUnknownProviderNamesNoKeyVariable(t *testing.T) {
+	// main.go reads os.Getenv(provider.APIKeyEnv()), and os.Getenv("") is "" —
+	// so this returning something plausible for a typo would hand the wrong
+	// account's key to the wrong API.
+	if got := Provider("gemini").APIKeyEnv(); got != "" {
+		t.Fatalf("an unknown provider named the key variable %q", got)
+	}
+}
+
+func TestTheShippedDefaultIsPinnedBecauseTheAppNamesIt(t *testing.T) {
+	// A deliberate change-detector, and the only one in this package.
+	//
+	// The rest of the factory tests derive their expectations from these
+	// constants, so they pass whatever the constants say — which is right for
+	// them and useless for pinning the decision itself. This one asserts the
+	// literals, because changing them has a consequence Go cannot see:
+	//
+	//   apps/mobile/app/food/describe.tsx tells the athlete, BEFORE the camera
+	//   opens, which company their photograph is sent to. A provider swap that
+	//   leaves that string alone turns a privacy disclosure into a specific
+	//   false statement about where a picture of somebody's kitchen went.
+	//
+	// So this failing is not a nuisance — it is the reminder that the swap has
+	// a second half. Change both, in the same PR, then update this line.
+	if DefaultProvider != ProviderOpenAI {
+		t.Errorf("DefaultProvider = %q, want %q — and if this is intended, update the disclosure in apps/mobile/app/food/describe.tsx",
+			DefaultProvider, ProviderOpenAI)
+	}
+	if got := DefaultModels[ProviderOpenAI]; got != "gpt-5.6-luna" {
+		t.Errorf("default OpenAI model = %q, want %q — chosen on measured calibration, see the N26 history entry", got, "gpt-5.6-luna")
 	}
 }
