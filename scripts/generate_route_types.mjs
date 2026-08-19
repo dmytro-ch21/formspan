@@ -262,11 +262,35 @@ async function generateOn(port) {
 
 // A pinned port is used as given and never retried — moving off a port
 // somebody asked for by name would defeat the reason they pinned it.
+//
+// Empty or whitespace is treated as unset rather than as a request for port 0,
+// because `EXPO_TYPEGEN_PORT=` in a shell profile means "I stopped pinning
+// one", not "bind anything".
 const pinned = process.env.EXPO_TYPEGEN_PORT?.trim();
+
+// Validated here rather than left to Expo's argument parser. A typo'd pin
+// otherwise fails with whatever Expo says about it, several seconds and one
+// Metro boot later — this is the same failure a second sooner and in words
+// that name the cause.
+if (pinned && !(/^\d+$/.test(pinned) && Number(pinned) >= 1 && Number(pinned) <= 65535)) {
+  console.error(`\nEXPO_TYPEGEN_PORT must be a port number between 1 and 65535, got ${JSON.stringify(pinned)}.`);
+  process.exit(1);
+}
 
 let failure = null;
 for (let attempt = 1; attempt <= PORT_ATTEMPTS; attempt += 1) {
-  const port = pinned || (await freePort());
+  let port;
+  try {
+    // Wrapped so a probe that cannot bind at all is reported the same way as
+    // every other failure here. Unwrapped, a rejected top-level await fails
+    // module evaluation: still exit 1, but as a raw stack rather than through
+    // the `Could not generate route types` line everybody greps for.
+    port = pinned || String(await freePort());
+  } catch (err) {
+    failure = new Error(`Could not find a free port to start Metro on: ${err.message}`);
+    break;
+  }
+
   try {
     const ms = await generateOn(port);
     console.log(`Route types generated in ${(ms / 1000).toFixed(1)}s on port ${port} → ${TYPES}`);
