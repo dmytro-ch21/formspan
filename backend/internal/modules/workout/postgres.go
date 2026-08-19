@@ -514,6 +514,40 @@ func (r *PostgresRepository) Describe(ctx context.Context, resourceID, sharerID 
 	return name, true, nil
 }
 
+// Copy is the self-serve half of CopyTo: same duplication, no share involved.
+//
+// It DELEGATES rather than reimplementing. `CopyTo` already re-applies
+// `visibleTo`, renumbers the items and forces the copy private, and a second
+// routine would be a second place for those to drift — the mistake the web
+// client was making instead, with a `createWorkout` followed by a
+// `replaceItems` that could strand an empty workout between them. Passing the
+// caller as both the "sharer" and the new owner is the self-copy case: the
+// visibility check runs against the person asking.
+//
+// `ok == false` means not visible to this caller, which for a direct request is
+// indistinguishable from not existing and must stay that way.
+func (r *PostgresRepository) Copy(ctx context.Context, userID, id string) (*Workout, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("workout: copy begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	newID, ok, err := r.CopyTo(ctx, tx, id, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("workout: copy commit: %w", err)
+	}
+	// Read back through the ordinary path, so the response is what a subsequent
+	// GET returns rather than a hand-assembled near-copy of it.
+	return r.Get(ctx, userID, newID)
+}
+
 // CopyTo duplicates a workout and its items into another athlete's ownership,
 // inside the share module's transaction.
 //

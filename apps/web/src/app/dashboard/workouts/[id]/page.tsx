@@ -16,7 +16,7 @@ import {
   listExercises,
   pickImage,
   renameWorkout,
-  createWorkout,
+  copyWorkout,
   replaceItems,
   setsFromWorkout,
   startSession,
@@ -66,7 +66,29 @@ export default function WorkoutEditorPage({
   const [loading, setLoading] = useState(true);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copying, setCopying] = useState(false);
+  /**
+   * WHICH workout is being copied, and cleared whenever the id changes.
+   *
+   * `router.push` to the copy stays inside the `[id]` segment, so Next REUSES
+   * this component rather than remounting it. A plain boolean survived that:
+   * copy, press Back, and the original's button sat disabled at "Copying…".
+   *
+   * **Deriving alone was not enough, which review caught.** `copyingId === id`
+   * is false while you are AWAY from the original — and true again the moment
+   * you navigate BACK to it, because the equality returns. So the id is
+   * compared against the previous render's and the flag cleared on any change,
+   * in either direction, using React's adjust-state-during-render pattern
+   * rather than an effect (`react-hooks/set-state-in-effect` refuses the
+   * effect, correctly). Clearing after the push instead would re-enable the
+   * button mid-transition, and copying is not idempotent.
+   */
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [prevId, setPrevId] = useState(id);
+  if (prevId !== id) {
+    setPrevId(id);
+    setCopyingId(null);
+  }
+  const copying = copyingId !== null && copyingId === id;
   const [saving, setSaving] = useState(false);
   const [savedOnce, setSavedOnce] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -410,24 +432,31 @@ export default function WorkoutEditorPage({
             type="button"
             disabled={copying}
             onClick={async () => {
-              setCopying(true);
+              setCopyingId(workout.id);
               try {
-                const mine = await createWorkout(getToken, {
-                  name: workout.name,
-                  sport: workout.sport,
-                  goal: workout.goal,
-                  visibility: "private",
-                });
-                await replaceItems(getToken, mine.id, items);
+                // ONE call. This was `createWorkout` then `replaceItems`, and
+                // a failure between them left an empty workout the athlete now
+                // owned, with no sign of where it came from. The server has
+                // done it in a transaction since F10.
+                const mine = await copyWorkout(getToken, workout.id);
                 router.push(`/dashboard/workouts/${mine.id}`);
               } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-                setCopying(false);
+                setError(
+                  `Couldn't copy: ${err instanceof Error ? err.message : String(err)}`,
+                );
+                // Only on failure. On success the navigation changes `id`,
+                // which clears the flag above.
+                setCopyingId(null);
               }
             }}
             className="shrink-0 rounded-pill bg-accent-fill px-4 py-2 text-sm font-bold text-accent-on-fill transition hover:brightness-110 disabled:opacity-50"
           >
-            {copying ? "Copying…" : "Copy to my workouts"}
+            {/* aria-live, matching the sequences page and the save status
+                above: a label swapping in place on an already focused button
+                is not reliably announced. */}
+            <span aria-live="polite">
+              {copying ? "Copying…" : "Copy to my workouts"}
+            </span>
           </button>
         </div>
       )}

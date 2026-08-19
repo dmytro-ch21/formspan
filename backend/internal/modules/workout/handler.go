@@ -296,6 +296,22 @@ func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, wk)
 }
 
+// Copy duplicates a workout the caller can read into one they own.
+//
+// No body: the only inputs are the id and the caller. 404 for anything not
+// visible, the same answer Get gives — "you may not copy that" would confirm an
+// id belongs to somebody.
+func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	wk, err := h.repo.Copy(r.Context(), claims.UserID, r.PathValue("workoutID"))
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusCreated, wk)
+}
+
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	if err := h.repo.Delete(r.Context(), claims.UserID, r.PathValue("workoutID")); err != nil {

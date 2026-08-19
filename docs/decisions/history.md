@@ -26650,6 +26650,90 @@ family mapping, disfluency, self-correction, and one empty input.
 - **No transcription-error coverage**, and this is the one that will need real
   device data rather than more authoring.
 
+## 2026-08-19 — The workouts page gets the same two fixes, and one difference
+
+**F10.** #294 fixed a client-side copy and a stuck flag on sequences and
+recorded that the workouts page had both, untouched. This is that.
+
+Same shape, same two fixes: `POST /v1/workouts/{id}/copy` delegating to the
+`CopyTo` that already existed for share-accept, and the page's copy flag keyed
+on the workout id so it DERIVES rather than surviving a navigation that reuses
+the component.
+
+The client half was two calls — `createWorkout` then `replaceItems` — so a
+failure between them left an **empty workout the athlete now owned**, with
+nothing to say where it came from. One transactional call cannot half-copy.
+
+**The one real difference from sequences is the visibility predicate, and it
+changes the semantics.** Sequences are `(owner_user_id IS NULL OR owner_user_id
+= $1)` — no public arm, so a stranger's chain 404s. Workouts are
+`(owner_user_id = $1 OR visibility = 'public')`, so another athlete's published
+template IS copyable, by design: that is what the browse shelf exists for, and
+the page has said "Published by someone else — yours to copy, not to edit" all
+along. The test is table-driven over three sources — VOLA's, a stranger's
+public one, and your own — because a test that copied only VOLA's would pass
+against a build that had quietly lost the public arm.
+
+The copy is always **private** regardless of source, so copying a public
+template does not republish it under your name. That is `CopyTo`'s existing
+behaviour and now has a test; a mutation making the copy inherit its source's
+visibility goes red.
+
+Four guards mutation-checked up front: the empty-sharer one that was misread on
+#294 (covered from the start here, because "copy your own" is one of the three
+table rows), the public arm removed, the copy inheriting visibility, and item
+positions copied verbatim instead of densely renumbered — the last needing a
+GAPPED fixture to mean anything, which is the lesson #294 paid for.
+
+**And review found two more, one of which is a data-loss vector.** The fixture
+named "a VOLA template" was ownerless and public — and `source` DEFAULTS to
+`'user'`, so it was not seeded, which is the one dimension that makes copying a
+VOLA template dangerous. A mutation copying `source` verbatim survived the
+entire suite. It is not cosmetic: `cmd/seed` refreshes `WHERE source = 'seed'`,
+so a copy that inherited it would be silently overwritten by the next deploy —
+and this endpoint is the first path where ordinary athletes routinely copy seed
+rows. The fixture seeds `source='seed'` now, the copy's own `source` is asserted
+by raw query (`Get` does not select it), and that mutation dies. Exactly the
+#294 shape again: the visibility-inheritance line I checked and the
+source-inheritance line I did not are adjacent in the same INSERT.
+
+Also uncovered anywhere: `target_weight_kg` and `target_distance_m` on a copy —
+the share module's test covers sets, reps and seconds, and neither suite touched
+the two fields a strength athlete cares most about. Dropping them from `CopyTo`'s
+column lists produced a plan that is a list of movements, and passed. Asserted
+now.
+
+**The client fix was also incomplete, and by a route worth recording.** Deriving
+`copying` from `copyingId === id` clears the flag while you are AWAY from the
+original — and restores it the moment you navigate BACK, because the equality
+returns. So the stuck button came back by the same door it left, and the fix
+"fixed" only the forward direction. It compares against the previous render's id
+now and clears on any change, either direction, using React's
+adjust-state-during-render pattern rather than an effect
+(`react-hooks/set-state-in-effect` refuses that, correctly). **#294's sequences
+page had the identical latent bug and is fixed here too** — one line each, and
+leaving a known-broken merged page while fixing its twin would have been
+arbitrary.
+
+Open questions:
+
+- **Three resources now have a copy endpoint with the same shape** — sequences,
+  workouts, and share-accept underneath both — and each wrote its own `Copy`
+  wrapper around `CopyTo`. The wrappers are nearly identical; nothing shares
+  them, and the next resource will write a third.
+- The workouts detail page still surfaces copy failures through its own inline
+  error, which is right, but the sequences page and this one now have two
+  slightly different action-error patterns.
+- **The transaction's actual guard is untested on both resources** — that the
+  workout row rolls back if the items INSERT fails. The "a refused copy leaves
+  nothing behind" assertion does not cover it: on that path nothing has been
+  inserted yet. Testing it needs fault injection, since no natural input makes
+  the items INSERT fail under intact foreign keys. The comment says so now
+  rather than implying coverage.
+- Mobile has neither copy path. It has no sequence route at all, and its workout
+  screens do not offer copying.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

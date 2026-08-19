@@ -502,6 +502,9 @@ func main() {
 	mux.Handle("PUT /v1/workouts/{workoutID}/items", verifier.RequireAuth(http.HandlerFunc(workoutHandler.ReplaceItems)))
 	mux.Handle("PATCH /v1/workouts/{workoutID}", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Rename)))
 	mux.Handle("DELETE /v1/workouts/{workoutID}", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Delete)))
+	// POST and not idempotent, matching sequences: copying twice gives you two
+	// copies, which is the honest reading of "copy this again".
+	mux.Handle("POST /v1/workouts/{workoutID}/copy", verifier.RequireAuth(http.HandlerFunc(workoutHandler.Copy)))
 	mux.Handle("GET /v1/admin/users", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUsers)))
 	mux.Handle("GET /v1/admin/users/{userID}", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminGetUser)))
 	mux.Handle("GET /v1/admin/users/{userID}/activities", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUserActivities)))
