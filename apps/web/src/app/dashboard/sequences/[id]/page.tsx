@@ -48,22 +48,28 @@ export default function SequenceDetailPage() {
   const actionError = action?.id === id ? action.message : null;
   const [confirming, setConfirming] = useState(false);
   /**
-   * WHICH sequence is being copied, not whether one is — and the same for the
-   * action error.
+   * WHICH sequence is being copied, and cleared whenever the id changes.
    *
-   * `router.push` to another sequence stays inside the `[id]` segment, so Next
-   * REUSES this component rather than remounting it (the fact the edit route's
-   * `key={s.id}` exists for). Plain booleans therefore survive the navigation:
-   * copy, press Back, and the original's button is stuck disabled at
-   * "Copying…" for the life of the instance. Review found it.
+   * `router.push` to the copy stays inside the `[id]` segment, so Next REUSES
+   * this component rather than remounting it. A plain boolean survived that:
+   * copy, press Back, and the original's button sat disabled at "Copying…".
    *
-   * Keying the state on the id and DERIVING the flag during render fixes it
-   * without an effect — which is what `react-hooks/set-state-in-effect`
-   * refused when this was written as a reset, correctly. Nothing to clear:
-   * when `id` changes the derived value is already false.
+   * **Deriving alone was not enough, which review caught.** `copyingId === id`
+   * is false while you are AWAY from the original — and true again the moment
+   * you navigate BACK to it, because the equality returns. So the id is
+   * compared against the previous render's and the flag cleared on any change,
+   * in either direction, using React's adjust-state-during-render pattern
+   * rather than an effect (`react-hooks/set-state-in-effect` refuses the
+   * effect, correctly). Clearing after the push instead would re-enable the
+   * button mid-transition, and copying is not idempotent.
    */
   const [copyingId, setCopyingId] = useState<string | null>(null);
-  const copying = copyingId === id;
+  const [prevId, setPrevId] = useState(id);
+  if (prevId !== id) {
+    setPrevId(id);
+    setCopyingId(null);
+  }
+  const copying = copyingId !== null && copyingId === id;
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {

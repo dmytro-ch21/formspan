@@ -727,12 +727,19 @@ func TestCopyingAnythingYouCanReadGivesYouOneOfYourOwn(t *testing.T) {
 	mine := "wk-copy-mine"
 	me := "wk-copy-user"
 
-	// Ownerless and public: a VOLA template.
-	vola := strengthWorkout(official, "", VisibilityPublic)
-	vola.OwnerUserID = ""
+	// Ownerless, public, AND source='seed' — a real VOLA template.
+	//
+	// The `source` is the part that matters and the part this fixture missed at
+	// first: the column DEFAULTS to 'user', so an ownerless row is not a seeded
+	// one, and a mutation copying `source` verbatim survived the whole suite.
+	// That mutation is not cosmetic — `cmd/seed` refreshes `WHERE source =
+	// 'seed'`, so a copy that inherited it would be overwritten by the next
+	// deploy, and this endpoint is the first path where athletes routinely copy
+	// seed rows. Review found it; it is the same adjacent-lines-in-one-INSERT
+	// miss as #294's.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO workouts (id, owner_user_id, name, sport, goal, notes, visibility)
-		VALUES ($1, NULL, 'VOLA Push', 'strength', 'hypertrophy', '', 'public')`,
+		INSERT INTO workouts (id, owner_user_id, source, name, sport, goal, notes, visibility)
+		VALUES ($1, NULL, 'seed', 'VOLA Push', 'strength', 'hypertrophy', 'template notes', 'public')`,
 		official); err != nil {
 		t.Fatalf("seed official: %v", err)
 	}
@@ -740,9 +747,15 @@ func TestCopyingAnythingYouCanReadGivesYouOneOfYourOwn(t *testing.T) {
 	// Gapped positions, so the dense renumbering is a real assertion rather
 	// than one an unchanged copy would satisfy.
 	for i, ex := range []string{exBench, exOverhead} {
+		// Weight and distance too: nothing in this suite or the share module's
+		// asserted either on a copy, so dropping them from CopyTo's column
+		// lists went unnoticed — the two fields a strength athlete cares most
+		// about, in a plan that would arrive as a list of movements.
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO workout_items (workout_id, exercise_id, position, target_sets, notes)
-			VALUES ($1, $2, $3, 5, $4)`, official, ex, i*10, "keep me"); err != nil {
+			INSERT INTO workout_items
+				(workout_id, exercise_id, position, target_sets, target_weight_kg,
+				 target_distance_m, notes)
+			VALUES ($1, $2, $3, 5, 60.5, 400, $4)`, official, ex, i*10, "keep me"); err != nil {
 			t.Fatalf("seed official item: %v", err)
 		}
 	}
@@ -789,6 +802,16 @@ func TestCopyingAnythingYouCanReadGivesYouOneOfYourOwn(t *testing.T) {
 			if got.Name != src.Name {
 				t.Errorf("copy name = %q, want %q", got.Name, src.Name)
 			}
+			// Asked directly, because `Get` does not select `source`. A copy
+			// that inherited 'seed' would be overwritten by the next deploy.
+			var srcCol string
+			if err := pool.QueryRow(ctx,
+				`SELECT source FROM workouts WHERE id = $1`, got.ID).Scan(&srcCol); err != nil {
+				t.Fatalf("read copy source: %v", err)
+			}
+			if srcCol != "user" {
+				t.Errorf("copy source = %q, want \"user\" — a deploy would overwrite it", srcCol)
+			}
 			if len(got.Items) != len(src.Items) {
 				t.Fatalf("copy has %d items, source has %d", len(got.Items), len(src.Items))
 			}
@@ -799,6 +822,14 @@ func TestCopyingAnythingYouCanReadGivesYouOneOfYourOwn(t *testing.T) {
 				}
 				if got.Items[i].Notes != src.Items[i].Notes {
 					t.Errorf("item %d: notes %q, want %q", i, got.Items[i].Notes, src.Items[i].Notes)
+				}
+				if !sameFloat(got.Items[i].TargetWeightKg, src.Items[i].TargetWeightKg) {
+					t.Errorf("item %d: weight %v, want %v",
+						i, got.Items[i].TargetWeightKg, src.Items[i].TargetWeightKg)
+				}
+				if !sameInt(got.Items[i].TargetDistanceM, src.Items[i].TargetDistanceM) {
+					t.Errorf("item %d: distance %v, want %v",
+						i, got.Items[i].TargetDistanceM, src.Items[i].TargetDistanceM)
 				}
 				if got.Items[i].Position != i {
 					t.Errorf("item %d has position %d; the copy must be densely renumbered",
@@ -824,6 +855,11 @@ func TestCopyingSomethingPrivateToSomebodyElseIsANotFound(t *testing.T) {
 	if _, err := repo.Copy(ctx, "wk-copy-nosy", hidden); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("copy of somebody else's private template: err = %v, want ErrNotFound", err)
 	}
+	// What this covers, precisely: that the visibility check happens BEFORE any
+	// insert. It is NOT a test of the rollback — on this path CopyTo returns
+	// before inserting anything, so the count is zero with or without the
+	// transaction. Testing the rollback would need fault injection, since no
+	// natural input makes the items INSERT fail.
 	var n int
 	if err := pool.QueryRow(ctx,
 		`SELECT count(*) FROM workouts WHERE owner_user_id = $1`, "wk-copy-nosy").Scan(&n); err != nil {
@@ -832,4 +868,18 @@ func TestCopyingSomethingPrivateToSomebodyElseIsANotFound(t *testing.T) {
 	if n != 0 {
 		t.Errorf("a refused copy left %d row(s) behind", n)
 	}
+}
+
+func sameFloat(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func sameInt(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

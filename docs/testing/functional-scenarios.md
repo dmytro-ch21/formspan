@@ -6600,7 +6600,14 @@ Copying a workout (2026-08-19):
 - **One request, not two.** Watch the network tab: a single POST, no
   create-then-replace. A failure must leave no empty workout behind.
 - **Copy, then press Back to the template — its button is live again**, not
-  stuck at "Copying…".
+  stuck at "Copying…". Both directions matter: the first fix cleared the flag on
+  the way OUT and let it return on the way back. Same check on the sequences
+  detail page.
+- **A copied VOLA template is not overwritten by the next deploy.** Copy one,
+  re-run `cmd/seed`, and the copy must still be there with its edits — its
+  `source` is `'user'`, not `'seed'`.
+- **The copy carries target weight and distance**, not just sets and reps. A
+  plan that arrives as a list of movements is the failure mode.
 
 Copying a sequence (2026-08-19):
 

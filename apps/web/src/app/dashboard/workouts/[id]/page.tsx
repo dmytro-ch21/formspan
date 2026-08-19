@@ -67,17 +67,28 @@ export default function WorkoutEditorPage({
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
-   * WHICH workout is being copied, not whether one is.
+   * WHICH workout is being copied, and cleared whenever the id changes.
    *
    * `router.push` to the copy stays inside the `[id]` segment, so Next REUSES
-   * this component rather than remounting it. A boolean therefore survived the
-   * navigation: copy, press Back to the template, and its button sat disabled
-   * at "Copying…" for the life of the instance. Keying on the id and DERIVING
-   * the flag means there is nothing to reset — when `id` changes it is already
-   * false. Same fix as #294 made on sequences, where review found it.
+   * this component rather than remounting it. A plain boolean survived that:
+   * copy, press Back, and the original's button sat disabled at "Copying…".
+   *
+   * **Deriving alone was not enough, which review caught.** `copyingId === id`
+   * is false while you are AWAY from the original — and true again the moment
+   * you navigate BACK to it, because the equality returns. So the id is
+   * compared against the previous render's and the flag cleared on any change,
+   * in either direction, using React's adjust-state-during-render pattern
+   * rather than an effect (`react-hooks/set-state-in-effect` refuses the
+   * effect, correctly). Clearing after the push instead would re-enable the
+   * button mid-transition, and copying is not idempotent.
    */
   const [copyingId, setCopyingId] = useState<string | null>(null);
-  const copying = copyingId === id;
+  const [prevId, setPrevId] = useState(id);
+  if (prevId !== id) {
+    setPrevId(id);
+    setCopyingId(null);
+  }
+  const copying = copyingId !== null && copyingId === id;
   const [saving, setSaving] = useState(false);
   const [savedOnce, setSavedOnce] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -430,15 +441,22 @@ export default function WorkoutEditorPage({
                 const mine = await copyWorkout(getToken, workout.id);
                 router.push(`/dashboard/workouts/${mine.id}`);
               } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
+                setError(
+                  `Couldn't copy: ${err instanceof Error ? err.message : String(err)}`,
+                );
                 // Only on failure. On success the navigation changes `id`,
-                // which makes `copying` false by derivation.
+                // which clears the flag above.
                 setCopyingId(null);
               }
             }}
             className="shrink-0 rounded-pill bg-accent-fill px-4 py-2 text-sm font-bold text-accent-on-fill transition hover:brightness-110 disabled:opacity-50"
           >
-            {copying ? "Copying…" : "Copy to my workouts"}
+            {/* aria-live, matching the sequences page and the save status
+                above: a label swapping in place on an already focused button
+                is not reliably announced. */}
+            <span aria-live="polite">
+              {copying ? "Copying…" : "Copy to my workouts"}
+            </span>
           </button>
         </div>
       )}
