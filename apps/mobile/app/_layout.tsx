@@ -1,5 +1,6 @@
 import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { installTelemetry } from '@/lib/telemetryClient';
 import { initSounds } from '@/lib/sounds';
 import { initVoice } from '@/lib/voice';
 import { clearSessionToken } from '@/lib/session';
@@ -154,6 +155,18 @@ function RootLayoutNav() {
   useEffect(() => {
     setSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
   }, [isSignedIn, userId, getToken]);
+
+  // Catch what nobody catches: unhandled JS errors and unhandled promise
+  // rejections. Installed once for the process, at the root, because an error
+  // thrown outside a component tree — which is where the sync path throws,
+  // since it runs off a timer — reaches no boundary at all.
+  //
+  // It observes rather than intercepts: the previous handler is always
+  // chained, so the red box in development and the runtime's own behaviour in
+  // production are unchanged. See `installTelemetry`.
+  useEffect(() => {
+    installTelemetry(isSignedIn ? getToken : async () => null);
+  }, [isSignedIn, getToken]);
 
   // Fill the caches once, so the app is usable before it is ever offline.
   //

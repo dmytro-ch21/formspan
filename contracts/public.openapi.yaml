@@ -3584,6 +3584,37 @@ components:
             blocked sync, say. Free-form so a new kind of report doesn't need a
             new column.
 
+
+            The buffered client reporter puts its honesty counters here:
+            `occurrences` (how many times a coalesced event really happened),
+            `suppressed` (occurrences the per-fingerprint cap hid) and
+            `lost_events` (whole events dropped from a full ring or lost in a
+            failed flush). Every one of those is a way of NOT sending
+            something, so each is reported rather than left as silence — a
+            bounded reporter and a broken one are otherwise indistinguishable.
+
+
+            Detail keys are allowlisted CLIENT-side before they leave the
+            device. This is health and training data and a crash report is sent
+            without the athlete initiating it, so nothing an athlete wrote, ate
+            or photographed is carried here.
+
+    ClientErrorBatch:
+      type: object
+      description: >
+        Several reports in one request. What the buffered reporter sends: it
+        coalesces repeat occurrences into one event with a count rather than
+        queueing every occurrence, so a two-hour offline stretch produces one
+        small batch on reconnect instead of a flood.
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/ClientErrorReport"
+
     HealthEvent:
       type: object
       description: >
@@ -7663,12 +7694,34 @@ paths:
         is that an operator can tell what was *measured* from what was
         *claimed*. Returns `202` — the report is accepted, not stored as a
         resource anyone reads back.
+
+
+        Accepts EITHER a single report or a batch — `{"events": [...]}`, or a
+        bare array. The batch form is what the buffered client reporter sends:
+        occurrences of one problem are coalesced into a single event carrying a
+        count rather than one request each, so a device in a retry loop costs a
+        bounded number of writes instead of one per occurrence. The single form
+        is kept forever, because a client that reports its own trouble is the
+        client least able to be upgraded first.
+
+
+        A batch is all-or-nothing: one invalid event refuses the whole request
+        rather than silently accepting the rest. Partial acceptance would need a
+        per-event result the client cannot act on — it never retries — and "202
+        with some of it dropped" is exactly the silent-loss shape this endpoint
+        exists to end. At most 50 events per request.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ClientErrorReport"
+              oneOf:
+                - $ref: "#/components/schemas/ClientErrorReport"
+                - $ref: "#/components/schemas/ClientErrorBatch"
+                - type: array
+                  maxItems: 50
+                  items:
+                    $ref: "#/components/schemas/ClientErrorReport"
       responses:
         "202":
           description: Report accepted.
