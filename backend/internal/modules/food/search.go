@@ -85,6 +85,9 @@ var synonyms = map[string][]string{
 	"veg": {"vegetable"},
 }
 
+// maxSearchTokens bounds how much of a query is used. See searchTokens.
+const maxSearchTokens = 10
+
 // searchTokens splits a query into the words to match on.
 //
 // Punctuation separates rather than matching, so "ez-bar" and "ez bar" are one
@@ -96,6 +99,15 @@ func searchTokens(q string) []string {
 	fields := strings.FieldsFunc(strings.ToLower(q), func(r rune) bool {
 		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
 	})
+	// Bounded, and this is a real limit rather than tidiness. Each token
+	// expands to up to four alternatives, each binding a placeholder used by
+	// two predicates in the WHERE and one `strpos` in the ORDER BY — so an
+	// unbounded query builds SQL that grows with what somebody typed, and past
+	// ~65k parameters pgx fails outright, turning a pasted wall of text into a
+	// 500. Ten tokens is far beyond any real food query. Raised in review.
+	if len(fields) > maxSearchTokens {
+		fields = fields[:maxSearchTokens]
+	}
 	out := make([]string, 0, len(fields))
 	for _, f := range fields {
 		// Only a trailing "s", and only when dropping it leaves something to

@@ -273,6 +273,39 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
+    BarcodeFood:
+      type: object
+      description: >
+        A food resolved from a barcode. A SEPARATE schema from `CatalogFood`,
+        not a subset of it, and deliberately so: `CatalogFood.source` is
+        `seed|admin` and both values mean "content we own", so an Open Food
+        Facts row rendered as a `CatalogFood` would assert on the wire that
+        ODbL data is deploy-authored. A client copying that into
+        `nutrition_foods.source` — whose vocabulary also contains `seed` —
+        would mislabel it permanently. This type has no `source` and no
+        `market`, so it cannot.
+
+
+        Values are per 100 g.
+      required: [name, brand, serving_label, kcal, protein_g, carb_g, fat_g]
+      properties:
+        name: { type: string, maxLength: 120 }
+        brand: { type: string, maxLength: 80 }
+        serving_label: { type: string, example: "100 g" }
+        serving_grams: { type: number, nullable: true }
+        kcal: { type: number }
+        protein_g: { type: number }
+        carb_g: { type: number }
+        fat_g: { type: number }
+        fibre_g:
+          type: number
+          nullable: true
+          description: Null is not zero — an unstated figure is not a claim of none.
+        external_id:
+          type: string
+          nullable: true
+          description: The provider's own identifier for the product.
+
     CatalogCoverage:
       type: object
       description: >
@@ -9095,7 +9128,7 @@ paths:
                 type: object
                 required: [food, source, provider, cached]
                 properties:
-                  food: { $ref: "#/components/schemas/CatalogFood" }
+                  food: { $ref: "#/components/schemas/BarcodeFood" }
                   source:
                     type: string
                     enum: [catalog, off]

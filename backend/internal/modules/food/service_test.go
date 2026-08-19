@@ -19,7 +19,7 @@ type fakeRepo struct {
 	// marketCounts answers CountMarket. A market absent from the map has no
 	// rows, which is the state OutcomeMarketNotCovered describes.
 	marketCounts map[string]int
-	cached       map[string]Food
+	cached       map[string]BarcodeFood
 	cacheWrites  int
 	cacheErr     error
 	searchErr    error
@@ -29,15 +29,25 @@ func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		coverage:     &Coverage{Foods: 0, Categories: []CategoryCount{}, Markets: []string{}},
 		marketCounts: map[string]int{},
-		cached:       map[string]Food{},
+		cached:       map[string]BarcodeFood{},
 	}
 }
 
-func (f *fakeRepo) Search(context.Context, SearchFilter) ([]Food, int, error) {
+// Search models the real repository's paging, including the property that
+// makes the over-page bug possible: `count(*) OVER ()` yields no count when
+// the page is empty, so `total` comes back 0 exactly when rows do.
+func (f *fakeRepo) Search(_ context.Context, filter SearchFilter) ([]Food, int, error) {
 	if f.searchErr != nil {
 		return nil, 0, f.searchErr
 	}
-	return f.foods, f.total, nil
+	if filter.Offset >= len(f.foods) {
+		return nil, 0, nil
+	}
+	end := filter.Offset + filter.Limit
+	if end > len(f.foods) {
+		end = len(f.foods)
+	}
+	return f.foods[filter.Offset:end], f.total, nil
 }
 func (f *fakeRepo) Get(context.Context, string) (*Food, error)  { return nil, ErrNotFound }
 func (f *fakeRepo) Coverage(context.Context) (*Coverage, error) { return f.coverage, nil }
@@ -45,13 +55,13 @@ func (f *fakeRepo) UpsertAll(context.Context, []Food) error     { return nil }
 func (f *fakeRepo) CountMarket(_ context.Context, m string) (int, error) {
 	return f.marketCounts[m], nil
 }
-func (f *fakeRepo) LookupBarcode(_ context.Context, b string) (*Food, error) {
+func (f *fakeRepo) LookupBarcode(_ context.Context, b string) (*BarcodeFood, string, error) {
 	if food, ok := f.cached[b]; ok {
-		return &food, nil
+		return &food, OpenFoodFactsProvider, nil
 	}
-	return nil, ErrNotFound
+	return nil, "", ErrNotFound
 }
-func (f *fakeRepo) CacheBarcode(_ context.Context, b string, food Food, _ string) error {
+func (f *fakeRepo) CacheBarcode(_ context.Context, b string, food BarcodeFood, _ string) error {
 	if f.cacheErr != nil {
 		return f.cacheErr
 	}
@@ -224,5 +234,56 @@ func TestSearchFilterNormalizeBoundsPaging(t *testing.T) {
 	f.Normalize()
 	if f.Offset != 0 {
 		t.Errorf("negative offset survived normalisation: %d", f.Offset)
+	}
+}
+
+// An empty PAGE is not an empty RESULT. `count(*) OVER ()` returns no count
+// when a page is past the end, so a client paging off the end of a real result
+// set would otherwise be told the food does not exist. Raised in review.
+func TestSearchDoesNotReportNoMatchForAPagePastTheEnd(t *testing.T) {
+	repo := newFakeRepo()
+	repo.coverage.Foods = 173
+	repo.foods = []Food{aFood()}
+	repo.total = 1
+	svc := NewService(repo, nil, nil)
+
+	got, err := svc.Search(context.Background(), SearchFilter{Query: "skyr", Limit: 10, Offset: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Outcome == OutcomeNoMatch {
+		t.Fatal("paging past the end reported no_match — the catalog demonstrably has this food")
+	}
+	if got.Outcome != OutcomeOK {
+		t.Fatalf("outcome = %q, want %q", got.Outcome, OutcomeOK)
+	}
+	if got.Total != 1 {
+		t.Fatalf("total = %d, want the real match count so the client can page back", got.Total)
+	}
+}
+
+// And the genuine miss at a non-zero offset must still be a miss, or the fix
+// above would have made no_match unreachable through paging entirely.
+func TestSearchStillReportsNoMatchAtAnOffsetWhenNothingMatches(t *testing.T) {
+	repo := newFakeRepo()
+	repo.coverage.Foods = 173
+	svc := NewService(repo, nil, nil)
+
+	got, err := svc.Search(context.Background(), SearchFilter{Query: "skyr", Limit: 10, Offset: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Outcome != OutcomeNoMatch {
+		t.Fatalf("outcome = %q, want %q", got.Outcome, OutcomeNoMatch)
+	}
+}
+
+// A market we stock, spelled the way a client might send it. Exact matching
+// would answer market_not_covered — honest-looking and wrong.
+func TestSearchFilterNormalizeLowercasesTheMarket(t *testing.T) {
+	f := SearchFilter{Market: "  US "}
+	f.Normalize()
+	if f.Market != "us" {
+		t.Fatalf("market = %q, want %q", f.Market, "us")
 	}
 }

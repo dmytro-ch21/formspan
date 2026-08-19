@@ -76,6 +76,31 @@ func (s *Service) Search(ctx context.Context, f SearchFilter) (*SearchResult, er
 		return &SearchResult{Foods: foods, Total: total, Outcome: OutcomeOK}, nil
 	}
 
+	// **An empty PAGE is not an empty RESULT**, and conflating them puts
+	// `no_match` on a food the catalog demonstrably has.
+	//
+	// `total` comes from `count(*) OVER ()`, which is computed per returned
+	// row — so a page past the end of a real result set returns no rows and
+	// therefore no count at all, and arrives here looking exactly like "we have
+	// nothing". A client paging to offset 75 of 63 matches would be told the
+	// food does not exist.
+	//
+	// Re-asking with offset 0 costs one query and only ever runs on an empty
+	// page. If there really were matches, this is `ok` with the true total —
+	// the client has simply run off the end. Raised in review.
+	if f.Offset > 0 {
+		probe := f
+		probe.Offset = 0
+		probe.Limit = 1
+		_, realTotal, err := s.repo.Search(ctx, probe)
+		if err != nil {
+			return nil, err
+		}
+		if realTotal > 0 {
+			return &SearchResult{Foods: []Food{}, Total: realTotal, Outcome: OutcomeOK}, nil
+		}
+	}
+
 	// Nothing matched. Establish which kind of nothing it is.
 	cov, err := s.repo.Coverage(ctx)
 	if err != nil {

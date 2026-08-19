@@ -2,9 +2,11 @@ package food
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -47,8 +49,8 @@ func TestResolveHappyPath(t *testing.T) {
 	if got.KCal != 63 || got.ProteinG != 11 {
 		t.Fatalf("macros = %+v", got)
 	}
-	if got.ExternalSource == nil || *got.ExternalSource != "off" {
-		t.Fatal("resolved food does not record that it came from Open Food Facts — ODbL attribution depends on this")
+	if got.ExternalID == nil || *got.ExternalID != "5690550000001" {
+		t.Fatal("resolved food lost its upstream identifier")
 	}
 }
 
@@ -133,7 +135,7 @@ func TestValidBarcode(t *testing.T) {
 
 func TestLookupServesFromCacheWithoutCallingTheProvider(t *testing.T) {
 	repo := newFakeRepo()
-	repo.cached["5690550000001"] = Food{Name: "Skyr", KCal: 63}
+	repo.cached["5690550000001"] = BarcodeFood{Name: "Skyr", KCal: 63}
 	// A resolver pointed at a server that would fail if it were ever called.
 	off := offServer(t, 500, `{}`)
 	svc := NewService(repo, off, nil)
@@ -217,5 +219,48 @@ func TestLookupRejectsAMalformedBarcodeBeforeAsking(t *testing.T) {
 	}
 	if repo.cacheWrites != 0 {
 		t.Fatal("a malformed barcode reached the cache")
+	}
+}
+
+// A BarcodeFood carries no `source` and no `market`, and that is structural
+// rather than an omission: the enum's values (`seed`, `admin`) both mean
+// "content we own", so an Open Food Facts row shipped as `seed` would assert on
+// the wire that ODbL data is deploy-authored. A client copying that into
+// nutrition_foods.source — whose vocabulary also has `seed` — would mislabel it
+// permanently. A type that never had the field cannot leak it. Raised in review.
+func TestBarcodeFoodCannotClaimToBeOurContent(t *testing.T) {
+	off := offServer(t, 200, goodProduct)
+	got, err := off.Resolve(context.Background(), "5690550000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{`"source"`, `"market"`} {
+		if strings.Contains(string(blob), forbidden) {
+			t.Errorf("barcode response carries %s: %s", forbidden, blob)
+		}
+	}
+}
+
+// Crowd-sourced numbers get the same treatment as a missing name. Without this
+// the absurd value still reaches the athlete and merely fails to cache, because
+// a cache-write failure is deliberately non-fatal. Raised in review.
+func TestResolveRejectsImplausibleNumbers(t *testing.T) {
+	cases := map[string]string{
+		"absurd energy":    `{"status":1,"product":{"product_name":"X","nutriments":{"energy-kcal_100g":900000}}}`,
+		"negative protein": `{"status":1,"product":{"product_name":"X","nutriments":{"energy-kcal_100g":100,"proteins_100g":-5}}}`,
+		"impossible fat":   `{"status":1,"product":{"product_name":"X","nutriments":{"energy-kcal_100g":100,"fat_100g":5000}}}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			off := offServer(t, 200, body)
+			got, err := off.Resolve(context.Background(), "5690550000001")
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("err = %v (food %+v), want ErrNotFound", err, got)
+			}
+		})
 	}
 }

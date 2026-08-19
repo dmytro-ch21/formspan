@@ -38,6 +38,7 @@ package food
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -226,6 +227,11 @@ const (
 // for 5,000 rows gets 100 and a Total telling it there are more, which is more
 // useful than a 400 and cannot be turned into a denial-of-service by a typo.
 func (f *SearchFilter) Normalize() {
+	// Market is matched exactly in SQL, so a client sending "US" would get
+	// market_not_covered for a market we stock — an honest-looking answer that
+	// is simply wrong. Lowercased here rather than in the query so the stored
+	// value and the filter agree on one spelling. Raised in review.
+	f.Market = strings.ToLower(strings.TrimSpace(f.Market))
 	if f.Limit <= 0 {
 		f.Limit = DefaultLimit
 	}
@@ -237,14 +243,70 @@ func (f *SearchFilter) Normalize() {
 	}
 }
 
+// BarcodeFood is one resolved packet, and it is a SEPARATE type from Food on
+// purpose.
+//
+// Reusing Food here meant a barcode response carried `source` and `market`,
+// and neither has an honest value for an Open Food Facts row: the enum is
+// `seed|admin`, which both mean "content we own". It shipped as `seed`, so the
+// wire asserted that ODbL data was deploy-authored — one client copying that
+// field into `nutrition_foods.source` (whose vocabulary also contains `seed`)
+// would have mislabelled it permanently, and the licence separation the third
+// table exists for would have been undone in the one place nobody was looking.
+//
+// A type that never had the fields cannot mislabel them. Same argument as
+// `profile.PublicProfile`, for the same reason: the leak is one refactor away
+// otherwise. Raised in review.
+type BarcodeFood struct {
+	Name  string `json:"name"`
+	Brand string `json:"brand"`
+
+	ServingLabel string   `json:"serving_label"`
+	ServingGrams *float64 `json:"serving_grams"`
+
+	KCal     float64  `json:"kcal"`
+	ProteinG float64  `json:"protein_g"`
+	CarbG    float64  `json:"carb_g"`
+	FatG     float64  `json:"fat_g"`
+	FibreG   *float64 `json:"fibre_g"`
+
+	ExternalID *string `json:"external_id"`
+}
+
+// plausible reports whether these numbers are worth showing an athlete.
+//
+// The bounds are the ones `food_barcode_cache` enforces, checked HERE so a
+// violation becomes ErrNotFound rather than a warn. Without this, an upstream
+// row with `energy-kcal_100g: 900000` or a negative protein reaches the athlete
+// as a measured fact and merely fails to cache — the cache write is a logged
+// warning by design, so nothing stops the number.
+//
+// Same reasoning as rejecting a nameless product: an implausible figure
+// presented confidently is worse than no answer, because it prompts no
+// correction. Raised in review.
+func (b *BarcodeFood) plausible() bool {
+	inRange := func(v float64, max float64) bool { return v >= 0 && v < max }
+	if !inRange(b.KCal, 20000) || !inRange(b.ProteinG, 2000) ||
+		!inRange(b.CarbG, 2000) || !inRange(b.FatG, 2000) {
+		return false
+	}
+	if b.FibreG != nil && !inRange(*b.FibreG, 500) {
+		return false
+	}
+	if b.ServingGrams != nil && *b.ServingGrams <= 0 {
+		return false
+	}
+	return true
+}
+
 // BarcodeResult is one resolved packet.
 //
 // Provider is carried so a client can attribute the data — Open Food Facts is
 // ODbL and attribution is not optional — and so support can tell where a wrong
 // number came from.
 type BarcodeResult struct {
-	Food     Food   `json:"food"`
-	Provider string `json:"provider"`
+	Food     BarcodeFood `json:"food"`
+	Provider string      `json:"provider"`
 	// Cached reports whether this answer came from our store rather than a
 	// live upstream call. Useful in support ("is this stale?") and it is the
 	// only way a test can prove the cache is doing anything.
@@ -263,11 +325,12 @@ type Repository interface {
 	// UpsertAll writes the seeded catalog in one transaction, skipping rows a
 	// human has taken ownership of.
 	UpsertAll(ctx context.Context, foods []Food) error
-	// LookupBarcode returns a cached barcode resolution, or ErrNotFound.
-	LookupBarcode(ctx context.Context, barcode string) (*Food, error)
+	// LookupBarcode returns a cached barcode resolution and the provider that
+	// answered it, or ErrNotFound.
+	LookupBarcode(ctx context.Context, barcode string) (*BarcodeFood, string, error)
 	// CacheBarcode stores a resolution. Its table is deliberately separate
 	// from this catalog — see barcode.go.
-	CacheBarcode(ctx context.Context, barcode string, f Food, provider string) error
+	CacheBarcode(ctx context.Context, barcode string, f BarcodeFood, provider string) error
 }
 
 // Validate guards the content rules the database cannot express well, and is

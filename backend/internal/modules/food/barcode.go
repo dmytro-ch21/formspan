@@ -76,7 +76,7 @@ func ValidBarcode(s string) bool { return validBarcode.MatchString(s) }
 // mode without a network — including the ones that are hard to provoke against
 // a live provider, which is most of them.
 type Resolver interface {
-	Resolve(ctx context.Context, barcode string) (*Food, error)
+	Resolve(ctx context.Context, barcode string) (*BarcodeFood, error)
 	// Provider names who answers, for attribution and for the coverage
 	// endpoint's report of whether lookup is configured at all.
 	Provider() string
@@ -129,7 +129,7 @@ type offResponse struct {
 	} `json:"product"`
 }
 
-func (o *OpenFoodFacts) Resolve(ctx context.Context, barcode string) (*Food, error) {
+func (o *OpenFoodFacts) Resolve(ctx context.Context, barcode string) (*BarcodeFood, error) {
 	if !ValidBarcode(barcode) {
 		return nil, fmt.Errorf("%w: not a barcode", ErrInvalidInput)
 	}
@@ -194,30 +194,30 @@ func (o *OpenFoodFacts) Resolve(ctx context.Context, barcode string) (*Food, err
 
 	grams := 100.0
 	id := barcode
-	return &Food{
-		ID:    id,
+	out := &BarcodeFood{
 		Name:  truncate(name, 120),
 		Brand: brand,
-		// Everything from a barcode is packaged by definition. A real category
-		// would have to be inferred, and an inferred category on a screen that
-		// also shows measured numbers reads as measured.
-		Category: "packaged",
-		Aliases:  []string{},
 		// Per 100 g, matching the catalog, because that is the basis Open Food
 		// Facts states these values on. The packet's own serving size is
 		// available upstream and deliberately not used yet — mixing two
 		// serving bases in one response is how a doubled quantity happens.
-		ServingLabel:   SeedServingLabel,
-		ServingGrams:   &grams,
-		KCal:           *n.KCal,
-		ProteinG:       deref(n.Protein),
-		CarbG:          deref(n.Carbs),
-		FatG:           deref(n.Fat),
-		FibreG:         n.Fibre,
-		Source:         SourceSeed,
-		ExternalID:     &id,
-		ExternalSource: strPtr("off"),
-	}, nil
+		ServingLabel: SeedServingLabel,
+		ServingGrams: &grams,
+		KCal:         *n.KCal,
+		ProteinG:     deref(n.Protein),
+		CarbG:        deref(n.Carbs),
+		FatG:         deref(n.Fat),
+		FibreG:       n.Fibre,
+		ExternalID:   &id,
+	}
+	// Crowd-sourced numbers get the same treatment as a missing name: an
+	// implausible figure shown confidently is worse than no answer. Without
+	// this the value still reaches the athlete and merely fails to cache,
+	// because a cache-write failure is deliberately non-fatal.
+	if !out.plausible() {
+		return nil, ErrNotFound
+	}
+	return out, nil
 }
 
 func deref(f *float64) float64 {
@@ -226,8 +226,6 @@ func deref(f *float64) float64 {
 	}
 	return *f
 }
-
-func strPtr(s string) *string { return &s }
 
 func truncate(s string, n int) string {
 	if len(s) <= n {
@@ -252,10 +250,10 @@ func (s *Service) Lookup(ctx context.Context, barcode string) (*BarcodeResult, e
 		return nil, fmt.Errorf("%w: not a barcode", ErrInvalidInput)
 	}
 
-	cached, err := s.repo.LookupBarcode(ctx, barcode)
+	cached, provider, err := s.repo.LookupBarcode(ctx, barcode)
 	switch {
 	case err == nil:
-		return &BarcodeResult{Food: *cached, Provider: derefStr(cached.ExternalSource), Cached: true}, nil
+		return &BarcodeResult{Food: *cached, Provider: provider, Cached: true}, nil
 	case errors.Is(err, ErrNotFound):
 		// Fall through to the provider. Note there is no NEGATIVE cache: a
 		// barcode the provider did not know last week may be known today, and
@@ -285,11 +283,4 @@ func (s *Service) Lookup(ctx context.Context, barcode string) (*BarcodeResult, e
 		s.warn("food: caching barcode failed", "barcode", barcode, "err", err)
 	}
 	return &BarcodeResult{Food: *found, Provider: s.resolver.Provider(), Cached: false}, nil
-}
-
-func derefStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

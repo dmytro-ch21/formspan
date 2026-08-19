@@ -363,27 +363,27 @@ func TestBarcodeCacheRoundTrips(t *testing.T) {
 		}
 	})
 
-	if _, err := repo.LookupBarcode(ctx, barcode); err == nil {
+	if _, _, err := repo.LookupBarcode(ctx, barcode); err == nil {
 		t.Fatal("an unseen barcode was found in the cache")
 	}
 
 	fibre := 0.5
-	in := Food{
+	in := BarcodeFood{
 		Name: "Skyr, plain", Brand: "Siggi's", ServingLabel: "100 g",
 		KCal: 63, ProteinG: 11, CarbG: 4, FatG: 0.2, FibreG: &fibre,
 	}
 	if err := repo.CacheBarcode(ctx, barcode, in, OpenFoodFactsProvider); err != nil {
 		t.Fatal(err)
 	}
-	got, err := repo.LookupBarcode(ctx, barcode)
+	got, provider, err := repo.LookupBarcode(ctx, barcode)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Name != in.Name || got.KCal != in.KCal {
 		t.Fatalf("cached food = %+v, want %+v", got, in)
 	}
-	if got.ExternalSource == nil || *got.ExternalSource != OpenFoodFactsProvider {
-		t.Fatal("cached row lost its provider — ODbL attribution depends on it")
+	if provider != OpenFoodFactsProvider {
+		t.Fatalf("provider = %q — ODbL attribution depends on it", provider)
 	}
 }
 
@@ -447,5 +447,62 @@ func TestSeedWritesTheRealCatalog(t *testing.T) {
 	}
 	if got.ExternalID == nil || *got.ExternalID == "" {
 		t.Fatal("seeded row carries no external_id — its numbers cannot be checked against USDA")
+	}
+}
+
+// The browse path (no `q`) sorts by name, and `name` carries no uniqueness
+// constraint — two brands of the same yogurt is the expected state once the
+// console authors rows. Without the id tie-break this pages
+// non-deterministically. Raised in review; the query path's equivalent lives in
+// SearchRank and does not cover this one.
+//
+// **This test does NOT currently prove the tie-break, and saying so matters
+// more than the test does.** Mutation-checked: removing `f.id ASC` leaves it
+// green, because PostgreSQL returns three rows from a sequential scan in a
+// stable order regardless. The unspecified order only becomes an observable
+// one at a size where the planner changes strategy or parallelises.
+//
+// It is kept because it pins the paging CONTRACT — every row seen once, none
+// skipped — which is what a future change would break loudly. But the id
+// tie-break itself is guarded by review and by the comment in `Search`, not by
+// this assertion, and treating it as covered would be exactly the "passes for
+// the wrong reason" this repo keeps getting bitten by.
+func TestBrowseWithoutAQueryPagesDeterministically(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	ids := []string{"fd-fx-dup-a", "fd-fx-dup-b", "fd-fx-dup-c"}
+	t.Cleanup(func() {
+		if _, err := repo.pool.Exec(context.Background(),
+			`DELETE FROM food_catalog WHERE id = ANY($1)`, ids); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
+	for _, id := range ids {
+		// IDENTICAL names on purpose — that is the state the tie-break exists
+		// for, and the one a unique seed catalog never produces.
+		if _, err := repo.pool.Exec(ctx, `
+			INSERT INTO food_catalog (id, name, category, serving_label, kcal, protein_g, carb_g, fat_g, market, source)
+			VALUES ($1, 'Duplicate Name', 'fd-fx-dupcat', '100 g', 1, 1, 1, 1, 'us', 'seed')
+			ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	seen := map[string]bool{}
+	for offset := 0; offset < len(ids); offset++ {
+		page, _, err := repo.Search(ctx, SearchFilter{Category: "fd-fx-dupcat", Limit: 1, Offset: offset})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range page {
+			if seen[f.ID] {
+				t.Fatalf("row %q appeared on two pages — the browse sort is not total", f.ID)
+			}
+			seen[f.ID] = true
+		}
+	}
+	if len(seen) != len(ids) {
+		t.Fatalf("paged %d distinct rows of %d — the browse sort skipped one", len(seen), len(ids))
 	}
 }

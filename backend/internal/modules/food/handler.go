@@ -79,10 +79,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 // answer from a stored one in support — or in a test that needs to prove the
 // cache does anything.
 type barcodeResponse struct {
-	Food     Food   `json:"food"`
-	Source   string `json:"source"`
-	Provider string `json:"provider"`
-	Cached   bool   `json:"cached"`
+	Food     BarcodeFood `json:"food"`
+	Source   string      `json:"source"`
+	Provider string      `json:"provider"`
+	Cached   bool        `json:"cached"`
 }
 
 // Barcode serves GET /v1/nutrition/catalog/barcode/{barcode}.

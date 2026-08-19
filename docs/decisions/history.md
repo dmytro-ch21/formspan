@@ -29306,6 +29306,50 @@ nothing downstream — including N27's kcal adjustments — could ever weight th
 differently, and there would be no way to find them again to re-verify when a
 better model lands.
 
+### What `/pre-merge` caught
+
+Two blocking findings, both edges, both of which would have undone a property
+this change exists to establish.
+
+**An empty PAGE read as an empty RESULT.** `total` comes from
+`count(*) OVER ()`, which is computed per returned row — so a page past the end
+of a real result set returns no rows and therefore no count, and arrived at the
+outcome machinery looking exactly like "we have nothing". A client paging to
+offset 75 of 63 matches would have been told `no_match`: the one outcome that is
+allowed to mean "we do not have this food", on a food the catalog demonstrably
+has. Re-asking with offset 0 costs one query and only ever runs on an empty page.
+
+**The browse path's sort was not total.** `ORDER BY f.name ASC` with no `f.id`
+tie-break, on the one path `SearchRank` does not cover. `name` carries no
+uniqueness constraint and two brands of the same yogurt is the expected state
+once the console authors rows. Latent today, which is exactly when this class
+ships.
+
+Worth recording that the test written for the second one **does not actually
+prove it**, and mutation-checking is what established that: removing the
+tie-break leaves it green, because PostgreSQL returns three rows from a
+sequential scan in a stable order regardless. The unspecified order only becomes
+observable at a size where the planner changes strategy. The test is kept — it
+pins the paging contract — but the comment now says plainly that the tie-break
+is guarded by review rather than by that assertion. Claiming coverage it does
+not have would be the "passes for the wrong reason" failure this repo keeps
+paying for.
+
+The review also found the closest thing to an ODbL leak, and it was on the wire
+rather than in the database. The barcode response reused `Food`, whose `source`
+is `seed|admin` — both meaning "content we own" — so an Open Food Facts row
+shipped as `source: "seed"`. No ODbL row could reach `food_catalog`, but a
+client copying that field into `nutrition_foods.source`, whose vocabulary also
+contains `seed`, would have mislabelled it permanently. `BarcodeFood` is now a
+separate type with no `source` and no `market`: a type that never had the field
+cannot leak it, which is the argument `profile.PublicProfile` already makes.
+
+And one that matters for the same reason a nameless product does: Open Food
+Facts numbers had no range check, so `energy-kcal_100g: 900000` would reach an
+athlete as a measured fact and merely fail to cache — the cache write is
+non-fatal by design, so nothing stopped the value. Implausible figures are now
+`not_found`.
+
 ### Known gaps
 
 - **Household portions are not imported.** Every row is per 100 g, which is what
@@ -29322,7 +29366,14 @@ better model lands.
   tested, but nothing writes `admin` yet — `/content/foods` does not exist. The
   ownership half is ready for it.
 - **The trigram index is unused at 173 rows**, exactly as on `exercises`; the
-  planner seq-scans. Kept as headroom on a table written only by a seeder.
+  planner seq-scans. Kept as headroom on a table written only by a seeder. No
+  query-PLAN test for that reason — at this size one would only assert that a
+  sequential scan happens, which is not the property worth pinning. N14's plan
+  test earned its place at 200k rows.
+- **`Coverage` counts `food_barcode_cache` with a sequential scan**, on the one
+  table here that grows organically, and it runs on every empty search. Harmless
+  at any plausible scan volume; `pg_class.reltuples` is the fix if it ever shows
+  up. Raised in review and deliberately not pre-optimised.
 
 ## Open items / known gaps as of this entry
 

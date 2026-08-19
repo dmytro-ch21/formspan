@@ -59,7 +59,13 @@ func (r *PostgresRepository) Search(ctx context.Context, f SearchFilter) ([]Food
 	var (
 		where []string
 		args  []any
-		order = "f.name ASC"
+		// A TOTAL order, not just a sorted one. `name` carries no uniqueness
+		// constraint — two brands of "Greek Yogurt" is the expected state once
+		// the console authors rows — so without the id tie-break a category or
+		// market browse pages non-deterministically, repeating rows on one page
+		// and skipping them on the next. The query path has the same guard in
+		// SearchRank; this is the path it does not cover. Raised in review.
+		order = "f.name ASC, f.id ASC"
 	)
 
 	if f.Query != "" {
@@ -306,12 +312,15 @@ func (r *PostgresRepository) UpsertAll(ctx context.Context, foods []Food) error 
 	return nil
 }
 
-// LookupBarcode reads the cache only. Going upstream is the Resolver's job —
+// LookupBarcode reads the cache only. Going upstream is the Service's job —
 // see barcode.go — because a repository that could make a network call would
 // make "did this come from our database" unanswerable at the call site.
-func (r *PostgresRepository) LookupBarcode(ctx context.Context, barcode string) (*Food, error) {
+//
+// Returns the provider alongside the food rather than folding it into the
+// row, because it is a fact about who answered, not about the food.
+func (r *PostgresRepository) LookupBarcode(ctx context.Context, barcode string) (*BarcodeFood, string, error) {
 	var (
-		f        Food
+		f        BarcodeFood
 		provider string
 	)
 	err := r.pool.QueryRow(ctx, `
@@ -321,21 +330,15 @@ func (r *PostgresRepository) LookupBarcode(ctx context.Context, barcode string) 
 		&f.Name, &f.Brand, &f.ServingLabel, &f.ServingGrams,
 		&f.KCal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG, &provider, &f.ExternalID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, "", ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("food: barcode lookup: %w", err)
+		return nil, "", fmt.Errorf("food: barcode lookup: %w", err)
 	}
-	f.ID = barcode
-	f.Category = "packaged"
-	f.Aliases = []string{}
-	f.Market = ""
-	f.Source = SourceSeed
-	f.ExternalSource = &provider
-	return &f, nil
+	return &f, provider, nil
 }
 
-func (r *PostgresRepository) CacheBarcode(ctx context.Context, barcode string, f Food, provider string) error {
+func (r *PostgresRepository) CacheBarcode(ctx context.Context, barcode string, f BarcodeFood, provider string) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO food_barcode_cache (
 			barcode, provider, name, brand, serving_label, serving_grams,
