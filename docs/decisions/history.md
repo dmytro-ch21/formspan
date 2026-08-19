@@ -27728,6 +27728,43 @@ without focus is a one-line change if it reads badly on a device.
   bug.
 
 
+## 2026-08-19 — Ten minutes to die, bounded to three
+
+**F12**, the one-line follow-up F11 recorded and nobody had made. Neither
+`test:api` nor the CI step passed `-timeout`, so Go's default of **ten minutes
+per package** applied to any test that hangs rather than fails.
+
+That is measured, not hypothetical. F11 showed the shape: delete `CopySelf`'s
+deferred rollback and the leaked transaction keeps `pgxpool.Close` waiting
+forever, so the package cannot exit however loudly its assertions have already
+named the cause. `-timeout 3m` was verified against exactly that mutation — the
+run now dies at **3m01s** instead of ~10m.
+
+**Three minutes, chosen against measurements rather than taste.** The slowest
+package is 2.5s locally; earlier today, under the parallel-session contention
+CLAUDE.md documents, packages in this repo were observed at ~45s. Three minutes
+is roughly four times the worst seen and still a third of the default. The
+reasoning sits in a comment beside the CI invocation, next to the one explaining
+`-p 1`, so the number is not bare.
+
+A stale database turned up on the way and is worth recording because it looked
+like the change had broken something. The suite failed with `relation
+"nutrition_estimates" does not exist` — #287's migration 000060 had landed on
+main while the shared `vola_test` sat at 59. CLAUDE.md's own diagnosis
+distinguishes the two cases that produce that error, and this was the benign one:
+the version existed on `origin/main`, so the database was stale rather than
+somebody's unmerged migration having reached it. `migrate up`, nothing else.
+
+Open questions:
+
+- **Only the Go suite is bounded.** The mobile jest suite has its own documented
+  hang mode under worker oversubscription (`sharedScreen.test.tsx`), and neither
+  it nor the web/admin vitest runs carry an equivalent cap.
+- Three minutes is per PACKAGE, so a pathological run can still take 32 × 3m in
+  the worst case. Bounding the whole job is a CI-level `timeout-minutes`, which
+  this workflow does not set on any job.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
