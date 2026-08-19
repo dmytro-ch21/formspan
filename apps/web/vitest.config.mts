@@ -13,8 +13,17 @@ import { defineConfig } from "vitest/config";
  *
  * Deliberately narrow: node environment, pure logic only. `apps/mobile` earned
  * component tests by shipping two defects that existed only in the render path;
- * nothing here has, and a jsdom setup nobody needs yet is a maintenance cost
- * rather than a safety net. Widen it when a render-path bug argues for it.
+ * nothing here had, and a jsdom setup nobody needs yet is a maintenance cost
+ * rather than a safety net. The note used to end "widen it when a render-path
+ * bug argues for it", and N28 is the argument — so `.tsx` is included now.
+ *
+ * **Still no jsdom, and still `environment: "node"`.** The one thing that
+ * needed covering is what the markup CONTAINS — that an unlogged day draws no
+ * bar and that a line breaks across a gap rather than spanning it — and
+ * `react-dom/server`'s `renderToStaticMarkup` answers that with a dependency
+ * this app already ships. Nothing here clicks anything; the moment something
+ * needs to, that is the argument for jsdom and testing-library, and it is a
+ * different argument from this one.
  */
 export default defineConfig({
   // `@/` is Next's own alias from tsconfig, and vitest does not read that.
@@ -27,6 +36,13 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/lib/__tests__/**/*.test.ts"],
+    // Both extensions under both trees. The first version was
+    // `src/lib/**/*.test.ts` plus `src/app/**/*.test.tsx`, which silently
+    // dropped a `.ts` test under `src/app` or a `.tsx` one under `src/lib` —
+    // an uncollected test file reports nothing at all, which is the one
+    // failure mode a test suite cannot tell you about. Flagged by the
+    // pre-merge checker, which listed the collected files rather than
+    // trusting the green.
+    include: ["src/{lib,app}/**/__tests__/**/*.test.{ts,tsx}"],
   },
 });

@@ -117,6 +117,19 @@ const navItems: {
       m.some((x) => x.enabled && x.capabilities.catalog === "techniques"),
   },
   {
+    href: "/dashboard/nutrition",
+    label: "Nutrition",
+    // UNGATED, unlike the four above it, and the reason is that nutrition is
+    // not a discipline. The registry gates destinations on what an athlete
+    // TRAINS — a catalog to browse, record kinds that can populate — and
+    // eating is orthogonal to all of it: a BJJ-only athlete and a
+    // powerlifter have exactly the same nutrition screen.
+    //
+    // Placed after History and the discipline surfaces rather than beside
+    // Today, because everything behind it is review and authoring. Logging a
+    // meal is the phone's.
+  },
+  {
     href: "/dashboard/friends",
     label: "Friends",
     // Requests waiting on YOU, which this screen accepts and declines from —

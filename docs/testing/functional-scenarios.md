@@ -8419,3 +8419,192 @@ Domain: photograph a gym machine, get a **ranked shortlist** of catalog exercise
 **Not covered yet**
 - **No real photograph has been through this.** The same gap N40 closed for nutrition, where the first real image produced two errors, one of them unflagged. Accuracy claims should wait for that.
 - **The model tier is unmeasured for equipment vision.** It runs on the capable tier deliberately; the cheaper one needs a real-photo comparison before it is adopted, because N37 measured two tiers of one provider at 0.0% vs 24.2% invention.
+## Nutrition on web (N28, `apps/web` — `/dashboard/nutrition`)
+
+Four screens behind one rail entry. The two rules below are stated first
+because they cut across all four, and because both are the kind of thing a
+test suite passes on by accident: a chart that renders zeros looks fine, and an
+average with no denominator looks fine.
+
+### The honesty rules (assert these everywhere a number appears)
+
+- **An unlogged day renders as a gap, never as `0`.** Seed a window with entries
+  on some days and none on others, then assert the missing days show
+  "Nothing logged" in the day list and draw **no bar** in the chart — not a
+  zero-height one, not a floor-height stub.
+- **The mean and weight lines break across a gap.** With a logged run, a
+  multi-day silence, and another logged run, the chart must contain more than
+  one path element for the mean. A single unbroken path spanning the silence is
+  the failure.
+- **An average always names its denominator.** "Mean intake" must be
+  accompanied by "from N of M days" in the same block, not in a tooltip. Seed 4
+  logged days in a 90-day window and assert both the value and `from 4 of 90
+  days` are present.
+- **A zero-kcal logged day is distinguishable from an unlogged one.** Rare but
+  real: it must render as a logged day with a total, not as "Nothing logged".
+- **A day that FAILED TO LOAD is not a day that was not logged**, and this is
+  the half that is easy to miss: an empty array means both, and every screen
+  here originally read it as "nothing logged". Fail each fetch (offline, 500)
+  and assert **no gap claim appears anywhere** — not "Nothing logged" rows in
+  the day list, not "Nothing was logged on this day" in the day editor, not
+  "No recipes yet", not an empty chart with "nothing logged in this period"
+  tiles. The error alert should stand alone. This is worth a test per screen;
+  it is where the two blocking review findings were, and both looked correct
+  in the happy path.
+- **Nothing may claim a gap before the first fetch returns either.** Assert the
+  same on a slow response, not only on a failed one.
+
+### The analytical surface (`/dashboard/nutrition`)
+
+#### Happy path
+- Period toggle (4 weeks / 3 months / Year) refetches and redraws; each range
+  ends today.
+- The target renders as a **step** line that holds until the day it changes.
+  Seed two targets a month apart and assert the line is flat then flat, never
+  sloped between them.
+- Bodyweight trend appears on the right axis once **three or more** weigh-ins
+  fall in a trailing 7-day window; with two it must not appear at all.
+- Training days appear as ticks under the plot on the days that had sessions.
+- Every day is present as a readable row in the screen-reader list, including
+  unlogged days, which read "nothing logged".
+
+#### Edge cases & errors
+- A brand-new account with no entries, no targets, no weigh-ins and no
+  sessions: renders empty states, no NaN, no divide-by-zero, no axis collapsed
+  to a line.
+- Weigh-ins present but no entries: the weight axis draws and the calorie axis
+  is empty. And the reverse.
+- A check-in with measurements but **no `weight_kg`** must not count toward the
+  three readings a trend point needs.
+- A day whose target was set *after* it must show no target on that day — the
+  target line starts where the target does.
+- The Year period must not 400: the server caps `/nutrition/days` at 366 days,
+  and the screen also fetches a 6-day lead-in, so the request has to be clamped.
+- API failure surfaces one alert and leaves the rest of the page usable.
+
+#### Auth / security
+- Signed out, `/dashboard/nutrition` is gated by `proxy.ts` before it renders.
+- Every figure comes from the caller's own rows; there is no id in any URL that
+  addresses another athlete's data.
+
+### Target setting (`/dashboard/nutrition/targets`)
+
+#### Happy path
+- The derivation renders every line: resting rate, daily movement with its
+  factor, training with the session count and window, maintenance, the phase
+  delta, the target — and the macros with their g/kg.
+- Changing the activity chip refetches the suggestion and the numbers move.
+- Accepting sets a target effective **today**; the history list gains a row and
+  "What you are eating to" updates.
+- A typed target saves with `source: manual` and its detail line says there is
+  no arithmetic to show — never a blank where an explanation would be.
+- A derived target's stored `basis` renders under "Why this number", **frozen**:
+  change the profile weight afterwards and the stored explanation must not move.
+
+#### Edge cases & errors
+- An incomplete profile returns a 200 with `suggestion: null`; the screen names
+  the missing fields in plain words and does **not** show an error.
+- A clamped derivation shows the clamp as its own line. Without it the last line
+  of the arithmetic does not follow from the one above.
+- Fibre left blank on a typed target saves as `null`, not `0`.
+- A target below 800 or above 8000 kcal is rejected by the server; the message
+  surfaces.
+
+### The weekly adjustment proposal (N27's only client)
+
+#### Happy path
+- With enough evidence, a proposal renders with `from → to`, the delta, and
+  `effective_on` = **tomorrow**, never today.
+- "Show the arithmetic" reveals every line: both trend weights with their
+  weigh-in counts, observed rate, target rate, the gap, the raw delta, the cap
+  and its reason, the final delta, and `days_logged of days_considered`.
+- Accept issues a `PUT /v1/nutrition/targets/{effective_on}` with
+  `source: "adjustment"` and nothing before that.
+
+#### Edge cases & errors
+- **Each of the six `blocked_by` values renders its own explanation**:
+  `no_target`, `no_phase`, `too_soon`, `not_logging`, `not_weighing`,
+  `on_track`. None of them is an error state, none shows a retry, and
+  `on_track` in particular must read as a valid answer rather than a failure.
+- Several blocked reasons at once render as a list, all of them.
+- A **capped** proposal shows the raw figure it was capped from. Asserting only
+  the final number would pass against a UI that hides the cap.
+- There is no Decline button, and no dismissal is stored. Reloading a blocked or
+  proposed state re-derives it from rows.
+
+#### Regression trap
+- The single most important assertion on this screen: **loading it must not
+  write.** Assert no `PUT /v1/nutrition/targets/*` is issued on render, only
+  after Accept. An auto-apply would be invisible in a screenshot and is the one
+  thing the whole feature is built against.
+
+### Correcting a past day (`/dashboard/nutrition/days`, `/days/[date]`)
+
+#### Happy path
+- The day list shows six weeks, newest first, each with a total or
+  "Nothing logged".
+- The date field jumps to any day, including ones older than the list.
+- Entries group by meal in the **server's** order (breakfast, lunch, dinner,
+  snack) — never alphabetical.
+- **Halving an entry halves its calories.** Log 2 servings at 90 kcal each
+  (180 total), press ½, and assert the stored entry is 1 serving and **90
+  kcal**. A version that changes servings and leaves kcal at 180 is the bug
+  this control exists to prevent, and it passes any test that only checks
+  servings.
+- Doubling does the same in the other direction.
+- **Halve then double returns the original numbers exactly.** Log 3 servings
+  totalling 100 kcal, double, halve, and assert 3 servings and 100 kcal — not
+  99.99. The first version round-tripped through a two-decimal per-serving
+  draft and drifted; scaling must come off the stored row.
+- **Halve then double is inverse at small quantities too.** 0.25 servings is
+  the case that broke: rounding the intermediate to 2 dp gave 0.13, and
+  doubling that gave 0.26.
+- Removing an entry drops it and the day total falls.
+- Adding a missed entry files it on **that page's date**, not today.
+- The edit form shows `servings × per-serving kcal = total` live as you type.
+
+#### Edge cases & errors
+- Servings of 0 or a negative is refused with a message, not sent.
+- **A garbled macro field is refused, not coerced to zero.** Type `12o` into
+  calories and assert the save is rejected with a message. Silently saving 0
+  would record a claim that the item had no calories — the same "a zero is a
+  claim" failure as a zero-filled day, arriving through the input instead.
+- A BLANK macro field is 0, and that is correct — black coffee is a real
+  zero-calorie entry. Blank fibre stays `null`.
+- An entry with no fibre keeps `fibre_g: null` through a correction — a save
+  must not turn silence into a measured zero.
+- `source_food_id` survives a correction, so provenance is not lost by editing.
+- A day with no entries shows the gap wording, and the Add form still works.
+- `/days/not-a-date` 404s rather than rendering an empty day.
+- A day whose entries were logged on the phone edits identically here.
+
+#### Regression trap
+- **Correcting a saved food must not change any logged entry**, and vice versa.
+  Log an entry from a recipe, then edit the recipe, then reload the day: the
+  entry's numbers are unchanged. This is the rule the whole nutrition module is
+  shaped around and the one a join would silently break.
+
+### Recipe authoring (`/dashboard/nutrition/recipes`, `/new`, `/[id]`)
+
+#### Happy path
+- A new recipe with a name, a yield, a portion description and at least one
+  named ingredient saves and appears in the list.
+- The per-portion preview equals sum(item × quantity) ÷ yield, and matches what
+  the **server** stores — the server recomputes, so assert the saved row rather
+  than only the preview.
+- Editing an existing recipe loads its items and saves back to the same id.
+- Deleting removes it from the list.
+
+#### Edge cases & errors
+- **Fibre**: with no ingredient stating fibre, the recipe's fibre is `null` and
+  the screen says it is not claiming zero. With one ingredient stating it, the
+  total is that ingredient's contribution only.
+- Yield of 0 disables the save and the preview says so instead of dividing.
+- An ingredient row with an empty name is dropped rather than saved blank.
+- Over 100 ingredients is rejected by the server; the message surfaces.
+- The last remaining ingredient row cannot be removed.
+
+#### Regression trap
+- **Deleting a recipe must not alter days it was logged on.** `source_food_id`
+  is `ON DELETE SET NULL`, so the entries keep their numbers — assert the day
+  total is unchanged after the recipe is gone.
