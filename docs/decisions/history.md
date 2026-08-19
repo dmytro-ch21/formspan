@@ -27223,6 +27223,59 @@ reached the code it was written to cover. It passed with the leak deliberately
 reintroduced; only mutation testing found it. Sixteen guards are mutation-tested
 across the schema, the quota query, the handler and the wire layer.
 
+### What the first real API calls changed
+
+The feature was built and reviewed entirely against a fake estimator, because
+no key was configured. The first live calls changed three things.
+
+**The model is Sonnet 5, not Opus 5.** Asked for the cheapest model that can do
+this, the tier below is ruled out on two counts: `effort` is unsupported on
+Haiku 4.5, so using it would mean deleting the one knob holding per-call cost
+down, and Haiku is not in the high-resolution vision tier — portion judgement
+from a photo is the whole feature. Sonnet 5 is the first Sonnet with 2576px
+vision, supports structured outputs and the full effort ladder, and lists at
+$3/$15 against Opus 5's $5/$25.
+
+**`effort: medium` beat `high`, which was not the expected result.** Measured
+three runs each on the same input: medium returned three correct items every
+time; high returned duplicate items once, an empty-named item once, and the
+right answer once — at two to three times the output tokens. Medium is kept,
+now on evidence rather than as a cost guess.
+
+**The prompt produced degenerate output about a third of the time**, which no
+local test could have caught: placeholder rows with zeroed numbers, empty
+names, the same item twice. The schema guarantees the keys are present and says
+nothing about them being meaningful. Fixed by saying so explicitly in both the
+system prompt and the field descriptions — an empty list plus a note is a fine
+answer, a row the athlete cannot act on is not. Nine runs after the fix: no
+placeholders, no empty names, no duplicates, and gibberish input correctly
+refused three times out of three.
+
+The behaviour the feature is premised on does hold. Asked about a chicken thigh
+curry, the model returned the curry at **low** portion confidence and the rice
+and poppadom at medium, with the assumption naming sauce richness as the thing
+it could not see. Handed a synthetic illustration, it said so in the note rather
+than pretending it was a photograph.
+
+### The cost ratio the quota was designed around was wrong
+
+**A photo costs ~1.3x a text description, not ~50x.** That figure had been
+repeated in the quota comment, the migration, the OpenAPI description, the
+README, TASKS.md and this file, and the 20/5 caps were chosen on the strength of
+it.
+
+Measured with `count_tokens`: text-only is 1,537 input tokens, a 1080px photo
+is 2,645 — the image adds ~1,108. At Sonnet 5's introductory rate that is 0.73c
+against 0.95c, so the worst case under the current caps is 19c per athlete per
+day.
+
+The error was costing the image and ignoring the floor: the JSON schema plus
+system prompt are ~1,500 tokens on **every** call, so they dominate and the
+picture is an addition rather than a multiplier. Two counters are still right —
+a photo is the dearer path and the one a runaway client would hammer — but the
+split is a mild precaution now rather than the load-bearing control it was sold
+as, and the caps deserve revisiting on that basis.
+
 ### Four defects review found that a green suite did not
 
 **A typed nil made the unconfigured deploy panic.** `NewAnthropicEstimator`

@@ -29,10 +29,22 @@ var ErrNoEstimator = errors.New("nutrition: estimation is not configured")
 
 // EstimateModel is the model the endpoint runs on.
 //
-// Opus 5 rather than a cheaper tier because the hard part is not naming food,
-// it is portion judgement from a photo — the thing this feature exists to do,
-// and the thing the confidence field admits is unreliable.
-const EstimateModel = "claude-opus-5"
+// **Sonnet 5, chosen as the cheapest model that can actually do this**, not as
+// the most capable available. Two things rule out the tier below it:
+//
+//   - `effort` is not supported on Haiku 4.5, so using it would mean deleting
+//     the one knob holding this endpoint's per-call cost down — a saving that
+//     pays for itself in the wrong direction.
+//   - Haiku 4.5 is not in the high-resolution vision tier. Portion judgement
+//     from a photo is the whole feature, and it is the half the confidence
+//     field already admits is unreliable; spending the saving on worse eyes is
+//     the wrong trade.
+//
+// Sonnet 5 is the first Sonnet-tier model with high-resolution vision (2576px
+// on the long edge, same tier as Opus 5), supports structured outputs and the
+// full effort ladder, and lists at $3/$15 per MTok against Opus 5's $5/$25 —
+// currently $2/$10 under introductory pricing.
+const EstimateModel = "claude-sonnet-5"
 
 // estimateMaxTokens bounds thinking AND response text together.
 //
@@ -53,7 +65,9 @@ const estimateSystemPrompt = `You estimate the nutrition of a meal an athlete ha
 
 They will see your numbers as an editable draft and correct them. That makes a stated assumption far more useful than a confident guess: when you have to decide something you cannot see — portion size, cooking fat, whether the coffee had milk — put it in that item's assumption field so they know which number to fix.
 
-Say what you actually see or are told. Do not add items to make a meal look complete, and do not round a portion toward a typical serving when the evidence points elsewhere. If a photo shows food you cannot identify, say so in the note rather than naming a guess as though you were sure.`
+Say what you actually see or are told. Do not add items to make a meal look complete, and do not round a portion toward a typical serving when the evidence points elsewhere. If a photo shows food you cannot identify, say so in the note rather than naming a guess as though you were sure.
+
+List each component once, under the name someone would call it. If you genuinely cannot make anything out, return an empty items list and explain why in the note — an empty list is a fine answer. Never emit an item as a placeholder, with an empty name, or with zeroed numbers to fill the shape: a row the athlete cannot act on is worse than no row.`
 
 // AnthropicEstimator is the real Estimator.
 type AnthropicEstimator struct {

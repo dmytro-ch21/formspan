@@ -1,9 +1,10 @@
 -- Per-athlete usage of the AI estimate endpoint.
 --
 -- This exists for ONE reason: `POST /v1/nutrition/estimate` is the only route
--- in this API where a caller's loop spends real money, and a photo costs
--- roughly fifty times a text description. Everything else here follows from
--- that asymmetry.
+-- in this API where a caller's loop spends real money. A photo is the dearer
+-- path -- measured at ~1.3x a text description, not the ~50x an earlier
+-- version of this comment claimed -- which is why the two are counted apart,
+-- though the split is a precaution rather than the main cost control.
 --
 -- WHY A ROW PER CALL RATHER THAN A COUNTER. A stored counter has to be reset,
 -- and a reset is a scheduled job this repo does not have and should not grow
@@ -20,9 +21,9 @@ CREATE TABLE nutrition_estimates (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     TEXT        NOT NULL,
 
-    -- Which quota this call drew on. The two are counted separately: a shared
-    -- counter would let the expensive path exhaust the cheap one, so an
-    -- athlete who photographed five meals could no longer type a sixth.
+    -- Which quota this call drew on. The two are counted separately so the
+    -- dearer path cannot exhaust the cheap one -- an athlete who photographed
+    -- five meals should still be able to type a sixth.
     source      TEXT        NOT NULL,
 
     -- Whether a draft came back. See the note above on why failures count.

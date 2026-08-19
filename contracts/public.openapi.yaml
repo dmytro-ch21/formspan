@@ -8488,10 +8488,12 @@ paths:
 
 
         **Quotas are per athlete, per path, over a rolling 24 hours** — 20 text
-        and 5 photo, counted separately because a photo costs roughly fifty
-        times a description and one shared counter would let the expensive path
-        exhaust the cheap one. Failed and refused calls count, because they
-        cost tokens too. Exhaustion is `429` with `rate_limited`.
+        and 5 photo, counted separately so the dearer path cannot exhaust the
+        cheap one. (Measured, a photo costs about 1.3x a description rather
+        than the ~50x originally assumed: the JSON schema and system prompt are
+        ~1,500 input tokens on every call and dominate the image's ~1,100.)
+        Failed and refused calls count, because they cost tokens too.
+        Exhaustion is `429` with `rate_limited`.
       tags: [Nutrition]
       security:
         - ClerkBearerAuth: []

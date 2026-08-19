@@ -190,8 +190,8 @@ func TestAnOversizeOrWrongTypeImageIsRejected(t *testing.T) {
 }
 
 func TestSourceDecidesWhichQuotaIsSpent(t *testing.T) {
-	// The whole reason the two are counted apart: a photo costs roughly fifty
-	// times a description.
+	// The reason the two are counted apart: a photo is the dearer path
+	// (measured ~1.3x, not the ~50x first assumed — see quota.go).
 	if got := (EstimateInput{Description: "two eggs"}).Source(); got != SourceText {
 		t.Fatalf("text input reported %q", got)
 	}

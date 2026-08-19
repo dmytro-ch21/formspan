@@ -36,9 +36,9 @@ import (
 // describe.
 
 // EstimateSource is which path produced a draft. Recorded on the usage row so
-// the two quotas can be counted separately — a photo costs roughly fifty times
-// a description, so one shared counter would let the expensive path exhaust
-// the cheap one.
+// the two quotas can be counted separately: a photo is the dearer path (~1.3x
+// a description, measured — see quota.go, where an earlier ~50x claim is
+// corrected), so one shared counter would let it exhaust the cheap one.
 type EstimateSource string
 
 const (
@@ -307,8 +307,9 @@ func EstimateSchema() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"name": map[string]any{
-				"type":        "string",
-				"description": "What this component is, as an athlete would say it. 'Scrambled eggs', not 'Egg, whole, cooked, scrambled'.",
+				"type": "string",
+				"description": "What this component is, as an athlete would say it. 'Scrambled eggs', not 'Egg, whole, cooked, scrambled'. " +
+					"Never empty and never a placeholder — if you cannot name it, leave it out of the list entirely and say so in the note.",
 			},
 			"serving_label": map[string]any{
 				"type":        "string",
@@ -350,9 +351,10 @@ func EstimateSchema() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"items": map[string]any{
-				"type":        "array",
-				"items":       item,
-				"description": "One entry per component the athlete would correct separately. A sandwich is usually one item, not five.",
+				"type":  "array",
+				"items": item,
+				"description": "One entry per component the athlete would correct separately, each appearing once. A sandwich is usually one item, not five. " +
+					"May be empty when nothing could be identified — an empty list plus a note is a better answer than an invented row.",
 			},
 			"note": map[string]any{
 				"type":        "string",

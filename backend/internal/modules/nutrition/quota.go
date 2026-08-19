@@ -10,11 +10,21 @@ import (
 //
 // # Why two numbers and not one
 //
-// A photo costs roughly fifty times a text description — the vision tier bills
-// up to ~4,784 image tokens against a sentence's handful. One shared counter
-// would therefore let the expensive path exhaust the cheap one: an athlete who
-// photographed five unfamiliar meals could no longer TYPE a sixth, which
-// punishes them for using the feature the way it is meant to be used.
+// **MEASURED, after an earlier version of this comment claimed a photo cost
+// ~50x a description and was wrong by nearly two orders of magnitude.** With
+// `count_tokens` against the real schema: text-only is 1,537 input tokens and a
+// 1080px photo is 2,645 — the image adds ~1,108. At Sonnet 5's introductory
+// rate that is 0.73c against 0.95c, a ratio of **1.3x**.
+//
+// The mistake was costing the image and ignoring the floor: the JSON schema
+// plus system prompt are ~1,500 tokens on EVERY call, so they dominate and the
+// picture is an addition rather than a multiplier.
+//
+// Two counters are still right, for a reason that survives the correction: a
+// photo is the more expensive path and the one a runaway client would hammer,
+// and splitting them means the cheap path cannot be exhausted by the dear one.
+// But the split is now a mild precaution rather than the load-bearing cost
+// control the first version claimed, and the caps should be read that way.
 //
 // # Why these numbers
 //
