@@ -35,8 +35,7 @@ desk. "Am I losing weight fast enough" is answered in a supermarket, not in a
 spreadsheet. So a small read-only chart may live on mobile when **all** of these
 hold:
 
-- it answers ONE question, with no metric picker, no axes to read values off, no
-  tooltips and no zoom;
+- it answers ONE question, with no metric picker;
 - the decision it informs is made while away from a computer;
 - the comparable, exportable, correlate-it-with-training-load version still
   lives on web, and this is not a step toward moving that.
@@ -45,6 +44,29 @@ hold:
 The test is the three bullets, not "is it a chart" — the moment one grows a
 second metric or a **date-range picker** it has become the web screen and
 belongs there.
+
+**AMENDED 2026-08-19, by the user, and the reason matters more than the
+change.** The first bullet used to forbid **axes to read values off, tooltips
+and zoom** as well. Those three are struck. The rule was written to keep
+*analysis* off the phone and it did something else: `trend.tsx` is 105 lines
+with no axis labels, no value labels and no point labels at all, and the user's
+verdict on it was "pretty much useless". A chart you cannot read a number off
+does not answer one question in three seconds — it answers none, and the
+athlete goes to a desk anyway, which is the outcome the carve-out existed to
+prevent.
+
+So a mobile trend chart **may** now carry: value-readable axes, a label on the
+first and latest points, a dashed projection to a dashed goal line, a delta
+against a stated period, and a list of the entries behind it. **What still
+disqualifies it is unchanged and is the whole rule**: a second metric, or a
+date-range picker — a control that lets the athlete choose a start AND an end,
+which is comparison, and comparison is still the web screen's job. Preset
+windows that all END TODAY (`1W 1M 3M 6M 1Y All`) were always allowed and still
+are; that paragraph below was already explicit and is unchanged.
+
+The other two bullets — the decision is made away from a computer, and the
+comparable exportable version still lives on web — are untouched and still
+both have to hold.
 
 **A fixed zoom toggle is not a date-range picker**, and the distinction has to
 be stated or the first instance fails the rule that blesses it: week / month /
