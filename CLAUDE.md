@@ -463,12 +463,23 @@ pass vacuously on an empty file. That is also the *stronger* check — a live
 (`source='admin'`), any of which would satisfy an id no fresh deploy has.
 
 **The backend suite has exactly ONE skip, and it is intentional.** Measured
-2026-08-19 by two sessions independently: **34 packages, ~1092 tests, 1 skip, 0
+2026-08-19 by three sessions independently: **34 test packages, 1 skip, 0
 failures** on a migrated, never-seeded database. The skip is `TestLiveComplete`
 in `internal/platform/llm/live_smoke_test.go`, gated on `LLM_LIVE=1` because it
 spends real money on a live API call; it skips in CI too, and it **fails rather
-than skips** when `LLM_LIVE=1` is set without a key, which is what stops it
-being the silent-skip pattern this section is about.
+than skips** when `LLM_LIVE=1` is set without a key — measured, not assumed:
+`FAIL`, exit 1, and it fatals before a client is ever built, so checking that
+claim costs nothing. That is what stops it being the silent-skip pattern this
+section is about.
+
+**Count the skip, not the tests.** The first two measurements recorded "~1092
+tests"; the third counted **922 top-level tests, 1116 including subtests** — the
+gap between those two is only how subtests are counted, and the drift from 1092
+is #329 adding `health/handler_test.go`. A test total is a magnitude check that
+every PR moves, so it cannot be a tripwire; the skip count is. Count with
+`go test -p 1 -timeout 3m -json ./...` rather than grepping `-v` output, since
+the grep is exactly the apparatus that silently counts something else. And note
+`./...` reports **37** packages — the other three have no test files.
 
 **This paragraph used to say "zero skips: 28 packages, 583 tests"** and told you
 any skip meant a regression. That was true when written and stopped being true
