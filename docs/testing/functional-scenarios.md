@@ -7949,6 +7949,15 @@ training. Everything here is about it telling the truth.
 - A refused cross-account update leaves the owner's row byte-for-byte unchanged; asserting the error alone is a proxy for that, not proof of it.
 - One account's list never contains another's entries, and one entry's matches never attach to another entry.
 
+### The live step's technique rows
+
+- A technique **drilled in step 1** appears in step 2's "Working on" grid, with Landed / Missed / Stopped theirs — that is what connects the two screens.
+- It is named from the library ("Armbar from Closed Guard"), not shown as its id.
+- **Offline, with the library unavailable, the row still appears** and falls back to the readable slug. The counters work either way; a blank label would be worse.
+- A technique in **focus** appears whether or not it was drilled today, and a technique appearing for both reasons gets **one** row, not two.
+- **`conceded` never produces a row** — it is the category grid's "Them" column and has no per-technique control, so a row would draw counters no tap could fill.
+- Untagged category counts never appear here; they belong to the grid below, and pulling them in would put one event in two controls.
+
 ### Regression trap
 
 - **`position` is assigned by the server from array order and must never be accepted from a client.** It is what makes "lost in the final" different from "lost the first match", and the wire format deliberately has no field for it — if one is ever added, the uniqueness of a position stops being unviolatable from outside.
@@ -8001,7 +8010,7 @@ training. Everything here is about it telling the truth.
 - **Only a LIVE finish celebrates.** The retroactive "New log" path saves the session and returns to Today with no card at all, so no badge is reachable that way — verified on a Simulator 2026-08-18.
 - Land a technique drilled in an earlier session, for the first time: the card shows **First drilled technique landed live**.
 - Earn both at once (first-ever score, of something drilled weeks ago): the badge reads **2 firsts** rather than picking one.
-- **`first_drilled_scored` needs the technique on the athlete's FOCUS LIST** (N31). The live step's "Working on" grid is the only control that attributes a live outcome to a technique, and it only lists focus entries (plus anything already carrying live evidence) — never something merely drilled this session. With an empty focus list every scored tag is a bare category count, so the award is unreachable and the technique funnel is drilled-only. Set a focus list before running this scenario, or it will fail for a reason that has nothing to do with the award.
+- **The technique has to be attributable** (N31). The live step's "Working on" grid is the only control that names a technique on a live outcome, and it lists the focus list **plus whatever this session drilled**. So the runnable path is: drill it in step 1 of an earlier session, drill it again (or keep it in focus) and mark it **Landed** in a later one. Before N31 the drilled half did not produce a row, so an athlete with an empty focus list could attribute nothing and this award was unreachable for them — if a run fails, check attribution before suspecting the award.
 - Finish an ordinary BJJ session that earned nothing: **no badge at all**, which is the common case and the design.
 
 ### Edge cases & errors

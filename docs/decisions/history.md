@@ -26043,6 +26043,71 @@ and `first_drilled_scored` **is** earnable — for an athlete with the technique
 their focus list. What changes is the reason the evidence had to be inserted by
 hand: not that no client could write it, but that this account had no focus list.
 
+## 2026-08-18 — What you drilled today can now be what landed
+
+**N31**, in its corrected form. `focusRows` skipped `drilled`, so the reflection
+wizard asked what you drilled on step 1 and then, on step 2, offered no way to
+say any of it landed — unless the technique happened to be on the focus list.
+An athlete with an **empty focus list** could attribute nothing at all: every
+live outcome a bare category count, the technique funnel drilled-only, and
+`first_drilled_scored` unreachable. Not impossible; inert, and silently.
+
+The union now includes this session's drilled techniques. One clause.
+
+### The function it feeds was already written for this
+
+`bumpTechniqueOutcome`'s own doc says the source is "a drilled tag, or a focus
+entry translated into the tag vocabulary", and it inherits `category` and
+`position` from whichever named the technique — precisely so the live row it
+writes joins the drilled one in the funnel. The write path anticipated drilled
+sources; the row was the only missing half. That is the strongest argument this
+is a repair rather than a new feature.
+
+### Naming, which is the only part that cost anything
+
+A tag carries an id, not a name, and the old fallback rendered de-focused rows
+as their slug. Acceptable when it was a rare edge; not when the common case is a
+technique the athlete picked **by name one screen earlier** — handing back
+`armbar-closed-guard` reads as a different thing.
+
+So `focusRows` takes an optional id→name map and `LiveStep` builds one from
+`fetchTechniques`, which is module-cached: on the ordinary step-1-then-step-2
+path it resolves with no request. Offline it stays empty and every row falls
+back to the slug, which is the trade the tag path already made — a readable slug
+beats a blank label, and the counters work either way.
+
+`conceded` stays excluded. It is the category grid's "Them" column and carries
+no technique; the per-technique defensive event is `defended`, which the grid
+already offers. A conceded row would draw three counters no tap could fill.
+
+### Two tests pinned the old exclusion, and only one was obvious
+
+`ignores untagged rows and drilled-only techniques` was the one I expected, and
+it had to be split — the untagged half is still true and still matters, the
+drilled half is now the opposite. The second, `still ignores drilled and
+conceded, which have their own surfaces`, sat sixty lines further down and only
+surfaced on a full run of the file.
+
+Worth recording because the reflex when reversing a tested decision is to fix
+the test you already know about. Both are retired deliberately rather than left
+passing beside the new property, since they cannot both hold.
+
+Three mutations checked: skipping `drilled` again, letting `conceded` through,
+and ignoring the names map each fail a different test.
+
+### What this does not do
+
+- **It grows the fastest screen.** Drill six techniques in a class and step 2
+  gains six rows of three counters. That is the interaction cost the design
+  deliberately avoids, and it is now paid whenever somebody uses step 1
+  thoroughly. Nobody has seen it on a device with a realistic drilled list; a
+  class where you drill one or two is fine, and eight might not be.
+- **It does not make attribution automatic.** Landing something still costs a
+  tap on the right row. The dictation idea raised while this was in flight —
+  say what happened and have the model fill the tags — is the version that
+  removes the cost rather than relocating it, and is not started.
+- **`first_scored` is unaffected**: it never needed a technique.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
