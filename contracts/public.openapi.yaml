@@ -5527,6 +5527,52 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /sequences/{sequenceID}/copy:
+    post:
+      summary: Copy a sequence into your own library
+      operationId: copySequence
+      description: >
+        Duplicates a sequence you can SEE into one you OWN, with its steps, and
+        returns the new sequence.
+
+        This is what makes a VOLA reference chain usable rather than only
+        readable: those are visible to everyone and editable by nobody, so
+        without it the only thing to do with one is look at it.
+
+        **Visibility is the gate, not ownership** — you may copy anything you
+        may read, including your own chains. Ownership of the RESULT is
+        unconditional: the copy is a new row owned outright, so editing it
+        cannot touch the original and a deploy refreshing a seeded chain cannot
+        reach into the copy.
+
+        POST rather than PUT, and deliberately not idempotent: calling it twice
+        gives you two copies, which is the honest reading of "copy this again".
+
+        No request body. The only inputs are the id and the caller; a body would
+        invite a name or a visibility, both of which you change afterwards on a
+        sequence that is now plainly yours.
+      tags: [Sequences]
+      parameters:
+        - name: sequenceID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: The new sequence, with its steps.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Sequence" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: >
+            No such sequence, OR one you cannot see. The two are deliberately
+            the same answer — distinguishing them would confirm that an id
+            belongs to somebody.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /curricula:
     get:
       summary: Curricula the caller can see

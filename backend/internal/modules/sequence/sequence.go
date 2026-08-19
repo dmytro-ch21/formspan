@@ -353,4 +353,18 @@ type Repository interface {
 	// hears.
 	Update(ctx context.Context, id, userID string, in Update) (Sequence, error)
 	Delete(ctx context.Context, id, userID string) error
+	// Copy duplicates a sequence the caller can SEE into a sequence they OWN,
+	// and returns the new one with its steps.
+	//
+	// This is what makes a reference chain usable rather than only readable:
+	// VOLA's chains are visible to everybody and editable by nobody, so
+	// without it the only thing an athlete can do with one is look at it. The
+	// refusal on the edit route used to say "Copy it to make it yours" with
+	// nothing behind the sentence — see F9.
+	//
+	// Visibility, not ownership, is the gate: you may copy anything you may
+	// read. Ownership of the RESULT is unconditional — the copy is a new row
+	// owned outright, so editing it cannot touch the original and a deploy
+	// refreshing a seeded chain cannot reach into the copy.
+	Copy(ctx context.Context, id, userID string) (Sequence, error)
 }

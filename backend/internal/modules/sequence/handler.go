@@ -107,6 +107,26 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusCreated, s)
 }
 
+// Copy duplicates a readable sequence into one the caller owns.
+//
+// No body: the only input is the id in the path and the caller in the token.
+// A body would invite a name or a visibility, and both are things you change
+// afterwards on a sequence that is now plainly yours.
+//
+// 404 for anything not visible, which is the same answer Get gives — see the
+// repository's note on why "you may not copy that" would be an existence
+// oracle.
+func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	s, err := h.repo.Copy(r.Context(), r.PathValue("sequenceID"), claims.UserID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusCreated, s)
+}
+
 // updateBody uses pointers so an ABSENT field and an explicitly null one are
 // different requests. `start_position_id: null` clears the start; omitting the
 // key leaves it. A plain string could not tell those apart, which is what

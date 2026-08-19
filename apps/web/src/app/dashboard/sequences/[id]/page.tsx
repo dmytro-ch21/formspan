@@ -5,7 +5,12 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
-import { deleteSequence, getSequence, type Sequence } from "@/lib/api";
+import {
+  copySequence,
+  deleteSequence,
+  getSequence,
+  type Sequence,
+} from "@/lib/api";
 import { ShareToFriend } from "@/components/ShareToFriend";
 
 /**
@@ -30,6 +35,7 @@ export default function SequenceDetailPage() {
   const [s, setS] = useState<Sequence | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
@@ -92,6 +98,35 @@ export default function SequenceDetailPage() {
               reason — a VOLA-authored sequence is something you can already
               show a training partner by hand. */}
           <ShareToFriend resourceType="sequence" resourceId={s.id} />
+          {/* Copy is the counterpart to Edit, not a sibling of it: it appears
+              exactly where Edit does not. A chain you cannot edit was, until
+              F9, a chain you could only look at — the edit route even told you
+              to "copy it to make it yours" with nothing behind the sentence.
+
+              Visibility gates it server-side, so this renders for any
+              non-editable chain rather than only for VOLA's. `official` picks
+              the WORDS below; it does not decide whether you may copy. */}
+          {!s.editable && (
+            <button
+              type="button"
+              disabled={copying}
+              onClick={async () => {
+                setCopying(true);
+                try {
+                  const mine = await copySequence(getToken, s.id);
+                  router.push(`/dashboard/sequences/${mine.id}`);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : String(err));
+                  // Only on failure: on success this unmounts, and clearing it
+                  // first would flash the button live again mid-navigation.
+                  setCopying(false);
+                }
+              }}
+              className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition hover:brightness-110 disabled:opacity-50"
+            >
+              {copying ? "Copying…" : "Copy to my sequences"}
+            </button>
+          )}
           {s.editable && (
             <>
             {/* Tokens, not raw `neutral-*`. Share moved to the design system

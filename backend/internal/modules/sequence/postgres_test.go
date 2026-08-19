@@ -766,3 +766,121 @@ func TestASequenceSaysWhetherVolaWroteIt(t *testing.T) {
 		}
 	}
 }
+
+// Copying is what makes a reference chain usable rather than only readable.
+//
+// The properties are: visibility gates it (not ownership), the copy is a real
+// detached row the caller owns, the steps arrive in order, and a chain you
+// cannot see cannot be copied — with the same 404 Get gives, so this does not
+// become the existence oracle Get refuses to be.
+func TestCopyingAReferenceChainGivesYouOneOfYourOwn(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	uid := user(t, pool)
+	steps, _ := chain(t, pool)
+
+	var volaID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO bjj_sequences (owner_user_id, source, name, description)
+		VALUES (NULL, 'seed', 'Reference chain', 'VOLA wrote this') RETURNING id`).Scan(&volaID); err != nil {
+		t.Fatalf("seed VOLA sequence: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM bjj_sequences WHERE id = $1`, volaID) })
+	for i, st := range steps {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO bjj_sequence_steps (sequence_id, technique_id, sort_order, notes)
+			VALUES ($1, $2, $3, $4)`, volaID, st.TechniqueID, i, st.Notes); err != nil {
+			t.Fatalf("seed reference step %d: %v", i, err)
+		}
+	}
+
+	// The chain is readable and not editable — the state F9 said you could do
+	// nothing with.
+	before, err := repo.Get(ctx, volaID, uid)
+	if err != nil {
+		t.Fatalf("get reference chain: %v", err)
+	}
+	if before.Editable || !before.Official {
+		t.Fatalf("fixture wrong: want a VOLA chain the caller cannot edit, got editable=%v official=%v",
+			before.Editable, before.Official)
+	}
+
+	got, err := repo.Copy(ctx, volaID, uid)
+	if err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM bjj_sequences WHERE id = $1`, got.ID) })
+
+	if got.ID == volaID {
+		t.Fatal("copy returned the original; it must be a new row")
+	}
+	if !got.Editable {
+		t.Error("the copy is yours and must be editable — that is the entire point")
+	}
+	if got.Official {
+		t.Error("the copy is yours, not VOLA's, and must not report official")
+	}
+	if got.Name != before.Name {
+		t.Errorf("copy name = %q, want the original's %q", got.Name, before.Name)
+	}
+	if len(got.Steps) != len(before.Steps) {
+		t.Fatalf("copy has %d steps, original has %d", len(got.Steps), len(before.Steps))
+	}
+	for i := range got.Steps {
+		if got.Steps[i].TechniqueID != before.Steps[i].TechniqueID {
+			t.Errorf("step %d: technique %q, want %q",
+				i, got.Steps[i].TechniqueID, before.Steps[i].TechniqueID)
+		}
+		if got.Steps[i].Order != i {
+			t.Errorf("step %d has order %d; the copy must be densely renumbered", i, got.Steps[i].Order)
+		}
+	}
+
+	// Detached: editing the copy cannot reach the original. This is what makes
+	// "yours" mean anything, and it is a property a shallow copy would fail
+	// while every assertion above still passed.
+	if _, err := repo.Update(ctx, got.ID, uid, Update{Name: ptr("Mine now")}); err != nil {
+		t.Fatalf("update the copy: %v", err)
+	}
+	after, err := repo.Get(ctx, volaID, uid)
+	if err != nil {
+		t.Fatalf("re-read the original: %v", err)
+	}
+	if after.Name != before.Name {
+		t.Errorf("editing the copy changed the original's name to %q", after.Name)
+	}
+}
+
+// A chain you cannot see cannot be copied, and the refusal says only "not
+// found" — the same answer Get gives, so copy does not become the existence
+// oracle Get is careful not to be.
+func TestCopyingSomethingYouCannotSeeIsANotFound(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	uid := user(t, pool)
+	stranger := uid + "-stranger"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM bjj_sequences WHERE owner_user_id = $1`, stranger)
+	})
+
+	theirs, err := repo.Create(ctx, stranger, NewSequence{Name: "Not yours"})
+	if err != nil {
+		t.Fatalf("create stranger sequence: %v", err)
+	}
+
+	if _, err := repo.Copy(ctx, theirs.ID, uid); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("copy of a stranger's chain: err = %v, want ErrNotFound", err)
+	}
+	// And nothing was created on the way to refusing.
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM bjj_sequences WHERE owner_user_id = $1`, uid).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("a refused copy left %d row(s) behind; the transaction must roll back", n)
+	}
+}

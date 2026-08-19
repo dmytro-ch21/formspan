@@ -379,6 +379,42 @@ func (r *PostgresRepository) Describe(ctx context.Context, resourceID, sharerID 
 // without touching what the recipient now owns. `sort_order` is re-derived
 // from the read order rather than copied, so a source with gaps in its
 // ordering yields a dense one.
+// Copy is the self-serve half of CopyTo: same duplication, no share involved.
+//
+// It DELEGATES rather than reimplementing, and the delegation is the point —
+// `CopyTo` already re-applies `visibleTo` and renumbers the steps in one
+// statement, and a second copy routine would be a second place for those to
+// drift. Passing the caller as both the "sharer" and the new owner is exactly
+// the self-copy case: the visibility check runs against the person asking.
+//
+// `ok == false` means the row is not visible to this caller — which for a
+// direct request is indistinguishable from it not existing, and must stay that
+// way. Answering "you may not copy that" would confirm the id belongs to
+// somebody, which is the existence oracle this module's Get already refuses to
+// be.
+func (r *PostgresRepository) Copy(ctx context.Context, id, userID string) (Sequence, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Sequence{}, translate(err, "copy begin")
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	newID, ok, err := r.CopyTo(ctx, tx, id, userID, userID)
+	if err != nil {
+		return Sequence{}, err
+	}
+	if !ok {
+		return Sequence{}, ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Sequence{}, translate(err, "copy commit")
+	}
+	// Read back through the ordinary path so the response is byte-for-byte what
+	// a subsequent GET returns — including `editable` and `official`, which are
+	// per-caller and would have to be hand-set here otherwise.
+	return r.Get(ctx, newID, userID)
+}
+
 func (r *PostgresRepository) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID, newOwnerID string) (string, bool, error) {
 	var name, description string
 	var startPositionID *string
