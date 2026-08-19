@@ -30283,6 +30283,21 @@ real and worth naming: this is athlete-facing copy about the same idea, so the
 two can drift into telling people different things about one rule. The phrasing
 is identical today.
 
+**Check-then-record is not atomic, and the overshoot is accepted.** At 19 used,
+several concurrent requests can each read 19 before any `Record` lands, so the
+cap can be exceeded by the in-flight concurrency — bounded by the burst
+limiter's 20 tokens, and self-correcting, since the extra rows count against the
+next window. Closing it needs an `INSERT … WHERE count < limit` or a row lock,
+a real per-call cost to save at most one athlete's worth of overshoot once.
+`nutrition` makes the same trade. Raised in review and written down here rather
+than left implicit, so the next person can weigh it instead of rediscovering it.
+
+**A `Record` failure fails OPEN** — logged, request proceeds — which is the
+opposite of the quota read. Deliberate: by that line the money is already spent,
+and failing the request would turn a bookkeeping outage into a feature outage.
+The unmetered window is a partial outage between the two queries, since a fully
+down database refuses at the read.
+
 No client change. Nothing surfaces the remaining count to the athlete — the 429
 says when the next one frees up, but a client cannot show "3 left today" without
 a read endpoint, which nutrition also lacks. Whether that is worth having is a

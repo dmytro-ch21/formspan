@@ -81,6 +81,22 @@ func (h *IdentifyHandler) Identify(w http.ResponseWriter, r *http.Request) {
 
 	// THE GATE, BEFORE ANY TOKEN IS SPENT. Checking after the call would meter
 	// spend that has already happened, which is not a quota — it is a receipt.
+	//
+	// It runs after the parse and validation on purpose: a malformed request
+	// should hear 400 rather than 429, and the body has to be drained either
+	// way. The cost is that an exhausted client looping on retries still
+	// uploads its photo to be refused, which is the rate limiter's problem
+	// rather than this one's.
+	//
+	// **Check-then-record is not atomic, and the overshoot is accepted.** At 19
+	// used, several concurrent requests can each read 19 before any Record
+	// lands, so the cap can be exceeded by the in-flight concurrency — bounded
+	// by the burst limiter's 20 tokens, and self-correcting, since the extra
+	// rows count against the next window. Closing it needs an
+	// `INSERT … WHERE count < limit` or a row lock, which is a real cost on
+	// every call to save at most one athlete's worth of overshoot once.
+	// `nutrition` makes the same trade. Recorded so the next reader knows it
+	// was seen rather than missed.
 	quota, err := CheckIdentifyQuota(r.Context(), h.usage, userID, h.now())
 	if err != nil {
 		if errors.Is(err, ErrIdentifyQuotaExhausted) {

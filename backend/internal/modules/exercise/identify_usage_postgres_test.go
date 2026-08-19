@@ -41,10 +41,18 @@ func newIdentifyUsage(t *testing.T) (*PostgresIdentifyUsage, context.Context) {
 // exercised without waiting a day.
 func seedIdentifications(t *testing.T, u *PostgresIdentifyUsage, ctx context.Context, userID string, ages ...time.Duration) {
 	t.Helper()
+	// Fail-and-verify rather than swallowed, matching the repo's convention for
+	// cleanups: a delete that quietly errors leaves rows that inflate the next
+	// run's count, and the failure would surface as an unrelated test being
+	// wrong about a number.
 	t.Cleanup(func() {
-		_, _ = u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, userID)
+		if _, err := u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, userID); err != nil {
+			t.Errorf("cleanup %s: %v", userID, err)
+		}
 	})
-	_, _ = u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, userID)
+	if _, err := u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, userID); err != nil {
+		t.Fatalf("pre-clean %s: %v", userID, err)
+	}
 	for _, age := range ages {
 		if _, err := u.pool.Exec(ctx, `
 			INSERT INTO exercise_identifications (user_id, succeeded, model, candidate_count, created_at)
@@ -101,9 +109,13 @@ func TestIdentifyQuotaCountsOnlyInsideTheWindow(t *testing.T) {
 func TestFailedIdentificationsCountTowardTheQuota(t *testing.T) {
 	u, ctx := newIdentifyUsage(t)
 	t.Cleanup(func() {
-		_, _ = u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, "user_fail_db")
+		if _, err := u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, "user_fail_db"); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
 	})
-	_, _ = u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, "user_fail_db")
+	if _, err := u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, "user_fail_db"); err != nil {
+		t.Fatalf("pre-clean: %v", err)
+	}
 
 	// A refusal and an outage both spent tokens.
 	for _, ok := range []bool{false, false, true} {
@@ -144,9 +156,13 @@ func TestAnUnusedIdentifyQuotaHasNoReset(t *testing.T) {
 func TestRecordStoresTheAnswerButNeverThePhoto(t *testing.T) {
 	u, ctx := newIdentifyUsage(t)
 	t.Cleanup(func() {
-		_, _ = u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, "user_round")
+		if _, err := u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, "user_round"); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
 	})
-	_, _ = u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, "user_round")
+	if _, err := u.pool.Exec(ctx, `DELETE FROM exercise_identifications WHERE user_id = $1`, "user_round"); err != nil {
+		t.Fatalf("pre-clean: %v", err)
+	}
 
 	if err := u.Record(ctx, IdentifyRecord{
 		UserID: "user_round", Succeeded: true, Model: "gpt-5.6-luna", CandidateCount: 3,
