@@ -27326,6 +27326,51 @@ as they land, so a retry logs only the remainder.
 The pattern across all four is the one this branch keeps repeating: the test
 existed, and it passed for a reason unrelated to its claim.
 
+### Made provider-agnostic, and a two-provider bake-off
+
+`Estimator` was already an interface, but it was the wrong seam: implementing it
+a second time meant reimplementing the parse, the range checks and the error
+mapping alongside the actual call — three chances for two backends to disagree
+about what a draft is. There is now a smaller internal `completer` interface
+underneath it. A provider is handed an input and returns raw JSON plus the model
+id that answered; everything else — prompt, schema, validation, error
+vocabulary — lives above it and is shared. **Adding a provider is one file with
+one method.**
+
+The prompt and schema moved to their own file for the same reason: a comparison
+where each side gets its own instructions measures the instructions, not the
+models.
+
+Selection is config. `ESTIMATE_PROVIDER` and `ESTIMATE_MODEL` are env vars, so
+trying a different model is a restart rather than a deploy — which matters,
+because the only way to know whether a cheaper model holds up on portion
+confidence is to run it against real meals. An unknown provider fails the boot
+rather than falling back, since a silent fallback would bill the wrong account
+and read as the config having been applied.
+
+**The bake-off, identical prompt and schema, twelve runs each.** Both providers
+behaved correctly 12/12 and refused gibberish 3/3, so the split is not about
+reliability. It is about calibration, which is the thing this feature sells:
+
+- Haiku 4.5 marked "two scrambled eggs" **high** (the athlete stated the
+  quantity) and every component of a curry **low** (a portion nobody can know).
+- gpt-5.4-nano compressed toward the middle — **medium** for the same stated
+  two eggs, and **high** for a poppadom, whose size varies more than almost
+  anything on the plate.
+
+Under-confidence is cheap; over-confidence is the failure this design exists to
+prevent, because a `high` on a portion the model cannot actually know is exactly
+the number an athlete will not check.
+
+Measured cost, same shape: gpt-5.4-nano is **4.4x cheaper** on text and 4.1x on
+photos (0.054c against 0.237c per description). At a thousand athletes logging
+three drafted meals a day that is $49 a month against $213.
+
+**Haiku stays the default** — on a $164/month difference at a scale VOLA does
+not have, the better-calibrated confidence is worth more than the saving. That
+is a judgement, not a measurement, and the config seam means it is one line to
+revisit rather than an argument to have again.
+
 ### Open questions this leaves
 
 - **Nothing has been run against the real API.** No key is configured here, so
@@ -27333,9 +27378,14 @@ existed, and it passed for a reason unrelated to its claim.
   unproven — including whether the prompt actually produces useful portion
   confidence, which is the feature's entire premise.
 - **Nothing has been seen on a phone**, same as N25.
-- **The caps are guesses.** 20 and 5 were chosen from cost arithmetic, not from
-  usage. The point of shipping is to find out whether they are anywhere near
-  right.
+- **The caps are guesses, and were set against a cost figure that was wrong.**
+  20 and 5 came from arithmetic, not usage, and the arithmetic said a photo cost
+  ~50x a description when it costs ~1.7x. Five photos a day is about 2c per
+  athlete. The photo cap is roughly 25x tighter than the cost justifies.
+- **The bake-off is four inputs and one synthetic image.** Both providers
+  scored 12/12, which mostly says the harness is too easy. The calibration
+  difference is visible but the sample is small, and no real photograph of a
+  real plate has been through either.
 - **`ANTHROPIC_API_KEY` is not set on Railway staging**, so the route serves 503
   there until it is. That is the intended degradation rather than a failure, but
   it does mean the feature is off until somebody sets it.

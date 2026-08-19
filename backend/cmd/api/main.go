@@ -242,11 +242,35 @@ func main() {
 	// key and the handler serves 503 for that, so a deploy without
 	// ANTHROPIC_API_KEY runs every other nutrition route normally rather than
 	// refusing to start — this is the only feature in the API that needs it.
+	// Which model drafts a meal is CONFIG, not code. `ESTIMATE_PROVIDER` picks
+	// the backend and `ESTIMATE_MODEL` overrides its default, so trying a
+	// different model is an env change and a restart rather than a deploy —
+	// which is the point, since the only way to know whether a cheaper model
+	// holds up on portion confidence is to run it against real meals.
+	//
+	// Defaults to Anthropic, so a deploy that only sets ANTHROPIC_API_KEY is
+	// unaffected by any of this.
+	estimateProvider := nutrition.Provider(os.Getenv("ESTIMATE_PROVIDER"))
+	estimateKey := os.Getenv("ANTHROPIC_API_KEY")
+	if estimateProvider == nutrition.ProviderOpenAI {
+		estimateKey = os.Getenv("OPENAI_API_KEY")
+	}
+	// Nil-safe: NewEstimator returns the Estimator INTERFACE, so an absent key
+	// is a true nil rather than a non-nil interface wrapping a nil pointer.
+	mealEstimator, err := nutrition.NewEstimator(nutrition.EstimatorConfig{
+		Provider: estimateProvider,
+		Model:    os.Getenv("ESTIMATE_MODEL"),
+		APIKey:   estimateKey,
+	})
+	if err != nil {
+		// A typo in ESTIMATE_PROVIDER fails the boot rather than silently
+		// falling back, which would bill the wrong account and read as the
+		// config having been applied.
+		logger.Error("nutrition: estimator config", "err", err)
+		os.Exit(1)
+	}
 	estimateHandler := nutrition.NewEstimateHandler(
-		// Nil-safe: the constructor returns the Estimator interface precisely so
-		// an absent key is a true nil here rather than a non-nil interface
-		// wrapping a nil pointer. See its doc comment.
-		nutrition.NewAnthropicEstimator(os.Getenv("ANTHROPIC_API_KEY")),
+		mealEstimator,
 		nutrition.NewPostgresEstimateUsage(pool),
 	)
 

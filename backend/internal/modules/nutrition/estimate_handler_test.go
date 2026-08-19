@@ -208,7 +208,11 @@ func TestAnUnconfiguredDeployFailsOnlyThisRoute(t *testing.T) {
 	// test passed throughout. Review found it; this shape is what would have
 	// caught it, and the constructor now returns the interface so the nil is
 	// genuine.
-	h := NewEstimateHandler(NewAnthropicEstimator(""), &memUsage{})
+	est, err := NewEstimator(EstimatorConfig{APIKey: ""})
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	h := NewEstimateHandler(est, &memUsage{})
 	w := call(t, h, `{"description":"two eggs"}`)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status %d, want 503", w.Code)
