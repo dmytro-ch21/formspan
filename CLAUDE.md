@@ -63,6 +63,7 @@ Every domain module follows the shape of `internal/modules/profile/` — read it
 - `postgres.go` — the Postgres-backed implementation. Domain errors (`ErrNotFound`, `ErrAlreadyExists`, `ErrInvalidInput`) get translated from Postgres constraint violations (`pgconn.PgError` codes) — never let a raw SQL error escape the repository.
 - `handler.go` — HTTP handlers using `internal/platform/apihttp.WriteJSON`/`WriteError` for every response. Never hand-roll JSON writing or error shapes here.
 - A migration in `backend/migrations/` (plain versioned SQL, `golang-migrate` — `NNNNNN_description.up.sql` / `.down.sql`).
+- **Adding a column to `exercise`'s `updateWithin` has silently blanked data three times.** `load_mode` (migration 000052), `implements` (000057) and `note` (000061) each added the column to the SET clause, which made `Restore` overwrite an authored value with an empty one — and `writeWithRevision` then recorded the wipe as a legitimate revision, so the damage looked like history rather than a bug. **All three were caught in review; none was caught by the suite**, and the guard documenting the mechanism was sitting right there each time. Nothing structural prevents a fourth: if you add a column to that function, write the restore-path test before the migration.
 - An integration test (`postgres_test.go`) gated on `TEST_DATABASE_URL`, skipping gracefully if unset. **Gotcha:** if the test needs `pool.Close()`, register it via `t.Cleanup`, not `defer` — and register it *before* any other `t.Cleanup` that still needs the pool open (`t.Cleanup` runs LIFO, strictly after all `defer`s in the function have already fired; a `defer pool.Close()` closes the pool before any `t.Cleanup` gets a chance to use it).
 - Wired into `cmd/api/main.go` under `/v1`, and a matching entry in `contracts/public.openapi.yaml`.
 
@@ -517,6 +518,17 @@ version exists on `main`:
 Reaching for the rollback recipe when the real answer was "pull" is how you
 turn a stale checkout into a damaged shared database.
 
+**A THIRD case produces the same confusion and neither recipe above fixes it:
+your own per-branch database is ahead of a migration it never applied.** Create
+`vola_test_<branch>` and migrate it to `000062`, then rebase and pick up
+somebody else's `000061` — golang-migrate does nothing, because the recorded
+version is already higher. The symptom is not a migration error at all: it is
+**20 tests failing with `column "note" of relation "exercises" does not exist`**,
+which reads as the other branch being broken and is nothing of the sort. Check
+with the `schema_migrations` query above; the fix is to **drop and recreate the
+database**, never to touch migrations. Measured 2026-08-19 on N42's branch.
+
+
 **If you are the branch with the unmerged migration, use your own database.**
 `createdb -U vola vola_test_<branch>` and point `TEST_DATABASE_URL` at it. That
 is the whole fix, it costs one command, and it is the only thing that keeps a
@@ -542,8 +554,64 @@ Env vars come from real files, never baked into images: `backend/.env` / `backen
 
 The backend's CORS (`withCORS` in `cmd/api/main.go`) allows multiple comma-separated origins via `WEB_ORIGIN` (not just one) — needed once the Expo web preview (`:8081`) joined `apps/web` (`:3000`) as a second browser-based local client. Only matters for browser clients; native iOS/Android requests aren't subject to CORS at all.
 
+## Verify that a check can fail (hard rule)
+
+**Check that your apparatus can fail — that a mutation applied, that a filter
+matched, that a run happened — before believing what it proves.**
+
+This is one line because it has to be followable at the moment of temptation.
+Everything below is why it earns a section rather than a bullet: on 2026-08-19
+eleven separate instances of it were found in one afternoon, by six sessions, in
+six different parts of the stack. None was a mistake in reasoning. Every one was
+a piece of apparatus returning a confident result while measuring nothing.
+
+- A `perl` mutation whose escaping never matched, so the "pass" measured nothing.
+- A mutation that produced a **compile** error rather than a test failure —
+  also a non-zero exit, also proving nothing about the test.
+- A `-run` filter that silently matched no tests, because `Identification` does
+  not contain `Identify`. Three tests believed run had not run.
+- A downed Colima making every test fail in milliseconds, which is
+  indistinguishable from a mutation being caught. **A red suite is only evidence
+  once the baseline is green in the same session.**
+- A `set -- $pair` in zsh, which does not word-split, so an ancestry check
+  compared a two-SHA string against an empty one and "failed" every time.
+- A test emptied by a legitimate change to the code it covers: tightening a
+  filter left only two of five candidates, so the cap under test could never
+  fire. Still green, no mistake anywhere.
+- Nine guards mutation-tested, and the tenth **did not exist** — every test
+  vector written was valid, and a guard is only exercised by the input it is
+  meant to reject. Testing the guards you wrote says nothing about the one you
+  did not.
+- Two check-digit guards validating arithmetic the code had just performed
+  itself, so they were true by construction.
+- CI silently skipping pushes, so an absent run read exactly like a passing one.
+- A build failing with `PluginError` and **exiting 0** while printing it.
+
+**A stub built from an assumption cannot falsify it.** The sharpest instance:
+every test of an external provider stubbed it with `httptest` returning 200,
+because that is what the author believed the provider did. The suite was green,
+thorough and mutation-tested, and confirming the wrong thing — and review could
+not break the tie either, because the code and its tests agreed perfectly with
+each other. Only a live call could. **Verify an external contract against the
+real service at least once**, and record the measurement next to the code that
+depends on it.
+
+Two corollaries worth stating separately, because both were arrived at the hard
+way:
+
+- **Absence is not evidence.** No checks is not passing; no output is not
+  silence; a grep that finds nothing has found nothing, not proven nothing is
+  there. (`gh run list --branch` will hand you a green run for a stale commit —
+  compare `headSha` against the PR's `headRefOid`.)
+- **A guard whose outcome is redundant still needs a test**, on its *message*
+  if not its effect — otherwise a surviving mutation reads as dead code, and
+  "the tests still pass without it" is a very persuasive argument for deleting
+  something load-bearing.
+
 ## Known gotchas
 
+- **A new native dependency is DECLARED by a merge and INSTALLED by nobody.** #320 added `expo-camera` to `apps/mobile/package.json` and a plugin entry to `app.json`; pulling that `main` onto a machine with an existing `node_modules` fails at config resolution with `PluginError: Failed to resolve plugin for module "expo-camera"`, **and the process exits 0 while printing it.** It reads like a broken checkout and is nothing of the sort — run `pnpm install`. CI never sees this because CI installs from the lockfile on every run, so the gap exists only for people who already have the repo. This sits one step *earlier* in the chain than the existing "first run after a new native dep must be `run:ios`, not `start`" trap: that one is a stale native binary, this one is a missing package.
+- **`apps/mobile/app.json` has THREE silent permission traps, and nothing in the pipeline can see any of them** — they exist only in a built binary, so no test, no lint, no typecheck and no CI job will ever fail on them. (1) `expo-image-picker`'s plugin adds `NSMicrophoneUsageDescription` and Android `RECORD_AUDIO` unless you pass `microphonePermission: false`. (2) `expo-camera`'s plugin does **the same thing** — `withCamera.js` passes it into `createPermissionsPlugin` unless `microphonePermission: false` **and** `recordAudioAndroid: false`. Both matter because `lib/sounds.ts` sets `allowsRecording: false` and its test calls asking for the microphone "indefensible": the runtime guard was honoured while the binary declared the capability anyway, which is what App Store review and the privacy label read. (3) **Both plugins declare `cameraPermission`, and `applyPermissions` resolves that as _last explicit string wins_** — plugins run in order, so whichever sorts later silently replaces the other's justification. They are deliberately given the **same** string rather than ordered, because order-dependence is the hazard: the next plugin added between them moves the answer again. **A permission change only takes effect after a native rebuild**, so merging the fix does not fix an installed binary.
 - **`secrets.txt`** may show up untracked in the repo root containing what looks like a live API key. Never stage or commit it — flag it to the user instead.
 - This Next.js version renamed the `middleware.ts` file convention to `proxy.ts` (same `clerkMiddleware()` export, just a renamed file). Separately: `next dev --hostname 127.0.0.1` breaks when a `proxy.ts`/`clerkMiddleware()` is present — Next's Proxy runtime tries to self-fetch via `localhost` internally and fails (`ECONNRESET`, surfaces as a 500). Use `--port` alone when running concurrent dev instances; never pass `--hostname`.
 - pnpm blocks native build scripts (`sharp`, `unrs-resolver`, etc.) by default — they need explicit `allowBuilds: true` entries in `pnpm-workspace.yaml` or installs fail.
