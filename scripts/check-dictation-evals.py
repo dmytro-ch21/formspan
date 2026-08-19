@@ -80,6 +80,109 @@ def to_tag_category(library_category: str) -> str:
     return LIBRARY_TO_TAG.get(library_category, "control")
 
 
+def _norm(text: str) -> list[str]:
+    return re.sub(r"[^a-z0-9 ]", " ", text.lower().replace("-", " ")).split()
+
+
+def resolve(phrase: str, techniques: dict) -> list[str]:
+    """Which catalog entries a spoken phrase could mean.
+
+    An exact match on a name or alias wins outright — "scissor sweep" IS
+    `Scissor Sweep`, even though seven other entries contain both words.
+    Otherwise every entry containing all the phrase's words is a candidate.
+
+    This is deliberately NOT the app's matcher (there are already three of
+    those, which is the drift this repo keeps arguing about). It is a coarse
+    upper bound on ambiguity, and that is all the check below needs.
+    """
+    words = _norm(phrase)
+    joined = " ".join(words)
+    exact = [
+        t["id"] for t in techniques.values()
+        if " ".join(_norm(t["name"])) == joined
+        or any(" ".join(_norm(a)) == joined for a in (t.get("aliases") or []))
+    ]
+    if len(exact) == 1:
+        return exact
+    if len(exact) > 1:
+        return exact
+    return [
+        t["id"] for t in techniques.values()
+        if all(w in _norm(t["name"] + " " + " ".join(t.get("aliases") or [])) for w in words)
+    ]
+
+
+def check_resolution(case, techniques, errors):
+    """Every expected `technique_id` must be one the DICTATION actually names.
+
+    This is the check the first live run should have had. Three cases claimed a
+    resolution the athlete's words do not support — "swept two people with
+    butterfly" expecting `butterfly-sweep-basic` when twenty-six entries match
+    "butterfly", "drilled the knee cut" expecting `headquarters-knee-cut` when
+    seven match — and one case asserted a technique was absent from the catalog
+    when it was present all along. All four scored a CORRECT model as wrong, and
+    nothing in the repo noticed, because the expectations were each perfectly
+    writable: the old checks only ask whether a tag could exist, never whether
+    the sentence earns it.
+
+    So a resolved tag now has to say which phrase resolved it, and that phrase
+    has to appear in the dictation and to pick out the expected entry.
+    """
+    cid = case.get("id", "<no id>")
+    dictation = case.get("dictation", "").lower()
+
+    for i, tag in enumerate(case.get("expect", {}).get("tags", [])):
+        tid = tag.get("technique_id")
+        if tid is None or tid not in techniques:
+            continue  # a bad id is already reported by check_case
+        phrase = tag.get("resolved_by")
+        if not phrase:
+            errors.append(
+                f"{cid}: tags[{i}] resolves to {tid!r} but does not say which words "
+                f"did it. Add 'resolved_by' — an expectation nobody can check is one "
+                f"nobody can correct."
+            )
+            continue
+        if " ".join(_norm(phrase)) not in " ".join(_norm(dictation)):
+            errors.append(
+                f"{cid}: tags[{i}] claims {phrase!r} resolved it, but the dictation "
+                f"does not contain those words. The model only has the dictation."
+            )
+            continue
+        cands = resolve(phrase, techniques)
+        if tid not in cands:
+            errors.append(
+                f"{cid}: tags[{i}] expects {tid!r}, but {phrase!r} matches "
+                f"{cands[:4] if cands else 'nothing in the catalog'}. A model that "
+                f"answered correctly would be scored wrong."
+            )
+            continue
+        # More than one candidate is allowed only when the athlete said the BASE
+        # technique and the alternatives are qualified variants of it. Bounded at
+        # three because past that the phrase is simply not a resolution.
+        if len(cands) > 1:
+            shortest = min(cands, key=lambda c: len(_norm(techniques[c]["name"])))
+            if len(cands) > 3 or tid != shortest:
+                errors.append(
+                    f"{cid}: tags[{i}] expects {tid!r}, but {phrase!r} matches "
+                    f"{len(cands)} entries ({cands[:4]}). The athlete's words do not "
+                    f"pick one out — this belongs in 'unresolved', which is what the "
+                    f"spec says and what a well-behaved model will do."
+                )
+
+    # The mirror: a case whose premise is that the catalog LACKS something has to
+    # be told when that stops being true. `d-technique-not-in-catalog` named a
+    # technique the catalog had carried all along.
+    absent = case.get("expect_absent_from_catalog")
+    if absent:
+        cands = resolve(absent, techniques)
+        if cands:
+            errors.append(
+                f"{cid}: claims the catalog has no {absent!r}, but it matches "
+                f"{cands[:4]}. The case's whole premise has expired."
+            )
+
+
 def check_case(case, techniques, families, errors):
     cid = case.get("id", "<no id>")
 
@@ -151,6 +254,23 @@ def check_case(case, techniques, families, errors):
                 f"{want_fam!r}, but the case expects position {pos!r}. A mismatch here "
                 f"splits the technique's evidence in the funnel."
             )
+
+    # `accept` is how a tolerance is stated — machine-readable, never inferred
+    # from the prose of `why`. A scorer reading a range out of an English
+    # sentence is guessing at the corpus; an unreadable path here would make the
+    # tolerance silently vanish and score a correct model as wrong.
+    for path, allowed in (case.get("accept") or {}).items():
+        if not isinstance(allowed, list) or not allowed:
+            err(f"accept[{path!r}]: needs a non-empty list of acceptable values")
+        if path in ("kind", "gi", "rounds", "round_minutes", "session_rpe"):
+            continue
+        if not re.fullmatch(r"tags\[\d+\]\.\w+", path):
+            err(
+                f"accept[{path!r}]: not a path the scorer can resolve. Use a scalar "
+                f"field name or 'tags[N].field'."
+            )
+
+    check_resolution(case, techniques, errors)
 
     for i, u in enumerate(exp.get("unresolved", [])):
         if not u.get("phrase", "").strip():

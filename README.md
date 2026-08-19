@@ -88,3 +88,19 @@ pnpm run test:api                            # needs TEST_DATABASE_URL (see abov
 pnpm run build:web && pnpm run build:admin   # slow
 docker build -f backend/Dockerfile backend   # needs Docker/Colima
 ```
+
+### Score a model on the dictation corpus
+
+`evals/bjj-dictation/` pairs 33 dictated sentences with the draft a correct
+extraction returns. The validator (`pnpm run check:evals`) runs in `verify` and
+costs nothing; the runner makes real API calls and is never wired into a check.
+
+```bash
+python3 evals/bjj-dictation/run.py --dry-run              # build the prompt, call nothing
+python3 evals/bjj-dictation/run.py --model gpt-5.6-luna   # ~33 live calls, spends money
+```
+
+It reads `OPENAI_API_KEY` from `backend/.env` (and finds the primary checkout's
+copy when you are in a worktree, which never has one). Results land in
+`evals/bjj-dictation/results/`; the README there carries the current scores and
+what they are and are not evidence of.
