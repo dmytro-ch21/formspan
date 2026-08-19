@@ -43,12 +43,26 @@ func (p Provider) APIKeyEnv() string {
 // No DEFAULT provider and no default model: both are per-feature judgements
 // that stay with the caller, and that is measured rather than asserted.
 //
-// Same provider, same prompt shape, same schema discipline: on the dictation
-// eval (#302) `gpt-5.6-luna` scored a 0.0% invention rate against
-// `gpt-5.4-nano`'s 24.2%, which makes nano unusable there — while nano was
-// perfectly adequate for portion estimates, where the failure it is prone to
-// costs far less. A package-level default would quietly become one feature's
-// opinion imposed on the other, and the number that says so is 24.2%.
+// Same provider, same prompt shape, same schema discipline, opposite verdicts —
+// and measured from BOTH directions, which is what makes it an argument rather
+// than a preference:
+//
+//   - On dictation (#302), `gpt-5.6-luna` scored a 0.0% invention rate against
+//     `gpt-5.4-nano`'s 24.2%. That is the difference between usable and
+//     unusable, and it disqualifies nano for N33 outright.
+//   - On nutrition portions, the same nano was perfectly adequate. Its
+//     characteristic failure there is compressing a stated quantity to
+//     `medium` where luna and Haiku say `high` — a wrong portion size, which
+//     the athlete is looking at and can correct, not an invented food.
+//
+// So the cheap tier is disqualified by one feature and fine for the other, on
+// the same provider. A package-level default map would quietly become one
+// feature's opinion imposed on the other, and it would be a saving for the
+// feature that did not need it and a correctness bug for the one that did.
+//
+// This now has a third dependent: N7's machine-recognition call was chosen for
+// OpenAI on COST against a comparable result (#309) — a third reasoning again,
+// which only works while each feature owns its own tier.
 type Config struct {
 	// Provider selects the backend. Required — the caller owns its own default.
 	Provider Provider

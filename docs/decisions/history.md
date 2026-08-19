@@ -28089,6 +28089,16 @@ worth paying for is a per-feature judgement, and N26 and N33 want different
 defaults on the same provider. A package-level default in `llm` would quietly
 become one feature's opinion imposed on the other.
 
+That is measured from **both** directions now, by two other sessions, which is
+what turns it from a preference into an argument. On dictation, `gpt-5.4-nano`
+invented at 24.2% against `gpt-5.6-luna`'s 0.0% — disqualifying. On nutrition
+portions the same nano was perfectly adequate, its characteristic failure being
+that it compresses a stated quantity to `medium` where luna and Haiku say
+`high`: a wrong portion the athlete is looking at and can correct, not an
+invented food. Same provider, same prompt shape, opposite verdicts. A shared
+default map would be a saving for the feature that did not need it and a
+correctness bug for the one that did.
+
 ### The four constraints the task line named, all carried and all mutation-checked
 
 Each was found rather than designed, which is why they are pinned rather than
