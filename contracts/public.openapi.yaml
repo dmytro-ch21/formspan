@@ -5476,6 +5476,13 @@ paths:
         server-side. An id that was not offered is dropped rather than mapped to
         a neighbour, and a response whose reported `equipment` contradicts its
         own candidates is refused outright.
+
+
+        **Capped at 20 per athlete per rolling 24 hours**, persisted, so the
+        limit survives a restart. Failed and refused calls count too — they
+        spend tokens, and a quota counting only successes would let a client
+        loop on a photo the model keeps declining and pay for every attempt. See
+        the 429 below for how this differs from the shared burst limit.
       requestBody:
         required: true
         content:
@@ -5569,7 +5576,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "429": { $ref: "#/components/responses/RateLimited" }
+        "429":
+          description: >
+            Two different limits answer with this status, and a client should
+            treat them the same way — read `Retry-After` and say when.
+
+
+            **A daily quota**, persisted per athlete: 20 identifications in a
+            rolling 24 hours. The message names the cap and says roughly when
+            the next one frees up, as a RELATIVE duration rather than an
+            instant, because a timestamp is the wrong wall-clock time for
+            everyone outside UTC. The reset is derived from the oldest call
+            still inside the window.
+
+
+            **A burst rate limit**, in-memory and shared with every other
+            authenticated route. It bounds how fast calls can be made; the quota
+            bounds how many there are in a day. Both exist because neither
+            substitutes for the other: without the limiter a client bug spends
+            the whole day's allowance in one second, and without the quota the
+            day has no ceiling at all — the limiter resets on every deploy.
+
+
+            Consistent with `components/responses/RateLimited`, the response
+            does not say which limit was hit; that is in the server log, where
+            it can be tuned from, rather than in the reply where it is free
+            reconnaissance.
+          headers:
+            Retry-After:
+              description: Whole seconds, never below 1.
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: >
+            The quota could not be read. Deliberately a refusal rather than a
+            pass: failing open here would turn a database blip into an unmetered
+            spending window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "503":
           description: >
             The provider is unreachable, or this deploy has no API key
