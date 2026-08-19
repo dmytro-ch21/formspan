@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -157,13 +158,19 @@ func TestARefusalIs422AndAnOutageIs502(t *testing.T) {
 	// Different remedies, so different codes: a refusal means send a better
 	// photo, an outage means try again later. Collapsing them into one status
 	// would make the client tell the athlete the wrong thing.
+	//
+	// `bad output` is 502 and NOT 400, which this test asserted until review.
+	// The input is validated before a token is spent, so an ErrInvalidInput
+	// arriving from Estimate can only mean the MODEL returned something
+	// unusable — an absurd magnitude, a NaN, a nameless item. A 400 tells the
+	// athlete to fix a request that has nothing wrong with it.
 	cases := map[string]struct {
 		err  error
 		want int
 	}{
 		"refusal":     {ErrEstimateRefused, http.StatusUnprocessableEntity},
 		"unavailable": {ErrEstimateUnavailable, http.StatusBadGateway},
-		"bad output":  {ErrInvalidInput, http.StatusBadRequest},
+		"bad output":  {ErrInvalidInput, http.StatusBadGateway},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -306,5 +313,78 @@ func TestAMeterWriteFailureDoesNotCostTheAthleteTheirDraft(t *testing.T) {
 	w := call(t, h, `{"description":"two eggs"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200 — a meter failure lost a paid-for draft", w.Code)
+	}
+}
+
+func TestAnExhaustedQuotaSaysWhenInAWayBothHalvesCanUse(t *testing.T) {
+	// Two audiences, two channels. The athlete reads the message, so it has to
+	// be a RELATIVE duration: the previous version formatted an RFC3339 instant
+	// in UTC, which west of Greenwich is unreadable and names the wrong
+	// wall-clock day. The client needs a machine-readable form, and the
+	// conventions forbid pattern-matching a message — so without a header there
+	// was no contract-legal way for it to act on the reset at all.
+	// NewQuota's third argument is the OLDEST CALL, not the reset — it adds
+	// QuotaWindow itself. Passing a reset time here yields one a full day late,
+	// which is how this test first went wrong and is the same confusion that
+	// bit the handler earlier in this PR. Twenty-one hours ago resets in three.
+	oldest := time.Now().Add(-21 * time.Hour)
+	est := &fakeEstimator{out: goodEstimate()}
+	usage := &memUsage{quotaFn: func(src EstimateSource) Quota {
+		return NewQuota(src, LimitFor(src), &oldest)
+	}}
+	w := call(t, NewEstimateHandler(est, usage), `{"description":"two eggs"}`)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status %d, want 429", w.Code)
+	}
+	ra := w.Header().Get("Retry-After")
+	if ra == "" {
+		t.Fatal("no Retry-After — the client cannot act on the reset without parsing prose")
+	}
+	secs, err := strconv.Atoi(ra)
+	if err != nil || secs <= 0 {
+		t.Fatalf("Retry-After = %q, want a positive whole number of seconds", ra)
+	}
+	if secs > int((3*time.Hour + time.Minute).Seconds()) {
+		t.Fatalf("Retry-After = %d seconds, further away than the reset itself", secs)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, "T") && strings.Contains(body, "Z") {
+		t.Errorf("the message looks like an RFC3339 instant, which has a timezone the athlete does not: %s", body)
+	}
+	if !strings.Contains(body, "about 3 hours") {
+		t.Errorf("message does not say when in words: %s", body)
+	}
+}
+
+func TestHowTheWaitIsSpoken(t *testing.T) {
+	// Coarse on purpose: this is "come back later" versus "come back tomorrow",
+	// and minute-precision on a 24-hour window is false precision.
+	for _, tc := range []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "under a minute"},
+		{90 * time.Second, "2 minutes"},
+		{45 * time.Minute, "45 minutes"},
+		{62 * time.Minute, "about an hour"},
+		{5 * time.Hour, "about 5 hours"},
+		{-time.Second, "under a minute"},
+	} {
+		if got := humaniseWait(tc.d); got != tc.want {
+			t.Errorf("humaniseWait(%s) = %q, want %q", tc.d, got, tc.want)
+		}
+	}
+	// Never zero: a Retry-After of 0 invites the immediate retry just refused.
+	//
+	// Both boundaries, because only one of them discriminates. A NEGATIVE
+	// duration truncates below zero under any comparison, so it passes whether
+	// the guard reads `> 0` or `>= 0` — testing it alone proves nothing. The
+	// case that separates them is a positive duration under one second, which
+	// truncates to exactly 0.
+	for _, d := range []time.Duration{-time.Hour, 0, 500 * time.Millisecond} {
+		if got := retryAfterSeconds(d); got < 1 {
+			t.Errorf("retryAfterSeconds(%s) = %d, want at least 1", d, got)
+		}
 	}
 }

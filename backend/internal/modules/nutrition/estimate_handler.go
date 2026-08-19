@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,8 +86,18 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, ErrQuotaExhausted) {
 			msg := fmt.Sprintf("you have used all %d %s estimates for today", quota.Limit, src)
 			if quota.ResetsAt != nil {
-				msg = fmt.Sprintf("%s — one more is available %s",
-					msg, quota.ResetsAt.UTC().Format(time.RFC3339))
+				// RELATIVE, not an RFC3339 instant. The client shows this
+				// string as written, and the previous version rendered a UTC
+				// timestamp — which west of Greenwich is both unreadable and
+				// the wrong wall-clock DAY. A duration needs no timezone and
+				// cannot be wrong about one.
+				msg = fmt.Sprintf("%s — one more in %s", msg, humaniseWait(quota.ResetsAt.Sub(now)))
+				// The machine-readable half. Conventions forbid clients
+				// pattern-matching a message, so the reset has to leave here as
+				// something other than prose or a client cannot act on it at
+				// all. Retry-After is the standard spelling and needs no
+				// contract change.
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(quota.ResetsAt.Sub(now))))
 			}
 			apihttp.WriteError(w, http.StatusTooManyRequests, apihttp.CodeRateLimited, msg)
 			return
@@ -122,6 +133,15 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if estErr != nil {
+		// LOGGED here, not inside writeEstimateError, because the wrapped
+		// upstream text is the half that never reaches the client — and it
+		// carries the provider request id somebody would need to raise a
+		// support case. The convention is "log server-side, return a generic
+		// message"; only the second half was being done, so a provider outage
+		// on the one endpoint that costs money produced a stream of 502s with
+		// no server-side detail at all.
+		httplog.FromContext(r.Context()).Error("nutrition: estimate failed",
+			"user_id", userID, "source", src, "model", est.Model, "err", estErr)
 		writeEstimateError(w, estErr)
 		return
 	}
@@ -161,7 +181,15 @@ func writeEstimateError(w http.ResponseWriter, err error) {
 		apihttp.WriteError(w, http.StatusUnprocessableEntity, apihttp.CodeInvalidInput,
 			"could not read that as a meal — try describing it instead")
 	case errors.Is(err, ErrInvalidInput):
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, validationMessage(err))
+		// 502, NOT 400 — and the distinction is the whole reason this case is
+		// separate. The request was validated before a token was spent, so an
+		// ErrInvalidInput reaching here can only have come from
+		// ValidateEstimate: the MODEL returned an absurd magnitude, a NaN or a
+		// nameless item. Answering 400 tells the athlete their request was
+		// malformed when there is nothing in it to fix. Retryable, unlike a
+		// refusal, because a garbled response is not deterministic.
+		apihttp.WriteError(w, http.StatusBadGateway, apihttp.CodeInternal,
+			"estimation returned something unusable — try again")
 	case errors.Is(err, ErrEstimateUnavailable):
 		// The wrapped upstream text is deliberately NOT forwarded: it can carry
 		// request ids and prompt fragments, and no raw internal error reaches a
@@ -245,4 +273,36 @@ func parseMultipartEstimate(r *http.Request) (EstimateInput, error) {
 	// there, at our expense rather than the caller's.
 	in.ImageMediaType = http.DetectContentType(raw)
 	return in, nil
+}
+
+// humaniseWait renders a duration the way somebody would say it.
+//
+// Deliberately coarse: this is the difference between "come back later" and
+// "come back tomorrow", and a minute's precision on a 24-hour window is noise
+// that reads as false precision.
+func humaniseWait(d time.Duration) string {
+	if d < time.Minute {
+		return "under a minute"
+	}
+	if d < time.Hour {
+		m := int(d.Round(time.Minute).Minutes())
+		if m == 1 {
+			return "a minute"
+		}
+		return fmt.Sprintf("%d minutes", m)
+	}
+	h := int(d.Round(time.Hour).Hours())
+	if h <= 1 {
+		return "about an hour"
+	}
+	return fmt.Sprintf("about %d hours", h)
+}
+
+// retryAfterSeconds is the header value: whole seconds, never below one, since
+// a Retry-After of 0 invites the immediate retry the quota just refused.
+func retryAfterSeconds(d time.Duration) int {
+	if s := int(d.Seconds()); s > 0 {
+		return s
+	}
+	return 1
 }

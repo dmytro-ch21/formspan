@@ -8489,11 +8489,14 @@ paths:
 
         **Quotas are per athlete, per path, over a rolling 24 hours** — 20 text
         and 5 photo, counted separately so the dearer path cannot exhaust the
-        cheap one. (Measured, a photo costs about 1.4x a description rather
-        than the ~50x originally assumed: the JSON schema and system prompt are
-        ~1,500 input tokens on every call and dominate the image's ~1,100.)
+        cheap one. (Measured on the shipped model, a photo costs about 1.1x a
+        description rather than the ~50x originally assumed: the JSON schema and
+        system prompt are sent on every call and dominate the image's ~500
+        tokens. The ratio moves with the model — it was ~1.4x on Haiku 4.5.)
         Failed and refused calls count, because they cost tokens too.
-        Exhaustion is `429` with `rate_limited`.
+        Exhaustion is `429` with `rate_limited`, carrying a `Retry-After`
+        header in seconds; the reset is also stated in the message as a
+        relative duration, never as a timestamp.
       tags: [Nutrition]
       security:
         - ClerkBearerAuth: []
@@ -8540,7 +8543,10 @@ paths:
                   estimate: { $ref: '#/components/schemas/MealEstimate' }
                   quota: { $ref: '#/components/schemas/EstimateQuota' }
         '400':
-          description: No input, an over-long description, or an unreadable image.
+          description: >
+            No input, an over-long description, or an unreadable image — all
+            detected before the model is called. Only the request can produce
+            this; a bad response from the model is `502`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8553,24 +8559,40 @@ paths:
           description: >
             The request was well formed and the model could not read it as
             food. Distinct from 400 — the client's remedy is a better photo or
-            a description, not a corrected field.
+            a description, not a corrected field. Distinct from 502 too: a
+            refusal is deterministic, so retrying the same input only spends
+            the quota again.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '429':
-          description: The daily cap for this path is used up.
+          description: >
+            The daily cap for this path is used up. `Retry-After` gives the
+            wait in whole seconds; the message repeats it as a relative
+            duration. Neither is ever an absolute timestamp — the athlete's
+            timezone is not something this endpoint knows.
+          headers:
+            Retry-After:
+              description: Whole seconds until one more estimate is available. Never zero.
+              schema: { type: integer, minimum: 1 }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '502':
-          description: The model provider is unreachable. Retryable.
+          description: >
+            The model provider is unreachable, OR it answered with something
+            unusable — an absurd magnitude, a NaN, an item with no name. Both
+            are retryable and neither is the client's fault, which is why a
+            bad response is not reported as `400`: the request was already
+            validated before a token was spent, so there is nothing in it to
+            correct.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '503':
           description: >
-            Estimation is not configured on this deploy (no API key). Every
-            other nutrition route is unaffected.
+            Estimation is not configured on this deploy (no key for the
+            selected provider). Every other nutrition route is unaffected.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

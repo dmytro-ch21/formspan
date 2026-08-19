@@ -23,12 +23,19 @@ import (
 type openAICompleter struct {
 	client openai.Client
 	model  string
+	// maxTokens is the output ceiling. A field rather than the constant used
+	// directly so a test can set it low enough to actually PROVOKE truncation
+	// against the live API — otherwise the `length` branch below is reasoned
+	// about and never run, which is how it came to carry a comment describing a
+	// budget that did not exist.
+	maxTokens int64
 }
 
 func newOpenAICompleter(apiKey, model string) *openAICompleter {
 	return &openAICompleter{
-		client: openai.NewClient(option.WithAPIKey(apiKey)),
-		model:  model,
+		client:    openai.NewClient(option.WithAPIKey(apiKey)),
+		model:     model,
+		maxTokens: estimateMaxTokens,
 	}
 }
 
@@ -52,6 +59,18 @@ func (o *openAICompleter) complete(ctx context.Context, in EstimateInput) (strin
 			openai.SystemMessage(estimateSystemPrompt),
 			openai.UserMessage(parts),
 		},
+		// The output ceiling, and it matters more here than on the other
+		// backend: this is the default provider, and its model is billed for
+		// reasoning tokens it never shows — measured at ~726 completion tokens
+		// against ~1,337 input, so output is most of the bill. Without a cap a
+		// pathological input is bounded only by the model's own maximum, on the
+		// one endpoint in this API where a request turns directly into money.
+		//
+		// `MaxCompletionTokens`, NOT the deprecated `MaxTokens`: only the former
+		// covers reasoning tokens, so the latter would cap the visible answer
+		// and leave the expensive half unbounded — a cap that reads as present
+		// and is not.
+		MaxCompletionTokens: openai.Int(o.maxTokens),
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
 				JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
@@ -83,10 +102,14 @@ func (o *openAICompleter) complete(ctx context.Context, in EstimateInput) (strin
 	if choice.Message.Refusal != "" {
 		return "", "", ErrEstimateRefused
 	}
-	// `length` means the token budget ran out mid-object. Reported as a refusal
-	// rather than as unavailable because a retry is deterministic — same input,
-	// same truncation, same cost — so telling the client to try again would
-	// bill them for a doomed request.
+	// `length` means the response hit `MaxCompletionTokens` mid-object. Reported
+	// as a refusal rather than as unavailable because a retry is deterministic —
+	// same input, same truncation, same cost — so telling the client to try
+	// again would bill them for a doomed request.
+	//
+	// This branch was unreachable-in-practice until the cap above existed: with
+	// no budget set, `length` fires only at the model's own maximum, which this
+	// prompt cannot approach. The comment claimed a budget that was not there.
 	if choice.FinishReason == "length" {
 		return "", "", fmt.Errorf("%w: response was cut off", ErrEstimateRefused)
 	}

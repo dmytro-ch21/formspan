@@ -36,9 +36,10 @@ import (
 // describe.
 
 // EstimateSource is which path produced a draft. Recorded on the usage row so
-// the two quotas can be counted separately: a photo is the dearer path (~1.3x
-// a description, measured — see quota.go, where an earlier ~50x claim is
-// corrected), so one shared counter would let it exhaust the cheap one.
+// the two quotas can be counted separately: a photo is the dearer path, though
+// only just — ~1.1x a description on the shipped model, measured, against the
+// ~50x an early version of this comment claimed. See quota.go for the numbers
+// and for why the split is now a precaution rather than the cost control.
 type EstimateSource string
 
 const (

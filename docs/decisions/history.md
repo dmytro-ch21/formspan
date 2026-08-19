@@ -27549,6 +27549,132 @@ the other file - so the failing test says which file to open.
   there until it is. Note the variable to set has changed with the default.
 
 
+## 2026-08-19 — Closing the review on N26: a cap, a cursor, and four wrong numbers
+
+Both reviewers ran against the previous day's provider switch and each returned
+one blocking finding. Both were real, both were reproduced by hand before being
+fixed, and each was a gap between what the code *said* and what it did.
+
+### The OpenAI path had no output ceiling
+
+`estimateMaxTokens` was wired into the Anthropic client only. That was harmless
+while Anthropic was the default and became the opposite the moment OpenAI took
+over, because the shipped model is billed for reasoning tokens it never shows —
+output is most of the bill. Nothing bounded a call but the model's own maximum,
+on the one endpoint in this API where a request turns directly into money.
+
+Two comments were false while it was missing, which is what made it invisible:
+`openai.go` said `length` meant the token budget ran out, when with no budget
+set that branch fires only at the model maximum; and `prompt.go` said the
+constant "bounds the response" when it bounded one backend.
+
+The cap is a **field** rather than the constant used directly, so the truncation
+branch can be provoked instead of reasoned about. Verified live both ways: at
+8,192 a normal call answers in 796 bytes of JSON, and at 16 it returns
+`ErrEstimateRefused` through the `length` branch. That live test is not
+committed — it needs a key, and this suite has no skips — so what ships is the
+offline guard that the constructor sets the cap at all. A zero there is not a
+missing cap but a broken one: the field is sent regardless, so
+`max_completion_tokens: 0` reaches the API and every call fails.
+
+### Low confidence never moved the cursor
+
+`portion_confidence` exists so the client can send the athlete straight to the
+quantity field — the field's own doc comment says so, and this screen's
+docstring says "the servings field is where the eye is sent". Neither was true.
+There was no `ref`, no `autoFocus` and no `focus()` anywhere in the file; `low`
+rendered as a line of muted grey text in the same colour as the assumption
+directly above it. The whole point of carrying the field to the client was
+being spent on a tint.
+
+Now the first low-confidence row's Servings input takes focus as the draft
+mounts — the first only, since two autofocused inputs race and the winner is
+whichever mounts last rather than whichever matters. The warning also moved
+from `textMuted` to `warn`, so the one line asking for attention no longer
+matches the line that does not. Not `danger`: an uncertain portion is a request
+to look, not a failure.
+
+### The row-identity bug underneath it
+
+Rows were tracked by object identity and keyed by index, and both are wrong for
+a list edited and trimmed while it is being written. Editing a field replaces
+the object, so the save loop's `r !== row` filter stopped matching and left a
+logged row on screen — a retry then logged it twice, the exact duplicate the
+drop-as-it-lands design exists to prevent. An index-derived key separately
+remounted every row after a removal, dismissing the keyboard mid-edit. One
+minted id fixes both, and the fields and Remove control are now frozen while
+saving, since the loop iterates a copy taken at tap time.
+
+### Numbers that were wrong in four places
+
+The `~1.3x` photo-cost ratio appeared in `estimate.go`, `estimate_test.go` and
+migration `000060`, and matched neither measurement — Haiku was 1.4x, the
+shipped model is ~1.1x. The contract still carried the Haiku-era token counts
+outright. All corrected, the migration included, since a landed migration is
+awkward to amend. The figure now says which model it belongs to, because the
+ratio moves with the model and a bare number invites this again.
+
+### Three smaller things, each a stated convention not being followed
+
+- **The model's failure was translated but never logged.** The convention is
+  log server-side, return a generic message; only the second half was done, so
+  a provider outage produced a stream of 502s with no server-side detail — and
+  the wrapped text is the half carrying the provider request id somebody would
+  need to raise a support case.
+- **A garbled model response was reported as `400`.** Input is validated before
+  a token is spent, so an `ErrInvalidInput` arriving after the call can only
+  mean the MODEL returned an absurd magnitude, a NaN or a nameless item.
+  Telling the athlete their request was malformed points them at nothing they
+  can fix. It is `502` now, retryable, and the contract says so.
+- **The 429 stated its reset only as a UTC RFC3339 instant, inside the
+  message.** West of Greenwich that is unreadable and names the wrong
+  wall-clock day, and since the conventions forbid clients pattern-matching a
+  message there was no legal way for the client to act on it at all. Now a
+  `Retry-After` header in whole seconds, never zero, plus a relative duration
+  in the prose. A duration needs no timezone and cannot be wrong about one.
+
+### And the disclosure claimed something this repo cannot verify
+
+"The photo is sent to OpenAI to be read, and is not stored — by VOLA or by
+them." The first half is backed by the code. The second is a claim about
+another company's retention policy that nothing here can check, in the one
+string whose entire purpose is being a specific factual statement. It now says
+what VOLA controls and stops there.
+
+`backend/.env.example` also gained the note that changing `ESTIMATE_PROVIDER`
+has a second half: the Go test pins the *default* against that string, and
+cannot see an env var set in a deployment.
+
+### What the mutation pass caught this time
+
+Four of five new guards went red on the first attempt. The fifth did not, and
+the reason is worth keeping: the mutation was `s > 0` to `s >= 0` in
+`retryAfterSeconds`, and the test only fed it a negative duration — which
+truncates below zero under either form, so it could never discriminate. The
+case that separates them is a positive duration under one second. **A test can
+cover the right line and still not test the change**, and picking the input
+that distinguishes the two versions is the whole skill.
+
+A second one, found while writing a test rather than by mutation:
+`NewQuota`'s third argument is the OLDEST CALL, not the reset — it adds the
+window itself. Passing a reset time yields one a full day late. That is the
+same confusion this PR hit once already.
+
+### Open questions this leaves
+
+- **Still no photograph of a real plate.** Unchanged and now the oldest open
+  item on this feature.
+- **`autoFocus` is unverified on a device.** It typechecks and the logic is
+  simple, but focus and keyboard behaviour are exactly what a typecheck cannot
+  see, and nothing in this feature has been run on a phone.
+- **The quota is still soft under concurrency.** The check precedes the call
+  and the row is written after, so N simultaneous requests at `remaining = 1`
+  all pass. Raised in review, deliberately not fixed: closing it means writing
+  the row first and reconciling on failure, which is a larger change than the
+  overshoot justifies. Recorded so the next person does not rediscover it as a
+  bug.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

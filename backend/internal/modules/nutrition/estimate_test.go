@@ -190,8 +190,10 @@ func TestAnOversizeOrWrongTypeImageIsRejected(t *testing.T) {
 }
 
 func TestSourceDecidesWhichQuotaIsSpent(t *testing.T) {
-	// The reason the two are counted apart: a photo is the dearer path
-	// (measured ~1.3x, not the ~50x first assumed — see quota.go).
+	// The reason the two are counted apart: a photo is the dearer path, by
+	// ~1.1x on the shipped model rather than the ~50x first assumed. Small
+	// enough that the split is a precaution against a runaway photo loop, not
+	// a cost control — see quota.go.
 	if got := (EstimateInput{Description: "two eggs"}).Source(); got != SourceText {
 		t.Fatalf("text input reported %q", got)
 	}

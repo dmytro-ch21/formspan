@@ -98,20 +98,30 @@ export default function DescribeMealScreen() {
   const photograph = useCallback(
     async (fromCamera: boolean) => {
       if (busy) return;
-      const perm = fromCamera
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        setError(
-          fromCamera
-            ? 'VOLA needs the camera to photograph a meal.'
-            : 'VOLA needs access to your photos to read one.',
-        );
+      // Guarded, because the caller is `void photograph(...)`: a throw from
+      // the permission prompt or the picker (already open, OS-level failure)
+      // would otherwise be an unhandled rejection, and the observable is a
+      // button that does nothing at all with no error shown.
+      let picked: ImagePicker.ImagePickerResult;
+      try {
+        const perm = fromCamera
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          setError(
+            fromCamera
+              ? 'VOLA needs the camera to photograph a meal. You can turn it on in Settings.'
+              : 'VOLA needs access to your photos to read one. You can turn it on in Settings.',
+          );
+          return;
+        }
+        picked = fromCamera
+          ? await ImagePicker.launchCameraAsync({ quality: 1 })
+          : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+      } catch (err) {
+        setError(messageFor(err));
         return;
       }
-      const picked = fromCamera
-        ? await ImagePicker.launchCameraAsync({ quality: 1 })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
       if (picked.canceled || !picked.assets[0]) return;
 
       setBusy(true);
@@ -169,7 +179,7 @@ export default function DescribeMealScreen() {
           // confirmed, whoever typed it first.
           source_food_id: null,
         });
-        setRows((rs) => rs.filter((r) => r !== row));
+        setRows((rs) => rs.filter((r) => r.key !== row.key));
       }
       requestSync('meal estimated');
       router.back();
@@ -182,8 +192,16 @@ export default function DescribeMealScreen() {
     }
   }, [userId, rows, saving, date, meal, router]);
 
-  const updateRow = (i: number, patch: Partial<DraftRow>) =>
-    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const updateRow = (key: string, patch: Partial<DraftRow>) =>
+    setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+
+  /**
+   * The first row the model was unsure about, which is where the cursor goes.
+   *
+   * Only the FIRST: two autofocused inputs race, and the winner is whichever
+   * mounts last rather than whichever matters most.
+   */
+  const firstUncertain = rows.findIndex((r) => r.portion_confidence === 'low');
 
   return (
     <KeyboardAwareScrollView
@@ -249,9 +267,9 @@ export default function DescribeMealScreen() {
           where a photograph of somebody's kitchen went. If the provider
           changes, this string changes in the same PR. */}
       <Text style={styles.disclosure}>
-        The photo is sent to OpenAI to be read, and is not stored — by VOLA or
-        by them. Describing the meal in words works nearly as well and sends no
-        picture at all.
+        The photo is sent to OpenAI to be read. VOLA never stores it — not the
+        picture, not a copy. Describing the meal in words works nearly as well
+        and sends no picture at all.
       </Text>
       <View style={styles.photoRow}>
         <Pressable
@@ -301,7 +319,7 @@ export default function DescribeMealScreen() {
           {estimate.note ? <Text style={styles.note}>{estimate.note}</Text> : null}
 
           {rows.map((row, i) => (
-            <View key={`${row.name}-${i}`} style={styles.row}>
+            <View key={row.key} style={styles.row}>
               <Text style={styles.rowName}>{row.name}</Text>
               <Text style={styles.rowServing}>{row.serving_label}</Text>
 
@@ -322,30 +340,40 @@ export default function DescribeMealScreen() {
                 <Field
                   label="Servings"
                   value={row.servingsText}
-                  onChange={(v) => updateRow(i, { servingsText: v })}
+                  onChange={(v) => updateRow(row.key, { servingsText: v })}
                   testID={`describe-servings-${i}`}
+                  autoFocus={i === firstUncertain}
+                  editable={!saving}
                 />
                 <Field
                   label="Calories"
                   value={row.kcalText}
-                  onChange={(v) => updateRow(i, { kcalText: v })}
+                  onChange={(v) => updateRow(row.key, { kcalText: v })}
                   testID={`describe-kcal-${i}`}
+                  editable={!saving}
                 />
                 <Field
                   label="Protein (g)"
                   value={row.proteinText}
-                  onChange={(v) => updateRow(i, { proteinText: v })}
+                  onChange={(v) => updateRow(row.key, { proteinText: v })}
                   testID={`describe-protein-${i}`}
+                  editable={!saving}
                 />
               </View>
 
+              {/* Disabled while saving, because the loop drops rows as they
+                  land: removing one from under it would let a row the athlete
+                  deleted reach the log anyway, since the loop iterates a copy
+                  taken at tap time. */}
               <Pressable
-                onPress={() => setRows((rs) => rs.filter((_, j) => j !== i))}
+                onPress={() => setRows((rs) => rs.filter((r) => r.key !== row.key))}
                 accessibilityRole="button"
                 accessibilityLabel={`Remove ${row.name}`}
                 testID={`describe-remove-${i}`}
+                disabled={saving}
+                accessibilityState={{ disabled: saving }}
               >
-                <Text style={styles.remove}>Remove</Text>
+                <Text style={[styles.remove, saving && styles.off]}>Remove</Text>
               </Pressable>
             </View>
           ))}
@@ -381,23 +409,36 @@ function Field({
   value,
   onChange,
   testID,
+  autoFocus = false,
+  editable = true,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   testID: string;
+  /**
+   * Sends the cursor here as the draft mounts. This is what
+   * `portion_confidence` reaching the client is FOR — the field carried a
+   * `low` all the way to the screen and then only tinted some text, which is
+   * one step above not sending it. `KeyboardAwareScrollView` scrolls the
+   * focused input clear of the keyboard, so the row stays visible.
+   */
+  autoFocus?: boolean;
+  editable?: boolean;
 }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
-        style={styles.fieldInput}
+        style={[styles.fieldInput, !editable && styles.fieldInputOff]}
         value={value}
         onChangeText={onChange}
         keyboardType="decimal-pad"
         inputMode="decimal"
         accessibilityLabel={label}
         testID={testID}
+        autoFocus={autoFocus}
+        editable={editable}
       />
     </View>
   );
@@ -416,14 +457,31 @@ function Field({
  * is `0` and passes a `>= 0` guard. Found by review.
  */
 type DraftRow = EstimatedItem & {
+  /**
+   * A stable identity, minted once when the draft arrives.
+   *
+   * Rows used to be tracked by OBJECT IDENTITY and rendered under an
+   * index-derived key, and both are wrong for a list that is edited and
+   * trimmed while it is being written. Editing a field replaces the object, so
+   * the save loop's `r !== row` filter stopped matching and left the row on
+   * screen — a retry then logged it a second time, which is the exact
+   * duplicate the drop-as-it-lands design exists to prevent. And an
+   * index-derived key re-keys every row after a removal, remounting their
+   * inputs and dismissing the keyboard mid-edit. One id fixes both.
+   */
+  key: string;
   servingsText: string;
   kcalText: string;
   proteinText: string;
 };
 
+let draftKeySeq = 0;
+
 function toDraft(it: EstimatedItem): DraftRow {
+  draftKeySeq += 1;
   return {
     ...it,
+    key: `draft-${draftKeySeq}`,
     servingsText: String(it.servings),
     kcalText: String(Math.round(it.kcal)),
     proteinText: String(Math.round(it.protein_g)),
@@ -508,10 +566,15 @@ const styles = StyleSheet.create({
   rowName: { fontSize: 15, fontWeight: '700' },
   rowServing: { fontSize: 12, color: vola.textDim },
   assumption: { fontSize: 12, color: vola.textMuted, fontStyle: 'italic' },
-  uncertain: { fontSize: 12, color: vola.textMuted, fontWeight: '600' },
+  // `warn`, not `textMuted` and not `danger`: it sat in the same grey as the
+  // assumption text directly above it, which made the one line asking for
+  // attention indistinguishable from the line that does not. Not `danger`
+  // either — an uncertain portion is not a failure, it is a request to look.
+  uncertain: { fontSize: 12, color: vola.warn, fontWeight: '600' },
   fields: { flexDirection: 'row', gap: 10, marginTop: 6 },
   field: { flex: 1, gap: 4 },
   fieldLabel: { fontSize: 11, color: vola.textDim, fontWeight: '600' },
+  fieldInputOff: { opacity: 0.5 },
   fieldInput: {
     borderWidth: 1,
     borderColor: vola.line,

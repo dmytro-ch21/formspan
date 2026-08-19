@@ -239,3 +239,16 @@ func TestTheShippedDefaultIsPinnedBecauseTheAppNamesIt(t *testing.T) {
 		t.Errorf("default OpenAI model = %q, want %q — chosen on measured calibration, see the N26 history entry", got, "gpt-5.6-luna")
 	}
 }
+
+func TestTheOpenAIBackendShipsWithAnOutputCap(t *testing.T) {
+	// A zero here is not a missing cap, it is a BROKEN one: the field is sent
+	// either way, so `max_completion_tokens: 0` reaches the API and every call
+	// fails. The live behaviour (a normal call fits, a tiny cap yields
+	// ErrEstimateRefused through the `length` branch) was verified by hand
+	// against gpt-5.6-luna; it is not a committed test because it needs a key
+	// and this suite has no skips.
+	c := newOpenAICompleter("k", DefaultModels[ProviderOpenAI])
+	if c.maxTokens != estimateMaxTokens {
+		t.Fatalf("output cap = %d, want %d", c.maxTokens, estimateMaxTokens)
+	}
+}

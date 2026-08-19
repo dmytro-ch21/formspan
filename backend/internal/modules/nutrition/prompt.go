@@ -9,12 +9,17 @@ import "strings"
 // instructions. A provider-specific prompt would make "which model is better"
 // unanswerable.
 
-// estimateMaxTokens bounds the response.
+// estimateMaxTokens bounds the response, on BOTH backends.
 //
-// On providers where thinking shares the budget with the response, a value
-// sized to the JSON alone truncates mid-object and yields a parse failure that
-// reads like a model fault. Sized with headroom for that reason even though the
-// default model does not think.
+// It said "the response" while being wired into only one of them, which is the
+// kind of comment that makes a gap invisible — the Anthropic path had a cap and
+// the OpenAI path, which became the default, did not.
+//
+// Sized with headroom rather than to the JSON, because on providers that reason
+// before answering the hidden tokens share this budget: a value fitted to the
+// visible object truncates mid-JSON and surfaces as a parse failure that reads
+// like a model fault. Measured headroom on the default model is about 11x — it
+// answers in ~726 completion tokens including reasoning.
 const estimateMaxTokens = 8192
 
 // estimateSystemPrompt states the boundaries a schema cannot.

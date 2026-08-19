@@ -2,9 +2,10 @@
 --
 -- This exists for ONE reason: `POST /v1/nutrition/estimate` is the only route
 -- in this API where a caller's loop spends real money. A photo is the dearer
--- path -- measured at ~1.3x a text description, not the ~50x an earlier
--- version of this comment claimed -- which is why the two are counted apart,
--- though the split is a precaution rather than the main cost control.
+-- path, but only by ~1.1x a text description on the shipped model -- not the
+-- ~50x an earlier version of this comment claimed -- which is why the two are
+-- counted apart, though the split is a precaution rather than the main cost
+-- control. (The ratio moves with the model: it was ~1.4x on Haiku 4.5.)
 --
 -- WHY A ROW PER CALL RATHER THAN A COUNTER. A stored counter has to be reset,
 -- and a reset is a scheduled job this repo does not have and should not grow

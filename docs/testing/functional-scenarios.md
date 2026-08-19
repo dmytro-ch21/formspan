@@ -7283,6 +7283,15 @@ this section.
 - **A refusal is 422, an outage is 502**, and they say different things: send a
   better photo versus try again later. Collapsing them tells the athlete the
   wrong thing.
+- **A garbled model response is 502, never 400.** The request is validated
+  before a token is spent, so nothing arriving after the call can be the
+  caller's fault. A scenario asserting 400 here would be asserting the bug.
+- **An exhausted quota carries `Retry-After` in seconds AND states the wait in
+  words.** The header is the only contract-legal way for a client to act on the
+  reset, since messages are not contract. The prose must be a relative duration
+  — a scenario should assert there is no timestamp in it, because a UTC instant
+  passes a "does it say when" check while naming the wrong day for anyone west
+  of Greenwich.
 - **No upstream error text ever reaches the client** — it can carry request ids
   and prompt fragments.
 - **A deploy with no key for the selected provider serves 503 on this route only.** Every
@@ -7337,6 +7346,16 @@ history entry for results.
 
 **Happy path**
 
+- **A low-confidence row focuses its Servings field when the draft arrives** —
+  the first such row only. This is what `portion_confidence` reaching the
+  client is for; a scenario that only checks the warning text is *shown* passes
+  against a build that renders a tint and moves no cursor, which is what
+  shipped until review.
+- **Logging a draft twice logs it once.** Edit a field while the save is
+  running, then let a later item fail and retry: only the un-logged remainder
+  may be written. Rows are dropped by minted id, not object identity, and
+  editing replaces the object — a scenario that does not edit mid-save passes
+  against the duplicate.
 - **A repeat meal is two taps.** Open `Food`, tap `+ Add` on a slot, tap a
   recent — logged, sheet dismissed, the remaining figure on Today has moved.
   Nothing about that sequence may require a network round trip.
