@@ -34,8 +34,8 @@
  *    package's `node_modules` — and it is unexported build output that can move
  *    between patch releases.
  *
- * So: start the server, wait for the file, stop the server. Measured at ~6
- * seconds locally. It is a supported entry point doing the thing it normally
+ * So: start the server, wait for the file, stop the server. Measured at 3.5s
+ * locally and 5.5s on a CI runner. It is a supported entry point doing the thing it normally
  * does, which is the most durable of the options above.
  *
  * ## What it deliberately does
@@ -57,7 +57,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -67,6 +67,27 @@ const TYPES = join(MOBILE, '.expo', 'types', 'router.d.ts');
 const PORT = '8099';
 const TIMEOUT_MS = 120_000;
 const POLL_MS = 250;
+/**
+ * What a COMPLETE file ends with — see the generator's own template.
+ *
+ * Existence is not completion, and that distinction is the one path back to
+ * silent green. `@expo/router-server` composes the whole ~17KB declaration and
+ * writes it with a single `writeFileSync`, so between `open(…, 'w')` and the
+ * write landing there is a real, if microscopic, window where the file exists
+ * and is EMPTY. An empty `.d.ts` is valid TypeScript that declares nothing:
+ * `Href` falls back to a loose string, every route literal passes, and CI stays
+ * green — restoring precisely the silence this script exists to end.
+ *
+ * A truncation mid-union would fail closed (the declaration is one long line
+ * and would not parse), so the empty case is the dangerous one. Waiting for the
+ * closing brace covers both, and costs one read of a small file.
+ *
+ * The same race is re-armed by the generator's 1s-debounced watcher: a second
+ * regeneration in flight when the kill lands can truncate a file already
+ * reported as good.
+ */
+const COMPLETE_SUFFIX = '}';
+const MIN_BYTES = 200;
 
 /**
  * Removed first, so a stale file cannot be mistaken for a fresh one.
@@ -81,9 +102,20 @@ function clearStaleTypes() {
   mkdirSync(dirname(TYPES), { recursive: true });
 }
 
+/** Written, and finished being written. */
+function typesAreComplete() {
+  if (!existsSync(TYPES)) return false;
+  const text = readFileSync(TYPES, 'utf8');
+  return text.length > MIN_BYTES && text.trimEnd().endsWith(COMPLETE_SUFFIX);
+}
+
 function waitForTypes(child) {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
+    // Declared before the handlers that close over it. Not a live bug — the
+    // executor runs synchronously and `exit` can only fire from a later tick —
+    // but the previous order read like one, which invites a worse "fix".
+    let timer;
     let log = '';
     const collect = (chunk) => {
       log += chunk.toString();
@@ -94,14 +126,22 @@ function waitForTypes(child) {
     // If the server dies before the file lands, say so with its output rather
     // than waiting out the full timeout for a process that is already gone.
     child.on('exit', (code) => {
-      if (!existsSync(TYPES)) {
+      if (!typesAreComplete()) {
         clearInterval(timer);
         reject(new Error(`Metro exited (code ${code}) before writing types.\n${log}`));
       }
     });
 
-    const timer = setInterval(() => {
-      if (existsSync(TYPES)) {
+    // Without this, a spawn failure (no `npx` on PATH) is an uncaught
+    // exception: still a non-zero exit, but with a raw stack instead of the
+    // message below, and the promise never settles.
+    child.on('error', (err) => {
+      clearInterval(timer);
+      reject(new Error(`Could not start Metro: ${err.message}\n${log}`));
+    });
+
+    timer = setInterval(() => {
+      if (typesAreComplete()) {
         clearInterval(timer);
         resolve(Date.now() - startedAt);
       } else if (Date.now() - startedAt > TIMEOUT_MS) {
@@ -145,7 +185,16 @@ try {
   }
 }
 
+/*
+  Exit EXPLICITLY rather than letting the event loop drain.
+
+  Draining requires every process in the group to die and release the piped
+  stdio. A Metro worker that traps SIGTERM and lingers would otherwise hang this
+  script forever — which wedges `verify` locally, and in CI wedges the Mobile
+  job until GitHub's 6-hour default, since no step here sets `timeout-minutes`.
+  It fails closed either way; this makes it fail quickly.
+*/
 if (failure) {
   console.error(`\nCould not generate route types.\n${failure.message}`);
-  process.exit(1);
 }
+process.exit(failure ? 1 : 0);

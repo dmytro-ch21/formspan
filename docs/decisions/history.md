@@ -26206,6 +26206,12 @@ Both were found by mutating the source back to the bug and watching the test
 - **The honest upgrade is generating the typed routes in CI** and letting `tsc`
   do this properly, which would cover the computed cases too. That is a build
   change, not a test, and it is the real fix this one stands in for.
+- **`app/__tests__/` screens are registered as routes**, so the generated union
+  now contains `/__tests__/youScreen.test` and friends, and pushing to one
+  typechecks. Pre-existing — that is where the screen tests live — but the typed
+  routes make the junk newly visible. Deliberately NOT given a task id here: an
+  id filed inside an unmerged PR is invisible to every other session (the N19
+  collision), so whoever picks it up should allocate one with their own claim.
 - **`apps/web` has the same class of exposure** and no equivalent guard; nothing
   here looked at it.
 
@@ -26419,7 +26425,8 @@ Three alternatives were tested rather than reasoned about, and all three failed:
   `require` it without reaching through another package's `node_modules` — and
   it is unexported build output that can move between patch releases.
 
-So the script starts the server, waits for the file, and stops it: **~3.5s**, a
+So the script starts the server, waits for the file, and stops it: **3.5s
+locally, 5.5s measured on the CI runner** — a
 supported entry point doing what it normally does. It kills the process *group*,
 because Metro spawns workers and killing only the parent leaves them holding the
 port — which turns the next run into a mysterious timeout rather than an error.
@@ -26448,7 +26455,7 @@ could develop. Defence in depth against the new mechanism, at 40ms.
   wholly invented prefix assembled at runtime is not.
 - **`apps/web` has the same class of exposure** — Next.js typed routes are
   opt-in and not enabled — and nothing here looked at it.
-- **CI now starts a Metro server during typecheck.** It is ~3.5s locally and
+- **CI now starts a Metro server during typecheck.** It is 5.5s there and
   headless, but it is a heavier step than `tsc` alone, and if a future runner
   cannot bind a port this fails closed rather than open. That is the right way
   round, and it is a new way for the Mobile job to fail.
