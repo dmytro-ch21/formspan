@@ -28341,13 +28341,40 @@ would "fix" it back and re-invent tonnage on every set.
 - **An optional note field is now `N39`**, deliberately not folded in here. The
   motivating case is the kettlebell/dumbbell RDL pair above: a note is what would
   explain that difference where an athlete reads it, rather than in a test
-  comment. Its design is genuinely open — per-exercise or per-correction,
-  admin-authored or athlete-authored, and where it surfaces — and the user's word
-  was "maybe", so nothing should be built against a guess.
+  comment. **Its design and its open questions live on the N39 line itself**, and
+  this entry deliberately does not restate them — see the correction below for
+  why.
+
+  The id **collided**: two sessions allocated N39 within about ten minutes, which
+  is the failure that already cost two sessions an N19. The convention settled it
+  without argument, because it is written down — **an id is claimed by a PR
+  TITLE**, and #312 had it there while this branch had it only inside a diff.
+  Worth recording that the rule worked; a convention usually only gets noted when
+  it fails. What it did not prevent is the window between allocating an id and
+  claiming it, exactly as invisible as the convention already admits.
 - **`renegade` is still unpinned**, unchanged and correct. It holds two
   implements but rows one per rep, and no one has ruled it. The whole point of
   this entry is that a ruling is what converts a guess into something a test may
   assert.
+
+### Correction, same day: this entry restated a design that then moved
+
+As merged, the N39 bullet above said the note field's design was "genuinely
+open" and quoted the user's word as "maybe" — listing per-exercise versus
+per-correction, admin- versus athlete-authored, and where it surfaces as
+unanswered. That was true when it was written and **false within the hour**: the
+answer is per-exercise, admin-authored, shown when present.
+
+Nothing was wrong with the reporting. What was wrong was the *shape*: an entry
+that copies a live question out of the line that owns it will go stale silently,
+because nothing links the copy to the original and the copy reads as settled
+fact. History entries are dated and permanent by design, which is exactly what
+makes them the wrong place to hold a moving answer. **Point at the line; do not
+mirror it.** The bullet now does.
+
+Kept rather than quietly rewritten, because the failure is more instructive than
+the fix and it is a shape this file invites: every entry here is written at the
+moment of most confidence about work that is still moving.
 
 
 ## Open items / known gaps as of this entry
