@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -527,21 +529,12 @@ func (r *PostgresRepository) Describe(ctx context.Context, resourceID, sharerID 
 // `ok == false` means not visible to this caller, which for a direct request is
 // indistinguishable from not existing and must stay that way.
 func (r *PostgresRepository) Copy(ctx context.Context, userID, id string) (*Workout, error) {
-	tx, err := r.pool.Begin(ctx)
+	newID, ok, err := database.CopySelf(ctx, r.pool, r.CopyTo, id, userID)
 	if err != nil {
-		return nil, fmt.Errorf("workout: copy begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	newID, ok, err := r.CopyTo(ctx, tx, id, userID, userID)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("workout: copy: %w", err)
 	}
 	if !ok {
 		return nil, ErrNotFound
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("workout: copy commit: %w", err)
 	}
 	// Read back through the ordinary path, so the response is what a subsequent
 	// GET returns rather than a hand-assembled near-copy of it.
