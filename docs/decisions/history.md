@@ -30903,11 +30903,62 @@ backend job runs `go test -p 1 -timeout 3m ./...` directly rather than
 `pnpm run test:api`. That was found on the script's very first run, when it
 reported a correct setup as broken.
 
+### What review then defeated, including a hole that was already open
+
+An adversarial pass was asked specifically to break it, and broke it three ways.
+Two were hypothetical edits; **one was a live hole in the shipped chain**.
+
+**The live one:** `verify` contained `node scripts/validate_palette.mjs` and
+`node scripts/generate_icons.mjs --check` as **bare commands, not
+`package.json` scripts** — so they were not gates, so nothing required them to
+be in the chain, and neither appears anywhere in CI. They ran in exactly one
+place in the whole repo: the line this check exists to protect. Deleting both
+left the check printing the identical reassuring `verify chain ok` and exiting
+0. N66's own failure mode, surviving N66's fix, on the two links least
+protected by anything else. They are named scripts now (`check:palette`,
+`check:icons`) and covered like everything else.
+
+**A single `#` truncated the chain while every name stayed readable.** `#` makes
+the rest of a shell line a comment, so the chain stops there **and exits 0** —
+while `script_deps` regexes over the raw string and still reports every gate
+after it as covered. One inserted character turned twenty-six gates into five
+with nothing red anywhere. That is categorically worse than the `|| true` case
+the docstring already conceded, which neuters one link rather than all of them,
+and it is the likeliest artifact of a hand-edit on a 1,300-character line. A `#`
+in any reachable script body is now an error.
+
+**The CI check failed OPEN, while the docstring claimed it failed safe.**
+`gate_runs_in_ci` substring-matched the raw workflow, so a **commented-out** CI
+step still counted as CI running the gate — meaning `build:web` could be removed
+from CI entirely and this stayed green, because the words were still on the
+page. Comment lines are stripped before matching now, and a command shorter than
+twelve characters no longer counts, since `true`, `go vet ./...` and
+`go build ./...` all already appear in that file.
+
+Two suggestions were worth taking as well. `routes:` joined `GATE_PREFIXES`: it
+is a generator rather than a check, but `typecheck:mobile` runs it first and
+without it Expo Router's typed routes are never generated — route literals then
+type-check against a loose `Href` and everything passes, which is exactly how
+N32 shipped a button pointing at a route that never existed. And a `MIN_GATES`
+floor, because renaming a gate out of the prefixes retires it silently: the
+check simply stops seeing it, which is the same shape as everything else here.
+
+All five are now tested in the failing direction, on top of the original nine.
+
 ### What this leaves open
 
-- **It reads names, not behaviour.** A link that is present but neutered — `||
-  true` appended, say — passes. The check knows something invokes the gate; it
-  cannot know the gate still means anything.
+- **It reads names, not behaviour**, and the limit is wider than it first
+  looks. A link neutered with `|| true` passes. So does replacing a gate's BODY
+  with `true` — `"lint:web": "true"` is green — and that form is likelier
+  because it is shorter. The check knows something invokes the gate; it cannot
+  know the gate still means anything.
+- **`ALLOWED_OUTSIDE` can re-enable the rejected "or CI" rule one gate at a
+  time.** Any gate CI also runs can be excluded with a two-line diff, and the
+  reason string is not checked against anything. Review is the only barrier.
+  That is visible in a diff and so is left to review — but the claim that the
+  exclusion list is structurally different from `or CI` is weaker than the
+  argument above makes it sound, and it is worth knowing which part is
+  mechanism and which is manners.
 - **`verify` is still one line.** The better long-term shape is a
   `scripts/verify.mjs` or a newline-delimited list, so two additions in
   different places merge cleanly instead of conflicting as one line. This check

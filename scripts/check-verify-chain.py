@@ -50,10 +50,19 @@ somebody had to write, and each still required to run in CI.
 
 ## What it does not promise
 
-Stdlib-only and syntactic, matching its siblings. It reads names, not
-behaviour: a link that is present but neutered (`|| true` appended, say) passes
-here. It also cannot know that a gate is *meaningful* — only that something
-invokes it.
+Stdlib-only and syntactic, matching its siblings. **It reads names, not
+behaviour**, and that limit is wider than it first looks:
+
+- A link present but neutered — `|| true` appended — passes.
+- A gate's BODY replaced with `true` passes. `"lint:web": "true"` is green
+  here, and that form is likelier than the one above because it is shorter.
+- It cannot know a gate is *meaningful*, only that something invokes it.
+
+What it now does catch, after review found each of these defeating the first
+version: a `#` truncating the chain, a commented-out CI step counting as CI
+coverage, a bare `node …` link that is in the chain but is not a script and so
+was protected by nothing, a renamed gate silently leaving the gate set, and a
+generator prerequisite (`routes:mobile`) being dropped from inside another gate.
 """
 
 import json
@@ -68,7 +77,26 @@ CI = ROOT / ".github/workflows/ci.yml"
 # What counts as a gate. Deliberately broad: the finding was about ANY gate
 # silently disappearing, and `lint:web` vanishing is exactly as bad as
 # `check:python` vanishing. `dev:*` and one-off tools are not gates.
-GATE_PREFIXES = ("check:", "lint:", "typecheck:", "test:", "fmt:", "vet:", "build:")
+GATE_PREFIXES = (
+    "check:", "lint:", "typecheck:", "test:", "fmt:", "vet:", "build:",
+    # `routes:` is a GENERATOR, not a check — and it is load-bearing anyway.
+    # `typecheck:mobile` runs it first, and without it Expo Router's typed
+    # routes are never generated, so route literals type-check against a loose
+    # `Href` and everything passes (N32 shipped a button pointing at a route
+    # that never existed, exactly this way). Deleting that prerequisite leaves
+    # `typecheck:mobile` present, green and silently weaker. Found in review.
+    "routes:",
+)
+
+# The gate count may not silently fall. Renaming a gate out of GATE_PREFIXES —
+# `check:python` to `python:syntax`, say — and dropping its link retires it
+# with nothing objecting, because the check only ever sees the gates that are
+# still named like gates. Same floor `check-tasks-integrity.py` puts on ids.
+# Raise this deliberately when a gate is genuinely retired.
+MIN_GATES = 27
+
+# A CI command shorter than this substring-matches by accident.
+MIN_CI_COMMAND_LEN = 12
 
 # Gates that legitimately run in neither place need a REASON, not just an
 # entry. An exclusion list you can append to silently is the same hole this
@@ -100,6 +128,18 @@ def reachable_from(entry: str, scripts: dict[str, str]) -> set[str]:
     return seen
 
 
+def strip_comments(text: str) -> str:
+    """Drop whole-line YAML comments before matching.
+
+    The first version substring-matched the RAW workflow, so a step commented
+    out still counted as CI running it — meaning `build:web` could be removed
+    from CI entirely and this check would stay green, because the words were
+    still on the page. That is failing OPEN, and the docstring claimed it
+    failed safe. Both are fixed. Found in review.
+    """
+    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+
+
 def gate_runs_in_ci(gate: str, body: str, ci_text: str) -> bool:
     """Whether CI runs this gate — by alias OR by the command behind it.
 
@@ -116,7 +156,10 @@ def gate_runs_in_ci(gate: str, body: str, ci_text: str) -> bool:
     if f"pnpm run {gate}" in ci_text:
         return True
     command = re.sub(r"^\s*cd\s+\S+\s*&&\s*", "", body).strip()
-    return bool(command) and command in ci_text
+    # A short body substring-matches too easily — `true`, `go vet ./...` and
+    # `go build ./...` all appear in this workflow already, so a future
+    # placeholder-length exclusion would match for free.
+    return len(command) >= MIN_CI_COMMAND_LEN and command in ci_text
 
 
 def main() -> int:
@@ -126,12 +169,39 @@ def main() -> int:
         return 1
 
     covered = reachable_from("verify", scripts)
-    ci_text = CI.read_text() if CI.exists() else ""
+    ci_text = strip_comments(CI.read_text()) if CI.exists() else ""
     if not ci_text:
         print(f"{CI} is missing or empty; cannot check CI coverage.", file=sys.stderr)
         return 1
 
+    # A `#` makes the rest of a shell line a comment, so the chain stops there
+    # and exits 0 — while `script_deps` regexes over the raw string and still
+    # reports every name after it as covered. One inserted character turns
+    # twenty-six gates into five with nothing red anywhere, and it is the most
+    # plausible artifact of a hand-edit on a 1,300-character line. Categorically
+    # worse than the `|| true` case, which neuters one link rather than all of
+    # them. Found in review.
+    commented = sorted(n for n in covered | {"verify"} if "#" in scripts.get(n, ""))
+    if commented:
+        print("these scripts contain a `#`, which silently truncates the rest "
+              "of the command:\n", file=sys.stderr)
+        for name in commented:
+            print(f"  {name}  ->  {scripts[name][:70]}", file=sys.stderr)
+        print("\nEverything after it stops running while the script still exits 0.",
+              file=sys.stderr)
+        return 1
+
     gates = sorted(n for n in scripts if n.startswith(GATE_PREFIXES))
+    if len(gates) < MIN_GATES:
+        print(
+            f"only {len(gates)} gates found, expected at least {MIN_GATES}.\n"
+            "A gate renamed out of GATE_PREFIXES is retired silently — the check "
+            "stops seeing it rather than reporting it.\nIf a gate was deliberately "
+            "removed, lower MIN_GATES in the same commit.",
+            file=sys.stderr,
+        )
+        return 1
+
     if not gates:
         # Never correct, and it would otherwise pass vacuously — the same
         # empty-comparison hole the telemetry parity check closes.
