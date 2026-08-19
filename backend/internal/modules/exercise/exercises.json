@@ -2860,9 +2860,9 @@
       "kettlebell"
     ],
     "load_type": "weight_reps",
-    "is_unilateral": false,
+    "is_unilateral": true,
     "load_mode": "per_side",
-    "implements": 2,
+    "implements": 1,
     "instructions": "",
     "media": []
   },
@@ -5184,7 +5184,7 @@
       "dumbbells"
     ],
     "load_type": "weight_reps",
-    "is_unilateral": false,
+    "is_unilateral": true,
     "load_mode": "per_side",
     "implements": 2,
     "instructions": "",
