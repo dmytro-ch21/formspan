@@ -30839,6 +30839,132 @@ screen is where that gets found out, and it has not been found out yet.
 **#322 has not merged**, so the endpoint this calls is not on `main` and nothing
 here has been exercised against a running server — only against its contract.
 
+## 2026-08-19 — A gate that stops running while the build stays green (N66)
+
+`verify` is one ~1,300-character `&&` chain in `package.json` that every task
+appends to. Two branches touching it always conflict, and always in a way where
+taking one side looks like a correct resolution while silently deleting the
+other's link.
+
+**A dropped link is not a broken build. It is a gate that stops running while
+`verify` still exits 0.** Nothing goes red. Nothing is missing from the tree.
+The script is still there and still passes when invoked by hand. The next person
+to find out is whoever ships the bug it existed to catch.
+
+That is worse than the `README.md` merge trap it resembles — that one loses a
+sentence, this one loses a guarantee — and it is not hypothetical: it nearly
+happened on N50, where `main` had added `check:tasks` at the front of the chain
+while the branch added `check:telemetry-parity` in the middle.
+
+`scripts/check-verify-chain.py` asserts every gate is reachable from `verify`,
+transitively, unless named in `ALLOWED_OUTSIDE` with a reason — and each
+excluded gate must still be run by CI, so an exclusion cannot quietly become a
+gate that runs nowhere.
+
+### The first design passed every case it was written for
+
+It asserted "reachable from `verify` **OR** from CI". Under it, deleting
+`check:telemetry-parity` from the chain was **green**. So was deleting
+`check:tasks`. So was deleting `lint:web`. All three, because **CI independently
+runs each of them** and CI mirrors `verify` almost exactly — the `or CI` clause
+swallowed exactly the failure the script exists to detect.
+
+It was caught by running the check in the failing direction, not by reading it.
+The reasoning that produced it is worth recording because it is the tolerant,
+sensible-looking generalisation: `build:web` genuinely is outside `verify` on
+purpose, so "or CI" reads like the correct way to accommodate that. It is also
+the escape hatch that makes the check unable to fail.
+
+The exclusion list is the right shape instead — three names, each with a reason
+somebody had to write, each still required to run in CI, and a stale entry
+naming a script nobody has is itself an error, because an exclusion that guards
+nothing looks exactly like a considered decision.
+
+### Verification
+
+Nine failure modes, each seen red: five different links deleted from the chain
+(`check:telemetry-parity`, `check:tasks`, `lint:web`, `typecheck:mobile`,
+`test:mobile`), a new gate nobody wired up, an exclusion CI does not run either,
+a stale exclusion, and **its own link removed** — the check requires itself.
+
+One of those nine started as a bad test rather than a bug: the
+exclusion-not-in-CI case first used `check:python`, which CI genuinely does run,
+so the checker was right and the test was wrong. Worth noting because a
+failing-direction test that fails for the wrong reason is the same
+false-confidence problem in the other direction.
+
+Coverage is transitive: `typecheck:mobile` runs `routes:mobile`, so a gate
+invoked inside another gate counts without being its own link. Checking only the
+top-level chain would cry wolf on a correct setup, and a checker that cries wolf
+is one somebody eventually silences.
+
+`gate_runs_in_ci` matches the alias **or the command behind it**, because the
+backend job runs `go test -p 1 -timeout 3m ./...` directly rather than
+`pnpm run test:api`. That was found on the script's very first run, when it
+reported a correct setup as broken.
+
+### What review then defeated, including a hole that was already open
+
+An adversarial pass was asked specifically to break it, and broke it three ways.
+Two were hypothetical edits; **one was a live hole in the shipped chain**.
+
+**The live one:** `verify` contained `node scripts/validate_palette.mjs` and
+`node scripts/generate_icons.mjs --check` as **bare commands, not
+`package.json` scripts** — so they were not gates, so nothing required them to
+be in the chain, and neither appears anywhere in CI. They ran in exactly one
+place in the whole repo: the line this check exists to protect. Deleting both
+left the check printing the identical reassuring `verify chain ok` and exiting
+0. N66's own failure mode, surviving N66's fix, on the two links least
+protected by anything else. They are named scripts now (`check:palette`,
+`check:icons`) and covered like everything else.
+
+**A single `#` truncated the chain while every name stayed readable.** `#` makes
+the rest of a shell line a comment, so the chain stops there **and exits 0** —
+while `script_deps` regexes over the raw string and still reports every gate
+after it as covered. One inserted character turned twenty-six gates into five
+with nothing red anywhere. That is categorically worse than the `|| true` case
+the docstring already conceded, which neuters one link rather than all of them,
+and it is the likeliest artifact of a hand-edit on a 1,300-character line. A `#`
+in any reachable script body is now an error.
+
+**The CI check failed OPEN, while the docstring claimed it failed safe.**
+`gate_runs_in_ci` substring-matched the raw workflow, so a **commented-out** CI
+step still counted as CI running the gate — meaning `build:web` could be removed
+from CI entirely and this stayed green, because the words were still on the
+page. Comment lines are stripped before matching now, and a command shorter than
+twelve characters no longer counts, since `true`, `go vet ./...` and
+`go build ./...` all already appear in that file.
+
+Two suggestions were worth taking as well. `routes:` joined `GATE_PREFIXES`: it
+is a generator rather than a check, but `typecheck:mobile` runs it first and
+without it Expo Router's typed routes are never generated — route literals then
+type-check against a loose `Href` and everything passes, which is exactly how
+N32 shipped a button pointing at a route that never existed. And a `MIN_GATES`
+floor, because renaming a gate out of the prefixes retires it silently: the
+check simply stops seeing it, which is the same shape as everything else here.
+
+All five are now tested in the failing direction, on top of the original nine.
+
+### What this leaves open
+
+- **It reads names, not behaviour**, and the limit is wider than it first
+  looks. A link neutered with `|| true` passes. So does replacing a gate's BODY
+  with `true` — `"lint:web": "true"` is green — and that form is likelier
+  because it is shorter. The check knows something invokes the gate; it cannot
+  know the gate still means anything.
+- **`ALLOWED_OUTSIDE` can re-enable the rejected "or CI" rule one gate at a
+  time.** Any gate CI also runs can be excluded with a two-line diff, and the
+  reason string is not checked against anything. Review is the only barrier.
+  That is visible in a diff and so is left to review — but the claim that the
+  exclusion list is structurally different from `or CI` is weaker than the
+  argument above makes it sound, and it is worth knowing which part is
+  mechanism and which is manners.
+- **`verify` is still one line.** The better long-term shape is a
+  `scripts/verify.mjs` or a newline-delimited list, so two additions in
+  different places merge cleanly instead of conflicting as one line. This check
+  makes the current shape survivable rather than fixing it, which is the same
+  trade the parity checkers make.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
