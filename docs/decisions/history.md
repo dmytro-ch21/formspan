@@ -30526,6 +30526,127 @@ may appear only once**: `**N7 (backend)**` parses as `N7`, so adding
 would miss a real duplicate where one copy gained a qualifier, which is the
 worse trade — split with a new id.
 
+## 2026-08-19 — The web reporter, and a shared package that was built and rejected (N50)
+
+N43 shipped the reporter on mobile and left `apps/web` with none. This is the
+other half: the same buffer, a browser transport, a reporting error boundary,
+and a **parity check** standing in for the shared package that was the obvious
+answer and turned out to be the wrong one here.
+
+### The package was built, not dismissed
+
+The steer — and my own first instinct — was a shared workspace package over a
+~400-line copy. So it was built: `packages/telemetry`, package.json, tsconfig,
+the buffer moved in, mobile's dependency and imports rewired. `packages/*` is
+already declared in `pnpm-workspace.yaml`, and pnpm linked it correctly first
+try.
+
+Then jest died with `SyntaxError: Cannot use import statement outside a module`.
+Two attempts followed and both were wrong in an instructive way:
+
+- **`transformIgnorePatterns` is the wrong lever.** pnpm links by symlink, so
+  the real path of the package holds no `node_modules` segment at all — that
+  pattern was never what excluded it.
+- **A package-local `babel.config.js` did not fix it either**, though the
+  diagnosis behind it was right: `babel-jest` resolves config relative to the
+  file it is transforming, and `apps/mobile`'s config cannot reach outside its
+  own directory.
+
+Two bundlers down with three untested ahead — Metro's `watchFolders` for a
+symlinked package (and `typecheck:mobile` boots Metro, so that is not optional),
+turbopack's `transpilePackages`, and a vitest alias. Three carefully-reasoned
+config files, for one shared file, with **zero precedent**: `packages/*` has
+been declared and empty this whole time.
+
+The tree was fully restored before anything else was written.
+
+### The third option, which is stronger rather than merely cheaper
+
+The hazard was never that two files exist. It is **drift** — and on `redact()`
+specifically, drift is a privacy control rotting silently: an allowlist that
+gains a key on one platform and not the other is one platform shipping a field
+the other considers private, with nothing looking wrong on either side.
+
+This repo already answers that **four times**: `check:grip-parity`,
+`check:rate-parity`, `check:brand-copies`, `check:python` — all scripts, all in
+`verify`, all in CI. `check-rate-parity.py` mirrors constants between **Go and
+TypeScript**, which is a strictly harder version of this problem and has been
+carrying its weight for months.
+
+So: duplicate the buffer, and add `check:telemetry-parity`. That is the
+**stronger** guarantee of the two, not a concession — a shared package is safe
+only while four build systems keep agreeing, whereas a failing check cannot be
+defeated by a bundler config change, and it turns drift into a red build rather
+than an implicit property nobody re-verifies.
+
+The checker compares three things: the **redaction allowlist** name by name and
+order-sensitively (with an empty parse raising rather than passing, since two
+empty lists compare equal and would report parity over the one thing it exists
+to guard), the **tuning constants** by name, and the **whole shared body**
+verbatim from the first `Severity` declaration onward. The file headers
+deliberately differ — each explains its own side — so they are excluded.
+
+**It was made to fail on purpose five ways before being trusted**: web gaining
+an allowlisted key, the same keys in a different order, a diverged constant, a
+guard silently changed deep in the body, and the allowlist emptied. All five go
+red. A parity checker that cannot fail is worse than none, because it looks like
+the drift is being watched.
+
+### The transport was never shareable, and that is the load-bearing argument
+
+This would have held even if every bundler had cooperated. React Native routes
+unhandled rejections through `promise/setimmediate/rejection-tracking` into
+`ExceptionsManager`, bypassing `ErrorUtils` entirely; a browser has real
+`unhandledrejection` and `error` events. **That difference is not an
+implementation detail a good abstraction hides — it is the exact thing each
+platform's correctness depends on**, and N43's worst defect was hooking the
+browser's answer on the phone, where it installed nothing and did so silently. A
+shared transport would have made that mistake structural rather than accidental.
+
+So each app owns its own `telemetryClient`, and both own the same buffer.
+
+### What web has that mobile does not, and vice versa
+
+- **`keepalive: true`** on the flush, so a send started as the tab closes is
+  still delivered — the one real advantage the browser has here, and why there
+  is no separate beacon path. Flushed on `visibilitychange` → `hidden` rather
+  than `beforeunload`, which mobile browsers frequently never fire.
+- **`app/error.tsx`**, a route error boundary that REPORTS. Nothing in
+  `window.addEventListener('error')` sees a React render crash — React catches
+  it at the boundary — so without this file the most visible failure an athlete
+  can hit is invisible to the reporter. It sends Next's `digest`, which is the
+  only thing that joins a production render error to the server log, since the
+  real message and stack are withheld from the client on purpose.
+- Mobile keeps the `ErrorUtils` + rejection-tracking pair, which has no browser
+  equivalent.
+
+### Verification
+
+The four transport guards mutation-tested red and restored: the loss tally
+evaporating, sign-out not clearing the buffer, install not being idempotent, and
+— found BY the mutation rather than by reading — **`keepalive` being entirely
+unguarded**, which every other test stayed green through. That last one is the
+argument for mutating each line rather than trusting a green suite: the line was
+doing real work with nothing watching it.
+
+30 buffer tests plus 16 transport tests on web; `verify` exit 0 with the parity
+check inside it; zero lint warnings added.
+
+### What this leaves open
+
+- **Nothing here has run in a real browser.** The handlers are wired and unit
+  tested against stubs, but no unhandled rejection has been thrown in Chrome
+  and watched arrive on the Health screen. Same caveat N43 carries, and the
+  same reason it matters: a handler that installs nothing is invisible to a
+  test that does not run the real runtime.
+- **The buffer's tests are duplicated too, and are NOT parity-checked.** That is
+  deliberate — a test file that must stay byte-identical is a second thing to
+  keep in step for no extra safety, since the guarantee comes from the sources
+  agreeing and each suite proving its own copy behaves. Worth revisiting if the
+  two suites ever diverge in what they cover rather than how they are written.
+- **`packages/*` is still declared and empty.** The next person who wants a
+  shared package will hit the same four bundlers; this entry is the map of
+  where it breaks, not an argument that it can never work.
 
 ## Open items / known gaps as of this entry
 

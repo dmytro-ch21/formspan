@@ -230,6 +230,9 @@ jobs:
       # An expected tag naming a technique id that does not exist — or writing a
       # category the technique does not derive — scores a CORRECT model as wrong,
       # permanently, and nothing else in the repo would notice.
+      - name: Telemetry buffer parity
+        run: pnpm run check:telemetry-parity
+
       - name: Dictation eval corpus
         run: python3 scripts/check-dictation-evals.py
 

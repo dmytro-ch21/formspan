@@ -9213,3 +9213,69 @@ statement about the food. Exercise them by stubbing the `outcome`:
   moment and passes with the guard removed.
 - **The empty-state element must not exist at all** when no answer is current.
   An empty `Text` node is findable and reads as a message.
+## Client telemetry on web (N50, `apps/web` — `lib/telemetry.ts`, `lib/telemetryClient.ts`, `app/error.tsx`)
+
+The buffer is a **deliberate duplicate** of mobile's, so its scenarios are the
+same ones listed under N43 — coalescing, the cap, the ring, level gating, the
+allowlist, and the honesty counters. Do not re-derive them; run the same
+assertions against the web copy.
+
+What follows is only what differs.
+
+### The parity check is itself a test surface
+
+- **`pnpm run check:telemetry-parity` must FAIL when the copies diverge.** Five
+  divergences worth pinning, each verified by hand before the check was
+  trusted: web gaining an allowlisted key mobile lacks (the privacy case), the
+  same keys in a different order, a diverged tuning constant, a guard changed
+  deep in the shared body, and the allowlist emptied.
+- **An empty allowlist must ERROR, not pass.** Two empty lists compare equal, so
+  a parser that quietly found nothing would report parity over the one thing the
+  check exists to guard.
+- The check is in `verify` and in CI's `Scripts (Python)` job. If it is ever
+  removed or made non-blocking, the two copies are unguarded.
+
+### The browser handlers
+
+- `error` and `unhandledrejection` listeners are registered — **and unlike React
+  Native, the browser really has both.** (RN's silent no-op on
+  `unhandledrejection` was N43's worst defect; this is the platform where that
+  name works.)
+- **Registered once**, despite React strict mode running effects twice in
+  development. Stacked listeners capture every error twice and make the counts a
+  lie.
+- `visibilitychange` → `hidden` triggers a flush, so a tab going away still
+  reports. Assert `beforeunload` is NOT relied on — mobile browsers frequently
+  never fire it.
+- **The request is sent with `keepalive: true`.** Assert this explicitly: a
+  mutation removing it left every other test green, so the line was doing real
+  work with nothing guarding it.
+- `installTelemetry` on the server (no `window`) is a no-op, not a crash — the
+  component that calls it is mounted in the root layout.
+
+### The route error boundary (`app/error.tsx`)
+
+- A component that throws during render renders the boundary **and reports**.
+  This is the case `window.addEventListener('error')` cannot see, because React
+  catches it at the boundary — so without this file the most visible failure an
+  athlete can hit is invisible to the reporter.
+- The report carries Next's `digest` as `code`. In production the real message
+  and stack are withheld from the client, so the digest is the only thing that
+  joins the event to the server log.
+- The digest is shown on screen as a reference. Assert it is an opaque id and
+  that no stack or file path is rendered.
+- `reset()` re-renders the segment rather than reloading the page.
+
+### Cross-account
+
+- Same as mobile: buffer an event, sign out, sign in as someone else, flush, and
+  assert **nothing** is posted — then that the second athlete's own events go
+  under the second athlete's token.
+
+### Needs a real browser
+
+- **Throw an un-awaited rejecting promise in Chrome and watch it reach the
+  Health screen.** Nothing in the unit suite can stand in for this: a handler
+  that installs nothing is invisible to a test that does not run the real
+  runtime, which is exactly how the broken mobile version survived a green
+  suite.

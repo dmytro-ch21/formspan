@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+
+import { Telemetry } from "./Telemetry";
 import { clerkAppearance, clerkLocalization } from "./clerkAppearance";
 import { Barlow, Barlow_Condensed } from "next/font/google";
 import "./globals.css";
@@ -52,7 +54,13 @@ export default function RootLayout({
         <head>
           <ThemeScript />
         </head>
-        <body>{children}</body>
+        <body>
+          {/* Mounted at the root so the handlers are live before any page
+              renders — the first error a session can produce is one thrown
+              while the first page is still mounting. Renders nothing. */}
+          <Telemetry />
+          {children}
+        </body>
       </html>
     </ClerkProvider>
   );
