@@ -8713,3 +8713,95 @@ Domain: N44, the phone half of N7. Reached from the add-exercise screen mid-sess
 **Not covered yet**
 - **Never verified on a device.** The screen has not rendered; Expo web cannot bundle this app, so it needs a Simulator or a real phone. The permission change additionally needs a **rebuild** to take effect, since it alters generated native config rather than JS.
 - **No persisted quota.** Spend is bounded only by N7's server-side rate limit (20 per 30 minutes, in-memory, resets on deploy).
+## Food catalog (N42) — `/v1/nutrition/catalog`
+
+The shared, searchable catalog a text search or a scanned barcode resolves
+into. Distinct from `/v1/nutrition/foods`, which is an athlete's own saved
+list — scenarios that confuse the two will pass against the wrong resource.
+
+### Happy path
+
+- Searching `chicken breast` returns the plain breast row **first**, not
+  `Lunchmeat, chicken breast, sliced`. Both match; ranking is what separates
+  them, and this is the case that proves ranking is doing anything.
+- Searching `courgette` finds the zucchini row (general synonym), and
+  `garbanzo beans` finds chickpeas (per-row alias). Two different mechanisms —
+  assert both, or a regression in one hides behind the other.
+- `oats`, `eggs`, `prawns` all resolve despite the catalog storing the
+  singular.
+- `GET /v1/nutrition/catalog/{id}` returns one food; an unknown slug is 404.
+- `GET /v1/nutrition/catalog/coverage` reports a non-zero food count, at least
+  one market, and category counts that **sum to the total**.
+
+### Edge cases & errors — the availability half
+
+Each of these must produce a DIFFERENT `outcome`. A test that only asserts
+"the list is empty" passes against every bug this feature exists to prevent.
+
+- A food the catalog genuinely lacks (`skyr`, `haggis`) → `200`, empty
+  `foods`, `outcome: no_match`, and `coverage` present.
+- A query with no searchable term (`%`, `!!!`) → `outcome: query_unusable`.
+  **Not** `no_match`: nothing was asked, so nothing can be concluded.
+- Against an **unseeded** catalog → `outcome: catalog_empty`. This is the one
+  worth building a fixture for: it is a server-side failure, and reporting it
+  as `no_match` blames the athlete for our broken deploy.
+- `?market=` naming a region with no stock → `outcome: market_not_covered`.
+- A single `%` must **not** return the whole catalog. The exercise search
+  regressed exactly this way and handed back all 762 rows.
+- `?limit=5000` is clamped to 100 and answered, not rejected; `total` still
+  reports the full match count so a client can say "showing 20 of 63".
+- Paging with `limit=1` across several offsets never repeats or skips a row.
+
+### Barcode — `/v1/nutrition/catalog/barcode/{barcode}`
+
+Three outcomes, and the whole point is that they stay apart:
+
+- A known barcode → `200` with `food`, `source: off`, and `cached: false` on
+  the first call, `cached: true` on the second. The macros must be **identical**
+  across those two calls — the cache columns are `NUMERIC(_, 2)`, so an
+  unrounded fetch answers differently from the row it just wrote.
+- A barcode the provider does not have → `404` `not_found`. **Verify no
+  negative cache**: the same barcode must go upstream again on a later call,
+  or a food added upstream tomorrow stays "missing" forever.
+- The provider unreachable (stub a timeout or a 500) → `503` `unavailable`,
+  **never 404**. A network failure reported as "not in the database" tells an
+  athlete their food does not exist because DNS blinked.
+- A provider response that is `status: 1` but carries **no name or no energy
+  value** → `404`, not a food with `kcal: 0`. A confident zero prompts no
+  correction.
+- `abc`, or 5 digits, or 15 → `400` `invalid_input`.
+
+### Auth/security
+
+- Every catalog route requires auth; unauthenticated → `401`.
+- The catalog is not user-scoped, so there is no cross-user leak to test —
+  but assert that a catalog response never carries a `user_id`, which would
+  mean the personal and shared stores had been conflated.
+- `source` is server-owned. No client may set `seed`/`admin`.
+
+### Regression trap
+
+- **`upsertSQL`'s `WHERE food_catalog.source = 'seed'` is the ownership
+  rule.** Drop it and the next deploy silently reverts every console edit. Its
+  mirror matters too: a row nobody edited must **still** receive deploy
+  corrections, or the guard is indistinguishable from a broken upsert. Test
+  both directions.
+- **`ORDER BY` must be total.** Without the `f.id` tie-break, paging over a
+  similarity sort repeats rows on one page and skips them on the next — a bug
+  no assertion on page one can see.
+- **`strpos` returns 0 when a word is absent.** The `NULLIF` around it is what
+  stops non-matching rows sorting first; without it the ranking is inverted.
+- **Open Food Facts answers an unknown barcode with HTTP 404** carrying its own
+  JSON envelope (`{"status":0,"status_verbose":"product not found"}`) — that is
+  the ordinary unknown-scan case. It answers **200 with `"status": 0`** for a
+  *malformed* code, which `ValidBarcode` rejects before the call. It has also
+  been observed returning `status: 1` for invented codes. **The body is the
+  signal; 200 and 404 are both answers.** Accepting only 200 shipped once and
+  turned every unknown packet into a 503 — a phone told to retry forever, and
+  N41's `not_found` branch never firing.
+- **The two kinds of 404 are told apart by whether the body parses.** A 404 from
+  a proxy, a WAF or a wrong route carries HTML and must stay `unavailable`. Test
+  both, or the fix for the bug above reintroduces it from the other side.
+- **A stub cannot falsify the assumption it was built from.** The suite that
+  missed the 404 bug was green and thorough and stubbed 200 throughout. Any test
+  asserting provider semantics is only as good as the last live measurement.

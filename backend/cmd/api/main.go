@@ -24,6 +24,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/featureflag"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/feed"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/food"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/friend"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/notification"
@@ -347,6 +348,25 @@ func main() {
 			"model", exercise.ResolveIdentifyModel(identifyProvider, os.Getenv("IDENTIFY_MODEL")))
 	}
 	identifyHandler := exercise.NewIdentifyHandler(machineIdentifier)
+	// The food catalog: text search, coverage, and barcode lookup.
+	//
+	// The barcode resolver is wired unconditionally because Open Food Facts
+	// needs no key — unlike the estimator above, which is why that one is
+	// nil-checked and this one is not. What it DOES need is a real
+	// User-Agent: Open Food Facts rate-limits anonymous clients harder, so
+	// FOOD_LOOKUP_USER_AGENT identifies this deploy. An empty value falls back
+	// to a sensible default rather than sending Go's, because a lookup that
+	// only fails in production is the worst way to learn this.
+	//
+	// Passing nil here instead would be a supported state, not a broken one:
+	// the coverage endpoint reports `barcode.enabled: false` and lookups
+	// return 503 `unavailable` rather than 404, so a client can tell "this
+	// build cannot look packets up" from "this packet is unknown".
+	foodHandler := food.NewHandler(food.NewService(
+		food.NewPostgresRepository(pool),
+		food.NewOpenFoodFacts(os.Getenv("FOOD_LOOKUP_USER_AGENT")),
+		logger,
+	))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
@@ -388,6 +408,17 @@ func main() {
 	// the global limiter, because this is the one route where a loop costs
 	// real money rather than CPU.
 	mux.Handle("POST /v1/nutrition/estimate", verifier.RequireAuth(http.HandlerFunc(estimateHandler.Estimate)))
+	// The shared catalog, distinct from /v1/nutrition/foods above — that one is
+	// the athlete's OWN saved foods, this one is the catalog everybody
+	// searches. Both are needed and neither replaces the other.
+	//
+	// `coverage` and `barcode/{barcode}` are declared before `{id}` for
+	// readability only; Go's ServeMux resolves by specificity, so a literal
+	// segment beats a wildcard regardless of registration order.
+	mux.Handle("GET /v1/nutrition/catalog", verifier.RequireAuth(http.HandlerFunc(foodHandler.Search)))
+	mux.Handle("GET /v1/nutrition/catalog/coverage", verifier.RequireAuth(http.HandlerFunc(foodHandler.Coverage)))
+	mux.Handle("GET /v1/nutrition/catalog/barcode/{barcode}", verifier.RequireAuth(http.HandlerFunc(foodHandler.Barcode)))
+	mux.Handle("GET /v1/nutrition/catalog/{id}", verifier.RequireAuth(http.HandlerFunc(foodHandler.Get)))
 	mux.Handle("GET /v1/nutrition/foods", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.ListFoods)))
 	mux.Handle("PUT /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveFood)))
 	mux.Handle("DELETE /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteFood)))

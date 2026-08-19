@@ -21,6 +21,7 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/curriculum"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/food"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
@@ -50,6 +51,15 @@ func main() {
 		log.Fatalf("seed: exercises: %v", err)
 	}
 	log.Printf("seed: exercises: %d upserted", n)
+
+	// The food catalog. No ordering constraint against anything else here —
+	// nothing references a food by foreign key yet, unlike workout plans into
+	// exercises or curricula into techniques.
+	fn, err := food.Seed(ctx, food.NewPostgresRepository(pool))
+	if err != nil {
+		log.Fatalf("seed: foods: %v", err)
+	}
+	log.Printf("seed: foods: %d upserted", fn)
 
 	// AFTER exercises, and the order is load-bearing rather than tidy: every
 	// plan item is a foreign key into the catalog, so seeding these first would

@@ -36,6 +36,22 @@ const (
 	// docs/architecture/api-conventions.md forbid, precisely so a reworded
 	// string cannot break a client.
 	CodeInvalidGrip = "invalid_grip"
+
+	// CodeUnavailable accompanies 503 when the request was fine and WE could
+	// not answer it — an upstream lookup that timed out, refused, or is not
+	// configured on this deploy.
+	//
+	// A SEPARATE code rather than reusing `not_found`, and the food catalog is
+	// why. "This barcode is not in the database" and "I could not reach the
+	// database" look identical to a client that only sees an empty result, and
+	// they are opposite instructions: the first means offer manual entry, the
+	// second means try again shortly. Collapsing them is this repo's
+	// most-repeated bug — absence reading as an answer — in the one place it is
+	// most expensive, because the athlete is standing in a shop.
+	//
+	// Distinct from `internal` too: `internal` means we are broken, this means
+	// somebody we depend on is.
+	CodeUnavailable = "unavailable"
 )
 
 type errorBody struct {

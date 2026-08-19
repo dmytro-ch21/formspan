@@ -130,6 +130,9 @@ func (k FoodKind) valid() bool {
 // declaring it now costs nothing. `off` rows additionally have to stay
 // separable from our own: Open Food Facts is ODbL, and its share-alike
 // obligation must never reach data we authored.
+//
+// `ai` was added by migration 000062, on exactly the reasoning above: a
+// migration was already being written, so declaring it then cost nothing.
 type Source string
 
 const (
@@ -137,9 +140,21 @@ const (
 	SourceSeed Source = "seed"
 	SourceUSDA Source = "usda"
 	SourceOFF  Source = "off"
+	// SourceAI is a food an AI drafted rather than one anybody measured.
+	//
+	// Its own value rather than folded into `user`, and N40 (#313) is the
+	// argument. Put through a real photograph, the estimator invented one item
+	// and DOUBLED a quantity — and it flagged the invention three separate
+	// ways while flagging the miscount not at all. A model cannot reliably say
+	// which of its own numbers to distrust, so an AI-drafted food must stay
+	// permanently distinguishable from a measured one. Folded into `user`,
+	// nothing downstream — including N27's kcal adjustments — could ever weight
+	// them differently, and there would be no way to find them again to
+	// re-verify when a better model lands.
+	SourceAI Source = "ai"
 )
 
-var Sources = []Source{SourceUser, SourceSeed, SourceUSDA, SourceOFF}
+var Sources = []Source{SourceUser, SourceSeed, SourceUSDA, SourceOFF, SourceAI}
 
 func (s Source) valid() bool {
 	for _, v := range Sources {
