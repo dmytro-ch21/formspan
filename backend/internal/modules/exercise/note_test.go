@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // The optional per-exercise note (N39): why a catalog value is what it is,
@@ -155,6 +156,21 @@ func TestTheRuledRowsCarryTheirExplanations(t *testing.T) {
 		}
 		if e.Note == "" {
 			t.Errorf("%s was ruled by a human and carries no explanation — the ruling still reads as an oversight", id)
+		}
+	}
+
+	// No seeded note may exceed the console's own limit.
+	//
+	// `UpsertAll` does not validate, so an over-long note committed to
+	// exercises.json seeds perfectly well — and then makes the row UNSAVABLE in
+	// the console: any unrelated PATCH re-validates the merged exercise and is
+	// refused on a field the editor never touched, with no way to fix it except
+	// shortening the note in the same request. The seeder failing loudly is not
+	// an option (one bad row must not fail a deploy), so this is the check.
+	for _, e := range catalog {
+		if n := utf8.RuneCountInString(e.Note); n > maxNoteLen {
+			t.Errorf("%s has a %d-character note (max %d) — it would seed fine and "+
+				"then refuse every console edit to that row", e.ID, n, maxNoteLen)
 		}
 	}
 

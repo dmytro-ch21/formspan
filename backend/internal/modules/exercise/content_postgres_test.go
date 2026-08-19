@@ -487,3 +487,90 @@ func TestAnAuthoredNoteSurvivesADeploy(t *testing.T) {
 		t.Fatalf("%s is not in AdminAuthored", id)
 	}
 }
+
+// `Restore` must not blank a note, and this is the THIRD time this exact bug
+// has been available in this function — `load_mode` (000052) and `implements`
+// (000057) came before it, and both arrived the same way: adding the column to
+// `updateWithin`'s SET clause is what makes restore able to destroy it.
+//
+// Every revision written before 000061 has no `note` key. It unmarshals to ""
+// and the UPDATE writes that over a live explanation — then `writeWithRevision`
+// records the wipe as a legitimate revision, so the audit trail agrees it was
+// meant. Found in review, not by the check suite.
+func TestRestoringAPreNoteRevisionDoesNotBlankTheNote(t *testing.T) {
+	repo, ctx, id := contentFixture(t)
+
+	annotated := authored(id)
+	annotated.Note = "One bell, so the weight counts once."
+	if _, err := repo.CreateExercise(ctx, annotated, testActor); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A snapshot shaped the way pre-000061 code wrote one: no `note` key.
+	// Literal JSON rather than a marshalled Exercise — though note that with
+	// `omitempty` the current struct would ALSO omit it for an empty note,
+	// which is precisely why the guard treats absent as "leave it".
+	if _, err := repo.pool.Exec(ctx, `
+		INSERT INTO exercise_revisions (exercise_id, revision, actor, action, payload)
+		VALUES ($1, 95, 'user_fixture', 'update', $2::jsonb)
+		ON CONFLICT (exercise_id, revision) DO UPDATE SET payload = EXCLUDED.payload`,
+		id, `{"id":"`+id+`","name":"Zercher Squat","sport":"strength",
+		      "movement_pattern":"squat","load_type":"weight_reps","is_unilateral":false,
+		      "load_mode":"total","implements":1,
+		      "primary_muscles":[],"secondary_muscles":[],"equipment":[]}`); err != nil {
+		t.Fatalf("seed pre-note revision: %v", err)
+	}
+
+	restored, err := repo.Restore(ctx, id, 95, testActor)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.Note != "One bell, so the weight counts once." {
+		t.Fatalf("restore blanked the note (%q) — a revision that predates the column "+
+			"says nothing about it, and reading that silence as empty destroys content "+
+			"with no other copy until the next export", restored.Note)
+	}
+
+	// Read the column back: the RETURNING has hidden this exact class of bug
+	// before, by re-reading a value the SET had not touched.
+	var stored string
+	if err := repo.pool.QueryRow(ctx,
+		`SELECT note FROM exercises WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored != "One bell, so the weight counts once." {
+		t.Fatalf("the column holds %q after the restore", stored)
+	}
+}
+
+// And the other half, which "always preserve" would break: a revision that DOES
+// carry a note is restored as it stands, or Restore has stopped meaning
+// "put that revision's content back".
+func TestRestoringARevisionAppliesItsNote(t *testing.T) {
+	repo, ctx, id := contentFixture(t)
+
+	annotated := authored(id)
+	annotated.Note = "The current explanation."
+	if _, err := repo.CreateExercise(ctx, annotated, testActor); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if _, err := repo.pool.Exec(ctx, `
+		INSERT INTO exercise_revisions (exercise_id, revision, actor, action, payload)
+		VALUES ($1, 94, 'user_fixture', 'update', $2::jsonb)
+		ON CONFLICT (exercise_id, revision) DO UPDATE SET payload = EXCLUDED.payload`,
+		id, `{"id":"`+id+`","name":"Zercher Squat","sport":"strength",
+		      "movement_pattern":"squat","load_type":"weight_reps","is_unilateral":false,
+		      "load_mode":"total","implements":1,"note":"The older explanation.",
+		      "primary_muscles":[],"secondary_muscles":[],"equipment":[]}`); err != nil {
+		t.Fatalf("seed revision: %v", err)
+	}
+
+	restored, err := repo.Restore(ctx, id, 94, testActor)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.Note != "The older explanation." {
+		t.Errorf("restore kept %q — a revision that carries a note must apply it", restored.Note)
+	}
+}

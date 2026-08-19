@@ -200,7 +200,7 @@ type Exercise struct {
 	// would bury a one-line answer inside a coaching paragraph, and the rows
 	// that most need this note are largely rows with no instructions at all.
 	//
-	// ABSENT IS THE NORMAL CASE — 504 seeded rows carry none — so a client must
+	// ABSENT IS THE NORMAL CASE — 757 of the 762 seeded rows carry none — so a client must
 	// render nothing rather than an empty section. `omitempty` keeps it off the
 	// wire entirely for those rows, which matters on a catalog listing; unlike
 	// OfferedGrips there is no absent-versus-empty distinction to preserve,

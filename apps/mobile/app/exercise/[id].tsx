@@ -40,10 +40,19 @@ export default function ExerciseDetailScreen() {
   // came to tell people they'd never done an exercise they do every week.
   const [statsUnavailable, setStatsUnavailable] = useState(false);
   const [detailsUnavailable, setDetailsUnavailable] = useState(false);
-  // The offline cache stores name, sport, movement pattern and load type —
-  // and not equipment, muscles or instructions. A cache hit is therefore
-  // *partial*, and rendering it as if complete would quietly assert that a
-  // barbell lift needs no equipment and has no technique notes.
+  // A cache hit may or may not be complete, and the screen cannot tell which.
+  //
+  // Rows written since v10 store the WHOLE API payload (`payload_json`), so
+  // they carry equipment, muscles, instructions and the note. Older rows have
+  // no payload and are reconstructed from the typed columns with those fields
+  // fabricated EMPTY — which is what this banner was written for, since
+  // rendering that as complete asserts a barbell lift needs no equipment.
+  //
+  // `cachedExercises` returns both shapes indistinguishably, so the copy says
+  // "may be missing" rather than naming fields. It used to name equipment and
+  // technique notes specifically, which N39 turned into a visible contradiction:
+  // a cached note renders directly above it. Naming a field this cannot check
+  // is what made it wrong; telling the truth about the uncertainty is not.
   const [detailsFromCache, setDetailsFromCache] = useState(false);
 
   useEffect(() => {
@@ -108,7 +117,8 @@ export default function ExerciseDetailScreen() {
       )}
       {detailsFromCache && (
         <Text style={styles.muted} testID="exercise-details-partial">
-          Showing what&apos;s saved on this phone — equipment and technique notes need a connection.
+          Showing what&apos;s saved on this phone. Some details may be missing or out of date until
+          you&apos;re back online.
         </Text>
       )}
 

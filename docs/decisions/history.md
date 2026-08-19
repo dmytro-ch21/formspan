@@ -28867,7 +28867,7 @@ tested separately against real Postgres. Dropping `note` from the SET means a
 deploy cannot write one; dropping it from the change-detection tuple means a
 re-seed whose ONLY change is the note matches nothing and updates nothing — the
 row keeps a stale explanation forever while every other field still tracks the
-deploy, so nothing looks broken. Every guard was mutation-checked (eight
+deploy, so nothing looks broken. Every guard was mutation-checked (ten
 mutations, each red, each restored):
 
 - a PATCH that never mentions the note leaves it alone — the `exercise_media`
@@ -28880,9 +28880,52 @@ mutations, each red, each restored):
 - 500 characters, refused above and accepted exactly at the limit — a test that
   only proves "too long fails" passes against an off-by-one that rejects the
   documented maximum;
+- a restore of a pre-note revision preserves the note, while a restore of one
+  that carries a note applies it — "always preserve" would break the second and
+  is the tempting one-line version of the fix;
+- no note in the seed catalog exceeds the console's own limit;
 - the five ruled rows carry explanations, **and** the RDL pair still disagrees
   about `implements`. If a future change makes them agree, the note is now
   *wrong* rather than merely missing, which is worse than having none.
+
+### The bug review found, which is the third instance of one trap
+
+`Restore` unmarshals a revision's JSON payload and hands it to `updateWithin`.
+Adding `note` to that function's SET clause made restore able to **destroy** a
+note: every revision written before 000061 has no `note` key, so it unmarshals
+to `""` and the UPDATE writes that over a live explanation — after which
+`writeWithRevision` records the wipe as a legitimate revision, so the audit
+trail agrees it was intended.
+
+This is the **third** time this exact bug has been available in this one
+function. `load_mode` (000052) and `implements` (000057) both arrived the same
+way, and the guard for them was already sitting there with a comment saying
+adding a column to the SET is what makes restore dangerous. I added a fourth
+column to that SET and did not extend the guard. The check suite was green; a
+reviewer found it, prompted to attack that specific path.
+
+**The recurrence is the point.** A guard that has to be extended by hand every
+time a column joins the SET will be missed again — that is now 3 for 3 on
+"noticed only in review". Nothing structural prevents the fourth.
+
+`note` differs from the two above in a way that makes the guard *stronger* than
+"predates the column": `Note` is `omitempty`, so a revision snapshotted while
+the note was genuinely empty also omits the key. Absent is therefore ambiguous
+and is resolved as "leave it" in both cases. The consequence — a restore can
+never blank a note — is the right side to err on: failing to remove an
+explanation is a nuisance, silently removing one destroys content that has no
+other copy until the next export. Clearing stays a `PATCH {"note":""}`, which
+is what the contract already documents.
+
+Two other review findings, both taken: the length bound counted **bytes** while
+the contract advertises `maxLength: 500` characters, so an em-dash-heavy note
+the contract calls legal was refused (the RDL note is 170 characters in 172
+bytes) — it counts runes now, and the comment says why that differs from
+`maxNameLen`, which bounds a name because it derives a btree key. And nothing
+bounded a note in the **seed file**: `UpsertAll` does not validate, so an
+over-long note would seed fine and then make the row unsavable in the console,
+refusing every unrelated edit on a field the editor never touched. The catalog
+test now checks it.
 
 ### Verified, not assumed
 

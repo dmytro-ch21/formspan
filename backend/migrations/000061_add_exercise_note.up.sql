@@ -45,6 +45,6 @@
 -- nothing a NULL would say that '' does not, and a nullable column would make
 -- every reader handle a third state that carries no meaning.
 --
--- Absent is the NORMAL case — 504 rows arrive with '' — so a client must render
+-- Absent is the NORMAL case — 757 of 762 rows arrive with '' — so a client must render
 -- nothing at all rather than an empty affordance.
 ALTER TABLE exercises ADD COLUMN note TEXT NOT NULL DEFAULT '';

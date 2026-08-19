@@ -397,23 +397,47 @@ func (r *PostgresRepository) Restore(ctx context.Context, id string, revision in
 		// `NormalizeImplements` reads as 1. Restoring a description edit would
 		// halve a pair of dumbbells.
 		//
-		// One SELECT for both: they are read together, and two round trips to
-		// answer one question about one row is the kind of thing that gets
-		// "optimised" later by someone who does not notice the guards are
+		// `note` is the THIRD field with this rule, added by 000061, and it
+		// arrived the same way: adding the column to `updateWithin`'s SET is
+		// what made restore able to destroy it. Every revision written before
+		// 000061 has no `note` key, so it unmarshals to "" and the UPDATE wipes
+		// a live explanation — and `writeWithRevision` then records that wipe as
+		// a legitimate revision, so the audit trail agrees it was intended.
+		//
+		// It differs from the two above in one way worth stating, because it
+		// makes this guard STRONGER than "predates the column": `Note` is
+		// `omitempty`, so a revision snapshotted while the note was genuinely
+		// empty ALSO omits the key. Absent is therefore ambiguous, and this
+		// resolves it as "leave it" in both cases.
+		//
+		// The consequence is that a restore can never blank a note — clearing
+		// one stays a `PATCH {"note":""}`, which is what the contract already
+		// documents as the way to clear it. That is the right side to err on:
+		// failing to remove an explanation is a nuisance, while silently
+		// removing one destroys content with no other copy until the next
+		// export.
+		//
+		// One SELECT for all three: they are read together, and three round
+		// trips to answer one question about one row is the kind of thing that
+		// gets "optimised" later by someone who does not notice the guards are
 		// separate for no reason.
-		if want.LoadMode == "" || want.Implements == 0 {
+		if want.LoadMode == "" || want.Implements == 0 || want.Note == "" {
 			var mode string
 			var implements int
+			var note string
 			if err := tx.QueryRow(ctx,
-				`SELECT load_mode, implements FROM exercises WHERE id = $1`, id,
-			).Scan(&mode, &implements); err != nil {
-				return Exercise{}, fmt.Errorf("exercise: read load_mode/implements for restore: %w", err)
+				`SELECT load_mode, implements, note FROM exercises WHERE id = $1`, id,
+			).Scan(&mode, &implements, &note); err != nil {
+				return Exercise{}, fmt.Errorf("exercise: read load_mode/implements/note for restore: %w", err)
 			}
 			if want.LoadMode == "" {
 				want.LoadMode = mode
 			}
 			if want.Implements == 0 {
 				want.Implements = implements
+			}
+			if want.Note == "" {
+				want.Note = note
 			}
 		}
 		return updateWithin(ctx, tx, want)
