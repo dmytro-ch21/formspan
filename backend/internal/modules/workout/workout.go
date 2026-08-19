@@ -147,6 +147,19 @@ type Repository interface {
 	Rename(ctx context.Context, userID, workoutID, name string) (*Workout, error)
 	// Delete removes a workout, owner-only.
 	Delete(ctx context.Context, userID, id string) error
+	// Copy duplicates a workout the caller can SEE into one they OWN, with its
+	// items, and returns the new one.
+	//
+	// **Visibility is the gate, not ownership** — and here that genuinely
+	// includes other athletes, unlike sequences: `visibleTo` has a public arm,
+	// so a community template published by somebody else is copyable by
+	// design. That is what the browse shelf is FOR; without a copy path the
+	// seeded plans are something you can read and never use.
+	//
+	// The copy lands PRIVATE regardless of what it was copied from, and owned
+	// outright, so editing it cannot touch the original and a deploy
+	// refreshing a seeded plan cannot reach into it.
+	Copy(ctx context.Context, userID, id string) (*Workout, error)
 }
 
 // ValidGoal reports whether g is a known goal.

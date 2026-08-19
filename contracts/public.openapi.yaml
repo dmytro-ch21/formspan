@@ -6406,6 +6406,51 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /workouts/{workoutID}/copy:
+    post:
+      summary: Copy a workout into your own library
+      operationId: copyWorkout
+      description: >
+        Duplicates a workout you can SEE into one you OWN, with its items, and
+        returns the new workout.
+
+        **Visibility is the gate, not ownership**, and here that genuinely
+        includes other athletes: workout visibility has a public arm, so a
+        community template somebody else published is copyable by design —
+        which is what the browse shelf is for. (Sequences differ: theirs has no
+        public arm, so the equivalent request 404s.)
+
+        The copy is always **private** regardless of what it was copied from, so
+        copying a public template does not republish it under your name. It is
+        owned outright, so editing it cannot touch the original and a deploy
+        refreshing a seeded plan cannot reach into it.
+
+        Replaces a client-side create-then-replace-items dance, which was two
+        calls and could strand an empty workout if the second failed.
+
+        POST and deliberately not idempotent: twice gives you two copies.
+      tags: [Workouts]
+      parameters:
+        - name: workoutID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: The new workout, with its items.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workout" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: >
+            No such workout, OR one you cannot see. Deliberately the same
+            answer — distinguishing them would confirm an id belongs to
+            somebody.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /workouts/{workoutID}/items:
     put:
       summary: Replace a workout's ordered contents (owner only)

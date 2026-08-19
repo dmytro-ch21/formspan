@@ -708,3 +708,128 @@ func TestCreate_AcceptsTheSameExerciseOncePublished(t *testing.T) {
 		t.Fatalf("a published exercise was refused: %v", err)
 	}
 }
+
+// Copying is what makes the browse shelf worth having: seeded plans and other
+// athletes' published templates are readable and not editable, so without it
+// they are something you can look at and never use.
+//
+// Table-driven over the three sources on purpose. **Workouts differ from
+// sequences here** — `visibleTo` has a public arm, so a stranger's PUBLIC
+// template is copyable by design, where the sequence equivalent is a 404. A
+// test that only copied VOLA's would pass against a build that had quietly lost
+// that arm.
+func TestCopyingAnythingYouCanReadGivesYouOneOfYourOwn(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+
+	official := "wk-copy-official"
+	stranger := "wk-copy-stranger"
+	mine := "wk-copy-mine"
+	me := "wk-copy-user"
+
+	// Ownerless and public: a VOLA template.
+	vola := strengthWorkout(official, "", VisibilityPublic)
+	vola.OwnerUserID = ""
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workouts (id, owner_user_id, name, sport, goal, notes, visibility)
+		VALUES ($1, NULL, 'VOLA Push', 'strength', 'hypertrophy', '', 'public')`,
+		official); err != nil {
+		t.Fatalf("seed official: %v", err)
+	}
+	cleanupWorkout(t, pool, official)
+	// Gapped positions, so the dense renumbering is a real assertion rather
+	// than one an unchanged copy would satisfy.
+	for i, ex := range []string{exBench, exOverhead} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO workout_items (workout_id, exercise_id, position, target_sets, notes)
+			VALUES ($1, $2, $3, 5, $4)`, official, ex, i*10, "keep me"); err != nil {
+			t.Fatalf("seed official item: %v", err)
+		}
+	}
+
+	if _, err := repo.Create(ctx, strengthWorkout(stranger, "wk-copy-other", VisibilityPublic)); err != nil {
+		t.Fatalf("create stranger's public: %v", err)
+	}
+	cleanupWorkout(t, pool, stranger)
+	if _, err := repo.Create(ctx, strengthWorkout(mine, me, VisibilityPrivate)); err != nil {
+		t.Fatalf("create my own: %v", err)
+	}
+	cleanupWorkout(t, pool, mine)
+
+	for _, tc := range []struct{ name, id string }{
+		{"a VOLA template", official},
+		// The one the public arm exists for, and the difference from sequences.
+		{"another athlete's published template", stranger},
+		// The contract says visibility gates it, not ownership — so your own
+		// counts too, and nothing else covers that arm.
+		{"my own", mine},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src, err := repo.Get(ctx, me, tc.id)
+			if err != nil {
+				t.Fatalf("get source: %v", err)
+			}
+			got, err := repo.Copy(ctx, me, tc.id)
+			if err != nil {
+				t.Fatalf("copy: %v", err)
+			}
+			cleanupWorkout(t, pool, got.ID)
+
+			if got.ID == tc.id {
+				t.Fatal("copy returned the original")
+			}
+			if got.OwnerUserID == nil || *got.OwnerUserID != me {
+				t.Errorf("copy owner = %v, want %q", got.OwnerUserID, me)
+			}
+			// Private regardless of what it came from — copying a public
+			// template must not republish it under your name.
+			if got.Visibility != VisibilityPrivate {
+				t.Errorf("copy visibility = %q, want private", got.Visibility)
+			}
+			if got.Name != src.Name {
+				t.Errorf("copy name = %q, want %q", got.Name, src.Name)
+			}
+			if len(got.Items) != len(src.Items) {
+				t.Fatalf("copy has %d items, source has %d", len(got.Items), len(src.Items))
+			}
+			for i := range got.Items {
+				if got.Items[i].ExerciseID != src.Items[i].ExerciseID {
+					t.Errorf("item %d: exercise %q, want %q",
+						i, got.Items[i].ExerciseID, src.Items[i].ExerciseID)
+				}
+				if got.Items[i].Notes != src.Items[i].Notes {
+					t.Errorf("item %d: notes %q, want %q", i, got.Items[i].Notes, src.Items[i].Notes)
+				}
+				if got.Items[i].Position != i {
+					t.Errorf("item %d has position %d; the copy must be densely renumbered",
+						i, got.Items[i].Position)
+				}
+			}
+		})
+	}
+}
+
+// A template you cannot read cannot be copied, and the refusal says only "not
+// found" — the same answer Get gives, so copy is not an existence oracle.
+func TestCopyingSomethingPrivateToSomebodyElseIsANotFound(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+
+	hidden := "wk-copy-hidden"
+	if _, err := repo.Create(ctx, strengthWorkout(hidden, "wk-copy-owner", VisibilityPrivate)); err != nil {
+		t.Fatalf("create private: %v", err)
+	}
+	cleanupWorkout(t, pool, hidden)
+
+	if _, err := repo.Copy(ctx, "wk-copy-nosy", hidden); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("copy of somebody else's private template: err = %v, want ErrNotFound", err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM workouts WHERE owner_user_id = $1`, "wk-copy-nosy").Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("a refused copy left %d row(s) behind", n)
+	}
+}

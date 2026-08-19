@@ -996,6 +996,27 @@ export async function deleteWorkout(
 }
 
 /**
+ * Duplicates a workout you can see into one you own, and returns the new one.
+ *
+ * ONE call. This replaced a `createWorkout` followed by a `replaceItems`, which
+ * was two — and left an EMPTY workout behind, owned by the athlete, whenever
+ * the second failed. The server does the whole thing in a transaction.
+ *
+ * NOT idempotent: twice gives two copies, so a caller has to disable its own
+ * button while this is in flight.
+ */
+export async function copyWorkout(
+  getToken: Token,
+  id: string,
+): Promise<Workout> {
+  return request<Workout>(
+    getToken,
+    `/workouts/${encodeURIComponent(id)}/copy`,
+    { method: "POST" },
+  );
+}
+
+/**
  * `goal` picks the rep range the rule progresses inside — the same squat is a
  * 3-rep lift in a strength block and a 10-rep lift in a hypertrophy one. Pass
  * the goal of the workout being performed; omitting it falls back to a general

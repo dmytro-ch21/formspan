@@ -26650,6 +26650,54 @@ family mapping, disfluency, self-correction, and one empty input.
 - **No transcription-error coverage**, and this is the one that will need real
   device data rather than more authoring.
 
+## 2026-08-19 — The workouts page gets the same two fixes, and one difference
+
+**F10.** #294 fixed a client-side copy and a stuck flag on sequences and
+recorded that the workouts page had both, untouched. This is that.
+
+Same shape, same two fixes: `POST /v1/workouts/{id}/copy` delegating to the
+`CopyTo` that already existed for share-accept, and the page's copy flag keyed
+on the workout id so it DERIVES rather than surviving a navigation that reuses
+the component.
+
+The client half was two calls — `createWorkout` then `replaceItems` — so a
+failure between them left an **empty workout the athlete now owned**, with
+nothing to say where it came from. One transactional call cannot half-copy.
+
+**The one real difference from sequences is the visibility predicate, and it
+changes the semantics.** Sequences are `(owner_user_id IS NULL OR owner_user_id
+= $1)` — no public arm, so a stranger's chain 404s. Workouts are
+`(owner_user_id = $1 OR visibility = 'public')`, so another athlete's published
+template IS copyable, by design: that is what the browse shelf exists for, and
+the page has said "Published by someone else — yours to copy, not to edit" all
+along. The test is table-driven over three sources — VOLA's, a stranger's
+public one, and your own — because a test that copied only VOLA's would pass
+against a build that had quietly lost the public arm.
+
+The copy is always **private** regardless of source, so copying a public
+template does not republish it under your name. That is `CopyTo`'s existing
+behaviour and now has a test; a mutation making the copy inherit its source's
+visibility goes red.
+
+Four guards mutation-checked: the empty-sharer one that was misread on #294
+(covered from the start here, because "copy your own" is one of the three table
+rows), the public arm removed, the copy inheriting visibility, and item
+positions copied verbatim instead of densely renumbered — the last needing a
+GAPPED fixture to mean anything, which is the lesson #294 paid for.
+
+Open questions:
+
+- **Three resources now have a copy endpoint with the same shape** — sequences,
+  workouts, and share-accept underneath both — and each wrote its own `Copy`
+  wrapper around `CopyTo`. The wrappers are nearly identical; nothing shares
+  them, and the next resource will write a third.
+- The workouts detail page still surfaces copy failures through its own inline
+  error, which is right, but the sequences page and this one now have two
+  slightly different action-error patterns.
+- Mobile has neither copy path. It has no sequence route at all, and its workout
+  screens do not offer copying.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

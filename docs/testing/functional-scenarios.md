@@ -6589,6 +6589,19 @@ The round map (2026-08-18):
 - **Both sides of a position share one link.** "Mount" and "Under mount" both
   read about `mount`, so both counts are the family's. That is the glossary
   describing a position for both players, not a duplicate.
+Copying a workout (2026-08-19):
+
+- **Three sources are copyable**: a VOLA template, another athlete's PUBLIC
+  template, and your own. The public one is the difference from sequences —
+  workout visibility has a public arm and the browse shelf depends on it.
+- **Somebody else's PRIVATE workout is a 404**, and leaves no row behind.
+- **The copy is always private**, whatever it was copied from. Copy a public
+  template and confirm it does not appear on anyone else's browse shelf.
+- **One request, not two.** Watch the network tab: a single POST, no
+  create-then-replace. A failure must leave no empty workout behind.
+- **Copy, then press Back to the template — its button is live again**, not
+  stuck at "Copying…".
+
 Copying a sequence (2026-08-19):
 
 - **A VOLA reference chain has a "Copy to my sequences" button; your own does
