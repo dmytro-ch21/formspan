@@ -236,6 +236,26 @@ export default function LogBjjScreen() {
           </Text>
         )}
 
+        {/* The dictation route in (N60), above the form rather than buried in
+            it. Talking through a session is faster than tapping it out and is
+            the reason the backend feature exists; a surface nobody can find is
+            what N33 shipped and what this task was filed to fix.
+
+            It is an ALTERNATIVE, not a replacement — the form below stays the
+            three-tap floor, works with no signal and spends nothing. */}
+        <Pressable
+          onPress={() => router.push('/bjj/dictate')}
+          style={[styles.dictate, { borderColor: accent.accent }]}
+          accessibilityRole="button"
+          accessibilityLabel="Say what happened instead of filling this in"
+          testID="bjj-dictate-entry"
+        >
+          <Text style={[styles.dictateLabel, { color: accent.ink }]}>Say what happened</Text>
+          <Text style={styles.dictateBlurb}>
+            Talk it through with your keyboard’s mic and we’ll fill this in
+          </Text>
+        </Pressable>
+
         {/* 1. What it was. The only genuinely required choice. */}
         <Text style={styles.label}>What was it?</Text>
         <RNView style={styles.kindGrid} accessibilityRole="radiogroup">
@@ -521,6 +541,16 @@ const styles = StyleSheet.create({
   labelRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
   derived: { color: vola.textMuted, fontSize: 12, fontWeight: '600', marginTop: 14 },
 
+  dictate: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 3,
+    marginBottom: 4,
+  },
+  dictateLabel: { fontSize: 16, fontWeight: '800' },
+  dictateBlurb: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
   kindGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   kindCard: {
     // Two per row, accounting for the 8pt gap.

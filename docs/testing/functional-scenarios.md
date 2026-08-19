@@ -9279,3 +9279,68 @@ What follows is only what differs.
   that installs nothing is invisible to a test that does not run the real
   runtime, which is exactly how the broken mobile version survived a green
   suite.
+
+## Dictating a BJJ session (N60 — `apps/mobile`, `/bjj/dictate`)
+
+The mobile surface for N33's `POST /v1/bjj/reflect/draft`. Reached from
+`/bjj/log`, above the manual form and as an alternative to it.
+
+### Happy path
+
+- Tapping **Say what happened** on `/bjj/log` opens the screen; the manual form
+  is still there and still works with no signal.
+- Dictating "hour of gi, five rounds, swept him twice from half guard" and
+  tapping **Read it** returns a draft with the kind, gi, rounds and the tags
+  filled in, all editable.
+- **Save it** writes the session locally and opens the ordinary reflection
+  wizard on it — there is no separate "review a dictated session" surface.
+- The saved session is indistinguishable from a typed one. No marker records
+  that a model was involved, deliberately: what happened is what the athlete
+  says happened, whoever typed it first.
+
+### Edge cases & errors
+
+- **A phrase naming more than one technique shows a pick-one prompt with more
+  than one option.** Saving without answering writes **no tag** for it. This is
+  the single most important behaviour on the screen.
+- Picking an option adds exactly one tag, taking the **category and event from
+  what the athlete said** rather than from the technique chosen.
+- **Skipping** an unresolved phrase leaves it out entirely; it can be added by
+  hand in the wizard.
+- **A count the words did not contain stays blank**, not zero, with the reason
+  shown ("we couldn't find that in what you said").
+- Decrementing a count to zero **removes the tag** rather than storing a zero.
+- **An empty draft** (`empty: true`) shows "nothing was picked up from that" and
+  **offers no Save button**.
+- A refusal (422), an outage (503) and an exhausted quota (429) each surface
+  their own message; the quota one says how many are left when it is close.
+- A failed technique-catalog fetch leaves the picker empty and the phrase
+  unresolved, rather than breaking the screen.
+- Over 2000 characters is refused client-side by `maxLength`, matching the
+  server's `MaxDictationRunes`.
+
+### Auth / security & privacy
+
+- **No audio is recorded, and none leaves the phone.** Transcription is the
+  system keyboard's, on-device; the app only ever handles text and there is no
+  audio dependency in the tree.
+- The screen states that the *words* go to an AI service **before** the send
+  button, not after.
+- Nothing is written until Save; a draft is never persisted.
+
+### Regression trap
+
+- **Never auto-select the top match for an unresolved phrase.** It would render
+  a plausible screen, save silently, and be indistinguishable from the athlete's
+  own answer. Assert that **two or more** options are offered — a test that only
+  checks "a picker appeared" passes against a picker narrowed to one.
+- **`empty` must withhold Save.** A confirm screen with nothing on it reads as a
+  successful reading and gets confirmed unread.
+- **Notices must render as sentences built from `reason`**, never the raw code
+  and never by parsing the server's prose. The codes are contract; the sentences
+  are not.
+- **Blank and zero are different.** Collapsing them puts a number in the record
+  the athlete never said.
+- The eval corpus is **33 authored / 0 recorded**, so no test anywhere in this
+  feature — backend or mobile — has met real keyboard transcription. A green
+  suite is not evidence that dictation works on speech.
