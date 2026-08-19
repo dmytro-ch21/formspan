@@ -12,12 +12,18 @@ import { capture } from "@/lib/telemetryClient";
  * the boundary, so without this file a render crash is invisible to the
  * reporter while being the single most visible thing to the athlete.
  *
+ * **Named for what it actually is.** It was `GlobalError`, which promised
+ * coverage it does not have: this is `app/error.tsx`, the root SEGMENT
+ * boundary, and it does not catch an error thrown by the root layout itself —
+ * `ClerkProvider`, `<Telemetry />`, the fonts. Only a `global-error.tsx` would,
+ * and there isn't one. Found in review; the misleading half was the name.
+ *
  * `digest` is Next's own id for a server-side error, and it is the ONLY way to
  * join this to the server log — the real message and stack are withheld from
  * the client in production on purpose, so the digest is what an operator
  * matches against.
  */
-export default function GlobalError({
+export default function RootErrorBoundary({
   error,
   reset,
 }: {

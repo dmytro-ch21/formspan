@@ -68,6 +68,23 @@ def shared_body(text: str, path: Path) -> str:
             "Either the file was restructured or this check is parsing the wrong "
             "thing. Fix the marker rather than deleting the check."
         )
+
+    # Everything above the marker is each file's own header and is NOT compared.
+    # So it has to be prose and nothing else: a web-only `export const
+    # WEB_EXTRA_KEYS = [...]` placed up there would pass parity, pass typecheck,
+    # and widen what leaves the browser without either copy of `redact()`
+    # changing a line. That is precisely the blind spot this check exists to
+    # not have. Found in review.
+    header = re.sub(r"/\*.*?\*/", "", text[:i], flags=re.S)
+    leftover = [ln for ln in header.splitlines() if ln.strip()]
+    if leftover:
+        raise SystemExit(
+            f"{path}: found code above the shared-body marker, which is not "
+            f"compared between the copies:\n    "
+            + "\n    ".join(leftover[:5])
+            + "\n\nThe header may hold comments only. Anything executable belongs "
+            "below the marker, where parity actually guards it."
+        )
     return text[i:]
 
 
@@ -90,7 +107,13 @@ def parse_allowlist(text: str, path: Path) -> list[str]:
 def parse_consts(text: str) -> dict[str, str]:
     """The tuning constants that decide how much leaves a device."""
     out: dict[str, str] = {}
-    for name in ("MEAN_WINDOW_DAYS", "MAX_MESSAGE", "DEFAULT_MIN_LEVEL"):
+    # Named explicitly rather than globbed, so a constant that is renamed away
+    # fails loudly below instead of quietly dropping out of the comparison.
+    # `MEAN_WINDOW_DAYS` used to be in this list and exists in NEITHER file —
+    # copy-paste residue from a sibling checker that could never have fired.
+    # Found in review; the lesson is that a check listing a name nobody has is
+    # indistinguishable from a check that passes.
+    for name in ("MAX_MESSAGE", "DEFAULT_MIN_LEVEL"):
         m = re.search(rf"\b{name}[^=]*=\s*([^;]+);", text)
         if m:
             out[name] = " ".join(m.group(1).split())

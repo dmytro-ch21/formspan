@@ -30632,6 +30632,72 @@ doing real work with nothing watching it.
 30 buffer tests plus 16 transport tests on web; `verify` exit 0 with the parity
 check inside it; zero lint warnings added.
 
+### What review caught
+
+No blocking findings this time, but two that mattered and several that were
+about claims being wider than the code.
+
+**A pre-auth event could be attributed to whoever signed in next.** The
+cross-account story handled A → sign-out → B correctly; the missing half was
+**null → someone**. An error on a PUBLIC page — the sign-in screen, the landing
+page — buffers with nobody signed in, and no flush timer is running yet
+(`installTelemetry` starts it), so the event sits there until the first athlete
+signs in and ships it under their token. Low content risk, wrong attribution,
+and on a shared computer that is somebody else's error against your name. The
+clear is now keyed on WHO rather than on whether-signed-in, in both directions.
+
+**The parity checker had a blind spot above its own marker.** Everything above
+the first `Severity` declaration is each file's header and deliberately not
+compared — so a web-only `export const WEB_EXTRA_KEYS = [...]` placed up there
+would pass parity, pass typecheck, and widen what leaves the browser without
+either copy of `redact()` changing a line. The header is now asserted to be
+comments and nothing else, and that is verified by smuggling exactly such an
+export in and watching it exit 1.
+
+The checker also listed `MEAN_WINDOW_DAYS`, which **exists in neither file** —
+copy-paste residue from a sibling checker. It parsed as absent-from-both and
+could never fire. That is the same shape as everything else found today: a
+check naming something nobody has is indistinguishable from a check that
+passes.
+
+The rest were claims wider than the code, and all four are now narrower:
+`keepalive` guarantees a request outlives the page *once it is on the wire*, not
+that a CORS preflight or a Clerk token refresh completes first — so a final
+flush often does not make it, and the in-memory loss tally dies with the page,
+which means "quiet" and "silenced" are not fully distinguishable across an
+unload on web the way they are on the phone. The `installed` flag survives React
+strict mode but **not** Fast Refresh, which re-evaluates the module and leaves
+the previous listeners attached. The root layout's comment said the handlers
+were live "before any page renders"; they are live once Clerk resolves and
+somebody is signed in. And `app/error.tsx` exported a component called
+`GlobalError`, which promised coverage it does not have — it is the root
+*segment* boundary and does not catch an error thrown by the root layout itself.
+
+One structural fix came out of the first of those. The identity decision now
+lives in `shouldClearForIdentity`, a plain function, rather than inside the
+effect: `apps/web` has no jsdom by design, so a `useEffect` body cannot be
+mutation-tested, and the part that was actually wrong was the decision. Moving
+it somewhere a test can reach it is what turns "fixed" into "guarded" —
+reintroducing the bug (`last !== null && last !== next`) now goes red.
+
+### And one the CHECKER caught, which no local run could
+
+The new CI step invoked `pnpm run check:telemetry-parity`. The
+`Scripts (Python)` job **deliberately installs neither Node nor pnpm** — its own
+comment says so, and its three sibling steps all call `python3 scripts/...`
+directly — so on `ubuntu-latest` that is `command not found`.
+
+`verify` passed locally either way, because locally pnpm is on PATH. **The only
+place it breaks is the one place it could not be tested**, which is the argument
+for running the checker against a workflow edit rather than trusting a green
+local chain.
+
+The same report noted something worth keeping: the only green CI run on the
+branch at that point was on the **empty claim commit**. The entire change had
+never been through CI, so the green tick on the PR was evidence about nothing —
+the same "absence reading as an answer" shape as the rest of today, wearing a
+green checkmark.
+
 ### What this leaves open
 
 - **Nothing here has run in a real browser.** The handlers are wired and unit

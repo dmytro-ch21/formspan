@@ -55,9 +55,11 @@ export default function RootLayout({
           <ThemeScript />
         </head>
         <body>
-          {/* Mounted at the root so the handlers are live before any page
-              renders — the first error a session can produce is one thrown
-              while the first page is still mounting. Renders nothing. */}
+          {/* Mounted at the root so the reporter is installed as early as it
+              can be. NOT "before any page renders": the endpoint is
+              authenticated, so the window listeners go live only once Clerk
+              resolves and somebody is signed in. Signed-out render crashes are
+              still caught, by `app/error.tsx`. Renders nothing. */}
           <Telemetry />
           {children}
         </body>

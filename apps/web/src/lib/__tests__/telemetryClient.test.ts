@@ -6,6 +6,7 @@ import {
   flush,
   installTelemetry,
   resetTelemetry,
+  shouldClearForIdentity,
 } from "@/lib/telemetryClient";
 
 /**
@@ -179,11 +180,54 @@ describe("one athlete's events must never be sent under another's token", () => 
     expect(posted[0].token).toBe("Bearer B-token");
   });
 
+  it("does not attribute a PRE-AUTH event to whoever signs in next", async () => {
+    // The gap review found, and the half that was missing: an error on a
+    // public page (sign-in, landing) buffers with nobody signed in, no timer
+    // is running to flush it, and it sits there until the first athlete signs
+    // in — who then ships it under their token and owns it on the Health
+    // screen. On a shared computer that is somebody else's error against your
+    // name.
+    //
+    // `Telemetry.tsx` clears whenever the athlete CHANGES, in either
+    // direction, which covers null → someone as well as someone → null. This
+    // asserts the transport half honours a clear at that moment.
+    capture("error", "client_error", "crash on the public sign-in page");
+    clearTelemetryForSignOut(); // what the null → someone transition triggers
+    installTelemetry(token("first-athlete"));
+    await flush();
+    expect(posted).toHaveLength(0);
+  });
+
   it("sends nothing without a token", async () => {
     installTelemetry(async () => null);
     capture("error", "client_error", "boom");
     await flush();
     expect(posted).toHaveLength(0);
+  });
+});
+
+describe("clearing on a change of athlete", () => {
+  it("clears when somebody signs in after a signed-out error", () => {
+    // null → someone. THE case review found missing: an error on a public page
+    // buffers with nobody signed in, and the first athlete to sign in would
+    // otherwise ship it under their token and own it on the Health screen.
+    expect(shouldClearForIdentity(null, "athlete_a")).toBe(true);
+  });
+
+  it("clears on sign-out", () => {
+    expect(shouldClearForIdentity("athlete_a", null)).toBe(true);
+  });
+
+  it("clears when one athlete replaces another without a signed-out gap", () => {
+    expect(shouldClearForIdentity("athlete_a", "athlete_b")).toBe(true);
+  });
+
+  it("does NOT clear when only the token getter changed identity", () => {
+    // The effect re-runs on `getToken` identity too. Clearing there would drop
+    // events nobody had a problem with, which is why this is keyed on who
+    // rather than on whether anything re-ran.
+    expect(shouldClearForIdentity("athlete_a", "athlete_a")).toBe(false);
+    expect(shouldClearForIdentity(null, null)).toBe(false);
   });
 });
 

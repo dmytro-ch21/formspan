@@ -94,11 +94,29 @@ export async function flush(): Promise<void> {
         "Content-Type": "application/json",
         traceparent: traceparent(runTraceId),
       },
-      // `keepalive` so a flush started as the tab closes is still delivered.
-      // This is the one real advantage the browser has over the phone here, and
-      // it is why there is no separate beacon path: the same request survives
-      // unload.
+      // `keepalive` so a flush started as the tab closes is still delivered —
+      // and the claim is bounded, because the first version of this comment
+      // overclaimed and review said so. It guarantees the request outlives the
+      // page ONCE IT IS ON THE WIRE. It does not guarantee that the CORS
+      // preflight completes (this API is cross-origin and the request carries
+      // `Authorization`), nor that the `await tokenSource()` above it returns —
+      // and Clerk's default token lives ~60s, so that call frequently is a
+      // network refresh. A final flush therefore often does not make it.
+      //
+      // `sendBeacon` cannot carry the header, so this is still the right
+      // design; it is just not a guarantee. The residual consequence is worth
+      // knowing: the in-memory `lost` tally dies with the page too, so across
+      // an unload "quiet" and "silenced" are not fully distinguishable on web
+      // the way they are on the phone.
       keepalive: true,
+      // **Below the redaction boundary.** Everything spread into `details`
+      // here bypasses `redact()`, because it is composed after the buffer has
+      // already sanitised what the caller supplied. That is fine for these —
+      // every one is telemetry's own bookkeeping — and it must stay that way:
+      // nothing athlete-derived may be added to this object. A `url:
+      // location.href` here would leave the browser with no allowlist between
+      // it and the wire, and the parity checker guards the buffer files, not
+      // this hop. Found in review.
       body: JSON.stringify({
         events: batch.map((e, i) => ({
           kind: e.kind,
@@ -127,10 +145,17 @@ export async function flush(): Promise<void> {
 /**
  * Install the browser's global handlers.
  *
- * Idempotent: React strict mode runs effects twice in development, and Fast
- * Refresh re-runs module bodies, so without the guard the listeners stack and
- * every error is captured two and three times — making the counts this feature
- * exists to report into a lie.
+ * Idempotent against React strict mode, which runs effects twice in
+ * development — without the guard the listeners stack and every error is
+ * captured twice, making the counts this feature exists to report into a lie.
+ *
+ * **It does NOT fully survive Fast Refresh**, and the first version of this
+ * comment claimed it did. Editing this module re-evaluates it, so `installed`
+ * resets to `false` while the previous module's anonymous listeners remain on
+ * `window` — a reinstall then stacks a second set. Development-only, and the
+ * honest scope is worth more than the reassurance: if exact counts in dev ever
+ * matter, the flag belongs on `window` under a symbol rather than in module
+ * scope.
  */
 export function installTelemetry(getToken: () => Promise<string | null>): void {
   tokenSource = getToken;
@@ -175,6 +200,28 @@ export function installTelemetry(getToken: () => Promise<string | null>): void {
       if (buffer.shouldFlush(Date.now())) void flush();
     }, DEFAULTS.flushAfterMs);
   }
+}
+
+/**
+ * Whether a change of signed-in athlete requires dropping the buffer.
+ *
+ * Pulled out of `Telemetry.tsx` as a plain function because the decision is
+ * the part that was WRONG — the component only handled someone → null, and
+ * missed null → someone, which is the case where a pre-auth event gets
+ * attributed to whoever signs in next. A `useEffect` body cannot be
+ * mutation-tested in this app (there is no jsdom here, deliberately), so the
+ * logic worth guarding lives where a test can reach it and the component keeps
+ * only the wiring.
+ *
+ * Keyed on WHO rather than on whether-signed-in: the effect also re-runs when
+ * Clerk's `getToken` identity changes, and clearing on that would drop events
+ * nobody had a problem with.
+ */
+export function shouldClearForIdentity(
+  last: string | null,
+  next: string | null,
+): boolean {
+  return last !== next;
 }
 
 /**
