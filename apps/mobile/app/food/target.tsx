@@ -39,7 +39,7 @@ import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
-import { todayString } from '@/lib/nutrition';
+import { profileGap, todayString } from '@/lib/nutrition';
 import { saveTarget, suggestedTarget, type Suggested } from '@/lib/nutritionApi';
 
 /**
@@ -114,6 +114,9 @@ export default function TargetScreen() {
   }, [data, getToken, on, router, saving]);
 
   const s = data?.suggestion ?? null;
+  // Null once a target is derivable, so the fix-this button cannot render for a
+  // screen that has nothing left to fix.
+  const gap = profileGap(data?.missing ?? []);
   const b = s?.basis ?? null;
 
   return (
@@ -154,19 +157,43 @@ export default function TargetScreen() {
 
         {data && !s && (
           <View style={styles.gap}>
+            {/* The explanation renders whenever a target cannot be derived —
+                the button only when there is somewhere honest to send you.
+                Gating both on `gap` hid the sentence too, so a field this build
+                does not recognise would have produced a blank screen instead of
+                a named reason. Raised in review. */}
             <Text style={styles.note}>
-              A target needs a few things from your profile first:{' '}
-              {data.missing.map(profileLabel).join(', ')}.
+              A target needs a few things first: {data.missing.map(profileLabel).join(', ')}.
             </Text>
-            <Pressable
-              onPress={() => router.push('/profile')}
-              style={[styles.primary, { backgroundColor: accent.accent }]}
-              accessibilityRole="button"
-              accessibilityLabel="Open your profile"
-              testID="target-profile"
-            >
-              <Text style={[styles.primaryText, { color: accent.on }]}>Open profile</Text>
-            </Pressable>
+            {gap && (
+              <Pressable
+                onPress={() =>
+                  /*
+                    The literals live HERE so Expo Router's generated types check
+                    them, and the check-in uses the OBJECT form on purpose.
+
+                    `` `/checkin/${date}` `` is a template literal, which the
+                    route guard deliberately skips and CI's `tsc` cannot see
+                    either — so that branch of this very fix would have been
+                    unguarded against the exact bug it exists to fix. The object
+                    form names the route pattern as a literal, which both the
+                    guard and the generated types can check. Raised in review.
+                  */
+                  gap.kind === 'profile'
+                    ? router.push('/profile/edit')
+                    : router.push({
+                        pathname: '/checkin/[date]',
+                        params: { date: todayString() },
+                      })
+                }
+                style={[styles.primary, { backgroundColor: accent.accent }]}
+                accessibilityRole="button"
+                accessibilityLabel={gap.label}
+                testID="target-profile"
+              >
+                <Text style={[styles.primaryText, { color: accent.on }]}>{gap.label}</Text>
+              </Pressable>
+            )}
           </View>
         )}
 
