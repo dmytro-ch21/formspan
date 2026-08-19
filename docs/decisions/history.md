@@ -27228,19 +27228,35 @@ across the schema, the quota query, the handler and the wire layer.
 The feature was built and reviewed entirely against a fake estimator, because
 no key was configured. The first live calls changed three things.
 
-**The model is Sonnet 5, not Opus 5.** Asked for the cheapest model that can do
-this, the tier below is ruled out on two counts: `effort` is unsupported on
-Haiku 4.5, so using it would mean deleting the one knob holding per-call cost
-down, and Haiku is not in the high-resolution vision tier — portion judgement
-from a photo is the whole feature. Sonnet 5 is the first Sonnet with 2576px
-vision, supports structured outputs and the full effort ladder, and lists at
-$3/$15 against Opus 5's $5/$25.
+**The model is Haiku 4.5 — arrived at by measuring, after two wrong guesses.**
+The first pick was Opus 5, on the reasoning that portion judgement is hard. Asked
+for the cheapest capable model, the second was Sonnet 5, on two objections to
+going lower: that `effort` was unsupported on Haiku so the cost control would
+have to go, and that Haiku lacked the high-resolution vision tier.
 
-**`effort: medium` beat `high`, which was not the expected result.** Measured
-three runs each on the same input: medium returned three correct items every
-time; high returned duplicate items once, an empty-named item once, and the
-right answer once — at two to three times the output tokens. Medium is kept,
-now on evidence rather than as a cost guess.
+The second objection was simply wrong. The client downscales to 1080px before
+upload, which is below Haiku's 1568px ceiling, so the tier never binds. The
+first was right about the fact and wrong about the consequence: Haiku 4.5
+rejects adaptive thinking AND `effort` with real 400s — verified against the
+live API rather than inferred — but reading food off a sentence is extraction,
+not reasoning, and it does not need either.
+
+Twelve runs (two real meals, a gibberish input, a photo; three each): Haiku
+behaved correctly every time, refusing the nonsense and discriminating portion
+confidence the way the design requires. It marked "two scrambled eggs" HIGH,
+because the athlete stated the quantity, while still marking a curry LOW — a
+finer distinction than Sonnet 5 drew on the same input. At 0.26c a call against
+0.73c it is 2.8x cheaper.
+
+The lesson is the one this whole entry keeps repeating: two of the three model
+decisions were made from plausible reasoning about tiers, and both were
+overturned by four minutes of measurement.
+
+**`effort: medium` beat `high` on Sonnet 5, which was not the expected
+result** — three correct items every time against duplicate and empty-named
+items, at two to three times the tokens. That finding is moot on the model that
+ships, which supports neither parameter, but it is recorded because it is the
+setting to reach for if the model ever moves back up a tier.
 
 **The prompt produced degenerate output about a third of the time**, which no
 local test could have caught: placeholder rows with zeroed numbers, empty
@@ -27265,9 +27281,8 @@ README, TASKS.md and this file, and the 20/5 caps were chosen on the strength of
 it.
 
 Measured with `count_tokens`: text-only is 1,537 input tokens, a 1080px photo
-is 2,645 — the image adds ~1,108. At Sonnet 5's introductory rate that is 0.73c
-against 0.95c, so the worst case under the current caps is 19c per athlete per
-day.
+is 2,645 — the image adds ~1,108. On Haiku 4.5 that is about 0.26c against 0.37c, so the
+worst case under the current caps is around 7c per athlete per day.
 
 The error was costing the image and ignoring the floor: the JSON schema plus
 system prompt are ~1,500 tokens on **every** call, so they dominate and the

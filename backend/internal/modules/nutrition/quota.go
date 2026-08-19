@@ -12,9 +12,9 @@ import (
 //
 // **MEASURED, after an earlier version of this comment claimed a photo cost
 // ~50x a description and was wrong by nearly two orders of magnitude.** With
-// `count_tokens` against the real schema: text-only is 1,537 input tokens and a
-// 1080px photo is 2,645 — the image adds ~1,108. At Sonnet 5's introductory
-// rate that is 0.73c against 0.95c, a ratio of **1.3x**.
+// `count_tokens` against the real schema: text-only is ~1,500 input tokens and
+// a 1080px photo ~2,600 — the image adds ~1,100. On Haiku 4.5 that is roughly
+// 0.26c against 0.37c, a ratio of about **1.4x**.
 //
 // The mistake was costing the image and ignoring the floor: the JSON schema
 // plus system prompt are ~1,500 tokens on EVERY call, so they dominate and the
