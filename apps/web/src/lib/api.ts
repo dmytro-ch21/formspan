@@ -38,6 +38,15 @@ export type Exercise = {
   sport: Sport;
   movement_pattern: string;
   movement_pattern_detail: string;
+  /**
+   * Which grips to offer, decided by the server (N16).
+   *
+   * Optional on the type only because a response from a server older than the
+   * field would omit it; web fetches fresh on every render, so unlike mobile
+   * there is no cached-row case and no local fallback table here — this app's
+   * copy of the subsets was deleted with this change.
+   */
+  offered_grips?: string[];
   primary_muscles: string[];
   secondary_muscles: string[];
   equipment: string[];
@@ -228,71 +237,23 @@ export const GRIPS: { key: Grip; label: string; short: string }[] = [
   { key: "hook", label: "Hook", short: "Hook" },
 ];
 
-/**
- * Which grips a movement can be held in.
- *
- * **This is the THIRD copy of one rule.** `GripsFor` lives in
- * `backend/internal/modules/session/session.go` and `gripsFor` in
- * `apps/mobile/lib/sessions.ts`, and this is the same table again. That is not
- * a design anyone chose — there is no shared TypeScript package between
- * `apps/web` and `apps/mobile` (the pnpm workspace globs `packages/*`, but no
- * such package exists), so the alternative to copying was inventing a shared
- * library and rewiring two apps' builds to consume it. That is a bigger and
- * riskier change than the picker N10 asks for.
- *
- * What makes a copy survivable is a test that fails when it drifts, not a
- * comment asking people to be careful — see `__tests__/grip.test.ts`, which
- * pins this table entry by entry. **If you change the vocabulary, change all
- * three**, and note the backend is the only one that is authoritative: it is
- * the one with the CHECK constraint behind it.
- *
- * The subsets themselves are N9's, not this file's invention. A hinge can be
- * pulled mixed or hook and is never angled; a carry or an olympic lift is
- * hook or nothing much; a press or a row is the original four.
- */
-export function gripsFor(movementPattern: string | undefined): Grip[] {
-  switch (movementPattern) {
-    case "horizontal_push":
-    case "horizontal_pull":
-    case "vertical_push":
-    case "vertical_pull":
-    case "isolation":
-      return ["regular", "neutral", "reverse", "angled"];
-    case "hinge":
-      return ["regular", "neutral", "mixed", "hook"];
-    case "carry":
-    case "olympic":
-      return ["regular", "neutral", "hook"];
-    default:
-      return [];
-  }
-}
+/*
+  `gripsFor` and `gripApplies` used to live here — a hand-maintained copy of a
+  Go table, kept honest by `scripts/check-grip-parity.py`.
 
-/**
- * Whether a grip is worth asking about at all — the emptiness of `gripsFor`.
- * Its own name because that is the question the call site is asking.
- */
-export function gripApplies(movementPattern: string | undefined): boolean {
-  return gripsFor(movementPattern).length > 0;
-}
+  Both are gone. The server sends `offered_grips` on every exercise now (N16),
+  and this app has no offline story: it fetches on render, so there is no cached
+  row that could predate the field and therefore no reason to keep a fallback
+  that could disagree. Mobile keeps one, for rows already on disk.
+*/
 
-/**
- * The grip chips to show: the movement's own subset, plus whatever this set
- * already holds if that is not in it.
- *
- * The second half is the UI end of #256's rule, and it is the half that is easy
- * to leave out. The SERVER decides how many grips exist, so a set can carry a
- * value this build's subset does not list — a newer server's grip, or one
- * recorded before a movement's subset changed. Rendering only the subset would
- * leave that grip visible in the row summary but **unclearable**: no chip to
- * tap, so the way back to "unrecorded" is gone. Appending rather than replacing
- * keeps the common answers in their usual positions.
- */
 export function offeredGrips(
-  movementPattern: string | undefined,
+  offered: string[] | undefined,
   current: Grip | null | undefined,
 ): { key: Grip; label: string }[] {
-  const keys = gripsFor(movementPattern);
+  // The server's list, or nothing. No fallback table on this side — see the
+  // note where `gripsFor` used to be.
+  const keys = (offered ?? []) as Grip[];
   const shown = keys.map(
     (k) => GRIPS.find((g) => g.key === k) ?? { key: k, label: k },
   );

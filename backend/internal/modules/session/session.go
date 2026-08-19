@@ -90,78 +90,18 @@ func ValidGrip(g Grip) bool {
 	return false
 }
 
-// GripApplies says whether a grip is worth asking about for a movement at all.
+// The per-pattern grip table used to live here as `GripsFor`/`GripApplies`.
 //
-// It IS the emptiness of `GripsFor` — read that for which values and why. Kept
-// as a separate name because "is this question worth asking" and "which answers
-// does it have" are different questions, and a caller usually wants the second.
+// It moved to `exercise.OfferedGrips` and is now SERVED on `GET /v1/exercises`
+// (N16). It belongs with `movement_pattern`, which is catalog data, and it had
+// no production caller on this side — it was a specification the server
+// published, never used, and both apps re-implemented. Read `exercise/grips.go`
+// for the subsets and why they are what they are.
 //
-// This doc used to carry the whole rationale and went stale the moment N9
-// widened the vocabulary: it still said hinges and carries were out "because
-// their answer is `mixed` or `hook`, which this enum does not have", directly
-// under a function that had just gained both. The rationale now lives with the
-// table it describes, so there is one place to keep true.
-func GripApplies(movementPattern string) bool {
-	return len(GripsFor(movementPattern)) > 0
-}
-
-// GripsFor is which grips are worth OFFERING for a movement.
-//
-// The subsets are grounded in the catalog rather than in what sounds right,
-// because two of them are counter-intuitive:
-//
-//   - **Hinges get `neutral`**, which looks wrong for a deadlift until you
-//     count them: 20 of those 55 rows are kettlebell, dumbbell or hex-bar.
-//     Not all of those are palms-facing — the four swings are held overhand —
-//     but the hex bar and the dumbbells-at-the-sides work carry the argument
-//     on their own. (`regular` is on this list for the 13 barbell rows, not
-//     for the swings; four of 55 would not earn a value.)
-//   - **Olympic lifts get `neutral`** for the same reason: 12 of those 25 rows
-//     are kettlebell (11) or dumbbell (1), none of which hook-grips anything.
-//     Barbell is 13 — a bare majority, not a plurality, and stating it the
-//     generous way was itself corrected once. Twelve real rows still need
-//     `neutral`, which is the whole argument; the split does not have to be
-//     even to need both values.
-//
-// `mixed` appears on hinges ALONE. You do not mix-grip a snatch, and a mixed
-// farmer's carry is not a thing — offering it there would be the same
-// false-entry mistake in a new place.
-//
-// The five original patterns are unchanged.
-//
-// Derived from the catalog's existing `movement_pattern` vocabulary rather than
-// a new column, deliberately: a `grips_vary` flag would be 762 more rows of
-// hand-classification to maintain and get wrong, and the per-side review (F3)
-// is the standing evidence of what that costs.
-//
-// `isolation` is the debatable inclusion: 210 rows, the catalog's honest bucket
-// for the single-joint long tail, so it carries calf raises (grip is
-// meaningless) alongside hammer and reverse curls — the purest grip variations
-// there are. The asymmetry decides it. A false positive is an optional control
-// somebody ignores on a calf raise; a false negative is the feature not
-// existing for reverse curls. Cheap wrong beats expensive wrong.
-//
-// Returns nil where the question is meaningless — squats, lunges, jumps,
-// conditioning, core, mobility, rotation. `GripApplies` is that emptiness.
-// Together the eight patterns here are 496 of the catalog's 762 exercises; it
-// was 403 before N9 added the last three.
-// Each branch returns a FRESH slice, deliberately — and the mechanism matters,
-// because the first version of this note named the wrong one. `append` is NOT
-// the hazard: a slice literal has len == cap, so appending reallocates and the
-// caller's copy diverges harmlessly. The hazard is an in-place write or a
-// `sort` on the returned slice, which a package-level table would carry into
-// every later caller. Pinned by `TestGripsForReturnsAFreshSliceEachCall`.
-func GripsFor(movementPattern string) []Grip {
-	switch movementPattern {
-	case "horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation":
-		return []Grip{GripRegular, GripNeutral, GripReverse, GripAngled}
-	case "hinge":
-		return []Grip{GripRegular, GripNeutral, GripMixed, GripHook}
-	case "carry", "olympic":
-		return []Grip{GripRegular, GripNeutral, GripHook}
-	}
-	return nil
-}
+// `ValidGrip` above stays, and the split it documents is unchanged: the
+// vocabulary is enforced, the per-movement subset is advisory. That is exactly
+// what makes serving the subset safe — a client on a stale copy over- or
+// under-offers, and never produces a 400.
 
 func ValidSetType(s SetType) bool {
 	switch s {

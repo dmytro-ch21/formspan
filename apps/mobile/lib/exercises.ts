@@ -29,6 +29,21 @@ export type Exercise = {
   name: string;
   sport: string;
   movement_pattern: string;
+  /**
+   * Which grips to offer, decided by the SERVER (N16).
+   *
+   * Optional because a row cached before this field existed parses without it —
+   * `exercise_cache` stores the whole API object as `payload_json`, so the field
+   * arrives automatically on the next catalog fetch and no SQLite migration was
+   * needed, but the rows already on disk predate it.
+   *
+   * **`undefined` and `[]` are different answers.** `[]` is the server saying
+   * grip is meaningless here (a squat) and the picker should not appear;
+   * `undefined` is "this row is older than the field", where `offeredGrips`
+   * falls back to the local table rather than hiding a control that used to
+   * work. Collapsing the two would silently remove the grip picker offline.
+   */
+  offered_grips?: string[];
   primary_muscles: string[];
   secondary_muscles: string[];
   equipment: string[];

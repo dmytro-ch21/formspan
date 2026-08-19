@@ -37,6 +37,11 @@ func scanExercise(row scannable) (*Exercise, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Derived here rather than in a handler, and via a shared helper because
+	// this is one of TWO scanners: `scanContent` in `content_postgres.go` is the
+	// admin half. The first version of this said "the ONLY place", which was
+	// wrong and shipped `offered_grips: null` on every admin response.
+	applyOfferedGrips(&e)
 	return &e, nil
 }
 

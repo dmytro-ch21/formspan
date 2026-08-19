@@ -1,21 +1,29 @@
 #!/usr/bin/env python3
-"""Fail if the grip vocabulary drifts between its three copies.
+"""Fail if mobile's OFFLINE FALLBACK drifts from the table the server serves.
 
-One rule, three implementations: `GripsFor` in
-`backend/internal/modules/session/session.go`, `gripsFor` in
-`apps/mobile/lib/sessions.ts`, and `gripsFor` in `apps/web/src/lib/api.ts`.
+This used to police three hand-maintained copies of one rule. It now polices
+one, and the promise it makes is smaller and worth stating precisely (N16).
 
-Nobody chose that. There is no shared TypeScript package between `apps/web` and
-`apps/mobile` — the pnpm workspace globs `packages/*` and no such package
-exists — so the alternative to copying was inventing a shared library and
-rewiring two apps' builds. This script is the cheaper half of that trade: the
-copies are allowed to exist because drift fails a check rather than reaching an
-athlete.
+The subsets are **served**: `GET /v1/exercises` carries `offered_grips` per row,
+derived from `movement_pattern` by `exercise.OfferedGrips` in
+`backend/internal/modules/exercise/grips.go`. `apps/web` reads that and nothing
+else — its copy was deleted, because web fetches on render and has no cached row
+that could predate the field.
 
-The failure it prevents is quiet in both directions. A picker offering a grip
-the server refuses produces a 400 the athlete cannot explain; a picker hiding a
-grip the server accepts means a deadlifter still cannot say how they pull,
-which is the bug N9 was filed for.
+`apps/mobile` keeps `gripsFor` in `lib/sessions.ts` as the fallback for
+exercises cached before `offered_grips` existed. `exercise_cache` stores the
+whole API object, so the field arrives on the next catalog fetch — but an
+athlete who last synced before it shipped, then walked into a basement gym, has
+a catalog without it. That copy is therefore deliberate, and this script is what
+keeps it from becoming a second opinion.
+
+What this can no longer prevent, and did not before either: a fallback that is
+merely STALE. It matches the served table at the moment the check runs; after a
+release changes the server's mind, phones on the old build fall back to the old
+answer until they re-sync. That is inherent to an offline fallback and is
+accepted — the server does not refuse a grip outside a movement's subset
+(`ValidGrip` checks the vocabulary and stops), so over- or under-offering never
+produces a 400.
 
 Stdlib-only and syntactic on purpose, matching `check-python-syntax.py`: it
 parses the three case tables rather than importing anything, so `verify` needs
@@ -31,9 +39,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-GO = ROOT / "backend/internal/modules/session/session.go"
+GO = ROOT / "backend/internal/modules/exercise/grips.go"
 MOBILE = ROOT / "apps/mobile/lib/sessions.ts"
-WEB = ROOT / "apps/web/src/lib/api.ts"
 
 #: Sentinel for the `default:` branch, compared like any movement pattern.
 DEFAULT_KEY = "<default>"
@@ -78,17 +85,19 @@ def go_const_values(src: str) -> dict[str, str]:
 
 def parse_go(path: Path) -> dict[str, list[str]]:
     src = path.read_text()
+    # The table names its values as plain string literals now: it lives in the
+    # catalog package, which must not import the logging module for a `Grip`
+    # type. Constants are still resolved if present, so this keeps working if
+    # the table ever moves back beside them.
     consts = go_const_values(src)
-    if not consts:
-        raise SystemExit("check-grip-parity: parsed no Grip constants from Go — the parser needs updating, not deleting")
-    body = _body(src, r"func GripsFor\([^)]*\)[^{]*\{")
+    body = _body(src, r"func OfferedGrips\([^)]*\)[^{]*\{")
     table: dict[str, list[str]] = {}
     pending: list[str] = []
     for line in body.splitlines():
         case = re.search(r"case ([^:]+):", line)
         if case:
             pending = [x.strip().strip('"') for x in case.group(1).split(",")]
-        ret = re.search(r"return \[\]Grip\{(.*?)\}", line)
+        ret = re.search(r"return \[\]string\{(.*?)\}", line)
         if ret:
             inner = ret.group(1)
             names = re.findall(r"\bGrip\w+", inner)
@@ -107,10 +116,10 @@ def parse_go(path: Path) -> dict[str, list[str]]:
     # in SPELLING rather than in behaviour. `nil` and `[]` are the same answer:
     # this movement offers no grips.
     if DEFAULT_KEY not in table:
-        tail = re.search(r"\n\treturn (nil|\[\]Grip\{\s*\})\s*$", body)
+        tail = re.search(r"\n\treturn (nil|\[\]string\{\s*\})\s*$", body)
         if not tail:
             raise SystemExit(
-                "check-grip-parity: Go's GripsFor has neither a `default:` nor a "
+                "check-grip-parity: Go's OfferedGrips has neither a `default:` nor a "
                 "trailing `return nil` — the parser needs updating, not deleting"
             )
         table[DEFAULT_KEY] = []
@@ -118,7 +127,7 @@ def parse_go(path: Path) -> dict[str, list[str]]:
 
 
 def _unknown(name: str) -> str:
-    raise SystemExit(f"check-grip-parity: Go names {name} in GripsFor but no `{name} Grip = \"...\"` const — parser or code out of step")
+    raise SystemExit(f"check-grip-parity: Go names {name} in OfferedGrips but no `{name} Grip = \"...\"` const — parser or code out of step")
 
 
 def _body(src: str, header: str) -> str:
@@ -129,7 +138,7 @@ def _body(src: str, header: str) -> str:
 
 
 def main() -> int:
-    tables = {"go": parse_go(GO), "mobile": parse_ts(MOBILE), "web": parse_ts(WEB)}
+    tables = {"go": parse_go(GO), "mobile": parse_ts(MOBILE)}
 
     for name, t in tables.items():
         if not t:
@@ -144,17 +153,27 @@ def main() -> int:
             drift.append((p, got))
 
     if drift:
-        print("check-grip-parity: the grip vocabulary has drifted between its three copies.\n")
+        print(
+            "check-grip-parity: mobile's offline fallback no longer matches the "
+            "table the server serves.\n"
+        )
         for p, got in drift:
             print(f"  {p}:")
             for name, v in got.items():
                 print(f"      {name:7} {v}")
-        print("\nUpdate all three: backend session.go, apps/mobile/lib/sessions.ts,")
-        print("apps/web/src/lib/api.ts. The backend is the authoritative one — it is")
-        print("the copy with a CHECK constraint behind it.")
+        print(
+            "\nThe SERVER is authoritative: backend/internal/modules/exercise/grips.go "
+            "is what\nevery online client reads via `offered_grips`. Fix "
+            "apps/mobile/lib/sessions.ts to\nmatch it — that copy exists only so a "
+            "phone holding exercises cached before the\nfield existed still shows a "
+            "grip picker offline."
+        )
         return 1
 
-    print(f"grip vocabulary identical across go/mobile/web ({len(patterns)} movement patterns)")
+    print(
+        f"mobile’s offline grip fallback matches the served table "
+        f"({len(patterns)} movement patterns)"
+    )
     return 0
 
 

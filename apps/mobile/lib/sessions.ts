@@ -93,10 +93,10 @@ export function gripsFor(movementPattern: string | undefined): Grip[] {
  * rather than replaces, so the common answers stay in their usual positions.
  */
 export function offeredGrips(
-  movementPattern: string | undefined,
+  exercise: { movement_pattern?: string; offered_grips?: string[] } | undefined,
   current: Grip | null | undefined,
 ): { key: Grip; label: string }[] {
-  const keys = gripsFor(movementPattern);
+  const keys = gripsToOffer(exercise);
   const shown = keys.map(
     (k) => GRIPS.find((g) => g.key === k) ?? { key: k, label: k },
   );
@@ -107,12 +107,53 @@ export function offeredGrips(
 }
 
 /**
- * Whether a grip is worth asking about at all — the emptiness of `gripsFor`.
- * Kept as its own name because that is what the call site is asking.
+ * The server's answer, or this build's guess when the server has not given one.
+ *
+ * The subsets are decided server-side now and shipped on the exercise
+ * (`offered_grips`, N16), because this table existed in three hand-maintained
+ * copies — Go, here, and `apps/web` — policed by a Python parity script. The
+ * numbers in this file's own comment about it were wrong for two PRs.
+ *
+ * **`gripsFor` survives only as the OFFLINE FALLBACK**, and only for exercises
+ * cached before the field existed. Those rows are real: `exercise_cache` stores
+ * the whole API object, so the field appears on the next catalog fetch, but an
+ * athlete who last synced before this shipped and then walks into a basement gym
+ * has a catalog without it. Hiding the picker for them would be a regression
+ * they cannot explain; showing this build's last known answer is wrong only if
+ * the server has since changed its mind, and it self-heals on the next fetch.
+ *
+ * Which is why the distinction below is not truthiness: an empty array is the
+ * server SAYING no grips apply, and must not be mistaken for "the server has
+ * not said".
+ *
+ * It is `Array.isArray` rather than `!== undefined` for a reason review found.
+ * The type says `string[] | undefined`, but nothing validates network JSON or
+ * the `payload_json` blob it was cached from — so a `null` can reach here at
+ * runtime, and `!== undefined` would hand it straight to `keys.map(...)` and
+ * crash the session screen. Worse, a bad payload is CACHED, so the crash would
+ * survive going offline. Today's server provably cannot send it (`scanExercise`
+ * substitutes `[]`), which is why this is belt and braces rather than a fix —
+ * but the cost is one word and the failure mode is a screen an athlete cannot
+ * open mid-workout.
  */
-export function gripApplies(movementPattern: string | undefined): boolean {
-  return gripsFor(movementPattern).length > 0;
+function gripsToOffer(
+  exercise: { movement_pattern?: string; offered_grips?: string[] } | undefined,
+): Grip[] {
+  if (Array.isArray(exercise?.offered_grips)) return exercise.offered_grips as Grip[];
+  return gripsFor(exercise?.movement_pattern);
 }
+
+/*
+  `gripApplies` used to live here — the emptiness of the offer, as a named
+  boolean. It is gone, and for the reason this whole change is about: it had no
+  production caller. Both pickers gate on `offeredGrips(...).length > 0`, which
+  is not the same question (see the session screen's note — the offer includes a
+  grip the set already holds, so it can be non-empty where the subset is empty,
+  and that difference is what keeps a stray grip clearable).
+
+  Deleting Go's `GripApplies` for exactly this and keeping the TypeScript one
+  would have been the inconsistency, so it went too. Raised in review.
+*/
 
 export type SetType = 'warmup' | 'working' | 'backoff' | 'drop' | 'amrap' | 'failure';
 

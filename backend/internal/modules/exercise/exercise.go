@@ -185,6 +185,22 @@ type Exercise struct {
 	Instructions string  `json:"instructions"`
 	Media        []Media `json:"media"`
 
+	// OfferedGrips is which grips a client should offer for this movement —
+	// derived from MovementPattern by `OfferedGrips`, never stored.
+	//
+	// Served so the rule lives in one place. It was previously reimplemented in
+	// both apps against a Go copy that nothing called, with a parity script
+	// standing in for a shared package; read `grips.go` for why that trade was
+	// made and why serving it is cheaper than policing it (N16).
+	//
+	// **Absent is not the same as empty**, and clients must keep them apart. An
+	// empty array is the server saying "grip is meaningless here" (a squat);
+	// absent means the response predates this field — a row cached before it
+	// existed — where a client falls back rather than concluding the picker
+	// should vanish. `omitempty` is therefore deliberately NOT set: a squat has
+	// to serialize `[]`, not disappear into the same shape as a stale row.
+	OfferedGrips []string `json:"offered_grips"`
+
 	// Source is "seed" (the embedded JSON owns it, and a deploy rewrites it) or
 	// "admin" (authored in the console, the database owns it). Read-only on the
 	// wire — the server sets it, so a client cannot promote its own row out of

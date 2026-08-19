@@ -46,6 +46,10 @@ func scanContent(s contentScannable) (Exercise, error) {
 	if err != nil {
 		return Exercise{}, err
 	}
+	// The served grip subset, exactly as the public scanner derives it — see
+	// `applyOfferedGrips`. Both scanners must call it or the admin console gets
+	// a shape the contract says is impossible.
+	applyOfferedGrips(&e)
 	// `[]`, never nil, for the same reason the export writes `[]`: these are
 	// `TEXT[] NOT NULL` columns, and a nil slice round-tripping back through a
 	// write would be sent as NULL and fail the constraint.

@@ -2542,21 +2542,22 @@ function SetRow({
               question is meaningless there rather than merely hard to
               answer.
 
-              Gated on `offeredGrips`, NOT on `gripApplies`. They differ in
+              Gated on the OFFER's length, never on the subset's. They differ in
               exactly one case and it is the one that traps data: a set holding
               a grip on a movement whose subset is empty — an exercise the
               console re-categorised after it was logged, or a pattern a newer
-              server grew. `gripApplies` hides the row, and the grip is then
+              server grew. The subset is empty there, so gating on it hides the
+              row — and the grip is then
               visible in the summary line with no chip to tap, so the single
               route back to "unrecorded" is gone.
 
               Tapping the selected chip clears it, which is that route. Without
               it a mis-tap is permanent — and unrecorded is a real state here,
               not an absence. */}
-            {offeredGrips(exercise?.movement_pattern, set.grip).length > 0 && (
+            {offeredGrips(exercise, set.grip).length > 0 && (
               <OptionSelect
                 label="Grip"
-                options={offeredGrips(exercise?.movement_pattern, set.grip)}
+                options={offeredGrips(exercise, set.grip)}
                 selected={set.grip ?? null}
                 clearable
                 emptyLabel="Not recorded"
