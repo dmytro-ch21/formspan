@@ -225,14 +225,26 @@ jobs:
       - name: Rate band parity
         run: python3 scripts/check-rate-parity.py
 
+      # The telemetry buffer is duplicated between apps/mobile and apps/web
+      # because a shared workspace package was built and measured worse here —
+      # four bundlers to satisfy, two of them already failing, and no precedent.
+      # Drift on `redact()` in particular is a privacy control rotting
+      # silently: an allowlist that gains a key on one platform and not the
+      # other is one platform shipping a field the other considers private,
+      # with nothing looking wrong on either side.
+      #
+      # `python3` directly, like its three siblings — this job deliberately
+      # installs neither Node nor pnpm (see the comment on the job), so a
+      # `pnpm run` here fails with `command not found`. Caught by the
+      # pre-merge checker before it ever reached a runner.
+      - name: Telemetry buffer parity
+        run: python3 scripts/check-telemetry-parity.py
+
       # The dictation eval corpus (N33/N34) is hand-authored, and a hand-authored
       # expectation is exactly as capable of being wrong as the model it grades.
       # An expected tag naming a technique id that does not exist — or writing a
       # category the technique does not derive — scores a CORRECT model as wrong,
       # permanently, and nothing else in the repo would notice.
-      - name: Telemetry buffer parity
-        run: pnpm run check:telemetry-parity
-
       - name: Dictation eval corpus
         run: python3 scripts/check-dictation-evals.py
 
