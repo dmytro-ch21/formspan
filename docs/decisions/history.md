@@ -27874,6 +27874,32 @@ Open questions:
 - 15 minutes per job is generous against a 1.8-minute reality. It is chosen to
   never fire on a slow-but-working runner, which means a genuinely wedged job
   still costs a quarter of an hour.
+## 2026-08-19 — N7 gets a provider before it gets code
+
+Recorded against the N7 line rather than built: **the machine-recognition camera
+call will go to OpenAI, not Anthropic** — judged comparable on this task and
+cheaper. Noted here because it is a provider choice, and because the reasoning
+has a short shelf life if it is not written down beside the number that
+motivated it.
+
+What makes this a one-line decision rather than a piece of work is N36 (#307).
+The platform package it introduces puts both backends behind a single
+`Completer`, and its `Request` already carries `Image`/`ImageMediaType`, so N7
+selects a provider and a model id at the call site and writes no transport. Had
+this been decided before N36, it would have meant a third `openai.go`.
+
+`DefaultModels` staying with the consumer is what makes the choice safe to make
+early: N7 can pick its own tier without moving nutrition's or N33's.
+
+**The caveat is the part worth keeping.** "Comparable and cheaper" is a
+judgement, not a measurement, and nothing has been run against equipment photos.
+The evidence from N37's dictation eval says the risk is **tier, not vendor** —
+two tiers of the *same* provider came in at 0.0% and 24.2% invention
+(`gpt-5.6-luna` vs `gpt-5.4-nano`), which is the difference between usable and
+unusable on one axis, at one provider. A cheap tier chosen on price and never
+measured is how the saving turns into a wrong exercise logged against a real
+athlete's history. Pick the tier against real machine photos first; the cost
+comparison is only meaningful between tiers that both work.
 
 
 ## Open items / known gaps as of this entry
