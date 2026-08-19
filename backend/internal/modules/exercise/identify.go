@@ -278,6 +278,19 @@ func ValidateIdentification(id Identification, shortlist []Exercise) (Identifica
 		// Refusing rather than deriving the family from the candidates: that
 		// would be the server inventing the half the model declined to give,
 		// which is the same move as fuzzy-matching an invented id.
+		//
+		// **DELETING THIS BRANCH WILL NOT FAIL THE SUITE, AND IT IS STILL
+		// LOAD-BEARING.** Measured: with `eq == ""` no candidate can match it,
+		// so the filter below refuses anyway and every assertion about the
+		// OUTCOME still passes. What changes is what the refusal SAYS — the
+		// filter's message is "every candidate is other equipment", which is a
+		// misleading description of a response that named no equipment at all,
+		// and the operator reading it would go looking for the wrong bug.
+		//
+		// So this branch exists for its message rather than its outcome, and
+		// the test pins it by asserting the message. Recorded here because a
+		// surviving mutation reads as dead code, and the next person to notice
+		// one here will be tempted to delete it.
 		return Identification{}, fmt.Errorf(
 			"%w: %d candidates but no equipment named", ErrIdentifyRefused, len(kept))
 	}
