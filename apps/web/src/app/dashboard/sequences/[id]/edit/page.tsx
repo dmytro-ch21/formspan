@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
@@ -62,8 +63,17 @@ export default function EditSequencePage() {
             affordance that did not exist — so it says where the button IS
             rather than telling you to copy and leaving you to find out how. */}
         {s.official
-          ? "This is a reference sequence and cannot be edited. Copy it from its page to make it yours."
-          : "This sequence cannot be edited. Copy it from its page to make it yours."}
+          ? "This is a reference sequence and cannot be edited. "
+          : "This sequence cannot be edited. "}
+        {/* A link, not the words "its page". This route is only reachable by
+            typing the URL — the detail page hides Edit when you cannot edit —
+            so the reader arrived WITHOUT passing the page being pointed at.
+            The sentence exists to name a reachable affordance; one click beats
+            a treasure hunt. */}
+        <Link href={`/dashboard/sequences/${s.id}`} className="underline">
+          Copy it from its page
+        </Link>{" "}
+        to make it yours.
       </p>
     );
   }

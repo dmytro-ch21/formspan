@@ -34,8 +34,36 @@ export default function SequenceDetailPage() {
 
   const [s, setS] = useState<Sequence | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * An action that failed, as opposed to a page that would not load.
+   *
+   * Separate from `error` because that one drives a full-page early return —
+   * right when the sequence itself is unreachable, and wrong for a copy or a
+   * delete that failed: it replaces the chain, the share button and the retry
+   * with one line of red, and the load effect never clears it, so a transient
+   * network blip destroys the page until a hard reload. Review found the copy
+   * path feeding into it; `remove` had the same shape already.
+   */
+  const [action, setAction] = useState<{ id: string; message: string } | null>(null);
+  const actionError = action?.id === id ? action.message : null;
   const [confirming, setConfirming] = useState(false);
-  const [copying, setCopying] = useState(false);
+  /**
+   * WHICH sequence is being copied, not whether one is — and the same for the
+   * action error.
+   *
+   * `router.push` to another sequence stays inside the `[id]` segment, so Next
+   * REUSES this component rather than remounting it (the fact the edit route's
+   * `key={s.id}` exists for). Plain booleans therefore survive the navigation:
+   * copy, press Back, and the original's button is stuck disabled at
+   * "Copying…" for the life of the instance. Review found it.
+   *
+   * Keying the state on the id and DERIVING the flag during render fixes it
+   * without an effect — which is what `react-hooks/set-state-in-effect`
+   * refused when this was written as a reset, correctly. Nothing to clear:
+   * when `id` changes the derived value is already false.
+   */
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const copying = copyingId === id;
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
@@ -57,7 +85,7 @@ export default function SequenceDetailPage() {
       await deleteSequence(getToken, id);
       router.push("/dashboard/sequences");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setAction({ id, message: err instanceof Error ? err.message : String(err) });
       setDeleting(false);
     }
   }, [getToken, id, router]);
@@ -111,20 +139,29 @@ export default function SequenceDetailPage() {
               type="button"
               disabled={copying}
               onClick={async () => {
-                setCopying(true);
+                setCopyingId(s.id);
                 try {
                   const mine = await copySequence(getToken, s.id);
                   router.push(`/dashboard/sequences/${mine.id}`);
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : String(err));
-                  // Only on failure: on success this unmounts, and clearing it
-                  // first would flash the button live again mid-navigation.
-                  setCopying(false);
+                  setAction({
+                    id: s.id,
+                    message: err instanceof Error ? err.message : String(err),
+                  });
+                  // Only on failure. On success the navigation changes `id`,
+                  // which makes `copying` false by derivation — no reset, and
+                  // no stale flag left on the page you came from.
+                  setCopyingId(null);
                 }
               }}
-              className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition hover:brightness-110 disabled:opacity-50"
+              className="rounded-pill bg-accent-fill px-5 py-2 text-sm font-bold text-accent-on-fill transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {copying ? "Copying…" : "Copy to my sequences"}
+              {/* aria-live for the same reason Delete has it below: a label
+                  swapping in place on an already focused button is not
+                  reliably announced. */}
+              <span aria-live="polite">
+                {copying ? "Copying…" : "Copy to my sequences"}
+              </span>
             </button>
           )}
           {s.editable && (
@@ -156,6 +193,14 @@ export default function SequenceDetailPage() {
             </>
           )}
         </div>
+        {/* Inline, beside the controls that produced it — the page and its
+            retry survive. The full-page `error` return above is for a sequence
+            that would not load, where there is nothing else to show. */}
+        {actionError && (
+          <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+            {actionError}
+          </p>
+        )}
       </header>
 
       <ol className="space-y-1">

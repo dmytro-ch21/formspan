@@ -26423,19 +26423,60 @@ picks the WORDS rather than deciding whether you may copy. The edit route's
 instruction is restored — it now says where the button is rather than telling
 you to copy and leaving you to find out how.
 
-Four guards, each mutation-checked, and the first attempt at one was worthless:
-passing an empty sharer id still blocked a stranger's chain, because an empty
-string does not match their owner id either — the mutation changed no behaviour.
-Widening `visibleTo` with `OR TRUE` is the one that represents the risk, and
-that fails on "copy of a stranger's chain: err = nil, want ErrNotFound". The
-other three: a not-visible row returning no error, a skipped commit, and editing
-the copy reaching the original.
+**A surviving mutation was read as evidence about the mutation, and it was
+evidence about the tests.** Passing an empty sharer id to `CopyTo` survived both
+tests, and the conclusion drawn — written into the PR description — was "the
+mutation changed no behaviour, an empty string does not match a stranger's owner
+id either". Wrong, and review caught it: it breaks copying a chain you **own**,
+because `owner_user_id = $1` stops matching. Both tests stayed green because
+neither copied an owned chain — while the contract's most-quoted promise is "you
+may copy anything you may read, **including your own**". Measured after the fact:
+with that mutation, a copy-your-own test fails with `sequence: not found`. The
+right reading of a surviving mutation is "which case does this break that I am
+not testing", never "this mutation is meaningless".
+
+`TestCopyingYourOwnSequenceWorksToo` exists now and is the only test that makes
+the `owner_user_id = $1` arm load-bearing in the copy path.
+
+Two more assertions were vacuous for the same family of reason. The step fixture
+seeded `sort_order` 0,1,2 — already dense — so `CopyTo`'s promise that "a source
+with gaps yields a dense one" could not fail; copying `sort_order` verbatim
+passed. The fixture is gapped (0, 10, 20) now. And `notes`, `ends_at_position_id`
+and `description` were never compared, so a mutation blanking any of them
+passed; they are asserted. One comment was also claiming more than its path
+exercises — a refused copy has nothing to roll back, since no INSERT has run —
+and now says so.
+
+The guards that did hold: widening `visibleTo` with `OR TRUE`, a not-visible row
+returning no error, a skipped commit, and editing the copy reaching the
+original.
+
+**The client half had two lifecycle bugs, both from one false premise.** The
+handler's comment said "on success this unmounts" — it does not. `router.push`
+to another sequence stays inside the `[id]` segment, so Next REUSES the
+component, which is the same fact the edit route's `key={s.id}` exists for, in
+this branch, thirty lines away. So `copying` survived the navigation: copy,
+press Back, and the original's button sat disabled at "Copying…" for the life of
+the instance. And the copy's error fed the page's full-page `error` early
+return, which is right for a sequence that will not load and wrong for an action
+that failed — it replaced the chain, the share control and the retry with one
+line of red, and nothing ever cleared it.
+
+Both fixed by DERIVING rather than resetting: the state holds *which* sequence
+is copying and *which* one an error belongs to, and the flags are computed
+during render, so changing `id` makes them false with nothing to clear. The
+first attempt was a reset inside the load effect, and
+`react-hooks/set-state-in-effect` refused it — correctly, and pointing at the
+better design, exactly as the same rule did on mobile in #282. Action errors now
+render inline beside the button, matching what the workouts page already did.
 
 Open questions:
 
 - **Workouts still copy client-side** and can strand an empty workout on a
-  partial failure. The pattern to copy is now the sequence one, and nothing
-  obliges anybody to.
+  partial failure. It also has the identical stuck-flag bug this branch fixed —
+  it pushes into its own `[id]` segment after copying — and that is untouched
+  here. The pattern to copy is now the sequence one, and nothing obliges anybody
+  to.
 - The copy keeps the original's name, matching both existing copy paths
   (share-accept and workouts). Two identically named chains in one list are
   distinguishable only by the "· reference" label on the original. A "(copy)"

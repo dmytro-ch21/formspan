@@ -787,10 +787,18 @@ func TestCopyingAReferenceChainGivesYouOneOfYourOwn(t *testing.T) {
 		t.Fatalf("seed VOLA sequence: %v", err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM bjj_sequences WHERE id = $1`, volaID) })
+	// GAPPED sort orders — 0, 10, 20 — not 0, 1, 2.
+	//
+	// `CopyTo` promises "a source with gaps yields a dense one", and against a
+	// densely seeded fixture that assertion cannot fail: copying `sort_order`
+	// verbatim would pass. Review caught it. The gaps are what make the
+	// `row_number()` renumbering load-bearing here.
 	for i, st := range steps {
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO bjj_sequence_steps (sequence_id, technique_id, sort_order, notes)
-			VALUES ($1, $2, $3, $4)`, volaID, st.TechniqueID, i, st.Notes); err != nil {
+			INSERT INTO bjj_sequence_steps
+				(sequence_id, technique_id, sort_order, ends_at_position_id, notes)
+			VALUES ($1, $2, $3, $4, $5)`,
+			volaID, st.TechniqueID, i*10, st.EndsAtPositionID, st.Notes); err != nil {
 			t.Fatalf("seed reference step %d: %v", i, err)
 		}
 	}
@@ -827,13 +835,27 @@ func TestCopyingAReferenceChainGivesYouOneOfYourOwn(t *testing.T) {
 	if len(got.Steps) != len(before.Steps) {
 		t.Fatalf("copy has %d steps, original has %d", len(got.Steps), len(before.Steps))
 	}
+	if got.Description != before.Description {
+		t.Errorf("copy description = %q, want %q", got.Description, before.Description)
+	}
+	// Every field the copy carries, not just the ones that are obviously
+	// structural: a mutation blanking `notes` or `ends_at_position_id` in
+	// CopyTo's SELECT or INSERT passed every earlier version of this test.
 	for i := range got.Steps {
 		if got.Steps[i].TechniqueID != before.Steps[i].TechniqueID {
 			t.Errorf("step %d: technique %q, want %q",
 				i, got.Steps[i].TechniqueID, before.Steps[i].TechniqueID)
 		}
+		if got.Steps[i].Notes != before.Steps[i].Notes {
+			t.Errorf("step %d: notes %q, want %q", i, got.Steps[i].Notes, before.Steps[i].Notes)
+		}
+		if !samePtr(got.Steps[i].EndsAtPositionID, before.Steps[i].EndsAtPositionID) {
+			t.Errorf("step %d: ends_at %s, want %s",
+				i, deref(got.Steps[i].EndsAtPositionID), deref(before.Steps[i].EndsAtPositionID))
+		}
 		if got.Steps[i].Order != i {
-			t.Errorf("step %d has order %d; the copy must be densely renumbered", i, got.Steps[i].Order)
+			t.Errorf("step %d has order %d; the copy must be densely renumbered from a gapped source",
+				i, got.Steps[i].Order)
 		}
 	}
 
@@ -875,6 +897,11 @@ func TestCopyingSomethingYouCannotSeeIsANotFound(t *testing.T) {
 		t.Fatalf("copy of a stranger's chain: err = %v, want ErrNotFound", err)
 	}
 	// And nothing was created on the way to refusing.
+	//
+	// Honest about what this does NOT prove: on the not-visible path no INSERT
+	// has run yet, so there is nothing for the deferred rollback to undo and
+	// this would pass with the rollback removed. It is still the property worth
+	// stating — a refused copy creates nothing — just not a test of the defer.
 	var n int
 	if err := pool.QueryRow(ctx,
 		`SELECT count(*) FROM bjj_sequences WHERE owner_user_id = $1`, uid).Scan(&n); err != nil {
@@ -882,5 +909,52 @@ func TestCopyingSomethingYouCannotSeeIsANotFound(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("a refused copy left %d row(s) behind; the transaction must roll back", n)
+	}
+}
+
+func samePtr(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return "<nil>"
+	}
+	return *p
+}
+
+// Copying your OWN chain, which the contract promises and nothing covered.
+//
+// This is the test the "worthless" mutation was pointing at. Passing an empty
+// sharer id to CopyTo survived both other tests, and the conclusion drawn was
+// "the mutation changes no behaviour" — wrong. It breaks exactly this case,
+// because `owner_user_id = $1` stops matching, and neither test copied a chain
+// the caller owned. A surviving mutation is evidence about the TESTS.
+func TestCopyingYourOwnSequenceWorksToo(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	uid := user(t, pool)
+
+	mine, err := repo.Create(ctx, uid, NewSequence{Name: "Mine", Description: "and mine to copy"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.Copy(ctx, mine.ID, uid)
+	if err != nil {
+		t.Fatalf("copying a chain you own must work — the gate is visibility, not ownership: %v", err)
+	}
+	if got.ID == mine.ID {
+		t.Fatal("copy returned the original")
+	}
+	if !got.Editable || got.Official {
+		t.Errorf("the copy is yours: editable=%v official=%v, want true/false", got.Editable, got.Official)
+	}
+	if got.Name != mine.Name || got.Description != mine.Description {
+		t.Errorf("copy = %q/%q, want %q/%q", got.Name, got.Description, mine.Name, mine.Description)
 	}
 }

@@ -365,20 +365,6 @@ func (r *PostgresRepository) Describe(ctx context.Context, resourceID, sharerID 
 	return name, true, nil
 }
 
-// CopyTo duplicates a sequence and its steps into another athlete's ownership,
-// inside the share module's transaction.
-//
-// A NEW id, always — never the source's, even though ids here can be
-// client-supplied. Two athletes owning rows with one id would collide on the
-// primary key for the second copy and, worse, would make the recipient's chain
-// answer to the sender's offline sync retries.
-//
-// The steps are re-inserted rather than the row being pointed at, because that
-// is what snapshot semantics MEAN: after this returns, the two chains have no
-// relationship at all, and the sender can rename, reorder or delete theirs
-// without touching what the recipient now owns. `sort_order` is re-derived
-// from the read order rather than copied, so a source with gaps in its
-// ordering yields a dense one.
 // Copy is the self-serve half of CopyTo: same duplication, no share involved.
 //
 // It DELEGATES rather than reimplementing, and the delegation is the point —
@@ -415,6 +401,20 @@ func (r *PostgresRepository) Copy(ctx context.Context, id, userID string) (Seque
 	return r.Get(ctx, newID, userID)
 }
 
+// CopyTo duplicates a sequence and its steps into another athlete's ownership,
+// inside the share module's transaction.
+//
+// A NEW id, always — never the source's, even though ids here can be
+// client-supplied. Two athletes owning rows with one id would collide on the
+// primary key for the second copy and, worse, would make the recipient's chain
+// answer to the sender's offline sync retries.
+//
+// The steps are re-inserted rather than the row being pointed at, because that
+// is what snapshot semantics MEAN: after this returns, the two chains have no
+// relationship at all, and the sender can rename, reorder or delete theirs
+// without touching what the recipient now owns. `sort_order` is re-derived
+// from the read order rather than copied, so a source with gaps in its
+// ordering yields a dense one.
 func (r *PostgresRepository) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID, newOwnerID string) (string, bool, error) {
 	var name, description string
 	var startPositionID *string
