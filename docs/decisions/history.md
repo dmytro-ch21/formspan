@@ -28787,6 +28787,78 @@ uncollected test file reports nothing at all. It is one symmetric glob now.
   /nutrition/foods/{id}`, which the repository has and nothing exposes. One
   request either way at a 200-row cap, so no endpoint was added for it.
 
+## 2026-08-19 — The guard that was skipped, and the test that stopped meaning anything
+
+Backend review on #321 (run at the user's instruction, no blocking findings)
+turned up two suggestions on N7's coherence guard. Both were real, and chasing
+them found a third that nobody had raised.
+
+### The contract promised something the code did not do
+
+The guard only ran when `equipment` was non-empty:
+
+```go
+if eq := strings.TrimSpace(id.Equipment); eq != "" { ... }
+```
+
+So a response naming **no** equipment while naming four exercises skipped the
+check entirely — and the published OpenAPI text said `equipment` is *"guaranteed
+to be used by at least one candidate"*. That sentence was false on exactly that
+path, and the schema **invites** it: the field's own description offers `""` for
+"none visible".
+
+Harm was bounded, but a wire contract that promises what the code does not do is
+the kind of wrong that costs somebody else a debugging session, not us.
+
+### The guard was also looser than the prompt it enforces
+
+It asked whether **any** candidate matched the reported equipment. The prompt
+tells the model its candidates must **all** use it. So a treadmill answer could
+carry two cable-machine candidates through on the strength of a third that
+matched — and **a guard weaker than its own instruction cannot detect that
+instruction being ignored**, which is the only reason it exists.
+
+Now every candidate is checked, and non-matching ones are **dropped rather than
+failing the whole answer**: a mostly-right response still gives the athlete its
+coherent candidates instead of nothing.
+
+### The third one: the cap ran before the filter
+
+Not raised in review, found while fixing the other two. `MaxCandidates` was
+applied inside the collection loop, so it discarded by **rank** what the filter
+would then remove by **correctness** — a good fifth candidate lost while four
+incoherent ones ahead of it were dropped anyway, leaving the athlete fewer
+answers than the model actually got right. The cap is applied last now.
+
+### The part worth keeping: tightening the code silently emptied a test
+
+`TestValidateIdentificationCapsCandidates` fed five candidates and asserted at
+most four came back. Once the filter ran before the cap, only **two** of its five
+survived — so the cap could never fire and the test asserted nothing. It kept
+passing throughout.
+
+This is the same family as the morning's three worthless mutations, and it is the
+more dangerous member: **a test can be emptied by a change to the code it
+covers, while still passing.** Nothing reports it. The fixture now carries seven
+cable-stack rows so the cap test supplies more coherent candidates than the cap
+allows, and the mutation that removes the cap fails it.
+
+Mutation-testing is what surfaced it, and only because the *result* was checked
+rather than assumed — the first pass reported two survivors, and both were
+findings rather than noise:
+
+- Deleting the empty-equipment branch did **not** fail anything, because with
+  `eq == ""` no candidate can match it and the filter refuses anyway. The branch
+  is real but its OUTCOME is redundant; it exists to say the accurate thing
+  ("no equipment named" rather than "every candidate is other equipment"). So
+  the test now asserts the **message**, which is the only thing that pins it.
+- Deleting the cap did not fail anything either — that was the emptied test
+  above.
+
+A guard whose outcome is redundant and a test that no longer reaches its subject
+both look exactly like working apparatus.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

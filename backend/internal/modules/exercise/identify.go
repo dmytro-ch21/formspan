@@ -238,9 +238,12 @@ func ValidateIdentification(id Identification, shortlist []Exercise) (Identifica
 			Name:       e.Name,
 			Confidence: clampConfidence(c.Confidence),
 		})
-		if len(kept) == MaxCandidates {
-			break
-		}
+		// NOT capped here. The cap is applied LAST, after the coherence filter
+		// below, because capping first discards by RANK what the filter would
+		// then remove by CORRECTNESS — a good fifth candidate lost while four
+		// incoherent ones ahead of it are dropped anyway, leaving fewer answers
+		// than the model actually got right. Found by review of the first
+		// version, which capped here.
 	}
 
 	if len(kept) == 0 {
@@ -258,30 +261,59 @@ func ValidateIdentification(id Identification, shortlist []Exercise) (Identifica
 	// is a model that reports "treadmill" and returns cable rows — each half
 	// individually well-formed, the pair incoherent, and nothing in an
 	// id-existence check can see it.
+	eq := strings.TrimSpace(id.Equipment)
+	if eq == "" {
+		// **Candidates with no equipment named is itself incoherent**, and the
+		// first version let it straight through — it only ran the check when
+		// `eq != ""`, so an empty string skipped the guard entirely.
+		//
+		// That was not merely a thin spot. The published contract said
+		// `equipment` is "guaranteed to be used by at least one candidate",
+		// which was FALSE on exactly this path, and the schema invites it: the
+		// field's own description offers an empty string for "none visible".
+		// A model that names no equipment while naming four exercises has
+		// contradicted the prompt, which tells it that candidates must use the
+		// equipment it reports.
+		//
+		// Refusing rather than deriving the family from the candidates: that
+		// would be the server inventing the half the model declined to give,
+		// which is the same move as fuzzy-matching an invented id.
+		return Identification{}, fmt.Errorf(
+			"%w: %d candidates but no equipment named", ErrIdentifyRefused, len(kept))
+	}
+
+	// EVERY candidate must use the reported equipment, not merely one of them.
 	//
-	// Reported equipment that no surviving candidate actually uses means the
-	// two halves of the answer disagree, and a disagreement the server can
-	// detect should never reach a client as a confident draft.
-	if eq := strings.TrimSpace(id.Equipment); eq != "" {
-		agrees := false
-		for _, c := range kept {
-			for _, q := range byID[c.ExerciseID].Equipment {
-				if q == eq {
-					agrees = true
-					break
-				}
-			}
-			if agrees {
+	// The first version asked whether ANY candidate agreed, which let a
+	// treadmill answer carry two cable-machine candidates through on the
+	// strength of a third that matched. That is weaker than the prompt, which
+	// tells the model its candidates must all use the equipment it reports — and
+	// a guard looser than its own instruction cannot detect the instruction
+	// being ignored, which is the only reason it exists.
+	//
+	// Non-matching candidates are DROPPED rather than failing the whole answer,
+	// so a mostly-right response still helps: the athlete gets the coherent
+	// candidates instead of nothing. If that empties the list, the two halves
+	// disagreed completely and it becomes a refusal.
+	coherent := kept[:0:0]
+	for _, c := range kept {
+		for _, q := range byID[c.ExerciseID].Equipment {
+			if q == eq {
+				coherent = append(coherent, c)
 				break
 			}
 		}
-		if !agrees {
-			return Identification{}, fmt.Errorf(
-				"%w: reported %q but every candidate is other equipment", ErrIdentifyRefused, eq)
-		}
+	}
+	if len(coherent) == 0 {
+		return Identification{}, fmt.Errorf(
+			"%w: reported %q but every candidate is other equipment", ErrIdentifyRefused, eq)
 	}
 
-	id.Candidates = kept
+	if len(coherent) > MaxCandidates {
+		coherent = coherent[:MaxCandidates]
+	}
+	id.Equipment = eq
+	id.Candidates = coherent
 	return id, nil
 }
 
