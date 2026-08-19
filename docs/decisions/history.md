@@ -28439,6 +28439,113 @@ Open questions:
   still only covered by their own tests.
 
 
+## 2026-08-19 — Point the camera at a machine, and answer from a closed set
+
+`POST /v1/exercises/identify` exists. Photograph a gym machine, get a **ranked
+shortlist** of catalog exercises to tap. That is N7's backend half.
+
+### The design is a shortlist, and everything else follows from that
+
+The obvious reading of N7 — train something on our library — is impossible and
+the task line has said so for months: **8 images across 504 exercises.** There is
+no training set and there never will be one from this catalog.
+
+So the question asked of the model is narrowed until it is answerable. The
+catalog is filtered to machine equipment — ~200 published rows out of 762 — and
+the model is asked *which of these* rather than *what is this*. **A closed set is
+what makes a wrong answer checkable**, and checkability is the whole feature. An
+open-vocabulary answer of "pec deck" is unfalsifiable; the same answer against a
+list it is not on is detectably invented.
+
+The exclusions are the interesting half. `bodyweight` (186 rows) and
+`mobility-area` (69) are out because there is no machine to photograph — leaving
+them in is how a photo of empty gym floor acquires a confident answer. Dumbbells,
+barbells and kettlebells are out for a different reason: they are real objects,
+but **someone holding a dumbbell already knows what it is.** What is left is what
+a person genuinely cannot identify by looking, which is exactly the case N7 was
+filed for.
+
+### Three guards, and the second one is the one worth having
+
+All mutation-checked, each turning an undetectable failure into a detectable one:
+
+- **An id that was not offered is DROPPED**, not repaired. A fuzzy match to the
+  nearest catalog row would turn "I invented this" into "here is a confident
+  neighbour", which is strictly worse than saying nothing. Validation runs
+  against the shortlist that was SENT rather than the whole catalog — a
+  different and stronger question, and the only one that detects a model
+  answering from its own memory of gyms.
+- **A reported `equipment` that contradicts its own candidates is refused.**
+  This is the N40 shape, and it is why that entry sits directly above this one:
+  its invented item was caught three ways while a doubled quantity was caught
+  **not at all**, because nothing downstream could see it. The equivalent here
+  is a response saying "treadmill" while returning cable rows — each half
+  well-formed, the pair incoherent, and an id-existence check blind to it. A
+  disagreement the server can detect should never reach a client as a confident
+  draft.
+- **The name comes from the catalog, never the response.** A valid id with a
+  wrong label would otherwise put text on screen that no other part of the app
+  agrees with.
+
+### More than one candidate is a product decision, not a UI detail
+
+The failure that costs an athlete something here is not "no answer" — it is a
+**confident wrong one**, and nothing in Go can tell a correct `seated-cable-row`
+from a plausible wrong one. That is unfixable on the server.
+
+A ranked shortlist converts it into a fixable problem. The athlete is standing in
+front of the machine and is a perfect oracle; four options cost one tap and make
+a near-miss harmless, where a single confident answer makes it invisible. The
+contract says clients must not auto-select the first.
+
+`confidence` is **reported and never acted on** — nothing thresholds it. It
+cannot be calibrated to "am I right", because the model has never seen this
+catalog; at best it means "how clearly can I see a machine", which is worth
+showing to someone deciding whether to retake a photo and worthless as a gate.
+
+### No provider file, which is the whole of what N36 bought
+
+This is a prompt, a schema, a validator and a model id. `internal/platform/llm`
+carries both backends behind one `Completer`, and its `Request` already had
+`Image`/`ImageMediaType` because N26 needed them for a plate photo — so **nothing
+in the transport had to change** to add a third consumer. The extraction was done
+before this code existed precisely so the cheap version was still available; this
+is the invoice arriving.
+
+Model defaults stayed with the caller for the same reason, and this is the third
+independent judgement behind that: `DefaultIdentifyModels` is N7's own, beside
+N26's and N33's, on the same provider.
+
+### What this does NOT do, stated plainly
+
+- **The tier is not chosen against evidence.** The provider decision (#309) was
+  OpenAI on "comparable and cheaper", and *comparable* was a judgement — nothing
+  has been run against equipment photos. It therefore starts on the **capable**
+  tier, and the cheap one is a measurement away rather than a default. N37 put
+  two tiers of the same provider at 0.0% and 24.2% invention, so tier is the
+  risk and vendor is not; banking a cost saving first is how the saving becomes
+  a wrong exercise in real history.
+- **Nothing has been run against a real photograph**, which is the same gap N40
+  closed for nutrition and found two errors in one image. This feature should
+  expect the same treatment before anyone trusts its accuracy.
+- **The mobile camera surface is not built** — that is **N44**. Per the platform
+  rule it is unambiguously a phone thing, done standing in front of a machine,
+  and the backend is the half that makes the tier choice measurable, so it went
+  first. The id was allocated and broadcast **separately** rather than written
+  into this diff, because an id inside an open PR is invisible to `gh pr list`
+  until it merges — which is how two sessions allocated N39 this same afternoon.
+- **The spend bound is a rate limit, not a quota.** 20 per 30 minutes, keyed on
+  the account. Weaker than nutrition's persisted daily quota, which survives a
+  deploy and reports a remaining count; this is in-memory and resets on restart.
+  Proportionate for an endpoint with no usage history, and recorded rather than
+  implied.
+- **The shortlist comes from the embedded seed catalog, not the database**, so a
+  console-authored exercise is not offered until the next deploy carries it into
+  the seed file. Same contract as every other `SeedData()` consumer, and a
+  per-request query would put a table read on a latency budget that already has a
+  vision round-trip in it.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

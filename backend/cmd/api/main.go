@@ -133,14 +133,30 @@ func main() {
 	shareLimiter := ratelimit.New(ratelimit.Policy{
 		Name: "share", Burst: 30, Every: 2 * time.Minute,
 	}, nil)
+	// The machine-identification limit is the TIGHTEST here, and it is a spend
+	// bound rather than an abuse bound. Every call is a vision request against
+	// a billed endpoint (~$0.005), and unlike the other two the cost lands on
+	// us rather than on somebody's inbox. 20 in 30 minutes is far above real
+	// use — an athlete photographs a machine they cannot identify, taps a
+	// candidate, and is done — and far below a loop.
+	//
+	// Deliberately NOT nutrition's persisted daily quota. That one survives a
+	// deploy and reports a remaining count to the client; this is in-memory and
+	// resets on restart, which is weaker. It is the proportionate first cut for
+	// an endpoint with no usage history, and the gap is recorded rather than
+	// implied — see the N7 history entry.
+	identifyLimiter := ratelimit.New(ratelimit.Policy{
+		Name: "exercise_identify", Burst: 20, Every: 30 * time.Minute,
+	}, nil)
 	limitFriendRequests := ratelimit.Middleware(friendRequestLimiter, byUser)
 	limitShares := ratelimit.Middleware(shareLimiter, byUser)
+	limitIdentify := ratelimit.Middleware(identifyLimiter, byUser)
 
 	// ALL THREE, not just the default. The two tight maps are smaller — only
 	// athletes who ever sent a request or a share — but "smaller leak" is
 	// still the leak this sweeper exists to not have, and review pointed out
 	// that sweeping one of three quietly reads as sweeping all of them.
-	sweepable := []*ratelimit.Limiter{defaultLimiter, friendRequestLimiter, shareLimiter}
+	sweepable := []*ratelimit.Limiter{defaultLimiter, friendRequestLimiter, shareLimiter, identifyLimiter}
 	go func() {
 		for range time.Tick(10 * time.Minute) {
 			for _, l := range sweepable {
@@ -291,6 +307,46 @@ func main() {
 		mealEstimator,
 		nutrition.NewPostgresEstimateUsage(pool),
 	)
+
+	// Machine identification (N7). Same nil-safe shape as the estimator above:
+	// `NewIdentifier` returns the Identifier INTERFACE, so a deploy without the
+	// provider's key gets a genuinely nil interface and every other exercise
+	// route runs normally. Returning a concrete pointer here would produce a
+	// NON-nil interface holding nil, the handler's nil check would read false,
+	// and the first request would panic on a nil receiver.
+	//
+	// Its own provider and model env vars rather than sharing the estimate's:
+	// model tier is a per-feature judgement, and N26 and this want different
+	// answers from the same provider — see `DefaultIdentifyModels`.
+	identifyProvider := exercise.Provider(os.Getenv("IDENTIFY_PROVIDER"))
+	if identifyProvider == "" {
+		identifyProvider = exercise.DefaultIdentifyProvider
+	}
+	identifyKey := ""
+	if env := identifyProvider.APIKeyEnv(); env != "" {
+		identifyKey = os.Getenv(env)
+	}
+	machineIdentifier, err := exercise.NewIdentifier(exercise.IdentifierConfig{
+		Provider: identifyProvider,
+		Model:    os.Getenv("IDENTIFY_MODEL"),
+		APIKey:   identifyKey,
+	})
+	if err != nil {
+		// A bad provider name or an empty shortlist is a CONFIG error, and it
+		// fails the boot rather than degrading to 503. A typo'd provider that
+		// silently disabled the feature would look exactly like "no key set",
+		// which is the state it is most likely to be confused with.
+		logger.Error("exercise: identifier config", "err", err)
+		os.Exit(1)
+	}
+	if machineIdentifier == nil {
+		logger.Info("exercise: machine identification disabled", "reason", "no "+identifyProvider.APIKeyEnv())
+	} else {
+		logger.Info("exercise: machine identification enabled",
+			"provider", string(identifyProvider),
+			"model", exercise.ResolveIdentifyModel(identifyProvider, os.Getenv("IDENTIFY_MODEL")))
+	}
+	identifyHandler := exercise.NewIdentifyHandler(machineIdentifier)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
@@ -490,6 +546,12 @@ func main() {
 	mux.Handle("PUT /v1/profile/exercise-units/{exerciseID}", verifier.RequireAuth(http.HandlerFunc(profileHandler.SetExerciseUnit)))
 	mux.Handle("GET /v1/exercises", verifier.RequireAuth(http.HandlerFunc(exerciseHandler.List)))
 	mux.Handle("GET /v1/exercises/{exerciseID}", verifier.RequireAuth(http.HandlerFunc(exerciseHandler.Get)))
+	// POST rather than GET because the photo is the request body, and BEFORE
+	// the {exerciseID} route would matter if this were a GET — it is not, so
+	// there is no shadowing question. Rate-limited on top of the default
+	// policy: every call is a billed vision request.
+	mux.Handle("POST /v1/exercises/identify",
+		verifier.RequireAuth(limitIdentify(http.HandlerFunc(identifyHandler.Identify))))
 	mux.Handle("GET /v1/techniques", verifier.RequireAuth(http.HandlerFunc(techniqueHandler.List)))
 	// Registered before the wildcard for readability only — Go 1.22's mux
 	// picks the more specific pattern regardless of order, so the literal
