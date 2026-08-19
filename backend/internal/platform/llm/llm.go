@@ -67,6 +67,29 @@ var ErrRefused = errors.New("llm: the provider declined the request")
 // package's errors reach a client through the caller's error vocabulary.
 var ErrUnavailable = errors.New("llm: the provider is unavailable")
 
+// There is a THIRD outcome, and this package deliberately has no error for it.
+//
+// A model can return HTTP 200, valid JSON, schema-conformant — and empty of
+// anything useful. Measured: the dictation eval (#302) fed `gpt-5.6-luna` a
+// dictation carrying an injected instruction, and it neither obeyed nor failed.
+// It dumped the whole sentence into the free-text field and returned no tags,
+// including for the real technique the athlete had reported. No refusal stop
+// reason, no `message.refusal`, no `length` finish reason. At this layer that is
+// a **successful call**, and both sentinels above are wrong for it.
+//
+// **Do not add an emptiness check here.** Emptiness is only legible against a
+// schema and a domain, and the same shape means opposite things to different
+// callers: an empty item list is the CORRECT answer for a photo of a wall, and
+// an empty tag list is the CORRECT answer for "reminder to buy a mouthguard".
+// A check in this package would have to be wrong for one of them to be right
+// for the other — it would break nutrition's legitimate empty result in order
+// to catch dictation's illegitimate one.
+//
+// Deciding whether a well-formed response is USABLE is the consumer's job, next
+// to the schema that gives the fields meaning. This package's contract stops at
+// "the provider answered, here is what it said". Raised by the session that ran
+// the eval.
+
 // Request is one call, described without reference to any provider.
 type Request struct {
 	// System is the instruction sent as the system prompt.

@@ -2571,6 +2571,27 @@ than `!== undefined`, because a `null` in a cached payload would otherwise reach
 deleted, since keeping a TypeScript helper with no production caller while
 deleting Go's for exactly that would have been the inconsistency.
 
+**A third outcome, raised by the session that ran the dictation eval, and it is
+now written into the package rather than left to be rediscovered.** A model can
+return HTTP 200, valid JSON, schema-conformant, and empty of anything useful:
+fed a dictation carrying an injected instruction, `gpt-5.6-luna` neither obeyed
+nor failed — it dumped the sentence into the free-text field and returned no
+tags, including for the real technique the athlete had reported. No refusal stop
+reason, no `message.refusal`, no `length`. At the transport layer that is a
+successful call, and both sentinels are correctly wrong for it.
+
+The doc comment says **do not add an emptiness check here**, because emptiness
+is only legible against a schema and a domain: an empty item list is the correct
+answer for a photo of a wall, and an empty tag list is the correct answer for
+"reminder to buy a mouthguard". A check in this package would have to be wrong
+for one caller to be right for the other. That is exactly the kind of helpful
+addition a later session makes, and the comment is there to stop it.
+
+The `Config` note about per-feature defaults is now cited rather than asserted:
+same provider, `gpt-5.6-luna` scores a 0.0% invention rate against
+`gpt-5.4-nano`'s 24.2% on dictation, while nano was adequate for portion
+estimates. Both figures are #302's, checked against `main` before quoting them.
+
 ### Gaps this leaves
 
 - **No password reset**, which is now the most urgent hole in mobile auth and is
