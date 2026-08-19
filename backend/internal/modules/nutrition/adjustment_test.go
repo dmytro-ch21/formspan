@@ -2,6 +2,7 @@ package nutrition
 
 import (
 	"fmt"
+	"math"
 	"testing"
 )
 
@@ -381,3 +382,58 @@ func abs(n int) int {
 }
 
 var _ = fmt.Sprintf
+
+func TestTheStepNeverExceedsItsLimitEvenAfterRounding(t *testing.T) {
+	// The bound must apply to the number RETURNED, not to the raw float.
+	//
+	// The first version compared the raw delta against the limit and rounded
+	// afterwards, so a raw of 245.5 under a limit of 246 took the UNCAPPED
+	// branch and `roundTo10` returned 250 — over the limit, and reported
+	// `capped: false`, so the explanation did not even confess. Every limit in
+	// the table above is a round number, which is why none of them could see
+	// it. Found by review.
+	for _, tc := range []struct {
+		raw     float64
+		current int
+	}{
+		{245.5, 2460}, // limit 246: rounding used to carry it to 250
+		{246.0, 2460}, // exactly on the limit
+		{244.9, 2460},
+		{9999, 2460}, // far over
+		{-245.5, 2460},
+		{-9999, 2460},
+	} {
+		limit := math.Min(MaxStepKcal, float64(tc.current)*MaxStepFraction)
+		delta, capped, reason := capStep(tc.raw, tc.current)
+		if float64(abs(delta)) > limit {
+			t.Errorf("capStep(%v, %d) = %d, over the limit of %.1f", tc.raw, tc.current, delta, limit)
+		}
+		if capped && reason == "" {
+			t.Errorf("capStep(%v, %d) capped without saying so", tc.raw, tc.current)
+		}
+	}
+}
+
+func TestTheDerivationsOwnFloorDoesNotRoundBelowItself(t *testing.T) {
+	// `clampKcal` raised a target to the resting floor and then rounded to
+	// NEAREST, so a floor of 1874 came back as 1870 while the reason line said
+	// the target had been raised to stay above resting. Small, and it made the
+	// adjustment's contract sentence false: a target the derivation blesses
+	// must never be one the adjustment immediately proposes raising.
+	// TDEE 2000, so the 30% deficit cap lands at 1400 and the floor is what
+	// actually binds. With TDEE 3000 the cap raises the target to 2100 — above
+	// every floor below — and this test passed while never entering the branch
+	// it names, `clamped` being true for the cap instead. Checked by mutation,
+	// not by reading.
+	for _, rmr := range []float64{1874, 1871, 1875, 1879, 1880, 1700.5} {
+		got, clamped, reason := clampKcal(1000, 2000, rmr)
+		floor := rmr * minKcalOverResting
+		if float64(got) < floor {
+			t.Errorf("clampKcal floor at rmr %.1f returned %d, below the floor of %.1f (%q)",
+				rmr, got, floor, reason)
+		}
+		if !clamped {
+			t.Errorf("rmr %.1f: the floor bound but clamped is false", rmr)
+		}
+	}
+}

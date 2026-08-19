@@ -399,17 +399,6 @@ func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Suggested derives a target and RETURNS IT WITHOUT STORING IT.
-//
-// A proposal, not a decision: the athlete accepts it with a PUT, which is what
-// makes the number arguable rather than imposed. Same posture the weekly
-// adjustment rule will take.
-//
-// An incomplete profile is a 200 with a null suggestion and the field names,
-// NOT a 400. The request was fine; the profile is missing something, and the
-// client's fix is a form rather than a retry — the same shape body uses for a
-// check-in with no bodyweight.
-
 // Adjustment proposes a change to the live target, or says why it will not.
 //
 // **Never an error and never a write.** A withheld proposal is 200 with
@@ -454,6 +443,16 @@ func (h *Handler) Adjustment(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Suggested derives a target and RETURNS IT WITHOUT STORING IT.
+//
+// A proposal, not a decision: the athlete accepts it with a PUT, which is what
+// makes the number arguable rather than imposed. Same posture the weekly
+// adjustment rule will take.
+//
+// An incomplete profile is a 200 with a null suggestion and the field names,
+// NOT a 400. The request was fine; the profile is missing something, and the
+// client's fix is a form rather than a retry — the same shape body uses for a
+// check-in with no bodyweight.
 func (h *Handler) Suggested(w http.ResponseWriter, r *http.Request) {
 	userID, ok := callerID(w, r)
 	if !ok {

@@ -119,8 +119,12 @@ type AdjustmentInputs struct {
 	// silently disagrees with the rows the moment one path forgets.
 	DaysLogged int
 
-	// RMRKcal is the floor's input. The proposal may never go below
-	// RMRKcal * 1.1, whatever the arithmetic says.
+	// RMRKcal is the floor's input. The proposal may never go below resting —
+	// `minKcalOverResting`, the derivation's own constant, and NOT a multiple
+	// of it. Zero means the profile was too coarse to price, which is read as
+	// "no floor": `energy`'s fallback baseline runs 20-30% high, so a floor
+	// built on it would sit above many athletes' real targets and block every
+	// legitimate reduction.
 	RMRKcal float64
 }
 
@@ -309,17 +313,25 @@ func ProposeAdjustment(in AdjustmentInputs) (*Adjustment, []string) {
 // capStep bounds one move to whichever of the two limits is tighter.
 func capStep(raw float64, current int) (delta int, capped bool, reason string) {
 	limit := math.Min(MaxStepKcal, float64(current)*MaxStepFraction)
-	// Rounded DOWN, for the mirror of the reason the floor rounds up: a 10%
-	// limit of 245 would become a 250 step under `roundTo10`, exceeding the cap
-	// this function exists to impose. A ceiling that rounds up is not a
-	// ceiling.
-	switch {
-	case raw > limit:
-		return floorTo10(limit), true, "increase capped to one step"
-	case raw < -limit:
-		return -floorTo10(limit), true, "decrease capped to one step"
+	// The ceiling is rounded DOWN, the mirror of the floor rounding up: a 10%
+	// limit of 245 would otherwise permit a 250 step. A ceiling that rounds up
+	// is not a ceiling.
+	//
+	// **The comparison is against the ROUNDED delta, not the raw one**, which
+	// is the half the first version got wrong. A raw of 245.5 under a limit of
+	// 246 took the uncapped branch, and `roundTo10` then returned 250 —
+	// over the limit, and reported `capped: false`, so the basis did not even
+	// confess to it. Rounding first makes the bound apply to the number
+	// actually returned. Found by review.
+	max := floorTo10(limit)
+	switch d := roundTo10(raw); {
+	case d > max:
+		return max, true, "increase capped to one step"
+	case d < -max:
+		return -max, true, "decrease capped to one step"
+	default:
+		return d, false, ""
 	}
-	return roundTo10(raw), false, ""
 }
 
 // splitHalves puts each reading in the recent or earlier 7 days of the window,

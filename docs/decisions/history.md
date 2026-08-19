@@ -27986,6 +27986,37 @@ The cap test needed two rows to mean anything: 10% of 2,400 is 240, so the flat
 250 never binds at that target. Whichever limit is looser is never exercised,
 and a single row passes against a rule that only ever applies one of them.
 
+### The second pass, and two bounds that still were not bounds
+
+No blocking findings either time. Three of the second round's suggestions were
+the same defect at different addresses, which is the useful part:
+
+- **`capStep` compared the RAW delta against the limit and rounded afterwards.**
+  A raw of 245.5 under a limit of 246 took the *uncapped* branch, and
+  `roundTo10` then returned 250 — over the limit, reported as `capped: false`,
+  so the explanation did not even confess. The comparison is against the
+  rounded delta now. Every limit in the existing table was a round number,
+  which is exactly why none of them could see it.
+- **`clampKcal` — the DERIVATION's floor, not this feature's — had the same
+  rounding bug** the adjustment had just fixed: it raised a target to the
+  resting floor and then rounded to nearest, so a floor of 1874 came back as
+  1870 while the reason line said the target had been raised to stay above
+  resting. Four calories, and it made this branch's own contract sentence false:
+  a target the API is willing to derive must never be one it immediately
+  proposes raising. Fixed in `target.go`, since the aphorism this branch wrote
+  applies there verbatim.
+
+**And the test written to pin the second one passed without ever entering the
+branch it named.** `clampKcal(1000, 3000, 1874)` never reaches the floor: the
+30% deficit cap raises the target to 2100 first, well above it, and `clamped`
+comes back true for the cap instead. It was found by mutation rather than by
+review or by reading — the mutation survived, which is the only reason anyone
+looked. With TDEE 2000 the cap lands at 1400 and the floor is what binds.
+
+That is the seventh test in this arc to pass for a reason unrelated to its
+claim, and the shape has not varied: the assertion is true, the code is right,
+and the input never reaches the thing being tested.
+
 ### Open questions this leaves
 
 - **No client consumes this yet.** The endpoint returns a proposal nothing

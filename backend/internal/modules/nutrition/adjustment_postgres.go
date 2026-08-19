@@ -10,7 +10,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/platform/energy"
 )
 
-// AdjustmentInputs gathers the fortnight of evidence the rule judges, in four
+// AdjustmentInputs gathers the fortnight of evidence the rule judges, in five
 // queries.
 //
 // Reads `body_checkins` and `body_phases` directly, for the reason

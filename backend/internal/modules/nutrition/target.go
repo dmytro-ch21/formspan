@@ -445,9 +445,21 @@ func clampKcal(want, tdee, rmr float64) (kcal int, clamped bool, reason string) 
 	}
 	// A target under resting is the one an athlete most needs told, and a
 	// percentage cap can land below it — which is exactly what happened.
+	floorBound := false
 	if floor := rmr * minKcalOverResting; want < floor {
-		want, clamped = floor, true
+		want, clamped, floorBound = floor, true, true
 		reason = "the target was raised to stay above your resting rate"
+	}
+	if floorBound {
+		// Rounded UP when the floor bound, because the final rounding can put
+		// the number back BELOW the rail that just raised it: a floor of 1874
+		// became 1870 here while the reason line said it had been raised to
+		// stay above resting. A floor that rounds to nearest is not a floor.
+		//
+		// The adjustment rule reads this same constant and rounds up too, so
+		// the two agreeing is what keeps a derived target from being one the
+		// adjustment immediately proposes raising. Found by review on N27.
+		return ceilTo10(want), clamped, reason
 	}
 	return roundTo10(want), clamped, reason
 }
