@@ -39,6 +39,9 @@ func (a *anthropicCompleter) Model() string { return a.model }
 func (a *anthropicCompleter) Name() string { return string(ProviderAnthropic) }
 
 func (a *anthropicCompleter) Complete(ctx context.Context, req Request) (Response, error) {
+	if err := req.validate(); err != nil {
+		return Response{}, err
+	}
 	blocks := make([]anthropic.ContentBlockParamUnion, 0, 2)
 	// Image first: a leading image reads better than a trailing one, and the
 	// text is a caption for the picture rather than the other way round.

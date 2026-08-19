@@ -28123,6 +28123,46 @@ configured with — distinct from `Response.Model`, which is what the provider
 says it actually used, and the two differ routinely when an alias resolves to a
 dated snapshot.
 
+### Three things the review round added, all of them about the same failure mode
+
+None was blocking, and all three are the same shape — **a config error wearing
+an outage's clothes**, which is the failure this package is most prone to because
+it sits between an env var and a billed endpoint.
+
+- **`translateLLMError` was dropping the truncation detail.** It returned the
+  bare `ErrEstimateRefused`, and the handler logs that error — so "the model
+  declined" and "the output cap is too low" became indistinguishable in the one
+  place an operator would look, while the client (correctly) sees the same 422
+  either way. Now `fmt.Errorf("%w: %v", …)`, which is safe precisely because both
+  providers' refusal paths carry either nothing or the fixed "response was cut
+  off" string, never SDK text.
+- **`Request.MaxTokens` was documented as load-bearing and unvalidated.** Zero is
+  not "no cap", it is a cap of zero: the field is sent either way, so it fails
+  every call and surfaces as `ErrUnavailable` — an outage, for a caller bug. It
+  now fails before the SDK is touched, with a plain error rather than a sentinel,
+  so a caller's translation still returns the right STATUS while the log carries
+  the real reason. This is the same guard `New`'s empty-model check already was,
+  one layer down.
+- **The package had no test of its own contract.** `New`'s three-way behaviour
+  was pinned only through `nutrition`'s tests, which was fine while nutrition was
+  the only consumer and stops being fine the moment N33 calls `llm.New` directly
+  — a guard N33 depends on would live in a package it does not own, and a
+  nutrition refactor that stopped exercising a branch would silently unpin it for
+  everyone. `provider_test.go` pins it locally now.
+
+Two of those tests **enumerate the `Provider` constants rather than listing
+backends by hand**, deliberately. Every provider must build, report itself, and
+reject an impossible request; a third provider added without a case in `New`
+fails here by name instead of nil-panicking on somebody's first call. That is the
+lesson from N16 in this codebase's own recent history, where a second constructor
+nobody remembered shipped an admin endpoint serving `null` — two implementations
+means one of them gets forgotten, so the test drives off the list rather than
+repeating it.
+
+All four guards were mutation-checked: dropping either provider's `validate()`
+call, weakening `<=` to `<`, returning a nil concrete pointer from `New`, and
+swapping the validity check back behind the key check each turn the suite red.
+
 ### Gaps this leaves
 
 - ~~Nothing has been run against a real API.~~ **Closed, by the session that
@@ -28145,9 +28185,11 @@ dated snapshot.
   convenience (a worktree has no `backend/.env`, the same trap that costs mobile
   builds their Clerk key) and a bad habit to encode: above the repo root it is
   reading files that are none of its business. Export the variable.
-- **`llm` still has no OFFLINE happy-path test** — no fake HTTP server, no
-  recorded response — so the default `go test ./...` still exercises the
-  providers only through the truncation grep and nutrition's fake. A recorded
+- **`llm` still has no offline test of a SUCCESSFUL call** — no fake HTTP
+  server, no recorded response. `provider_test.go` covers construction and
+  rejection, both of which stop before the wire; the truncation grep is a text
+  assertion; nutrition's fake stands in for the provider entirely. So no test in
+  the default `go test ./...` has ever seen a response parsed. A recorded
   fixture is the honest next step and needs a decision about where those live.
 - **`Model()` widened the interface.** It earns its place (the alternative was a
   test reaching across a package boundary or re-deriving what it was checking),

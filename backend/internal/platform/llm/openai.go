@@ -40,6 +40,9 @@ func (o *openAICompleter) Model() string { return o.model }
 func (o *openAICompleter) Name() string { return string(ProviderOpenAI) }
 
 func (o *openAICompleter) Complete(ctx context.Context, req Request) (Response, error) {
+	if err := req.validate(); err != nil {
+		return Response{}, err
+	}
 	parts := make([]openai.ChatCompletionContentPartUnionParam, 0, 2)
 	if len(req.Image) > 0 {
 		// A data URI rather than a URL: the bytes are in hand and are never

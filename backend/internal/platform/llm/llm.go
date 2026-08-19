@@ -142,6 +142,25 @@ type Response struct {
 	Model string
 }
 
+// validate rejects a request that cannot succeed, before it costs anything.
+//
+// `MaxTokens` is the one that bites: zero is not "no cap", it is a cap of zero.
+// The field is sent either way, so `max_completion_tokens: 0` fails every
+// OpenAI call and Anthropic requires at least one — and both surface as
+// `ErrUnavailable`, which is a config error wearing an outage's clothes. That is
+// the exact shape `New`'s empty-model check exists to prevent, so it gets the
+// same treatment one layer down.
+//
+// A plain error rather than a sentinel, deliberately: a caller translating the
+// two sentinels will map this to its own "unavailable", which is the right
+// STATUS, while the text carries the actual reason into the log.
+func (r Request) validate() error {
+	if r.MaxTokens <= 0 {
+		return errors.New("llm: request needs a positive MaxTokens; zero is a cap of zero, not an absent one")
+	}
+	return nil
+}
+
 // Completer is one provider.
 type Completer interface {
 	Complete(ctx context.Context, req Request) (Response, error)

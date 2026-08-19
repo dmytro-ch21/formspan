@@ -192,7 +192,15 @@ func NewEstimator(cfg EstimatorConfig) (Estimator, error) {
 func translateLLMError(err error) error {
 	switch {
 	case errors.Is(err, llm.ErrRefused):
-		return ErrEstimateRefused
+		// The detail is KEPT, not dropped to the bare sentinel. The client sees
+		// a hard-coded 422 message either way, but the handler logs this error,
+		// and truncation-versus-genuine-refusal is precisely the half the client
+		// never sees and the operator needs — it is what says the output cap is
+		// too low. The first version returned the bare sentinel and quietly made
+		// those two indistinguishable in the log. Safe to embed because the
+		// refusal paths in both providers carry either nothing or the fixed
+		// "response was cut off" string, never SDK text. Raised in review.
+		return fmt.Errorf("%w: %v", ErrEstimateRefused, err)
 	case errors.Is(err, llm.ErrUnavailable):
 		return fmt.Errorf("%w: %v", ErrEstimateUnavailable, err)
 	default:
