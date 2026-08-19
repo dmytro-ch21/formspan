@@ -28,7 +28,7 @@ function ok(body: unknown) {
 
 const draft = {
   estimate: { items: [], note: '', model: 'claude-opus-5', source: 'text' },
-  quota: { source: 'text', used: 1, limit: 20, remaining: 19, resets_at: null },
+  quota: { used: 1, limit: 25, remaining: 24, resets_at: null },
 };
 
 /** What was handed to FormData.append, before it stringifies anything. */

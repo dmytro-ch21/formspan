@@ -95,13 +95,18 @@ func (o *openAICompleter) Complete(ctx context.Context, req Request) (Response, 
 		return Response{}, fmt.Errorf("%w: no choices returned", ErrUnavailable)
 	}
 
+	// Built BEFORE the refusal and truncation checks below, because both of
+	// those are billed 200s and a meter that skipped them would under-count
+	// exactly the traffic a runaway client produces.
+	usage := openAIUsage(resp)
+
 	choice := resp.Choices[0]
 	// The refusal check, and it is NOT the same shape as Anthropic's: OpenAI
 	// puts a declined request in a `refusal` field on the message rather than
 	// in a stop reason, so code ported across without reading the API would
 	// silently treat a refusal as an empty response and report an outage.
 	if choice.Message.Refusal != "" {
-		return Response{}, ErrRefused
+		return Response{Model: resp.Model, Usage: usage}, ErrRefused
 	}
 	// `length` means the response hit `MaxCompletionTokens` mid-object. Reported
 	// as a refusal rather than as unavailable because a retry is deterministic —
@@ -112,7 +117,25 @@ func (o *openAICompleter) Complete(ctx context.Context, req Request) (Response, 
 	// no budget set, `length` fires only at the model's own maximum, which this
 	// prompt cannot approach. The comment claimed a budget that was not there.
 	if choice.FinishReason == "length" {
-		return Response{}, fmt.Errorf("%w: response was cut off", ErrRefused)
+		return Response{Model: resp.Model, Usage: usage}, fmt.Errorf("%w: response was cut off", ErrRefused)
 	}
-	return Response{Raw: choice.Message.Content, Model: resp.Model}, nil
+	return Response{Raw: choice.Message.Content, Model: resp.Model, Usage: usage}, nil
+}
+
+// openAIUsage maps OpenAI's accounting onto the normalised shape.
+//
+// `PromptTokens` already INCLUDES the cached portion here, so it maps straight
+// across — the adjustment is on the Anthropic side. See the Usage doc comment
+// for why that asymmetry cannot be ignored.
+func openAIUsage(resp *openai.ChatCompletion) Usage {
+	if resp == nil {
+		return Usage{}
+	}
+	return Usage{
+		InputTokens:       resp.Usage.PromptTokens,
+		OutputTokens:      resp.Usage.CompletionTokens,
+		CachedInputTokens: resp.Usage.PromptTokensDetails.CachedTokens,
+		ReasoningTokens:   resp.Usage.CompletionTokensDetails.ReasoningTokens,
+		ImageTokens:       resp.Usage.PromptTokensDetails.ImageTokens,
+	}
 }

@@ -58,7 +58,7 @@ func TestTheProviderNeutralHalfDoesAllTheChecking(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := &estimator{c: &fakeCompleter{raw: tc.raw, model: "m"}}
-			_, err := e.Estimate(context.Background(), EstimateInput{Description: "two eggs"})
+			_, _, err := e.Estimate(context.Background(), EstimateInput{Description: "two eggs"})
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("got %v, want %v", err, tc.want)
 			}
@@ -68,7 +68,7 @@ func TestTheProviderNeutralHalfDoesAllTheChecking(t *testing.T) {
 
 func TestAGoodResponseIsStampedWithTheProviderModelAndSource(t *testing.T) {
 	e := &estimator{c: &fakeCompleter{raw: goodRaw, model: "some-model-9"}}
-	out, err := e.Estimate(context.Background(), EstimateInput{
+	out, _, err := e.Estimate(context.Background(), EstimateInput{
 		Image: []byte{1}, ImageMediaType: "image/png",
 	})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestAnInvalidInputNeverReachesAProvider(t *testing.T) {
 	// The provider is where money is spent, so validation happens above it.
 	f := &fakeCompleter{raw: goodRaw, model: "m"}
 	e := &estimator{c: f}
-	if _, err := e.Estimate(context.Background(), EstimateInput{}); !errors.Is(err, ErrNoInput) {
+	if _, _, err := e.Estimate(context.Background(), EstimateInput{}); !errors.Is(err, ErrNoInput) {
 		t.Fatalf("want ErrNoInput, got %v", err)
 	}
 	if f.calls != 0 {
@@ -261,7 +261,7 @@ func TestTheRequestCarriesEverythingTheProviderNeeds(t *testing.T) {
 	f := &fakeCompleter{raw: goodRaw, model: "m"}
 	e := &estimator{c: f}
 	img := []byte{0xff, 0xd8, 0xff}
-	if _, err := e.Estimate(context.Background(), EstimateInput{
+	if _, _, err := e.Estimate(context.Background(), EstimateInput{
 		Description:    "two eggs",
 		Image:          img,
 		ImageMediaType: "image/jpeg",

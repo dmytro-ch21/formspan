@@ -26,6 +26,7 @@ import (
 type fakeEstimator struct {
 	out    Estimate
 	err    error
+	usage  Usage
 	calls  int
 	lastIn EstimateInput
 	// onCall fires inside the estimate, so a test can cancel the request while
@@ -34,19 +35,23 @@ type fakeEstimator struct {
 	onCall func()
 }
 
-func (f *fakeEstimator) Estimate(_ context.Context, in EstimateInput) (Estimate, error) {
+func (f *fakeEstimator) Estimate(_ context.Context, in EstimateInput) (Estimate, Usage, error) {
 	f.calls++
 	f.lastIn = in
 	if f.onCall != nil {
 		f.onCall()
 	}
-	return f.out, f.err
+	// Usage is returned alongside the error deliberately, mirroring the real
+	// estimator: a refusal is a billed 200, so a fake that zeroed usage on the
+	// error path would make the metering tests below pass against an
+	// implementation that loses exactly the spend it exists to catch.
+	return f.out, f.usage, f.err
 }
 
 // memUsage is an in-memory meter, so the handler tests need no database.
 type memUsage struct {
 	rows    []EstimateRecord
-	quotaFn func(src EstimateSource) Quota
+	quotaFn func() Quota
 	recErr  error
 	// lastCtxErr is the state of the context the meter was handed. A real
 	// Postgres write would fail on a cancelled one, so recording it here is
@@ -54,17 +59,14 @@ type memUsage struct {
 	lastCtxErr error
 }
 
-func (m *memUsage) Quota(_ context.Context, _ string, src EstimateSource, _ time.Time) (Quota, error) {
+// Counts EVERY row, not the rows of one source. That is the behaviour under
+// test now: a photo consumes the same budget a description does, so a fake
+// still filtering by source would let a per-path regression pass.
+func (m *memUsage) Quota(_ context.Context, _ string, _ time.Time) (Quota, error) {
 	if m.quotaFn != nil {
-		return m.quotaFn(src), nil
+		return m.quotaFn(), nil
 	}
-	used := 0
-	for _, r := range m.rows {
-		if r.Source == src {
-			used++
-		}
-	}
-	return NewQuota(src, used, nil), nil
+	return NewQuota(len(m.rows), nil), nil
 }
 
 func (m *memUsage) Record(ctx context.Context, rec EstimateRecord) error {
@@ -110,8 +112,8 @@ func TestASuccessfulEstimateWritesNoEntryAndReturnsADraft(t *testing.T) {
 	// The response is a DRAFT. There is deliberately no repository on this
 	// handler at all, so it could not write an entry if it tried — which is
 	// the structural version of the rule rather than a promise in a comment.
-	if got.Quota.Remaining != LimitFor(SourceText)-1 {
-		t.Fatalf("remaining = %d, want %d", got.Quota.Remaining, LimitFor(SourceText)-1)
+	if got.Quota.Remaining != DailyEstimates-1 {
+		t.Fatalf("remaining = %d, want %d", got.Quota.Remaining, DailyEstimates-1)
 	}
 }
 
@@ -121,8 +123,8 @@ func TestTheQuotaIsCheckedBEFORETheModelIsCalled(t *testing.T) {
 	// `est.calls == 0` — a handler that called first and refused afterwards
 	// would still return 429 and look correct from the outside.
 	est := &fakeEstimator{out: goodEstimate()}
-	usage := &memUsage{quotaFn: func(src EstimateSource) Quota {
-		return NewQuota(src, LimitFor(src), nil) // already at the cap
+	usage := &memUsage{quotaFn: func() Quota {
+		return NewQuota(DailyEstimates, nil) // already at the cap
 	}}
 	h := NewEstimateHandler(est, usage)
 
@@ -329,8 +331,8 @@ func TestAnExhaustedQuotaSaysWhenInAWayBothHalvesCanUse(t *testing.T) {
 	// bit the handler earlier in this PR. Twenty-one hours ago resets in three.
 	oldest := time.Now().Add(-21 * time.Hour)
 	est := &fakeEstimator{out: goodEstimate()}
-	usage := &memUsage{quotaFn: func(src EstimateSource) Quota {
-		return NewQuota(src, LimitFor(src), &oldest)
+	usage := &memUsage{quotaFn: func() Quota {
+		return NewQuota(DailyEstimates, &oldest)
 	}}
 	w := call(t, NewEstimateHandler(est, usage), `{"description":"two eggs"}`)
 
@@ -390,6 +392,74 @@ func TestHowTheWaitIsSpoken(t *testing.T) {
 	for _, d := range []time.Duration{-time.Hour, 0, 500 * time.Millisecond} {
 		if got := retryAfterSeconds(d); got < 1 {
 			t.Errorf("retryAfterSeconds(%s) = %d, want at least 1", d, got)
+		}
+	}
+}
+
+// **A refusal is a billed 200, so its usage must reach the meter.**
+//
+// This is the half a naive implementation loses: the estimator returns a zero
+// Estimate on every error path, so it is natural to return zero usage with it —
+// and then the only traffic that never gets counted is exactly the traffic a
+// runaway client generates, which is what the quota exists to bound.
+func TestUsageIsMeteredEvenWhenTheEstimateFails(t *testing.T) {
+	est := &fakeEstimator{
+		err:   ErrEstimateRefused,
+		usage: Usage{InputTokens: 1337, OutputTokens: 12, CachedInputTokens: 1334},
+	}
+	usage := &memUsage{}
+	h := NewEstimateHandler(est, usage)
+
+	call(t, h, `{"description":"two eggs"}`)
+
+	if len(usage.rows) != 1 {
+		t.Fatalf("recorded %d rows, want 1", len(usage.rows))
+	}
+	got := usage.rows[0]
+	if got.Succeeded {
+		t.Fatal("a refusal was recorded as a success")
+	}
+	if got.Usage.InputTokens != 1337 || got.Usage.OutputTokens != 12 {
+		t.Fatalf("usage = %+v — a refusal was billed in full and must be metered in full", got.Usage)
+	}
+}
+
+// The successful path carries usage through unchanged, including the image
+// breakdown that the whole photo-vs-text question turns on.
+func TestUsageIsMeteredOnASuccessfulEstimate(t *testing.T) {
+	est := &fakeEstimator{
+		out:   Estimate{Items: []EstimatedItem{}, Model: "gpt-5.6-luna"},
+		usage: Usage{InputTokens: 1837, OutputTokens: 726, CachedInputTokens: 1334, ImageTokens: 500},
+	}
+	usage := &memUsage{}
+	h := NewEstimateHandler(est, usage)
+
+	call(t, h, `{"description":"two eggs"}`)
+
+	if len(usage.rows) != 1 {
+		t.Fatalf("recorded %d rows, want 1", len(usage.rows))
+	}
+	if got := usage.rows[0].Usage; got.ImageTokens != 500 || got.InputTokens != 1837 {
+		t.Fatalf("usage = %+v, want the image breakdown carried through", got)
+	}
+}
+
+// **Token spend must never reach the athlete.** `Estimate` is the response body,
+// which is why usage is a separate return value rather than a field on it — a
+// field would have put our per-call cost on the wire for every client to read.
+func TestTheResponseBodyDoesNotLeakTokenUsage(t *testing.T) {
+	est := &fakeEstimator{
+		out:   Estimate{Items: []EstimatedItem{}, Model: "gpt-5.6-luna"},
+		usage: Usage{InputTokens: 1837, OutputTokens: 726},
+	}
+	h := NewEstimateHandler(est, &memUsage{})
+
+	w := call(t, h, `{"description":"two eggs"}`)
+
+	body := w.Body.String()
+	for _, leaked := range []string{"input_tokens", "output_tokens", "cached_input_tokens", "1837", "726"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("response body contains %q — token spend is the server's business: %s", leaked, body)
 		}
 	}
 }

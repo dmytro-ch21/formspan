@@ -46,13 +46,23 @@ export type MealEstimate = {
 };
 
 export type EstimateQuota = {
-  source: 'text' | 'photo';
   used: number;
   limit: number;
   remaining: number;
   /** When one more becomes available. Null when nothing is used. */
   resets_at: string | null;
 };
+
+/**
+ * ONE budget covers both paths.
+ *
+ * There used to be a `source` field here, because the server capped photos and
+ * descriptions separately. It no longer does — measured on the shipped model, a
+ * photo costs ~1.2-1.5x a description of the SAME meal, while the number of
+ * items in the meal moves the bill ~5x, so the split was rationing the wrong
+ * thing. The field is gone rather than ignored: rendering "3 of 25 photos" from
+ * a combined budget states something false about what the athlete may do next.
+ */
 
 export type EstimateResponse = {
   estimate: MealEstimate;

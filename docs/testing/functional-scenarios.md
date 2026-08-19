@@ -9534,3 +9534,57 @@ about the single number the feature exists to show.
   instead of two), and it is green against any test that only exercises the
   has-a-target path. The two captions fail independently — the food read is
   local, the target read is a network call — which is why they are two.
+## Estimate quota — one budget (N49)
+
+The cap on `POST /v1/nutrition/estimate` is now **one daily budget of 25**
+covering both paths, not 20 text + 5 photo. Scenarios written against the old
+split will pass against a per-path regression, so they have to change.
+
+### Happy path
+
+- A successful estimate returns `quota` with `used`, `limit: 25`, `remaining`
+  and `resets_at`. **There is no `source` field** — asserting its absence is
+  worth doing, because reintroducing it is how the per-path cap comes back.
+- `remaining` counts down by one per call regardless of which path was used.
+
+### Edge cases & errors
+
+- **A photograph and a description draw on the SAME allowance.** Log one of
+  each and assert `used` is 2. A test that only ever uses one path passes
+  against an implementation still counting per source — this is the single
+  most important scenario here.
+- Fill the budget with a **mix** (say 13 typed, 12 photographed) and assert the
+  26th call is refused whichever path it uses. Filling it with 25 photos would
+  also pass against a per-path cap of 25.
+- A refused or failed estimate still consumes budget — it was billed.
+- Exhaustion is `429` `rate_limited` with `Retry-After`, and the message names
+  no path ("all 25 estimates for today"), because naming one would imply the
+  other is still open.
+- `remaining` never goes negative, including right after the cap is lowered in
+  a deploy while somebody is over the new one.
+
+### Token metering
+
+- Every call writes token usage. A **refusal** must write non-zero usage: it is
+  an HTTP 200 that was billed, and it is the traffic a runaway client generates.
+- A call rejected by **validation** (no description, no image) must write
+  **NULL**, not 0 — nothing reached the provider. The distinction is what stops
+  a future cost query averaging in calls that never happened.
+- `image_tokens` is NULL where the provider does not break it out, which on the
+  shipped model is always. Assert NULL rather than 0: "not reported" must never
+  read as "the image was free".
+- **Token counts must never appear in the response body.** Spend is the
+  server's business; a client that could read it could also derive our pricing.
+
+### Regression trap
+
+- **`nutrition_estimates_user_window_idx` is load-bearing and invisible.** The
+  quota query lost its `source` predicate, and the older index leads
+  `(user_id, source, created_at)` — with `source` unfiltered the window stops
+  being a range scan and the query degrades to the athlete's whole history.
+  **The returned count is identical either way**, so only a plan test or a
+  volume test can see it.
+- **Cached-token semantics differ between providers.** OpenAI's `prompt_tokens`
+  includes cached tokens, Anthropic's `input_tokens` excludes them. Any test
+  asserting an input figure must say which provider produced it, or it pins a
+  number that is wrong by ~400x on the other one.

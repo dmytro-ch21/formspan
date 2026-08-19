@@ -15,8 +15,22 @@ import (
 // The seam the handler depends on, so every quota, validation and refusal path
 // is testable against a fake — no API key, no spend per test run.
 type Estimator interface {
-	Estimate(ctx context.Context, in EstimateInput) (Estimate, error)
+	// Estimate returns the draft, what the call cost, and any error.
+	//
+	// **Usage is a THIRD return rather than a field on Estimate**, and that is
+	// the whole reason it is shaped this way: `Estimate` is the response body
+	// this endpoint serialises to the athlete, so a usage field on it would put
+	// our token spend on the wire for every client to read. Metering is the
+	// server's business.
+	//
+	// Usage is meaningful even when err is non-nil — a refusal and a truncation
+	// are billed 200s. It is the zero value only when no call completed.
+	Estimate(ctx context.Context, in EstimateInput) (Estimate, Usage, error)
 }
+
+// Usage is `llm.Usage`, re-exported so this module's callers keep reading one
+// name — the same treatment `Provider` gets below, and for the same reason.
+type Usage = llm.Usage
 
 // completer is what a PROVIDER implements, and it is deliberately the smaller
 // interface.
@@ -44,9 +58,11 @@ type estimator struct {
 // well-formed JSON gets the same validation, the same absurdity bounds and the
 // same errors as every other, which is what stops two backends disagreeing
 // about whether a draft is acceptable.
-func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, error) {
+func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, Usage, error) {
 	if err := in.Validate(); err != nil {
-		return Estimate{}, err
+		// Rejected before the call, so nothing was spent and there is genuinely
+		// nothing to meter.
+		return Estimate{}, Usage{}, err
 	}
 
 	res, err := e.c.Complete(ctx, llm.Request{
@@ -64,11 +80,16 @@ func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, e
 		// what keeps the wire vocabulary a nutrition decision — the handler
 		// maps ErrEstimateRefused to its own status, and it should not have to
 		// know which transport produced it.
-		return Estimate{}, translateLLMError(err)
+		//
+		// `res.Usage` is returned ALONGSIDE the error rather than dropped: a
+		// refusal was billed in full, and the meter that exists to bound spend
+		// would otherwise miss exactly the traffic that runs it up. It is the
+		// zero value on a transport failure, where no call completed.
+		return Estimate{}, res.Usage, translateLLMError(err)
 	}
-	raw, model := res.Raw, res.Model
+	raw, model, usage := res.Raw, res.Model, res.Usage
 	if strings.TrimSpace(raw) == "" {
-		return Estimate{}, fmt.Errorf("%w: empty response", ErrEstimateUnavailable)
+		return Estimate{}, usage, fmt.Errorf("%w: empty response", ErrEstimateUnavailable)
 	}
 
 	var out Estimate
@@ -76,15 +97,15 @@ func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, e
 		// Structured outputs make this close to impossible on either provider;
 		// the usual cause is truncation, which means the token budget is too
 		// small rather than that the model misbehaved.
-		return Estimate{}, fmt.Errorf("%w: could not read the response", ErrEstimateUnavailable)
+		return Estimate{}, usage, fmt.Errorf("%w: could not read the response", ErrEstimateUnavailable)
 	}
 	out.Model = model
 	out.Source = in.Source()
 
 	if err := ValidateEstimate(out); err != nil {
-		return Estimate{}, err
+		return Estimate{}, usage, err
 	}
-	return out, nil
+	return out, usage, nil
 }
 
 // Provider is `llm.Provider`, re-exported so callers and config keep reading

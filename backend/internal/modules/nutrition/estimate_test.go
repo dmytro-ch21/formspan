@@ -280,23 +280,42 @@ func TestTheSchemaCarriesNoNumericBounds(t *testing.T) {
 // Quota arithmetic.
 // ---------------------------------------------------------------------------
 
-func TestTheTwoPathsHaveSeparateLimits(t *testing.T) {
-	// A shared counter would let five photos stop an athlete typing a sixth
-	// meal, which punishes them for using the feature as intended.
-	if LimitFor(SourceText) == LimitFor(SourcePhoto) {
-		t.Fatal("the paths share a limit — a photo costs ~50x a description")
+// **This replaces a test asserting the OPPOSITE**, and the reversal is the
+// point rather than an accident.
+//
+// The old test required the photo cap to be strictly below the text cap, on the
+// stated grounds that "a photo costs ~50x a description". Measured on the
+// shipped model it costs ~1.2–1.5x for the same meal, while ITEM COUNT moves
+// the bill ~5x — so the old assertion pinned a distinction that does not exist
+// and hid the one that does. See quota.go for the numbers.
+//
+// Asserting the collapse explicitly, rather than deleting the test, so a future
+// session that reintroduces a per-path cap has to argue with a measurement
+// instead of quietly restoring a guess.
+func TestOneBudgetCoversBothPaths(t *testing.T) {
+	textQ := NewQuota(0, nil)
+	photoQ := NewQuota(0, nil)
+	if textQ.Limit != photoQ.Limit {
+		t.Fatal("the paths report different limits — there is one budget")
 	}
-	if LimitFor(SourcePhoto) >= LimitFor(SourceText) {
-		t.Fatalf("photo limit %d is not below text %d", LimitFor(SourcePhoto), LimitFor(SourceText))
+	if textQ.Limit != DailyEstimates {
+		t.Fatalf("limit = %d, want DailyEstimates (%d)", textQ.Limit, DailyEstimates)
+	}
+	// The property that actually matters to an athlete: a photo consumes the
+	// same budget a description does, so nothing is stopped for the wrong
+	// reason.
+	spent := NewQuota(DailyEstimates-1, nil)
+	if !spent.Allowed() {
+		t.Fatal("blocked one call short of the budget")
 	}
 }
 
 func TestQuotaAllowsUpToTheLimitAndNotBeyond(t *testing.T) {
-	limit := LimitFor(SourceText)
-	if q := NewQuota(SourceText, limit-1, nil); !q.Allowed() {
+	limit := DailyEstimates
+	if q := NewQuota(limit-1, nil); !q.Allowed() {
 		t.Fatalf("blocked at %d of %d", limit-1, limit)
 	}
-	if q := NewQuota(SourceText, limit, nil); q.Allowed() {
+	if q := NewQuota(limit, nil); q.Allowed() {
 		t.Fatalf("allowed a call at exactly the limit of %d", limit)
 	}
 }
@@ -305,7 +324,7 @@ func TestRemainingNeverGoesNegative(t *testing.T) {
 	// Reachable by lowering the caps in a deploy while somebody is over the
 	// new one. A negative "remaining" rendered in a client reads as a bug in
 	// the app rather than as a cap that moved.
-	q := NewQuota(SourcePhoto, LimitFor(SourcePhoto)+7, nil)
+	q := NewQuota(DailyEstimates+7, nil)
 	if q.Remaining != 0 {
 		t.Fatalf("remaining = %d, want 0", q.Remaining)
 	}
@@ -316,7 +335,7 @@ func TestRemainingNeverGoesNegative(t *testing.T) {
 
 func TestResetsAtIsTheOldestCallAgingOut(t *testing.T) {
 	oldest := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
-	q := NewQuota(SourceText, 3, &oldest)
+	q := NewQuota(3, &oldest)
 	if q.ResetsAt == nil {
 		t.Fatal("no resets_at with calls in the window")
 	}
@@ -324,7 +343,7 @@ func TestResetsAtIsTheOldestCallAgingOut(t *testing.T) {
 		t.Fatalf("resets_at = %v, want %v", q.ResetsAt, want)
 	}
 	// Nothing used means nothing waiting to expire.
-	if NewQuota(SourceText, 0, nil).ResetsAt != nil {
+	if NewQuota(0, nil).ResetsAt != nil {
 		t.Fatal("resets_at set with no usage")
 	}
 }

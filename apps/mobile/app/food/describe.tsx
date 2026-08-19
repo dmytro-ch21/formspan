@@ -496,8 +496,7 @@ export default function DescribeMealScreen() {
 
       {quota ? (
         <Text style={styles.quota} testID="describe-quota">
-          {quota.remaining} of {quota.limit} {quota.source === 'photo' ? 'photos' : 'descriptions'}{' '}
-          left today
+          {quota.remaining} of {quota.limit} estimates left today
         </Text>
       ) : null}
     </KeyboardAwareScrollView>

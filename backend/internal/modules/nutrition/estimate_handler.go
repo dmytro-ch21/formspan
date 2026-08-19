@@ -81,10 +81,12 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 
 	// THE GATE, BEFORE ANY TOKEN IS SPENT. Checking after the call would meter
 	// spend that has already happened, which is not a quota — it is a receipt.
-	quota, err := CheckQuota(r.Context(), h.usage, userID, src, now)
+	quota, err := CheckQuota(r.Context(), h.usage, userID, now)
 	if err != nil {
 		if errors.Is(err, ErrQuotaExhausted) {
-			msg := fmt.Sprintf("you have used all %d %s estimates for today", quota.Limit, src)
+			// No path in the message any more: there is one budget, and
+			// naming the path would imply the other one is still available.
+			msg := fmt.Sprintf("you have used all %d estimates for today", quota.Limit)
 			if quota.ResetsAt != nil {
 				// RELATIVE, not an RFC3339 instant. The client shows this
 				// string as written, and the previous version rendered a UTC
@@ -106,7 +108,7 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	est, estErr := h.estimator.Estimate(r.Context(), in)
+	est, usage, estErr := h.estimator.Estimate(r.Context(), in)
 
 	// RECORDED WHETHER OR NOT IT WORKED, and deliberately not gated on estErr.
 	// A refusal and an upstream error both cost tokens, so a meter that counted
@@ -127,6 +129,10 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	if err := h.usage.Record(context.WithoutCancel(r.Context()), EstimateRecord{
 		UserID: userID, Source: src, Succeeded: estErr == nil,
 		Model: est.Model, ItemCount: len(est.Items),
+		// Recorded on the failure path too, and it is not zero there: a
+		// refusal and a truncation are billed 200s. This is the whole point of
+		// metering tokens rather than calls — see N49.
+		Usage: usage,
 	}); err != nil {
 		httplog.FromContext(r.Context()).Error("nutrition: estimate not metered",
 			"user_id", userID, "source", src, "err", err)
@@ -155,7 +161,7 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	// Re-read rather than decrementing the number in hand: the athlete may be
 	// logging from two devices, and a client-side subtraction would disagree
 	// with the server the moment they are.
-	after, err := h.usage.Quota(r.Context(), userID, src, now)
+	after, err := h.usage.Quota(r.Context(), userID, now)
 	if err != nil {
 		// The pre-call figure would overstate `remaining` by one, since it does
 		// not count the call just made, so it is adjusted by hand.
