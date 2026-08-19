@@ -1,3 +1,4 @@
+import { apiRequest } from './apiRequest';
 import { newTraceId, traceparent } from './trace';
 import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
@@ -104,6 +105,40 @@ export function pickImage(e: Exercise, prefer: MediaKind): string | null {
     if (hit) return hit.url;
   }
   return null;
+}
+
+/**
+ * One catalog exercise, BY ID.
+ *
+ * ## Why this exists rather than reusing the search
+ *
+ * The identify screen resolved a picked candidate by putting the exercise
+ * **id** into the **name** search — `fetchExercises({ q: exerciseID })`, then
+ * `.find(e => e.id === exerciseID)`. That worked only because ids happen to be
+ * slugs of names, which is a coincidence the catalog does not promise and the
+ * write path actively breaks: renaming an exercise deliberately keeps its id
+ * (`TestRenamingKeepsTheID`, landed 2026-08-04 in #113).
+ *
+ * The first name that diverges from its slug — "Seated Cable Row" becoming
+ * "Cable Row Machine" — makes every token of `seated-cable-row` have to appear
+ * in the new name, which they do not, so the search returns nothing and the
+ * athlete is told **"That exercise is no longer in the catalog"** about an
+ * exercise the server returned two seconds earlier. A confident wrong answer,
+ * which is the exact class the shortlist exists to prevent. Found in review of
+ * N44 (#325), fixed under N47.
+ *
+ * It is also strictly cheaper: one row instead of a ranked list with media.
+ *
+ * ## It throws `ApiError`, and that is the point
+ *
+ * `fetchExercises` above hand-rolls its failure into a bare `Error`, so a
+ * caller cannot tell "this id is gone" from "I could not ask". Going through
+ * `apiRequest` keeps the status and the contract's error CODE, so a 404 can say
+ * the exercise is gone and a dead network can say something true instead —
+ * the same distinction N41's barcode lookup turns on.
+ */
+export function fetchExercise(getToken: TokenGetter, id: string): Promise<Exercise> {
+  return apiRequest<Exercise>(getToken, `/exercises/${encodeURIComponent(id)}`);
 }
 
 export async function fetchExercises(

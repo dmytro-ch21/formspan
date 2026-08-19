@@ -1,12 +1,13 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useAuth } from '@clerk/clerk-expo';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { isNotFound } from '@/lib/apiError';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
@@ -17,7 +18,7 @@ import {
 } from '@/lib/identifyApi';
 import { emptySet, swapExercise } from '@/lib/sessions';
 import { readLocalSession, saveLocalSets } from '@/lib/sessionStore';
-import { fetchExercises, type Exercise } from '@/lib/exercises';
+import { fetchExercise, type Exercise } from '@/lib/exercises';
 import { request as requestSync } from '@/lib/sync';
 
 /**
@@ -42,10 +43,19 @@ import { request as requestSync } from '@/lib/sync';
  * doubled quantity — the dangerous outcome is the one that looks like an
  * answer. Every candidate here is an equal, deliberate tap.
  *
- * `confidence` is shown but never thresholded and never re-sorted on. It is not
- * calibrated to correctness — the model has never seen this catalog — so it
- * reads as "how clear was the photo", which helps somebody decide whether to
- * retake it and cannot help anybody decide which exercise this is.
+ * `confidence` is deliberately **not shown**, and never thresholded or
+ * re-sorted on. This paragraph used to claim it was displayed and the code has
+ * never displayed it; review caught the mismatch (N47), and correcting the
+ * claim is the right way round rather than adding the number.
+ *
+ * The reason is the rule above. `MachineCandidate.confidence` is per candidate,
+ * and it is not calibrated to correctness — the model has never seen this
+ * catalog — so at best it means "how clearly can I see a machine". Four
+ * differing numbers, one beside each choice, at the exact moment of choosing,
+ * would be read as a ranking no matter what it is called. That is a "best
+ * match" badge in all but name, and the note above says why one must not exist.
+ * The client contract sanctions both ("display it or ignore it"), so ignoring
+ * it is a choice this screen is entitled to make and now says it makes.
  */
 export default function IdentifyMachineScreen() {
   const { id, swap } = useLocalSearchParams<{ id: string; swap?: string }>();
@@ -56,8 +66,50 @@ export default function IdentifyMachineScreen() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryable, setRetryable] = useState(true);
+  /**
+   * The hint under an error, as three states rather than a boolean.
+   *
+   * `retry` and `retake` are both about the IDENTIFICATION. A COMMIT failure is
+   * about neither, and forcing it into one of them reproduces the very
+   * contradiction this task was filed to remove: `setRetryable(false)` put
+   * "Take another photo, or search instead." under "Try again when you have
+   * signal", and `true` put "You can try again." under "Session not found on
+   * this device". Both messages already name their own remedy and the
+   * shortlist is still tappable, so the honest third option is to say nothing.
+   * Raised in review, on the fix for the first version of this bug.
+   */
+  const [hint, setHint] = useState<'retry' | 'retake' | 'none'>('retry');
   const [result, setResult] = useState<MachineIdentification | null>(null);
+
+  /**
+   * Speak the error.
+   *
+   * **`accessibilityLiveRegion` is Android-only**, which this codebase already
+   * records in `sign-up.tsx` and `forgot-password.tsx` — so the attribute alone
+   * announces nothing on iOS, the platform this app ships on. It is kept for
+   * Android and paired with this, which is the half that actually reaches
+   * VoiceOver. An Android live region on a node that MOUNTS carrying its
+   * message often does not fire either: a live region announces changes to an
+   * existing node, and this box is conditionally rendered.
+   *
+   * Caught in review — and the comment here previously claimed the VoiceOver
+   * fix that did not exist, which is the same claims-behaviour-it-does-not-have
+   * defect as the `confidence` docstring this task was filed to correct.
+   */
+  useEffect(() => {
+    if (error) AccessibilityInfo.announceForAccessibility(error);
+  }, [error]);
+
+  /**
+   * Whether a commit is already running.
+   *
+   * A ref, because `committing` is state: two touches landing in one batch —
+   * two fingers on two candidate rows — both read `null` from the render
+   * closure, both commit, and `router.back()` fires twice, popping a screen
+   * the athlete did not leave. Narrow, and the same pattern the barcode screen
+   * uses one feature over. Raised in review.
+   */
+  const committingRef = useRef(false);
   const [committing, setCommitting] = useState<string | null>(null);
 
   const swapping = typeof swap === 'string' && swap.length > 0;
@@ -73,13 +125,17 @@ export default function IdentifyMachineScreen() {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
         setError('VOLA needs the camera to photograph a machine. You can turn it on in Settings.');
-        setRetryable(false);
+        // `none`, not `retake`. A permission denial used to render "Take
+        // another photo, or search instead." — advice that cannot work, since
+        // there is no camera to take it with. The message already names the
+        // only remedy.
+        setHint('none');
         return;
       }
       picked = await ImagePicker.launchCameraAsync({ quality: 1 });
     } catch {
       setError('The camera would not open. Try again, or search for the exercise instead.');
-      setRetryable(true);
+      setHint('retry');
       return;
     }
     if (picked.canceled || !picked.assets[0]) return;
@@ -99,7 +155,7 @@ export default function IdentifyMachineScreen() {
       // A 422 is DETERMINISTIC — the same photo yields the same refusal — so
       // the screen offers "Take another" rather than "Try again". One word
       // apart, opposite in effect: a retry button there cannot work.
-      setRetryable(isRetryable(err));
+      setHint(isRetryable(err) ? 'retry' : 'retake');
     } finally {
       setBusy(false);
     }
@@ -115,24 +171,62 @@ export default function IdentifyMachineScreen() {
    * catalog exactly as the search path builds it.
    */
   async function choose(exerciseID: string) {
-    if (!id || !userId || committing) return;
+    if (!id || !userId || committingRef.current) return;
+    committingRef.current = true;
     setCommitting(exerciseID);
+    setError(null);
     try {
-      const matches = await fetchExercises(getToken, { q: exerciseID });
-      const exercise: Exercise | undefined =
-        matches.find((e) => e.id === exerciseID) ?? undefined;
-      if (!exercise) throw new Error('That exercise is no longer in the catalog.');
+      // BY ID. This used to put the id through the NAME search and then find
+      // the id in the results, which held only while ids stayed slugs of names
+      // — and renaming an exercise deliberately keeps its id, so the first
+      // diverged name would have reported an exercise the server had just
+      // returned as missing from the catalog. See `fetchExercise`.
+      // Started TOGETHER, because they are independent and this runs on gym
+      // wifi. The second is pre-caught so a rejection cannot escape as an
+      // unhandled rejection while the first is still in flight.
+      const chosen = fetchExercise(getToken, exerciseID);
+      const replaced: Promise<Exercise['load_type'] | undefined> = swapping
+        ? fetchExercise(getToken, swap)
+            .then((e) => e.load_type)
+            .catch(() => undefined)
+        : Promise.resolve(undefined);
+
+      let exercise: Exercise;
+      try {
+        exercise = await chosen;
+      } catch (err) {
+        // "Gone" and "could not ask" are different answers and only one of
+        // them is about the catalog. Saying the first when the second is true
+        // is a confident false statement, which is the failure this whole
+        // screen is shaped around.
+        throw new Error(
+          isNotFound(err)
+            ? 'That exercise is no longer in the catalog.'
+            : 'Could not load that exercise. Try again when you have signal, or search for it by name.',
+        );
+      }
 
       const session = await readLocalSession(userId, id);
       if (!session) throw new Error('Session not found on this device.');
+      // The replaced exercise's load type, so `swapExercise` can tell whether
+      // the logged numbers carry over. Passing `undefined` made `sameShape`
+      // always false and wiped reps and weight even between two `weight_reps`
+      // machines. A failure resolving it is NOT fatal — losing the carry-over
+      // is worse than nothing and far better than refusing the swap — so it
+      // falls back to the old conservative behaviour.
+      const fromLoadType = await replaced;
       const next = swapping
-        ? swapExercise(session.sets, swap, exercise, undefined)
+        ? swapExercise(session.sets, swap, exercise, fromLoadType)
         : [...session.sets, emptySet(exercise.id, session.sets.length)];
       await saveLocalSets(userId, id, next);
       requestSync('exercise-added');
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      // A commit failure is not the photo's fault and not the network's
+      // either, necessarily. Neither identification hint fits, and the error
+      // itself already says what to do.
+      setHint('none');
       setCommitting(null);
     }
   }
@@ -160,16 +254,39 @@ export default function IdentifyMachineScreen() {
           {busy ? <ActivityIndicator /> : <Text style={[styles.shootText, { color: accent.on }]}>Take a photo</Text>}
         </Pressable>
 
+        {/* Announced, and coloured. It rendered in the same weight as the lead
+            copy while both sibling screens use `vola.danger`, and a VoiceOver
+            user standing at the machine got no announcement at all that
+            identify had failed — which matters most in exactly the
+            one-handed-in-a-gym case this screen is designed for. */}
         {error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{error}</Text>
-            <Text style={styles.errorHint}>
-              {retryable ? 'You can try again.' : 'Take another photo, or search instead.'}
+          <View style={styles.errorBox} accessibilityLiveRegion="assertive">
+            <Text style={styles.errorText} testID="identify-error">
+              {error}
             </Text>
+            {hint === 'none' ? null : (
+              <Text style={styles.errorHint} testID="identify-hint">
+                {hint === 'retry' ? 'You can try again.' : 'Take another photo, or search instead.'}
+              </Text>
+            )}
           </View>
         ) : null}
 
-        {result ? (
+        {/* `candidates.length > 0`, not just `result`. The contract says an
+            empty list is a 422 and never a 200, so this is defence against the
+            contract being violated rather than against a case that happens
+            today — but the failure mode if it ever is would be the worst kind
+            here: a heading reading "Looks like a cable stack. Which one is
+            it?" above nothing at all, which is answer-shaped and answers
+            nothing. Absence must say it is absence. */}
+        {result && result.candidates.length === 0 ? (
+          <Text style={styles.none} testID="identify-empty">
+            That looks like a {result.equipment.replace(/-/g, ' ')}, but nothing in the catalog
+            matched it. Go back and search for it by name.
+          </Text>
+        ) : null}
+
+        {result && result.candidates.length > 0 ? (
           <View style={styles.results}>
             <Text style={styles.resultsHead}>
               Looks like a {result.equipment.replace(/-/g, ' ')}. Which one is it?
@@ -213,7 +330,7 @@ const styles = StyleSheet.create({
   shootBusy: { opacity: 0.6 },
   shootText: { fontWeight: '600', fontSize: 16 },
   errorBox: { gap: 4, paddingVertical: 8 },
-  errorText: { fontSize: 14, lineHeight: 20 },
+  errorText: { fontSize: 14, lineHeight: 20, color: vola.danger },
   errorHint: { fontSize: 12, opacity: 0.7 },
   results: { gap: 8, marginTop: 8 },
   resultsHead: { fontSize: 14, opacity: 0.8, marginBottom: 2 },

@@ -9054,3 +9054,48 @@ stopped reporting would pass every test that only checks it did not crash.
   60×/second for a minute and assert the number of HTTP requests is in single
   digits, not thousands. Everything else can be right while this is wrong, and
   it is the requirement the user stated in their own words.
+
+## Identify screen follow-ups (N47 — `app/session/[id]/identify.tsx`)
+
+Additions to the machine-identification scenarios above, covering the commit
+path rather than the camera. The camera cannot be driven by a test; these are
+all reachable by picking a candidate.
+
+### Happy path
+
+- Picking a candidate resolves it **by id** and adds it to the session. Verify
+  by renaming an exercise in the admin console so its name no longer slugs to
+  its id (e.g. "Seated Cable Row" → "Cable Row Machine"), then identifying that
+  machine and picking it. **It must still commit.** Before N47 this reported
+  "That exercise is no longer in the catalog" about a row the server had just
+  returned.
+
+### Edge cases & errors
+
+- **A genuinely deleted exercise** (404 from `GET /v1/exercises/{id}`) says it
+  is no longer in the catalog. That message must appear *only* here.
+- **Offline while picking** says something else entirely — it must not claim
+  the catalog dropped the exercise, which is a statement about the catalog
+  caused by the network.
+- **An identify-driven swap between two `weight_reps` machines keeps the
+  logged reps and weight.** Before N47 they were cleared every time. A swap
+  between different load types still clears them, as it should.
+- **A swap where the replaced exercise cannot be read** still swaps, without
+  the carry-over. Refusing the swap would be worse.
+- **An empty `candidates` array** renders an explicit "nothing in the catalog
+  matched" rather than a heading above nothing. Only reachable by violating the
+  422 contract, so exercise it with a stubbed 200.
+- **A commit failure must not offer a contradictory retry** — "Session not
+  found on this device" must not carry "You can try again."
+
+### Accessibility
+
+- Error text is `vola.danger` and is **announced**. Check with VoiceOver on:
+  a failed identification must speak, since the athlete is holding the phone at
+  a machine rather than reading it.
+
+### What is deliberately absent
+
+- **`confidence` is not rendered**, and a test asserting it appears would be
+  asserting the wrong thing. It is per candidate, uncalibrated, and beside a
+  choice it reads as a ranking — which the screen's central rule forbids.
