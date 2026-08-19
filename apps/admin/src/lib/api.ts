@@ -459,6 +459,20 @@ export type Exercise = {
   implements: number;
   is_unilateral: boolean;
   instructions: string;
+  /**
+   * The optional line explaining why this exercise's values are what they are.
+   *
+   * OPTIONAL because absent is the normal case — 5 of 762 seeded rows carry
+   * one, and the API omits the key entirely when empty. Absent and empty mean
+   * the same thing, so there is no third state; render nothing at all rather
+   * than an empty section.
+   *
+   * Not `instructions`: that says how to PERFORM the movement, this says how it
+   * is RECORDED and why. It exists because human rulings settled several
+   * `implements` values the names could not, and an unexplained ruling reads as
+   * a mistake to whoever finds it next.
+   */
+  note?: string;
   media?: { kind: string; url: string; is_default: boolean }[];
   /** "admin" for everything this console lists. Same caveat as Technique.source:
    *  populated only on /admin/*, so never derive ownership from it elsewhere. */
@@ -544,7 +558,19 @@ export async function getExercise(id: string): Promise<Exercise> {
 export type ExerciseWrite = Omit<
   Exercise,
   "id" | "source" | "media" | "created_at" | "updated_at"
->;
+> & {
+  // REQUIRED on the write side even though it is optional on the read side,
+  // and the asymmetry is the point.
+  //
+  // `bodyFrom` documents its contract as "the whole form, every save", which is
+  // what makes an emptied textarea CLEAR the note. Inherited as optional, that
+  // contract is convention only: delete the `note:` line from `bodyFrom` and
+  // this still typechecks, while the API — which reads an absent key as "leave
+  // alone" — would silently make notes unclearable. `instructions` gets this
+  // guarantee for free by being required on `Exercise`; `note` cannot, because
+  // absent genuinely is the normal case on a read.
+  note: string;
+};
 
 export async function createExercise(body: ExerciseWrite): Promise<Exercise> {
   const data = await adminFetch<{ exercise: Exercise }>("/admin/exercises", {

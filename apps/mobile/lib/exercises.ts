@@ -65,6 +65,22 @@ export type Exercise = {
   load_mode?: 'total' | 'per_side';
   is_unilateral: boolean;
   instructions: string;
+  /**
+   * Why this exercise's values are what they are — admin-authored, and shown
+   * on the exercise screen only when it is there.
+   *
+   * OPTIONAL, and absent is the normal case: the server omits the key entirely
+   * when empty, and a session cached by an app older than this field has none
+   * either. Both mean the same thing — say nothing — so unlike `load_mode`
+   * there is no absent-versus-known distinction to preserve, and a falsy check
+   * is the whole handling.
+   *
+   * Not `instructions`, which is how to PERFORM the movement. This is how it is
+   * RECORDED and why: `single-leg-kettlebell-romanian-deadlift` counts one
+   * implement while the dumbbell version counts two, deliberately, and without
+   * this the difference reads as a bug.
+   */
+  note?: string;
   media: Media[];
 };
 

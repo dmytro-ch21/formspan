@@ -181,9 +181,32 @@ type Exercise struct {
 	//
 	// Zero means "not recorded" and reads as 1, so a row written by code that
 	// predates the column under-reports rather than inventing weight.
-	Implements   int     `json:"implements"`
-	Instructions string  `json:"instructions"`
-	Media        []Media `json:"media"`
+	Implements   int    `json:"implements"`
+	Instructions string `json:"instructions"`
+
+	// Note is an optional line explaining why this exercise's catalog values
+	// are what they are — admin-authored, and shown to an athlete wherever the
+	// exercise is read.
+	//
+	// It exists because W7 ruled five per-side rows that their names could not
+	// settle, and a ruling fixes the number while leaving the reason invisible.
+	// `single-leg-kettlebell-romanian-deadlift` counts ONE implement while
+	// `dumbbell-romanian-deadlift` counts two — deliberately, by human ruling —
+	// and that reads as an oversight to everyone who finds it until something
+	// says so where the value is displayed.
+	//
+	// Distinct from Instructions, which says HOW TO PERFORM the movement. This
+	// says how the movement is RECORDED, and why. Folding the two together
+	// would bury a one-line answer inside a coaching paragraph, and the rows
+	// that most need this note are largely rows with no instructions at all.
+	//
+	// ABSENT IS THE NORMAL CASE — 757 of the 762 seeded rows carry none — so a client must
+	// render nothing rather than an empty section. `omitempty` keeps it off the
+	// wire entirely for those rows, which matters on a catalog listing; unlike
+	// OfferedGrips there is no absent-versus-empty distinction to preserve,
+	// because "no note" is the only thing either state can mean.
+	Note  string  `json:"note,omitempty"`
+	Media []Media `json:"media"`
 
 	// OfferedGrips is which grips a client should offer for this movement —
 	// derived from MovementPattern by `OfferedGrips`, never stored.

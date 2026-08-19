@@ -3202,6 +3202,31 @@ components:
             under-reports rather than inventing weight nobody lifted.
         instructions:
           type: string
+        note:
+          type: string
+          description: >
+            An optional line explaining why this exercise's catalog values are
+            what they are — admin-authored, and meant to be shown wherever the
+            exercise is read.
+
+
+            Deliberately NOT in `required`, unlike `instructions`. Absent is the
+            normal case: 5 of 762 seeded rows carry one, and the field is
+            omitted entirely when empty. A client must therefore render nothing
+            at all rather than an empty section — absent and empty mean the same
+            thing here, so there is no third state to handle.
+
+
+            Distinct from `instructions`, which says how to PERFORM the
+            movement. This says how it is RECORDED, and why. It exists because
+            human rulings fixed several `implements` values that the exercise
+            names could not settle, and a ruling that is not explained where the
+            athlete reads it goes on looking like a mistake — `Single-Leg
+            Kettlebell Romanian Deadlift` counts one implement while its
+            dumbbell twin counts two, on purpose.
+          example: >-
+            One bell here, against two for the dumbbell version — that
+            difference is deliberate, not an oversight.
         media:
           type: array
           description: >
@@ -4207,6 +4232,27 @@ components:
             interpreted.
         is_unilateral: { type: boolean }
         instructions: { type: string }
+        note:
+          type: string
+          maxLength: 500
+          description: >
+            The optional explanation of why this exercise's values are what they
+            are. See `Exercise.note`.
+
+
+            Omitting it on a PATCH leaves the stored value alone, like every
+            other field here — so an edit that never mentions the note cannot
+            wipe one. Sending it as `""` DOES clear it, which is this
+            endpoint's ordinary "a field sent as empty is cleared" rule and is
+            the right one here: an explanation that has stopped being true has
+            to be removable. `load_mode` is the exception to that rule, not the
+            pattern.
+
+
+            Bounded at 500 characters because it renders in full, inline, on a
+            phone with no "read more". Anything longer has become instructions
+            and belongs in that field, which is unbounded because it has a
+            section of its own.
 
     TechniqueWrite:
       type: object

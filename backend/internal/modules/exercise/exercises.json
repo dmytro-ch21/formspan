@@ -2864,6 +2864,7 @@
     "load_mode": "per_side",
     "implements": 1,
     "instructions": "",
+    "note": "One bell, pressed a single arm at a time, so the weight you enter counts once rather than doubled.",
     "media": []
   },
   {
@@ -5188,6 +5189,7 @@
     "load_mode": "per_side",
     "implements": 2,
     "instructions": "",
+    "note": "Two dumbbells, but only one leg drives — the trailing foot is a kickstand, not a second working leg. So the weight counts twice and the reps are per side.",
     "media": []
   },
   {
@@ -6137,6 +6139,7 @@
     "load_mode": "per_side",
     "implements": 1,
     "instructions": "",
+    "note": "One dumbbell, one leg: the weight you enter counts once, and the reps are per side.",
     "media": []
   },
   {
@@ -9218,6 +9221,7 @@
     "load_mode": "per_side",
     "implements": 1,
     "instructions": "",
+    "note": "One bell, one leg: the weight you enter counts once, and the reps are per side.",
     "media": []
   },
   {
@@ -14462,6 +14466,7 @@
     "load_mode": "per_side",
     "implements": 1,
     "instructions": "",
+    "note": "One bell here, against two for the dumbbell version — that difference is deliberate, not an oversight. This variant is loaded on one side only, so the weight counts once.",
     "media": []
   },
   {

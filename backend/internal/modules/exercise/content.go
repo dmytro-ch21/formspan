@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 )
@@ -154,12 +155,32 @@ func ValidateForWrite(e Exercise) error {
 	case !validLoadTypes[e.LoadType]:
 		return fmt.Errorf("%w: %q has unknown load_type %q — one of: %s",
 			ErrInvalidInput, e.ID, e.LoadType, strings.Join(loadTypeNames(), ", "))
+	case utf8.RuneCountInString(e.Note) > maxNoteLen:
+		// Bounded because the note is rendered in full on a phone, inline with
+		// the exercise, with no "read more". A note long enough to need one has
+		// become instructions and belongs in that field, which is unbounded
+		// precisely because it has a section of its own.
+		return fmt.Errorf("%w: %q note is too long (max %d)", ErrInvalidInput, e.ID, maxNoteLen)
 	}
 	return nil
 }
 
 // maxNameLen bounds the name, and therefore the derived id.
 const maxNameLen = 200
+
+// maxNoteLen bounds the note. Two or three sentences — "one bell, held opposite
+// the working leg, so it counts once" is 48 characters, and the longest thing
+// this field should ever have to say is not much more.
+//
+// Counted in RUNES, unlike maxNameLen just above, and the difference is not an
+// inconsistency. A name is bounded because it derives a permanent id that lands
+// in a Postgres btree, which is a limit in bytes. A note is prose shown to a
+// person, the contract advertises `maxLength: 500` (which every client reads as
+// characters), and this codebase's copy is full of em dashes — the seed note on
+// `single-leg-kettlebell-romanian-deadlift` is 170 characters in 172 bytes. By
+// bytes, a note the contract calls legal is refused, and the author is told the
+// limit is 500 while being cut off earlier.
+const maxNoteLen = 500
 
 func sortedKeys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))

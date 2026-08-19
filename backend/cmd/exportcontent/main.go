@@ -565,10 +565,16 @@ func techniqueEntryOf(t technique.Technique) entry {
 // including `"instructions": ""` on 443 of them and `"media": []` on 500. There
 // is no key here where absent means something different from empty, which is
 // what makes this simpler than the technique order.
+//
+// `note` is written the same unconditional way, and is the same kind of key:
+// empty on nearly every row, and meaning exactly what an absent one would. It
+// is deliberately NOT in exercisePreserve — unlike `media`, the console CAN
+// author it and AdminAuthored DOES read it, so the database owns it and
+// carrying it into the file is the whole point. See migration 000061.
 var exerciseKeyOrder = []string{
 	"id", "name", "sport", "movement_pattern", "movement_pattern_detail",
 	"primary_muscles", "secondary_muscles", "equipment", "load_type",
-	"is_unilateral", "load_mode", "implements", "instructions", "media",
+	"is_unilateral", "load_mode", "implements", "instructions", "note", "media",
 }
 
 // exercisePreserve names the keys the FILE owns rather than the database.
@@ -608,6 +614,7 @@ func exerciseEntryOf(e exercise.Exercise) entry {
 		"load_mode":               e.LoadMode,
 		"implements":              e.Implements,
 		"instructions":            e.Instructions,
+		"note":                    e.Note,
 		"media":                   []any{},
 	}
 	var out entry
