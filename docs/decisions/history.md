@@ -28338,12 +28338,21 @@ would "fix" it back and re-invent tonnage on every set.
   this one.** They are recorded here as the user's because that is what was
   reported, and the PR says so plainly rather than burying it — a data ruling is
   exactly the kind of fact whose provenance should be checkable later.
-- **An optional note field is now `N39`**, deliberately not folded in here. The
-  motivating case is the kettlebell/dumbbell RDL pair above: a note is what would
-  explain that difference where an athlete reads it, rather than in a test
-  comment. Its design is genuinely open — per-exercise or per-correction,
-  admin-authored or athlete-authored, and where it surfaces — and the user's word
-  was "maybe", so nothing should be built against a guess.
+- **An optional note field is `N39`**, deliberately not folded in here, and
+  **owned by #312** rather than by this branch. The motivating case is the
+  kettlebell/dumbbell RDL pair above: a note is what would explain that
+  difference where an athlete reads it, rather than in a test comment. Its
+  design and its open questions live on the N39 line itself; this entry
+  deliberately does not restate them, because it was written while they were
+  still open and a copy of a moving answer goes stale silently.
+
+  The id collided on the way — two sessions allocated N39 within ten minutes,
+  the same failure that cost two sessions an N19. The convention resolved it
+  cleanly and without argument, because it is written down: **an id is claimed
+  by a PR TITLE**, #312 had it there and this branch did not. Worth recording
+  that the rule worked, since it is usually only noted when it fails. What it
+  did not prevent is the ten-minute window between allocating and claiming,
+  which remains exactly as invisible as the convention already admits.
 - **`renegade` is still unpinned**, unchanged and correct. It holds two
   implements but rows one per rep, and no one has ruled it. The whole point of
   this entry is that a ruling is what converts a guess into something a test may
