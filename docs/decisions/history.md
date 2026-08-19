@@ -26095,13 +26095,37 @@ passing beside the new property, since they cannot both hold.
 Three mutations checked: skipping `drilled` again, letting `conceded` through,
 and ignoring the names map each fail a different test.
 
+### What review added
+
+Three independent confirmations that the reversal is right, one stronger than my
+own argument: the backend funnel (`ListProficiency`) groups by `technique_id`
+**alone**, taking position and category from the library join rather than the
+tag — so even a position disagreement between a drilled row and a live one
+cannot split a technique's evidence server-side. The "positions must agree"
+caution in `bumpTechniqueOutcome`'s doc is about not forking rows inside one
+session, which inheritance satisfies by construction.
+
+Review also caught the header, which still read "Working on". That mildly
+overclaims for something drilled once — and for an athlete with **no focus
+list** it titled the section after a list they had never made, while containing
+only today's drills. Now "Working on & drilled today".
+
+
 ### What this does not do
 
-- **It grows the fastest screen.** Drill six techniques in a class and step 2
-  gains six rows of three counters. That is the interaction cost the design
-  deliberately avoids, and it is now paid whenever somebody uses step 1
-  thoroughly. Nobody has seen it on a device with a realistic drilled list; a
-  class where you drill one or two is fine, and eight might not be.
+- **It grows the fastest screen, and the real bound is worse than I first
+  wrote.** I said "drill six techniques and step 2 gains six rows"; review
+  pointed out the drilled list is not hand-paced. `addChain` imports a whole
+  sequence in one tap, up to `MAX_SEQUENCE_STEPS` — **20** — so a chain-heavy
+  day can push "Everything else" more than a screen height down. Two to six
+  rows, the common case, is fine. Twenty is not, and nobody has seen either on
+  a device.
+
+  The mitigation, if it bites: **collapse beyond ~8 rows, never cap.** Focus
+  rows sort first, so they stay visible, and a cap would strand evidence exactly
+  the way the old drilled-step counters did — the failure this union exists to
+  prevent. Not done here: it costs a tap on the rows N31 exists to surface, for
+  a case nobody has yet hit.
 - **It does not make attribution automatic.** Landing something still costs a
   tap on the right row. The dictation idea raised while this was in flight —
   say what happened and have the model fill the tags — is the version that

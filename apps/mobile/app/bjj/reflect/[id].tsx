@@ -897,8 +897,13 @@ function LiveStep({
 
       {rows.length > 0 && (
         <>
+          {/* NOT "Working on" alone any more. Rows can now be something
+              drilled once today, and for an athlete with no focus list the
+              section contains ONLY today's drills — so the old header named
+              a list they had never made. The footnote covers it, but a
+              footnote is read once and a header is read every time. */}
           <Text style={styles.label} accessibilityRole="header">
-            Working on
+            Working on & drilled today
           </Text>
           <RNView
             style={styles.gridHead}
