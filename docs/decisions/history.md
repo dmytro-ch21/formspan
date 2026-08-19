@@ -27878,6 +27878,49 @@ Open questions:
   still costs a quarter of an hour.
 
 
+## 2026-08-19 — Vitest measured, and deliberately left alone
+
+**F14**, and the deliverable is a decision not to change anything — recorded so
+the next person does not re-open it.
+
+F13 left an open item: the web and admin vitest runs set no `testTimeout`, and
+nobody had measured vitest's default or whether any of those suites configure a
+longer wait the way five mobile suites did. Both halves are now measured.
+
+**Vitest bounds a test at 5008ms** — the same 5s default jest has. Both suites
+are already bounded, so the F12-shaped hole (ten unbounded minutes) does not
+exist here either.
+
+**And F13's actual defect cannot occur**, which is the part that settles it.
+That bug was a configured wait ABOVE the ceiling: five files asking RNTL for ten
+seconds while jest killed them at five. Nothing here can be cut off, because
+**neither suite contains a single async wait** — no `waitFor`, no timers, no
+promise delays. That is by explicit design; both config docstrings say "node
+environment, pure logic only", and both explain that component tests were left
+out until a render-path bug argues for them. `apps/mobile` earned those; these
+have not.
+
+**So no `testTimeout` was added, and adding one for symmetry would be wrong.**
+Jest's is 15s only because five files ask for 10s — it exists to make a
+configured budget reachable. Copying the number to a suite with no waits would
+loosen a bound nothing needs loosened, and leave a config line whose reason is
+somebody else's.
+
+The module-scope green-hang is identical in both runners: 20 seconds of blocking
+before any test runs reports **"1 passed"**. Vitest is marginally better about
+it, attributing the time as `import 20.02s` where jest folded it into the suite
+duration — but it is still a green tick on a wedged file. That class was never a
+per-test-timeout problem in either runner, and F13's `timeout-minutes: 15` on all
+five CI jobs is what covers it.
+
+Open questions:
+
+- **The web and admin suites are pure logic by choice, and that choice is what
+  makes this a non-issue.** The day either grows a component test with a
+  `waitFor`, the F13 question returns for that runner — and nothing connects
+  this entry to that moment.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
