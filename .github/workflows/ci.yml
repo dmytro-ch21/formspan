@@ -13,6 +13,18 @@ jobs:
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
+    # timeout-minutes on every job: GitHub's default is SIX HOURS, so anything
+    # that hangs rather than fails burns a runner for an afternoon before
+    # anybody sees it. Measured on a recent green run, the slowest job here is
+    # ~1.8 min, so 15 is roughly eight times the worst and twenty-four times
+    # under the default. This bounds the JOB; F12's `-timeout 3m` bounds a Go
+    # package and jest's `testTimeout` bounds a mobile test — three different
+    # granularities, and only the outermost one catches a hang in setup,
+    # install or a runner that wedges. Measured: a 25s block at MODULE scope in
+    # a jest file runs to completion and the test reports PASS — `testTimeout`
+    # never sees it, because no test is running yet. That class is invisible
+    # until something bounds the job.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -82,6 +94,7 @@ jobs:
   web:
     name: Web (Next.js)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -113,6 +126,7 @@ jobs:
   admin:
     name: Admin (Next.js)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -148,6 +162,7 @@ jobs:
   scripts:
     name: Scripts (Python)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -194,6 +209,7 @@ jobs:
   mobile:
     name: Mobile (Expo)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 

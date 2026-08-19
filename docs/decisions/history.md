@@ -27821,6 +27821,61 @@ attempt to count those rows was blocked by the sandbox classifier, so even the
 size of that pool is currently unknown.
 
 
+## 2026-08-19 — The mobile suite was already bounded; two timeouts disagreed about by how much
+
+**F13**, and it started from a wrong premise of mine. F12 bounded the Go suite
+and left "the mobile suite has no equivalent cap" as an open item. Measured, that
+is false: **jest enforces 5000ms per test by default**, so a 9-second test dies
+at 5001ms. There was never a ten-minute hole here.
+
+What the measurement did find is a contradiction. Five component suites call
+`configure({ asyncUtilTimeout: 10_000 })` — RNTL's polling budget, widened so a
+slow render under load has room. Nothing set jest's `testTimeout`, so its 5s
+default won every time: a `waitFor` configured for ten seconds died at **5003ms**
+with jest's message, not RNTL's. Those files were asking for ten seconds and
+getting five, losing precisely the headroom they were widened for.
+
+`testTimeout: 15_000` now, above the 10s they ask for. Verified both directions:
+the same `waitFor` runs **10014ms** and fails on its own assertion, and a 20s
+test still dies at **15001ms**, so the ceiling was raised rather than removed.
+That is 15s against the ten minutes the Go suite ran unbounded until F12 — a
+bound worth having, not an absence.
+
+**It does not fix the oversubscription flake and the entry should not imply it
+does.** That is `--maxWorkers`, deliberately unset because CI runs one instance.
+What this removes is a second, unrelated reason those tests could fail early.
+
+**CLAUDE.md was wrong about which timeout expires**, and has been since the flake
+was first characterised: it said `sharedScreen.test.tsx`'s "10s `asyncUtilTimeout`
+expires", which could not happen while jest's 5s fired first. Corrected in place.
+
+**The bound that genuinely was missing is at the job level.** No job in `ci.yml`
+set `timeout-minutes`, so GitHub's default of **six hours** applied to all five —
+anything wedging in setup, install or a stuck runner burns an afternoon before
+anybody looks. All five are capped at 15 minutes, measured against a recent green
+run whose slowest job was 1.8 min. There are three granularities now and they
+catch different things: `testTimeout` a test, F12's `-timeout 3m` a Go package,
+and `timeout-minutes` everything else — including the hang that never reaches a
+test at all.
+
+That last case was measured rather than assumed, and it is worse than
+"unbounded": a 25-second block at MODULE scope in a jest file runs to completion
+and the test reports **PASS**, in a suite that took 25.7s. `testTimeout` cannot
+see it, because no test is running yet — so a wedged import or a spinning
+`jest.setup.js` is not a slow red X, it is a slow GREEN one. Only the job cap
+turns that into a signal.
+
+Open questions:
+
+- **The web and admin vitest runs have no explicit `testTimeout`** either, so
+  they carry vitest's own default. Nobody has measured what that is here or
+  whether any of those tests configure a longer wait the way the five mobile
+  suites do.
+- 15 minutes per job is generous against a 1.8-minute reality. It is chosen to
+  never fire on a slow-but-working runner, which means a genuinely wedged job
+  still costs a quarter of an hour.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
