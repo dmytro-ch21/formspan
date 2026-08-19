@@ -8379,3 +8379,43 @@ training. Everything here is about it telling the truth.
 - **`offered_grips` is derived in `scanExercise`, the single point where a row becomes an `Exercise`.** Deriving it in a handler instead ships `null` from whichever handler was forgotten.
 - **`apps/mobile`'s `gripsFor` is an OFFLINE FALLBACK, not a source of truth**, and `scripts/check-grip-parity.py` is what keeps it from becoming a second opinion. `apps/web` has no copy at all — do not reintroduce one, it fetches on render.
 - **`exercise.OfferedGrips` returns plain strings**, so the type system does not connect it to `session.Grip`. `TestEveryOfferedGripIsInTheVocabulary` is that connection; it lives in `session` because that side owns `ValidGrip`.
+
+## Machine identification (`POST /v1/exercises/identify`)
+
+Domain: photograph a gym machine, get a **ranked shortlist** of catalog exercises to tap. Never selects, never logs, never writes. The model answers from a closed shortlist of the catalog's machine equipment (~200 published rows) and every returned id is re-checked server-side against the shortlist that was sent.
+
+**Happy path**
+- A clear photo of a cable machine returns `200` with 1–4 candidates, ranked, each carrying `exercise_id`, `name` and `confidence`, plus the `equipment` family and the `model` the provider reports.
+- Every `exercise_id` returned resolves via `GET /v1/exercises/{id}` — the shortlist only offers published rows, so a candidate is always tappable.
+- `name` matches what `GET /v1/exercises/{id}` calls it. It is taken from the catalog, never from the model, so it cannot disagree with any other screen.
+- **Nothing is written.** Confirm no session, set or activity row appears as a result of a call — the response populates a picker.
+
+**The guards (the substance of this feature)**
+- **An id the model invents is dropped, not mapped to a neighbour.** Hard to force from outside; the unit tests cover it. If exercised live, a response naming equipment the catalog does not have must not produce a candidate at all.
+- **Incoherent equipment is refused.** A response reporting one equipment family while returning candidates from another yields `422`, not a 200 with a plausible list. This is the N40 shape — each half well-formed, the pair incoherent — and the only failure of its kind the server can see.
+- **Non-machine equipment is never offered.** No bodyweight, dumbbell, kettlebell or barbell exercise can appear as a candidate, whatever the photo shows. A photo of a dumbbell rack should refuse rather than return a curl.
+- **Draft exercises are never offered.** A console-authored draft must not appear, or the tap opens content that is not published.
+
+**Edge cases & errors**
+- A photo of a person, a wall, a locker room, food or a screen returns **`422`**, not a 200 with a low-confidence guess. The message should point at retaking the photo.
+- `422` is **deterministic for the same image** — clients must not retry it. Worth asserting a client does not.
+- No `image` part, or a non-multipart body, returns `400`.
+- A file over 5 MB returns `400` rather than being silently truncated into a valid-looking short image.
+- A PDF (or any non-image) sent with `Content-Type: image/jpeg` returns `400`. The type is **sniffed from the bytes**, so the declared header must not be able to get it forwarded to the vision API at our expense.
+- With no API key configured, the route returns `503` and **every other `/v1/exercises` route still works**. This is the state local dev and CI are in by default.
+- A provider outage returns `503`, and the client's advice is "try again" rather than "fix your request".
+- Error responses never carry raw upstream text — no provider request ids, no prompt fragments. The detail belongs in the server log only.
+
+**Spend and abuse**
+- The endpoint is **rate limited per athlete** (20 per 30 minutes) on top of the default policy. Exceeding it returns `429` with `Retry-After`.
+- The limit is a **spend** bound: every call is a billed vision request. A test that loops this endpoint costs real money — use a fake completer, not the live route.
+- Unauthenticated requests return `401` before any token is spent.
+
+**Client behaviour worth testing on whichever surface builds it**
+- **The first candidate is not auto-selected.** The whole reason more than one comes back is that nothing on the server can tell a correct match from a plausible wrong one, and the athlete in front of the machine can. Auto-selecting throws that away and restores the invisible-error failure mode.
+- **`confidence` is not used as a threshold.** It is not calibrated to correctness — the model has never seen this catalog. Showing it, or using it to suggest a retake, is fine; hiding candidates below a cutoff is not.
+- A refusal reads as "could not tell — try a straighter shot", not as an error the athlete caused.
+
+**Not covered yet**
+- **No real photograph has been through this.** The same gap N40 closed for nutrition, where the first real image produced two errors, one of them unflagged. Accuracy claims should wait for that.
+- **The model tier is unmeasured for equipment vision.** It runs on the capable tier deliberately; the cheaper one needs a real-photo comparison before it is adopted, because N37 measured two tiers of one provider at 0.0% vs 24.2% invention.

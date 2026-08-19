@@ -5220,6 +5220,129 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /exercises/identify:
+    post:
+      summary: Identify a gym machine from a photograph
+      operationId: identifyExercise
+      description: >
+        Returns a **ranked shortlist of candidate exercises** for a photo of a
+        gym machine. It never selects, logs or writes anything — the athlete
+        taps one.
+
+
+        **More than one candidate is deliberate.** The failure that costs an
+        athlete something here is a confidently wrong answer, not a missing one,
+        and nothing on the server can tell a correct match from a plausible
+        wrong one. The athlete is standing in front of the machine and can; a
+        shortlist makes a near-miss one extra tap instead of an invisible error.
+        Clients should present these as choices and must not auto-select the
+        first.
+
+
+        **`confidence` is reported, not acted on.** It is not calibrated to "am
+        I right" — the model has never seen this catalog — and at best means
+        "how clearly can I see a machine". Useful for prompting a retake; never
+        a threshold.
+
+
+        The model answers from a closed shortlist of the catalog's machine
+        exercises, and every returned id is re-checked against that shortlist
+        server-side. An id that was not offered is dropped rather than mapped to
+        a neighbour, and a response whose reported `equipment` contradicts its
+        own candidates is refused outright.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: >
+                    The photo, at most 5 MB. The media type is SNIFFED from the
+                    bytes, not read from the part's declared `Content-Type`;
+                    JPEG, PNG, GIF and WebP are accepted. Multipart is the only
+                    transport — there is no text path here, so base64 in JSON
+                    would inflate the payload for nothing.
+      responses:
+        "200":
+          description: A draft shortlist. Nothing has been logged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [identification]
+                properties:
+                  identification:
+                    type: object
+                    required: [equipment, candidates, model]
+                    properties:
+                      equipment:
+                        type: string
+                        description: >
+                          The equipment family reported, e.g. `cable-stack`.
+                          Guaranteed to be used by at least one candidate.
+                        example: cable-stack
+                      candidates:
+                        type: array
+                        description: Ranked, most likely first. Never empty on a 200.
+                        maxItems: 4
+                        items:
+                          type: object
+                          required: [exercise_id, name, confidence]
+                          properties:
+                            exercise_id:
+                              type: string
+                              description: A published catalog exercise.
+                              example: seated-cable-row
+                            name:
+                              type: string
+                              description: >
+                                Taken from the catalog, never from the model, so
+                                it always matches what every other screen calls
+                                this exercise.
+                              example: Seated Cable Row
+                            confidence:
+                              type: number
+                              minimum: 0
+                              maximum: 1
+                              example: 0.82
+                      model:
+                        type: string
+                        description: >
+                          The model id the provider reports having used, which
+                          is not always the one requested — an alias resolves to
+                          a dated snapshot.
+                        example: gpt-5.6-luna
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: >
+            The photo was read and no machine on the shortlist matched — a
+            person, a room, a free weight, or simply unclear. **Not a client
+            error to fix:** the remedy is a better photo, not a different
+            request, which is why this is 422 rather than 400. Deterministic for
+            the same image, so do not retry it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: >
+            The provider is unreachable, or this deploy has no API key
+            configured. A retry is reasonable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /exercises/{exerciseID}:
     get:
       summary: Get one catalog entry by its slug
