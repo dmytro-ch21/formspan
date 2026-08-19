@@ -30152,6 +30152,156 @@ That is the second time on these two branches that running the checks
 separately would have shipped something the chain catches, which is the
 argument `verify` was written to make.
 
+## 2026-08-19 — A ceiling that survives a deploy (N48)
+
+`POST /v1/exercises/identify` had one control: `identifyLimiter`, a rate limiter
+at `Burst: 20, Every: 30m` — about 48 calls a day sustained. It now also has a
+**persisted daily quota**, 20 per athlete per rolling 24 hours, metered in
+`exercise_identifications` (migration 000063).
+
+### Why this was the urgent half
+
+N7's own history entry recorded the missing quota as a **deliberate deferral**
+rather than an oversight — the proportionate first cut for an endpoint with no
+usage history, with the gap written down instead of implied. That is the right
+way to have left it, and this is that deferral coming due.
+
+What made it urgent is the half that reads as a detail: **the limiter is
+in-memory**. It resets on process restart, so every deploy hands every athlete a
+fresh burst of 20. The ceiling lifted on exactly the days we ship most — a day
+with 23 deploys is a day with 23 refills. A rate limiter is the wrong instrument
+for a daily budget not because it is too loose but because it does not persist,
+and no amount of tuning the numbers fixes that.
+
+Identification is also the more expensive half of the athlete-facing model
+spend, and it had the weaker of the two controls. Food estimation has had hard
+persisted caps since N26.
+
+### The limiter stays, and that is not hedging
+
+A quota bounds the DAY. A rate limit bounds the BURST. Dropping either leaves a
+real gap: without the limiter a client bug spends the whole day's allowance in
+one second, and without the quota the day has no ceiling at all. They are
+answers to different questions and the endpoint needs both.
+
+A test asserts `DailyIdentifications` stays below the limiter's sustained rate,
+because a quota set at or above the burst rate never binds and is decoration
+that reads as a control.
+
+### Shaped as nutrition's twin, deliberately
+
+`nutrition_estimates` (000060) had already solved the three properties that
+matter, so this copies it rather than reinventing:
+
+- **adherence is a QUERY over rows, never a stored counter** — a counter drifts,
+  cannot be recomputed after a bug, and cannot answer "what did this athlete
+  actually do", which is the question anyone looking at a bill will ask;
+- **the gate runs BEFORE the model call**, or it is a receipt rather than a
+  quota;
+- **failed and refused calls count**, because they spend tokens — otherwise a
+  caller loops on a photo the model keeps declining and pays for every attempt.
+
+One difference: no `source` column. There is exactly one path here, and a column
+with one legal value invites a second meaning later. And as with its twin, **the
+photograph is never stored** — the bytes go to the provider and are discarded,
+which keeps the table free of a retention question. A test asserts the table has
+no `bytea` column and nothing named `image`, so that stays true by check rather
+than by intention.
+
+### The gate moved into the handler, and that is the structural half
+
+N7's review found its spend gate structurally correct — `limitIdentify` wrapped
+inside `RequireAuth`, outside the handler — but **untestable**: nothing asserted
+the route was actually wired behind it, because the gate lived in `main.go` and
+`main.go` has no test.
+
+Putting the quota in the handler closes that: a gate on the handler is exercised
+by every test that calls the handler, so "is the route behind the gate" stops
+being something a reviewer has to remember to ask.
+
+**The gap turned out to be wider than reported.** `NewIdentifyHandler` was
+referenced by exactly one non-test file in the whole repo — `cmd/api/main.go`.
+Every existing test in this module covered pure functions: shortlist building,
+validation, transport sentinels. **The handler had never been called by a test
+at all.** It has nine now, and the one that matters asserts the model was called
+**zero** times at the cap — a handler that called first and refused afterwards
+would still answer 429 and look perfectly correct from outside.
+
+The rate limiter is still in `main.go` and still not covered by these tests.
+That is stated rather than fixed: only the daily half moved.
+
+### The number is a judgment, and is labelled as one
+
+**20 is not measured.** Nothing has measured what an identify call costs on the
+shipped model, so this cap is weaker-founded than the nutrition ones beside it,
+which now have live per-call costs behind them (N49 is re-deriving those).
+
+It is picked from the shape of the usage rather than the price: identification
+is the unfamiliar-gym case, which is bursty and front-loaded — a dozen machines
+on a first visit, then almost none, because they stop being unfamiliar. A cap of
+5 would fail exactly the session the feature exists for. The nutrition module's
+reasoning applies unchanged: a cap an athlete hits during ordinary use teaches
+them not to rely on the feature, which is the opposite of what a release trying
+to find out whether the feature works wants.
+
+It is also strictly tighter than what shipped, so it cannot loosen anything.
+
+### Verified
+
+Every guard mutation-checked, and — following the rule added to CLAUDE.md this
+afternoon — each mutation was confirmed to produce a **test failure** rather
+than a compile error, against a baseline green in the same session:
+
+- moving the gate after the model call;
+- metering only successes;
+- failing open when the meter is unreadable;
+- dropping the `user_id` scope from the quota query (a per-athlete cap silently
+  becomes a global one);
+- dropping the `created_at` window (calls never age out and the athlete never
+  gets the day back).
+
+The last two are the ones handler tests structurally cannot reach, since the
+fake meter implements its own counting — a broken `WHERE` clause leaves every
+handler test green.
+
+Also checked, because the same rule says to: that all nine new tests actually
+**ran** rather than being silently filtered out. One `-run` pattern here did
+quietly miss a test while reporting a pass, which is the trap verbatim.
+
+Migration applied to an isolated `vola_test_n48`, since 000063 is unmerged and
+the shared database would have blocked every other branch.
+
+### Left open
+
+`humaniseWait` and `retryAfterSeconds` are now duplicated in `nutrition` and
+`exercise`. **The third consumer should promote both into
+`internal/platform/apihttp`**, which already owns the 429's shape via
+`WriteError`. Copied rather than extracted here only because N49 is concurrently
+reworking the nutrition quotas and moving a function out of
+`estimate_handler.go` during that buys a conflict for twenty lines. The risk is
+real and worth naming: this is athlete-facing copy about the same idea, so the
+two can drift into telling people different things about one rule. The phrasing
+is identical today.
+
+**Check-then-record is not atomic, and the overshoot is accepted.** At 19 used,
+several concurrent requests can each read 19 before any `Record` lands, so the
+cap can be exceeded by the in-flight concurrency — bounded by the burst
+limiter's 20 tokens, and self-correcting, since the extra rows count against the
+next window. Closing it needs an `INSERT … WHERE count < limit` or a row lock,
+a real per-call cost to save at most one athlete's worth of overshoot once.
+`nutrition` makes the same trade. Raised in review and written down here rather
+than left implicit, so the next person can weigh it instead of rediscovering it.
+
+**A `Record` failure fails OPEN** — logged, request proceeds — which is the
+opposite of the quota read. Deliberate: by that line the money is already spent,
+and failing the request would turn a bookkeeping outage into a feature outage.
+The unmetered window is a partial outage between the two queries, since a fully
+down database refuses at the read.
+
+No client change. Nothing surfaces the remaining count to the athlete — the 429
+says when the next one frees up, but a client cannot show "3 left today" without
+a read endpoint, which nutrition also lacks. Whether that is worth having is a
+product question nobody has asked yet.
 
 ## Open items / known gaps as of this entry
 

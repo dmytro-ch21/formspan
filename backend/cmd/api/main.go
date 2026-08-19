@@ -141,11 +141,17 @@ func main() {
 	// use — an athlete photographs a machine they cannot identify, taps a
 	// candidate, and is done — and far below a loop.
 	//
-	// Deliberately NOT nutrition's persisted daily quota. That one survives a
-	// deploy and reports a remaining count to the client; this is in-memory and
-	// resets on restart, which is weaker. It is the proportionate first cut for
-	// an endpoint with no usage history, and the gap is recorded rather than
-	// implied — see the N7 history entry.
+	// KEPT alongside the persisted daily quota that N48 added, not replaced by
+	// it. The two answer different questions: this bounds the BURST (a client
+	// bug cannot spend the whole day's allowance in one second), and the quota
+	// in `exercise.CheckIdentifyQuota` bounds the DAY and survives a restart.
+	//
+	// The note that used to sit here — that this was deliberately weaker than
+	// nutrition's persisted quota, a proportionate first cut with the gap
+	// recorded rather than implied — was accurate, and N48 is that deferral
+	// coming due. What made it urgent was the in-memory half: every deploy
+	// handed every athlete a fresh burst of 20, so the ceiling lifted on
+	// exactly the days we ship most.
 	identifyLimiter := ratelimit.New(ratelimit.Policy{
 		Name: "exercise_identify", Burst: 20, Every: 30 * time.Minute,
 	}, nil)
@@ -347,7 +353,11 @@ func main() {
 			"provider", string(identifyProvider),
 			"model", exercise.ResolveIdentifyModel(identifyProvider, os.Getenv("IDENTIFY_MODEL")))
 	}
-	identifyHandler := exercise.NewIdentifyHandler(machineIdentifier)
+	// The quota repository is always real, even on a deploy with no API key:
+	// `machineIdentifier` may be nil and the handler nil-checks it, but a nil
+	// usage repository would panic on the first call rather than refuse it.
+	identifyUsage := exercise.NewPostgresIdentifyUsage(pool)
+	identifyHandler := exercise.NewIdentifyHandler(machineIdentifier, identifyUsage)
 	// The food catalog: text search, coverage, and barcode lookup.
 	//
 	// The barcode resolver is wired unconditionally because Open Food Facts

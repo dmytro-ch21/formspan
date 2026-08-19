@@ -9099,3 +9099,71 @@ all reachable by picking a candidate.
 - **`confidence` is not rendered**, and a test asserting it appears would be
   asserting the wrong thing. It is per candidate, uncalibrated, and beside a
   choice it reads as a ranking — which the screen's central rule forbids.
+## The identify daily quota (N48 — `POST /v1/exercises/identify`)
+
+A persisted per-athlete cap of 20 identifications per rolling 24 hours, metered
+in `exercise_identifications`. It sits **alongside** the in-memory burst limiter,
+which is unchanged.
+
+### Happy path
+
+- A first identification of the day returns 200 and writes one meter row
+  carrying the athlete, the model, and how many candidates were offered.
+- The 20th succeeds; the 21st inside the same rolling day is refused.
+- Calls age out: one made 25 hours ago no longer counts, and the athlete gets
+  that slot back without any job running.
+
+### Edge cases & errors
+
+- **The cap refuses with 429, a `Retry-After` in whole seconds, and a message
+  saying roughly when the next one frees up** — as a RELATIVE duration ("one
+  more in about an hour"), never an RFC3339 instant, which is the wrong
+  wall-clock time for everyone outside UTC and the wrong DAY west of Greenwich.
+- **The reset is derived from the oldest call still inside the window**, not
+  from the oldest row overall. Computed from the wrong row it reports a wait of
+  nearly a day when the real answer is minutes.
+- **A refused (422) or failed (503) identification still counts.** They spend
+  tokens. A quota counting only successes lets a client loop on a photo the
+  model keeps declining and pay for every attempt.
+- **An unauthenticated request spends nothing** — no model call, no meter row. A
+  quota keyed on an empty user id would meter every athlete into one bucket.
+- **A deploy with no API key answers 503 and meters nothing**: there is nothing
+  to bill for a call that cannot be made.
+- **If the meter cannot be read, the request is REFUSED (500), not allowed.**
+  Failing open turns a database blip into an unmetered spending window. The
+  underlying error must not reach the client.
+- Restarting the API does **not** reset the quota. This is the whole point: the
+  burst limiter resets on every deploy, and the quota is what makes the daily
+  ceiling survive one.
+
+### Auth / security
+
+- The route stays behind `RequireAuth` and the burst limiter; the quota is a
+  third control inside the handler, not a replacement for either.
+- The response never says which of the two limits was hit — that is in the
+  server log, where it can be tuned from, rather than in the reply where it is
+  free reconnaissance.
+- **The photograph is never stored.** The meter has no `bytea` column and
+  nothing named `image`; the bytes go to the provider and are discarded.
+
+### Regression trap
+
+- **The gate must run BEFORE the model call.** After it, it is a receipt rather
+  than a quota — and a handler that called first and refused afterwards still
+  answers 429 and looks correct from outside. The assertion that catches this is
+  "the model was called zero times", not the status code.
+- **The quota query has two scopes and both are load-bearing.** Drop `user_id`
+  and a per-athlete cap silently becomes a global one; drop `created_at` and
+  calls never age out. Neither is reachable from a handler test, because the
+  fake meter implements its own counting — they need the Postgres test.
+- **`DailyIdentifications` must stay below the burst limiter's sustained rate**
+  (~48/day at `Burst: 20, Every: 30m`). At or above it the quota never binds and
+  is decoration that reads as a control. There is a test for exactly this.
+- **The cap is a judgment, not a measurement.** Nothing has measured what an
+  identify call costs on the shipped model, so treat it as weaker-founded than
+  the nutrition caps beside it — which is the opposite of how it looks sitting
+  next to them in the same shape.
+- **Before N48 this endpoint had no handler-level test at all**, so "the
+  handler is covered" was not true here even though the module looked
+  well-tested. If a future change moves logic back into `main.go`, that
+  invisibility comes back with it.
