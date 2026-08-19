@@ -94,6 +94,18 @@ stricter of the two there, so a green CI run is not evidence those passed.
 
 **`lint:mobile` carries a `--max-warnings` ratchet** (`eslint . --max-warnings=54` in `apps/mobile/package.json`). It currently passes with **zero headroom**, so the next warning anyone adds anywhere in that app fails the gate. Always report the warning count and the cap, not just pass/fail — "54 of 54" is information the caller needs and "passed" hides it.
 
+**`typecheck:mobile` boots a Metro server, and its failures are real.** It is
+`pnpm run routes:mobile && tsc --noEmit`, and `routes:mobile` starts a dev
+server for ~5s to generate Expo Router's typed routes into a gitignored
+`.expo/` before killing it. That is not incidental slowness to route around:
+those types are what let `tsc` check route literals at all, and without them a
+clean checkout type-checks every `router.push('/nowhere')` as valid. That gap
+shipped N32 — a button whose only job was to unblock the athlete pushed a route
+the app has never had, and it surfaced only because one worktree happened to be
+carrying a stale generated file. The step **fails closed** by design, so a red
+Mobile job here is a real failure, never a flake — do not retry it away, and do
+not report it as environmental.
+
 **Backend integration tests skip silently without `TEST_DATABASE_URL`**, and a skipped test is indistinguishable from a passing one in the default output. If a local Postgres is reachable (`docker compose ps`), set it and:
 
 - run the suite **twice back to back with `-count=1`** — this project has been bitten by cleanup that leaks state on repeated runs (a `defer pool.Close()` racing `t.Cleanup`), and one clean run is not evidence;
