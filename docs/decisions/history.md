@@ -29755,6 +29755,251 @@ verifications went in both directions rather than only the passing one:
 Nothing user-facing changes, so `docs/testing/functional-scenarios.md` gets no
 entry. The one behavioural note for anybody reading logs: the success line now
 names the port it used.
+## 2026-08-19 — The reporter that has to be cheap, and the premise that was wrong (N43)
+
+Client error reporting. The task line said the client half "does not exist at
+all" and that grep finds no error reporting in either app. **That is wrong**,
+and finding out is most of what made the task tractable — so it is recorded
+first, because the wrong version of it invites building a second reporter
+beside the working one.
+
+### What already existed
+
+- `POST /v1/client-errors` (`main.go`), authenticated, validated, **persisted**
+  into `health_events`, returning 202.
+- It already captures correlation: `RequestID` and `TraceID` off the incoming
+  `traceparent`. Piece (2) of the task was done server-side.
+- `apps/mobile/lib/report.ts` posting to it, with a well-argued header about
+  never retrying and never throwing.
+- Both clients already sending `traceparent` on every request.
+- **Retention already decided and implemented**: `retention = 90 * 24 * time.Hour`,
+  a `Prune`, migration `000022`, and a test that catches a sign flip. Piece (3)
+  was largely done; the only real gap is that `Prune` runs from `cmd/seed`, i.e.
+  on deploy rather than on a schedule, which is consistent with this repo having
+  no cron.
+- `apps/admin/src/app/health/` reading it back, and an OpenAPI entry.
+
+### What was actually missing, and it is a shape problem
+
+The pipeline had **exactly one call site** — a `sync_blocked` on the session
+screen — and at one deliberate call per incident, one `fetch` per occurrence is
+the right design. It is the wrong design the moment the crash path feeds the
+same pipe, and that is the whole task: **a render loop throwing sixty times a
+second was sixty POSTs a second**, a device in a reconnect loop reported every
+retry, and one bad deploy multiplied either by the number of devices.
+
+Nothing caught unhandled errors at all: no `ErrorUtils.setGlobalHandler`, no
+`unhandledrejection` handler, and the `ErrorBoundary` exported from
+`app/_layout.tsx` is Expo Router's, which renders a screen and reports nothing.
+
+### First party, no vendor — decided with the user
+
+The recommendation was made after reading the code rather than before, and the
+user approved it in those words. Recorded because the next person here will
+reach for Sentry by reflex and the argument against is not obvious:
+
+- We already have persistence, trace correlation, a 90-day window with a test,
+  an admin read surface and a contract entry. A vendor **duplicates all five and
+  creates a second place to look during an incident**, which is the opposite of
+  what the task asked for.
+- **Every reporter SDK's default shape is one event per occurrence** — precisely
+  the thing the user ruled out. We would pay for the integration and then fight
+  the default.
+- **The PII constraint is the strongest half.** This is health and training
+  data, and a crash report is sent *without the athlete initiating it*, so
+  N26's disclosure rules apply harder rather than more loosely. Sentry-class
+  SDKs capture breadcrumbs and navigation by default; on this app a route param
+  is a session id or a food entry. Turning all of that off is most of the work
+  of writing it yourself, but with a third party in the data path.
+
+**The counter-argument, so this can be revisited honestly**: a vendor buys
+**native** crash capture (iOS signal handlers) and symbolication that a JS-side
+handler cannot. The answer is that this app's bugs are in the offline sync path,
+which is JS-side — and that native capture is a separable later decision, not
+one this entry settles. It is a real trade-off and it was made, not dodged.
+
+### The design: pure buffer, thin transport
+
+`lib/telemetry.ts` holds everything with a rule in it and no clock, no I/O and
+no timers — `now` is passed in, the same shape `target.go` and `adjustment.go`
+use, so every behaviour is testable without a device. `lib/telemetryClient.ts`
+is the part that cannot be: a timer, a `fetch`, and two runtime hooks.
+
+The four requirements are behaviours the buffer HAS, not settings:
+
+- **Coalesce, don't queue.** Repeat occurrences of one fingerprint fold into a
+  single record with a `count`. This is what stops a two-hour dead spot becoming
+  a flood: 5,000 occurrences over two hours offline is *one* buffered row.
+- **Cap per fingerprint** — three payloads per fifteen minutes, however often it
+  fires.
+- **Batch** — nothing sends on the occurrence; a flush goes on a timer or at a
+  size threshold, as one request.
+- **Fixed-size ring** — self-cleaning is a property of the structure, not a task
+  somebody remembers to run. The server's 90 days is the other half.
+
+Fingerprinting normalises numbers, uuids, hex and quoted strings out of the
+message first. Without that, "row 41 failed" and "row 87 failed" are different
+problems, coalescing never coalesces and the cap never binds — which looks like
+it is working right up until a device is in a loop.
+
+### Silence is never the answer, applied to the reporter itself
+
+Every one of those four is a way of NOT sending something, and a reporter that
+quietly drops is the exact failure it was built to prevent. It is the same shape
+as an empty array meaning both "no data" and "the fetch failed" (N28), a CI run
+with no checks reading as passing, a skipped test printing `ok`, and — measured
+the same afternoon — `expo-camera` failing to resolve while the process exited
+0.
+
+So every suppression is counted and carried: **`occurrences`** is how many times
+a coalesced event really happened, **`suppressed`** is what the cap hid, and
+**`lost_events`** is whole events that fell off the ring or died in a failed
+flush. An operator reading the Health screen can always tell a quiet device from
+one that stopped being able to tell us anything. Without those three, a bounded
+reporter and a broken one are indistinguishable.
+
+### What must never leave the device
+
+`redact()` is an **allowlist**, not a blocklist, and the distinction is the
+point: a blocklist fails open, so the next field somebody adds ships by default,
+and eventually that field is a note, a food name or a partner's handle. Objects
+and arrays are dropped whole rather than walked, because a nested object is
+where prose hides and a recursive sanitiser grows exceptions.
+
+Stacks are **deliberately not sent**. A stack is the most useful thing available
+here and also the most dangerous — React Native stacks carry file paths, and in
+a dev build those include the developer's home directory.
+
+### Server: the endpoint takes a batch now
+
+`/client-errors` accepts a single report (the form that shipped), `{"events":
+[...]}`, or a bare array. The single form is kept **forever**: a client that
+reports its own trouble is the client least able to be upgraded first.
+
+A batch is all-or-nothing. Partial acceptance would need a per-event result the
+client cannot act on — it never retries — and "202 with some of it dropped" is
+the silent-loss shape this endpoint exists to end.
+
+`decodeReports` discriminates on the first non-space byte rather than trying one
+shape and falling back. The fallback version has a specific failure: an object
+with no `events` key decodes cleanly as an empty batch, so a single report — the
+shipped form — would be accepted with 202 and recorded as nothing. That case is
+in the table test, and it is the one that goes red if the discriminator is
+loosened.
+
+### The global handlers observe; they do not intercept
+
+`setGlobalHandler` **always chains to the previous handler**. Replacing it
+without calling on swallows the red box in development and stops the runtime
+doing whatever it would have done in production, turning a visible crash into an
+app that quietly misbehaves. Installation is idempotent because Fast Refresh
+re-runs module bodies, and a second install would wrap our own wrapper — a leak
+that only appears in development and only after a while.
+
+`unhandledrejection` is the hook that matters most: the offline sync path is
+almost entirely promises, so `ErrorUtils` alone would miss the bugs this was
+filed for.
+
+### Verification
+
+Five mutations, each seen red and restored: removing coalescing (2 red),
+removing the cap (3), unbounding the ring (3), removing the level gate (1),
+turning the allowlist into a passthrough (2). On the server, loosening the batch
+discriminator turns the shipped-form case red. 30 new mobile tests; `verify`
+exit 0; **zero lint warnings added**, which matters because `lint:mobile` sits
+at exactly its 54 cap.
+
+### What review caught, and it was most of the value
+
+Both reviewers ran. `frontend-reviewer` returned **five blocking findings** and
+every one of them independently defeated a property this feature exists to
+provide — which is worth stating plainly, because the first version passed 30
+tests and a full `verify`:
+
+1. **Cross-account flush.** `resetTelemetry` existed, documented this exact
+   hazard in its own comment, and **nothing called it**. Athlete A's buffered
+   events and loss tally would POST under athlete B's token at the next flush
+   and be attributed to B in `health_events`. The window is 30 seconds or ten
+   events, which a fast account switch beats easily.
+2. **The loss tally evaporated.** `takeLost()` zeroed the counter *before* the
+   fetch, and a rejected send gave back only `batch.length` — so ten evictions
+   plus a failed flush of five ended at five, not fifteen. Events dropped with
+   nothing counted, which is the one thing this design forbids.
+3. **The global handler did not always chain.** `describe(e)` is evaluated as
+   an ARGUMENT, so it runs outside `capture`'s try/catch; an Error whose
+   `message` getter throws skipped `previous?.(e, isFatal)` entirely — the
+   reporter swallowing the red box in development and the runtime's fatal
+   handling in production, for exactly the strange errors most worth seeing.
+4. **`sends` was unbounded.** `windowFor` inserts an entry for every fingerprint
+   ever seen and nothing removed one. A bounded ring sitting next to two
+   unbounded maps is not a bounded reporter. This one had been *suspected and
+   flagged to the reviewer* rather than assumed away, which is the only reason
+   it was not a surprise.
+5. **`unhandledrejection` is not a thing in React Native.** The first version
+   hooked `globalThis.addEventListener('unhandledrejection')`, a DOM API, with
+   optional chaining — so on a device it installed **nothing, silently**, and
+   the half of N43 that matters most did not exist. Confirmed in the runtime:
+   RN enables `promise/setimmediate/rejection-tracking`, whose `onUnhandled`
+   calls `ExceptionsManager.handleException` *directly*, bypassing the
+   `ErrorUtils` global handler. Neither hook would ever have seen a rejection.
+
+**And a sixth, found by the fix for the second.** The two tests written for the
+loss-tally bug **passed with the bug reintroduced** — they failed a single
+event, so the tally was zero at the failing flush and `batch.length` alone
+happened to be right. Green against the exact defect they were named for. The
+mutation said so; reading them did not. They now build a tally across
+consecutive failed flushes and assert an exact 6.
+
+The lesson generalises and is worth more than the feature: **the pure half was
+well covered and correspondingly correct; four of the five blocking findings
+lived in the file that had no tests at all.** None of them needed a device — a
+stubbed `fetch` and a fake `ErrorUtils` reach all four. `telemetryClient.ts` has
+18 tests now.
+
+Also fixed from that review: **fingerprint churn** — the normaliser caught
+uuids, hex, digits and quoted strings but not mixed-alphanumeric ids like
+`req_8fka2`, so such a message fingerprinted differently every occurrence,
+coalescing never coalesced, the cap never bound, and the size trigger fired a
+POST every ten occurrences (~21,600/hour on a 60/s loop, the exact failure the
+requirement names); eviction was first-inserted rather than least-recently-seen,
+so the *most active* problem was evicted before a stale one-off; `lost_events`
+was stamped on every event in a batch, so summing it multiplied by batch size;
+the outbound **message** bypassed the allowlist entirely, so interpolated
+athlete prose could ship on the crash path (scrubbing is now at the buffer
+boundary, covering every path rather than one); and object-shaped rejections all
+collapsed to `'unknown error'`, sharing one fingerprint and one cap slot so each
+suppressed the others.
+
+`backend-reviewer` returned one blocking finding — a missing `minItems: 1` on
+the bare-array branch, so the spec accepted `[]` while the handler refused it —
+plus the observation that a **single multi-row INSERT** collapses three lesser
+findings at once. It does: `RecordBatch` is atomic, so a partial write can no
+longer commit a prefix and return 500, which would have made the client's own
+`lost_events` wrong about events that were in fact stored. Telemetry that
+misreports its own loss is the failure this whole feature exists to end.
+
+### What this leaves open
+
+- **`apps/web` has no reporter, and that half is not done.** Filed as **N50**
+  rather than bolted on here: the honest options are a shared workspace package
+  or a second ~380-line copy of `telemetry.ts`, and this repo's
+  duplicate-small-utilities convention explicitly covers "a ~15-line utility",
+  not this. Picking between them is a decision, not an afterthought at the end
+  of somebody else's diff.
+- **Nothing here has run on a device, and finding #5 is why that matters more
+  than usual.** The buffer and the transport are covered by 48 unit tests, but
+  no unhandled error has been thrown on a phone and watched arrive on the
+  Health screen. A hook that installs nothing is invisible to every test that
+  does not run the real runtime — which is exactly how the `addEventListener`
+  version survived a green suite. `rejectionTrackingActive()` exists so the
+  answer is at least *observable* rather than assumed, and a failed install
+  buffers a `client_error` saying so, but **verifying the rejection path on a
+  simulator is the first thing anyone should do with this branch.**
+- **`Prune` still runs only from `cmd/seed`**, so retention is enforced on
+  deploy. Fine while deploys are frequent; worth knowing if they stop being.
+- The admin Health screen does not yet surface `occurrences`, `suppressed` or
+  `lost_events` — they are in `details` and readable, but nothing draws
+  attention to a device that has started losing events.
 
 ## Open items / known gaps as of this entry
 

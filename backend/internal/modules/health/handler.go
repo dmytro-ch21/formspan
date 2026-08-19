@@ -1,8 +1,11 @@
 package health
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -14,8 +17,62 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
+// maxReportBytes bounds the body. Raised from 8KB with the batch form: a full
+// batch of MaxBatch events, each with a 500-char message and a small details
+// object, does not fit in 8KB, and a client whose whole job is to report
+// trouble must not have its report rejected for being a batch.
+const maxReportBytes = 64 << 10
+
+// MaxBatch bounds how many events one call may carry.
+//
+// The client's buffer is a fixed-size ring well under this, so in normal
+// operation the bound never binds — it is here so a misbehaving client cannot
+// use one request to write an unbounded number of rows.
+const MaxBatch = 50
+
 type Handler struct {
 	repo Repository
+}
+
+var errNullBody = errors.New("health: body is null")
+
+// decodeReports accepts either a single report object or `{"events": [...]}`.
+//
+// Discriminated on the first non-space byte rather than by trying one shape and
+// falling back to the other: a failed decode can leave a half-consumed reader,
+// and "try, fail, retry differently" is how a malformed body silently becomes
+// an empty batch instead of a 400.
+func decodeReports(raw []byte) ([]NewEvent, error) {
+	trimmed := bytes.TrimLeft(raw, " \t\r\n")
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	// A literal `null` is rejected here rather than left to decode into a
+	// zero-valued report that `Validate` happens to refuse for having no kind.
+	// The outcome is the same 400 either way — but one is a decision and the
+	// other is an accident, and an accident stops holding the moment somebody
+	// gives `Kind` a default. Found by a test written from a review note.
+	if bytes.Equal(bytes.TrimRight(trimmed, " \t\r\n"), []byte("null")) {
+		return nil, errNullBody
+	}
+	if trimmed[0] == '[' {
+		var list []NewEvent
+		if err := json.Unmarshal(trimmed, &list); err != nil {
+			return nil, err
+		}
+		return list, nil
+	}
+	var batch struct {
+		Events []NewEvent `json:"events"`
+	}
+	if err := json.Unmarshal(trimmed, &batch); err == nil && batch.Events != nil {
+		return batch.Events, nil
+	}
+	var one NewEvent
+	if err := json.Unmarshal(trimmed, &one); err != nil {
+		return nil, err
+	}
+	return []NewEvent{one}, nil
 }
 
 func NewHandler(repo Repository) *Handler {
@@ -44,30 +101,81 @@ func (h *Handler) Report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req NewEvent
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
+	// Read once, then decide the shape. The body can be a single report — the
+	// form this endpoint shipped with and the one a deployed build still sends
+	// — or a batch. Both stay supported deliberately: a client that reports its
+	// own trouble is exactly the client least able to be upgraded first.
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxReportBytes))
+	if err != nil {
+		// Told apart from malformed JSON on purpose. `MaxBytesReader` fails the
+		// read, and the old code conflated the two — so a client author sending
+		// a valid but large batch got "invalid JSON body" and had nothing to go
+		// on. That is now the likelier trip of the two, since a batch of 50 is
+		// a much bigger body than a single report ever was.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			apihttp.WriteError(w, http.StatusRequestEntityTooLarge, apihttp.CodeInvalidInput,
+				"that report is too large")
+			return
+		}
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}
-	if err := req.Validate(); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-			"kind must be client_error or sync_blocked, and message must be under "+
-				strconv.Itoa(MaxMessageLen)+" characters")
+
+	reports, err := decodeReports(raw)
+	if err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
+	}
+	if len(reports) == 0 {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "no events")
+		return
+	}
+	if len(reports) > MaxBatch {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"at most "+strconv.Itoa(MaxBatch)+" events per request")
+		return
+	}
+	for i := range reports {
+		if err := reports[i].Validate(); err != nil {
+			// The whole batch is refused rather than the good half kept.
+			// Partial acceptance would need a per-event result the client
+			// cannot act on anyway — it never retries — and "202 with some of
+			// it dropped" is the silent-loss shape this endpoint exists to
+			// end.
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"kind must be client_error or sync_blocked, and message must be under "+
+					strconv.Itoa(MaxMessageLen)+" characters")
+			return
+		}
 	}
 
 	userID := claims.UserID
-	ev := Event{
-		Source:    SourceClient,
-		Kind:      req.Kind,
-		UserID:    &userID,
-		ErrorCode: req.ErrorCode,
-		Message:   req.Message,
-		Details:   req.Details,
-		RequestID: httplog.RequestIDFromContext(r.Context()),
-		TraceID:   httplog.TraceIDFromContext(r.Context()),
+	requestID := httplog.RequestIDFromContext(r.Context())
+	traceID := httplog.TraceIDFromContext(r.Context())
+	events := make([]Event, 0, len(reports))
+	for _, req := range reports {
+		events = append(events, Event{
+			Source:    SourceClient,
+			Kind:      req.Kind,
+			UserID:    &userID,
+			ErrorCode: req.ErrorCode,
+			Message:   req.Message,
+			Details:   req.Details,
+			// Every event in a batch shares the batch's request and trace ids.
+			// That is correct rather than lossy: they were reported together,
+			// by one device, in one call, and the trace is what joins them to
+			// the server-side line for that call.
+			RequestID: requestID,
+			TraceID:   traceID,
+		})
 	}
-	if err := h.repo.Record(r.Context(), ev); err != nil {
+	// One statement, atomically. A loop of single inserts that failed partway
+	// would commit a prefix and return 500 — and since the client never
+	// retries, the events it then counts as `lost_events` would include ones
+	// that were in fact stored. A reporter that misreports its own loss is the
+	// failure this endpoint exists to end. Found in review.
+	if err := h.repo.RecordBatch(r.Context(), events); err != nil {
 		apihttp.WriteInternal(w, r, "health", err)
 		return
 	}

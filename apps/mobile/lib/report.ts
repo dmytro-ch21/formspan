@@ -1,7 +1,5 @@
-import { newTraceId, traceparent } from './trace';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
+import { capture } from './telemetryClient';
+import type { ReportKind } from './telemetry';
 
 /**
  * Tells the server about a failure it has no way to observe.
@@ -12,7 +10,10 @@ const API_BASE = `${API_URL}/v1`;
  * would have carried the data never gets made again — which is exactly why the
  * client has to say so.
  */
-export type ReportKind = 'client_error' | 'sync_blocked';
+// Re-exported rather than declared a second time. It was declared here AND in
+// `telemetry.ts`, which is two copies of one vocabulary that the server's CHECK
+// constraint is the real source of — the shape this repo has drifted on before.
+export type { ReportKind } from './telemetry';
 
 /**
  * Fire-and-forget by construction, and that is the whole design.
@@ -27,33 +28,29 @@ export type ReportKind = 'client_error' | 'sync_blocked';
  * two are ranked, not balanced.
  */
 export function report(
-  getToken: () => Promise<string | null>,
+  /**
+   * @deprecated Ignored. Attribution comes from the token source installed at
+   * the root by `installTelemetry`, so passing one here controls nothing.
+   * Kept only so the existing call site is unchanged; new callers should use
+   * `capture` from `telemetryClient` directly.
+   */
+  _getToken: () => Promise<string | null>,
   kind: ReportKind,
   message: string,
   details?: Record<string, unknown>,
 ): void {
-  void (async () => {
-    try {
-      const token = await getToken();
-      if (!token) return;
-      await fetch(`${API_BASE}/client-errors`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          traceparent: traceparent(newTraceId()),
-        },
-        // Trimmed well under the server's 500 rather than to exactly it. The
-        // server bounds *bytes* and `slice` counts UTF-16 code units, so a
-        // message with any non-ASCII in it can pass this trim and still be
-        // rejected — and since reporting is fire-and-forget, that rejection
-        // would be completely silent. 200 leaves room for even 2 bytes per
-        // character.
-        body: JSON.stringify({ kind, message: message.slice(0, 200), details }),
-      });
-    } catch {
-      // Deliberately silent. See above: the failure this reports is more
-      // important than the report.
-    }
-  })();
+  // Now a thin front for the buffered reporter rather than its own `fetch`.
+  //
+  // The old body posted once per call, which was right while this had exactly
+  // one deliberate call site. It is wrong the moment the crash path feeds the
+  // same pipe: a render loop throwing sixty times a second was sixty POSTs a
+  // second. `telemetry.ts` coalesces, caps, batches and bounds; everything the
+  // old comment promised about never throwing and never retrying is preserved
+  // there, and the message trimming and detail redaction are stricter.
+  //
+  // `_getToken` is unused: the reporter holds the token source installed at the
+  // root, so a call site no longer has to supply one. Kept in the signature so
+  // this stays a drop-in for the existing caller, and because a caller that
+  // *had* a token is not a caller that should be rewritten to prove it.
+  capture('error', kind, message, details);
 }

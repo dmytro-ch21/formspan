@@ -21,6 +21,7 @@ package health
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -101,6 +102,15 @@ type NewEvent struct {
 const (
 	MaxMessageLen   = 500
 	MaxErrorCodeLen = 64
+	// MaxDetailsBytes bounds one event's free-form context.
+	//
+	// `details` was previously bounded only by the 8KB body cap, which was a
+	// fine implicit limit while a request carried one event. The batch form
+	// raised the envelope to 64KB, so without this a single event could carry
+	// eight times what the whole request used to — and the free-storage
+	// concern that justified bounding `message` at all applies unchanged.
+	// Found in review.
+	MaxDetailsBytes = 4 << 10
 )
 
 // Validate bounds and normalises a client report.
@@ -117,6 +127,15 @@ func (n *NewEvent) Validate() error {
 	}
 	if len(n.Message) > MaxMessageLen || len(n.ErrorCode) > MaxErrorCodeLen {
 		return ErrInvalidInput
+	}
+	// Measured by marshalling rather than by counting keys: the cost this
+	// bounds is the bytes that reach the column, and a small map of very long
+	// strings passes any key count.
+	if len(n.Details) > 0 {
+		b, err := json.Marshal(n.Details)
+		if err != nil || len(b) > MaxDetailsBytes {
+			return ErrInvalidInput
+		}
 	}
 	return nil
 }
@@ -151,6 +170,19 @@ type Repository interface {
 	// Record stores one event. Best-effort by contract: callers on a request
 	// path must not fail a user's request because observability failed.
 	Record(ctx context.Context, e Event) error
+	// RecordBatch stores several events ATOMICALLY, in one round trip.
+	//
+	// Beside Record rather than replacing it: the request-logging middleware
+	// records exactly one event and would gain nothing from a slice, and
+	// reshaping the interface for the batch endpoint's sake would put the
+	// endpoint's shape into every caller.
+	//
+	// Atomic is the point, not just the round trip. A loop of single inserts
+	// that fails partway leaves some rows committed and returns 500 — and
+	// since the client never retries, the events it then reports as
+	// `lost_events` include ones that were in fact stored. Telemetry that
+	// misreports its own loss is the failure this whole feature exists to end.
+	RecordBatch(ctx context.Context, events []Event) error
 	List(ctx context.Context, f Filter) ([]Event, error)
 	Summarise(ctx context.Context, since time.Time) (Summary, error)
 }

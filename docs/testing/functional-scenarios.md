@@ -8913,3 +8913,144 @@ is the code #319 measured as a real 404.
 - A curved packet (a tin, a bottle) and a creased one — do they read, and when
   they do not, is the "didn't read cleanly" hint what actually appears?
 - The keyboard must not cover the servings field when it focuses.
+
+## Client telemetry (N43, `apps/mobile` — `lib/telemetry.ts`, `lib/telemetryClient.ts`, `POST /v1/client-errors`)
+
+The reporter's job is to be *cheap* and *honest at the same time*, and those
+pull against each other — every way of being cheap is a way of not sending
+something. Most of the scenarios below are about the second half, because the
+first half is easy to test and easy to get right, and a reporter that quietly
+stopped reporting would pass every test that only checks it did not crash.
+
+### The four requirements, asserted directly
+
+- **Coalescing.** Fire the same error 60 times without a flush; assert **one**
+  event is buffered carrying `count: 60` — not 60 events.
+- **Coalescing must survive generated ids in the message.** Fire
+  `lock held by job_kf93ha` with a different token each time and assert it
+  still coalesces. The normaliser originally caught uuids, hex, digits and
+  quoted strings but not mixed alphanumerics, so such a message fingerprinted
+  differently every occurrence — and then coalescing never coalesced, the cap
+  never bound, and the size trigger fired a POST every ten occurrences. Every
+  other guard is intact while that happens, which is what makes it dangerous.
+- **Offline coalescing.** Fire 5,000 occurrences spread over two simulated
+  hours with no drain; assert still one event. This is the reconnect-flood case
+  and it is the one most likely to regress.
+- **Cap.** With a cap of 3 per window, drain three times, then assert a fourth
+  occurrence produces no new event, and that the window rolling lets it through
+  again.
+- **Ring.** Exceed capacity with distinct problems; assert size never exceeds
+  capacity and that the **oldest** is the one evicted.
+- **Levels.** Assert `debug`/`info`/`warn` are not buffered by default and
+  `error`/`fatal` are; assert a support-session config can open it up.
+- **Batching.** Assert nothing sends on the occurrence; assert a flush is due at
+  the size threshold and at the age threshold, and that age is measured from the
+  **oldest** buffered event (so a steady trickle still gets sent rather than the
+  clock resetting on each arrival).
+
+### Silence is never the answer (the honesty half)
+
+- **A capped burst must not look like a single occurrence.** Cap at 1, fire 26
+  times, roll the window, then assert the next event carries `dropped: 25`.
+  Without this the cap is a way of lying rather than a way of being cheap.
+- **An evicted event must be counted.** Overflow the ring and assert
+  `takeLost()` reports what fell off, and that it clears once told.
+- **A failed flush must be counted, not swallowed** — and this needs an
+  EARLIER tally to be a real test. Failing a single event passes even when the
+  bug is present, because the tally is zero at that point and `batch.length`
+  alone is accidentally right; that version was green against the exact defect
+  it was named for. Fail two flushes in a row and assert the third carries the
+  sum of both.
+- **`lost_events` is batch-scoped and must appear on ONE event**, not stamped
+  on every one — otherwise summing it multiplies by batch size, a made-up
+  number in the field whose whole job is to be honest about loss.
+- **The counters must reach the server.** Assert `occurrences`, `suppressed` and
+  `lost_events` are present in the posted payload. A bounded reporter and a
+  broken one are indistinguishable without them.
+
+### What must never leave the device
+
+- **The allowlist drops everything not on it.** Pass `notes`, `foodName`,
+  `partner`, `photoUri` alongside `code`; assert only `code` survives.
+- **Objects and arrays are dropped whole**, not walked — a nested object is
+  where prose hides.
+- `null`, `undefined` and `NaN` are dropped rather than shipped.
+- Long strings are truncated; the message is truncated well under the server's
+  **byte** cap (the server bounds bytes, `slice` counts UTF-16 units, and the
+  rejection would be silent).
+- **No stack traces are sent.** Assert the payload contains no file paths — a
+  dev-build stack carries the developer's home directory.
+
+### The global handlers
+
+- An unhandled JS error is captured, with `fatal` when the runtime says fatal.
+- **The previous handler is always called**, including when describing the
+  error throws. Assert with an `Error` whose `message` getter throws: a
+  reporter that skips the chain swallows the red box in development and changes
+  production behaviour, for exactly the strange errors most worth seeing.
+- **Installation is idempotent.** Install twice and assert the previous handler
+  is not wrapped twice (Fast Refresh re-runs module bodies).
+- Capturing while signed out, or with the reporter unreachable, **degrades to
+  silence** — never to an exception of its own.
+
+#### The rejection hook needs a DEVICE, and this is the important one
+
+- **`unhandledrejection` does not exist in React Native.** The first version
+  hooked `globalThis.addEventListener('unhandledrejection')` with optional
+  chaining, so it installed nothing, silently, and the half of the feature that
+  matters most did not exist — while every unit test stayed green. A hook that
+  installs nothing is invisible to any test that does not run the real runtime.
+- So: **on a simulator or device**, throw an un-awaited rejecting promise and
+  assert it reaches the buffer and then the Health screen. This is the single
+  check that proves the wiring; nothing in jest can stand in for it.
+- Assert `rejectionTrackingActive()` is `true` after install, and that a failed
+  install buffers a `client_error` rather than being swallowed — the point is
+  that the gap is *visible* rather than silent.
+- Assert RN's own `onUnhandled` still runs (the development warning is
+  unchanged): the reporter observes, it does not intercept.
+
+### One athlete's events must never be sent under another's token
+
+- Buffer an event, sign out, sign in as someone else, flush — assert **nothing**
+  is posted. `clearTelemetryForSignOut` is what makes this true and its absence
+  was a real privacy bug: the events, and the accumulated loss tally, would have
+  been attributed to the second athlete in `health_events`.
+- Assert the second athlete's own events post under the second athlete's token.
+
+### `POST /v1/client-errors` (server)
+
+#### Happy path
+- The single-report form still works. **This is a compatibility test, not a
+  legacy one** — a client that reports its own trouble is the one least able to
+  be upgraded first.
+- `{"events":[...]}` records one row per event, all sharing the batch's request
+  and trace ids.
+- A bare top-level array works too, because that is what a client author tries
+  first.
+
+#### Edge cases & errors
+- **An object with no `events` key is ONE report, not an empty batch.** Reading
+  it as an empty batch would accept a malformed body with 202 and record
+  nothing — success reported over silence, which is the shape this endpoint
+  exists to end.
+- Garbage is a 400, never an empty batch.
+- An empty `events` array is refused.
+- More than 50 events is refused.
+- One invalid event refuses the **whole** batch. Partial acceptance would need a
+  per-event result the client cannot act on, since it never retries.
+- A body over the size cap is refused without the server buffering it.
+
+#### Auth / security
+- Unauthenticated is 401.
+- The user is attributed from the **token**, never the body — assert a `user_id`
+  in the payload is ignored. A client that could name the user could file noise
+  against someone else, and could not be trusted reporting its own trouble.
+- `kind` outside `client_error`/`sync_blocked` is refused, so a client cannot
+  claim `server_error` and blur measured against claimed on the Health screen.
+
+#### Regression trap
+- **Wiring the reporter to the crash path must not restore per-occurrence
+  sending.** The highest-value assertion here: simulate a render loop throwing
+  60×/second for a minute and assert the number of HTTP requests is in single
+  digits, not thousands. Everything else can be right while this is wrong, and
+  it is the requirement the user stated in their own words.

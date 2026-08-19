@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,16 +20,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 }
 
 func (r *PostgresRepository) Record(ctx context.Context, e Event) error {
-	var details []byte
-	if len(e.Details) > 0 {
-		b, err := json.Marshal(e.Details)
-		if err != nil {
-			// Don't fail the write over unserialisable context — the event
-			// itself is the thing worth keeping.
-			b = nil
-		}
-		details = b
-	}
+	details := marshalDetails(e.Details)
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO health_events (
 			source, kind, user_id, method, path, status, duration_ms,
@@ -39,6 +32,56 @@ func (r *PostgresRepository) Record(ctx context.Context, e Event) error {
 		return fmt.Errorf("health: record: %w", err)
 	}
 	return nil
+}
+
+// RecordBatch inserts every event in ONE statement.
+//
+// A multi-row VALUES list rather than a loop: it is one round trip instead of
+// fifty, and it is atomic without needing an explicit transaction, so a failure
+// stores nothing rather than storing a prefix. See the interface for why that
+// matters more here than the round trips do.
+func (r *PostgresRepository) RecordBatch(ctx context.Context, events []Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+	const cols = 12
+	values := make([]string, 0, len(events))
+	args := make([]any, 0, len(events)*cols)
+	for i, e := range events {
+		base := i * cols
+		ph := make([]string, cols)
+		for j := range ph {
+			ph[j] = "$" + strconv.Itoa(base+j+1)
+		}
+		values = append(values, "("+strings.Join(ph, ", ")+")")
+		args = append(args,
+			e.Source, e.Kind, e.UserID, e.Method, e.Path, e.Status, e.DurationMS,
+			e.ErrorCode, e.Message, e.RequestID, e.TraceID, marshalDetails(e.Details))
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO health_events (
+			source, kind, user_id, method, path, status, duration_ms,
+			error_code, message, request_id, trace_id, details
+		) VALUES `+strings.Join(values, ", "), args...)
+	if err != nil {
+		return fmt.Errorf("health: record batch: %w", err)
+	}
+	return nil
+}
+
+// marshalDetails is shared by both writers so they cannot disagree about what
+// an unserialisable details map means — dropping the context, never the event.
+func marshalDetails(d map[string]any) []byte {
+	if len(d) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(d)
+	if err != nil {
+		// Don't fail the write over unserialisable context — the event itself
+		// is the thing worth keeping.
+		return nil
+	}
+	return b
 }
 
 func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Event, error) {

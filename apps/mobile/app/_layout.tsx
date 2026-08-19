@@ -1,5 +1,6 @@
 import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { clearTelemetryForSignOut, installTelemetry } from '@/lib/telemetryClient';
 import { initSounds } from '@/lib/sounds';
 import { initVoice } from '@/lib/voice';
 import { clearSessionToken } from '@/lib/session';
@@ -154,6 +155,30 @@ function RootLayoutNav() {
   useEffect(() => {
     setSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
   }, [isSignedIn, userId, getToken]);
+
+  // Catch what nobody catches: unhandled JS errors and unhandled promise
+  // rejections. Installed once for the process, at the root, because an error
+  // thrown outside a component tree — which is where the sync path throws,
+  // since it runs off a timer — reaches no boundary at all.
+  //
+  // It observes rather than intercepts: the previous handler is always
+  // chained, so the red box in development and the runtime's own behaviour in
+  // production are unchanged. See `installTelemetry`.
+  useEffect(() => {
+    if (!isSignedIn) {
+      // **Clear on sign-out, before anything else can flush.** Without this,
+      // events buffered under one athlete — and that athlete's accumulated
+      // loss tally — are POSTed under the NEXT athlete's token and attributed
+      // to them in `health_events`. The window is real: a flush fires on a
+      // 30s timer or at ten buffered events, so a fast account switch beats
+      // it easily. Same reasoning as `setSyncIdentity` above, and review
+      // found this missing. Handlers stay installed; only the buffer and the
+      // token source are per-account.
+      clearTelemetryForSignOut();
+      return;
+    }
+    installTelemetry(getToken);
+  }, [isSignedIn, getToken]);
 
   // Fill the caches once, so the app is usable before it is ever offline.
   //
