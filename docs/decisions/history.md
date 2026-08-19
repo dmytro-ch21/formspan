@@ -27802,6 +27802,13 @@ catch different things: `testTimeout` a test, F12's `-timeout 3m` a Go package,
 and `timeout-minutes` everything else — including the hang that never reaches a
 test at all.
 
+That last case was measured rather than assumed, and it is worse than
+"unbounded": a 25-second block at MODULE scope in a jest file runs to completion
+and the test reports **PASS**, in a suite that took 25.7s. `testTimeout` cannot
+see it, because no test is running yet — so a wedged import or a spinning
+`jest.setup.js` is not a slow red X, it is a slow GREEN one. Only the job cap
+turns that into a signal.
+
 Open questions:
 
 - **The web and admin vitest runs have no explicit `testTimeout`** either, so

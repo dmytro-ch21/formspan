@@ -20,7 +20,10 @@ jobs:
     # under the default. This bounds the JOB; F12's `-timeout 3m` bounds a Go
     # package and jest's `testTimeout` bounds a mobile test — three different
     # granularities, and only the outermost one catches a hang in setup,
-    # install or a runner that wedges.
+    # install or a runner that wedges. Measured: a 25s block at MODULE scope in
+    # a jest file runs to completion and the test reports PASS — `testTimeout`
+    # never sees it, because no test is running yet. That class is invisible
+    # until something bounds the job.
     timeout-minutes: 15
     defaults:
       run:
