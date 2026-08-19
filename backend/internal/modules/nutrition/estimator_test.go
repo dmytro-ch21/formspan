@@ -3,10 +3,10 @@ package nutrition
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"strings"
 	"testing"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/llm"
 )
 
 // fakeCompleter stands in for a provider — the SMALL interface, which is the
@@ -17,14 +17,23 @@ type fakeCompleter struct {
 	model string
 	err   error
 	calls int
-	last  EstimateInput
+	// last is the REQUEST now, not the EstimateInput — and it is asserted
+	// rather than merely captured. It used to be the input and nothing read it,
+	// which meant nothing checked that this module hands the transport the
+	// right prompt, schema and image. That is precisely the seam N36 moved, so
+	// it is the seam that most needs a test.
+	last llm.Request
 }
 
-func (f *fakeCompleter) providerName() string { return "fake" }
-func (f *fakeCompleter) complete(_ context.Context, in EstimateInput) (string, string, error) {
+func (f *fakeCompleter) Name() string  { return "fake" }
+func (f *fakeCompleter) Model() string { return f.model }
+func (f *fakeCompleter) Complete(_ context.Context, req llm.Request) (llm.Response, error) {
 	f.calls++
-	f.last = in
-	return f.raw, f.model, f.err
+	f.last = req
+	if f.err != nil {
+		return llm.Response{}, f.err
+	}
+	return llm.Response{Raw: f.raw, Model: f.model}, nil
 }
 
 const goodRaw = `{"items":[{"name":"Scrambled eggs","serving_label":"1 medium egg","servings":2,` +
@@ -107,6 +116,9 @@ func TestTheFactoryPicksABackendFromConfig(t *testing.T) {
 		{"openai explicitly", EstimatorConfig{Provider: ProviderOpenAI, APIKey: "k"}, ProviderOpenAI, DefaultModels[ProviderOpenAI]},
 		{"a named model overrides the default", EstimatorConfig{Provider: ProviderOpenAI, Model: "gpt-5.4-nano", APIKey: "k"}, ProviderOpenAI, "gpt-5.4-nano"},
 		{"a named model on anthropic", EstimatorConfig{Provider: ProviderAnthropic, Model: "claude-opus-5", APIKey: "k"}, ProviderAnthropic, "claude-opus-5"},
+		// The default-model lookup is this module's, not the transport's — N33
+		// wants a different default on the same provider — so a wrong entry
+		// here is a nutrition bug and this is where it must fail.
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			est, err := NewEstimator(tc.cfg)
@@ -120,18 +132,16 @@ func TestTheFactoryPicksABackendFromConfig(t *testing.T) {
 			if !ok {
 				t.Fatalf("factory returned %T, not *estimator", est)
 			}
-			if got := Provider(inner.c.providerName()); got != tc.wantProvider {
+			if got := Provider(inner.c.Name()); got != tc.wantProvider {
 				t.Errorf("provider = %q, want %q", got, tc.wantProvider)
 			}
-			var gotModel string
-			switch c := inner.c.(type) {
-			case *anthropicCompleter:
-				gotModel = c.model
-			case *openAICompleter:
-				gotModel = c.model
-			default:
-				t.Fatalf("unknown completer %T — add its model accessor here", c)
-			}
+			// Read off the transport rather than by type-switching on the
+			// concrete completer, which this test used to do and no longer can:
+			// those types moved to `internal/platform/llm` with N36 and are
+			// unexported there. `Model()` is on the interface precisely so this
+			// module can confirm the model IT resolved reached the transport —
+			// re-deriving it here would assert `ResolveModel` against itself.
+			gotModel := inner.c.Model()
 			if gotModel != tc.wantModel {
 				t.Errorf("model = %q, want %q", gotModel, tc.wantModel)
 			}
@@ -242,16 +252,51 @@ func TestTheShippedDefaultIsPinnedBecauseTheAppNamesIt(t *testing.T) {
 	}
 }
 
-func TestTheOpenAIBackendShipsWithAnOutputCap(t *testing.T) {
-	// A zero here is not a missing cap, it is a BROKEN one: the field is sent
-	// either way, so `max_completion_tokens: 0` reaches the API and every call
-	// fails. The live behaviour (a normal call fits, a tiny cap yields
-	// ErrEstimateRefused through the `length` branch) was verified by hand
-	// against gpt-5.6-luna; it is not a committed test because it needs a key
-	// and this suite has no skips.
-	c := newOpenAICompleter("k", DefaultModels[ProviderOpenAI])
-	if c.maxTokens != estimateMaxTokens {
-		t.Fatalf("output cap = %d, want %d", c.maxTokens, estimateMaxTokens)
+func TestTheRequestCarriesEverythingTheProviderNeeds(t *testing.T) {
+	// N36 moved the transport out, so what this module now owns is the REQUEST
+	// it builds. Every field below was previously implicit — the provider
+	// reached for `estimateSystemPrompt`, `EstimateSchema()` and
+	// `estimateMaxTokens` itself — so nothing could assert them; now they cross
+	// a boundary and each one is a way to ship a broken call silently.
+	f := &fakeCompleter{raw: goodRaw, model: "m"}
+	e := &estimator{c: f}
+	img := []byte{0xff, 0xd8, 0xff}
+	if _, err := e.Estimate(context.Background(), EstimateInput{
+		Description:    "two eggs",
+		Image:          img,
+		ImageMediaType: "image/jpeg",
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The output cap. A zero is not a missing cap, it is a BROKEN one: the
+	// field is sent either way, so `max_completion_tokens: 0` reaches the API
+	// and every call fails. This used to assert a struct field on the OpenAI
+	// completer; asserting the request is strictly stronger, because it proves
+	// the value actually crosses to the transport rather than merely existing.
+	if f.last.MaxTokens != estimateMaxTokens {
+		t.Errorf("MaxTokens = %d, want %d", f.last.MaxTokens, estimateMaxTokens)
+	}
+	if f.last.MaxTokens == 0 {
+		t.Error("no output cap: this endpoint turns a request directly into money")
+	}
+
+	if f.last.System != estimateSystemPrompt {
+		t.Error("the system prompt did not reach the provider")
+	}
+	if !strings.Contains(f.last.Prompt, "two eggs") {
+		t.Errorf("the user prompt does not carry the description: %q", f.last.Prompt)
+	}
+	// A schema is what makes this structured output rather than a suggestion,
+	// and OpenAI additionally requires the name.
+	if f.last.Schema == nil {
+		t.Error("no schema sent — the response would be free text")
+	}
+	if f.last.SchemaName == "" {
+		t.Error("no schema name sent — OpenAI rejects a strict schema without one")
+	}
+	if len(f.last.Image) != len(img) || f.last.ImageMediaType != "image/jpeg" {
+		t.Error("the photo did not reach the provider")
 	}
 }
 
@@ -276,33 +321,33 @@ func TestResolveModelIsTheOnePlaceDefaultingHappens(t *testing.T) {
 	}
 }
 
-func TestBothBackendsCallTruncationTheSameThing(t *testing.T) {
-	// Truncation is deterministic, so it must be a refusal on EVERY backend: a
-	// retryable status bills the athlete a second time for the identical doomed
-	// request. The two disagreed — OpenAI reported it, Anthropic let a cut-off
-	// response fall through to the JSON parse and surface as "temporarily
-	// unavailable" — which is the divergence the shared completer exists to
-	// stop. This asserts the shared vocabulary rather than either mechanism.
-	for _, err := range []error{
-		fmt.Errorf("%w: response was cut off", ErrEstimateRefused),
-	} {
-		if !errors.Is(err, ErrEstimateRefused) {
-			t.Fatal("truncation must map to a refusal")
-		}
-		if errors.Is(err, ErrEstimateUnavailable) {
-			t.Fatal("truncation must not read as retryable")
-		}
+func TestTheTransportsVocabularyBecomesThisModulesVocabulary(t *testing.T) {
+	// `llm` speaks two sentinels; this module speaks its own, and the handler
+	// turns ITS sentinels into statuses. If the translation drops a case, a
+	// refusal reaches the client as "temporarily unavailable" and the athlete
+	// retries a deterministic failure — billed twice for the identical doomed
+	// request.
+	//
+	// The truncation-is-a-refusal rule itself now lives with the providers, in
+	// `internal/platform/llm` — the two backends disagreeing about it was the
+	// divergence that seam exists to stop, and it is asserted there, against
+	// the files that implement it.
+	if got := translateLLMError(llm.ErrRefused); !errors.Is(got, ErrEstimateRefused) {
+		t.Errorf("a refusal became %v, want ErrEstimateRefused", got)
 	}
-	// And the guard that matters: neither file may report truncation as an
-	// outage. A grep is the honest test here — the alternative is a live call
-	// per provider, and this catches the regression the review found.
-	for _, path := range []string{"anthropic.go", "openai.go"} {
-		src, readErr := os.ReadFile(path)
-		if readErr != nil {
-			t.Fatalf("read %s: %v", path, readErr)
-		}
-		if !strings.Contains(string(src), "response was cut off") {
-			t.Errorf("%s does not handle truncation — a cut-off response will read as an outage", path)
-		}
+	if got := translateLLMError(llm.ErrRefused); errors.Is(got, ErrEstimateUnavailable) {
+		t.Error("a refusal also reads as unavailable, so the client will retry it")
+	}
+	if got := translateLLMError(llm.ErrUnavailable); !errors.Is(got, ErrEstimateUnavailable) {
+		t.Errorf("an outage became %v, want ErrEstimateUnavailable", got)
+	}
+	// Total by construction: anything unrecognised must still land inside this
+	// module's vocabulary rather than escaping as itself, or it reaches the
+	// handler as a 500 carrying whatever text the SDK put in it — which is how
+	// request ids and prompt fragments leave the building.
+	stray := errors.New("dial tcp: connection refused to api.internal:443")
+	got := translateLLMError(stray)
+	if !errors.Is(got, ErrEstimateUnavailable) {
+		t.Errorf("an unmapped error became %v, want ErrEstimateUnavailable", got)
 	}
 }

@@ -28031,6 +28031,91 @@ and the input never reaches the thing being tested.
   Bounded by the 14-day cooldown, which makes the overlap rare rather than
   impossible.
 
+## 2026-08-19 — The transport moves out, one consumer before it would have been a guess
+
+`internal/platform/llm` exists now: `Completer`, `Request`/`Response`,
+`Provider`/`Valid`/`APIKeyEnv`, the two SDK calls, and one pair of sentinels
+(`ErrRefused` / `ErrUnavailable`) both backends map onto. That is N36.
+
+The timing was the decision, and it was made jointly with the session building
+N26. Extracting **inside** #287 would have put a refactor behind evidence that
+had been paid for with real API calls; extracting **never** would have had N33
+write a second `anthropic.go`/`openai.go` pair, which N26's own comment calls
+"three chances for two backends to disagree". So: after #287 landed, before N33
+writes any provider code. With one consumer an interface is designed against a
+guess; with a second consumer that has not started, it is designed against two
+real shapes and costs nothing to get right.
+
+### What stayed behind, which is the line that keeps the package honest
+
+`nutrition` keeps the prompt, the schema, the parse, the validation, and its own
+error vocabulary — `translateLLMError` maps the transport's two sentinels onto
+`ErrEstimateRefused` / `ErrEstimateUnavailable`, and is total by construction so
+an unmapped error cannot escape as itself carrying SDK text (request ids, prompt
+fragments) into a 500.
+
+`DefaultProvider` and `DefaultModels` stayed too, deliberately: which model is
+worth paying for is a per-feature judgement, and N26 and N33 want different
+defaults on the same provider. A package-level default in `llm` would quietly
+become one feature's opinion imposed on the other.
+
+### The four constraints the task line named, all carried and all mutation-checked
+
+Each was found rather than designed, which is why they are pinned rather than
+trusted:
+
+- **The factory returns the INTERFACE.** A nil `*openAICompleter` assigned into
+  an interface is a NON-nil interface, so the caller's nil check reads false and
+  the first request panics on a nil receiver. Deleting the nil guard fails
+  `TestNoKeyYieldsAGENUINELYNilInterface`.
+- **Validity is checked BEFORE the missing-key return.** The other order lets a
+  typo'd `ESTIMATE_PROVIDER` pass silently on exactly the deploy where its key is
+  also absent. Swapping them fails
+  `TestAnUnknownProviderFailsTheBootEVENWITHNoKey`.
+- **Truncation maps to REFUSED on both backends**, because the retry is
+  deterministic and bills twice. Changing OpenAI's to `ErrUnavailable` fails
+  `TestBothBackendsCallTruncationTheSameThing`, which moved here with the
+  providers — it used to grep two files in `nutrition` that no longer exist.
+- **No `effort` or `thinking` field**, because Haiku 4.5 400s on both. The
+  request type has no field for either, so it cannot be sent by accident.
+
+### What the move made testable for the first time
+
+The output cap was a struct field on the OpenAI completer, asserted by reading
+that field. It is now `Request.MaxTokens`, set by the caller — so
+`TestTheRequestCarriesEverythingTheProviderNeeds` asserts the cap, the system
+prompt, the user prompt, the schema, the schema name and the image all actually
+**cross to the transport**. Setting the cap to zero fails it twice, once on the
+value and once on the reason ("this endpoint turns a request directly into
+money").
+
+That test replaced a fake whose captured input was assigned and never read —
+`f.last` held an `EstimateInput` nothing asserted, so nothing checked that this
+module handed the provider the right anything. The seam N36 moved was the seam
+with no test on it.
+
+`Completer.Model()` is on the interface for a related reason: the factory test
+used to type-switch on the concrete completers to check which model was built,
+and those types are unexported here now. Re-deriving the model in the test would
+assert `ResolveModel` against itself, so the transport reports what it was
+configured with — distinct from `Response.Model`, which is what the provider
+says it actually used, and the two differ routinely when an alias resolves to a
+dated snapshot.
+
+### Gaps this leaves
+
+- **Nothing has been run against a real API on this branch.** The refactor is
+  behaviour-preserving by construction and the bake-off numbers stay valid, but
+  "no behaviour change" is an argument, not a measurement. The first real call
+  through the new package will be N33's or the next N26 deploy's.
+- **`llm` has no test of its own for the happy path** — no fake HTTP server, no
+  golden response. The providers are exercised only by the truncation grep and
+  by nutrition's fake. A recorded-response test would be the honest next step
+  and needs a decision about fixtures.
+- **`Model()` widened the interface.** It earns its place (the alternative was a
+  test reaching across a package boundary or re-deriving what it was checking),
+  but every method on `Completer` is one more thing a third provider must
+  implement.
 
 ## Open items / known gaps as of this entry
 
