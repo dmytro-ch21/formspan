@@ -27867,10 +27867,12 @@ turns that into a signal.
 
 Open questions:
 
-- **The web and admin vitest runs have no explicit `testTimeout`** either, so
-  they carry vitest's own default. Nobody has measured what that is here or
-  whether any of those tests configure a longer wait the way the five mobile
-  suites do.
+- ~~**The web and admin vitest runs have no explicit `testTimeout`**~~ —
+  measured and closed as F14, deliberately without a change. Vitest bounds a
+  test at 5008ms, the same default jest has, and neither suite contains a
+  single async wait to be cut off by it: both are pure sync logic by design.
+  Adding a `testTimeout` for symmetry would loosen a bound nothing needs
+  loosened.
 - 15 minutes per job is generous against a 1.8-minute reality. It is chosen to
   never fire on a slow-but-working runner, which means a genuinely wedged job
   still costs a quarter of an hour.
