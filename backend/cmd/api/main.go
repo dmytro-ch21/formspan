@@ -339,6 +339,10 @@ func main() {
 	// rather than declaration order — the same shape /v1/sessions/suggestions
 	// and /v1/curricula/working already rely on. Ordered this way for readers.
 	mux.Handle("GET /v1/nutrition/targets/suggested", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.Suggested)))
+	// Literal before wildcard, same as `suggested` above: Go 1.22's ServeMux
+	// prefers the more specific pattern, so neither is shadowed by
+	// `targets/{date}`.
+	mux.Handle("GET /v1/nutrition/targets/adjustment", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.Adjustment)))
 	mux.Handle("GET /v1/nutrition/targets", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.ListTargets)))
 	mux.Handle("PUT /v1/nutrition/targets/{date}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveTarget)))
 	mux.Handle("DELETE /v1/nutrition/targets/{date}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteTarget)))

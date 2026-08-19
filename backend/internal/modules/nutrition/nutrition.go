@@ -635,4 +635,10 @@ type Repository interface {
 	// profiles, body_checkins and body_phases directly by SQL, which is the
 	// shape sessioncard already uses — a module never imports a sibling.
 	TargetInputs(ctx context.Context, userID, on string) (Inputs, error)
+
+	// AdjustmentInputs gathers the fortnight of evidence the weekly adjustment
+	// rule judges: the live target and when it took effect, the live phase,
+	// every weigh-in in the window, how many days cleared the logging bar, and
+	// the resting floor.
+	AdjustmentInputs(ctx context.Context, userID, on string) (AdjustmentInputs, error)
 }
