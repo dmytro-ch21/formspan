@@ -7342,6 +7342,56 @@ history entry for results.
 - **Nothing recognisable yields an empty list plus a note**, never an invented
   meal — checked with gibberish text and with an image containing no food.
 
+### The weekly target adjustment (N27)
+
+`GET /v1/nutrition/targets/adjustment` — a proposal, never a write, never a
+scheduled job.
+
+**Happy path**
+
+- **A steady weight on a cut proposes eating LESS.** This is the scenario worth
+  writing first: the sign is the failure this rule is most likely to ship, and
+  an inversion proposes more food to somebody already failing to lose, with
+  every number on screen still plausible.
+- **Losing too fast proposes eating MORE**, and a lean bulk inverts both. A
+  suite that only ever checks one direction passes against a constant.
+- **The proposal takes effect tomorrow**, never today.
+- **Accepting is a `PUT /nutrition/targets/{tomorrow}`** with
+  `source: "adjustment"` — there is no accept endpoint, and there should not be.
+
+**The guards, which are the feature**
+
+Each of these must be shown blocking ON ITS OWN, with everything else healthy —
+a scenario that spoils two at once cannot tell which guard fired:
+
+- fewer than 10 of 14 days reaching half the target's calories → `not_logging`
+- fewer than 4 weigh-ins in **either** 7-day half → `not_weighing` (a scenario
+  with 8 readings all in one half must still block; counting across the window
+  is the mistake)
+- fewer than 14 days on the current target → `too_soon`
+- no live phase → `no_phase`
+- inside the 0.25%/week deadband → `on_track`
+- no target at all → `no_target`, **reported alone**
+
+**Edge cases**
+
+- **A withheld proposal is `200`, never an error.** For most athletes on most
+  days it is the correct answer.
+- **The step is capped** at the smaller of 250 kcal and 10% of the target, and
+  a capped proposal says so — assert both limits, since whichever is looser
+  never gets exercised.
+- **Never below 110% of resting rate**, and the floor rounds UP: a floor that
+  rounds to nearest is not a floor.
+- **Evidence outside the fortnight is ignored** — an old weigh-in or a
+  month-old logged day must not count.
+
+**Auth**
+
+- **One athlete's evidence is never another's.** Seed a second athlete with
+  louder data (more logged days, a very different weight); if any filter is
+  missing their rows dominate and the assertion fails rather than wobbles. This
+  is the cross-user bug already caught twice in this codebase.
+
 ### Mobile: the Food tab, the day screen and the outbox (N25)
 
 **Happy path**

@@ -8771,6 +8771,136 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /nutrition/targets/adjustment:
+    get:
+      operationId: proposeNutritionTargetAdjustment
+      summary: Propose a correction to the live target from observed weight change
+      description: >
+        **A proposal, never an application, and never a scheduled job.** Nothing
+        is written and nothing runs in the background; the rule is evaluated
+        when somebody asks. Accepting is an ordinary
+        `PUT /nutrition/targets/{date}` with `source: "adjustment"`, using the
+        `effective_on` and macros in the proposal. Declining is sending nothing
+        — no dismissal is stored, because it would be stale the moment the next
+        check-in landed, and the cooldown is already derivable from target
+        history.
+
+
+        **Why it exists.** The derivation uses 7700 kcal/kg, which ignores
+        adaptive thermogenesis and therefore drifts optimistic over a phase.
+        This corrects from what actually happened to the athlete's weight
+        rather than from a better constant.
+
+
+        **A withheld proposal is a `200` with `adjustment: null`**, and
+        `blocked_by` naming why. For most athletes on most days that is the
+        correct answer rather than a failure, so it is never an error status.
+        The reasons are part of the contract:
+
+        `no_target` (nothing to adjust from — reported alone, since every other
+        reason is a statement about a target that does not exist),
+        `no_phase` (no live body phase, so no target rate to compare against),
+        `too_soon` (fewer than 14 days on the current target: a week after a
+        change measures the water shift the change caused),
+        `not_logging` (fewer than 10 of the last 14 days reached half the
+        target's calories — an adjustment from two logged days is not measuring
+        intake),
+        `not_weighing` (fewer than 4 weigh-ins in EACH 7-day half; deliberately
+        stricter than the 3 the displayed trend needs, because this moves food),
+        `on_track` (the observed and target rates differ by less than
+        0.25%/week, which is roughly the noise floor of a 7-day trend).
+
+
+        **The step is capped** at whichever is smaller of 250 kcal and 10% of
+        the current target, and never falls below 110% of resting rate. A capped
+        proposal says so in `basis.capped`, with `basis.raw_delta_kcal` showing
+        what the arithmetic asked for — so the explanation reads as "we stopped
+        here" rather than as arithmetic whose last line does not follow.
+
+
+        **It takes effect tomorrow, never today.** Today is mostly eaten; a
+        retroactive target would move the day's remaining figure under an
+        athlete who has already acted on it.
+      tags: [Nutrition]
+      parameters:
+        - name: on
+          in: query
+          required: false
+          description: The day to judge. Defaults to today, UTC.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: >
+            A proposal, or null with the reasons it was withheld. Both are
+            ordinary outcomes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [adjustment, blocked_by]
+                properties:
+                  adjustment:
+                    nullable: true
+                    type: object
+                    required: [from_kcal, to_kcal, delta_kcal, protein_g, carb_g, fat_g, fibre_g, effective_on, basis]
+                    properties:
+                      from_kcal: { type: integer }
+                      to_kcal: { type: integer }
+                      delta_kcal:
+                        type: integer
+                        description: >
+                          Signed. Negative means eat less — which is what a
+                          steady weight on a cut calls for.
+                      protein_g: { type: integer }
+                      carb_g: { type: integer }
+                      fat_g: { type: integer }
+                      fibre_g: { type: integer }
+                      effective_on:
+                        type: string
+                        format: date
+                        description: Always tomorrow.
+                      basis:
+                        type: object
+                        description: >
+                          The arithmetic, rendered as the explanation. kcal is
+                          authoritative here as everywhere: macros are rounded
+                          to 5 g and will not reconcile against it exactly.
+                        properties:
+                          observed_kg_per_week: { type: number }
+                          observed_pct_per_week: { type: number }
+                          target_kg_per_week: { type: number }
+                          target_pct_per_week: { type: number }
+                          trend_weight_kg: { type: number }
+                          earlier_trend_weight_kg: { type: number }
+                          weighins_recent_half: { type: integer }
+                          weighins_earlier_half: { type: integer }
+                          days_logged: { type: integer }
+                          days_considered: { type: integer }
+                          days_on_current_target: { type: integer }
+                          kcal_per_kg: { type: number }
+                          raw_delta_kcal: { type: integer }
+                          capped: { type: boolean }
+                          cap_reason: { type: string }
+                          relaxed: { type: string }
+                          protein_g_per_kg: { type: number }
+                          fat_g_per_kg: { type: number }
+                  blocked_by:
+                    type: array
+                    description: Empty when a proposal is present. Never null.
+                    items:
+                      type: string
+                      enum: [no_target, no_phase, too_soon, not_logging, not_weighing, on_track]
+        '400':
+          description: '`on` is not a date.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Unauthenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /nutrition/targets/suggested:
     get:
       operationId: suggestNutritionTarget

@@ -409,6 +409,50 @@ func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 // NOT a 400. The request was fine; the profile is missing something, and the
 // client's fix is a form rather than a retry — the same shape body uses for a
 // check-in with no bodyweight.
+// Adjustment proposes a change to the live target, or says why it will not.
+//
+// **Never an error and never a write.** A withheld proposal is 200 with
+// `adjustment: null` and `blocked_by` naming what is missing, because for most
+// athletes on most days that is the correct answer rather than a failure. The
+// client's job is to say what would unblock it — log more days, weigh in more
+// often, wait out the fortnight — not to retry.
+//
+// Accepting is an ordinary `PUT /v1/nutrition/targets/{date}` with
+// `source: "adjustment"`, using the date and macros in the proposal. Declining
+// is sending nothing: no dismissal is stored, because it would be stale the
+// moment the next check-in landed and the cooldown is already derivable from
+// target history.
+func (h *Handler) Adjustment(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(w, r)
+	if !ok {
+		return
+	}
+	on := r.URL.Query().Get("on")
+	if on == "" {
+		on = time.Now().UTC().Format("2006-01-02")
+	}
+	if !isDate(on) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "on must be a date, as YYYY-MM-DD")
+		return
+	}
+
+	in, err := h.repo.AdjustmentInputs(r.Context(), userID, on)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	adjustment, blocked := ProposeAdjustment(in)
+	if blocked == nil {
+		// An empty array, never null — same rule as `missing` below.
+		blocked = []string{}
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{
+		"adjustment": adjustment,
+		"blocked_by": blocked,
+	})
+}
+
 func (h *Handler) Suggested(w http.ResponseWriter, r *http.Request) {
 	userID, ok := callerID(w, r)
 	if !ok {

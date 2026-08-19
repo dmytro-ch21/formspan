@@ -27901,6 +27901,86 @@ measured is how the saving turns into a wrong exercise logged against a real
 athlete's history. Pick the tier against real machine photos first; the cost
 comparison is only meaningful between tiers that both work.
 
+## 2026-08-19 — The weekly adjustment rule, where the guards are the feature (N27)
+
+`GET /v1/nutrition/targets/adjustment` compares the observed 7-day trend-weight
+change against the live phase's target rate and proposes a kcal delta. It
+exists because `kcalPerKG`'s own comment admits the problem: 7700 kcal/kg
+ignores adaptive thermogenesis, so a derived target drifts optimistic over a
+phase. The fix is not a better constant — it is correcting from what actually
+happened to the athlete.
+
+**A proposal, never an application, and no scheduler.** Nothing is written;
+accepting is an ordinary `PUT /v1/nutrition/targets/{tomorrow}` with
+`source: "adjustment"`. Declining is sending nothing — a stored dismissal would
+be stale the moment the next check-in landed, and the 14-day cooldown is
+already derivable from target history. This repo has no cron and did not grow
+one for this.
+
+### The guards, and why a withheld proposal is a 200
+
+An adjustment from thin evidence is worse than none: it moves how much somebody
+eats on the strength of a number nobody recorded. So ≥10 of 14 days must clear
+half the target's calories, ≥4 weigh-ins must land in **each** 7-day half, the
+target must be ≥14 days old, a phase must be live, and the rates must differ by
+more than 0.25%/week. Each blocks with a named reason, and the response is
+`200` with `adjustment: null` — for most athletes on most days that is the
+correct answer rather than a failure, and the client's job is to say what would
+unblock it rather than to retry.
+
+Two details worth keeping. **Weigh-ins are counted per half, not across the
+window**: seven readings bunched into one half tell you nothing about the change
+between the halves, and a total-count guard passes on exactly that. And
+**adherence is a query, never a stored counter** — same reasoning `adherence`
+already records: a counter is maintained on every write and silently disagrees
+with the rows the first time a path forgets.
+
+### A guard removed for lying about itself
+
+The first draft blocked with `no_rate` when the target rate came out zero,
+commented as "a making_weight row with no date or target weight". Reading
+`makingWeightRate` showed that case falls back to the cut midpoint, so a rate is
+always derivable; the only way to reach zero is having **already made the
+weight**, which is an instruction to hold. The guard would have refused to help
+precisely the athlete sitting on weight before a competition, for a reason its
+own comment misdescribed. Removed, with a test pinning that a stalled
+making-weight athlete still gets a proposal.
+
+### A floor that rounded down
+
+`roundTo10` rounds to nearest, so a resting floor of 1874 became 1870 — four
+calories under the number the rail exists to hold. A floor that rounds downward
+is not a floor; it uses `ceilTo10` now. Found by a test assertion failing on
+floating-point, which is a duller cause than the defect it exposed.
+
+### What the mutation pass covered
+
+Fifteen guards, each broken in turn and confirmed red: the **sign** of the
+correction (the one that proposes more food to someone already losing too
+fast), each of the five blocking conditions, the per-half weigh-in count, the
+step cap taking the tighter of its two limits, the floor rounding up, the
+tomorrow-not-today date, the seven-day split boundary, no-target-reported-alone,
+and in SQL the half-target adherence bar, the window bound, and **both**
+cross-user scopings.
+
+The cap test needed two rows to mean anything: 10% of 2,400 is 240, so the flat
+250 never binds at that target. Whichever limit is looser is never exercised,
+and a single row passes against a rule that only ever applies one of them.
+
+### Open questions this leaves
+
+- **No client consumes this yet.** The endpoint returns a proposal nothing
+  renders — deliberate, since the mobile surface for it is a decision (a card
+  on Today, or a row on the target screen) that belongs with N28's target
+  authoring rather than bolted on here.
+- **The adherence bar is a guess.** Half the target's calories marks a "logged
+  day", which is defensible and unvalidated; an athlete who genuinely eats
+  1,000 kcal on a rest day is recorded as not logging.
+- **`LoggedDayKcalShare` uses the CURRENT target for the whole window**, so a
+  fortnight spanning a target change judges old days against the new number.
+  Bounded by the 14-day cooldown, which makes the overlap rare rather than
+  impossible.
+
 
 ## Open items / known gaps as of this entry
 
