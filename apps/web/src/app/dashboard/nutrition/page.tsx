@@ -55,6 +55,13 @@ export default function NutritionTrendPage() {
   const [checkins, setCheckins] = useState<Checkin[]>([]);
   const [training, setTraining] = useState<HistoryDay[]>([]);
   const [loading, setLoading] = useState(true);
+  // Whether a load has ever COMPLETED, which `points` cannot tell us:
+  // `buildSeries` returns one point per calendar day whether or not any data
+  // arrived, so `points.length` is never zero and a guard on it can never
+  // fire. Without this the first paint is a fully-drawn empty chart that then
+  // fills in — which reads as "you logged nothing", the one thing this screen
+  // must never say by accident.
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -90,9 +97,11 @@ export default function NutritionTrendPage() {
       setTargets(t);
       setCheckins(w);
       setTraining(h.days);
+      setLoaded(true);
     } catch (e) {
       if (c.signal.aborted) return;
       setError(e instanceof Error ? e.message : "Could not load your nutrition history.");
+      setLoaded(true);
     } finally {
       if (!c.signal.aborted) setLoading(false);
     }
@@ -154,13 +163,13 @@ export default function NutritionTrendPage() {
         </p>
       )}
 
-      {loading && !points.length ? (
+      {loading && !loaded ? (
         <p className="text-sm text-text-dim">Loading…</p>
       ) : (
         <>
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Stat
-              label={`Mean intake`}
+              label="Mean intake"
               value={kcalMean ? `${Math.round(kcalMean.value)} kcal` : "—"}
               // RULE 2, at its most visible. The number on its own is the
               // thing an athlete screenshots and argues from, so the count
