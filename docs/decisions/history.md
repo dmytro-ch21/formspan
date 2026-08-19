@@ -29264,10 +29264,39 @@ The scan path landed here rather than in N41 (the user's call: N41 ships the
 scanner, this ships the lookup). Two findings, both measured against the live
 API and both capable of producing a confidently wrong implementation:
 
-**HTTP status is not the signal.** Open Food Facts returns **HTTP 200 with
-`"status": 0`** for a barcode it does not have. Keying on the HTTP status gets
-it exactly inverted — every unknown packet becomes a success, every outage
-becomes a missing product.
+**The BODY is the signal, and a 404 is an answer.** This landed WRONG first and
+was corrected before merge; the correction is the useful part.
+
+The original code accepted only HTTP 200 and mapped everything else to
+`unavailable`, on a measurement showing Open Food Facts answering **200 with
+`"status": 0`** for a barcode it does not have. That measurement was real but
+was taken with a *malformed* code, which OFF normalises away — and `ValidBarcode`
+rejects those before the call. A **well-formed** barcode the database does not
+hold comes back **404** with the same envelope, which is to say almost every
+unknown scan. So every genuinely unknown product returned `unavailable`, the
+endpoint served 503, and a phone would have told the athlete to retry something
+that could never succeed. The exact inversion the design was written to prevent,
+reached from the other direction.
+
+Accepted statuses are now **200 and 404**, with the JSON body deciding, and
+`unavailable` reserved for transport failures, 5xx and unparseable bodies. That
+is correct under every observation any of three sessions took — which matters,
+because we got three different-looking answers: a fourth measurement found OFF
+returning `status: 1` "product found" for **invented** codes, complete with a
+name and a calorie figure. "Well-formed but unallocated" is not a category OFF
+reliably has; it holds stubs and real data under codes nobody would guess. The
+rule above does not depend on knowing which trigger produces which status, which
+is why it is the right rule.
+
+**Why no test caught it, which is the part worth keeping.** Every barcode test
+stubs the provider with `httptest`, and the stub returned 200 because that is
+what the author believed. A stub built from an assumption cannot falsify it —
+the suite was green, thorough, and confirming the wrong thing. It was found by
+another session measuring the live API. The regression guard now pins all three
+outcomes against both not-found shapes and a true-unavailable shape, and the
+discriminator between the two kinds of 404 is whether the body parses as the
+provider's envelope: an HTML 404 from a proxy or a wrong route stays
+`unavailable`, so a broken route can never become "your food does not exist".
 
 **A found product can still be unusable.** OFF is crowd-sourced and carries
 placeholder entries; a real barcode with no name or no energy value is a normal

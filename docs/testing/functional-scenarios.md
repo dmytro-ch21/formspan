@@ -8757,7 +8757,9 @@ Each of these must produce a DIFFERENT `outcome`. A test that only asserts
 Three outcomes, and the whole point is that they stay apart:
 
 - A known barcode → `200` with `food`, `source: off`, and `cached: false` on
-  the first call, `cached: true` on the second.
+  the first call, `cached: true` on the second. The macros must be **identical**
+  across those two calls — the cache columns are `NUMERIC(_, 2)`, so an
+  unrounded fetch answers differently from the row it just wrote.
 - A barcode the provider does not have → `404` `not_found`. **Verify no
   negative cache**: the same barcode must go upstream again on a later call,
   or a food added upstream tomorrow stays "missing" forever.
@@ -8789,6 +8791,17 @@ Three outcomes, and the whole point is that they stay apart:
   no assertion on page one can see.
 - **`strpos` returns 0 when a word is absent.** The `NULLIF` around it is what
   stops non-matching rows sorting first; without it the ranking is inverted.
-- **Open Food Facts answers an unknown barcode with HTTP 200 and
-  `"status": 0`.** Any test (or implementation) keying on the HTTP status has
-  it backwards.
+- **Open Food Facts answers an unknown barcode with HTTP 404** carrying its own
+  JSON envelope (`{"status":0,"status_verbose":"product not found"}`) — that is
+  the ordinary unknown-scan case. It answers **200 with `"status": 0`** for a
+  *malformed* code, which `ValidBarcode` rejects before the call. It has also
+  been observed returning `status: 1` for invented codes. **The body is the
+  signal; 200 and 404 are both answers.** Accepting only 200 shipped once and
+  turned every unknown packet into a 503 — a phone told to retry forever, and
+  N41's `not_found` branch never firing.
+- **The two kinds of 404 are told apart by whether the body parses.** A 404 from
+  a proxy, a WAF or a wrong route carries HTML and must stay `unavailable`. Test
+  both, or the fix for the bug above reintroduces it from the other side.
+- **A stub cannot falsify the assumption it was built from.** The suite that
+  missed the 404 bug was green and thorough and stubbed 200 throughout. Any test
+  asserting provider semantics is only as good as the last live measurement.

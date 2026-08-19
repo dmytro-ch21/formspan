@@ -9105,10 +9105,12 @@ paths:
 
 
         A network failure must never surface as `not_found`: that would tell an
-        athlete their food does not exist because a DNS lookup blinked. A
-        product the provider holds with no name or no energy value is
-        `not_found` too — returning it would put a nameless zero-calorie food in
-        front of someone as though it had been measured.
+        athlete their food does not exist because a DNS lookup blinked. Nor the
+        reverse — an unknown packet answered `503` would have a phone retrying
+        something that can never succeed. A product the provider holds with no
+        name or no energy value is `not_found` too, and so is one whose figures
+        are outside the plausible range: returning either would put a nameless
+        or absurd food in front of someone as though it had been measured.
 
 
         Values are per 100 g, matching the rest of the catalog.

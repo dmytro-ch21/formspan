@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
 	"strings"
@@ -27,14 +28,36 @@ import (
 // they are opposite instructions. So a transport failure must NEVER surface as
 // "not in the database".
 //
-// # HTTP status is not the signal, and assuming it is gets this backwards
+// # The BODY is the signal, not the status — and a 404 is an answer
 //
-// Measured against the live API: **Open Food Facts returns HTTP 200 with
-// `"status": 0` for a barcode it does not have.** A resolver that treated
-// non-200 as "unknown" and 200 as "found" would report every unknown packet as
-// a success and every outage as a missing product — exactly inverted. The JSON
-// body is the signal; the HTTP status only tells us whether we got an answer at
-// all.
+// Measured against the live API, with a real User-Agent:
+//
+//	9990000000017   HTTP 404   {"status":0,"status_verbose":"product not found"}
+//	4061458123456   HTTP 404   {"status":0,"status_verbose":"product not found"}
+//	5690550000001   HTTP 404   {"status":0,"status_verbose":"product not found"}
+//	0000000000000   HTTP 200   {"status":0,"status_verbose":"no code or invalid code"}
+//	9999999999994   HTTP 200   {"status":1, ... product ... }
+//
+// **A well-formed barcode the database does not hold comes back 404** — that is
+// the ordinary unknown-packet case, which is to say almost every unknown scan.
+// The 200-with-`status: 0` case is a *malformed* code, which `ValidBarcode`
+// already rejects before we ever make the call.
+//
+// So the accepted statuses are 200 **and** 404, and the JSON body decides. An
+// earlier version of this file accepted only 200, on a measurement taken with a
+// malformed code that OFF normalised away — every genuinely unknown product
+// therefore returned ErrUnavailable, the endpoint answered 503, and a phone was
+// told to retry something that would never succeed. That is the exact inversion
+// this comment exists to prevent, arrived at from the other direction. It was
+// caught by another session measuring the live API, not by this package's
+// tests, because those tests stub the provider and the stub encoded the same
+// wrong belief the code did. **A stub built from an assumption cannot falsify
+// it.**
+//
+// What still holds, and is the property worth a test: a 404 that is an HTML
+// error page from a proxy, a WAF or a wrong route fails to parse, and an
+// unparseable body is ErrUnavailable. So a bare unrouted 404 can never become
+// "not in the database" — only a 404 carrying the provider's own envelope can.
 //
 // # A found product can still be unusable, and that must not become 0 kcal
 //
@@ -148,10 +171,13 @@ func (o *OpenFoodFacts) Resolve(ctx context.Context, barcode string) (*BarcodeFo
 	}
 	defer resp.Body.Close() //nolint:errcheck // read-only
 
-	// 404 from the API itself means the ROUTE is wrong, not that the product
-	// is missing — an unknown barcode comes back 200 with status 0. Every
-	// non-200 is therefore "we could not ask", never "no such food".
-	if resp.StatusCode != http.StatusOK {
+	// 200 and 404 are both ANSWERS; the body says which. Everything else — 429,
+	// 5xx, a redirect we did not follow — is "we could not ask".
+	//
+	// Widening to 404 is safe because the body still has to parse as the
+	// provider's envelope below. A 404 from a proxy or a wrong route carries
+	// HTML, fails json.Unmarshal, and leaves as ErrUnavailable.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
 		return nil, fmt.Errorf("%w: provider returned %d", ErrUnavailable, resp.StatusCode)
 	}
 
@@ -203,12 +229,17 @@ func (o *OpenFoodFacts) Resolve(ctx context.Context, barcode string) (*BarcodeFo
 		// serving bases in one response is how a doubled quantity happens.
 		ServingLabel: SeedServingLabel,
 		ServingGrams: &grams,
-		KCal:         *n.KCal,
-		ProteinG:     deref(n.Protein),
-		CarbG:        deref(n.Carbs),
-		FatG:         deref(n.Fat),
-		FibreG:       n.Fibre,
-		ExternalID:   &id,
+		// Rounded to the scale `food_barcode_cache` stores, so a cold answer
+		// and a warm one are the same number. Without this a value like
+		// 99.99999999999999 (kJ->kcal conversions produce them) is served raw
+		// on the fetch and 100.00 from the cache, and the same barcode answers
+		// differently depending on whether somebody scanned it before.
+		KCal:       round2(*n.KCal),
+		ProteinG:   round2(deref(n.Protein)),
+		CarbG:      round2(deref(n.Carbs)),
+		FatG:       round2(deref(n.Fat)),
+		FibreG:     round2Ptr(n.Fibre),
+		ExternalID: &id,
 	}
 	// Crowd-sourced numbers get the same treatment as a missing name: an
 	// implausible figure shown confidently is worse than no answer. Without
@@ -218,6 +249,17 @@ func (o *OpenFoodFacts) Resolve(ctx context.Context, barcode string) (*BarcodeFo
 		return nil, ErrNotFound
 	}
 	return out, nil
+}
+
+// round2 matches NUMERIC(_, 2), the scale every macro column here uses.
+func round2(f float64) float64 { return math.Round(f*100) / 100 }
+
+func round2Ptr(f *float64) *float64 {
+	if f == nil {
+		return nil
+	}
+	v := round2(*f)
+	return &v
 }
 
 func deref(f *float64) float64 {

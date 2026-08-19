@@ -54,25 +54,68 @@ func TestResolveHappyPath(t *testing.T) {
 	}
 }
 
-// **HTTP 200 with status 0 is how Open Food Facts says "unknown".** Measured
-// against the live API. An implementation keying on the HTTP status gets this
-// exactly backwards: every unknown packet becomes a success.
-func TestResolveTreatsStatusZeroAsNotFound(t *testing.T) {
-	off := offServer(t, 200, `{"status":0,"status_verbose":"product not found"}`)
+// **A well-formed barcode the database does not hold comes back HTTP 404 with
+// the provider's envelope** — measured against the live API, and it is the
+// ordinary unknown-packet case rather than an exotic one.
+//
+// This test is the regression guard for a real shipped bug: the resolver
+// accepted only 200, because the original measurement was taken with a
+// MALFORMED code that Open Food Facts normalised away and answered 200 for. So
+// every genuinely unknown product returned ErrUnavailable, the endpoint served
+// 503, and a phone told the athlete to retry something that could never
+// succeed. The unit tests all passed, because they stubbed 200 — a stub built
+// from an assumption cannot falsify it.
+func TestResolveTreatsA404WithTheProvidersEnvelopeAsNotFound(t *testing.T) {
+	off := offServer(t, 404, `{"code":"5690550000001","status":0,"status_verbose":"product not found"}`)
 	_, err := off.Resolve(context.Background(), "5690550000001")
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("err = %v, want ErrNotFound — status 0 on a 200 is the provider saying it has no such product", err)
+		t.Fatalf("err = %v, want ErrNotFound — a 404 carrying status 0 is the provider saying it has no such product, and it is how almost every unknown scan arrives", err)
 	}
 	if errors.Is(err, ErrUnavailable) {
-		t.Fatal("an unknown product was reported as an outage")
+		t.Fatal("an unknown product was reported as an outage — the phone would retry forever")
 	}
 }
 
-// Every non-200 is "we could not ask". An unknown barcode never arrives that
-// way, so a 404 from the API means the route is wrong, not that the food is
-// missing.
+// The malformed-code case, which is the one that really does answer 200. Kept
+// alongside the 404 above so the two are visibly different situations rather
+// than one remembered fact.
+func TestResolveTreatsA200WithStatusZeroAsNotFound(t *testing.T) {
+	off := offServer(t, 200, `{"status":0,"status_verbose":"no code or invalid code"}`)
+	_, err := off.Resolve(context.Background(), "5690550000001")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// **The discriminator between the two kinds of 404, and the only thing keeping
+// the widened status from swallowing a real outage.**
+//
+// A 404 from a proxy, a WAF or a wrong route carries HTML, not the provider's
+// envelope. It must stay ErrUnavailable — otherwise "the route is broken"
+// becomes "your food does not exist", which is the failure this whole endpoint
+// is built to prevent, just re-entering through the fix for it.
+func TestResolveTreatsAnUnroutedHTML404AsUnavailable(t *testing.T) {
+	for name, body := range map[string]string{
+		"proxy error page": `<html><head><title>404 Not Found</title></head><body>nginx</body></html>`,
+		"empty body":       ``,
+		"WAF block":        `Access denied`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			off := offServer(t, 404, body)
+			_, err := off.Resolve(context.Background(), "5690550000001")
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("err = %v, want ErrUnavailable — a 404 that is not the provider's envelope is an outage, not an answer", err)
+			}
+			if errors.Is(err, ErrNotFound) {
+				t.Fatal("a broken route was reported as a missing food")
+			}
+		})
+	}
+}
+
+// Everything that is neither 200 nor 404 is "we could not ask".
 func TestResolveTreatsHTTPFailuresAsUnavailable(t *testing.T) {
-	for _, status := range []int{404, 429, 500, 502, 503} {
+	for _, status := range []int{429, 500, 502, 503, 504} {
 		off := offServer(t, status, `{"status":0}`)
 		_, err := off.Resolve(context.Background(), "5690550000001")
 		if !errors.Is(err, ErrUnavailable) {
@@ -81,6 +124,28 @@ func TestResolveTreatsHTTPFailuresAsUnavailable(t *testing.T) {
 		if errors.Is(err, ErrNotFound) {
 			t.Errorf("HTTP %d was reported as a missing food — an outage would tell an athlete their food does not exist", status)
 		}
+	}
+}
+
+// A cold answer and a warm one must be the same number. The cache column is
+// NUMERIC(_, 2), so an unrounded fetch answers differently from the row it
+// wrote — the same barcode giving two figures depending on whether somebody
+// scanned it before.
+func TestResolveRoundsToTheCachedScale(t *testing.T) {
+	off := offServer(t, 200, `{"status":1,"product":{"product_name":"X","nutriments":{
+		"energy-kcal_100g":99.99999999999999,"proteins_100g":11.005,"fiber_100g":0.12345}}}`)
+	got, err := off.Resolve(context.Background(), "5690550000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.KCal != 100 {
+		t.Errorf("kcal = %v, want 100 — an unrounded value differs from what the cache would return", got.KCal)
+	}
+	if got.ProteinG != 11.01 {
+		t.Errorf("protein = %v, want 11.01", got.ProteinG)
+	}
+	if got.FibreG == nil || *got.FibreG != 0.12 {
+		t.Errorf("fibre = %v, want 0.12", got.FibreG)
 	}
 }
 
