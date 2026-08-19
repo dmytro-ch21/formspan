@@ -166,6 +166,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # `check-tasks-integrity.py` compares docs/TASKS.md against the base
+      # branch, and the default checkout is shallow — `origin/main` simply is
+      # not there. Fetched explicitly rather than by `fetch-depth: 0`, which
+      # would clone the whole history for one file.
+      #
+      # The script FAILS rather than skips when the baseline is missing, so
+      # deleting this step turns the check red instead of quietly disarming it.
+      # That is deliberate: a check that passes when it cannot do its job is the
+      # failure mode this repo has already shipped once.
+      - name: Fetch base branch (for the TASKS.md comparison)
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+
       # No actions/setup-python on purpose. The check is stdlib-only and
       # version-agnostic, the runner image ships python3 already, and every
       # extra action is one more thing to download before any of this repo's
@@ -173,6 +185,16 @@ jobs:
       # ("Failed to resolve action download info").
       - name: Python version
         run: python3 --version
+
+      # docs/TASKS.md is the one load-bearing file every other check is blind
+      # to — it is prose to lint, typecheck and every test suite. A task
+      # silently reverting from [x] to [ ], a duplicated id, or a dropped line
+      # all pass everything else and merge. All three nearly landed in one
+      # evening on 2026-08-19, on branches that were green: two from rebase
+      # resolutions taking a side wholesale, and one from a CLEAN AUTO-MERGE
+      # that produced no conflict to notice.
+      - name: Task list integrity
+        run: python3 scripts/check-tasks-integrity.py
 
       # The grip vocabulary is duplicated in Go, mobile and web because there
       # is no shared package to put it in. This is what makes that survivable:
