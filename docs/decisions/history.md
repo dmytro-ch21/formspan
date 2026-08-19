@@ -27341,6 +27341,25 @@ The prompt and schema moved to their own file for the same reason: a comparison
 where each side gets its own instructions measures the instructions, not the
 models.
 
+**`completer` stays inside `nutrition` for now, deliberately.** It is typed to
+`EstimateInput`, so a second consumer of the same shape — prose in, JSON schema
+out, validated draft the athlete confirms — cannot reuse it without a
+generalised `internal/platform/llm`. N33 (dictated BJJ reflection) is exactly
+that second consumer, and the extraction belongs to it rather than here: with
+one consumer the interface would be designed against a guess, and this diff has
+already been through both reviewers. Four things the extraction must carry
+across, all of them found rather than designed — **the factory returns the
+interface**, because a nil concrete pointer in an interface is not nil and that
+was a live panic; **refusal is shaped differently per provider** (Anthropic's
+`stop_reason` against OpenAI's `message.refusal`), so it cannot be normalised
+away in the transport; **truncation maps to refused, not unavailable**, because
+the retry is deterministic and would bill the caller twice for the same
+failure; and **Haiku 4.5 rejects both `thinking` and `effort` with real 400s**,
+so a generic effort knob would reintroduce a bug this already paid for. What
+should NOT move is `DefaultModels` — the per-provider default is a per-*feature*
+judgement, and the calibration finding below is the reason: the model that is
+right for a food photo may be wrong for a task that has to say "unresolved".
+
 Selection is config. `ESTIMATE_PROVIDER` and `ESTIMATE_MODEL` are env vars, so
 trying a different model is a restart rather than a deploy — which matters,
 because the only way to know whether a cheaper model holds up on portion
@@ -27373,10 +27392,12 @@ revisit rather than an argument to have again.
 
 ### Open questions this leaves
 
-- **Nothing has been run against the real API.** No key is configured here, so
-  every path is exercised against a fake estimator. The first real call is
-  unproven — including whether the prompt actually produces useful portion
-  confidence, which is the feature's entire premise.
+- **The real API has been exercised, but only through the harness.** A key is
+  configured locally and roughly thirty live calls went through both providers
+  — that is where the calibration finding above comes from, so the feature's
+  premise is no longer unproven. What has never run is the *application* path:
+  every handler, quota and refusal test still uses a fake estimator, and no
+  request has reached a provider through `POST /v1/nutrition/estimate` itself.
 - **Nothing has been seen on a phone**, same as N25.
 - **The caps are guesses, and were set against a cost figure that was wrong.**
   20 and 5 came from arithmetic, not usage, and the arithmetic said a photo cost
