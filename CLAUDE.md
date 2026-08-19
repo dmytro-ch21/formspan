@@ -403,7 +403,7 @@ nothing, so it can never take a real catalog row out from under another package.
 `exercise`'s three seeding tests call `removeCatalogAfterTest`, so the 762 rows
 are gone by the time any later package runs. There is no populated catalog left
 to borrow from, so a fixture that references `bench-press` without seeding it
-fails in the ordinary `go test -p 1 ./...` run with
+fails in the ordinary `go test -p 1 -timeout 3m ./...` run with
 `unknown exercise "bench-press"` — immediately, in CI, on the PR that
 introduces it.
 
@@ -462,10 +462,20 @@ pass vacuously on an empty file. That is also the *stronger* check — a live
 `techniques` table additionally holds whatever the console authored
 (`source='admin'`), any of which would satisfy an id no fresh deploy has.
 
-**The whole backend suite now has zero skips**: 28 packages, 583 tests, 0 skips,
-0 failures on a migrated, never-seeded database. If you see a skip appear there,
-something has regressed to the pattern above — check with `-v`, because the
-package will still print `ok`.
+**The backend suite has exactly ONE skip, and it is intentional.** Measured
+2026-08-19 by two sessions independently: **34 packages, ~1092 tests, 1 skip, 0
+failures** on a migrated, never-seeded database. The skip is `TestLiveComplete`
+in `internal/platform/llm/live_smoke_test.go`, gated on `LLM_LIVE=1` because it
+spends real money on a live API call; it skips in CI too, and it **fails rather
+than skips** when `LLM_LIVE=1` is set without a key, which is what stops it
+being the silent-skip pattern this section is about.
+
+**This paragraph used to say "zero skips: 28 packages, 583 tests"** and told you
+any skip meant a regression. That was true when written and stopped being true
+when the `llm` package arrived — so the next session to run with `-v` would have
+seen a legitimate skip and gone hunting for a regression that did not exist. If
+you see a **second** skip appear, that is the thing to investigate — check with
+`-v`, because the package will still print `ok`.
 
 If a package does start failing on unknown exercise ids, the first question is
 whether the catalog is there at all:
