@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -66,8 +66,50 @@ export default function IdentifyMachineScreen() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryable, setRetryable] = useState(true);
+  /**
+   * The hint under an error, as three states rather than a boolean.
+   *
+   * `retry` and `retake` are both about the IDENTIFICATION. A COMMIT failure is
+   * about neither, and forcing it into one of them reproduces the very
+   * contradiction this task was filed to remove: `setRetryable(false)` put
+   * "Take another photo, or search instead." under "Try again when you have
+   * signal", and `true` put "You can try again." under "Session not found on
+   * this device". Both messages already name their own remedy and the
+   * shortlist is still tappable, so the honest third option is to say nothing.
+   * Raised in review, on the fix for the first version of this bug.
+   */
+  const [hint, setHint] = useState<'retry' | 'retake' | 'none'>('retry');
   const [result, setResult] = useState<MachineIdentification | null>(null);
+
+  /**
+   * Speak the error.
+   *
+   * **`accessibilityLiveRegion` is Android-only**, which this codebase already
+   * records in `sign-up.tsx` and `forgot-password.tsx` — so the attribute alone
+   * announces nothing on iOS, the platform this app ships on. It is kept for
+   * Android and paired with this, which is the half that actually reaches
+   * VoiceOver. An Android live region on a node that MOUNTS carrying its
+   * message often does not fire either: a live region announces changes to an
+   * existing node, and this box is conditionally rendered.
+   *
+   * Caught in review — and the comment here previously claimed the VoiceOver
+   * fix that did not exist, which is the same claims-behaviour-it-does-not-have
+   * defect as the `confidence` docstring this task was filed to correct.
+   */
+  useEffect(() => {
+    if (error) AccessibilityInfo.announceForAccessibility(error);
+  }, [error]);
+
+  /**
+   * Whether a commit is already running.
+   *
+   * A ref, because `committing` is state: two touches landing in one batch —
+   * two fingers on two candidate rows — both read `null` from the render
+   * closure, both commit, and `router.back()` fires twice, popping a screen
+   * the athlete did not leave. Narrow, and the same pattern the barcode screen
+   * uses one feature over. Raised in review.
+   */
+  const committingRef = useRef(false);
   const [committing, setCommitting] = useState<string | null>(null);
 
   const swapping = typeof swap === 'string' && swap.length > 0;
@@ -83,13 +125,17 @@ export default function IdentifyMachineScreen() {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
         setError('VOLA needs the camera to photograph a machine. You can turn it on in Settings.');
-        setRetryable(false);
+        // `none`, not `retake`. A permission denial used to render "Take
+        // another photo, or search instead." — advice that cannot work, since
+        // there is no camera to take it with. The message already names the
+        // only remedy.
+        setHint('none');
         return;
       }
       picked = await ImagePicker.launchCameraAsync({ quality: 1 });
     } catch {
       setError('The camera would not open. Try again, or search for the exercise instead.');
-      setRetryable(true);
+      setHint('retry');
       return;
     }
     if (picked.canceled || !picked.assets[0]) return;
@@ -109,7 +155,7 @@ export default function IdentifyMachineScreen() {
       // A 422 is DETERMINISTIC — the same photo yields the same refusal — so
       // the screen offers "Take another" rather than "Try again". One word
       // apart, opposite in effect: a retry button there cannot work.
-      setRetryable(isRetryable(err));
+      setHint(isRetryable(err) ? 'retry' : 'retake');
     } finally {
       setBusy(false);
     }
@@ -125,7 +171,8 @@ export default function IdentifyMachineScreen() {
    * catalog exactly as the search path builds it.
    */
   async function choose(exerciseID: string) {
-    if (!id || !userId || committing) return;
+    if (!id || !userId || committingRef.current) return;
+    committingRef.current = true;
     setCommitting(exerciseID);
     setError(null);
     try {
@@ -134,9 +181,19 @@ export default function IdentifyMachineScreen() {
       // — and renaming an exercise deliberately keeps its id, so the first
       // diverged name would have reported an exercise the server had just
       // returned as missing from the catalog. See `fetchExercise`.
+      // Started TOGETHER, because they are independent and this runs on gym
+      // wifi. The second is pre-caught so a rejection cannot escape as an
+      // unhandled rejection while the first is still in flight.
+      const chosen = fetchExercise(getToken, exerciseID);
+      const replaced: Promise<Exercise['load_type'] | undefined> = swapping
+        ? fetchExercise(getToken, swap)
+            .then((e) => e.load_type)
+            .catch(() => undefined)
+        : Promise.resolve(undefined);
+
       let exercise: Exercise;
       try {
-        exercise = await fetchExercise(getToken, exerciseID);
+        exercise = await chosen;
       } catch (err) {
         // "Gone" and "could not ask" are different answers and only one of
         // them is about the catalog. Saying the first when the second is true
@@ -151,19 +208,13 @@ export default function IdentifyMachineScreen() {
 
       const session = await readLocalSession(userId, id);
       if (!session) throw new Error('Session not found on this device.');
-      // The exercise being replaced, so `swapExercise` can tell whether the
-      // logged numbers carry over. Passing `undefined` made `sameShape` always
-      // false and wiped reps and weight even between two `weight_reps`
-      // machines — the row is fetched anyway, and this is the reason the
-      // comment above says it is. A failure here is NOT fatal: losing the
-      // carry-over is worse than nothing but far better than refusing the
-      // swap, so it falls back to the old conservative behaviour.
-      let fromLoadType: Exercise['load_type'] | undefined;
-      if (swapping) {
-        fromLoadType = await fetchExercise(getToken, swap)
-          .then((e) => e.load_type)
-          .catch(() => undefined);
-      }
+      // The replaced exercise's load type, so `swapExercise` can tell whether
+      // the logged numbers carry over. Passing `undefined` made `sameShape`
+      // always false and wiped reps and weight even between two `weight_reps`
+      // machines. A failure resolving it is NOT fatal — losing the carry-over
+      // is worse than nothing and far better than refusing the swap — so it
+      // falls back to the old conservative behaviour.
+      const fromLoadType = await replaced;
       const next = swapping
         ? swapExercise(session.sets, swap, exercise, fromLoadType)
         : [...session.sets, emptySet(exercise.id, session.sets.length)];
@@ -172,11 +223,10 @@ export default function IdentifyMachineScreen() {
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      // A commit failure is not the photo's fault, and `retryable` is about the
-      // IDENTIFICATION. Left as it was, a stale `true` from an earlier network
-      // failure renders "You can try again." under "Session not found on this
-      // device", which is a hint that contradicts its own message.
-      setRetryable(false);
+      // A commit failure is not the photo's fault and not the network's
+      // either, necessarily. Neither identification hint fits, and the error
+      // itself already says what to do.
+      setHint('none');
       setCommitting(null);
     }
   }
@@ -214,9 +264,11 @@ export default function IdentifyMachineScreen() {
             <Text style={styles.errorText} testID="identify-error">
               {error}
             </Text>
-            <Text style={styles.errorHint}>
-              {retryable ? 'You can try again.' : 'Take another photo, or search instead.'}
-            </Text>
+            {hint === 'none' ? null : (
+              <Text style={styles.errorHint} testID="identify-hint">
+                {hint === 'retry' ? 'You can try again.' : 'Take another photo, or search instead.'}
+              </Text>
+            )}
           </View>
         ) : null}
 

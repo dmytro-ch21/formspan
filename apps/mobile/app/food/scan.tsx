@@ -44,8 +44,15 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Stack, useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
@@ -107,6 +114,26 @@ export default function ScanBarcodeScreen() {
   const [proteinText, setProteinText] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  /**
+   * Speak the two messages that change in place.
+   *
+   * **`accessibilityLiveRegion` is Android-only** — recorded in `sign-up.tsx`
+   * and `forgot-password.tsx` and forgotten here. The attribute below announces
+   * nothing on iOS, so the misread hint this screen relies on to say "aim
+   * again" was silent on the platform the app ships on, for exactly the
+   * eyes-free case it was added for. Kept for Android, paired with this.
+   *
+   * Introduced in N41 and corrected in N47, where review found the identical
+   * claim on the identify screen.
+   */
+  useEffect(() => {
+    if (saveError) AccessibilityInfo.announceForAccessibility(saveError);
+  }, [saveError]);
+
+  useEffect(() => {
+    if (misread) AccessibilityInfo.announceForAccessibility("That didn't read cleanly — try again.");
+  }, [misread]);
 
   /**
    * Whether a code is already being handled.
@@ -347,9 +374,8 @@ export default function ScanBarcodeScreen() {
           />
           <View style={styles.reticle} pointerEvents="none" />
         </View>
-        {/* Announced, because it changes in place while the camera is the
-            focus: a VoiceOver user aiming at a packet would otherwise never
-            learn the read failed. */}
+        {/* Android announces via the live region; iOS via the effect above,
+            because `accessibilityLiveRegion` does nothing there. */}
         <Text style={styles.hint} testID="scan-hint" accessibilityLiveRegion="polite">
           {misread
             ? "That didn't read cleanly — try again, flatter to the light."

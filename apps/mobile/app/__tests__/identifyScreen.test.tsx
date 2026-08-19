@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AccessibilityInfo } from 'react-native';
 
 import { ApiError } from '@/lib/apiError';
 
@@ -18,8 +18,6 @@ import IdentifyMachineScreen from '../session/[id]/identify';
  * driven in jest, and the shortlist rendering is already governed by the rule
  * in the screen's own header.
  */
-
-const mockUseEffect = useEffect;
 
 jest.setTimeout(30_000);
 configure({ asyncUtilTimeout: 10_000 });
@@ -57,6 +55,15 @@ jest.mock('@/lib/sessionStore', () => ({
 
 jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
 
+/**
+ * `AccessibilityInfo.announceForAccessibility` is what actually reaches
+ * VoiceOver; `accessibilityLiveRegion` is Android-only and announces nothing on
+ * the platform this app ships on. Spied on the real export rather than mocked
+ * by module path, because the announcement is an imperative call with no
+ * rendered trace — and a path mock left the whole namespace undefined.
+ */
+const mockAnnounce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+
 const mockLaunchCamera = jest.fn();
 jest.mock('expo-image-picker', () => ({
   requestCameraPermissionsAsync: async () => ({ granted: true }),
@@ -66,7 +73,6 @@ jest.mock('expo-image-picker', () => ({
 let mockParams: Record<string, string> = { id: 'sess-1' };
 jest.mock('expo-router', () => ({
   __esModule: true,
-  useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
   useLocalSearchParams: () => mockParams,
   useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
   Stack: { Screen: () => null },
@@ -92,6 +98,7 @@ beforeEach(() => {
   mockEmptySet.mockClear();
   mockReadSession.mockReset().mockResolvedValue({ sets: [] });
   mockSaveSets.mockReset().mockResolvedValue(undefined);
+  mockAnnounce.mockReset().mockImplementation(() => {});
   mockLaunchCamera.mockReset().mockResolvedValue({
     canceled: false,
     assets: [{ uri: 'file:///machine.jpg' }],
@@ -207,10 +214,38 @@ it('says so rather than rendering an empty shortlist', async () => {
  * a stale `true` renders "You can try again." beneath "Session not found on
  * this device" — a hint contradicting its own message.
  */
-it('does not offer a retry that contradicts the commit error', async () => {
+it('offers no identification hint at all under a commit error', async () => {
   mockReadSession.mockResolvedValue(null);
   await shootAndPick();
   await waitFor(() => expect(screen.getByTestId('identify-error')).toBeTruthy());
   expect(screen.getByTestId('identify-error')).toHaveTextContent(/Session not found/i);
-  expect(screen.queryByText('You can try again.')).toBeNull();
+  // BOTH hints, not just one exact string. Asserting the absence of a single
+  // literal passes vacuously the moment somebody rewords it — and asserting
+  // only "You can try again." would have missed the contradiction the first
+  // fix introduced, where a network failure got "Take another photo" instead.
+  expect(screen.queryByTestId('identify-hint')).toBeNull();
+});
+
+/**
+ * The other half of the same rule: an identification failure still HAS a hint,
+ * so `identify-hint` disappearing everywhere would satisfy the test above while
+ * removing something real.
+ */
+it('still hints after a failed identification', async () => {
+  mockIdentify.mockRejectedValue(Object.assign(new Error('unprocessable'), { status: 422 }));
+  render(<IdentifyMachineScreen />);
+  await act(async () => {
+    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+  });
+  await waitFor(() => expect(screen.getByTestId('identify-hint')).toBeTruthy());
+  // A 422 is deterministic, so the hint must say retake rather than retry.
+  expect(screen.getByTestId('identify-hint')).toHaveTextContent(/Take another photo/i);
+});
+
+/** The error must actually be spoken — the attribute alone is Android-only. */
+it('announces the error to a screen reader', async () => {
+  mockFetchExercise.mockRejectedValue(new ApiError('exercise not found', 'not_found', 404));
+  await shootAndPick();
+  await waitFor(() => expect(mockAnnounce).toHaveBeenCalled());
+  expect(mockAnnounce).toHaveBeenCalledWith(expect.stringMatching(/no longer in the catalog/i));
 });

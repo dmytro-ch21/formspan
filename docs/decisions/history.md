@@ -30075,6 +30075,66 @@ at all. The contract says that is a 422 and never a 200, so this is defence
 against the contract breaking rather than against today — but answer-shaped
 nothing is the failure this repo keeps meeting, and it now says it is absence.
 
+### The review of the fix found the fix making the same mistake
+
+Finding (4) above was a docstring claiming UI that did not exist. The review of
+this branch found that the *fix* had introduced another one, four lines away.
+
+`accessibilityLiveRegion="assertive"` is **Android-only**. The comment beside it
+justified the change by the VoiceOver user who "got no announcement at all" —
+who still got none, because iOS ignores the attribute entirely. This codebase
+already records that, in `sign-up.tsx` and `forgot-password.tsx`, both of which
+pair the attribute with `AccessibilityInfo.announceForAccessibility` in an
+effect for exactly this reason. There is a second wrinkle worth keeping: an
+Android live region on a node that MOUNTS carrying its message frequently does
+not fire either, because a live region announces *changes* to an existing node,
+and this error box is conditionally rendered.
+
+**The identical claim went into N41's `app/food/scan.tsx` hours earlier and is
+corrected here too**, deliberately outside this task's stated scope. The
+alternative was leaving a false accessibility claim in the tree, about a screen
+whose whole argument is that it is used eyes-free at a machine or one-handed in
+a shop, while filing a ticket to fix a comment I had written the same afternoon.
+
+That makes three instances today of the same defect: a claim about behaviour
+nobody checked. The dependency question (three confident answers, none from
+reading the package), the `confidence` docstring, and this. The common shape is
+that all three *read* as verified.
+
+### Two more from the same review, both about honesty rather than correctness
+
+**The boolean hint could not represent the case it now had.** `retryable` is
+about the IDENTIFICATION, and the fix for (5) forced every COMMIT failure into
+one of its two values — so a network failure rendered "Try again when you have
+signal" directly above "Take another photo, or search instead", which is the
+same message-contradicts-hint defect (5) existed to remove, reintroduced by its
+own fix. It is a three-state hint now, and the third state is *say nothing*:
+these messages already name their own remedy. Fixing it also caught a
+pre-existing one — a **permission denial** rendered "Take another photo", advice
+that cannot work when there is no camera to take it with.
+
+**The commit guard was state, not a ref.** `if (committing) return` reads the
+render closure, so two touches in one batch — two fingers, two candidate rows —
+both see `null`, both commit, and `router.back()` fires twice, popping a screen
+the athlete never left. Narrow, and the barcode screen makes the same argument
+one feature over.
+
+The two independent fetches now start together rather than in series, which
+matters on gym wifi and costs nothing.
+
+### A mutation that did not apply, caught by checking
+
+Mutation-testing the three-state hint came back GREEN, which would have meant
+the new test was worthless. It was not: there are two `setHint('none')` calls
+and the patch had hit the permission branch rather than the commit branch. The
+mutation never reached the code under test.
+
+This is the failure mode that makes mutation testing itself untrustworthy — a
+mutation that does not apply is indistinguishable from a test that cannot fail,
+and both look like a green run. **Check that the mutation applied**, not just
+that the suite went green afterwards. Re-run against the right call site, the
+test went red as it should.
+
 ### The screen had no test, which is why (1) survived review
 
 `app/__tests__/identifyScreen.test.tsx` is new and covers the commit path
