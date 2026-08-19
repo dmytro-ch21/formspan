@@ -903,7 +903,7 @@ function ExerciseBlock({
                 editable={editable}
                 exerciseName={exercise?.name ?? exerciseID}
                 perSide={exercise?.load_mode === "per_side"}
-                movementPattern={exercise?.movement_pattern}
+                offeredGripKeys={exercise?.offered_grips}
                 units={units}
                 onChange={(next) => onChange(index, next)}
                 onRemove={() => onRemove(index)}
@@ -933,7 +933,7 @@ function SetRow({
   editable,
   exerciseName,
   perSide,
-  movementPattern,
+  offeredGripKeys,
   onChange,
   onRemove,
   units,
@@ -944,11 +944,15 @@ function SetRow({
   editable: boolean;
   exerciseName: string;
   /**
-   * Which grips this movement can be held in — see `gripsFor`. A plain string
-   * rather than the `Exercise`, for the same reason `perSide` is a boolean:
-   * this row is given values, not an object to interrogate.
+   * Which grips this movement can be held in, as the SERVER decided (N16).
+   *
+   * A plain array rather than the `Exercise`, for the same reason `perSide` is
+   * a boolean: this row is given values, not an object to interrogate. It was
+   * `movementPattern` until the subsets were served — this app derived them
+   * from the pattern with its own copy of a Go table, and now it does not have
+   * to know the pattern at all.
    */
-  movementPattern?: string;
+  offeredGripKeys?: string[];
   /**
    * The exercise is entered per hand. Passed down rather than read here
    * because this row is given a NAME, not an exercise — and it is needed for
@@ -1025,7 +1029,7 @@ function SetRow({
             Where there is neither a vocabulary nor a held grip — a leg press,
             normally — it returns nothing and no picker appears, which is the
             original intent: an empty picker is a question with no answers. */}
-        {editable && offeredGrips(movementPattern, set.grip).length > 0 ? (
+        {editable && offeredGrips(offeredGripKeys, set.grip).length > 0 ? (
           <select
             className="ml-1 rounded border border-line bg-transparent text-xs text-text-dim"
             value={set.grip ?? ""}
@@ -1045,7 +1049,7 @@ function SetRow({
                 making the one load-bearing choice the one with no
                 comprehensible name. */}
             <option value="">Not recorded</option>
-            {offeredGrips(movementPattern, set.grip).map((g) => (
+            {offeredGrips(offeredGripKeys, set.grip).map((g) => (
               <option key={g.key} value={g.key}>
                 {g.label}
               </option>

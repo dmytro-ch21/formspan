@@ -26734,6 +26734,82 @@ Open questions:
   screens do not offer copying.
 
 
+## 2026-08-19 — The grip table stops being a specification nobody read
+
+`GET /v1/exercises` carries `offered_grips` per row now, derived from
+`movement_pattern` and never stored. That is N16, and the shape of the problem
+turned out to be worse than the line describing it.
+
+**The Go copy had no production caller.** `session.GripsFor` and
+`session.GripApplies` were referenced by nothing but their own tests — 30 hits,
+all in `grip_postgres_test.go`. The server published a specification, never used
+it, and both apps re-implemented it from the source. A Python script
+(`check-grip-parity.py`) then compared the three tables and failed the build when
+they diverged. That trade was deliberate and written down: there is no shared
+TypeScript package between the two apps, so the alternative to copying was
+inventing one and rewiring two builds.
+
+Serving it is the cheaper answer, and it removes the drift surface instead of
+policing it. The table moved to `exercise.OfferedGrips`, beside the
+`movement_pattern` it reads, and gained exactly one authoritative reader: the
+serializer. It is derived in `scanExercise` because that is the only place a row
+becomes an `Exercise` — put it in a handler and the other handler ships `null`.
+
+### The two client stories are different, deliberately
+
+**`apps/web`'s copy is deleted outright.** It fetches on render, so there is no
+cached row that could predate the field, so a fallback there could only ever be
+a second opinion.
+
+**`apps/mobile` keeps its copy as an offline fallback**, because there is a real
+case: an athlete who last synced before this shipped, then walked into a
+basement gym, has a catalog without the field. Hiding the picker for them would
+be a regression they cannot explain. `check-grip-parity.py` now polices that one
+copy against the server rather than three against each other, and its docstring
+says what it can no longer promise — a fallback that is merely STALE matches at
+check time and diverges after the next release, which is inherent and accepted.
+
+What makes all of this safe is a property that already existed: **the server does
+not refuse a grip outside a movement's subset.** `ValidGrip` checks the
+vocabulary and stops, deliberately, because a hook-gripped shrug is real and
+nobody's business to refuse. So a client on a stale copy over- or under-offers
+and never produces a 400.
+
+### Two things the task line got wrong, both found by checking rather than reading
+
+- **No SQLite migration was needed.** N16 said mobile "needs a local migration
+  and a fallback". `exercise_cache` stores the whole API object as
+  `payload_json` and `cachedExercises` returns `JSON.parse` of it — the typed
+  columns are only for filtering — so a new field rides along automatically. The
+  fallback half was right.
+- **`null` is not `[]`.** The first version derived the field and stopped, and a
+  nil Go slice marshals to `null`. That would have been a *third* state clients
+  had to handle: absent (stale row, fall back), `[]` (grip is meaningless here),
+  and `null` (…the same as which?). A squat serializes `[]` now, and the
+  distinction is asserted on both sides — the client rule is `!== undefined`,
+  not truthiness, and mutating it to `?.length` turns two mobile tests red.
+
+### The seam that replaced the type system
+
+`OfferedGrips` returns plain strings, because the catalog package must not
+import the logging module for a `Grip` type. Nothing in the type system
+therefore stops the two naming different things, so
+`TestEveryOfferedGripIsInTheVocabulary` lives in `session` (which owns
+`ValidGrip`) and imports `exercise` in test scope only. Mutating `"hook"` to
+`"hoook"` in the served table fails it by name.
+
+### Gaps this leaves
+
+- **The mobile fallback goes stale by design.** It is correct at check time and
+  wrong after any release that changes the server's mind, until the phone
+  re-syncs. Accepted, because over-offering cannot 400.
+- **Nothing has been seen on a phone.** The picker still renders from a list;
+  only its source moved. L1 unchanged.
+- **`GripApplies` is gone as an exported name** — the boolean had no caller once
+  the table was served, and it survives as a test helper in `exercise`. Anything
+  that wanted "is this question worth asking" now asks for the list and checks
+  its length, which is what both clients already did.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

@@ -2553,10 +2553,10 @@ function SetRow({
               Tapping the selected chip clears it, which is that route. Without
               it a mis-tap is permanent — and unrecorded is a real state here,
               not an absence. */}
-            {offeredGrips(exercise?.movement_pattern, set.grip).length > 0 && (
+            {offeredGrips(exercise, set.grip).length > 0 && (
               <OptionSelect
                 label="Grip"
-                options={offeredGrips(exercise?.movement_pattern, set.grip)}
+                options={offeredGrips(exercise, set.grip)}
                 selected={set.grip ?? null}
                 clearable
                 emptyLabel="Not recorded"

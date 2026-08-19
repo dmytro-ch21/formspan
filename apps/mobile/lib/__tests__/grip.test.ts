@@ -47,7 +47,7 @@ describe('which movements ask about grip', () => {
       'vertical_pull',
       'isolation',
     ]) {
-      expect(gripApplies(p)).toBe(true);
+      expect(gripApplies({ movement_pattern: p })).toBe(true);
     }
   });
 
@@ -55,7 +55,7 @@ describe('which movements ask about grip', () => {
     // A squat has no grip worth recording, and asking on every set of every
     // movement is how an optional field becomes noise nobody reads.
     for (const p of ['squat', 'lunge', 'jump', 'locomotion', 'mobility', 'core']) {
-      expect(gripApplies(p)).toBe(false);
+      expect(gripApplies({ movement_pattern: p })).toBe(false);
     }
   });
 
@@ -66,7 +66,7 @@ describe('which movements ask about grip', () => {
     // `hook` in the vocabulary the question is answerable, so 93 exercises that
     // had no grip control now have one.
     for (const p of ['hinge', 'carry', 'olympic']) {
-      expect(gripApplies(p)).toBe(true);
+      expect(gripApplies({ movement_pattern: p })).toBe(true);
     }
   });
 
@@ -112,7 +112,7 @@ describe('which movements ask about grip', () => {
     // or one recorded before a subset changed. Rendering only the subset leaves
     // it visible in the summary line but with NO CHIP TO TAP, so the single way
     // back to "unrecorded" disappears and the athlete is stuck with it.
-    const shown = offeredGrips('horizontal_push', 'hook');
+    const shown = offeredGrips({ movement_pattern: 'horizontal_push' }, 'hook');
     expect(shown.map((g) => g.key)).toEqual([
       'regular',
       'neutral',
@@ -128,12 +128,12 @@ describe('which movements ask about grip', () => {
   it('labels a grip it has never heard of rather than rendering an empty chip', () => {
     // A value from a NEWER server, outside all six. Falling back to the raw key
     // is ugly and truthful; an empty chip is untappable and invisible.
-    const shown = offeredGrips('hinge', 'mixed_left' as never);
+    const shown = offeredGrips({ movement_pattern: 'hinge' }, 'mixed_left' as never);
     expect(shown.at(-1)).toEqual({ key: 'mixed_left', label: 'mixed_left' });
   });
 
   it('does not duplicate the held grip when the movement already offers it', () => {
-    expect(offeredGrips('hinge', 'mixed').map((g) => g.key)).toEqual([
+    expect(offeredGrips({ movement_pattern: 'hinge' }, 'mixed').map((g) => g.key)).toEqual([
       'regular',
       'neutral',
       'mixed',
@@ -280,5 +280,69 @@ describe('showing it back', () => {
     // The whole discipline in one assertion: silence stays silence. Rendering
     // "Regular" here would be the app answering a question nobody asked.
     expect(describeSet(set({ grip: undefined }))).toBe('10 × 30kg');
+  });
+});
+
+/*
+ * Which answer wins: the server's, or this build's (N16).
+ *
+ * The subsets are served now (`offered_grips`), and `gripsFor` survives only as
+ * the offline fallback for exercises cached before the field existed —
+ * `exercise_cache` stores the whole API object, so the field arrives on the next
+ * catalog fetch, but rows already on disk predate it.
+ *
+ * The distinction these pin is `undefined` versus `[]`, and it is the one a
+ * truthiness check silently gets wrong: an empty array is the server SAYING no
+ * grips apply, which must hide the picker; `undefined` is the server not having
+ * said, which must fall back. Collapsing them removes the grip picker offline
+ * for every athlete who has not re-synced.
+ */
+describe('server-served grips beat the local table', () => {
+  it('uses what the server sent, even when it contradicts the local table', () => {
+    // `squat` is empty in the local table. If the server starts offering grips
+    // there, the app must follow without an app release — the half of #256 that
+    // serving this finishes.
+    expect(
+      offeredGrips({ movement_pattern: 'squat', offered_grips: ['regular'] }, null).map(
+        (g) => g.key,
+      ),
+    ).toEqual(['regular']);
+    // And the reverse: the server withdrawing a subset the local table still has.
+    expect(offeredGrips({ movement_pattern: 'hinge', offered_grips: [] }, null)).toEqual([]);
+  });
+
+  it('offers a grip this build has never heard of', () => {
+    // The whole point of serving it: a seventh grip needs no app release. The
+    // label falls back to the raw key rather than the chip vanishing.
+    const shown = offeredGrips({ movement_pattern: 'hinge', offered_grips: ['sumo'] }, null);
+    expect(shown.map((g) => g.key)).toEqual(['sumo']);
+    expect(shown[0].label).toBe('sumo');
+  });
+
+  it('falls back to the local table when the server has NOT said', () => {
+    // A row cached before the field existed. Hiding the picker here would be a
+    // regression an athlete in a basement gym cannot explain.
+    expect(offeredGrips({ movement_pattern: 'hinge' }, null).map((g) => g.key)).toEqual([
+      'regular',
+      'neutral',
+      'mixed',
+      'hook',
+    ]);
+    expect(gripApplies({ movement_pattern: 'hinge' })).toBe(true);
+  });
+
+  it('treats an empty served list as an ANSWER, not as silence', () => {
+    // The mutation this exists for: `offered_grips?.length ? served : fallback`
+    // passes every other test in this file and quietly restores the local table
+    // wherever the server said "none".
+    expect(gripApplies({ movement_pattern: 'hinge', offered_grips: [] })).toBe(false);
+  });
+
+  it('still surfaces a held grip the offer does not contain', () => {
+    // #256's rule, unchanged by where the list comes from: a set carrying a grip
+    // outside the offer keeps a chip to tap, or "unrecorded" is unreachable.
+    expect(
+      offeredGrips({ movement_pattern: 'squat', offered_grips: [] }, 'hook').map((g) => g.key),
+    ).toEqual(['hook']);
   });
 });

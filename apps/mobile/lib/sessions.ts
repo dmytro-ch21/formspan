@@ -93,10 +93,10 @@ export function gripsFor(movementPattern: string | undefined): Grip[] {
  * rather than replaces, so the common answers stay in their usual positions.
  */
 export function offeredGrips(
-  movementPattern: string | undefined,
+  exercise: { movement_pattern?: string; offered_grips?: string[] } | undefined,
   current: Grip | null | undefined,
 ): { key: Grip; label: string }[] {
-  const keys = gripsFor(movementPattern);
+  const keys = gripsToOffer(exercise);
   const shown = keys.map(
     (k) => GRIPS.find((g) => g.key === k) ?? { key: k, label: k },
   );
@@ -107,11 +107,40 @@ export function offeredGrips(
 }
 
 /**
- * Whether a grip is worth asking about at all — the emptiness of `gripsFor`.
+ * The server's answer, or this build's guess when the server has not given one.
+ *
+ * The subsets are decided server-side now and shipped on the exercise
+ * (`offered_grips`, N16), because this table existed in three hand-maintained
+ * copies — Go, here, and `apps/web` — policed by a Python parity script. The
+ * numbers in this file's own comment about it were wrong for two PRs.
+ *
+ * **`gripsFor` survives only as the OFFLINE FALLBACK**, and only for exercises
+ * cached before the field existed. Those rows are real: `exercise_cache` stores
+ * the whole API object, so the field appears on the next catalog fetch, but an
+ * athlete who last synced before this shipped and then walks into a basement gym
+ * has a catalog without it. Hiding the picker for them would be a regression
+ * they cannot explain; showing this build's last known answer is wrong only if
+ * the server has since changed its mind, and it self-heals on the next fetch.
+ *
+ * Which is why the distinction below is `!== undefined` and not truthiness: an
+ * empty array is the server SAYING no grips apply, and must not be mistaken for
+ * "the server has not said".
+ */
+function gripsToOffer(
+  exercise: { movement_pattern?: string; offered_grips?: string[] } | undefined,
+): Grip[] {
+  if (exercise?.offered_grips !== undefined) return exercise.offered_grips as Grip[];
+  return gripsFor(exercise?.movement_pattern);
+}
+
+/**
+ * Whether a grip is worth asking about at all — the emptiness of the offer.
  * Kept as its own name because that is what the call site is asking.
  */
-export function gripApplies(movementPattern: string | undefined): boolean {
-  return gripsFor(movementPattern).length > 0;
+export function gripApplies(
+  exercise: { movement_pattern?: string; offered_grips?: string[] } | undefined,
+): boolean {
+  return gripsToOffer(exercise).length > 0;
 }
 
 export type SetType = 'warmup' | 'working' | 'backoff' | 'drop' | 'amrap' | 'failure';

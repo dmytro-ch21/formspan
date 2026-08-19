@@ -8188,3 +8188,24 @@ training. Everything here is about it telling the truth.
 - **Prefer the object form for any dynamic route** — `router.push({ pathname: '/checkin/[date]', params: { date } })`, not a template literal. The template is invisible to both the route guard and (in CI) the type checker, so a route rename leaves a green build and a dead button.
 - **A typo under a dynamic parent is invisible to the guard** (`/bjj/promotion/nope` resolves, because `[id].tsx` sits beside `new.tsx`). Inherent to matching patterns rather than resolving them.
 - The route guard reads **string literals only**. A computed path (`` `/session/${id}` ``) is not covered, and its static prefix is deliberately not half-matched — a partial check reporting a pass is worse than no check.
+
+## Offered grips, served per exercise (N16, `GET /v1/exercises`)
+
+### Happy path
+
+- `GET /v1/exercises` returns `offered_grips` on every row: `["regular","neutral","mixed","hook"]` for a hinge, `["regular","neutral","reverse","angled"]` for a press.
+- A squat returns `offered_grips: []` — **not** `null`, and not an absent key. The mobile and web pickers show nothing for it.
+- Change the subset server-side and both clients follow on the next catalog fetch, with no app release. That is the half of #256 this finishes.
+
+### Edge cases & errors
+
+- **A grip the client has never heard of must still render.** Serve `["sumo"]` and the chip appears labelled with its raw id rather than vanishing — the point of serving the list is that a seventh grip needs no release.
+- **Absent is not empty.** A mobile row cached before the field existed (`payload_json` without `offered_grips`) falls back to the local table; a row whose served list is `[]` shows no picker. A truthiness check collapses the two and silently removes the picker offline for anyone who has not re-synced.
+- **A held grip outside the offer stays clearable** (#256, unchanged): a set carrying `hook` on a movement offering nothing still renders that one chip, or "unrecorded" is unreachable.
+- **The server still accepts a grip outside the offer.** `PUT /v1/sessions/{id}/sets` checks the vocabulary only — a hook-gripped shrug is real. Over- or under-offering must never produce a 400, which is what makes a stale client safe.
+
+### Regression trap
+
+- **`offered_grips` is derived in `scanExercise`, the single point where a row becomes an `Exercise`.** Deriving it in a handler instead ships `null` from whichever handler was forgotten.
+- **`apps/mobile`'s `gripsFor` is an OFFLINE FALLBACK, not a source of truth**, and `scripts/check-grip-parity.py` is what keeps it from becoming a second opinion. `apps/web` has no copy at all — do not reintroduce one, it fetches on render.
+- **`exercise.OfferedGrips` returns plain strings**, so the type system does not connect it to `session.Grip`. `TestEveryOfferedGripIsInTheVocabulary` is that connection; it lives in `session` because that side owns `ValidGrip`.

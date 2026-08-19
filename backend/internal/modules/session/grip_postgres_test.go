@@ -3,8 +3,9 @@ package session
 import (
 	"context"
 	"errors"
-	"slices"
 	"testing"
+
+	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
 )
 
 func ptrGrip(g Grip) *Grip { return &g }
@@ -159,163 +160,27 @@ func TestTheGripConstraintKeepsTheNameTheWireCodeDependsOn(t *testing.T) {
 	}
 }
 
-// GripApplies has no backend caller — the clients gate their pickers on their
-// own copy of this list — so without a test nothing pins it at all, and an
-// uncalled source of truth is exactly how the two copies drift apart.
+// TestEveryOfferedGripIsInTheVocabulary is the seam between the two packages
+// that used to be one.
 //
-// The exclusions are the half worth pinning: squats, jumps and conditioning,
-// where no vocabulary would make the question worth asking.
+// `exercise.OfferedGrips` names which grips a movement should OFFER; `ValidGrip`
+// here names which grips EXIST. They were the same file until N16 served the
+// first one, and nothing in the type system now stops them naming different
+// things — `OfferedGrips` returns plain strings precisely so the catalog does
+// not have to import the logging module.
 //
-// This comment used to say hinges, carries and olympic lifts were absent
-// "BECAUSE the enum has no `mixed` or `hook`", and warned that adding those
-// values without revisiting the list would leave the picker hidden. N9 added
-// them and DID revisit the list — but not this paragraph, which then sat as a
-// flat self-contradiction directly above a body asserting all three are
-// present. Three separate review passes swept for exactly this class of rot and
-// all three missed it, including the one that found six other instances.
-// GripsFor must hand every caller its own slice.
-//
-// The doc above declares this deliberate and load-bearing, and review measured
-// it surviving: swapping the literals for package-level tables passed both
-// existing tests. Unobservable today — there is no backend caller — but the
-// client's `offeredGrips` builds on this list, and a shared table that one
-// caller sorts is corrupted for every later one.
-func TestGripsForReturnsAFreshSliceEachCall(t *testing.T) {
-	for _, p := range []string{"hinge", "carry", "olympic", "horizontal_push", "isolation"} {
-		a, b := GripsFor(p), GripsFor(p)
-		if len(a) == 0 {
-			t.Fatalf("GripsFor(%q) is empty; the fixture is wrong", p)
-		}
-		if &a[0] == &b[0] {
-			t.Errorf("GripsFor(%q) returns the SAME backing array twice — one caller "+
-				"sorting or writing in place corrupts it for every later one", p)
-		}
-		// And prove it concretely rather than by pointer identity alone.
-		a[0] = GripHook
-		if GripsFor(p)[0] == GripHook && b[0] != GripHook {
-			t.Errorf("writing to GripsFor(%q)'s result changed what later callers see", p)
-		}
-	}
-}
-
-func TestGripIsAskedWhereTheVocabularyCanAnswerIt(t *testing.T) {
-	for _, p := range []string{
-		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation",
-		// N9: these three were in the WITHHELD list until `mixed` and `hook`
-		// existed. The inversion is the feature — 93 of 762 exercises, and the
-		// ones where grip matters most.
-		"hinge", "carry", "olympic",
-	} {
-		if !GripApplies(p) {
-			t.Errorf("GripApplies(%q) = false, want true", p)
-		}
-	}
-	for _, p := range []string{
-		// Meaningless — no vocabulary would make the question worth asking.
-		"squat", "lunge", "jump", "locomotion", "mobility", "core", "rotation", "grappling",
-		// And an exercise whose pattern the client could not load.
-		"",
-	} {
-		if GripApplies(p) {
-			t.Errorf("GripApplies(%q) = true, want false", p)
-		}
-	}
-}
-
-// The per-pattern subsets, which are a question-quality rule rather than a
-// constraint — nothing server-side refuses an odd pairing, so these assertions
-// ARE the specification.
-func TestGripsForOffersOnlyWhatTheMovementCanUse(t *testing.T) {
-	four := []Grip{GripRegular, GripNeutral, GripReverse, GripAngled}
-	for _, p := range []string{
-		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull", "isolation",
-	} {
-		if got := GripsFor(p); !slices.Equal(got, four) {
-			t.Errorf("GripsFor(%q) = %v, want the original four", p, got)
-		}
-	}
-
-	// The three new patterns, pinned as FULL SETS rather than by membership.
-	//
-	// Membership spot-checks were what shipped in #266, and review measured
-	// four mutations surviving them: hinge losing `hook`, carry/olympic losing
-	// `hook`, hinge losing `regular`, hinge gaining `reverse` — all green.
-	// `hook` had no positive assertion anywhere, which is half of N9's headline
-	// unpinned, and since `GripsFor` has no backend caller this test is the
-	// only server-side pin there is. An equality is the whole specification;
-	// a `Contains` is one clause of it.
-	if got := GripsFor("hinge"); !slices.Equal(got, []Grip{GripRegular, GripNeutral, GripMixed, GripHook}) {
-		t.Errorf("GripsFor(hinge) = %v, want regular/neutral/mixed/hook", got)
-	}
-	for _, p := range []string{"carry", "olympic"} {
-		if got := GripsFor(p); !slices.Equal(got, []Grip{GripRegular, GripNeutral, GripHook}) {
-			t.Errorf("GripsFor(%q) = %v, want regular/neutral/hook", p, got)
-		}
-	}
-
-	// `mixed` on hinges ALONE, kept as its own assertion because it is the one
-	// property the equalities above would still satisfy if every subset were
-	// rewritten together by someone who thought mixed belonged on a carry.
-	for _, p := range []string{
-		"carry", "olympic", "horizontal_push", "horizontal_pull",
-		"vertical_push", "vertical_pull", "isolation",
-	} {
-		if slices.Contains(GripsFor(p), GripMixed) {
-			t.Errorf("GripsFor(%q) offers mixed", p)
-		}
-	}
-
-	// `neutral` on hinges and olympic lifts reads wrong and is not. Counted from
-	// the seed catalog: 20 of `hinge`'s 55 rows are kettlebell, dumbbell or
-	// hex-bar, and 12 of `olympic`'s 25 are kettlebell (11) or dumbbell (1).
-	// Neither is a majority — olympic is 13 barbell — which is the point: both
-	// buckets are split, so dropping either value strands a real half.
-	for _, p := range []string{"hinge", "olympic"} {
-		if !slices.Contains(GripsFor(p), GripNeutral) {
-			t.Errorf("GripsFor(%q) dropped neutral; check the catalog before "+
-				"deciding that is right", p)
-		}
-	}
-
-	// The four originals stay OFF the new patterns where they are meaningless.
-	for _, p := range []string{"hinge", "carry", "olympic"} {
-		if slices.Contains(GripsFor(p), GripAngled) {
-			t.Errorf("GripsFor(%q) offers angled", p)
-		}
-	}
-	if slices.Contains(GripsFor("olympic"), GripReverse) {
-		t.Error("GripsFor(olympic) offers reverse")
-	}
-
-	// Emptiness IS GripApplies — asserted rather than assumed. The two agree by
-	// construction today, but `GripApplies` is one edit away from being an
-	// independent switch that happens to match, and nothing else would notice.
-	for _, p := range []string{
-		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull",
-		"isolation", "hinge", "carry", "olympic", "squat", "core", "", "not_a_pattern",
-	} {
-		if GripApplies(p) != (len(GripsFor(p)) > 0) {
-			t.Errorf("GripApplies(%q) = %v but GripsFor gives %d values — these have "+
-				"come apart", p, GripApplies(p), len(GripsFor(p)))
-		}
-	}
-	// Emptiness IS GripApplies, so the two can never disagree.
-	for _, p := range []string{"squat", "core", ""} {
-		if len(GripsFor(p)) != 0 {
-			t.Errorf("GripsFor(%q) is non-empty but the question is meaningless", p)
-		}
-	}
-
-	// Every offered value must be a real grip. A typo here would ship a chip
-	// the server then refuses with `invalid_grip`, which the phone would
-	// silently drop — the athlete taps it and nothing sticks.
+// So this is the guard. A typo in a subset would ship a chip the server then
+// refuses with `invalid_grip`, which the phone silently drops: the athlete taps
+// it and nothing sticks. Lives on this side because this side owns the
+// vocabulary; a test-only import of `exercise` creates no production cycle.
+func TestEveryOfferedGripIsInTheVocabulary(t *testing.T) {
 	for _, p := range []string{
 		"horizontal_push", "horizontal_pull", "vertical_push", "vertical_pull",
 		"isolation", "hinge", "carry", "olympic",
 	} {
-		for _, g := range GripsFor(p) {
-			if !ValidGrip(g) {
-				t.Errorf("GripsFor(%q) offers %q, which ValidGrip refuses", p, g)
+		for _, g := range exercise.OfferedGrips(p) {
+			if !ValidGrip(Grip(g)) {
+				t.Errorf("OfferedGrips(%q) offers %q, which ValidGrip refuses", p, g)
 			}
 		}
 	}
