@@ -5284,12 +5284,22 @@ paths:
                       equipment:
                         type: string
                         description: >
-                          The equipment family reported, e.g. `cable-stack`.
-                          Guaranteed to be used by at least one candidate.
+                          The equipment family, e.g. `cable-stack`. **Never
+                          empty on a 200, and every candidate uses it** — a
+                          response naming no equipment, or one whose candidates
+                          disagree with it, is refused as incoherent rather than
+                          returned. The earlier wording promised only "at least
+                          one candidate", which was both weaker than the code
+                          now is and untrue on the empty path.
                         example: cable-stack
                       candidates:
                         type: array
-                        description: Ranked, most likely first. Never empty on a 200.
+                        description: >
+                          Ranked, most likely first. Never empty on a 200, and
+                          every entry uses the `equipment` above. Candidates
+                          that disagree with it are dropped server-side before
+                          the cap is applied, so a mostly-coherent answer still
+                          returns its good candidates rather than nothing.
                         maxItems: 4
                         items:
                           type: object

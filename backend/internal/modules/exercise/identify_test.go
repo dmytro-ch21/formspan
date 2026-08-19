@@ -19,6 +19,18 @@ func fixtureCatalog() []Exercise {
 	return []Exercise{
 		{ID: "seated-cable-row", Name: "Seated Cable Row", Equipment: []string{"cable-stack"}, Status: StatusPublished},
 		{ID: "lat-pulldown", Name: "Lat Pulldown", Equipment: []string{"cable-stack"}, Status: StatusPublished},
+		// Five more cable-stack rows so a cap test can supply MORE THAN
+		// MaxCandidates candidates that all SURVIVE the coherence filter.
+		// Without them the cap test is vacuous: filtering now runs before the
+		// cap, so a mixed-equipment list is cut to two long before the cap
+		// could fire. That is exactly what happened to the original cap test
+		// when the filter was tightened — it kept passing and stopped meaning
+		// anything.
+		{ID: "cable-triceps-pushdown", Name: "Cable Triceps Pushdown", Equipment: []string{"cable-stack"}, Status: StatusPublished},
+		{ID: "cable-face-pull", Name: "Cable Face Pull", Equipment: []string{"cable-stack"}, Status: StatusPublished},
+		{ID: "cable-lateral-raise", Name: "Cable Lateral Raise", Equipment: []string{"cable-stack"}, Status: StatusPublished},
+		{ID: "cable-woodchop", Name: "Cable Woodchop", Equipment: []string{"cable-stack"}, Status: StatusPublished},
+		{ID: "cable-crossover", Name: "Cable Crossover", Equipment: []string{"cable-stack"}, Status: StatusPublished},
 		{ID: "leg-press", Name: "Leg Press", Equipment: []string{"plate-loaded-machine"}, Status: StatusPublished},
 		{ID: "chest-press-machine", Name: "Chest Press Machine", Equipment: []string{"selectorized"}, Status: StatusPublished},
 		{ID: "treadmill-run", Name: "Treadmill Run", Equipment: []string{"treadmill"}, Status: StatusPublished},
@@ -186,7 +198,14 @@ func TestValidateIdentificationDropsDuplicates(t *testing.T) {
 func TestValidateIdentificationCapsCandidates(t *testing.T) {
 	short := Shortlist(fixtureCatalog())
 	in := Identification{Equipment: "cable-stack"}
-	for _, id := range []string{"lat-pulldown", "seated-cable-row", "leg-press", "chest-press-machine", "treadmill-run"} {
+	// SEVEN, all cable-stack, so every one survives the coherence filter and
+	// the cap is the only thing that can reduce them. The earlier version of
+	// this test listed five exercises of mixed equipment, which the filter now
+	// cuts to two on its own — so it passed while exercising nothing.
+	for _, id := range []string{
+		"lat-pulldown", "seated-cable-row", "cable-triceps-pushdown", "cable-face-pull",
+		"cable-lateral-raise", "cable-woodchop", "cable-crossover",
+	} {
 		in.Candidates = append(in.Candidates, Candidate{ExerciseID: id, Confidence: 0.5})
 	}
 	got, err := ValidateIdentification(in, short)
@@ -446,5 +465,101 @@ func TestEveryMachineEquipmentNameIsRealVocabulary(t *testing.T) {
 			t.Errorf("%q is in MachineEquipment but no catalog row uses it — a typo here "+
 				"silently removes a whole machine family from the shortlist", m)
 		}
+	}
+}
+
+// The three below cover what review found in #321, and none of the original
+// tests reached any of them. Each was a path the first version had, not a new
+// feature — which is the more useful kind of gap to record.
+
+// **Candidates with no equipment named is incoherent**, and the first version
+// let it straight through: the guard only ran when `equipment != ""`.
+//
+// That made a PUBLISHED sentence false — the contract said `equipment` is
+// "guaranteed to be used by at least one candidate" — on a path the schema
+// actively invites, since the field's own description offers "" for none.
+func TestValidateIdentificationRefusesCandidatesWithNoEquipmentNamed(t *testing.T) {
+	_, err := ValidateIdentification(Identification{
+		Equipment:  "",
+		Candidates: []Candidate{{ExerciseID: "lat-pulldown", Confidence: 0.9}},
+	}, Shortlist(fixtureCatalog()))
+	if !errors.Is(err, ErrIdentifyRefused) {
+		t.Fatalf("candidates with no equipment named is a contradiction; want a refusal, got %v", err)
+	}
+	// The MESSAGE is asserted, not just the refusal, and that is deliberate.
+	// Mutation-testing showed the outcome alone does not pin this branch:
+	// delete the empty check and the coherence filter refuses anyway, because
+	// no real equipment string equals "". So the branch is only observable
+	// through what it says — and it exists to say the accurate thing, since
+	// "every candidate is other equipment" would be a misleading description
+	// of a response that named no equipment at all.
+	if !strings.Contains(err.Error(), "no equipment named") {
+		t.Errorf("refused for the wrong stated reason: %v", err)
+	}
+}
+
+// EVERY candidate must use the reported equipment, not merely one.
+//
+// The first version asked whether ANY agreed, so a treadmill answer could carry
+// cable-machine candidates through on the strength of one that matched. A guard
+// looser than the prompt it enforces cannot detect that prompt being ignored,
+// which is the only thing it is for.
+func TestValidateIdentificationDropsCandidatesThatUseOtherEquipment(t *testing.T) {
+	got, err := ValidateIdentification(Identification{
+		Equipment: "cable-stack",
+		Candidates: []Candidate{
+			{ExerciseID: "lat-pulldown", Confidence: 0.9},  // cable-stack
+			{ExerciseID: "leg-press", Confidence: 0.8},     // plate-loaded-machine
+			{ExerciseID: "treadmill-run", Confidence: 0.7}, // treadmill
+		},
+	}, Shortlist(fixtureCatalog()))
+	if err != nil {
+		t.Fatalf("a mostly-coherent answer should survive with the good candidates: %v", err)
+	}
+	if len(got.Candidates) != 1 || got.Candidates[0].ExerciseID != "lat-pulldown" {
+		t.Fatalf("want only the cable-stack candidate, got %+v", got.Candidates)
+	}
+	// Every survivor uses the reported equipment — the property the contract
+	// now states, asserted rather than assumed.
+	for _, c := range got.Candidates {
+		uses := false
+		for _, e := range Shortlist(fixtureCatalog()) {
+			if e.ID != c.ExerciseID {
+				continue
+			}
+			for _, q := range e.Equipment {
+				if q == got.Equipment {
+					uses = true
+				}
+			}
+		}
+		if !uses {
+			t.Errorf("%s survived but does not use %q", c.ExerciseID, got.Equipment)
+		}
+	}
+}
+
+// The cap is applied AFTER the coherence filter.
+//
+// Capping first discards by RANK what the filter then removes by CORRECTNESS,
+// so a good fifth candidate is lost while four incoherent ones ahead of it are
+// dropped anyway — leaving the athlete fewer answers than the model got right.
+func TestValidateIdentificationCapsAfterFilteringNotBefore(t *testing.T) {
+	got, err := ValidateIdentification(Identification{
+		Equipment: "cable-stack",
+		Candidates: []Candidate{
+			{ExerciseID: "leg-press", Confidence: 0.9},           // wrong equipment
+			{ExerciseID: "chest-press-machine", Confidence: 0.8}, // wrong equipment
+			{ExerciseID: "treadmill-run", Confidence: 0.7},       // wrong equipment
+			{ExerciseID: "seated-cable-row", Confidence: 0.6},    // right, 4th
+			{ExerciseID: "lat-pulldown", Confidence: 0.5},        // right, 5th — past the cap
+		},
+	}, Shortlist(fixtureCatalog()))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Candidates) != 2 {
+		t.Fatalf("both coherent candidates should survive, including the one ranked past the cap; got %+v",
+			got.Candidates)
 	}
 }
