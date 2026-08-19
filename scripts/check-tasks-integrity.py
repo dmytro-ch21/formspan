@@ -29,14 +29,33 @@ is the exact loss the claiming convention was written to prevent.
 
 ## What it promises, and what it cannot
 
-It compares this working tree against `origin/main`. That bounds it in two ways
-worth stating rather than implying:
+It compares this working tree against the **merge base** with `origin/main`.
+That bounds it in four ways, stated rather than implied — the first two are the
+ones that matter operationally and the first draft of this file omitted both:
 
-- **A stale `origin/main` weakens it.** If the baseline predates a tick, the
-  regression of that tick is invisible here. `git fetch origin` first, which the
-  branching rule already requires.
+- **It is blind to a branch losing its OWN work.** Measured: a branch that ticks
+  an id and files a new one, then has a bad resolution revert its own tick and
+  drop its own new id, prints `tasks intact`. Both sides of a resolution can
+  lose work and only the upstream-facing side is guarded. Inherent to a
+  two-point comparison, and the reason the headline claim is "makes a lost
+  UPSTREAM tick a red build" rather than anything broader.
+- **A stale `origin/main` weakens it.** If the fetched tip predates a tick, the
+  merge base does too, and reverting that tick is invisible here. `git fetch
+  origin` first, which the branching rule already requires. Note this is
+  weakening, never a false alarm: being behind cannot fail this check, which is
+  what the merge base buys.
+- **A qualified id may appear only ONCE.** `**N7 (backend)**` parses as `N7`, so
+  adding `**N7 (mobile)**` — splitting a task the way the file already models —
+  is reported as a duplicate. The alternative (keying on id-plus-qualifier)
+  would miss a real duplicate where one copy gained a qualifier, which is the
+  worse trade. Split with a new id instead.
 - **It does not read prose.** A line rewritten to say something false, or a task
   ticked that was never done, is out of scope. This checks structure only.
+
+Retiring or renumbering an id fails as a dropped line. That is deliberate —
+`CLAUDE.md` says a finished task's line is never deleted, because it is the
+record that the task was considered — but it means a genuine renumbering needs
+that rule revisited rather than this check bypassed.
 
 Stdlib-only and syntactic, matching `check-grip-parity.py` and
 `check-rate-parity.py`, so `verify` needs no toolchain beyond `python3` and
@@ -48,7 +67,7 @@ import subprocess
 import sys
 
 TASKS = "docs/TASKS.md"
-BASELINE = "origin/main"
+UPSTREAM = "origin/main"
 
 # `- [x] **N41** — ...`, and also `- [x] **N7 (backend)** — ...`, where the id
 # carries a qualifier inside the bold. Deliberately NOT anchored on the closing
@@ -75,17 +94,48 @@ def parse(text: str) -> dict[str, list[str]]:
     return found
 
 
-def baseline_text() -> str | None:
-    """`docs/TASKS.md` as `origin/main` has it, or None if it cannot be read."""
+def git(*args: str) -> str | None:
+    """Run a git command, or None if it fails."""
     try:
         return subprocess.run(
-            ["git", "show", f"{BASELINE}:{TASKS}"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
+            ["git", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
+
+
+def baseline_ref() -> str | None:
+    """The commit to compare against: the MERGE BASE, not `origin/main`'s tip.
+
+    This distinction is the whole correctness of the check, and the first
+    version got it wrong.
+
+    Comparing against the tip fails any branch that is merely BEHIND — and being
+    behind cannot produce the damage this file is looking for. Git's three-way
+    merge resolves against the merge base, so a line the branch never touched is
+    never regressed by merging it, no matter how far the tip has moved. The tip
+    comparison therefore fired on a condition structurally incapable of causing
+    harm, while telling the author they had regressed a task they had not
+    touched.
+
+    It made three ordinary situations red for no reason: a **stacked PR** (whose
+    merge ref contains its feature base, not `main`'s newest ticks — and
+    `ci.yml` deliberately supports stacked PRs), a **push to `main`** racing
+    another merge, and — worst — **every local `verify` on every in-flight
+    branch** after any merge anywhere, since this runs first and blocks the
+    chain. A check that cries wolf on undamaged trees gets deleted, which is the
+    one outcome that leaves the file unguarded again.
+
+    After a rebase — the exact moment this check exists for — the merge base IS
+    `origin/main`, so nothing is given up. Verified against all three real
+    failures (un-tick, duplicate, drop): each still fails.
+    """
+    return git("merge-base", "HEAD", UPSTREAM)
+
+
+def baseline_text(ref: str) -> str | None:
+    """`docs/TASKS.md` as of `ref`, or None if it cannot be read."""
+    return git("show", f"{ref}:{TASKS}")
 
 
 def main() -> int:
@@ -104,15 +154,17 @@ def main() -> int:
                 f"{', '.join('[x]' if s == 'x' else '[ ]' for s in states)})"
             )
 
-    base_text = baseline_text()
+    ref = baseline_ref()
+    base_text = baseline_text(ref) if ref else None
     if base_text is None:
         # NOT a skip. A check that quietly passes when it cannot do its job is
         # the failure this repo has already shipped once — an integration test
         # that skipped on every CI run for months while its package printed
         # `ok`. If the baseline is unreachable, say so and fail.
         print(
-            f"check-tasks-integrity: cannot read {TASKS} from {BASELINE}, so the\n"
-            f"comparison that catches a regressed task cannot be made.\n\n"
+            f"check-tasks-integrity: cannot read {TASKS} at the merge base with\n"
+            f"{UPSTREAM}, so the comparison that catches a regressed task cannot be\n"
+            f"made.\n\n"
             f"Run `git fetch origin` and try again. In CI, the workflow must fetch\n"
             f"the base branch before this step — a shallow checkout does not have it."
         )
@@ -126,18 +178,18 @@ def main() -> int:
     for task_id, states in sorted(base.items()):
         if "x" in states and here.get(task_id) and "x" not in here[task_id]:
             problems.append(
-                f"  {task_id} is [x] on {BASELINE} but [ ] here — a finished task "
-                f"marked open again"
+                f"  {task_id} is [x] at the merge base but [ ] here — a finished "
+                f"task marked open again"
             )
 
     # 3. Nothing may vanish. A finished task's line IS the record that it was
     #    considered, which is why the convention marks lines in place rather
     #    than deleting them.
     for task_id in sorted(set(base) - set(here)):
-        problems.append(f"  {task_id} is on {BASELINE} and missing here")
+        problems.append(f"  {task_id} is at the merge base and missing here")
 
     if problems:
-        print(f"check-tasks-integrity: {TASKS} has regressed against {BASELINE}.\n")
+        print(f"check-tasks-integrity: {TASKS} has regressed against the merge base.\n")
         print("\n".join(problems))
         print(
             "\nThis is almost always a rebase resolution that took one side of a\n"
@@ -150,7 +202,7 @@ def main() -> int:
 
     print(
         f"tasks intact ({len(here)} ids, none duplicated, "
-        f"none regressed against {BASELINE})"
+        f"none regressed against the merge base with {UPSTREAM})"
     )
     return 0
 

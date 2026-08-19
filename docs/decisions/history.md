@@ -30470,7 +30470,7 @@ it**: a baseline predating a tick cannot see that tick reverted. And it **reads
 structure, not prose** — a line rewritten to say something false, or a task
 ticked that was never done, is out of scope.
 
-### It was tested in the failing direction, and it caught something on its first run
+### It was tested in the failing direction
 
 Four mutations, each verified to have applied and then to go red: un-tick,
 duplicate, drop, baseline-missing. Separately, that `pnpm run verify` itself
@@ -30481,8 +30481,50 @@ That discipline is the day's own lesson turned on the thing written to enforce
 the day's other lessons: **a checker nobody has watched fail is one more thing
 that looks like it is watching.**
 
-And on its first live run against a real tree it failed honestly — this branch
-was two ids behind `main`, and it named them rather than passing.
+### And it was still wrong, in the way the day was about
+
+The first version compared against **`origin/main`'s tip**. Review measured what
+that does: it fails any branch that is merely BEHIND — and being behind is
+structurally incapable of causing the damage, because git's three-way merge
+resolves against the merge base and never regresses a line the branch did not
+touch. Proven rather than argued: the stale branch was merged and every one of
+main's ticks survived.
+
+So the check fired on undamaged trees and told their authors they had regressed
+a task they had never touched. Three ordinary situations went red for no reason
+— a **stacked PR** (whose merge ref carries its feature base, not main's newest
+ticks, and `ci.yml` deliberately supports stacked PRs), a **push to `main`**
+racing another merge, and, worst, **every local `verify` on every in-flight
+branch** after any merge anywhere, since this runs first and blocks the chain.
+A check that cries wolf on undamaged trees gets deleted, which is the single
+outcome that leaves the file unguarded again. `git merge-base HEAD origin/main`
+fixes all three and loses none of the real catches.
+
+**And the first version of this entry claimed a false positive as a success.**
+It said the check "caught a real regression on its first live run", naming two
+ids. It had not: the branch was two ids *behind* main, which is exactly the
+false alarm above, and its only `TASKS.md` edit was its own tick. The one piece
+of live evidence offered for the check working was an instance of its worst bug,
+recorded permanently as proof. That is the same
+comment-describes-behaviour-that-does-not-exist defect this branch had already
+hit twice — a `confidence` docstring, and an accessibility comment claiming a
+VoiceOver announcement that iOS ignores — and committing it a third time, inside
+the record of the tool built to make such things visible, is the most useful
+thing in this entry.
+
+The corrected claim is smaller and true: **the check has never yet caught a real
+regression.** It has been shown to fail correctly on four constructed ones.
+
+### What it does not promise
+
+Two limits the first draft omitted, both now in the docstring. It is **blind to
+a branch losing its OWN work** — a bad resolution reverting this branch's own
+tick and dropping the new id it filed prints `tasks intact`, because only the
+upstream-facing side of a two-point comparison is guarded. And a **qualified id
+may appear only once**: `**N7 (backend)**` parses as `N7`, so adding
+`**N7 (mobile)**` reads as a duplicate. Keying on id-plus-qualifier instead
+would miss a real duplicate where one copy gained a qualifier, which is the
+worse trade — split with a new id.
 
 
 ## Open items / known gaps as of this entry
