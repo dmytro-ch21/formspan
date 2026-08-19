@@ -29,10 +29,10 @@ import { useAuth } from '@clerk/clerk-expo';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
-import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
@@ -82,8 +82,22 @@ export default function DescribeMealScreen() {
     setQuota(res.quota);
   }, []);
 
+  /**
+   * Busy OR saving. Both mean "an operation owns this screen", and the two
+   * were tracked apart while only one of them gated the estimate buttons.
+   *
+   * The race that opens: tap Log, then Work it out while the loop is in
+   * flight. `receive` replaces `rows` with a fresh draft while `logAll`
+   * iterates its tap-time copy, `router.back()` then pops the screen out from
+   * under the new estimate — a quota unit spent on nothing — and if the save
+   * fails partway the error's "The items still listed were not logged" is
+   * describing a draft those items were never part of. Same class as the
+   * Remove-during-save race, one control further up. Raised in review.
+   */
+  const locked = busy || saving;
+
   const describe = useCallback(async () => {
-    if (!description.trim() || busy) return;
+    if (!description.trim() || locked) return;
     setBusy(true);
     setError(null);
     try {
@@ -93,11 +107,11 @@ export default function DescribeMealScreen() {
     } finally {
       setBusy(false);
     }
-  }, [description, busy, getToken, meal, receive]);
+  }, [description, locked, getToken, meal, receive]);
 
   const photograph = useCallback(
     async (fromCamera: boolean) => {
-      if (busy) return;
+      if (locked) return;
       // Guarded, because the caller is `void photograph(...)`: a throw from
       // the permission prompt or the picker (already open, OS-level failure)
       // would otherwise be an unhandled rejection, and the observable is a
@@ -118,8 +132,16 @@ export default function DescribeMealScreen() {
         picked = fromCamera
           ? await ImagePicker.launchCameraAsync({ quality: 1 })
           : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
-      } catch (err) {
-        setError(messageFor(err));
+      } catch {
+        // NOT messageFor: both of its branches are network-flavoured, and its
+        // fallback says "Could not reach the server. Try again when you have
+        // signal." — the wrong diagnosis entirely for a camera that would not
+        // open, and one that sends the athlete to check their signal.
+        setError(
+          fromCamera
+            ? 'The camera would not open. Try again, or describe the meal instead.'
+            : 'That photo could not be opened. Try another, or describe the meal instead.',
+        );
         return;
       }
       if (picked.canceled || !picked.assets[0]) return;
@@ -150,7 +172,7 @@ export default function DescribeMealScreen() {
         setBusy(false);
       }
     },
-    [busy, description, getToken, meal, receive],
+    [locked, description, getToken, meal, receive],
   );
 
   /**
@@ -248,7 +270,7 @@ export default function DescribeMealScreen() {
         accessibilityLabel="Work it out"
         // Dimming is a sighted-only signal. Without the state, a screen reader
         // announces an ordinary button that then does nothing.
-        disabled={busy || !description.trim()}
+        disabled={locked || !description.trim()}
         accessibilityState={{ disabled: busy || !description.trim() }}
         testID="describe-submit"
       >
@@ -277,7 +299,7 @@ export default function DescribeMealScreen() {
           style={[styles.secondary, busy && styles.off]}
           accessibilityRole="button"
           accessibilityLabel="Take a photo of this meal"
-          disabled={busy}
+          disabled={locked}
           accessibilityState={{ disabled: busy }}
           testID="describe-camera"
         >
@@ -288,7 +310,7 @@ export default function DescribeMealScreen() {
           style={[styles.secondary, busy && styles.off]}
           accessibilityRole="button"
           accessibilityLabel="Choose a photo from your library"
-          disabled={busy}
+          disabled={locked}
           accessibilityState={{ disabled: busy }}
           testID="describe-library"
         >
@@ -426,6 +448,8 @@ function Field({
   autoFocus?: boolean;
   editable?: boolean;
 }) {
+  const ensureVisible = useEnsureVisible();
+  const inputRef = useRef<TextInput>(null);
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -439,6 +463,17 @@ function Field({
         testID={testID}
         autoFocus={autoFocus}
         editable={editable}
+        // The model's number is SELECTED, not just focused, so the first
+        // keystroke replaces it. Without this the cursor lands after "2" and
+        // correcting it to 0.5 means deleting first — friction on the one
+        // field the screen just told the athlete to check.
+        selectTextOnFocus
+        ref={inputRef}
+        // Lifts the field above the keyboard when the keyboard is ALREADY up
+        // at the same height — moving between the decimal fields by tap. The
+        // native inset adjustment covers the keyboard appearing; this is the
+        // case it does not, and the case `useEnsureVisible` exists for.
+        onFocus={() => ensureVisible(inputRef.current)}
       />
     </View>
   );

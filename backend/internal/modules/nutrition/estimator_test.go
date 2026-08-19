@@ -3,6 +3,8 @@ package nutrition
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -250,5 +252,57 @@ func TestTheOpenAIBackendShipsWithAnOutputCap(t *testing.T) {
 	c := newOpenAICompleter("k", DefaultModels[ProviderOpenAI])
 	if c.maxTokens != estimateMaxTokens {
 		t.Fatalf("output cap = %d, want %d", c.maxTokens, estimateMaxTokens)
+	}
+}
+
+func TestResolveModelIsTheOnePlaceDefaultingHappens(t *testing.T) {
+	// main.go logs the resolved model at boot and NewEstimator builds with it;
+	// two copies of "empty means the default" drift, and the one that drifts is
+	// the log — which is the line somebody reads to find out what is running.
+	for _, tc := range []struct {
+		provider Provider
+		override string
+		want     string
+	}{
+		{ProviderOpenAI, "", DefaultModels[ProviderOpenAI]},
+		{ProviderAnthropic, "", DefaultModels[ProviderAnthropic]},
+		{ProviderOpenAI, "  ", DefaultModels[ProviderOpenAI]},
+		{ProviderOpenAI, "gpt-5.4-nano", "gpt-5.4-nano"},
+		{ProviderOpenAI, "  gpt-5.4-nano  ", "gpt-5.4-nano"},
+	} {
+		if got := ResolveModel(tc.provider, tc.override); got != tc.want {
+			t.Errorf("ResolveModel(%q, %q) = %q, want %q", tc.provider, tc.override, got, tc.want)
+		}
+	}
+}
+
+func TestBothBackendsCallTruncationTheSameThing(t *testing.T) {
+	// Truncation is deterministic, so it must be a refusal on EVERY backend: a
+	// retryable status bills the athlete a second time for the identical doomed
+	// request. The two disagreed — OpenAI reported it, Anthropic let a cut-off
+	// response fall through to the JSON parse and surface as "temporarily
+	// unavailable" — which is the divergence the shared completer exists to
+	// stop. This asserts the shared vocabulary rather than either mechanism.
+	for _, err := range []error{
+		fmt.Errorf("%w: response was cut off", ErrEstimateRefused),
+	} {
+		if !errors.Is(err, ErrEstimateRefused) {
+			t.Fatal("truncation must map to a refusal")
+		}
+		if errors.Is(err, ErrEstimateUnavailable) {
+			t.Fatal("truncation must not read as retryable")
+		}
+	}
+	// And the guard that matters: neither file may report truncation as an
+	// outage. A grep is the honest test here — the alternative is a live call
+	// per provider, and this catches the regression the review found.
+	for _, path := range []string{"anthropic.go", "openai.go"} {
+		src, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", path, readErr)
+		}
+		if !strings.Contains(string(src), "response was cut off") {
+			t.Errorf("%s does not handle truncation — a cut-off response will read as an outage", path)
+		}
 	}
 }

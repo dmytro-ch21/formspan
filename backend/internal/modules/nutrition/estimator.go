@@ -146,6 +146,18 @@ var DefaultModels = map[Provider]string{
 	ProviderOpenAI:    "gpt-5.6-luna",
 }
 
+// ResolveModel is the model id a given configuration actually uses.
+//
+// Exported so main.go can log what it built rather than re-deriving it, which
+// is the kind of duplicated defaulting that drifts and then misreports the
+// thing somebody is reading the log to find out.
+func ResolveModel(provider Provider, override string) string {
+	if m := strings.TrimSpace(override); m != "" {
+		return m
+	}
+	return DefaultModels[provider]
+}
+
 // NewEstimator builds the configured backend.
 //
 // Returns nil — not an error — when there is no API key, and the handler serves
@@ -174,10 +186,7 @@ func NewEstimator(cfg EstimatorConfig) (Estimator, error) {
 		return nil, nil
 	}
 
-	model := strings.TrimSpace(cfg.Model)
-	if model == "" {
-		model = DefaultModels[provider]
-	}
+	model := ResolveModel(provider, cfg.Model)
 
 	var c completer
 	switch provider {

@@ -140,8 +140,14 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 		// message"; only the second half was being done, so a provider outage
 		// on the one endpoint that costs money produced a stream of 502s with
 		// no server-side detail at all.
+		// No `model` field, deliberately. Every error path in Estimate returns a
+		// ZERO Estimate, so `est.Model` here was always the empty string — a
+		// field that reads as "the model is unknown" when it means "this code
+		// never had it". The configured model is deploy config rather than
+		// per-request data, and main.go logs it once at boot, which is where a
+		// support case should read it from.
 		httplog.FromContext(r.Context()).Error("nutrition: estimate failed",
-			"user_id", userID, "source", src, "model", est.Model, "err", estErr)
+			"user_id", userID, "source", src, "err", estErr)
 		writeEstimateError(w, estErr)
 		return
 	}
@@ -288,6 +294,11 @@ func humaniseWait(d time.Duration) string {
 		m := int(d.Round(time.Minute).Minutes())
 		if m == 1 {
 			return "a minute"
+		}
+		// Rounding can carry a shade under an hour up to a flat 60, and
+		// "60 minutes" is not how anybody says it.
+		if m >= 60 {
+			return "about an hour"
 		}
 		return fmt.Sprintf("%d minutes", m)
 	}

@@ -367,6 +367,11 @@ func TestHowTheWaitIsSpoken(t *testing.T) {
 		{30 * time.Second, "under a minute"},
 		{90 * time.Second, "2 minutes"},
 		{45 * time.Minute, "45 minutes"},
+		// The rounding seam. Under an hour by the comparison, but Round carries
+		// it to a flat 60 — and "60 minutes" is not how anybody says it. Only a
+		// value inside [59m30s, 60m) exercises this; 62m takes the hour branch
+		// and proves nothing about it.
+		{59*time.Minute + 45*time.Second, "about an hour"},
 		{62 * time.Minute, "about an hour"},
 		{5 * time.Hour, "about 5 hours"},
 		{-time.Second, "under a minute"},

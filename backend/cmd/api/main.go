@@ -274,6 +274,19 @@ func main() {
 		logger.Error("nutrition: estimator config", "err", err)
 		os.Exit(1)
 	}
+	// Logged ONCE, here, because which model drafts a meal is deploy config
+	// rather than per-request data — and because the per-request failure log
+	// deliberately does not carry it. This is the line a support case reads to
+	// find out what was actually running, and the line that shows an
+	// ESTIMATE_MODEL typo took effect (an unknown model id is not rejected at
+	// boot; it fails on the first call).
+	if mealEstimator == nil {
+		logger.Info("nutrition: estimation disabled", "reason", "no "+estimateProvider.APIKeyEnv())
+	} else {
+		logger.Info("nutrition: estimation enabled",
+			"provider", string(estimateProvider),
+			"model", nutrition.ResolveModel(estimateProvider, os.Getenv("ESTIMATE_MODEL")))
+	}
 	estimateHandler := nutrition.NewEstimateHandler(
 		mealEstimator,
 		nutrition.NewPostgresEstimateUsage(pool),

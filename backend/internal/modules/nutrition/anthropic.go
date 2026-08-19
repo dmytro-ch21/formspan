@@ -84,6 +84,15 @@ func (a *anthropicCompleter) complete(ctx context.Context, in EstimateInput) (st
 	if resp.StopReason == anthropic.StopReasonRefusal {
 		return "", "", ErrEstimateRefused
 	}
+	// Truncation, reported the SAME WAY as on the other backend. Without this
+	// a response cut off at MaxTokens fell through to the JSON parse, failed
+	// there, and surfaced as ErrEstimateUnavailable — "try again later" for
+	// something deterministic, which bills the athlete twice for one doomed
+	// request. The two backends disagreeing about the same event is precisely
+	// what the shared completer exists to prevent, and they did.
+	if resp.StopReason == anthropic.StopReasonMaxTokens {
+		return "", "", fmt.Errorf("%w: response was cut off", ErrEstimateRefused)
+	}
 	return anthropicText(resp), string(resp.Model), nil
 }
 

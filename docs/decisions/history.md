@@ -27660,6 +27660,59 @@ A second one, found while writing a test rather than by mutation:
 window itself. Passing a reset time yields one a full day late. That is the
 same confusion this PR hit once already.
 
+### Second review pass, and three things the first fix half-did
+
+Both reviewers ran again against the fixes. No blocking findings and no
+regressions, but three of the suggestions were the *first fix not going far
+enough*, which is worth separating from ordinary polish:
+
+- **The failure log named a model it could never have.** Every error path in
+  `Estimate` returns a ZERO `Estimate`, so the `model` field added an hour
+  earlier — specifically so a support case could name the model — was always
+  the empty string. It reads as "the model is unknown" and means "this code
+  never had it". The field is gone; instead `main.go` logs the resolved
+  provider and model ONCE at boot, which is the honest place for deploy config
+  and also shows an `ESTIMATE_MODEL` typo took effect (an unknown model id is
+  not rejected at boot — it fails on the first call). `ResolveModel` exists so
+  that line and the factory cannot disagree about what "empty means the
+  default" resolves to.
+- **Only one backend learned about truncation.** The OpenAI path was taught to
+  report a cut-off response as a refusal rather than an outage, because the
+  retry is deterministic and bills twice. Anthropic still let it fall through
+  to the JSON parse and surface as "temporarily unavailable" — the same defect,
+  unfixed, on the other backend. Two backends disagreeing about one event is
+  exactly what the shared `completer` was built to prevent, and they did.
+- **`humaniseWait` said "60 minutes".** Rounding carries anything from 59m30s
+  to a flat 60 while still failing the `< time.Hour` test.
+
+### And a mutation that proved nothing, twice
+
+Two of the new guards passed their mutation on inputs that could not
+discriminate. `retryAfterSeconds` was tested only with a negative duration,
+which truncates below zero under both `> 0` and `>= 0`; the case that separates
+them is a positive duration under a second. `humaniseWait` was tested at 62
+minutes, which takes the hour branch and says nothing about the rounding seam
+below it. Both are the same error: **covering the line is not testing the
+change.** Choosing the input where the two versions differ is the whole skill,
+and it is not what "write a test for this function" produces by default.
+
+### The one judgement call, recorded because it was contested
+
+The frontend reviewer argued against focusing the servings field when a draft
+arrives: the header says "Check these before logging", and a keyboard covering
+part of the list works against reading the draft first — most likely after the
+photo flow, where the athlete has just come back from the camera.
+
+Kept, for two reasons. It fires only when `portion_confidence` is `low`, so the
+common draft focuses nothing at all; and when it does fire the model has
+explicitly said it could not judge that quantity, which is the one number that
+needs correcting. `selectTextOnFocus` was added alongside, so the first
+keystroke replaces the guess rather than appending to it — without that,
+correcting "2" to "0.5" meant deleting first, on the very field the screen just
+asked the athlete to check. This is a product call rather than a correctness
+one and the counter-argument is reasonable; reverting to scroll-into-view
+without focus is a one-line change if it reads badly on a device.
+
 ### Open questions this leaves
 
 - **Still no photograph of a real plate.** Unchanged and now the oldest open
