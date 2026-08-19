@@ -156,8 +156,12 @@ export function emptySearchMessage(result: CatalogSearch, query: string): string
     case 'market_not_covered':
       return 'The food catalog does not cover this region yet, so it cannot answer for these foods.';
     default:
-      // `unknown`, and `ok` with an empty list, which the contract says cannot
-      // happen. Neither is entitled to claim the food is missing.
+      // `unknown`, and `ok` — the latter only reachable if a caller asks for a
+      // message about an answer that HAS results, which is a caller bug rather
+      // than a server one. `add.tsx` used to do exactly that when every row was
+      // deduped away against saved foods, so an `ok` answer rendered as a
+      // catalog failure; it now gates on the answer's own emptiness. Neither
+      // value is entitled to claim the food is missing.
       return 'The catalog could not answer that one. Your own saved foods still work.';
   }
 }

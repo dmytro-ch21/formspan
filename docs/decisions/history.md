@@ -30207,6 +30207,39 @@ catalog. The server owns these vocabularies and can extend them; a client union
 closed over today's values mislabels tomorrow's, always in the most confident
 direction available.
 
+### The dedupe turned a good answer into a failure message
+
+Review caught this and reproduced it, and it is the mainline case rather than an
+edge one.
+
+The empty-state block was gated on the **post-dedupe** count and then fed the
+**pre-dedupe** answer to the message. So when every catalog row collided with
+something the athlete had already saved — which is exactly what happens to
+anyone who has saved a common food — the answer was `ok`, the catalog had
+answered perfectly, and the screen rendered *"The catalog could not answer that
+one"* directly beneath the saved row that had just answered it.
+
+That is the feature's own invariant broken from the client side: only `no_match`
+may say the catalog failed to help, and this said something worse about an `ok`.
+The message now keys on the ANSWER's emptiness, and a fully-deduped answer
+renders nothing at all.
+
+Two smaller ones from the same review. The cap line counted pre-dedupe rows, so
+it claimed to be "showing 20 of 63" above eighteen. And the row displayed the
+bare name while the log recorded brand-plus-name, so an athlete tapped a row
+saying one thing and found another in their diary — both now go through one
+function.
+
+The dedupe key also gained `brand`. On name alone a brandless saved "Greek
+Yogurt" suppressed every branded Greek yogurt in the catalog, which is the
+opposite failure to the one dedupe exists to prevent.
+
+**The test for dedupe could not have caught any of this**, and the reason is
+worth keeping: it asserted only that the colliding row DISAPPEARED, so a change
+that suppressed the entire catalog section whenever the saved list was non-empty
+passed it. An absence test needs a survivor. It now sends two rows, one
+colliding and one not, and asserts the second is still there.
+
 ### A stale answer, and a test that could not see it
 
 Answers are paired with the query they answer. Without that, a result for

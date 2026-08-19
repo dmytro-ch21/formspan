@@ -122,8 +122,45 @@ it('logs a catalog row without claiming it as a saved food', async () => {
   expect(entry.source_food_id).toBeNull();
 });
 
-/** The athlete's own foods are not replaced by the catalog. */
+/**
+ * The athlete's own foods are not replaced, and a food they have saved is not
+ * listed twice.
+ *
+ * **Two catalog rows, one colliding and one not.** Asserting only that the
+ * collider disappears cannot tell deduplication from suppressing the whole
+ * catalog section whenever the saved list is non-empty — a mutation doing the
+ * latter passed the first version of this test. The survivor is what makes it
+ * a dedupe test. Raised in review.
+ */
 it('keeps saved foods and does not list them twice', async () => {
+  mockLocalFoods.mockResolvedValue([
+    { id: 'mine-1', kind: 'food', name: 'Oats, rolled', brand: '', serving_label: '40 g',
+      serving_grams: 40, kcal: 150, protein_g: 5, carb_g: 26, fat_g: 3, fibre_g: 4 },
+  ]);
+  const other = { ...CATALOG_OATS, id: 'usda-2', name: 'Oat bran' };
+  mockSearchCatalog.mockResolvedValue(
+    answer({ foods: [CATALOG_OATS, other], total: 2, outcome: 'ok' }),
+  );
+  await search('oat');
+  await waitFor(() => expect(screen.getByTestId('add-food-mine-1')).toBeTruthy());
+  // The collider is suppressed...
+  expect(screen.queryByTestId('add-catalog-usda-1')).toBeNull();
+  // ...and the one that is genuinely different is not.
+  expect(screen.getByTestId('add-catalog-usda-2')).toBeTruthy();
+  expect(screen.queryByTestId('add-catalog-empty')).toBeNull();
+});
+
+/**
+ * The blocking finding from review, reproduced.
+ *
+ * When EVERY catalog row is deduped away, the answer was still `ok` — the
+ * catalog had answered — but the empty block was gated on the post-dedupe count
+ * and fed the pre-dedupe answer to the message. The result was "The catalog
+ * could not answer that one" rendered directly beneath the saved row that had
+ * just answered it, and it is the mainline case for anyone who has saved a
+ * common food.
+ */
+it('says nothing when the catalog answered and every row was already saved', async () => {
   mockLocalFoods.mockResolvedValue([
     { id: 'mine-1', kind: 'food', name: 'Oats, rolled', brand: '', serving_label: '40 g',
       serving_grams: 40, kcal: 150, protein_g: 5, carb_g: 26, fat_g: 3, fibre_g: 4 },
@@ -131,10 +168,43 @@ it('keeps saved foods and does not list them twice', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-food-mine-1')).toBeTruthy());
-  // Same name already saved — the catalog copy is suppressed rather than
-  // shown beside it, which would be two rows that look identical and log
-  // different numbers.
+  expect(screen.queryByTestId('add-catalog-empty')).toBeNull();
   expect(screen.queryByTestId('add-catalog-usda-1')).toBeNull();
+});
+
+/** A brandless saved food must not suppress a branded catalog one. */
+it('does not let a brandless saved food suppress every brand', async () => {
+  mockLocalFoods.mockResolvedValue([
+    { id: 'mine-1', kind: 'food', name: 'Greek Yogurt', brand: '', serving_label: '150 g',
+      serving_grams: 150, kcal: 130, protein_g: 11, carb_g: 6, fat_g: 6, fibre_g: null },
+  ]);
+  mockSearchCatalog.mockResolvedValue(
+    answer({
+      foods: [{ ...CATALOG_OATS, id: 'usda-9', name: 'Greek Yogurt', brand: 'Fage' }],
+      total: 1,
+      outcome: 'ok',
+    }),
+  );
+  await search('greek');
+  await waitFor(() => expect(screen.getByTestId('add-catalog-usda-9')).toBeTruthy());
+});
+
+/** What the row says is what the diary records. */
+it('logs the same name it displayed', async () => {
+  mockSearchCatalog.mockResolvedValue(
+    answer({
+      foods: [{ ...CATALOG_OATS, id: 'usda-9', name: 'Greek Yogurt', brand: 'Fage' }],
+      total: 1,
+      outcome: 'ok',
+    }),
+  );
+  await search('greek');
+  await waitFor(() => expect(screen.getByTestId('add-catalog-usda-9')).toBeTruthy());
+  expect(screen.getByText('Fage Greek Yogurt')).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('add-catalog-usda-9'));
+  });
+  expect(mockLogFood.mock.calls[0][1].name).toBe('Fage Greek Yogurt');
 });
 
 describe('an empty result says which kind of empty', () => {

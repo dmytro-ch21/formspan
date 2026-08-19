@@ -82,6 +82,33 @@ import { useAuthToken } from '@/lib/useAuthToken';
  */
 type CatalogState = { forQuery: string; result: CatalogSearch | 'unreachable' };
 
+/**
+ * The key two food lists are compared on.
+ *
+ * Brand AND name, lowercased and trimmed. Name alone is not identifying — a
+ * brandless saved "Greek Yogurt" would suppress every branded one in the
+ * catalog — and id is useless here because the two lists do not share an id
+ * space.
+ */
+function foodKey(f: { name: string; brand: string }): string {
+  return `${f.brand.trim().toLowerCase()}|${f.name.trim().toLowerCase()}`;
+}
+
+/**
+ * What a catalog row is called — used for the ROW and for the logged entry,
+ * from one place.
+ *
+ * They were computed separately and disagreed: the row showed the bare name
+ * while the log recorded brand-plus-name, so an athlete tapped a row saying one
+ * thing and found another in their diary. Raised in review.
+ */
+function catalogName(food: CatalogFood): string {
+  if (!food.brand) return food.name;
+  return food.name.toLowerCase().includes(food.brand.toLowerCase())
+    ? food.name
+    : `${food.brand} ${food.name}`;
+}
+
 export default function AddFoodScreen() {
   const router = useRouter();
   const accent = useAccent();
@@ -187,17 +214,20 @@ export default function AddFoodScreen() {
   /**
    * Catalog rows the athlete has not already saved.
    *
-   * Deduplicated on NAME rather than id, because the two lists have different
-   * id spaces — a saved food's id is client-generated and a catalog id is not,
-   * so nothing would ever collide and every saved food would appear twice.
+   * Deduplicated on BRAND AND NAME rather than id, because the two lists have
+   * different id spaces — a saved food's id is client-generated and a catalog
+   * id is not, so nothing would ever collide and every saved food would appear
+   * twice. Brand is part of the key because name alone is not identifying: a
+   * brandless saved "Greek Yogurt" would otherwise suppress every branded
+   * Greek yogurt in the catalog.
    */
   const savedNames = useMemo(
-    () => new Set(matches.map((f) => f.name.trim().toLowerCase())),
+    () => new Set(matches.map(foodKey)),
     [matches],
   );
   const catalogOnly = useMemo(() => {
     if (!answer || answer === 'unreachable') return [];
-    return answer.foods.filter((f) => !savedNames.has(f.name.trim().toLowerCase()));
+    return answer.foods.filter((f) => !savedNames.has(foodKey(f)));
   }, [answer, savedNames]);
 
   const shown = searched ? matches : recents;
@@ -248,7 +278,7 @@ export default function AddFoodScreen() {
       await logFood(userId, {
         eaten_on: date,
         meal,
-        name: food.brand && !food.name.includes(food.brand) ? `${food.brand} ${food.name}` : food.name,
+        name: catalogName(food),
         servings: 1,
         serving_label: food.serving_label,
         kcal: food.kcal,
@@ -308,7 +338,7 @@ export default function AddFoodScreen() {
         style={styles.search}
         value={q}
         onChangeText={setQ}
-        placeholder="Search your foods"
+        placeholder="Search your foods and the catalog"
         placeholderTextColor={vola.textDim}
         autoCorrect={false}
         accessibilityLabel="Search your foods and the catalog"
@@ -358,12 +388,12 @@ export default function AddFoodScreen() {
               style={styles.row}
               onPress={() => void logCatalog(f)}
               accessibilityRole="button"
-              accessibilityLabel={`Log ${f.name} from the food catalog`}
+              accessibilityLabel={`Log ${catalogName(f)} from the food catalog`}
               testID={`add-catalog-${f.id}`}
             >
               <View style={styles.rowMain}>
                 <Text style={styles.rowName} numberOfLines={1}>
-                  {f.name}
+                  {catalogName(f)}
                 </Text>
                 <Text style={styles.rowServing}>{f.serving_label}</Text>
               </View>
@@ -372,9 +402,12 @@ export default function AddFoodScreen() {
           ))}
           {/* Honest about the cap. "20 of 63" beats a list that silently
               stops and implies it is everything. */}
-          {answer && answer !== 'unreachable' && answer.total > answer.foods.length ? (
+          {/* Counts what is ACTUALLY on screen. `answer.foods.length` is the
+              pre-dedupe figure, so with two rows suppressed it claimed to be
+              showing twenty above eighteen. */}
+          {answer && answer !== 'unreachable' && answer.total > catalogOnly.length ? (
             <Text style={styles.empty} testID="add-catalog-more">
-              Showing {answer.foods.length} of {answer.total}. Keep typing to narrow it.
+              Showing {catalogOnly.length} of {answer.total}. Keep typing to narrow it.
             </Text>
           ) : null}
         </>
@@ -384,11 +417,18 @@ export default function AddFoodScreen() {
           food; the rest are about the query, the deploy, the region, or the
           network, and reporting any of them as "we do not have that food"
           sends the athlete off to type it in by hand forever. */}
-      {/* `answer &&` — not just `searched`. Without it the block renders an
-          empty `Text` while a query is between the keystroke and the debounce,
-          which is a stray node saying nothing and, worse, an element a test can
-          find and mistake for a message. */}
-      {searched && answer && catalogOnly.length === 0 && !searching ? (
+      {/* Gated on the ANSWER being empty, not on `catalogOnly` being empty.
+          Those differ, and the difference was a live bug: when every catalog
+          row was deduped away against the athlete's saved foods — the MAINLINE
+          case for anyone who has saved a common food — an `ok` answer fell
+          through to the failure copy, so "The catalog could not answer that
+          one" rendered directly beneath the saved row that had just answered
+          it. The catalog answered perfectly. Found in review, reproduced.
+
+          `answer &&` also matters on its own: without it the block renders an
+          empty `Text` between the keystroke and the debounce — a stray node
+          saying nothing that a test can find and mistake for a message. */}
+      {searched && answer && !searching && (answer === 'unreachable' || answer.foods.length === 0) ? (
         <Text style={styles.empty} testID="add-catalog-empty">
           {answer === 'unreachable'
             ? 'Could not reach the food catalog. Your own saved foods are still searched.'
