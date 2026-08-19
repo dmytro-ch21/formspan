@@ -378,6 +378,45 @@ func main() {
 		logger,
 	))
 
+	// Dictated reflections (N33). The third feature on `internal/platform/llm`
+	// and the third to pick its own tier — and the only one whose tier is chosen
+	// against a published measurement rather than a judgement, because N37 ran
+	// the whole eval corpus through both OpenAI tiers first. See
+	// `bjj.DefaultDraftModels` for the numbers.
+	//
+	// Same nil-safe shape as the two above: `NewDrafter` returns the Drafter
+	// INTERFACE, so a deploy without the provider's key gets a genuinely nil
+	// interface and every other bjj route runs normally.
+	reflectProvider := bjj.Provider(os.Getenv("REFLECT_PROVIDER"))
+	if reflectProvider == "" {
+		reflectProvider = bjj.DefaultDraftProvider
+	}
+	reflectKey := ""
+	if env := reflectProvider.APIKeyEnv(); env != "" {
+		reflectKey = os.Getenv(env)
+	}
+	reflectionDrafter, err := bjj.NewDrafter(bjj.DrafterConfig{
+		Provider: reflectProvider,
+		Model:    os.Getenv("REFLECT_MODEL"),
+		APIKey:   reflectKey,
+	})
+	if err != nil {
+		// A bad provider name or an unloadable technique catalog is a CONFIG
+		// error and fails the boot rather than degrading to 503, for the reason
+		// the identifier records: a typo that silently disabled the feature
+		// looks exactly like the state it is most likely to be confused with.
+		logger.Error("bjj: reflection drafter config", "err", err)
+		os.Exit(1)
+	}
+	if reflectionDrafter == nil {
+		logger.Info("bjj: reflection drafting disabled", "reason", "no "+reflectProvider.APIKeyEnv())
+	} else {
+		logger.Info("bjj: reflection drafting enabled",
+			"provider", string(reflectProvider),
+			"model", bjj.ResolveDraftModel(reflectProvider, os.Getenv("REFLECT_MODEL")))
+	}
+	reflectHandler := bjj.NewDraftHandler(reflectionDrafter, bjj.NewPostgresDraftUsage(pool))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
 	mux.Handle("GET /v1/me", verifier.RequireAuth(http.HandlerFunc(handleMe)))
@@ -465,6 +504,18 @@ func main() {
 	// platform split: choosing a focus for the next few weeks is planning.
 	mux.Handle("GET /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Get)))
 	mux.Handle("PUT /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Set)))
+
+	// Say what happened and have it fill the chips (N33). A DRAFT comes back;
+	// nothing is logged until the athlete confirms it and PUTs it through
+	// /v1/bjj/sessions/{sessionID} above, which is the same draft-then-confirm
+	// rule as the meal estimate and the barcode scan.
+	//
+	// Not rate-limited by the in-memory limiter the identify route uses: this
+	// one carries nutrition's persisted per-athlete quota instead, which
+	// survives a restart and reports a remaining count the client can show. The
+	// gate runs inside the handler because it has to run BEFORE the model call
+	// and its refusal needs the quota's own numbers in the message.
+	mux.Handle("POST /v1/bjj/reflect/draft", verifier.RequireAuth(http.HandlerFunc(reflectHandler.Draft)))
 
 	// What the athlete has actually achieved on the mat and in competition,
 	// DERIVED from evidence that already exists -- contests and the tag stream

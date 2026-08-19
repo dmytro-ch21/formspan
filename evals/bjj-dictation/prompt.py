@@ -6,11 +6,19 @@ changed prompt or schema makes every earlier result incomparable. Keeping them
 here means `git log evals/bjj-dictation/prompt.py` is the list of things that
 could explain a moved number.
 
-When N33's endpoint is built, these move to Go. They are written to be portable:
-no Python in the prompt text, and a schema that satisfies OpenAI's `strict`
-rules (every property required, `additionalProperties: false` everywhere,
-nullability expressed as a type union) — which are also Anthropic's structured
-output rules, the happy reason one schema serves both.
+N33's endpoint now exists, and these did move to Go — but this file stays the
+ORIGINAL. `SYSTEM_RULES` below is embedded verbatim as
+`backend/internal/modules/bjj/reflect_rules.txt`, and a Go test
+(`reflect_parity_test.go`) fails when the two drift, along with the three
+vocabularies and the way the catalog is appended. That direction matters: the
+scores in the README describe THIS text, so the way to change the prompt is to
+change it here, re-run `run.py`, record the numbers, and copy across.
+
+They were written to be portable: no Python in the prompt text, and a schema
+that satisfies OpenAI's `strict` rules (every property required,
+`additionalProperties: false` everywhere, nullability expressed as a type union)
+— which are also Anthropic's structured output rules, the happy reason one
+schema serves both.
 """
 
 # The tag vocabularies, from migration 000025 and `apps/mobile/lib/bjjSession.ts`.
