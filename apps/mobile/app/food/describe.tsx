@@ -181,11 +181,32 @@ export default function DescribeMealScreen() {
         // much as a bandwidth one: image tokens scale with resolution, and a
         // plate of food is legible at 1080px. A raw 4-5MB frame would also
         // exceed the endpoint's own 5MB cap.
-        const shrunk = await ImageManipulator.manipulateAsync(
-          picked.assets[0].uri,
-          [{ resize: { width: 1080 } }],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-        );
+        //
+        // **Caught separately from the request below**, and that separation is
+        // the whole of N92's mobile half. A manipulator failure is
+        // DETERMINISTIC — an unreadable file, no disk, a frame in a format the
+        // encoder will not take — and the outer handler hands anything it
+        // catches to `messageFor`, whose no-message fallback says "Could not
+        // reach the server. Try again when you have signal." So a failure that
+        // never touched the network was reported as a network failure, on the
+        // screen an athlete reaches by tapping "Photograph the label".
+        //
+        // `identify.tsx` already had this guard, added by #361 with a comment
+        // saying in as many words that without it the false diagnosis is "the
+        // same N73 was reported for, just moved one line up". That is exactly
+        // what was still true here. Same bug, second path — which is the
+        // pattern #392 (N74) exists for.
+        let shrunk: ImageManipulator.ImageResult;
+        try {
+          shrunk = await ImageManipulator.manipulateAsync(
+            picked.assets[0].uri,
+            [{ resize: { width: 1080 } }],
+            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+          );
+        } catch {
+          setError('That photo could not be read. Try taking another, or describe the meal instead.');
+          return;
+        }
         receive(
           await photographMeal(getToken, {
             uri: shrunk.uri,

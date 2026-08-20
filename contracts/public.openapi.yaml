@@ -9899,6 +9899,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '504':
+          description: >
+            The provider was still working when THIS SERVICE stopped waiting.
+            The deadline is ours — 45 seconds — and it exists so that this
+            endpoint always answers with a status.
+
+
+            **Why that matters more than it sounds.** There used to be no
+            deadline anywhere on this path, so a slow provider ran until the
+            CLIENT's own request timeout fired instead. A client that times out
+            receives no status and no body, and has nothing left to say except
+            that it could not reach the server — which is what an athlete was
+            shown, on a working connection, while photographing a food label
+            (N92). Every other outcome here carries copy the client can render
+            as itself; silence is the one that cannot.
+
+
+            The code is `unavailable`, same as the `503`, because a client's
+            correct move is identical: retry the same request later, and there
+            is nothing in it to fix. **But unlike the `503`, this one DID cost
+            an estimate.** The request reached the provider and the tokens were
+            very likely bought; exempting it would also make the daily cap
+            trivially avoidable by abandoning every call. So a client must not
+            tell the athlete their allowance is untouched here — that promise
+            belongs to `503`/`unavailable` alone.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /nutrition/days:
     get:
