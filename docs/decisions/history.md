@@ -36011,19 +36011,43 @@ the library to 554:
 | `leg-drag-guard-recovery` | blue §2, and again at purple §4 |
 | `body-lock-guard-recovery` | purple §4 |
 
-**The authoring rule, because it is what makes the result checkable.** One
-technique named in the document becomes exactly one item, in the order named;
-one non-technique bullet becomes one concept. No exceptions, even where it is
-clumsy. The payoff is mechanical: the reference mockup's *N lessons* count now
-equals the document's own count, so a reviewer can check the screen against the
-document by counting rather than by judgement.
+**The authoring rule, stated precisely, because a loose version of it is how
+two phases quietly lost lessons.** Four parts:
 
-|  | phases | techniques | concepts | countable |
-|---|---|---|---|---|
-| white | 11 | 81 | 12 | 81 |
-| blue | 10 | 73 | 16 | 73 |
-| purple | 10 | 43 | 22 | 43 |
-| brown | 10 | 28 | 48 | 28 |
+1. Every technique the document names becomes exactly one item, in the order
+   named.
+2. Every non-technique bullet becomes one concept.
+3. Section-level prose that names a chain or a principle — the italic asides,
+   the "Start chaining:" lines — becomes one concept, or the phase description.
+4. Where a name is repeated and `curriculum_items_technique_unique` forbids a
+   second row pointing at the same technique, it becomes a **concept naming the
+   collision** — never a silent drop.
+
+Rule 4 is the one that was written down and then not followed, twice. Brown's
+*Develop Finishing Systems* names nineteen techniques and carried twelve;
+purple's *Develop Submission Systems* names twelve and carried eleven, with an
+undocumented `straightjacket-back-control` added on top so the count looked
+plausible. Both were found by review, not by the suite. Blue's *Attack From
+Guard* had a milder version — `underhook → dogfight` and `arm drag → back take`
+each folded into a single item.
+
+The first version of this entry claimed the rule held with "no exceptions, even
+where it is clumsy", which was false at the moment it was written. That is worse
+than the defect: a doc that overstates its own rigour is one the next session
+builds on without re-deriving.
+
+What is true now: rules 1 and 4 hold everywhere, and
+`TestNoBeltPhaseCarriesFewerLessonsThanTheDocumentNames` enforces the floor.
+Rules 2 and 3 mean a phase may carry MORE items than the document has bullets —
+so the honest claim is a **lower bound**, not equality: no milestone has fewer
+lessons than the document names.
+
+|  | phases | techniques | concepts | countable | items |
+|---|---|---|---|---|---|
+| white | 11 | 81 | 12 | 81 | 93 |
+| blue | 10 | 75 | 16 | 75 | 91 |
+| purple | 10 | 44 | 22 | 44 | 66 |
+| brown | 10 | 34 | 48 | 34 | 82 |
 
 Brown is the interesting row and it is not an accident: it is **majority
 prose**, which is the content agreeing with the document's own claim that brown
@@ -36065,12 +36089,12 @@ and read progress back:
 
 | | before | after |
 |---|---|---|
-| white | 42 items, 25 countable, **3 mastered** | 93 items, 81 countable, **7 mastered** |
-| blue | 33 items, 24 countable, **0 mastered** | 89 items, 73 countable, **3 mastered** |
+| white | 42 items, 25 countable, **3 mastered** (12.0%) | 93 items, 81 countable, **7 mastered** (8.6%) |
+| blue | 33 items, 24 countable, **0 mastered** (0%) | 91 items, 75 countable, **3 mastered** (4.0%) |
 
 Enrolment intact, not archived, `started_on` unchanged at 2026-06-21, all 168
 evidence rows and 420 reps untouched. **And white belt's displayed percentage
-went DOWN — 12% to 8.6% — while its mastered count went UP.** That is correct
+went DOWN — 12.0% to 8.6% — while its mastered count went UP.** That is correct
 and it is the thing that will look like a bug: the denominator grew faster than
 the numerator. Blue went up, from nothing to 4%, because the new roadmap
 includes techniques this athlete had already been logging.
@@ -36094,6 +36118,36 @@ re-added `The graduation standard` phase, and a gutted description. Without it
 "the order matches the document" is a sentence in a PR body, and a curriculum
 with the wrong order is still a perfectly legal curriculum that seeds, renders
 and simply teaches something else.
+
+**A title check was not enough, and that is the lesson worth keeping.** It
+passes happily while a phase drops half its lessons, which is exactly what had
+happened in brown and purple. `TestNoBeltPhaseCarriesFewerLessonsThanTheDocumentNames`
+now parses each milestone's named techniques and asserts the phase carries at
+least that many items — a lower bound, because rules 2 and 3 above legitimately
+add concepts.
+
+Its parser is the interesting part. The document uses `→` **both** to join peer
+techniques (purple's "RNC → rear triangle → armbar → mount") and to join a
+technique to an opponent's reaction (blue's "arm triangle → opponent turns →
+back take"), so splitting on it can overcount. Excluding it was tried first and
+is strictly worse: purple's entire submission milestone is arrow-joined, so its
+three families counted as three lessons rather than twelve, and **the exact
+dropped `rear-naked-choke` review found there passed the guard.** Including it
+makes the bound conservative rather than wrong, and every phase satisfies the
+stricter version — measured, zero false failures. Three mutations, each red
+alone: brown truncated back to twelve items, purple's RNC removed again, and the
+document's bullet markers rewritten, which trips the "only N sections had
+countable lessons" floor that stops the parser rotting into a no-op.
+
+**The seeder's own path was run end to end on the final content**, because
+nothing in the suite does: `curriculum.Seed` has no database test, and
+`TestEverySeededTechniqueExistsInTheLibrary` checks ids without touching
+Postgres. `cmd/seed` against a migrated database wrote 554 techniques and 9
+curricula clean, so the rewritten content has been through the real constraints
+rather than only their Go-side mirror. Making that permanent — a
+`seed_postgres_test.go` on the `workout` module's model — is a gap this leaves
+open, and it is the same gap that let the two dropped-lesson phases seed
+happily.
 
 **Open questions:**
 

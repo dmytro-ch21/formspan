@@ -990,7 +990,7 @@
       },
       {
         "title": "Attack From Guard",
-        "description": "Build combinations rather than isolated moves. Each of the three chains below is one grip and three exits: defending the first is what opens the second.",
+        "description": "Build combinations rather than isolated moves. Each of the three chains below is one grip and several exits: defending the first is what opens the next.",
         "items": [
           {
             "technique_id": "triangle-closed-guard",
@@ -1036,15 +1036,29 @@
             "min_hit_rate": 0.25
           },
           {
+            "technique_id": "closed-guard-underhook-back-take",
+            "notes": "And the drag's destination: climbing to the back rather than settling for the sweep.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
             "kind": "concept",
             "title": "Butterfly: sweep → arm drag → back take",
             "notes": "Threaten the elevation, take the reaction. Nobody defends a butterfly sweep without giving you an arm."
           },
           {
-            "technique_id": "half-guard-underhook-dogfight",
-            "notes": "The underhook is the position; the dogfight is what it becomes.",
+            "technique_id": "low-knee-shield-underhook",
+            "notes": "The underhook, taken from the knee shield before they flatten you.",
             "target_scored": 12,
             "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "half-guard-underhook-dogfight",
+            "notes": "What the underhook becomes once you come up on it.",
+            "target_scored": 10,
+            "target_sessions": 8,
             "min_hit_rate": 0.3
           },
           {
@@ -1459,19 +1473,14 @@
             "target_drilled_sessions": 10
           },
           {
-            "technique_id": "guillotine-front-headlock",
-            "notes": "One of the two exits, and the one they expect.",
-            "target_scored": 8,
-            "target_defended": 3,
-            "target_sessions": 8,
-            "min_hit_rate": 0.25
+            "kind": "concept",
+            "title": "Guillotine",
+            "notes": "One of the two exits from the sprawl, and the one they expect. The technique itself is milestone 7's, where the front headlock is built as a system rather than met as an outcome."
           },
           {
-            "technique_id": "front-headlock-go-behind",
-            "notes": "The other, and the one that scores without risk.",
-            "target_scored": 10,
-            "target_sessions": 8,
-            "min_hit_rate": 0.3
+            "kind": "concept",
+            "title": "Back take",
+            "notes": "The other exit, and the one that scores without risk. Also milestone 7's — what matters here is having decided which of the two you are hunting before the shot goes in."
           },
           {
             "technique_id": "guard-pull-single-leg-x",
@@ -1699,11 +1708,19 @@
       },
       {
         "title": "Develop Submission Systems",
-        "description": "Three systems, each one grip or one position with several finishes hanging off it.",
+        "description": "Three systems, each one grip or one position with several finishes hanging off it. Every lesson below is one the document names, in the order it names them.",
         "items": [
           {
-            "technique_id": "darce-side-control",
-            "notes": "The front headlock system, entered from the pin rather than the scramble.",
+            "technique_id": "guillotine-front-headlock",
+            "notes": "Front headlock: the finish the position is named for.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "darce-front-headlock",
+            "notes": "When they turn in toward you, the near arm is already threaded.",
             "target_scored": 8,
             "target_defended": 3,
             "target_sessions": 8,
@@ -1711,46 +1728,61 @@
           },
           {
             "technique_id": "anaconda-choke-front-headlock",
-            "notes": "The roll, when they turn away instead of in.",
+            "notes": "And when they turn away, the roll takes them with it.",
             "target_scored": 8,
             "target_defended": 3,
             "target_sessions": 8,
             "min_hit_rate": 0.2
           },
           {
-            "technique_id": "peruvian-necktie",
-            "notes": "And the one that finishes when both of those are defended.",
-            "target_scored": 6,
-            "target_sessions": 6,
+            "technique_id": "front-headlock-go-behind",
+            "notes": "The exit that is not a choke, and the highest-percentage one in the family.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "kimura-side-control",
+            "notes": "Kimura: the grip, taken as a control rather than reached for as a finish.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "side-control-far-side-armbar",
+            "notes": "They straighten the arm to save the shoulder, and the elbow is there.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
             "min_hit_rate": 0.2
           },
           {
-            "kind": "concept",
-            "title": "Front headlock: guillotine → darce → anaconda → back take",
-            "notes": "Four exits from one head-and-arm connection. Which one you get is decided by which way they turn, so the skill is reading the turn rather than choosing the choke."
-          },
-          {
             "technique_id": "kimura-trap-side-control-backtake",
-            "notes": "The kimura system: the grip that outlives every position it started in.",
+            "notes": "And when they roll away from both, the grip goes with them.",
             "target_scored": 8,
             "target_sessions": 8,
             "min_hit_rate": 0.25
           },
           {
-            "technique_id": "half-guard-kimura-backtake",
-            "notes": "The same grip from underneath, which is what makes it a system rather than a pin attack.",
+            "technique_id": "mounted-triangle",
+            "notes": "The fourth exit, once the arm is out and across.",
             "target_scored": 8,
+            "target_defended": 3,
             "target_sessions": 8,
-            "min_hit_rate": 0.25
+            "min_hit_rate": 0.2
           },
           {
-            "kind": "concept",
-            "title": "Kimura: kimura → armbar → back take → triangle",
-            "notes": "The kimura grip is a control that happens to finish sometimes. Treating it as a submission is what makes it disappear when it is defended."
+            "technique_id": "rear-naked-choke",
+            "notes": "Back: what the other three exist to set up.",
+            "target_scored": 10,
+            "target_defended": 5,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
           },
           {
             "technique_id": "rear-triangle",
-            "notes": "The back system: when the RNC is denied, the legs finish it.",
+            "notes": "When the neck is defended with both hands, the legs finish it.",
             "target_scored": 8,
             "target_defended": 3,
             "target_sessions": 8,
@@ -1758,20 +1790,15 @@
           },
           {
             "technique_id": "rear-triangle-armbar",
-            "notes": "And the arm, once the triangle has made them defend the neck with both hands.",
+            "notes": "And two hands on the neck means an arm is unattended.",
             "target_scored": 6,
             "target_sessions": 6,
             "min_hit_rate": 0.2
           },
           {
-            "technique_id": "straightjacket-back-control",
-            "notes": "What holds all of it together — their hands controlled, not just their body.",
-            "target_drilled_sessions": 10
-          },
-          {
             "kind": "concept",
-            "title": "Back: RNC → rear triangle → armbar → mount",
-            "notes": "Two hands, three threats. The back is the position where the arithmetic is most obviously in your favour, which is why it is worth the most."
+            "title": "Back → mount",
+            "notes": "The exit that is not a finish. It is milestone 6's Back Control to Mount, named again here because a submission system that ends when they escape is not a system — the mount is where the next one starts."
           }
         ]
       },
@@ -2196,46 +2223,75 @@
       },
       {
         "title": "Develop Finishing Systems",
-        "description": "Four families. Each is a position with several finishes rather than a finish you happen to know.",
+        "description": "Four families. Each is a position with several finishes hanging off it rather than a finish you happen to know — and the point of a family is that they cannot defend all of it with the two hands they have. Every lesson below is one the document names, in the order it names them.",
         "items": [
           {
-            "technique_id": "rear-triangle",
-            "notes": "Back: when the neck is defended with both hands, the legs finish it.",
-            "target_scored": 8,
-            "target_defended": 3,
+            "technique_id": "rear-naked-choke",
+            "notes": "Back: the one everything else in this family exists to set up.",
+            "target_scored": 10,
+            "target_defended": 5,
             "target_sessions": 8,
-            "min_hit_rate": 0.2
+            "min_hit_rate": 0.25
           },
           {
             "technique_id": "short-choke",
-            "notes": "The version that works when the hand fight denies the RNC.",
+            "notes": "What the hand fight leaves you when the RNC is denied.",
             "target_scored": 8,
             "target_defended": 3,
             "target_sessions": 8,
             "min_hit_rate": 0.2
           },
           {
-            "technique_id": "armbar-rnc-chain-from-back",
-            "notes": "And the chain run as one thing, which is what a family means.",
+            "technique_id": "rear-triangle",
+            "notes": "When the neck is defended with both hands, the legs finish it.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "armbar-back-control",
+            "notes": "And both hands on the neck means an arm is unattended.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "back-control-to-mount",
+            "notes": "The exit that is not a finish: a back escape is not an escape if you are already mounting them.",
             "target_scored": 8,
             "target_sessions": 8,
             "min_hit_rate": 0.25
           },
           {
-            "technique_id": "mounted-triangle",
-            "notes": "Mount: the triangle that arrives when they defend the arm triangle.",
+            "technique_id": "arm-triangle-mount",
+            "notes": "Mount: the choke that makes them turn.",
             "target_scored": 8,
             "target_defended": 3,
             "target_sessions": 8,
             "min_hit_rate": 0.2
           },
           {
-            "technique_id": "arm-triangle-mount",
-            "notes": "And the choke that makes them defend in the first place.",
+            "technique_id": "straight-armbar-mount",
+            "notes": "The straight arm, taken before they can bend it back in.",
             "target_scored": 8,
             "target_defended": 3,
             "target_sessions": 8,
             "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "mounted-triangle",
+            "notes": "And the triangle that arrives when they defend the arm triangle.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "kind": "concept",
+            "title": "Mount: the back take",
+            "notes": "The fourth exit, and it is the gift wrap from milestone 6 rather than a second technique — which is the point. A finishing family does not end at a submission; it ends wherever they are worst off, and from mount that is usually behind them."
           },
           {
             "technique_id": "guillotine-front-headlock",
@@ -2260,6 +2316,13 @@
             "target_defended": 3,
             "target_sessions": 8,
             "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "front-headlock-go-behind",
+            "notes": "And when they do neither, go behind. The unglamorous exit is the highest-percentage one.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
           },
           {
             "technique_id": "straight-ankle-lock-slx",
@@ -2291,9 +2354,18 @@
             "min_hit_rate": 0.2
           },
           {
-            "kind": "concept",
-            "title": "A family, not a list",
-            "notes": "Four finishes from one position is not four techniques. It is one technique with four endings, and they cannot defend all of them with the two hands they have."
+            "technique_id": "fifty-fifty-technical-standup-sweep",
+            "notes": "The entanglement is a position, so it sweeps as well as it finishes.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "fifty-fifty-backtake",
+            "notes": "And the exit worth more than any finish above it.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
           }
         ]
       },

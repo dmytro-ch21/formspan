@@ -1462,9 +1462,21 @@ func TestWorkingExcludesCurriculaWithNothingCompletable(t *testing.T) {
 // history entry for #272 already recorded — "removing a technique item does
 // move the displayed fraction".
 //
-// Uses the owner-edit path rather than Seed(): the seeder writes the embedded
-// file, so it cannot express "the old content" here, and replaceItems is the
-// same code underneath both.
+// Uses the owner-edit path rather than Seed(), because the seeder writes the
+// embedded file and so cannot express "the old content" here.
+//
+// Be precise about what that costs, because the first version of this comment
+// was wrong twice: the owner path is `replaceContent`, and `seedOne` does NOT
+// share it — seed.go inlines its own DELETE of curriculum_items and
+// curriculum_phases followed by a re-INSERT. So this test exercises one of the
+// two write paths, not both.
+//
+// The property still holds for the seeder, by inspection rather than by this
+// test: neither path touches `curriculum_enrollments` or `bjj_session_tags` at
+// all, which is the whole reason a content rewrite is safe. The seeder's own
+// path was additionally run end to end by hand for N97 — see the history entry
+// for the measured before/after numbers — and a `seed_postgres_test.go` on the
+// `workout` module's model is the way to make that permanent.
 func TestAReseedKeepsTheEnrolmentAndTheEvidenceWhileTheFractionMoves(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
