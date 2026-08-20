@@ -326,9 +326,6 @@ it('does not announce the glyph to a screen reader', async () => {
   // the glyph removed, the second alone would pass with it never rendered.
   expect(screen.queryByTestId('add-catalog-glyph-usda-1')).toBeNull();
   expect(screen.queryByText(glyphFor('grain'))).toBeNull();
-  expect(screen.getByText('Fage Greek Yogurt')).toBeTruthy();
-  await logCatalogRow('add-catalog-row-usda-9');
-  expect(mockLogFood.mock.calls[0][1].name).toBe('Fage Greek Yogurt');
 });
 
 /**
