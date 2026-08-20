@@ -1,6 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -145,9 +146,41 @@ export default function IdentifyMachineScreen() {
     setError(null);
     setResult(null);
     try {
+      // DOWNSCALED BEFORE IT LEAVES THE PHONE, and this screen shipped without
+      // it while `food/describe` shipped with it — which is the whole bug N73
+      // reported. `quality: 1` on a recent iPhone is a 48MP frame of 4-12MB;
+      // the endpoint caps a body at 8MB, and iOS gives the whole request a 60s
+      // budget that a multi-megabyte upload plus vision latency can exceed on
+      // gym wifi. Either way the request never returns a status, so
+      // `identifyErrorMessage` falls through to its no-status default and
+      // tells an athlete with four bars to go find signal.
+      //
+      // 1080px is the same width the meal photo uses and is ample for a
+      // machine and its label; it also cuts image tokens, which scale with
+      // resolution.
+      //
+      // Caught separately from the request below, because a manipulator failure
+      // is DETERMINISTIC — an unreadable file, no disk — and the outer handler
+      // would give it `identifyErrorMessage`'s no-status default: "Try again
+      // when you have signal", plus a retry hint. That is the same false
+      // diagnosis N73 was reported for, just moved one line up.
+      let shrunk: ImageManipulator.ImageResult;
+      try {
+        shrunk = await ImageManipulator.manipulateAsync(
+          asset.uri,
+          [{ resize: { width: 1080 } }],
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+        );
+      } catch {
+        setError('That photo could not be read. Try taking another.');
+        setHint('retake');
+        return;
+      }
       const res = await identifyMachine(getToken, {
-        uri: asset.uri,
-        mimeType: asset.mimeType ?? 'image/jpeg',
+        uri: shrunk.uri,
+        // The manipulator re-encodes to JPEG, so the asset's own mime type is
+        // no longer what is on the wire.
+        mimeType: 'image/jpeg',
       });
       setResult(res.identification);
     } catch (err) {

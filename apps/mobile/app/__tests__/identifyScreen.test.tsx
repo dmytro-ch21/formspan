@@ -64,6 +64,12 @@ jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
  */
 const mockAnnounce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
 
+const mockManipulate = jest.fn();
+jest.mock('expo-image-manipulator', () => ({
+  SaveFormat: { JPEG: 'jpeg' },
+  manipulateAsync: (...a: unknown[]) => mockManipulate(...a),
+}));
+
 const mockLaunchCamera = jest.fn();
 jest.mock('expo-image-picker', () => ({
   requestCameraPermissionsAsync: async () => ({ granted: true }),
@@ -101,8 +107,71 @@ beforeEach(() => {
   mockAnnounce.mockReset().mockImplementation(() => {});
   mockLaunchCamera.mockReset().mockResolvedValue({
     canceled: false,
-    assets: [{ uri: 'file:///machine.jpg' }],
+    // `image/heic` deliberately, and NOT the jpeg the assertion expects: with no
+    // mimeType here the old `asset.mimeType ?? 'image/jpeg'` fallback evaluates
+    // to the same jpeg, so the assertion below was true by construction and
+    // stayed green under the revert. Review caught that; it is the exact
+    // passes-for-the-wrong-reason shape this suite exists to refuse.
+    assets: [{ uri: 'file:///machine.jpg', mimeType: 'image/heic' }],
   });
+  mockManipulate.mockReset().mockResolvedValue({ uri: 'file:///machine-1080.jpg' });
+});
+
+/**
+ * N73, reported from a real phone: "Could not reach the server. Try again when
+ * you have signal" on a phone with four bars.
+ *
+ * That message is `identifyErrorMessage`'s NO-STATUS default — the request
+ * never came back with one — and the cause was that this screen uploaded the
+ * camera's raw frame. `quality: 1` on a recent iPhone is 4-12MB against an
+ * 8MB endpoint cap and a 60s iOS request budget shared with vision latency.
+ * `food/describe` has downscaled since it shipped; this screen never did.
+ *
+ * The assertion is on WHICH URI REACHES THE WIRE, not on the manipulator
+ * having been called: a call whose result is then ignored would satisfy the
+ * weaker check while shipping the original bug intact.
+ */
+it('uploads a downscaled frame, never the camera’s raw one', async () => {
+  render(<IdentifyMachineScreen />);
+  await act(async () => {
+    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+  });
+  await waitFor(() => expect(mockIdentify).toHaveBeenCalled());
+
+  expect(mockIdentify.mock.calls[0][1]).toMatchObject({
+    uri: 'file:///machine-1080.jpg',
+    // The manipulator re-encodes to JPEG, so the asset's own type is stale.
+    mimeType: 'image/jpeg',
+  });
+  expect(mockManipulate).toHaveBeenCalledWith(
+    'file:///machine.jpg',
+    [{ resize: { width: 1080 } }],
+    // `compress` pinned, not just the format: omitting it defaults to 1.0, which
+    // is a silently more expensive upload that no other assertion would notice.
+    expect.objectContaining({ format: 'jpeg', compress: 0.8 }),
+  );
+});
+
+
+/**
+ * The downscale's own failure is DETERMINISTIC — an unreadable file, no disk —
+ * so it must not inherit the network copy. Without its own catch it reaches
+ * `identifyErrorMessage` with no status and renders "Try again when you have
+ * signal" over a retry button, which is N73's false diagnosis relocated one
+ * line up rather than fixed.
+ */
+it('does not blame the network when the downscale itself fails', async () => {
+  mockManipulate.mockRejectedValue(new Error('cannot read'));
+  render(<IdentifyMachineScreen />);
+  await act(async () => {
+    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+  });
+
+  await waitFor(() => expect(screen.getByText(/could not be read/i)).toBeTruthy());
+  expect(screen.queryByText(/signal/i)).toBeNull();
+  // Nothing was uploaded, and the screen is usable again rather than stuck busy.
+  expect(mockIdentify).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('Take a photo of the machine')).toBeTruthy();
 });
 
 async function shootAndPick(name = ROW.name) {

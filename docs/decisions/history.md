@@ -31866,6 +31866,84 @@ neither lets them set their own number from the device they were holding.
 **No device run.** The mobile line is a conditional `<Text>`; the risk is
 cosmetic rather than behavioural, but it has not been seen on a phone.
 
+## 2026-08-20 — A machine photo that never left the phone (N73)
+
+Reported from a device: photographing a gym machine failed with *"Could not
+reach the server. Try again when you have signal, or search for the exercise
+instead."* The phone had signal. Everything else in the app worked.
+
+That copy is `identifyErrorMessage`'s **no-status default** — the branch taken
+when the request came back with no HTTP status at all, i.e. never came back.
+So the question was never "why did the server refuse it" but "why did the
+request die".
+
+`apps/mobile/app/session/[id]/identify.tsx` captured with
+`ImagePicker.launchCameraAsync({ quality: 1 })` and posted that frame directly.
+On a recent iPhone that is a 48MP capture — 4-12MB of JPEG. The endpoint caps a
+body at 8MB (`maxIdentifyBody`), and iOS gives the whole request a 60s budget
+that a multi-megabyte upload plus vision latency can exhaust on gym wifi.
+Either way the fetch rejects rather than returning a status.
+
+**The controlled comparison was already in the repo.** `app/food/describe.tsx`
+does the same thing — camera, multipart, a vision model — and works, because it
+has downscaled to 1080px at `compress: 0.8` since the day it shipped (#287).
+`git log -S manipulateAsync` on the identify screen returns nothing: it never
+had a downscale, in its entire history. Two screens, one difference, and the
+one without it is the one that fails.
+
+Fixed by mirroring the food path exactly: 1080px, 0.8 JPEG, and the mime type
+corrected to `image/jpeg` because the manipulator re-encodes and the asset's own
+type is stale after it.
+
+**The test asserts which uri reaches the wire, not that the manipulator was
+called.** Those are different guards and only one of them holds: a downscale
+whose *result is ignored* — `manipulateAsync(...)` on one line, `uri: asset.uri`
+on the next — satisfies a call-count assertion while shipping the original bug
+untouched. That exact mutation was applied and the test goes red on it. A
+call-count assertion would have stayed green.
+
+Two things this leaves behind.
+
+**The message misdiagnosed the failure, and that is N55, not a copy problem.**
+`lib/authedFetch.ts`'s `netFetch` converts *every* fetch rejection into
+`OfflineError` — timeout, TLS failure, DNS, body-too-large. By the time any
+caller sees it, a request that took too long and a phone with no radio are the
+same object. Every screen in the app inherits that, so no per-screen wording can
+fix it; the distinction has to be preserved at the transport. This is the second
+device-reported bug whose *symptom* was that conflation.
+
+Review then found the fix's own test had a decorative assertion, which is worth
+recording because it is the same class as the bug. The `mimeType` check could
+not fail: the mocked camera asset carried no `mimeType`, so the old
+`asset.mimeType ?? 'image/jpeg'` expression evaluated to exactly the jpeg the
+assertion expected, and reverting that line stayed green. The mock now returns
+`image/heic` — a value that is wrong unless the code overrides it — and the
+revert goes red. `compress: 0.8` was unpinned for the same reason and is now
+asserted; dropping it defaults to 1.0, a silently more expensive upload no other
+check would notice.
+
+The reviewer also caught that the downscale's OWN failure inherited the network
+copy — an unreadable file is deterministic, has no status, and would have
+rendered "Try again when you have signal" over a retry button. That is N73's
+false diagnosis relocated one line up rather than fixed, so it now has its own
+catch and the retake copy. All three have mutation tests.
+
+On resolution: 1080px is defensible, and the reason is not the one the fix was
+written on. The provider resizes anyway — OpenAI to a shortest side of ~768,
+Anthropic to a long edge of 1568 — so against OpenAI the raw upload bought
+literally nothing, and against Anthropic it bought about 9% more linear
+resolution. The 422 copy asks the athlete to get "the label in frame", and
+whether a placard survives that is still unmeasured on a real phone. It is the
+same debt N26 left.
+
+**Nothing stops the next upload path from omitting a downscale.** There are two
+image endpoints now and both learned this separately — one before shipping, one
+from a device report. A third will not inherit the lesson from either. The
+durable fix is a shared "prepare an image for upload" helper that owns the
+resize, the compression and the mime type, so omitting it is not something a new
+screen can do by simply not writing it. Not done here, deliberately: it is a
+refactor across two working screens and belongs in its own change.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

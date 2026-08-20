@@ -8752,6 +8752,40 @@ Each of these must produce a DIFFERENT `outcome`. A test that only asserts
   reports the full match count so a client can say "showing 20 of 63".
 - Paging with `limit=1` across several offsets never repeats or skips a row.
 
+### The upload itself — what N73 was
+
+Reported from a device and fixed in #361. The screen posted the camera's raw
+frame; the failure only exists at real resolutions, so every one of these needs
+a real capture or a fixture the size of one. A 200KB stand-in passes all of them
+while the bug is present.
+
+- **A full-resolution capture reaches the server at all.** The regression was a
+  48MP frame (4-12MB) against an 8MB body cap and a 60s iOS request budget.
+  Assert the request completes and returns a status — not that it succeeds,
+  which depends on the model.
+- **What goes on the wire is the downscaled file, not the picked asset.** The
+  distinction is the whole guard: a screen that downscales and then uploads the
+  original passes any "was the manipulator called" check. Assert the uri.
+- **The mime type sent is `image/jpeg`** regardless of what the camera returned,
+  because the manipulator re-encodes. A HEIC label on JPEG bytes is a 400 the
+  athlete reads as "that photo could not be read".
+- **An oversized body is a 400 with readable copy, never a dead request.** The
+  server's `MaxBytesReader` path should produce a status; if the connection
+  dies instead, the client cannot tell it from being offline.
+
+### Edge cases & errors — the message must not misdiagnose
+
+- **A request that fails for any reason other than a dead radio must not tell
+  the athlete to go find signal.** This is the device-reported symptom: the
+  no-status default reads "Try again when you have signal" and was shown to
+  someone with four bars. Currently unfixable at this screen — `netFetch`
+  collapses timeout, TLS, DNS and body-too-large into one `OfflineError` (N55),
+  so the test belongs at the transport, and this line is here to record that
+  the screen is not where it can be satisfied.
+- **A genuinely offline phone still gets the offline message.** The pair matters:
+  fixing the above by deleting the network wording would break the one case it
+  is right for.
+
 ### Barcode — `/v1/nutrition/catalog/barcode/{barcode}`
 
 Three outcomes, and the whole point is that they stay apart:
