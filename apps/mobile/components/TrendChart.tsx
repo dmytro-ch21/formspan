@@ -87,15 +87,32 @@ export function TrendChart({
    * lands is one that lands within the period shown; anything else says "not
    * yet, keep going", which is true.
    */
-  // Floored at 0. A server derivation that predates a fresh weigh-in can hand
-  // back a `reached_on` BEFORE the latest reading, making `daysAway` negative —
-  // which would shrink the domain, clip points past the right edge, and draw
-  // the dashed line BACKWARD to the goal, visually claiming an arrival behind
-  // the latest point. One token, and it cannot happen.
-  const futureDays = projected ? Math.max(0, Math.min(projected.daysAway, dataSpan)) : 0;
+  /**
+   * Days until arrival, clamped once and used everywhere below.
+   *
+   * A server derivation that predates a fresh weigh-in hands back a
+   * `reached_on` BEFORE the latest reading, making `daysAway` negative. The
+   * first version of this fix floored the DOMAIN only — and review caught that
+   * `projEnd` still read the raw value, so `-3 <= 0` held, and the dashed line
+   * was drawn BACKWARD from the latest reading to the goal: an arrival behind
+   * the athlete, which is the exact lie the floor was added to prevent. A
+   * partial clamp with a comment claiming completeness is worse than none.
+   *
+   * Zero is treated as no projection rather than as arrival today: it would
+   * otherwise draw a degenerate vertical dash, which reads as a cliff.
+   */
+  const daysAway = projected ? Math.max(0, projected.daysAway) : 0;
+  const futureDays = Math.min(daysAway, dataSpan);
   const totalSpan = dataSpan + futureDays;
 
-  const x = (day: number) => (day / totalSpan) * W;
+  // Divided by the last INDEX, not the count. Day indices run 0..totalSpan-1,
+  // so dividing by the count left the final day a full day-width short of the
+  // right edge — sub-pixel over a year, but ~14% of the width at 1W, an
+  // unexplained dead strip. It was self-consistent (dot and tick agreed), which
+  // is why it looked fine; it just meant the projection never actually reached
+  // the edge the comment below claims it exits.
+  const lastIndex = Math.max(1, totalSpan - 1);
+  const x = (day: number) => (day / lastIndex) * W;
   const y = (value: number) =>
     bounds
       ? H - PAD_Y - ((value - bounds.min) / (bounds.max - bounds.min)) * (H - PAD_Y * 2)
@@ -118,12 +135,12 @@ export function TrendChart({
   // cap; otherwise the value it has reached at the cap, so the slope stays true
   // rather than being bent toward a target it does not reach on screen.
   const projEnd =
-    projected && goal != null && latest
-      ? projected.daysAway <= futureDays
-        ? { day: latest.day + projected.daysAway, value: goal }
+    projected && goal != null && latest && daysAway > 0
+      ? daysAway <= futureDays
+        ? { day: latest.day + daysAway, value: goal }
         : {
             day: latest.day + futureDays,
-            value: latest.value + (goal - latest.value) * (futureDays / projected.daysAway),
+            value: latest.value + (goal - latest.value) * (futureDays / daysAway),
           }
       : null;
 

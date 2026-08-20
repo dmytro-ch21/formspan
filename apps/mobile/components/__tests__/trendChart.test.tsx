@@ -157,13 +157,55 @@ test('a trailing gap leaves empty space, rather than the axis ending at the last
   // The rightmost mark must sit where its DAY falls in the WINDOW, not at the
   // right edge. Asserted as a proportion rather than a pixel threshold: a loose
   // threshold is what let the first version of this test pass against the bug
-  // it was written for. viewBox width is 320 and the window is 90 days.
+  // it was written for. viewBox width is 320; the window is 90 days, so day
+  // indices run 0..89 and the divisor is the last INDEX.
   const lastDay = Math.max(...series.readings.map((p) => p.day));
-  const expected = (lastDay / 90) * 320;
+  const expected = (lastDay / 89) * 320;
   const maxCx = Math.max(...circles().map((c: any) => Number(c.props.cx)));
   expect(maxCx).toBeCloseTo(expected, 0);
 
   // And concretely: well short of the edge. Measuring the data instead would
   // put it within a few pixels of 320.
   expect(maxCx).toBeLessThan(230);
+});
+
+// A stale server derivation plus a fresh weigh-in gives `reached_on` BEFORE the
+// latest reading — a negative `daysAway`. The first attempt at this guard
+// floored the domain only and left `projEnd` reading the raw value, so the
+// dashed line still ran BACKWARD from the latest point to the goal: an arrival
+// behind the athlete. Review caught the incomplete fix; this pins the whole of
+// it.
+test('a projection dated before the latest reading draws nothing, never backwards', () => {
+  const readings = daily(60, 100, -0.05);
+  const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings) });
+  chart({
+    series,
+    goal: 90,
+    projection: {
+      kind: 'projected',
+      onDate: shift(TODAY, -10),
+      daysAway: -10,
+      source: 'plan',
+      basis: {
+        ratePerWeek: -0.35, fromValue: 97, fromDate: TODAY, goal: 90,
+        spanDays: 60, n: 60, basis: 'smoothed',
+      },
+    },
+  });
+  expect(screen.queryByTestId('trend-projection')).toBeNull();
+});
+
+// Zero would otherwise draw a degenerate vertical dash, which reads as a cliff.
+test('an arrival dated today draws nothing rather than a vertical dash', () => {
+  const readings = daily(60, 100, -0.05);
+  const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings) });
+  chart({
+    series,
+    goal: 90,
+    projection: {
+      kind: 'projected', onDate: TODAY, daysAway: 0, source: 'plan',
+      basis: { ratePerWeek: -0.35, fromValue: 90, fromDate: TODAY, goal: 90, spanDays: 60, n: 60, basis: 'smoothed' },
+    },
+  });
+  expect(screen.queryByTestId('trend-projection')).toBeNull();
 });

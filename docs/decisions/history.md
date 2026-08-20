@@ -35649,6 +35649,23 @@ now compares against the day's PROPORTION of the window, and the mutation goes
 red. Checking that a test fails for the right reason is the only thing that
 separates it from decoration.
 
+**The first fix for the backward-drawing projection was itself incomplete, and
+its comment claimed otherwise** — which review caught on the second pass. The
+floor protected the DOMAIN only; `projEnd` still read the raw `daysAway`, so a
+negative one satisfied `-3 <= 0` and the dashed line was drawn backward from
+the latest reading to the goal: an arrival behind the athlete, the exact lie
+the floor was added to prevent. Clamped once now and used everywhere, with zero
+treated as no projection rather than as arrival today (it would otherwise draw
+a degenerate vertical dash reading as a cliff). **A partial clamp carrying a
+comment that asserts completeness is worse than no clamp**, because the next
+reader stops looking.
+
+The same pass found the x divisor dividing by the day COUNT where indices run
+`0..count-1`, so the last day never reached the right edge — sub-pixel over a
+year, ~14% of the width at `1W`, and self-consistent enough to look fine while
+making the comment's claim that the projection "exits the right edge" quietly
+untrue.
+
 Also from review, as suggestions taken: the projection sentence now checks
 `source === 'plan'` at the RENDER SITE, because the claim that the
 discriminator makes an observed date unrenderable was true only of today's call
