@@ -31,6 +31,19 @@ export function weightUnit(u: UnitSystem): string {
   return u === "imperial" ? "lb" : "kg";
 }
 
+/**
+ * The unit's name in words, for a screen reader.
+ *
+ * `weightUnit` returns the written abbreviation, and a screen reader reads `lb`
+ * as the two letters "L B". An accessible label needs the spoken form, so it
+ * gets its own function rather than a second literal at each call site — which
+ * is exactly how "Target weight in kilograms" came to sit on a field that was
+ * about to ask for pounds.
+ */
+export function weightUnitName(u: UnitSystem): string {
+  return u === "imperial" ? "pounds" : "kilograms";
+}
+
 /** Storage (kg) → what to show. */
 export function toDisplayWeight(kg: number, u: UnitSystem): number {
   return u === "imperial" ? round(kg * LB_PER_KG, 1) : round(kg, 2);
