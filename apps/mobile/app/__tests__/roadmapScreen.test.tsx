@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import {
+  configure,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import CurriculumScreen from '../curriculum/[id]';
@@ -26,6 +33,17 @@ import type { Curriculum, CurriculumItem } from '@/lib/curriculum';
  *    measurable.
  */
 jest.setTimeout(30_000);
+
+// RNTL's default `asyncUtilTimeout` is ONE SECOND, and this suite needs longer.
+// **Measured, not guessed:** with the jest transform cache cleared, the first
+// test here fails 3 out of 3 — the screen is still showing its `ActivityIndicator`
+// when `waitFor` gives up at one second, and the test takes ~1.8s. Warm, it
+// passes 5 out of 5 in ~160ms, which is why a local run says everything is fine
+// and a cold runner does not. Seven suites here already raise it for exactly
+// this reason, and `jest.config.js`'s `testTimeout: 15_000` is what makes ten
+// seconds actually reachable — see F13, where five files asked for ten and jest
+// killed them at five.
+configure({ asyncUtilTimeout: 10_000 });
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();

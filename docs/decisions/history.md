@@ -36421,6 +36421,59 @@ were all the *first* mutation still in place and the later substitutions never
 applied. Redone with absolute paths and an assertion that each target string
 exists before substituting.
 
+### A test that passes warm and fails cold, 3 out of 3
+
+Found while re-applying this work onto a fresh worktree, which is the only
+reason it surfaced at all: a brand-new checkout has **no jest transform cache**,
+and `app/__tests__/roadmapScreen.test.tsx` never set `asyncUtilTimeout`.
+
+RNTL's default is **one second**. Cold, the screen is still showing its
+`ActivityIndicator` when `waitFor` gives up — the first test takes ~1.8s and
+fails **3 out of 3**. Warm, it passes **5 out of 5** in ~160ms. So a local run
+says everything is fine, and the one condition it fails in is the condition
+somebody iterating on this file is in the first time they run it.
+
+**It is NOT a live CI break, and the distinction is worth stating rather than
+assuming in either direction.** Measured: the cold *full* suite passes 2219/2219
+without the fix, because by the time this file runs among 144 suites the shared
+module graph is already compiled by earlier ones. `CI success` on `b31d73e`
+agrees. What was broken is the file **run alone**, which is how it will be run
+every time it is worked on.
+
+The fix is the one seven other suites here already use —
+`configure({ asyncUtilTimeout: 10_000 })`, reachable because `jest.config.js`
+sets `testTimeout: 15_000` (F13). And the apparatus was checked both ways rather
+than trusted: removing the line reproduces the failure 3/3 cold, restoring it
+passes 4/4 cold. An earlier attempt at that measurement was **worthless** — the
+`rm -rf` of the cache directory failed with "Directory not empty" and the run
+was warm, so it "confirmed" a fix against a condition it had not created.
+`jest --clearCache` is the supported way and is what the numbers above use.
+
+### It has been seen on a device, and that closes the previous entry's gap
+
+N97's entry ended on "**Nothing has been seen on a screen**", and that is no
+longer true: this ran on a simulator against a locally seeded database — white
+belt at its real 11 phases and 93 lessons, not a fixture — and the user's
+verdict was *"The roadmaps look outstanding, love it."* Both belts, collapsed
+and expanded. #446 is closed on that evidence.
+
+Worth recording **how** rather than only that, because the setup is the part
+that is easy to get wrong and quietly prove nothing:
+
+- Built from the **worktree**, with `apps/mobile/.env.local` copied in first.
+  Without that copy the build succeeds and launches into a config error — the
+  `EXPO_PUBLIC_*` values are inlined at build time and a worktree never has the
+  file.
+- Metro on **:8082**, not the :8081 instance the primary checkout was already
+  serving for another session. A dev client happily attaches to somebody else's
+  bundler, and the screenshot then shows a build that is not under test.
+- Pointed at a **local** API rather than staging, because staging's database
+  had not been reseeded since #476 and would have rendered the OLD curricula
+  under the new screen — which is the failure that looks most like success.
+
+The one judgement call the user ruled on implicitly by liking it is the belt
+mark; it stays as drawn.
+
 ### Gaps
 
 - **The belt mark is a judgement call.** It is a tied belt drawn from the
@@ -36436,6 +36489,7 @@ exists before substituting.
   state still carries a visible primary button; the enrolled state does not, and
   whether "Put this down" is discoverable enough behind `•••` has not been
   tested on anyone.
+
 ## 2026-08-20 — The phone stops throwing away the server's reason (N101)
 
 `nutrition.Projection` has carried `unreachable_reason` since N69 — display-ready
