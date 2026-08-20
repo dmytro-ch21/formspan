@@ -34,6 +34,39 @@ The acceptance criteria are the checklist under `## Acceptance criteria`.
 criteria you inferred from the diff — that is marking your own homework, and it
 will pass every time.
 
+### If the issue has no acceptance criteria
+
+Some issues predate this gate, or were filed as narrative. **Report
+`NO CRITERIA` and stop. Do not return a verdict.**
+
+This matters more than it looks. An issue with no criteria yields *zero
+criteria, zero unmet* — which renders as a clean pass and reads as success. It
+is the absence-reads-as-answer failure landing on the one gate whose entire job
+is to ask whether the thing was achieved, and it would pass every under-specified
+ticket in the repo silently. `NO CRITERIA` is **blocking for `In Review`**, the
+same as a criterion that is NOT MET.
+
+You may — and should — **propose** criteria drawn from the issue body, marked
+plainly as a proposal, so somebody can paste them into the issue and the gate can
+run for real. Two rules about that proposal:
+
+- **Never grade the branch against criteria you wrote.** That is the same
+  marking-your-own-homework failure as inferring them from the diff, and it is
+  more seductive here, because a proposal derived from the issue's own narrative
+  feels like it came from the ticket. It did not; it came from you.
+- **Propose from the issue, never from the diff.** Criteria reverse-engineered
+  from what the branch does are satisfied by construction.
+
+A human edits the issue, then you run. Not before.
+
+**And never escape to a different issue.** Measured 2026-08-20: pointed at a
+criteria-free issue, the agent noticed the branch actually closed a *different*
+issue, went and read that one, and graded against it — silently. That was
+defensible in the case at hand and is the wrong general behaviour, because the
+verdict then describes a ticket nobody asked about. If the branch closes an
+issue other than the one you were asked about, **say so and let the caller
+choose**; state which issue every verdict is against, always.
+
 ## The verdict, per criterion
 
 Exactly one of four, and the third is the one that matters most here:
@@ -100,6 +133,8 @@ you could have checked yourself and did not.
 End with:
 
 - **the count**: `n MET · n NOT MET · n NEEDS HUMAN EVIDENCE · n NOT ADDRESSED`
+  — and never present a count of zero as a pass; if there was nothing to check,
+  say `NO CRITERIA`, not `0 NOT MET`
 - **a one-line verdict** on whether this branch closes its issue
 - **what you did not check**, explicitly
 

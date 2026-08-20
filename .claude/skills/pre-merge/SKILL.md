@@ -93,6 +93,13 @@ interchangeable:
   the diff is not.
 - **NOT ADDRESSED** — legitimate on a partial PR, but it has to be visible.
   List what is left and why.
+- **NO CRITERIA** — the issue has none to check against. **Blocking, exactly
+  like NOT MET.** Zero criteria yields zero unmet, which renders as a clean pass
+  — so an under-specified ticket would sail through the one gate that exists to
+  ask whether the thing was achieved. Write criteria into the issue (the
+  verifier proposes a set, drawn from the issue rather than from the diff), get
+  them agreed, then re-run. Do not let the verifier grade against its own
+  proposal.
 
 **A criterion is never marked met by the person who wants to merge, on the
 strength of wanting to merge.** If the honest answer is "three of eight, and
