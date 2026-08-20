@@ -12,7 +12,7 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
-	"github.com/jackc/pgx/v5"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/testdb"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -168,93 +168,21 @@ func fixtureExerciseIDs() []string {
 //
 // Seeding once per process removes the churn. The advisory lock is what removes
 // the race, because two processes still cannot share one set of fixed ids.
-
-// fixtureLockKey identifies "this package's fixture rows". Arbitrary but fixed;
-// it is the issue number.
-const fixtureLockKey = 426
-
-// fixtureLockWait bounds the wait rather than blocking to the test timeout, so
-// the failure names its own cause instead of arriving as a 3-minute hang.
 //
-// The budget has to cover a whole neighbouring RUN, because the lock is held
-// for the lifetime of the process holding it — and that is much longer than one
-// package's ~2s when the neighbour was started with `-count=N`. Measured at 60s
-// this was too thin: two lanes each running `-count=10` (a 20-40s hold) put the
-// waiter within a few seconds of the budget every time, and 2 of 10 lane-runs
-// then failed on the wait rather than on anything real. 120s tolerates several
-// queued waiters and still leaves margin under CI's `-timeout 3m`.
-//
-// Contention is zero in the cases that matter: CI gets a throwaway database,
-// and the lock is scoped per-database, so a per-branch `vola_test_<branch>`
-// never queues at all.
-const fixtureLockWait = 120 * time.Second
-
-// The lock's SECOND key is a hash of the database name. Advisory lock keys are
-// CLUSTER-wide, not per-database, so without this two binaries running against
-// their own `vola_test_<branch>` databases on the one local Postgres would
-// serialise on each other for no reason — and per-branch databases are exactly
-// what CLAUDE.md tells you to use.
-const fixtureLockScope = `('x' || substr(md5(current_database()), 1, 8))::bit(32)::int`
-
-// fixtureLockPID is the Postgres backend pid of the connection holding the lock
-// — set by lockFixtures, read only by the guard that checks we are the holder.
-var fixtureLockPID int
-
-// lockFixtures takes the session-level advisory lock that makes this process
-// the sole owner of the fixture ids in this database. It is released when the
-// connection closes, including when the binary dies, so a crashed run cannot
-// wedge the next one.
-func lockFixtures(ctx context.Context, conn *pgx.Conn) error {
-	started := time.Now()
-	deadline := started.Add(fixtureLockWait)
-	announced := false
-	for {
-		var got bool
-		if err := conn.QueryRow(ctx,
-			`SELECT pg_try_advisory_lock($1::int, `+fixtureLockScope+`)`,
-			fixtureLockKey).Scan(&got); err != nil {
-			return fmt.Errorf("take the fixture lock: %w", err)
-		}
-		if got {
-			// Remember WHICH backend holds it, so the guard below can assert
-			// that this process is the holder rather than merely that somebody
-			// is. Without that distinction the guard passes vacuously whenever
-			// a neighbouring binary happens to hold the lock — which is exactly
-			// the situation it exists to police.
-			if err := conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&fixtureLockPID); err != nil {
-				return fmt.Errorf("read the fixture lock holder's backend pid: %w", err)
-			}
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf(
-				"another `session` test binary has held this database's fixture lock for %s.\n"+
-					"These tests own catalog rows with FIXED ids (%s, %s, …) and cannot share a "+
-					"database with a second copy of themselves — whichever finishes first deletes "+
-					"the other's rows mid-test.\n"+
-					"Give this branch its own database, as CLAUDE.md's \"use your own database\" "+
-					"section describes:\n"+
-					"  createdb -U vola vola_test_<branch> && TEST_DATABASE_URL=…vola_test_<branch>",
-				fixtureLockWait, exBench, exSquat)
-		}
-		// Say so once. A silent wait for a lock is indistinguishable from a
-		// hung test binary, and the person watching has no reason to suspect a
-		// second copy of themselves.
-		if !announced {
-			fmt.Fprintf(os.Stderr,
-				"session tests: waiting for another `session` test binary to release "+
-					"this database's fixture lock (up to %s)…\n", fixtureLockWait)
-			announced = true
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
+// #454 GENERALISED THAT LOCK and this package now uses the shared one in
+// internal/platform/testdb rather than a key of its own. Nothing here changes
+// behaviourally — one binary at a time still owns these ids — but the key is now
+// per DATABASE rather than per package, because the same measurement across the
+// other twelve packages found two more failure mechanisms a per-package key
+// cannot see: unscoped count assertions broken by a neighbouring *package*'s
+// rows, and two packages writing the same real catalog ids. See that package's
+// doc comment for the reasoning and the wall-clock cost.
 
 // seedFixtureExercises writes this package's catalog rows. Every column is
 // reconciled on conflict, not just inserted: a row left behind by an interrupted
 // run must be repaired rather than trusted, and a partial SET is how a stale
 // value survives into a green suite.
-func seedFixtureExercises(ctx context.Context, conn *pgx.Conn) error {
+func seedFixtureExercises(ctx context.Context, conn testdb.Conn) error {
 	for _, e := range fixtureExercises {
 		if _, err := conn.Exec(ctx, `
 			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, load_mode, implements, is_unilateral)
@@ -284,7 +212,7 @@ func seedFixtureExercises(ctx context.Context, conn *pgx.Conn) error {
 // So whatever still references the row goes first, and the delete is VERIFIED:
 // a cleanup that quietly failed would restore the pollution this exists to
 // prevent, with nothing going red.
-func removeFixtureExercises(ctx context.Context, conn *pgx.Conn) error {
+func removeFixtureExercises(ctx context.Context, conn testdb.Conn) error {
 	ids := fixtureExerciseIDs()
 	// Parents first: both child tables cascade from their own parent
 	// (session_sets from sessions, workout_items from workouts), so removing
@@ -314,43 +242,15 @@ func removeFixtureExercises(ctx context.Context, conn *pgx.Conn) error {
 	return nil
 }
 
+// TestMain holds the shared fixture lock for the lifetime of this binary and
+// seeds/removes the catalog rows above once inside it. With TEST_DATABASE_URL
+// unset every Postgres test skips, so there is nothing to own and nothing to
+// lock, and testdb.MainWithFixtures runs m untouched.
 func TestMain(m *testing.M) {
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		// Every Postgres test skips; there are no rows to own and nothing to
-		// lock. The pure-logic tests in this package still run.
-		os.Exit(m.Run())
-	}
-	ctx := context.Background()
-	// A dedicated connection rather than one borrowed from a pool: the advisory
-	// lock lives on the SESSION that took it, and a pooled connection would be
-	// handed back and could unlock or outlive the lock by accident.
-	conn, err := pgx.Connect(ctx, url)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "session tests: connect to TEST_DATABASE_URL: %v\n", err)
-		os.Exit(1)
-	}
-	if err := lockFixtures(ctx, conn); err != nil {
-		fmt.Fprintf(os.Stderr, "session tests: %v\n", err)
-		os.Exit(1)
-	}
-	if err := seedFixtureExercises(ctx, conn); err != nil {
-		fmt.Fprintf(os.Stderr, "session tests: %v\n", err)
-		os.Exit(1)
-	}
-
-	code := m.Run()
-
-	if err := removeFixtureExercises(ctx, conn); err != nil {
-		fmt.Fprintf(os.Stderr, "session tests: %v\n", err)
-		if code == 0 {
-			code = 1
-		}
-	}
-	// Explicit, because os.Exit runs no deferred function. Closing releases the
-	// advisory lock.
-	_ = conn.Close(ctx)
-	os.Exit(code)
+	os.Exit(testdb.MainWithFixtures(m, testdb.Fixtures{
+		Seed:   seedFixtureExercises,
+		Remove: removeFixtureExercises,
+	}))
 }
 
 func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
@@ -391,54 +291,18 @@ func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 }
 
 // The lock IS the fix, so it gets an assertion rather than a comment. Delete
-// the `lockFixtures` call from TestMain and this test is the thing that goes
-// red — without it the removal is silent, and the package goes back to passing
-// alone and failing in a fleet, which is the exact shape of #426.
+// the `testdb.MainWithFixtures` call from TestMain and this test is the thing
+// that goes red — without it the removal is silent, and the package goes back to
+// passing alone and failing in a fleet, which is the exact shape of #426.
 //
 // It asks `pg_locks` who the holder IS, rather than asking whether the lock can
-// be taken. The difference matters and review caught it: a `pg_try_advisory_lock`
-// probe only proves SOMEBODY holds the key, so with the `lockFixtures` call
-// deleted it still passes whenever a neighbouring binary happens to hold it —
-// vacuously green in exactly the fleet conditions the lock exists for. Comparing
-// the holder's backend pid against our own closes that window.
-//
-// `objsubid = 2` is how Postgres marks the two-key form of an advisory lock, and
-// the keys land in `classid`/`objid` as oids — hence the `::oid` casts, which
-// also carry the negative int4 the database-name hash can produce (verified:
-// -347321596 surfaces as objid 3947645700).
+// be taken — the distinction #457 established on this test, and it is preserved
+// exactly, just moved into `testdb.AssertHeld` along with the lock itself. A
+// `pg_try_advisory_lock` probe only proves SOMEBODY holds the key, so with the
+// lock removed it still passes whenever a neighbouring binary happens to hold
+// it: vacuously green in the very fleet conditions the lock exists for.
 func TestTheFixtureLockIsHeldForTheWholeProcess(t *testing.T) {
-	_, pool := newTestRepo(t) // skips when TEST_DATABASE_URL is unset
-	ctx := context.Background()
-
-	rows, err := pool.Query(ctx, `
-		SELECT pid FROM pg_locks
-		WHERE locktype = 'advisory'
-		  AND classid = $1::int::oid
-		  AND objid = (`+fixtureLockScope+`)::oid
-		  AND objsubid = 2
-		  AND granted`, fixtureLockKey)
-	if err != nil {
-		t.Fatalf("read the fixture lock's holders: %v", err)
-	}
-	var holders []int
-	for rows.Next() {
-		var pid int
-		if err := rows.Scan(&pid); err != nil {
-			t.Fatalf("scan a lock holder: %v", err)
-		}
-		holders = append(holders, pid)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("lock holder rows: %v", err)
-	}
-
-	if len(holders) != 1 || holders[0] != fixtureLockPID {
-		t.Fatalf("this database's fixture lock is held by %v, and THIS process's "+
-			"connection is pid %d. Exactly one holder, and it must be us — otherwise "+
-			"nothing stops a second `session` test binary deleting these fixtures out "+
-			"from under an in-flight test, which is #426. TestMain must take the lock "+
-			"and hold it for the lifetime of the process.", holders, fixtureLockPID)
-	}
+	testdb.AssertHeld(t) // skips when TEST_DATABASE_URL is unset
 }
 
 // And the other half: that TestMain actually SEEDED, with the values the rest of

@@ -88,6 +88,8 @@ cd backend && DATABASE_URL='postgres://vola:vola_dev_only@localhost:5432/vola_te
 
 Then set `TEST_DATABASE_URL` in `backend/.env` (see `backend/.env.example`) and run `pnpm run test:api`. Expect `PASS`, not `SKIP`.
 
+**One test binary at a time owns a test database.** These tests seed shared rows with fixed ids and assert some counts they do not scope, so two suites running against the same database used to delete each other's fixtures — nine packages failing across four concurrent runs. Every Postgres-backed package now takes a database-scoped advisory lock in `TestMain` (`backend/internal/platform/testdb`), so a second suite queues instead of interfering; if you see `testdb: another test binary holds this database's fixture lock`, that is a colleague's run, not a failure. Queueing costs about 17% of wall clock, so **give a branch its own database** (`createdb -U vola vola_test_<branch>`) when you can — the lock is scoped per database, so that has no contention at all.
+
 ### Run the checks
 
 One command, before every push:
