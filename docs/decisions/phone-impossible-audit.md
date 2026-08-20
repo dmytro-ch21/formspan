@@ -39,15 +39,25 @@ Counts at the time of the sweep: **26 web routes, 46 mobile routes.**
 | 6 | The nutrition analytical surface — intake vs bodyweight vs training load, 7-day mean, adherence % | `/dashboard/nutrition` | none | open |
 | 7 | Author a weekly training theme | `/dashboard/calendar` (`setTheme`) | `lib/themes.ts`: *"read-only on the phone… no write path here on purpose"* | open |
 | 8 | Create / edit / delete your own curriculum or roadmap | `curricula/new`, `[id]/edit` | mobile `lib/curriculum.ts` exports only `getCurriculum`, `enroll`, `archive` | open |
-| 9 | View, edit, copy or delete a sequence | `sequences/*` | mobile can only *capture* one inside `bjj/reflect/[id]` — **no list or detail screen exists** | open |
+| 9 | View, edit, copy or delete a sequence | `sequences/*` | mobile can only *capture* one inside `bjj/reflect/[id]` — **no list or detail screen exists** | **read-back by N80 (PRNUM); edit/copy/delete still open** |
 | 10 | The technique funnel as a browsable surface | `/dashboard/proficiency` | mobile `fetchProficiency` feeds the Today card only | open |
 | 11 | Per-exercise load over time | `records` + `LoadHistoryChart` | mobile has no `fetchLoadHistory` | open |
 | 12 | Session search by name, period/sport filters, a paged list | `/dashboard/sessions` | mobile's month sheet has neither | open |
 
-**#9 is the sharpest**, and it is worse than a missing screen: `shared/index.tsx`
-tells an athlete who accepts a shared sequence *"your copy is in the Library"* —
-a destination that does not exist on the phone. The app captures data it can
-never show back, and says otherwise.
+**#9 was the sharpest**, and it was worse than a missing screen:
+`shared/index.tsx` told an athlete who accepts a shared sequence *"your copy is
+in the Library"* — a destination that does not exist on the phone. The app
+captured data it could never show back, and said otherwise.
+
+**N80 (PRNUM) closed the reading half.** `app/sequence/index.tsx` and
+`app/sequence/[id].tsx` list and render chains on the phone, accepting a shared
+sequence now navigates to the copy instead of describing where it went, and the
+You tab carries an entry point so a chain is findable a week later rather than
+only in the moment of accepting. **The row stays partly open on purpose**:
+editing, reordering, copying a reference chain and deleting are still web-only,
+which is *reduced-on-mobile* rather than phone-impossible — the athlete can now
+read every chain they own on the device that captured it. Whoever closes the
+rest should file it as its own id rather than reopening this one.
 
 **#11 was legitimately web-only until yesterday.** N6 assigned it there; N57's
 amendment to the mobile-chart carve-out (2026-08-19) re-opened the door. It is
@@ -114,7 +124,7 @@ Each is superseded on the exclusivity, not on the design.
 | `nutrition-design.md` §4 | "Set / explain the target — **read-only** mobile" — the read-only half is what N72 closed |
 | `nutrition-design.md` §4 | "Intake vs weight vs training load — ✗ / ✅" |
 | `nutrition-design.md` §5 | "one web screen with three sections" — `CLAUDE.md` already rules this "one screen on each"; N69 delivered the feasibility section on both, the other two are still web-only |
-| `functional-scenarios.md` | "Building and refining [sequences] stay on web"; "No browse or detail screen on mobile" |
+| `functional-scenarios.md` | "Building and refining [sequences] stay on web"; "No browse or detail screen on mobile" — **corrected on the exclusivity by N80 (PRNUM)**: reading is now on both, building is still web-only, and that is allowed |
 | `functional-scenarios.md` | Themes "Authored on web, read on the phone… **no way to author one on the phone**, deliberately" |
 | `curriculum-and-gameplan-design.md` | "roadmap *building* and the full funnel on web" |
 | `system-design.md` | *"nothing a user needs weekly may be desktop-only"* — this one is not an assignment but a rule, and #1–#6 violate it. Nutrition is daily. |
@@ -154,11 +164,15 @@ Rows 1 and 2 were closed by N72 (#372) itself.
 Two things about that ordering worth keeping, because they are judgements rather
 than bookkeeping:
 
-- **#414 is filed above the analytical gaps**, out of severity order, because it
-  is the only finding where the app **says something untrue** rather than merely
-  omitting a surface: `shared/index.tsx` tells an athlete who accepts a shared
-  sequence that "your copy is in the Library", and no sequence screen exists on
-  the phone at all. An omission is a gap; a false statement is a defect.
+- **#414 was filed above the analytical gaps**, out of severity order, because
+  it was the only finding where the app **said something untrue** rather than
+  merely omitting a surface: `shared/index.tsx` told an athlete who accepts a
+  shared sequence that "your copy is in the Library", and no sequence screen
+  existed on the phone at all. An omission is a gap; a false statement is a
+  defect. That ordering was right for a second reason that only showed up in the
+  fixing: the false sentence was the *cheap* half, and a ticket that can be
+  half-closed truthfully in an afternoon is worth putting first. Closed by N80
+  (PRNUM) — see the note under the table for what it deliberately left.
 - **Rows 6, 10 and 11 are one issue**, not three. They share a shape — a
   read-only analytical surface that exists on web and nowhere else — and a
   solution, so splitting them would be three tickets that each half-build the

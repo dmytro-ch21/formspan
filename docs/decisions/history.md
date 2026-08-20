@@ -34014,6 +34014,122 @@ reddens the in-flight-edit test.
   size and is the first thing to change if a history view arrives.
 
 
+## 2026-08-20 — N80: the app stopped telling athletes their chain was somewhere it never was
+
+**The defect, exactly.** `apps/mobile/app/shared/index.tsx` had a
+`landedMessage` whose one special case read *"Accepted — your copy is in the
+Library."* for a shared **sequence**. It was false twice over: this app had no
+sequence route of any kind, and the Library tab is the technique and exercise
+catalog, which has never held a chain. An athlete who accepted a share would go
+and look, twice, and find nothing.
+
+The phone-impossible audit (`docs/decisions/phone-impossible-audit.md`, #372 /
+#398) swept 26 web and 46 mobile routes and turned up twelve capabilities that
+web owned outright. This one was filed **above** the others, out of severity
+order, and the reason is worth keeping: **every other finding omits a surface;
+this one made a statement.** An omission is a gap. A false statement is a
+defect, and the athlete acts on it.
+
+**Two things shipped, and they are different in kind.**
+
+1. **The copy stopped lying**, which was cheap. `landedMessage` is now a single
+   constant that says only what *happened* — "Accepted — the copy is yours now."
+   — and names no destination at all. A message that says where to look can go
+   stale when a route lands or moves; one that says what happened cannot. That
+   arm now only fires for a `resource_type` this build has never heard of, which
+   is the case it was written for.
+
+2. **A read-back surface**, which is the real fix. `app/sequence/index.tsx`
+   lists every chain you own; `app/sequence/[id].tsx` renders one — steps
+   numbered in the order they were recorded, the library's own name and
+   `position · category` on each, notes, and the position each step leaves you
+   in shown *between* the steps rather than beside them, because that is what
+   makes a chain a chain. Every step is a link into `/technique/[id]`, so a
+   chain is something you can study on a phone rather than a list of names you
+   already know. `sequence` joins `workout` in `DESTINATION`, so accepting a
+   shared chain now opens the copy.
+
+**How it is reachable on a phone** — `CLAUDE.md` asks for this explicitly, and
+asking it is what produced the third piece of work. Two ways in, deliberately:
+accepting a share navigates straight to the copy, and the **You** tab carries a
+`Sequences` row beside `Position map`, gated on the BJJ module the same way. The
+second one is not decoration. A destination reachable *only* by having just
+arrived at it answers the athlete who tapped Accept ten seconds ago and nobody
+else — the same phone-impossible gap in a smaller form, a week later.
+
+**No backend, no contract, no lib.** `GET /v1/sequences` and
+`GET /v1/sequences/{id}` already existed, and `apps/mobile/lib/sequences.ts`
+already had `listSequences`, `getSequence` and `pendingSequences` — written for
+the reflection wizard's chain chips. The whole ticket was two screens, one map
+entry, one row and one sentence. Worth recording, because the audit row read as
+a feature and was a UI-only fix sitting on finished plumbing.
+
+**Three things the screens have to get right, all of which look like success
+when wrong:**
+
+- **A 500 while listing must not read as "you have no chains".** `listSequences`
+  rejects the *whole* promise on a server fault, including the outbox half it
+  had already read — so degrading to `[]` would make an outage hide this
+  device's own captures while being *offline* showed them: inconsistent, and the
+  wrong way round. The list falls back to `pendingSequences` **and** shows the
+  error. This is the same defect `records/pinned.tsx` documents, and the
+  reflection wizard's chip loader had already learned it once.
+- **Offline is not 404.** `getSequence` resolves to `null` for a chain this
+  device has never held when the network cannot be reached. Rendering that as
+  not-found tells an athlete their chain was deleted, which is a much worse
+  claim than the one this ticket exists to remove. It gets its own state and its
+  own sentence.
+- **A local capture has no library fields on its steps.** The server resolves
+  `name`, `position` and `category` on read; a row still in the outbox carries
+  only the technique ids the reflection wizard tagged. The detail screen
+  resolves those from the memory-cached technique summaries — and only when a
+  step actually needs it, since that list is ~197 KB on a cold cache. When it
+  cannot (cold launch, no signal — the known gap that the technique library is
+  memory-only), the step says **"Name unavailable offline"** rather than
+  rendering `knee-cut` as if it were a name. A raw id in a name's slot is a
+  false claim dressed as a fallback, which is the same bug as the one at the top
+  of this entry, one layer down.
+
+**Twelve mutations, twelve reds**, run against a baseline that was green in the
+same session. Including: inverting the pluralisation in `stepSummary`; making
+`stepName` fall back to the technique id; removing `sequence` from `DESTINATION`
+again; **restoring the old "in the Library" sentence**; rounding a failed list
+down to `[]`; making a real failure read as offline; reversing the step order;
+fetching the library unconditionally; and both arms of the You-tab gate. Two
+notes on the apparatus, because both are the failure mode `CLAUDE.md` warns
+about: the harness required jest to report failing *tests* rather than merely
+exiting non-zero, since a type error also exits non-zero and proves nothing
+about the test — and every expectation in `sequenceRow.test.ts` is pinned to a
+**literal**, never rebuilt from the template the function uses, which would be
+true by construction.
+
+And one near-miss worth recording, because it cost nothing here and could cost a
+whole session elsewhere: the first test run was issued from `apps/mobile` in the
+**primary checkout** rather than the worktree. It passed, reported nine green
+tests, and printed the *old* test names — proving that the unmodified tree still
+worked. A `pwd` in the same command is the cheap fix, and the general form is the
+one already in `CLAUDE.md`: a green result from apparatus pointed at the wrong
+subject is not evidence.
+
+**What was deliberately not built.** Editing, reordering, renaming, adding or
+removing a step, copying a reference chain, and deleting are all still web-only.
+That is *reduced-on-mobile*, which the mobile-first rule permits — web may be
+richer — rather than phone-impossible, which it forbids. The audit row is
+updated to say exactly that rather than being marked closed, and whoever closes
+the writing half should file it as its own id.
+
+**Also unbuilt, and smaller:** the mobile `Sequence` type still has no
+`official` field, so a VOLA reference chain is detected as `editable === false`.
+That is equivalent today — the backend's visibility rule admits only your own
+rows plus ownerless ones — but it is an inference rather than the field, and
+nothing seeds an ownerless sequence yet, so that arm has never rendered against
+real data.
+
+**Not verified on hardware.** Everything above was exercised in jest against
+mocked transport. `docs/testing/device-checks.md` gains **D15b**, which is the
+check that matters: accept a shared chain on the phone with the web app genuinely
+closed, find it again from cold a screen later, and capture one in a dead-spot.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
