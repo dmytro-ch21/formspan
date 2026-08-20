@@ -24,8 +24,13 @@ on the commit GitHub thinks is the head of the pull request.
 A `pull_request` workflow does not run on your branch. It runs on
 `refs/pull/N/merge`, the commit GitHub makes by merging your head into the base.
 **When the pull request conflicts with its base, that merge commit cannot exist,
-so no workflow run is created at all** — silently, with no failure, no
-annotation and no check.
+so no NEW workflow run is created** — silently, with no failure, no annotation
+and no check.
+
+**"No new run", not "no runs".** The distinction is load-bearing and was got
+wrong here first: runs already created are never withdrawn, so a pull request
+can carry a full set of green checks *and* be conflicting. See `diagnose`, which
+measures that case and is why `EXIT_STALE` exists.
 
 Measured on the branch in #368: it merged cleanly at 22:09Z and got its run; six
 minutes later `main` moved and the branch began conflicting in `docs/TASKS.md`
@@ -33,7 +38,8 @@ and `docs/testing/functional-scenarios.md`; from there every push and the
 close/reopen produced nothing; the force-push that rebased it onto current
 `main` produced a full five within four seconds. Confirmed prospectively on a
 deliberately conflicting throwaway pull request (#393), which received zero runs
-while `mergeable` read `CONFLICTING`.
+while `mergeable` read `CONFLICTING` — and again unprompted on this script's own
+pull request (#390) while it was under review.
 
 Hence the remedy this script prints when it finds zero:
 `git fetch origin && git rebase origin/main && git push --force-with-lease`.
@@ -52,6 +58,10 @@ Hence the remedy this script prints when it finds zero:
    gets its own exit code, because "not finished", "did not run" and "went red"
    are three different answers: `1` nothing ran / a check missing / a check
    skipped, `2` something failed, `3` still pending, `4` could not ask GitHub.
+4. The green, if green, is about the PRESENT. A full set of passing checks on a
+   pull request that is now CONFLICTING describes a merge commit that no longer
+   exists — `5`, `EXIT_STALE`. Nothing else in any GitHub surface flags that
+   state, and every one of them calls it ready to merge.
 
 Expected checks are derived from the workflow files rather than hardcoded, and
 cross-checked against `EXPECTED_CHECK_RUNS`, a literal somebody measured: if the
@@ -123,6 +133,10 @@ EXIT_NOT_CHECKED = 1  # zero runs, a declared check missing, or skipped — the 
 EXIT_FAILED = 2  # the checks ran and something is red
 EXIT_PENDING = 3  # the checks ran and have not finished
 EXIT_ERROR = 4  # we could not ask GitHub at all — deliberately NOT 1
+# Every declared check is present and green, and the pull request is
+# CONFLICTING. Its own code, because it is the one state a human reads as
+# "ready to merge" while it is not: see `diagnose`.
+EXIT_STALE = 5
 
 REMEDY = (
     "  git fetch origin && git rebase origin/main && git push --force-with-lease"
@@ -359,31 +373,90 @@ def evaluate(expected: list[str], runs: list[dict]) -> tuple[int, list[str]]:
     return EXIT_OK, out
 
 
-def diagnose(code: int, facts: dict) -> str:
-    """The mergeability note that turns a bare count into a diagnosis.
+def diagnose(code: int, facts: dict) -> tuple[int, str]:
+    """Reconcile the run verdict with the pull request's mergeability.
 
-    Kept out of `main` and pure so `--self-test` can cover it. Review found it
-    living inline with no vector on it, which is the case CLAUDE.md's rule about
-    redundant guards is about: a guard whose *message* nothing asserts reads as
-    dead code to the next person, and this one carries the entire finding of
-    N65 to whoever is staring at a zero.
+    Returns a possibly-REVISED exit code plus the note explaining it. It revises
+    rather than merely annotates because of the refinement below: there is a
+    state where every check is green and the pull request is still not what a
+    green set says it is.
+
+    ## The precise claim is about run CREATION, not run existence
+
+    The first version of this file said "a conflicting pull request receives
+    zero check runs". Measured 2026-08-20, that is not quite right, and #395
+    looks at first like a counterexample to the whole mechanism:
+
+        PR #400  0 runs  CONFLICTING / DIRTY
+        PR #395  6 runs  CONFLICTING / DIRTY   <- all six green
+        PR #390  5 runs  MERGEABLE   / CLEAN
+
+    The timestamps settle it. #395's six runs started at `14:40:33Z`; the merge
+    that created its conflict, #404 into `main`, landed at `14:40:52Z`.
+    **Nineteen seconds.** The runs were created while the pull request still
+    merged cleanly, `main` then moved underneath it, and **existing check runs
+    are never withdrawn.**
+
+    So the claim is: *a pull request that conflicts with its base receives no
+    NEW check runs.* That is exactly what `refs/pull/N/merge` failing to exist
+    predicts, so the refinement strengthens the mechanism rather than qualifying
+    it — a run already created is the record of a merge commit that once did.
+
+    ## Which produces the state this function exists to catch
+
+    A full set of green checks on a CONFLICTING pull request is the most
+    dangerous reading in this whole area, and nothing else flags it. Every
+    surface says green. The checks are real and they passed. But they describe a
+    merge commit that **no longer exists**, GitHub will refuse the merge, and
+    rebasing re-runs all of them — so the green says nothing about the code that
+    would actually land. It is the stale-`headRefOid` trap with a perfectly
+    valid `headRefOid`.
+
+    Hence `EXIT_STALE`: green, but not about the present.
     """
     mergeable = facts.get("mergeable")
-    if code == EXIT_OK:
-        return ""
-    if code == EXIT_NOT_CHECKED and mergeable == "CONFLICTING":
-        return (
-            "CONFIRMED CAUSE: `mergeable` is CONFLICTING. GitHub cannot build "
-            "this pull request's merge ref, so no workflow run exists. Rebase "
-            "(above) and the checks appear within seconds."
+    state = facts.get("mergeStateStatus")
+
+    if code == EXIT_OK and mergeable == "CONFLICTING":
+        return EXIT_STALE, (
+            "GREEN, BUT STALE: every declared check passed AND this pull "
+            "request is CONFLICTING.\n\n"
+            "Those runs were created while it still merged cleanly; the base "
+            "has moved since, and existing runs are never withdrawn. They "
+            "describe a merge commit that no longer exists, GitHub will refuse "
+            "the merge, and a rebase re-runs all of them — so this green says "
+            "nothing about the code that would actually land.\n\n" + REMEDY
         )
+
+    if code == EXIT_OK and mergeable == "UNKNOWN":
+        # Deliberately still 0. GitHub computes `mergeable` lazily and UNKNOWN
+        # is the normal state for a few seconds after every push, so failing
+        # here would cry wolf on healthy pull requests — and a check that cries
+        # wolf is one somebody eventually silences, which costs more than this
+        # case is worth. Saying so out loud is the middle course.
+        return EXIT_OK, (
+            "note: `mergeable` is UNKNOWN, which GitHub computes lazily. If it "
+            "resolves to CONFLICTING this green is stale — re-run to be sure."
+        )
+
+    if code == EXIT_OK:
+        return EXIT_OK, ""
+
+    if code == EXIT_NOT_CHECKED and mergeable == "CONFLICTING":
+        return code, (
+            "CONFIRMED CAUSE: `mergeable` is CONFLICTING. GitHub cannot build "
+            "this pull request's merge ref, so no NEW workflow run is created. "
+            "Rebase (above) and the checks appear within seconds."
+        )
+
     if code == EXIT_NOT_CHECKED and mergeable == "UNKNOWN":
-        return (
+        return code, (
             "`mergeable` is UNKNOWN — GitHub computes it lazily. Re-run this in "
             "a few seconds before concluding anything; UNKNOWN is not the same "
             "as MERGEABLE."
         )
-    return f"mergeable={mergeable} mergeStateStatus={facts.get('mergeStateStatus')}"
+
+    return code, f"mergeable={mergeable} mergeStateStatus={state}"
 
 
 # --------------------------------------------------------------------------
@@ -541,28 +614,77 @@ def self_test() -> int:
         elif want_text not in text:
             failures.append(f"  {label}: output does not mention {want_text!r}")
 
-    # The mergeability note. Its *effect* is redundant — the exit code already
-    # says the PR is unchecked — so nothing would go red if it were deleted,
-    # which is exactly why its message needs asserting: it is the sentence that
-    # tells whoever is staring at a zero what N65 found.
-    diagnoses: list[tuple[str, int, dict, str]] = [
-        ("conflicting", EXIT_NOT_CHECKED, {"mergeable": "CONFLICTING"}, "CONFIRMED CAUSE"),
-        ("mergeable unknown", EXIT_NOT_CHECKED, {"mergeable": "UNKNOWN"}, "UNKNOWN is not the same"),
+    # The mergeability reconciliation. Two of these have a redundant *effect* —
+    # the exit code already says the PR is unchecked — so nothing would go red
+    # if the message were deleted, which is exactly why the message is asserted:
+    # it is the sentence that tells whoever is staring at a zero what N65 found.
+    # The `green but conflicting` pair is not redundant at all; it CHANGES the
+    # verdict, and it is the case a human is most likely to misread.
+    diagnoses: list[tuple[str, int, dict, int, str]] = [
+        (
+            "conflicting",
+            EXIT_NOT_CHECKED,
+            {"mergeable": "CONFLICTING"},
+            EXIT_NOT_CHECKED,
+            "CONFIRMED CAUSE",
+        ),
+        (
+            "mergeable unknown",
+            EXIT_NOT_CHECKED,
+            {"mergeable": "UNKNOWN"},
+            EXIT_NOT_CHECKED,
+            "UNKNOWN is not the same",
+        ),
         # Zero runs on a perfectly mergeable PR is the case the diagnosis must
         # NOT claim: something else is wrong and saying "CONFIRMED CAUSE" would
         # send the reader down the wrong path.
-        ("clean but unchecked", EXIT_NOT_CHECKED, {"mergeable": "MERGEABLE"}, "mergeable=MERGEABLE"),
-        ("green says nothing", EXIT_OK, {"mergeable": "MERGEABLE"}, ""),
+        (
+            "clean but unchecked",
+            EXIT_NOT_CHECKED,
+            {"mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED"},
+            EXIT_NOT_CHECKED,
+            "mergeable=MERGEABLE",
+        ),
+        ("green and clean says nothing", EXIT_OK, {"mergeable": "MERGEABLE"}, EXIT_OK, ""),
+        # THE REFINEMENT (measured 2026-08-20 on #395, see `diagnose`). Every
+        # check green AND conflicting: the runs were created before the base
+        # moved and are never withdrawn, so they describe a merge commit that no
+        # longer exists. Every other surface calls this ready to merge.
+        (
+            "green but conflicting",
+            EXIT_OK,
+            {"mergeable": "CONFLICTING", "mergeStateStatus": "DIRTY"},
+            EXIT_STALE,
+            "GREEN, BUT STALE",
+        ),
+        # UNKNOWN with a green set stays 0 on purpose — it is the normal state
+        # for seconds after any push, and failing here would cry wolf. It still
+        # has to SAY so, or the tolerance is indistinguishable from not looking.
+        (
+            "green but mergeability not yet computed",
+            EXIT_OK,
+            {"mergeable": "UNKNOWN"},
+            EXIT_OK,
+            "UNKNOWN",
+        ),
     ]
-    for label, code, facts, want in diagnoses:
-        note = diagnose(code, facts)
-        if want == "":
+    for label, code_in, facts, want_code, want in diagnoses:
+        got_code, note = diagnose(code_in, facts)
+        if got_code != want_code:
+            failures.append(
+                f"  diagnose/{label}: exit {got_code}, expected {want_code}"
+            )
+        elif want == "":
             if note != "":
                 failures.append(f"  diagnose/{label}: expected silence, got {note!r}")
         elif want not in note:
             failures.append(f"  diagnose/{label}: {note!r} does not mention {want!r}")
-    if "CONFIRMED CAUSE" in diagnose(EXIT_NOT_CHECKED, {"mergeable": "MERGEABLE"}):
+    if "CONFIRMED CAUSE" in diagnose(EXIT_NOT_CHECKED, {"mergeable": "MERGEABLE"})[1]:
         failures.append("  diagnose: claims the conflict cause on a mergeable PR")
+    # A green set on a conflicting PR must never exit 0 — the single most
+    # misreadable state in this whole area.
+    if diagnose(EXIT_OK, {"mergeable": "CONFLICTING"})[0] == EXIT_OK:
+        failures.append("  diagnose: a green set on a CONFLICTING pull request exits 0")
 
     # And the workflow parser, against the real files rather than a fixture —
     # the constant it cross-checks is the thing that stops a broken parser
@@ -677,13 +799,19 @@ def main() -> int:
         return EXIT_ERROR
 
     code, lines = evaluate(expected, runs)
+
+    note = ""
+    if facts is not None:
+        # `diagnose` may REVISE the code: a green set on a CONFLICTING pull
+        # request is EXIT_STALE, not EXIT_OK. So it has to run before the
+        # stream is chosen, or the one state a human misreads would be printed
+        # to stdout looking like a pass.
+        code, note = diagnose(code, facts)
+
     stream = sys.stdout if code == EXIT_OK else sys.stderr
     print("\n".join(lines), file=stream)
-
-    if facts is not None:
-        note = diagnose(code, facts)
-        if note:
-            print("\n" + note, file=sys.stderr)
+    if note:
+        print("\n" + note, file=stream)
 
     return code
 
