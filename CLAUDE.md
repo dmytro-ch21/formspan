@@ -398,8 +398,32 @@ gh project item-edit ...                                             # Status ->
 
 Assigned, or `Status` past `Todo`, means taken. Unassigned and `Todo` means free.
 
+**`In Progress` means DISPATCHED — a session is actually on it. Nothing else.**
+Set it at the moment work starts, together with the assignee, and never earlier.
+
+Two different facts live on the board and collapsing them breaks it:
+
+- **Board position is PRIORITY** — what we believe is most valuable next.
+- **`Status` is WHAT IS HAPPENING** — who is on it, right now.
+
+Prioritising a ticket is not claiming it. Marking something `In Progress` because
+it is important next tells every other session to skip a ticket nobody is
+working, which is **a claim with nothing behind it** — the exact failure the move
+off `docs/TASKS.md` was meant to end. It happened within an hour of the move, to
+the session that did the move, on two tickets, because a user asked for them to
+be prioritised and prioritising felt like claiming.
+
+To raise something's priority, move it up the board and leave `Status` alone. If
+you cannot staff a ticket you have claimed, **un-claim it** — `Todo`, unassigned,
+position untouched — rather than leaving the board asserting something untrue.
+
 Then open your PR with **`closes #<issue>`** in the body, so merging closes the
 issue and moves it to `Done` without anyone remembering to.
+
+**And note `docs/TASKS.md` is an ARCHIVE**, not the list — do not tick a line
+there to record any of this. The full account is in *The open list* above; it is
+restated here because this is the section somebody jumps straight to, and three
+sessions in one afternoon learned it from a colleague rather than from the repo.
 
 **Why this replaced the empty-commit-plus-draft-PR convention.** That convention
 existed for one reason: *a check cannot see work that has not been pushed*, so a

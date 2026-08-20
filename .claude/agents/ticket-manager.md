@@ -80,6 +80,14 @@ gh issue view <n> --repo dmytro-ch21/formspan --json assignees,state
 
 Assigned and `In Progress` means taken. Unassigned and `Todo` means free.
 
+**`In Progress` means DISPATCHED — somebody is actually working it.** Set it when
+work starts, never when a ticket is merely prioritised. Board position carries
+priority; `Status` carries what is happening. If you are asked to bump something
+up the list, **move it and leave `Status` alone** — marking an important-but-
+unstaffed ticket `In Progress` tells every other session to skip work nobody is
+doing. If a claimed ticket loses its session, put it back to `Todo` and
+unassigned, keeping its position.
+
 An issue moves to `In Review` when its PR goes ready-for-review, and closes when
 that PR merges — `closes #<n>` in the PR body does this automatically, which is
 the point of using issues.
