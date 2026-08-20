@@ -4997,6 +4997,153 @@ components:
           type: string
           description: Must be one of GET /admin/techniques/positions, or empty.
 
+    DailyTracker:
+      type: object
+      description: >
+        One athlete's daily tracker. Water, coffee and "creatine, 5 g, once a
+        day" are all this object with different values — there is no per-tracker
+        type, and nothing branches on `preset`.
+
+
+        Amounts are stored in `unit`, always, whatever the athlete's display
+        preference says — the same rule weights follow by being kilograms on the
+        wire and pounds on the screen.
+      required:
+        [id, user_id, preset, name, icon, color_key, unit, increment,
+         render_style, sort_order, created_at, updated_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        preset:
+          type: string
+          description: >
+            The seeded preset this row came from, or empty for one the athlete
+            authored. A provisioning key only: a preset row is an ordinary
+            tracker, fully editable and archivable like any other.
+        name: { type: string }
+        icon: { type: string, description: "An emoji, or empty." }
+        color_key:
+          type: string
+          description: >
+            A key into the client palette, never a hex. A free colour can fail
+            contrast on the card and nothing could check it at authoring time,
+            so the client offers a validated set and stores the name of one. An
+            unrecognised key renders as the client default.
+        unit:
+          type: string
+          enum: ["", ml, g, mg, cup, dose, count]
+          description: The canonical unit amounts are recorded in.
+        increment:
+          type: number
+          description: How much one tap adds, in `unit`.
+        target:
+          type: number
+          nullable: true
+          description: >
+            The daily target, in `unit`. **Null is a real state**, meaning the
+            athlete wants a count with no goal — not a missing value. Crossing a
+            target is never blocked.
+        render_style:
+          type: string
+          enum: [auto, glyphs, bar, dose]
+          description: >
+            `auto` lets the client pick from the target and increment: a glyph
+            row up to twelve, a bar beyond that, one large glyph for a single
+            dose. A stored value overrides it.
+        sort_order: { type: integer }
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            Set by DELETE. Archived trackers are excluded from the list and keep
+            every entry they ever recorded.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    DailyTrackerInput:
+      type: object
+      description: >
+        A new athlete-authored tracker. `preset` is not accepted — presets are
+        assigned by the server, and a caller who could claim one would collide
+        with provisioning and make somebody's water card unreachable.
+      required: [id, name, color_key, increment]
+      properties:
+        id:
+          type: string
+          description: >
+            Client-generated, so a retry after a lost response is idempotent
+            rather than a second tracker.
+        name: { type: string, maxLength: 60 }
+        icon: { type: string, maxLength: 16 }
+        color_key: { type: string }
+        unit: { type: string, enum: ["", ml, g, mg, cup, dose, count] }
+        increment: { type: number }
+        target: { type: number, nullable: true }
+        render_style: { type: string, enum: [auto, glyphs, bar, dose] }
+        sort_order: { type: integer }
+
+    DailyTrackerPatch:
+      type: object
+      description: >
+        A PARTIAL update. **A field absent from the body is not written**, and
+        that is the contract, not an implementation detail: the phone's target
+        screen sends `{"target": 2500}` and must not thereby blank the name,
+        icon, colour or unit.
+
+
+        `target` distinguishes three states, which is why it is the one nullable
+        field here: absent means leave it alone, `null` means the athlete wants
+        no target, and a number sets one. Every other field is non-nullable —
+        sending `null` for one is rejected rather than silently coerced.
+      properties:
+        name: { type: string, maxLength: 60 }
+        icon: { type: string, maxLength: 16 }
+        color_key: { type: string }
+        unit: { type: string, enum: ["", ml, g, mg, cup, dose, count] }
+        increment: { type: number }
+        target: { type: number, nullable: true }
+        render_style: { type: string, enum: [auto, glyphs, bar, dose] }
+        sort_order: { type: integer }
+
+    TrackerEntry:
+      type: object
+      description: One tap.
+      required: [id, tracker_id, user_id, logged_on, logged_at, amount, created_at]
+      properties:
+        id: { type: string }
+        tracker_id: { type: string }
+        user_id: { type: string }
+        logged_on:
+          type: string
+          format: date
+          description: >
+            The athlete's LOCAL calendar day, supplied by the client and never
+            derived from `logged_at`. West of Greenwich a 23:58 glass of water
+            belongs to the day that is ending, and a UTC-derived date files it
+            under tomorrow.
+        logged_at:
+          type: string
+          format: date-time
+          description: >
+            The moment, for "last at 16:40". Defaulted to the server's now when
+            omitted — unlike `logged_on`, which cannot be defaulted because the
+            server does not know the athlete's timezone.
+        amount:
+          type: number
+          description: >
+            The tracker's increment AS IT WAS when this was logged, so changing
+            the increment later does not rewrite last week.
+        created_at: { type: string, format: date-time }
+
+    TrackerEntryInput:
+      type: object
+      required: [logged_on, amount]
+      properties:
+        logged_on: { type: string, format: date }
+        logged_at: { type: string, format: date-time }
+        amount: { type: number }
+
   headers:
     ETag:
       description: >
@@ -10752,4 +10899,191 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/Accomplishment" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /trackers:
+    get:
+      operationId: listTrackers
+      summary: The athlete's daily trackers
+      description: >
+        Returns every live tracker, archived ones excluded.
+
+
+        **This call provisions the default presets**, which makes it a write on
+        a read and is worth stating rather than hiding. It is idempotent and
+        safe to race — provisioning is keyed on (athlete, preset) — and the
+        alternative, a separate "set up my trackers" call, is a step that gets
+        skipped and leaves Today empty. An edited target survives it, and a
+        tracker the athlete archived is not handed back.
+      tags: [Trackers]
+      responses:
+        "200":
+          description: The live trackers, in display order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trackers]
+                properties:
+                  trackers:
+                    type: array
+                    items: { $ref: "#/components/schemas/DailyTracker" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createTracker
+      summary: Create a tracker
+      description: >
+        Idempotent on the client-supplied `id`: sending it twice returns the
+        original row rather than creating a second. An id that belongs to
+        another athlete is reported as a conflict and never returned.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DailyTrackerInput" }
+      responses:
+        "201":
+          description: The stored tracker.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DailyTracker" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /trackers/entries:
+    get:
+      operationId: listTrackerEntries
+      summary: A window of taps across every tracker
+      description: >
+        One request serves a whole screen of cards; there is deliberately no
+        per-tracker variant, which would be an N+1 on the one screen that
+        renders several.
+
+
+        `from` and `to` are LOCAL calendar days and are both required. They have
+        no default because the server does not know the athlete's timezone, so
+        any default it picked would be wrong for much of the world for part of
+        every day.
+      tags: [Trackers]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: The entries, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/TrackerEntry" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /trackers/{trackerID}:
+    parameters:
+      - name: trackerID
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      operationId: updateTracker
+      summary: Change part of a tracker
+      description: >
+        **Partial, and strictly so: a field the body does not name is not
+        written.** The phone's target screen sends `{"target": 2500}` and
+        everything else about the tracker is left exactly as it was.
+
+
+        This is a contract promise rather than an implementation detail because
+        the failure it prevents has shipped in this codebase three times — a
+        full-row SET clause grew a column and blanked an authored value — and a
+        client cannot tell the difference until real data is lost.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DailyTrackerPatch" }
+      responses:
+        "200":
+          description: The tracker after the patch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DailyTracker" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: archiveTracker
+      summary: Archive a tracker
+      description: >
+        **Archives; does not destroy.** The tracker leaves the list and every
+        entry it recorded survives. Archiving twice is not an error, and an
+        archived preset is not re-provisioned on the next list.
+      tags: [Trackers]
+      responses:
+        "204": { description: Archived. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /trackers/{trackerID}/entries/{entryID}:
+    parameters:
+      - name: trackerID
+        in: path
+        required: true
+        schema: { type: string }
+      - name: entryID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: logTrackerEntry
+      summary: Record one tap
+      description: >
+        PUT, keyed on the entry id the client generated, so sending it twice is
+        the same as sending it once — which is what makes a cup logged in a
+        kitchen with no signal safe to retry. The id in the path wins over any
+        id in the body.
+
+
+        Crossing the target is never refused: an athlete who drinks ten of eight
+        logs ten.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrackerEntryInput" }
+      responses:
+        "200":
+          description: The stored entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerEntry" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteTrackerEntry
+      summary: Remove one tap
+      description: >
+        The tap-a-filled-cup correction. Deleting something already gone is not
+        an error — a retried delete over a flaky connection is the common case,
+        and a 404 on the second attempt would put a failure on the sync screen
+        for a correction that landed.
+      tags: [Trackers]
+      responses:
+        "204": { description: "Removed, or already absent." }
         "401": { $ref: "#/components/responses/Unauthorized" }

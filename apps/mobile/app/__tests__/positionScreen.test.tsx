@@ -1,6 +1,7 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import PositionScreen from '../position/[id]';
+import { TimeoutError } from '@/lib/apiError';
 import type { Position } from '@/lib/positions';
 import type { TechniqueSummary } from '@/lib/techniques';
 
@@ -337,33 +338,57 @@ test('says a missing position is missing, not that the network is down', async (
  * returns before clearing `loading` — leaving a spinner that never resolves and
  * carries no retry, which is strictly worse than having no deadline at all.
  *
- * An unmount aborts the same controller and must still set nothing, so the
- * reason is what distinguishes them. Both directions are asserted.
+ * **This test used to drive the screen's own timer, and it was testing a
+ * mechanism that did not work on a phone (N55).** The screen armed the
+ * deadline itself with `ac.abort(TIMED_OUT)` and told a timeout from an unmount
+ * by reading `signal.reason` back — but React Native replaces the global
+ * `AbortController` with `abort-controller@3.0.0`, which has no `reason` at
+ * all. So on a device `timedOut` was permanently false, a timeout took the
+ * unmount path, and the spinner never resolved: exactly the regression above,
+ * live, behind this passing test. It passed because jest runs on Node, where
+ * `reason` works.
+ *
+ * The deadline now lives in `netFetch`, which reports a `TimeoutError`. So the
+ * three things worth asserting changed shape: the screen must ASK for its
+ * deadline, must render the timeout when one comes back, and must still set
+ * nothing on an unmount.
  */
-test('a timed-out request reports an error instead of spinning forever', async () => {
-  jest.useFakeTimers();
-  try {
-    // Never settles on its own — only the deadline can end this.
-    mockFetchPosition.mockImplementation((...args: unknown[]) => {
-      const signal = args[2] as AbortSignal | undefined;
-      return new Promise((_resolve, reject) => {
-        signal?.addEventListener('abort', () => {
-          const err = new Error('Aborted');
-          err.name = 'AbortError';
-          reject(err);
-        });
-      });
-    });
-    mockFetchTechniques.mockResolvedValue([]);
+test('asks the transport for its deadline', async () => {
+  // Without this the request runs to the transport's default (30s) and this
+  // screen's 10s intent is silently lost — with nothing anywhere going red,
+  // since the request still completes and the screen still renders.
+  mockFetchPosition.mockResolvedValue(CLOSED_GUARD);
+  mockFetchTechniques.mockResolvedValue([]);
 
-    render(<PositionScreen />);
-    await act(async () => {
-      jest.advanceTimersByTime(10_000);
-    });
+  render(<PositionScreen />);
+  await waitFor(() => expect(screen.getByTestId('position-detail')).toBeTruthy());
 
-    expect(screen.getByTestId('position-error')).toBeTruthy();
-    expect(screen.getByText(/taking too long/)).toBeTruthy();
-  } finally {
-    jest.useRealTimers();
+  for (const call of [mockFetchPosition.mock.calls[0], mockFetchTechniques.mock.calls[0]]) {
+    const opts = call[call.length - 1] as { timeoutMs?: number };
+    expect(opts?.timeoutMs).toBe(10_000);
   }
 });
+
+test('a timed-out request reports an error instead of spinning forever', async () => {
+  mockFetchPosition.mockRejectedValue(new TimeoutError());
+  mockFetchTechniques.mockResolvedValue([]);
+
+  render(<PositionScreen />);
+
+  await waitFor(() => expect(screen.getByTestId('position-error')).toBeTruthy());
+  // Its own sentence, not the generic "could not load" — a timeout ran over a
+  // network that was working, and telling that athlete to check their
+  // connection is the misdiagnosis N55 is about.
+  expect(screen.getByText(new TimeoutError().diagnosis)).toBeTruthy();
+  expect(screen.queryByText(/Check your connection/)).toBeNull();
+});
+
+// The other direction — an unmount must set nothing — is deliberately NOT
+// asserted here. After `unmount()` there is no tree to query, and React 19 no
+// longer warns about a state update on an unmounted component, so every
+// version of that test either passed by construction or asserted the absence
+// of something that was never going to appear. What it would have covered is
+// covered where it is observable: `transport.test.ts` proves a caller's abort
+// is rethrown untouched rather than becoming a network error, and
+// `rnGlobals.test.ts` proves this screen is not reading an abort reason that
+// does not exist on a phone.

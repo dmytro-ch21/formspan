@@ -33455,9 +33455,923 @@ worktree of its own.
   carries it in prose, which is the weaker channel. That is a client change and
   is not in this PR.
 
+## 2026-08-20 — `session`'s tests deleted each other's fixtures, and the second binary was never in the room we were looking at (#426)
+
+`internal/modules/session`'s Postgres tests failed roughly 40% of the time at
+full-suite scope under load, with the package's own fixtures missing mid-run —
+`invalid input: unknown exercise "ses_fx_squat"`, then
+`panic: index out of range [0] with length 0` where a `LoadHistory` returned no
+points. Run alone the package passed 8/8. `Backend (Go)` is a required check, so
+this was a merge blocker for every backend PR and read as *"your PR broke the
+backend"* to whoever hit it.
+
+**The ticket deliberately did not guess the mechanism, and that was the right
+call, because the obvious story is false.** `seedFixtureExercises` ran per test
+via `newTestRepo` — 34 call sites — seeding shared ids with
+`ON CONFLICT DO UPDATE` and registering a `t.Cleanup` that deleted those same
+shared ids. Every test created and destroyed rows every other test depends on.
+But Go runs a package's tests sequentially without `t.Parallel()`, there is none
+in the package, no subtests, no goroutines — so *within one binary that is merely
+wasteful and always works*. Nothing else in the repo deletes a `ses_fx_*` row:
+grepped every `DELETE FROM exercises` and every fixture id across all 37
+packages, and `session`'s own cleanup is the only writer.
+
+**The second writer is a second copy of the test binary**, and it is the ordinary
+state of this repo rather than an exotic one: `vola_test` is the documented
+default target and twelve worktrees currently share it. The other process's
+per-test cleanup deletes the rows this process's in-flight test is using. That
+also explains the observation that killed the intra-package theory — the checking
+agent sampled `pg_stat_activity` once per run and saw three connections from one
+binary, because the neighbour is only connected for the ~2s its `session` package
+takes.
+
+### The measurement, and the apparatus that measured nothing
+
+**The first baseline was worthless and saying so is the point.** Twelve
+"sequential full-suite runs, 0 failures" and eighteen "concurrent runs, 0
+failures" were both **entirely served from Go's test cache** — 34 of 34 packages
+reported `(cached)`, zero tests executed. `go test` caches on inputs, and nothing
+in the inputs changes between runs; `pnpm run test:api` and CI pass no `-count`,
+so this is the normal local behaviour, not a mistake unique to the harness. Every
+number below carries `-count=1`, and the harness fails loudly if any log contains
+`(cached)`. This is the *Verify that a check can fail* rule landing on the
+measurement rather than on the code.
+
+Uncached, one database, before → after:
+
+| Arm | Before | After |
+|---|---|---|
+| One binary alone, 20 consecutive package runs | green | green |
+| Two concurrent `session` binaries (`-count=1` lanes) | **60 / 60 red** | **0 / 60** |
+| Four concurrent full suites, `session` package | **16 / 24 runs failed** | **0 / 24** |
+
+The single-binary arm is the control: the failure needs a neighbour, not load.
+0/24 against a 16/24 baseline is not a lucky streak — against the ticket's stated
+40% rate, P(0 in 24) = 0.6²⁴ ≈ 5×10⁻⁶; the one-sided 95% upper bound on the true
+post-fix rate from that arm alone is 12%, and 5% from the 60-run arm.
+
+(The two-binary arm was run twice: an early, cruder version used two `-count=10`
+lanes and scored 10/10 red, which is where that figure comes from if you find it
+quoted. The 60/60 arm replaced it because `-count=10` makes one binary hold the
+lock for ten whole package runs, which is not how anything actually invokes the
+suite.)
+
+**Verified independently before merge**, on a private database and without
+taking the above on trust: two concurrent copies of `origin/main`'s binary went
+8/8 red with the reported symptoms, one alone was green, and the fixed binary
+went 0/8 — with **4 of those 8 runs printing the "waiting for another `session`
+test binary…" notice.** That last detail is what makes the green non-vacuous: it
+proves the lock actually contended, rather than the runs happening to fall
+serially and prove nothing. A green that could not distinguish itself from "they
+never overlapped" would be the same class of mistake as the cached baseline.
+
+### The fix
+
+`TestMain` seeds the fixtures once per process and removes them once, under a
+Postgres **advisory lock** that makes one process the sole owner of the fixed ids
+in that database. Seeding once removes the churn; the lock removes the race,
+because two processes still cannot share one set of fixed ids. Three details that
+are load-bearing:
+
+- **The lock's second key is a hash of the database name.** Advisory lock keys
+  are cluster-wide, not per-database, so without it two branches on their own
+  `vola_test_<branch>` databases would serialise on each other — and per-branch
+  databases are exactly what CLAUDE.md tells you to use. CI, on a throwaway
+  database, never contends at all.
+- **The per-test sweep of *sessions* stayed exactly where it was.** Only the
+  exercise rows moved to the process. That sweep is the net for session rows
+  whose ids a test did not hand to `cleanup`; moved to package teardown it would
+  let one test's rows survive into the next, which is a different behaviour and
+  not one this change was entitled to make.
+- **No fixture id was renamed**, so `requireUnsorted` and the two order-dependent
+  tests behind it are untouched. That was the trap flagged on this package — its
+  previous rename inverted `bench`/`squat` and silently disarmed both.
+
+Both new guards were mutation-tested rather than trusted: delete the
+`lockFixtures` call and `TestTheFixtureLockIsHeldForTheWholeProcess` goes red;
+seed `implements` as a constant and `TestMainSeededTheFixtureExercises` names
+`ses_fx_db_bench` as wrong. A guard that cannot fail would have restored the
+silence this exists to end.
+
+**The lock budget was measured, not chosen.** At 60s, two lanes each running
+`-count=10` — a 20-40s hold, since the lock lives for the process — put the
+waiter within seconds of the budget every time, and 2 of 10 lane-runs then failed
+*on the wait*, which is a new flake wearing the old one's clothes. It is 120s
+now, and a waiting process says so on stderr rather than looking hung.
+
+### The part that is bigger than the ticket
+
+**`session` is not special.** At four concurrent full suites on one database, the
+same delete-your-neighbour's-fixtures mechanism fails **twelve other packages** —
+`workout` (21 of 24 runs), `nutrition` (17), `sequence` (16), `exercise` (15),
+`bjj` (13), `technique` (11), `feed` (9), `activity` (8), `health` (5), `food`
+(4), `profile` (2), `friend` and `theme` (1 each). After this change `session` is
+the only package in that list that no longer appears; the other twelve are
+untouched and still fail.
+
+So the ticket's scope was right about the symptom and too narrow about the cause.
+`workout` is the one CLAUDE.md names as *the one to copy* for fixture discipline,
+and it is now the worst offender — which means the pattern this repo teaches is
+itself the carrier. **This is left as its own follow-up rather than folded in
+silently**: generalising the lock touches twenty-odd packages and would serialise
+concurrent suites wholesale, which is a design decision with a wall-clock cost
+and deserves its own review, not a drive-by in a bugfix PR. Filed as #454.
+
+The honest one-line summary of the mechanism: *the rows vanished because another
+process deleted them, and no amount of reading the package's own sequential
+control flow could have found that.*
+
+## 2026-08-20 — The belt curricula have an authoritative ordering, and it is not the one in the seed
+
+The user supplied a full four-belt BJJ syllabus — white, blue, purple, brown,
+with a numbered milestone list per belt and a "fundamental flow" for each. It is
+committed as `docs/design/bjj-belt-curriculum.md`.
+
+**It is committed rather than summarised because it existed only in a chat
+message and on a Desktop.** The roadmap redesign's central acceptance criterion
+is "the milestone order matches this", and a criterion pointing at something
+that can be lost is not a criterion. Two accompanying mockups are described in
+prose inside the redesign ticket for the same reason — the same treatment N56's
+trend card and N58's food cards got.
+
+**It supersedes `curricula.json`'s phase order, and the difference is a teaching
+philosophy rather than a re-labelling.** The seeded white belt has **11** phases
+opening *How this belt works → The map: how a round goes → Mount: get out, then
+hold* — survive-the-bad-places-first. The supplied one opens *Start Standing →
+Get the Fight to the Ground → Understand Guard* — standing-first, following a
+match from its beginning. Blue belt likewise: **12** seeded phases opening with
+*Defensive consolidation*, against 10 opening with *Standing*.
+
+Two structural phases in the seed — *How this belt works* and *The graduation
+standard* — have no counterpart in the supplied ordering. Whether they stay is
+an open question, not an omission to be quietly resolved.
+
+**The one discrepancy was put to the user and ruled the same day.** The
+white-belt mockup showed **10** milestones and dropped *Turtle*; the written
+curriculum has **11** and keeps it. The ruling: **the images are a design
+reference, not a source of truth — the content comes from the text.** So 11 is
+correct, and the distinction generalises: layout from the mockups, every
+milestone and ordering from the document. Asking cost one message and avoided
+putting a guess into the artefact everything else measures against.
+
+### Open questions this leaves
+
+- **Nothing reconciles the document with `curricula.json` yet.** Re-authoring the
+  seed against it is real work: item ids must resolve against the 542-technique
+  library, and the seeded curricula carry criteria that derive progress.
+- **Purple and brown are far less concrete than white and blue** — much of their
+  content is systems and strategy rather than named techniques, which the
+  `concept` item kind exists for but which no roadmap has leaned on at this
+  scale.
+
+## 2026-08-20 — "You are offline" was the only thing the transport could say (N55)
+
+An athlete photographed a gym machine on a phone with four bars and read *"Could
+not reach the server. Try again when you have signal or search for an exercise
+instead."* #361 fixed the trigger — the screen was posting a 4-12MB camera frame
+— and said in its own body that the message was a second bug it was not fixing.
+This is that bug.
+
+`netFetch` was eight lines, and this was all of them:
+
+```ts
+try { return await fetch(input, init); }
+catch (err) {
+  if (err instanceof Error && err.name === 'AbortError') throw err;
+  throw new OfflineError();
+}
+```
+
+Every rejection except an abort became `OfflineError` — whose own docstring says
+it means "nothing was ever answered, no route to the API". So a TLS failure, a
+DNS failure, a timeout, and a body the server cut off mid-stream were **the same
+object** by the time any screen saw them. No per-screen wording can recover a
+distinction the transport already threw away, which is why two screens had
+already written their own network copy and a third would have made it the
+pattern.
+
+### What React Native can actually tell you, measured rather than assumed
+
+This is the constraint the design is shaped around, so it was measured against
+the installed modules before anything was written.
+
+`fetch` here is `whatwg-fetch@3.6.20` over RN's own `XMLHttpRequest`. On the
+native side, `RCTNetworking.mm:701` sends JS
+`[requestID, error.localizedDescription, error.code == kCFURLErrorTimedOut]` —
+and `localizedDescription` is exactly the string that separates *"The Internet
+connection appears to be offline."* from *"An SSL error has occurred and a
+secure connection to the server cannot be made."*
+
+**JS never sees it.** `whatwg-fetch` sets `responseType = 'blob'` (RN has Blob,
+so its feature check passes), and RN's `XMLHttpRequest` stores the error string
+only when the response type is `''` or `'text'`. Driving RN's real
+`XMLHttpRequest` with the payload iOS sends: with `'text'` the string is right
+there in `responseText`; with `'blob'` — what `fetch` uses — `responseText`
+*throws*, and `fetch` hands back no xhr to read it from anyway. The only other
+route to it is `XMLHttpRequest.__setInterceptor_DO_NOT_USE`, a single global slot
+the dev network inspector already claims; the name is the API's own opinion of
+that idea.
+
+So through `fetch`, three outcomes survive: **abort**, **timeout** (iOS only,
+`kCFURLErrorTimedOut` only, arriving as `TypeError('Network request timed out')`)
+and **everything else**, as one undifferentiated `TypeError('Network request
+failed')`.
+
+**That means the acceptance criterion asking for a TLS/DNS failure to be named
+separately cannot be met from the error object, and a classifier that appeared
+to would be reading its own fixtures.** This is recorded as a finding, not
+worked around. Android is a further gap: its `NetworkingModule` ships as a
+prebuilt AAR, so the same mapping was read on iOS and is unverified there.
+
+### So classify by evidence, not by inference
+
+The phone stops guessing what a failure meant and asks a question it can get a
+real answer to. On an unclassifiable rejection it sends one bodyless,
+unauthenticated GET to `/v1/healthz` and classifies on whether anything comes
+back. **Any** response counts, including a 500 — the question is whether packets
+reach VOLA, not whether VOLA is well.
+
+Three sentinels under one `TransportError` base:
+
+- **`OfflineError`** — no route to the API. Now the case with evidence behind
+  it rather than the fallback, which is the whole inversion.
+- **`TimeoutError`** — we stopped waiting. `netFetch` now imposes a deadline
+  (30s; 45s for the three requests that carry a photo — the two estimate routes
+  and the direct PUT of a check-in photo to object storage); nothing in the app
+  had one before except two screens that wrote their own, so a request ran to
+  whatever iOS allowed and then failed with a message about signal.
+- **`RequestDroppedError`** — the request failed while VOLA answered a probe.
+  The likeliest real producer is an upload: the backend's `MaxBytesReader`
+  closes the connection after answering, so a client still writing may never
+  read the 400 it was sent.
+
+What the probe cannot do is stated next to it: a captive portal answering 200 to
+everything reads as reachable, and "this phone has no radio" and "VOLA is down"
+are not separable — both are *no route to the API*, which is what `OfflineError`
+now claims and the most the app can honestly say. Separating them means probing
+a third-party host from an athlete's phone, which is not a trade this project
+makes for a wording nuance.
+
+`isOffline` narrowed to mean only the first, so every caller that used it to
+mean *"I could not ask, stay quiet and retry"* moved to `isTransportFailure` —
+four sync classifiers and the two places `sequences.ts` degrades to the outbox.
+Before N55 every no-answer failure **was** an `OfflineError`, so the base check
+is what preserves their behaviour exactly. One call site deliberately keeps the
+narrow reading: `sync.ts` drives the words "Connected"/"No connection", and a
+`RequestDroppedError` was thrown *because* VOLA answered — printing "No
+connection" over that evidence is the same confident false statement in a
+smaller font.
+
+### Diagnosis and action are separate, which is what keeps this out of the screens
+
+Each sentinel carries a `diagnosis` (what happened) and a message (that plus a
+default action). A surface with a better action composes its own:
+`identifyErrorMessage` appends *"Search for the exercise instead."*, the meal
+screen *"Enter the food by hand."* The wording of a failed request stays in one
+place; only the action is local. Copy is one line then an action throughout —
+the athlete's verdict on the old three-sentence version was "the error itself is
+ugly", read one-handed over a plate.
+
+The estimate screen's `messageFor` moved into `estimateApi.ts` as
+`estimateErrorMessage`, which also fixes the second half of the report: the
+route answers **503 when the deploy has no provider key**, by the handler's own
+comment, and the screen was showing the server's bare *"meal estimation is not
+available"* with nothing saying that typing the meal in still works. It now
+reads as a feature that is not switched on. Everything else the server answered
+keeps **its own** message — the 429 says *"you have used all 25 estimates for
+today — one more in 20 minutes"*, and paraphrasing that would throw away the one
+number the athlete can act on.
+
+### The bug found on the way, which is worse than the one being fixed
+
+`app/library.tsx` and `app/position/[id].tsx` were the two screens with their own
+deadlines, and both told a timeout apart from a supersede by aborting with a
+reason and reading `signal.reason` back.
+
+**`signal.reason` does not exist on a phone.** RN's `setUpXHR.js` replaces the
+global `AbortController` with `abort-controller@3.0.0`, and `polyfillGlobal`
+replaces unconditionally. Measured against that installed module:
+`abort('MY_REASON')` gives `reason: undefined`, and `AbortSignal.timeout`,
+`AbortSignal.any` and `signal.throwIfAborted` are all undefined. Node — which
+jest runs on — has all four.
+
+So on a device: the library's `reason === SUPERSEDED` never matched, and a search
+abandoned mid-typing fell through to the error branch and rendered **"Aborted"**;
+its `finally` guard never matched either, so a superseded request cleared the
+*newer* request's spinner. On the position screen a timeout took the unmount
+path and `loading` stayed true forever — **the exact permanent spinner that
+screen's own comment says the reason exists to prevent.** Both had passing tests,
+because the tests ran on Node.
+
+Both mechanisms are gone rather than repaired: the deadline moved to `netFetch`,
+which owns it in a plain local it can trust, so each screen's controller is now
+aborted for one reason only and `signal.aborted` answers on its own.
+`lib/__tests__/rnGlobals.test.ts` is a source scan that fails on any
+reintroduction of the four APIs — a runtime test cannot see this class of defect,
+because these APIs work perfectly in the runner.
+
+### What the tests do and do not establish
+
+22 transport cases, plus copy tests for both photo routes. **Twelve mutations
+were applied to the guards and the suite watched go red. Ten were caught on the
+first pass; the two survivors were both real gaps in the tests, and both are
+caught now** — which is the entire reason for running it:
+
+- Replacing the whole deadline with a hardcoded 30ms changed nothing, because
+  two stubs resolved on their own timers and ignored the abort signal — the
+  deadline tests were measuring the stub. (A third stub had the same flaw and
+  was caught earlier by tests that hung instead.)
+- Deleting the `AbortError` rethrow changed nothing, because no case exercised
+  an abort that was neither our deadline nor a caller's signal. It has one now:
+  a guard whose outcome is redundant still needs a test, or a surviving mutation
+  reads as dead code.
+
+The `rnGlobals` scan was mutation-tested the same way, and **its own self-test
+caught a hole in it**: the ban on `abort(reason)` required a string literal, so
+it missed `abort(TIMED_OUT)` — the exact form both screens shipped.
+
+What none of it establishes is which real-world cause produces which rejection.
+The stubs are honest about a Promise contract and nothing more; the offline
+branch in particular is confirmed only by a device with its radio off, and the
+TLS branch by pointing the app at a host that refuses one. Both are listed under
+*Needs a device* in `functional-scenarios.md` rather than claimed.
+
+### What review added
+
+Four things, and two of them were defects rather than polish.
+
+**`library.tsx`'s remaining guard was wrong for an unmount.**
+`techniqueAbortRef.current === ac` looks like it covers both supersede and
+unmount; it does not, because the cleanup calls `abort()` and **leaves the ref
+pointing at the same controller**, so the identity check passes and the state
+set runs on a component that is gone. React 19 no longer warns about that, so
+the only symptom is nothing — with a comment above it claiming the case was
+handled. Same class as the `signal.reason` bug: a guarantee asserted in prose
+that the runtime does not provide. It is now `lib/inflight.ts`'s `stillWanted`,
+**a function rather than an inline comparison specifically so it can be
+tested** — the unmount case is unobservable from a component test, and a
+mutation removing `!run.signal.aborted` survived until the helper existed.
+
+**`scan.tsx` was the one site where this PR's own rule was not applied.** It
+still tested `isOffline` alone, so once a timeout and a dropped lookup stopped
+being `OfflineError` they fell through to the raw message — losing the thing
+that screen knows and the transport does not, which is that a barcode already
+scanned on this phone still resolves. Migrated. (That screen is also the subject
+of #432, an app-terminating crash reported from a device; this change is
+confined to one copy function and touches nothing on the scan path.)
+
+**`describeMeal` had no deadline decision, only an inherited one.** The constant
+was called `UPLOAD_TIMEOUT_MS`, and the text path uploads nothing — so a name
+argued a request out of a budget it needs. It is the same route waiting on the
+same provider, and a slow provider day does not care whether the prompt had an
+image in it; left on the 30s default it would have surfaced as a mystery timeout
+on the text path only. Renamed `SLOW_REQUEST_TIMEOUT_MS`, which now states both
+reasons a request is legitimately slow — a multi-megabyte body, or a model at
+the other end — and covers the check-in photo PUT as well.
+
+**And one finding was declined.** The reviewer raised, as blocking, that N55's
+line in `docs/TASKS.md` was unticked. That file became an archive earlier the
+same day; `CLAUDE.md` now says a tick there means nothing, and the close is
+`closes #365` in the PR body. Recorded because the reviewer produced a confident
+blocking finding **from its own stale knowledge of a convention that was a hard
+rule that morning** — a gate arguing persuasively for a regression, which is a
+thing to expect on the day a convention changes.
+
+### Left open
+
+- **The two AI routes answer 503 with the error code `internal`.** The contract
+  says `unavailable` means "the request was fine and the server could not answer
+  it — an upstream lookup that timed out, refused, **or is not configured on
+  this deploy**", and `apihttp.CodeUnavailable` exists and is used elsewhere. The
+  client turns on the status here, so nothing is broken; the wire contract is
+  just contradicting its own documentation. Not fixed with this, which is a
+  mobile change.
+- **`EXPO_PUBLIC_API_URL` is copied into twelve modules.** The probe made it
+  thirteen until `apiRequest` was pointed at the transport's copy; the other
+  eleven are untouched and a real refactor.
+- **Android's timeout mapping is unverified**, as above.
+
+## 2026-08-20 — Daily trackers: water is a row in a table, not a card (N76)
+
+The ticket asked for a water card you tap on Today. The thing that was actually
+built is the model underneath it, because **#407 (coffee) and #408 (custom
+trackers) were both `Blocked` on it**, and the stated test was not "does water
+work" — it was *could coffee and the third one land as configuration.*
+
+So: one `daily_trackers` table, one `tracker_entries` table, and everything that
+distinguishes water from coffee from creatine is a value in a column.
+
+| | unit | increment | target | render | colour |
+|---|---|---|---|---|---|
+| water (seeded) | `ml` | 250 | 2000 | `auto` → glyphs | `water` |
+| coffee (N77) | `cup` | 1 | **NULL** | `auto` → glyphs | `coffee` |
+| creatine (N78) | `g` | 5 | 5 | `auto` → dose | picked |
+| 30 capsules (N78) | `dose` | 1 | 30 | `auto` → **bar** | picked |
+
+Every one of those rows renders today through the same component and the same
+pure model; three of the four have no feature behind them yet. `presets.go` is
+where the second one goes, and it is a struct literal.
+
+### The design trap, and the guard written before the code
+
+This repo has the failure on file three times: `exercise`'s `updateWithin`
+blanked authored data in migrations 000052, 000057 and 000061 — a column added
+to a fixed SET clause, a restore path writing an empty value over a real one,
+and `writeWithRevision` then recording the wipe as legitimate history. **All
+three were caught in review; none was caught by the suite.**
+
+A tracker model is exactly that shape: a shared write path several features will
+extend, where an omission has no symptom until real data hits it. So the write
+path here has no fixed SET clause at all. `Patch` is a struct of
+`Field[T] { Set bool; Value *T }`, `patchColumns` emits **only** what the caller
+set, and the `UPDATE` is assembled from that. A field the body did not mention
+is not in the statement, so it cannot be blanked.
+
+`Field[T]` exists rather than `*T` because a JSON key has three states and a
+pointer has two. `target` is nullable — coffee is a count with no ceiling — so
+*"clear my target"* and *"do not touch my target"* both have to be sayable, and
+with `*float64` they are the same wire shape.
+
+**The tests were written before `postgres.go` existed**, and they are structural
+rather than enumerated by hand:
+
+- `patch_test.go` reflects over `Patch` and asserts `patchColumns` yields exactly
+  one distinct column per field, that an empty patch yields none, and that each
+  field set alone yields exactly one. It also reflects over `Tracker` and fails
+  if a mutable field has no `Patch` counterpart, with an explicit immutable list
+  that itself has to stay in sync. `patchColumns` is written out by hand on
+  purpose: if both sides used reflection they would agree by construction and
+  prove nothing.
+- `postgres_test.go` runs one subtest **per patch field**, patching that field
+  alone against a real Postgres and asserting the other seven columns — plus
+  identity, ownership and `created_at` — came back unchanged. It also checks the
+  patched field actually moved, so the test cannot pass by writing nothing.
+
+**Mutation-tested, five ways, each compile-checked first:**
+
+| mutation | result |
+|---|---|
+| drop `target` from `patchColumns` | 3 tests red |
+| make every `add()` unconditional (the blanking bug) | 9 tests red, every field |
+| add a `Note` column to `Tracker` with no `Patch` field | red, naming `Tracker.Note` |
+| append a hardcoded `icon = ''` to the SET clause | 8 subtests red: *"patching Name also changed Icon: 💧 → ."* |
+| baseline restored | green, uncached |
+
+The fourth is the real bug reproduced — and note migration 000061's column was
+literally called `note`.
+
+### What is deliberately NOT a special case
+
+- **Provisioning is `ON CONFLICT (user_id, preset) DO NOTHING`** on a partial
+  unique index, on `GET /v1/trackers`. A write on a read, stated rather than
+  hidden: it is idempotent, safe to race, and the alternative (a "set up my
+  trackers" call) is a step that gets skipped and leaves Today empty. An edited
+  target survives it; an archived tracker is not handed back, because archiving
+  is a timestamp and the row keeps its index entry.
+- **The preset id is derived**, `sha256(userID + preset)`, not random. With a
+  random id two devices provisioning at once each believe a different id is "the
+  water tracker", and one device's cups reference a tracker the server never
+  stored. The unique index stops the duplicate row; it does not make the two
+  devices agree.
+- **`amount` lives on the entry**, not just on the definition. Switching from a
+  250 ml glass to a 500 ml bottle must not rewrite last week — the same class of
+  mistake as deriving a local day from a UTC timestamp.
+- **The count is `entries.length`**, never `amount / increment`. An athlete who
+  logged four cups and then widened the increment has still tapped four times;
+  the division says two and two of their cups vanish from the row.
+
+### Mobile
+
+`lib/trackerModel.ts` is pure and mentions water nowhere. `resolveRenderStyle`
+takes the *current count* as well as the record, because a row that would grow
+past twelve glyphs has to become a bar — that is a property of the day, not of
+the definition, and it is N78's "thirty capsules is a wall of identical glyphs
+nobody can count" solved for every tracker at once.
+
+`lib/trackers.ts` is the third outbox and copies `foodLog.ts` almost line for
+line — the monotonic `stamp()`, the compare-and-swap on `updated_at` on **both**
+the success and failure branches, tombstones for anything the server has seen,
+`break` on offline. Those are the accumulated repairs of several real data-loss
+bugs, and an outbox that reinvented them would reintroduce whichever one it
+forgot. Definitions push *before* entries, because `tracker_id` is a real foreign
+key server-side and an entry against a locally-created tracker would 404 —
+classifying as permanent, which would make the outbox give up on a good cup.
+
+One thing measured rather than assumed: a freshly logged tap is
+`dirty = 1, remote = 0`, so `removeTap` **tombstones** it rather than
+hard-deleting. The flags cannot distinguish never-attempted from
+attempt-in-flight, and hard-deleting the second loses the delete. The cost is a
+doomed `DELETE` after a tap-and-untap offline, which for a cup row is common —
+one idempotent request the server answers 204 to. Written as a test asserting
+the wrong behaviour first, which is how it was found.
+
+`useTrackerDay` is one hook, used by both Today and Food. #392 exists because two
+image-upload paths each learned the same downscale independently; two copies of
+"read SQLite, then the network, then re-read" would diverge in exactly the places
+that are hard to see. Today pins its row to today (a tap logs a cup *now*); Food
+follows the day stepper (the day is the subject there).
+
+`app/trackers/[id].tsx` is the target editor, and it exists because of the hard
+rule rather than because a tracker needed a detail view. The failure that rule
+was written from is this exact shape — `nutrition-design.md` put target-setting
+on "one web screen", so the reasoning was reachable on a phone and the action was
+not. There is no web counterpart, which is fine in this direction.
+
+### Colour, measured
+
+Water is `#408D96`, a deep teal, and the vivid cyan it wants to be does not
+exist. `#2ED9E0`, `#40E0D0` and `#7FE9F0` land at **ΔE 8.0 / 9.5 / 10.6 against
+`info` under simulated tritanopia**, where the blue axis collapses and the two
+become one hue separated only by lightness — and `info` is the categorical blue
+this app already uses. Separation has to come from lightness, which means going
+darker: `#408D96` measures ΔE 16.1, and 4.76:1 on `surface`.
+
+`validate_palette.mjs` now loops over the whole `trackerColors` block rather than
+naming checks, so N77's colour is covered by adding one line — and `block(...,
+2)` forces that line through the gate rather than past it. Coffee's `#C08457` is
+already in there and already measured (ΔE 23.4 from the water teal under
+protanopia) so that PR is a seed row, not a colour search. Confirmed the gate can
+fail: swapping in `#2ED9E0` reports *"ΔE 8.00 under tritanopia, needs 15. Normal
+vision sees 23.33, which is why it looks fine."*
+
+Two candidates were rejected at 4.35:1 and 4.40:1 on `raised` before the
+threshold was corrected — a filled glyph is a graphic (WCAG 1.4.11, 3:1) and only
+the value line on `surface` is text (4.5:1). Holding a fill to 4.5 on `raised` is
+stricter than anything else in that file, and a gate nothing else obeys is a gate
+that stops meaning anything. Said out loud in the file, with the condition under
+which it tightens again.
+
+### What review caught, and one of them was a permanent 409
+
+The check suite was green for all of this. Recorded in full because the ratio is
+the point: five mutation-verified guards did not find any of it.
+
+**`backend-reviewer` found a genuine denial of service, and the mechanism is one
+this entry got wrong two sections above.** The preset id is derived from the
+athlete's Clerk user id — which is not a secret — so anybody can compute another
+athlete's water id. Create your own tracker on it and the victim's provisioning
+collides on the **PRIMARY KEY**, which the `(user_id, preset)` arbiter does not
+cover: 23505 out of `EnsureDefaults`, 409 out of `GET /v1/trackers`, on every
+subsequent read, with no delete path to ever free the id. The derived id was
+introduced to make provisioning idempotent, and it opened a namespace somebody
+else could squat. Both halves of that sentence are true, which is why it was
+easy to miss.
+
+Reproduced first — both tests red against the old code — then fixed with two
+deliberately independent guards, each mutated on its own:
+
+| guard | mutation | result |
+|---|---|---|
+| `New.Validate` refuses the reserved `t_` namespace | disable the prefix check | `TestClientsCannotClaimTheDerivedPresetNamespace` red |
+| `EnsureDefaults` drops the ARBITER for a bare `ON CONFLICT DO NOTHING` | restore the arbiter | `TestProvisioningSurvivesASquattedID` red |
+
+Either alone leaves a hole, so both. With them, a squatted id costs one card
+rather than the whole list — a degraded Today is recoverable and a permanent 409
+is not. Provisioning legitimately mints ids in that namespace, so `New.Validate`
+splits into the client-facing rule and a shared `validateFields` the preset
+self-check uses. And `Create`/`Update` now validate **inside the repository**
+rather than trusting the handler: "the caller validates" is a convention, it
+holds until the second caller arrives, and one of the rules it now carries is a
+security guard.
+
+**The accessibility minimum caught the tap target, and that is worth saying
+plainly because the next glyph row will be built by somebody reading this.** The
+glyph shipped at 22pt with `hitSlop={4}` — a **30pt** target against iOS's 44pt
+minimum, on the one control whose entire purpose is correcting a one-handed
+mis-tap. The affordance for fixing a fat-finger error was itself
+fat-finger-hostile. Nothing in the suite can see that; the number is what caught
+it.
+
+It is **34 × 44pt** now, and the horizontal shortfall is arithmetic rather than
+taste. On a 375pt phone: 375 − 40 (Today's body padding) − 28 (the card's) − 30
+(the `+`) − 10 (the row gap) leaves **267pt**, and eight 44pt-wide targets need
+394. They would wrap to two rows, and eight cups across two rows is exactly the
+uncountable block the twelve-glyph cap exists to prevent — so the row idiom and
+a 44pt width are incompatible, and the row idiom is the feature. Horizontal slop
+is capped at **half the gap**, because beyond that adjacent targets *overlap*,
+and overlapping targets on a row of identical glyphs make mis-taps worse rather
+than better. The `+` and the settings button, which can be 44 both ways, now are.
+
+**The midnight case had been written in one direction only.** The 23:58 test was
+there; its mirror was not. Today computes its day key during *render* and never
+unmounts, so a phone left open across midnight holds yesterday's key and the
+first tap at 00:05 files a cup under the day that just ended. #398 met the same
+shape the same day — a date frozen at first render filing tomorrow's target
+under yesterday. **A stale read is a nuisance; a stale write is data.**
+
+`TrackerList` now takes `dayAtTap: () => string` rather than a day, and the
+*type* is the guard: a `string` prop can be computed once during render, a thunk
+cannot. Today reads the clock; Food passes its stepper's day, because there the
+day is the subject of the screen. Mutation-verified, and the mutation matters —
+swapping `dayString` for `toISOString().slice(0,10)` reddens only the 23:58
+test, while freezing the day at module load reddens only the mirror. Two tests,
+two different bugs; neither substitutes for the other.
+
+The rest, each a real defect rather than a tidy-up:
+
+- **A tap resolved an INDEX against a freshly-read day**, so two quick taps on
+  one glyph could each resolve against a different snapshot and remove two cups.
+  It takes the entry id now, and `removeTap` is idempotent on one.
+- **Empty glyphs were `disabled`**, which made `glyphHint(false)` unreachable
+  exactly when it applied and left a VoiceOver user with no add affordance where
+  they already were. They add now.
+- **The row's container `accessibilityLabel` was INERT.** A `View` without
+  `accessible` is not an accessibility element on iOS, so it was never spoken —
+  and adding `accessible` would have swallowed every glyph inside it, which is
+  strictly worse. Removed, and `rowLabel` with it: a tested function nothing can
+  hear reads as load-bearing. The `accessibilityState={{checked}}` beside it is
+  honestly labelled as braces rather than belt-and-braces, since iOS ignores
+  `checked` on `role="button"` — the *label* carries the state.
+- **`tracker.name.toUpperCase()`** is uppercased by style now. VoiceOver spells
+  short all-caps strings out letter by letter.
+- **Both number fields had no `accessibilityLabel`**, so VoiceOver read the
+  target field as its placeholder, "No target" — on the only screen in the app
+  that can change a target.
+- **`missing` was set and never cleared**, pinning "not on this device" forever
+  after one lookup that raced the first cache fill.
+- The entries window cap admitted 401 dates; both sides of the boundary are
+  asserted now.
+
+**And a process note worth more than any single finding.** Two typecheck errors
+introduced by these fixes passed a `tsc --noEmit` run — because that run was
+issued from the primary checkout rather than from this worktree, so it checked a
+tree without the changes in it. Absence of output from the wrong directory looks
+exactly like success. Every check was re-run from the worktree afterwards, and
+both errors were real.
+
+### Numbers
+
+`pnpm run verify` green (exit 0), 120 suites / **1829 tests**. Backend **38
+packages, 1054 top-level tests, 1 skip, 0 failures** on a migrated database — the skip is the intentional
+`TestLiveComplete`. `lint:mobile` at **54** warnings, unchanged: the one new
+`react-hooks/refs` finding was cleared by replacing `useRef(new
+Animated.Value(...)).current` with a lazy `useState` initialiser rather than by
+raising the ceiling. Migration **000068**, claimed against `origin/main` at push
+time; the hole at `000065` is untouched.
+
+Four mobile guards were mutation-tested too: swapping `dayString` for
+`toISOString().slice(0,10)` reddens the 23:58 local-day test; dropping
+`WHERE dirty = 0` from the pull reddens the no-clobber test; writing nulls for
+unmentioned patch fields reddens thirteen; removing the push compare-and-swap
+reddens the in-flight-edit test.
+
+### Open questions this leaves
+
+- **Archiving has no screen.** The backend archives (`DELETE /v1/trackers/{id}`,
+  a timestamp, entries kept) and the settings screen says so rather than
+  pretending — a tracker you can stop with no way to get it back is a trap, and
+  the archived list belongs to N78. The endpoint is tested; the button is not
+  wired.
+- **The count noun is derived from the unit**, so 30 g of fibre in 5 g steps
+  reads "6 doses", which is not what anyone would say. An authored noun belongs
+  to N78, where arbitrary trackers arrive.
+- **Nothing has run on a device.** The animation, VoiceOver, the keyboard on the
+  target field and the row's wrap at twelve glyphs are all Simulator-or-device
+  questions, and none has been answered. VoiceOver in particular is the least
+  verified thing in this app (L1) and the row is deliberately the most
+  accessibility-sensitive control it has.
+- **`GET /v1/trackers` writes.** It is idempotent and tested, but a read that
+  provisions is the kind of thing a future caching layer gets wrong. The ETag
+  middleware wraps the whole mux; nothing has been checked about a 304 on a
+  response whose side effect matters.
+- **The pull for entries is one day wide.** `fetchTrackerDay` asks for the day on
+  screen. Reading a week back on Food is a request per day, which is fine at this
+  size and is the first thing to change if a history view arrives.
+
+
+## 2026-08-20 — N80: the app stopped telling athletes their chain was somewhere it never was
+
+**The defect, exactly.** `apps/mobile/app/shared/index.tsx` had a
+`landedMessage` whose one special case read *"Accepted — your copy is in the
+Library."* for a shared **sequence**. It was false twice over: this app had no
+sequence route of any kind, and the Library tab is the technique and exercise
+catalog, which has never held a chain. An athlete who accepted a share would go
+and look, twice, and find nothing.
+
+The phone-impossible audit (`docs/decisions/phone-impossible-audit.md`, #372 /
+#398) swept 26 web and 46 mobile routes and turned up twelve capabilities that
+web owned outright. This one was filed **above** the others, out of severity
+order, and the reason is worth keeping: **every other finding omits a surface;
+this one made a statement.** An omission is a gap. A false statement is a
+defect, and the athlete acts on it.
+
+**Two things shipped, and they are different in kind.**
+
+1. **The copy stopped lying**, which was cheap. `landedMessage` is now a single
+   constant that says only what *happened* — "Accepted — the copy is yours now."
+   — and names no destination at all. A message that says where to look can go
+   stale when a route lands or moves; one that says what happened cannot. That
+   arm now only fires for a `resource_type` this build has never heard of, which
+   is the case it was written for.
+
+2. **A read-back surface**, which is the real fix. `app/sequence/index.tsx`
+   lists every chain you own; `app/sequence/[id].tsx` renders one — steps
+   numbered in the order they were recorded, the library's own name and
+   `position · category` on each, notes, and the position each step leaves you
+   in shown *between* the steps rather than beside them, because that is what
+   makes a chain a chain. Every step is a link into `/technique/[id]`, so a
+   chain is something you can study on a phone rather than a list of names you
+   already know. `sequence` joins `workout` in `DESTINATION`, so accepting a
+   shared chain now opens the copy.
+
+**How it is reachable on a phone** — `CLAUDE.md` asks for this explicitly, and
+asking it is what produced the third piece of work. Two ways in, deliberately:
+accepting a share navigates straight to the copy, and the **You** tab carries a
+`Sequences` row beside `Position map`, gated on the BJJ module the same way. The
+second one is not decoration. A destination reachable *only* by having just
+arrived at it answers the athlete who tapped Accept ten seconds ago and nobody
+else — the same phone-impossible gap in a smaller form, a week later.
+
+**No backend, no contract, no lib.** `GET /v1/sequences` and
+`GET /v1/sequences/{id}` already existed, and `apps/mobile/lib/sequences.ts`
+already had `listSequences`, `getSequence` and `pendingSequences` — written for
+the reflection wizard's chain chips. The whole ticket was two screens, one map
+entry, one row and one sentence. Worth recording, because the audit row read as
+a feature and was a UI-only fix sitting on finished plumbing.
+
+**Three things the screens have to get right, all of which look like success
+when wrong:**
+
+- **A 500 while listing must not read as "you have no chains".** `listSequences`
+  rejects the *whole* promise on a server fault, including the outbox half it
+  had already read — so degrading to `[]` would make an outage hide this
+  device's own captures while being *offline* showed them: inconsistent, and the
+  wrong way round. The list falls back to `pendingSequences` **and** shows the
+  error. This is the same defect `records/pinned.tsx` documents, and the
+  reflection wizard's chip loader had already learned it once.
+- **Offline is not 404.** `getSequence` resolves to `null` for a chain this
+  device has never held when the network cannot be reached. Rendering that as
+  not-found tells an athlete their chain was deleted, which is a much worse
+  claim than the one this ticket exists to remove. It gets its own state and its
+  own sentence.
+- **A local capture has no library fields on its steps.** The server resolves
+  `name`, `position` and `category` on read; a row still in the outbox carries
+  only the technique ids the reflection wizard tagged. The detail screen
+  resolves those from the memory-cached technique summaries — and only when a
+  step actually needs it, since that list is ~197 KB on a cold cache. When it
+  cannot (cold launch, no signal — the known gap that the technique library is
+  memory-only), the step says **"Name unavailable offline"** rather than
+  rendering `knee-cut` as if it were a name. A raw id in a name's slot is a
+  false claim dressed as a fallback, which is the same bug as the one at the top
+  of this entry, one layer down.
+
+**A rebase caught the sharpest defect in this branch, which no test of mine
+could have.** N55 (#365, #448) landed while this was in review and changed
+`getSequence` from `isOffline` to `isTransportFailure`: it now returns `null`
+for a timeout and a dropped connection as well as for no route. This screen's
+card said *"you're offline… try again when you have signal"* — which is false
+for the athlete on four bars whose request timed out, and sending that person to
+go and find signal is **the exact complaint N55 exists to fix**. This branch
+would have reintroduced it, in a ticket about the app saying untrue things, one
+day later and one screen over.
+
+Two things follow that are worth more than the fix. **A merge that applies
+cleanly can still be semantically wrong**: `lib/sequences.ts` auto-merged, the
+suite stayed green, and nothing in `verify` can see that a *comment about
+behaviour* two files away has become a lie. Only reading the other branch's diff
+found it. And **the vocabulary was already there to copy**: `OfflineError` is
+itself worded *"Can't reach VOLA"* rather than "you are offline", precisely
+because a reachable phone and a down API are indistinguishable from the client.
+The card now says the same, and the state is `unreachable` rather than
+`offline`, so the next person to read it is not invited back into the claim. Its
+test asserts the **absence** of the words "offline" and "signal" against
+literals, because copy drifting back toward naming an unobservable cause is the
+failure mode.
+
+**Nineteen mutations, nineteen reds**, run against a baseline that was green in
+the same session. Including: inverting the pluralisation in `stepSummary`; making
+`stepName` fall back to the technique id; removing `sequence` from `DESTINATION`
+again; **restoring the old "in the Library" sentence**; rounding a failed list
+down to `[]`; making a real failure read as offline; reversing the step order;
+fetching the library unconditionally; both arms of the You-tab gate; and both
+arms of the empty-state gate.
+
+**Score a mutation on FAILING TESTS, never on a non-zero exit.** This is the
+harness-level form of a rule `CLAUDE.md` already states about a single mutation
+— *"a mutation that produced a compile error rather than a test failure is also
+a non-zero exit, and also proves nothing"* — and it is worth stating separately
+because a harness inverts it silently. Two of those mutants were first written
+as `error ? null : (` → `true ? (`, which is a malformed ternary rather than a
+behaviour change. jest reported `Tests: 0 total`, exit non-zero. A harness
+scoring on the exit code would have counted both as **caught**, adding two
+fabricated reds to the tally; one scoring on "did jest report failing tests"
+counts them as **survived**, which is the safe direction and sent them back to
+be rewritten. `false ? null :` / `true ? null :` both go red for real.
+
+**`Tests: 0 total` and a real red are indistinguishable by exit code**, so the
+harness asserts the run happened before reading its verdict. Another session hit
+the same shape this morning mutating a `try/catch` and leaving the braces
+unbalanced, and caught it only because the total said `0` rather than `10`.
+
+Every expectation in `sequenceRow.test.ts` is likewise pinned to a **literal**
+rather than rebuilt from the template the function uses, which would be true by
+construction.
+
+**And the sharper of the two: a green suite run against the wrong tree.** The
+first test run here was issued from `apps/mobile` in the **primary checkout**
+rather than the worktree. It *passed* — nine green tests — and the only thing
+that gave it away was that it printed the **old test names**. Nothing about the
+result was suspicious; a false green is invisible to any amount of care about
+the verdict, because the verdict was true. It just answered a question nobody
+asked: does the unmodified tree still work.
+
+This is worse than the mutation case, which at least fails loudly enough to
+inspect. The fixes are cheap and both are worth the habit: **absolute paths**,
+and a `pwd` in the same command so the transcript records which tree answered.
+`cd A || cd B` fallbacks are the same hazard with a coin toss in front of it —
+another session hit exactly that today. And in a repo where several worktrees
+hold different branches of the same files, "I ran the tests" is not a claim
+about a branch until you can say which directory produced it.
+
+**Review took three of its four suggestions, and one of them is the better
+version of this ticket's own lesson.** `frontend-reviewer` found no blocking
+issues and noticed that the detail screen reloads on **focus**, so the ordinary
+path — read a chain, background the app, lose signal, come back — replaced the
+steps on screen with the full-page *"you're offline"* card. Every word of that
+card is true, and it is still worse than the chain that was already there:
+"nothing to show" is a different claim from "here is what I have". `setSequence`
+now keeps what it holds (`(prev) => found ?? prev`), so the offline branch means
+what it says. The list screen deliberately does **not** match — there the outbox
+fallback is the better answer, and the error is shown beside it.
+
+Also taken: `accessibilityLiveRegion="polite"` on both error texts (an error
+that appears without moving focus is silent to a screen reader), and clearing
+`refreshing` on the signed-out early return so a pull cannot spin forever.
+**The live-region change initially had no test and its mutation came back
+green**, which is the whole reason to mutate a change you are confident in; it
+is asserted on the prop now, against the literal `'polite'`. Declined: keying
+the step rows on `technique_id` alone — a chain may legally repeat a technique,
+so the index is load-bearing, and it is now commented as such.
+
+**What was deliberately not built.** Editing, reordering, renaming, adding or
+removing a step, copying a reference chain, and deleting are all still web-only.
+That is *reduced-on-mobile*, which the mobile-first rule permits — web may be
+richer — rather than phone-impossible, which it forbids. The audit row is
+updated to say exactly that rather than being marked closed, and whoever closes
+the writing half should file it as its own id.
+
+**One narrow case is knowingly left, and it is a judgement rather than an
+oversight.** The `Sequences` row is gated on the BJJ module, matching every
+other BJJ surface on that tab — so a *strength-only* athlete who is sent a chain
+reaches the copy once, through the accept navigation, and then has no row to
+re-find it from. That is the "reachable only by having just arrived" gap
+surviving in one configuration. Ungating was considered and not taken: the row
+would then appear, permanently, on accounts that can never populate it, and the
+inconsistency with `Position map` immediately above it would need its own
+justification. It is the same shape as #370 (N61) — *every BJJ surface with
+the module switched off* — and #423, the nutrition-tab instance of it.
+
+**Both of those are CLOSED**, checked rather than assumed, which changes what
+"file it there" means: the specific case is recorded as a comment on #423 and
+says so in its first line, because a note on a closed issue is exactly the kind
+of thing that is never read again. If the pattern is considered settled rather
+than still collecting instances, this needs its own id. It is deliberately not
+one today: the general question those two issues ask — can an athlete tell *this
+needs turning on* from *this does not exist* — wants one consistent answer
+across the app, and a third screen guessing at it separately is how the app ends
+up answering it three ways.
+
+**Also unbuilt, and smaller:** the mobile `Sequence` type still has no
+`official` field, so a VOLA reference chain is detected as `editable === false`.
+That is equivalent today — the backend's visibility rule admits only your own
+rows plus ownerless ones — but it is an inference rather than the field, and
+nothing seeds an ownerless sequence yet, so that arm has never rendered against
+real data.
+
+**Not verified on hardware.** Everything above was exercised in jest against
+mocked transport. `docs/testing/device-checks.md` gains **D15b**, which is the
+check that matters: accept a shared chain on the phone with the web app genuinely
+closed, find it again from cold a screen later, and capture one in a dead-spot.
+
+**This branch rebased three times and conflicted three times, always on the same
+line of this file.** #440, #448 and #452 landed while it was open; each had
+appended an entry immediately before `## Open items`, and so had this one, so
+the merge base saw two blocks growing into the same seam. The resolution is
+mechanical every time — keep both entries, in landing order, heading and list
+untouched below — and the convention that produces it is right: the alternative,
+appending *after* the heading, strands the gap list under whatever landed last,
+which this file has already been repaired for three times.
+
+Worth knowing rather than fixing: with five or six agents landing on one day,
+`history.md` is a **guaranteed** conflict between any two PRs open at once, and
+`strict: false` on the branch protection does not help because the conflict is
+real rather than a staleness policy. Budget a rebase per PR that lands ahead of
+yours, and check `pnpm run ci:checks` **twice** — GitHub computes `mergeable`
+lazily, so the first call reported `UNKNOWN` and the second reported
+`CONFLICTING` on an otherwise all-green PR, twice on this branch. A green that
+has not been re-checked for staleness is the same class of false green as the
+suite run against the wrong tree above.
+
+**The one number this entry should not be trusted on is the lint ratchet.** It
+was measured at 54 against `origin/main`, reported as such, and was **53** by
+the time the branch rebased — another PR lowered it in between. The branch holds
+at exactly 53/53 with zero errors. A ratchet with no headroom is a number that
+is only true as of a commit, which is worth saying out loud in a repo where
+several branches are in flight at once.
 
 ## Open items / known gaps as of this entry
 
+- **Twelve backend packages still delete each other's fixtures across concurrent test binaries — filed as #454.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.

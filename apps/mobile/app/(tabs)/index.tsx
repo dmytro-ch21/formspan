@@ -28,6 +28,7 @@ import { RoadmapLine } from '@/components/RoadmapLine';
 import { SectionHeader } from '@/components/ui/Section';
 import { TrendStrip } from '@/components/ui/TrendStrip';
 import { SessionCard, type Metric } from '@/components/ui/SessionCard';
+import { TrackerList } from '@/components/TrackerList';
 import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { WeekReview } from '@/components/WeekReview';
 import { vola } from '@/constants/Colors';
@@ -89,6 +90,7 @@ import {
 import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { accentGlow } from '@/lib/palette';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { useTrackerDay } from '@/lib/useTrackerDay';
 import { useUnits } from '@/lib/useUnits';
 import { totalWeightKg, contributesVolume, countsAsSet } from '@/lib/sessions';
 
@@ -577,6 +579,20 @@ export default function TodayScreen() {
   const [foodQuick, setFoodQuick] = useState<Food[]>([]);
   const foodEnabled = hasFoodLog(modules);
 
+  /**
+   * The daily trackers, and the day they describe.
+   *
+   * `todayKey` is recomputed on every render rather than held in state: this
+   * screen stays mounted for the life of the process, so a value captured once
+   * would still say yesterday after midnight — and a cup tapped at 00:05 would
+   * land on the day that just ended. `dayString`, never
+   * `toISOString().slice(0,10)`, which is the UTC date and files an evening tap
+   * under tomorrow west of Greenwich.
+   */
+  const trackerDay = useTrackerDay();
+  const { refresh: refreshTrackers } = trackerDay;
+  const todayKey = dayString(new Date());
+
   const refreshFood = useCallback(() => {
     let live = true;
     const today = dayString(new Date());
@@ -713,6 +729,10 @@ export default function TodayScreen() {
       // again immediately after logging — so a slow read started at focus could
       // otherwise resolve last and paint over the row just added.
       const stopFood = refreshFood();
+      // Same treatment as food, and for the same reason: this screen writes to
+      // it (every tap re-reads the day), so a slow read started at focus could
+      // otherwise resolve last and paint over a cup just added.
+      const stopTrackers = refreshTrackers(todayKey);
       // On focus only, not on every day-step: the funnel is an aggregate over
       // every session ever logged and does not change because you looked at
       // Thursday.
@@ -724,9 +744,10 @@ export default function TodayScreen() {
       const stop = readSuggestionPrefs();
       return () => {
         stopFood?.();
+        stopTrackers?.();
         stop?.();
       };
-    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins, refreshFood]),
+    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins, refreshFood, refreshTrackers, todayKey]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -1486,6 +1507,35 @@ export default function TodayScreen() {
             onQuickAdd={(f) => void quickLog(f)}
           />
         )}
+
+        {/*
+          The daily trackers — water today, coffee and whatever the athlete
+          names later.
+
+          Above WeekReview and below NutritionCard, in the band of cards that
+          ASK for something rather than the band that only reports. Being on
+          Today is the whole feature: a tracker you have to go and find is a
+          tracker you forget, which is the sentence the ticket opens with.
+
+          Pinned to `todayKey` rather than the day stepper's `date`: a tap logs
+          a cup NOW, and offering the row on a day the athlete is merely reading
+          would make it possible to log water into last Tuesday by accident.
+          Reading a past day's trackers is a Food-screen job, where the day is
+          the subject rather than a lens.
+        */}
+        <TrackerList
+          day={trackerDay}
+          // Read at the MOMENT of the tap, not at render. `todayKey` is computed
+          // during render and this screen never unmounts, so a phone left open
+          // across midnight still holds yesterday's key until something
+          // re-renders — and the first tap at 00:05 would file a cup under the
+          // day that just ended. Found in review; the 23:58 case was covered and
+          // this, its mirror, was not.
+          dayAtTap={() => dayString(new Date())}
+          units={units}
+          unitsReady={unitsReady}
+          testID="today-trackers"
+        />
 
         {/*
           The week, summed up — what happened, against what was meant to, and

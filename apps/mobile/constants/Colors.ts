@@ -461,6 +461,63 @@ export const monogramInk = {
 
 export type MonogramColor = keyof typeof monogramColors;
 
+/**
+ * The daily-tracker fills — water's cups, coffee's cups, and whatever N78's
+ * athlete picks.
+ *
+ * **This is a PICKER's palette, not a set of constants**, and that is the whole
+ * reason it is a named map rather than a hex on each tracker row. An athlete
+ * authoring their own tracker (N78) chooses from these keys; the database
+ * stores the key; `scripts/validate_palette.mjs` measures every entry. A free
+ * colour picker cannot work here — the athlete would be choosing at a moment
+ * when nothing can run a contrast check, and the first illegible fill would ship
+ * to their own phone with no gate in the way.
+ *
+ * ## Why water is a deep teal and not the vivid cyan it wants to be
+ *
+ * Measured, not chosen. The obvious candidates — `#2ED9E0`, `#40E0D0`,
+ * `#7FE9F0` — are beautiful on the card and land at **ΔE 8.0 / 9.5 / 10.6
+ * against `info` under simulated tritanopia**, which is where the blue axis
+ * collapses and the two become one hue separated only by lightness. `info` is
+ * the categorical blue this app already uses, so the pair has to clear ΔE 15
+ * like every other pair in that file. Nothing at that saturation does: the
+ * separation has to come from LIGHTNESS, which means going darker. `#408D96`
+ * measures **ΔE 16.1 (tritanopia)** and 4.76:1 on `surface` / 4.35:1 on
+ * `raised`, comfortably past the 3:1 a meaningful fill needs.
+ *
+ * ## `coffee` is here before anything uses it, on purpose
+ *
+ * N77 is coffee, and the expensive way for that ticket to go is to discover
+ * halfway through that its brown cannot clear ΔE 15 against this teal while two
+ * cards sit on one screen. It can — **ΔE 23.4 under protanopia** — and it is
+ * recorded here so that PR is a seed row rather than a colour search. Nothing
+ * renders it yet.
+ *
+ * ## Adding a fourth is arithmetic, not taste
+ *
+ * Every pair in here is checked pairwise under three CVD simulations, and the
+ * space runs out fast — the same wall `monoSport` documents, where four
+ * distinguishable greys do not exist. A candidate that fails is not a colour to
+ * fudge the threshold for: a tracker card carries its NAME and its ICON, so
+ * colour is redundant encoding, and the honest answer at that point is fewer
+ * colours rather than a lowered gate.
+ */
+export const trackerColors = {
+  water: '#408D96',
+  coffee: '#C08457',
+} as const;
+
+/**
+ * The monochrome twin. Lightness is the only axis left, so these are a bright
+ * step and a mid step — 13.49:1 and 4.81:1 on `surface`, ΔE 25.7 apart.
+ */
+export const monoTrackerColors = {
+  water: '#D7DEE8',
+  coffee: '#79839A',
+} as const;
+
+export type TrackerColor = keyof typeof trackerColors;
+
 export type AccentName = keyof typeof accents;
 export type Accent = (typeof accents)[AccentName];
 
@@ -648,6 +705,21 @@ export const activeStrap: Record<BeltKey, string> = isMono ? monoStrap : strap;
 export const activeRankBar: Record<BeltKey, string> = isMono
   ? { ...rankBar, black: monoRankBar }
   : rankBar;
+
+/**
+ * A tracker's fill, mode-aware, with a DEFAULT for a key this build has never
+ * heard of.
+ *
+ * The fallback is load-bearing rather than defensive: `color_key` comes from the
+ * server, and an athlete who authors a tracker on a newer build (or on web)
+ * then opens an older phone would otherwise get `undefined` straight into a
+ * `backgroundColor` — a transparent cup that reads as empty, which is the one
+ * thing this card must never render wrongly.
+ */
+export function trackerFill(key: string): string {
+  const set: Record<string, string> = isMono ? monoTrackerColors : trackerColors;
+  return set[key] ?? (isMono ? monoTrackerColors.water : trackerColors.water);
+}
 
 export default {
   light: scheme,

@@ -1,5 +1,5 @@
 import { newTraceId, traceparent } from './trace';
-import { netFetch } from './authedFetch';
+import { netFetch, type NetFetchOptions } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 import type { TechniqueSummary } from './techniques';
 
@@ -58,13 +58,18 @@ async function authed<T>(
   path: string,
   getToken: TokenGetter,
   signal?: AbortSignal,
+  opts?: NetFetchOptions,
 ): Promise<T> {
   const token = await getToken();
 
-  const res = await netFetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}`, traceparent: traceparent(newTraceId()) },
-    signal,
-  });
+  const res = await netFetch(
+    `${API_BASE}${path}`,
+    {
+      headers: { Authorization: `Bearer ${token}`, traceparent: traceparent(newTraceId()) },
+      signal,
+    },
+    opts,
+  );
   if (!res.ok) throw new Error(`Request failed (${res.status}).`);
   return (await res.json()) as T;
 }
@@ -179,6 +184,7 @@ export async function fetchPosition(
   id: string,
   getToken: TokenGetter,
   signal?: AbortSignal,
+  opts?: NetFetchOptions,
 ): Promise<Position> {
   // Served from the cached list when it is already loaded: opening a position
   // from the Library is then instant and offline-safe, since the list it was
@@ -189,6 +195,7 @@ export async function fetchPosition(
     `/techniques/positions/${encodeURIComponent(id)}`,
     getToken,
     signal,
+    opts,
   );
   return normalise(raw);
 }

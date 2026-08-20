@@ -1,5 +1,5 @@
 import { newTraceId, traceparent } from './trace';
-import { netFetch } from './authedFetch';
+import { netFetch, type NetFetchOptions } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
@@ -93,13 +93,18 @@ async function authed<T>(
   path: string,
   getToken: TokenGetter,
   signal?: AbortSignal,
+  opts?: NetFetchOptions,
 ): Promise<T> {
   const token = await getToken();
 
-  const res = await netFetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}`, traceparent: traceparent(newTraceId()) },
-    signal,
-  });
+  const res = await netFetch(
+    `${API_BASE}${path}`,
+    {
+      headers: { Authorization: `Bearer ${token}`, traceparent: traceparent(newTraceId()) },
+      signal,
+    },
+    opts,
+  );
   if (!res.ok) throw new Error(`Request failed (${res.status}).`);
   return (await res.json()) as T;
 }
@@ -107,12 +112,18 @@ async function authed<T>(
 export async function fetchTechniques(
   getToken: TokenGetter,
   signal?: AbortSignal,
+  opts?: NetFetchOptions,
 ): Promise<TechniqueSummary[]> {
   // Fetched unfiltered on purpose. The whole library is ~197 KB as summaries,
   // and holding all of it makes filtering and search local — a per-keystroke
   // request would be slower and would fail offline.
   if (summaryCache) return summaryCache;
-  const body = await authed<{ techniques: TechniqueSummary[] }>('/techniques', getToken, signal);
+  const body = await authed<{ techniques: TechniqueSummary[] }>(
+    '/techniques',
+    getToken,
+    signal,
+    opts,
+  );
   // Same reasoning as normalise(): an older server omits aliases and the
   // ruleset id, and local search maps over aliases on every keystroke.
   summaryCache = (body.techniques ?? []).map((t) => ({
@@ -195,10 +206,16 @@ let rulesetCache: Map<string, Ruleset> | null = null;
 export async function fetchRulesets(
   getToken: TokenGetter,
   signal?: AbortSignal,
+  opts?: NetFetchOptions,
 ): Promise<Map<string, Ruleset>> {
   if (rulesetCache) return rulesetCache;
   try {
-    const body = await authed<{ rulesets: Ruleset[] }>('/techniques/rulesets', getToken, signal);
+    const body = await authed<{ rulesets: Ruleset[] }>(
+      '/techniques/rulesets',
+      getToken,
+      signal,
+      opts,
+    );
     rulesetCache = new Map((body.rulesets ?? []).map((r) => [r.id, r]));
     return rulesetCache;
   } catch {

@@ -1,7 +1,12 @@
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
-import { ApiError } from '@/lib/apiError';
+import {
+  ApiError,
+  OfflineError,
+  RequestDroppedError,
+  TimeoutError,
+} from '@/lib/apiError';
 
 import ScanBarcodeScreen from '../food/scan';
 
@@ -312,6 +317,45 @@ describe('a server without the barcode route', () => {
     expect(screen.getByText(/does not have barcode lookup/i)).toBeTruthy();
   });
 });
+
+/**
+ * The taxonomy N55 put at the transport, seen from the screen that degrades to
+ * a local cache.
+ *
+ * This screen tested `isOffline` alone. Once a timeout and a dropped connection
+ * stopped being `OfflineError`, those two fell through to the raw message and
+ * lost the one thing this screen knows that the transport does not — that a
+ * barcode already scanned on this phone still resolves.
+ */
+describe('a lookup that never got an answer', () => {
+  const dead = [
+    ['no route to the API', new OfflineError()],
+    ['a timeout', new TimeoutError()],
+    ['a dropped connection', new RequestDroppedError()],
+  ] as const;
+
+  it.each(dead)('offers the local cache on %s, not just the offline case', async (_l, err) => {
+    mockLookup.mockRejectedValue(err);
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
+    // The screen's own knowledge, which is what the transport cannot supply.
+    expect(screen.getByText(/scanned on this phone before still works/i)).toBeTruthy();
+    // And the diagnosis, so the three do not read alike.
+    expect(screen.getByText(new RegExp(escapeRe(err.diagnosis), 'i'))).toBeTruthy();
+  });
+
+  it('never shows a raw transport message instead', async () => {
+    // The regression: falling through to `err.message` drops the cache hint.
+    mockLookup.mockRejectedValue(new TimeoutError());
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
+    expect(screen.queryByText(new TimeoutError().message)).toBeNull();
+  });
+});
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 describe('confirming twice', () => {
   /**

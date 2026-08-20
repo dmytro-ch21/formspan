@@ -1,4 +1,6 @@
+import { transportDiagnosis } from './apiError';
 import { apiRequest } from './apiRequest';
+import { SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -67,10 +69,14 @@ export function identifyMachine(
     type: input.mimeType,
   } as unknown as Blob);
 
-  return apiRequest<IdentifyResponse>(getToken, '/exercises/identify', {
-    method: 'POST',
-    body: form,
-  });
+  return apiRequest<IdentifyResponse>(
+    getToken,
+    '/exercises/identify',
+    { method: 'POST', body: form },
+    // A photo plus a provider round trip is the slowest thing the app asks
+    // for; the default deadline is sized for a JSON read.
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
+  );
 }
 
 /**
@@ -82,11 +88,27 @@ export function identifyMachine(
  * photo and no machine on the shortlist matched — the remedy is a different
  * photo, not the same request again.
  *
- * Deliberately not reusing the shared network-flavoured fallback: its wording
- * sends somebody to check their signal, which is the wrong diagnosis for every
- * case here except the last one.
+ * ## The transport branch (N55)
+ *
+ * This function used to end in a `default` reading *"Could not reach the
+ * server. Try again when you have signal, or search for the exercise
+ * instead."* — and that is the sentence an athlete with four bars was shown
+ * when a 4-12MB photo was dropped on the way up. It was reached because a dead
+ * request has no `status`, and every dead request looked alike.
+ *
+ * The fix is not a better `default`. It is that the transport now says which
+ * kind of dead request it was, and this composes that diagnosis with the
+ * action **this** screen can offer. The wording of the failure stays in one
+ * place; only "search for the exercise instead" is local, because only this
+ * screen has a search to send anyone to.
+ *
+ * The `default` that remains is for something with a status we have no copy
+ * for — a real answer, not a missing one.
  */
 export function identifyErrorMessage(err: unknown): string {
+  const diagnosis = transportDiagnosis(err);
+  if (diagnosis) return `${diagnosis} Search for the exercise instead.`;
+
   const status = (err as { status?: number } | null)?.status;
   switch (status) {
     case 422:
@@ -99,9 +121,16 @@ export function identifyErrorMessage(err: unknown): string {
     case 400:
       return 'That photo could not be read. Try taking another.';
     case 503:
+      // Covers both "no provider key on this deploy" and "the provider is
+      // down" — the route answers 503 to both and the client cannot tell
+      // them apart. Either way it is a feature that is not working, not a
+      // network the athlete should go and fix.
       return 'Machine recognition is unavailable right now. Search for the exercise instead.';
     default:
-      return 'Could not reach the server. Try again when you have signal, or search for the exercise instead.';
+      // A status we have no copy for. **Not network-flavoured**: getting here
+      // means the server answered, and the old wording sent that athlete to
+      // check their signal.
+      return 'That did not work. Search for the exercise instead.';
   }
 }
 

@@ -394,6 +394,33 @@ claimed; listed here because it is the archetype of a failure that is silent by
 construction, and because the same shape exists on **web**, where the sidebar
 can drop destinations with no error.
 
+### D15b — Accept a shared chain with the web app closed (N80)
+
+**Do:** On a second account, on **web**, share a sequence to yourself. On the
+phone — **with the web app closed and not touched again** — open You → Sharing,
+accept it, and follow where the app takes you. Then leave that screen entirely,
+go You → **Sequences**, and find the same chain again from cold. Tap a step.
+Finally, in a changing room or with airplane mode on, capture a new chain from a
+session reflection and open it from that list.
+
+**Should:** Accepting opens the chain itself. Every step is there, in the order
+the sender recorded it, with its technique name and the position it leaves you
+in; tapping one opens the technique. The chain is still findable from the
+Sequences row afterwards. The chain you captured offline appears immediately,
+marked *"On this phone only — not synced yet"*, and opens.
+
+**Failure looks like:** Being told the copy is *"in the Library"* — the exact
+sentence #414 was filed for, and the Library tab is the technique catalog, so
+following it finds nothing. Or a step rendering a raw id (`knee-cut`) where a
+name belongs, which is the offline capture path with no library cached: the
+honest answer is *"Name unavailable offline"*. Or an outage rendering as *"No
+chains yet"*, which tells someone with forty chains that they have none.
+
+**Why it needs a device:** the whole point of the ticket is an athlete who only
+has a phone. Run it with the web app genuinely closed — every part of this was
+verified in jest against mocked transport, so what no test here reached is the
+real accept, the real sync, and a real dead-spot.
+
 ## Rendering that has never executed
 
 31 mobile route files execute **zero statements** under the entire test suite

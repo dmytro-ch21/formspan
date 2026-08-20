@@ -2,7 +2,13 @@ import { randomUUID } from 'expo-crypto';
 import type { TokenGetter } from './useAuthToken';
 import type * as SQLite from 'expo-sqlite';
 
-import { ApiError, isNotFound, isUnknownGrip, isOffline, isPermanentRejection } from './apiError';
+import {
+  ApiError,
+  isNotFound,
+  isPermanentRejection,
+  isTransportFailure,
+  isUnknownGrip,
+} from './apiError';
 import { getDb, withTransaction } from './db';
 import type { Exercise } from './exercises';
 import type { Workout, WorkoutItem } from './workouts';
@@ -945,7 +951,7 @@ function worseKind(a: SyncErrorKind | undefined, b: SyncErrorKind): SyncErrorKin
 }
 
 function classify(err: unknown): SyncErrorKind {
-  if (isOffline(err)) return 'offline';
+  if (isTransportFailure(err)) return 'offline';
   if (isPermanentRejection(err)) return 'permanent';
   return 'transient';
 }

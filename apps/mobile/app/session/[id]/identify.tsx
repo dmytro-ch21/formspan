@@ -8,7 +8,7 @@ import { useAuth } from '@clerk/clerk-expo';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { isNotFound } from '@/lib/apiError';
+import { isNotFound, transportDiagnosis } from '@/lib/apiError';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
@@ -232,10 +232,18 @@ export default function IdentifyMachineScreen() {
         // them is about the catalog. Saying the first when the second is true
         // is a confident false statement, which is the failure this whole
         // screen is shaped around.
+        //
+        // And "could not ask" is itself several answers (N55): this used to
+        // say "Try again when you have signal" for every one of them,
+        // including a request that timed out over a working connection —
+        // the same misdiagnosis one screen further in.
+        const diagnosis = transportDiagnosis(err);
         throw new Error(
           isNotFound(err)
             ? 'That exercise is no longer in the catalog.'
-            : 'Could not load that exercise. Try again when you have signal, or search for it by name.',
+            : diagnosis
+              ? `${diagnosis} Search for it by name instead.`
+              : 'Could not load that exercise. Search for it by name instead.',
         );
       }
 

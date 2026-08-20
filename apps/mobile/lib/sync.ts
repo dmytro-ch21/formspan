@@ -6,6 +6,7 @@ import { countPendingSessions, countPendingWorkouts, syncSessions } from './sess
 import { countPendingPlans, syncPlans } from './plan';
 import { pendingFoodCount, syncFood } from './foodLog';
 import { pendingSequenceCount, syncSequences } from './sequences';
+import { pendingTrackerCount, syncTrackers } from './trackers';
 import type { SyncErrorKind } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
 
@@ -165,7 +166,7 @@ function cancelTimer(): void {
 export async function refreshPending(): Promise<void> {
   if (!creds) return;
   try {
-    const [sessions, workouts, plans, sequences, food] = await Promise.all([
+    const [sessions, workouts, plans, sequences, food, trackers] = await Promise.all([
       countPendingSessions(creds.userID),
       countPendingWorkouts(creds.userID),
       countPendingPlans(creds.userID),
@@ -174,8 +175,12 @@ export async function refreshPending(): Promise<void> {
       // "it saved" and is exactly the reassurance that must not be false.
       pendingSequenceCount(creds.userID),
       pendingFoodCount(creds.userID),
+      // Counted here too, for the reason the sequences line above records: a
+      // cup tapped in a dead spot must not sit in the outbox while the sync
+      // screen reports nothing owed — which reads as "it saved".
+      pendingTrackerCount(creds.userID),
     ]);
-    emit({ pending: sessions + workouts + plans + sequences + food });
+    emit({ pending: sessions + workouts + plans + sequences + food + trackers });
   } catch {
     // A failed count must not break anything; the number is advisory.
   }
@@ -251,6 +256,12 @@ async function run(reason: string): Promise<void> {
       // outboxes are independent of the FK ordering above.
       const foodResult = await syncFood(userID, getToken);
 
+      // Trackers last, like sequences and food: nothing else depends on a cup
+      // having landed, and a failure here must not stop a session being pushed.
+      // Its own two queues are ordered internally — definitions before entries,
+      // because tracker_id is a real foreign key server-side.
+      const trackerResult = await syncTrackers(userID, getToken);
+
       // Merged so one failing half cannot be masked by the other succeeding.
       // Both surfaces — the pending count and the error banner — describe the
       // whole outbox, not one table of it.
@@ -266,7 +277,11 @@ async function run(reason: string): Promise<void> {
       // the work.
       const result = {
         failed:
-          sessionResult.failed + planResult.failed + sequenceResult.failed + foodResult.failed,
+          sessionResult.failed +
+          planResult.failed +
+          sequenceResult.failed +
+          foodResult.failed +
+          trackerResult.failed,
         // Neither sequences nor food have deferred state: nothing about a
         // captured chain or a logged meal can be waiting on another local row
         // to land first, so there is nothing to add here. Written out rather
@@ -274,17 +289,24 @@ async function run(reason: string): Promise<void> {
         // kind of thing that reads as a bug.
         deferred: sessionResult.deferred + planResult.deferred,
         error:
-          sessionResult.error ?? planResult.error ?? sequenceResult.error ?? foodResult.error,
+          sessionResult.error ??
+          planResult.error ??
+          sequenceResult.error ??
+          foodResult.error ??
+          trackerResult.error,
         // RANKED across all three, for the reason spelled out above: `??` makes
         // the classification order-dependent, so a permanently-refused session
         // would mask a sequence that failed on a perfectly retryable 5xx and
         // the orchestrator would stop retrying it.
         errorKind: rankKind(
           rankKind(
-            rankKind(sessionResult.errorKind, planResult.errorKind),
-            sequenceResult.errorKind,
+            rankKind(
+              rankKind(sessionResult.errorKind, planResult.errorKind),
+              sequenceResult.errorKind,
+            ),
+            foodResult.errorKind,
           ),
-          foodResult.errorKind,
+          trackerResult.errorKind,
         ),
       };
 
@@ -322,6 +344,12 @@ async function run(reason: string): Promise<void> {
       failures++;
       emit({
         lastError: err instanceof Error ? err.message : String(err),
+        // **`isOffline`, deliberately narrow.** This drives the word
+        // "Connected"/"No connection" on the sync screen, so it is the one
+        // place the N55 distinction changes an answer rather than preserving
+        // one: a `RequestDroppedError` was thrown *because* VOLA answered a
+        // probe, and reporting "No connection" over the top of that evidence
+        // is the same confident false statement in a smaller font.
         online: !isOffline(err),
         // Cleared, not carried. The run threw before reporting a count, so
         // the previous run's number describes nothing that is true now.
