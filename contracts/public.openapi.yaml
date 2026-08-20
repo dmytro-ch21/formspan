@@ -1590,6 +1590,10 @@ components:
             row numbers said three.
         tonnage_kg:
           type: number
+          description: >
+            `reps × weight_kg × load_factor` over the same sets, under the one
+            tonnage rule — implements folded in, drops counted. See
+            `Set.weight_kg`.
         detail:
           type: array
           description: >
@@ -1621,7 +1625,10 @@ components:
         name: { type: string }
         figure:
           type: string
-          description: Strength only — the top working set, e.g. "140 kg × 5".
+          description: >
+            Strength only — the top working set, e.g. "140 kg × 5". The weight
+            is **per implement**, like every load this API publishes: a pair of
+            30 kg dumbbells reads "30 kg × 5". See `Set.weight_kg`.
         outcome:
           type: string
           description: >
@@ -1720,7 +1727,10 @@ components:
         name: { type: string }
         figure:
           type: string
-          description: Strength only — the top working set, e.g. "140 kg × 5".
+          description: >
+            Strength only — the top working set, e.g. "140 kg × 5". The weight
+            is **per implement**, like every load this API publishes: a pair of
+            30 kg dumbbells reads "30 kg × 5". See `Set.weight_kg`.
         outcome:
           type: string
           description: >
@@ -2658,7 +2668,14 @@ components:
         position: { type: integer }
         target_sets: { type: integer, nullable: true }
         target_reps: { type: integer, nullable: true }
-        target_weight_kg: { type: number, nullable: true }
+        target_weight_kg:
+          type: number
+          nullable: true
+          description: >
+            **Per implement**, the same reading as the `weight_kg` it will be
+            logged as — what to put on ONE dumbbell, not the pair. A template
+            authored in total kilograms would double every dumbbell session's
+            tonnage the moment it was performed. See `Set.weight_kg`.
         target_seconds: { type: integer, nullable: true }
         target_distance_m: { type: integer, nullable: true }
         notes: { type: string }
@@ -2912,7 +2929,42 @@ components:
             Warm-ups count toward neither working sets nor tonnage — counting
             them would make a light day look like a hard one.
         reps: { type: integer, nullable: true }
-        weight_kg: { type: number, nullable: true }
+        weight_kg:
+          type: number
+          nullable: true
+          description: >
+            **WHAT IS STAMPED ON THE IMPLEMENT — not the total moved.** For a
+            barbell or a machine those are the same number. For a PAIR of
+            dumbbells this is ONE of them, and the total is
+            `weight_kg × load_factor`.
+
+
+            This is the unit the athlete is asked for at every capture surface
+            ("Weight is per hand — what one hand holds, not the pair"), so it is
+            the unit stored, and **every load figure this API publishes is in it
+            too**: `top_weight_kg`, the `heaviest_weight` record, both 1RM
+            estimates and their evidence, and the weights a suggestion or a
+            workout item targets. A client renders any of them as logged.
+
+
+            **`tonnage_kg` is the ONE exception**, because it is the only figure
+            that asks how much work was moved rather than how heavy the lift
+            was. It, and only it, multiplies by `load_factor`.
+
+
+            So the two readings a client needs, stated once:
+
+
+            | quantity | rule |
+            |---|---|
+            | any load | `weight_kg`, as logged |
+            | tonnage | `reps × weight_kg × load_factor` |
+
+
+            Worked example — a pair of 30 kg dumbbells, 5 reps, 2 RIR: the
+            tonnage is `5 × 30 × 2` = **300 kg** and the estimated 1RM is
+            `30 × 36/(37−7)` = **36 kg**. Both come off this one field, and
+            neither is wrong.
         seconds: { type: integer, nullable: true }
         distance_m: { type: integer, nullable: true }
         rir:
@@ -3026,7 +3078,12 @@ components:
           type: number
           nullable: true
           description: >
-            What to load. Equal to `last_weight_kg` whenever the answer is to
+            What to load, **per implement** — the number to put on ONE dumbbell,
+            not the pair, matching the unit `weight_kg` is logged in so a client
+            can prefill the input with it unchanged. See `Set.weight_kg`.
+
+
+            Equal to `last_weight_kg` whenever the answer is to
             repeat, about 10% below it on a deload; null when there's nothing
             to say (no history, or not measured in weight).
 
@@ -3060,7 +3117,13 @@ components:
           format: date-time
           nullable: true
           description: When the most recent session containing it started.
-        last_weight_kg: { type: number, nullable: true, description: The top set's load. }
+        last_weight_kg:
+          type: number
+          nullable: true
+          description: >
+            The top set's load, **as logged — per implement**, so it renders
+            beside `target_weight_kg` in the same unit the athlete will type
+            back in. See `Set.weight_kg`.
         last_reps:
           type: integer
           nullable: true
@@ -3128,6 +3191,36 @@ components:
             one rep rather than inflating a true single.
 
 
+            **`w` is `weight_kg` AS LOGGED — per implement, `load_factor` NOT
+            applied**, and this is the one place the difference is worth
+            spelling out because the same screen also shows a tonnage that DOES
+            apply it. A 1RM is what a lifter quotes, and nobody quotes a
+            dumbbell press as the pair: a set of 5 with 2 RIR at 30 kg per hand
+            estimates **36 kg**, not 72. See `Set.weight_kg` for the full rule.
+
+
+            **`r` is EFFECTIVE reps, not logged reps** — stated in symbols so it
+            need not be inferred from the examples:
+
+
+            - `rir` present: `r = reps + rir`. RIR **wins** whenever both it and
+              `rpe` are given; it is the directly observed quantity where RPE
+              has to be converted.
+            - `rpe` only: `r = reps + max(0, 10 − min(rpe, 10))`. Kept
+              **fractional, never rounded** — the scale is used in half steps,
+              and rounding makes 8.5 and 8 give the same answer.
+            - neither: `r = reps`, which under-states a submaximal set. The
+              honest direction to be wrong in.
+            - assisted sets are the exception, and it inverts the rule: `r` is
+              the SOLO count and effort is **discarded**, because an RIR on an
+              assisted set describes the set including the help. See
+              `last_assisted_reps`.
+
+
+            `r > 12` returns null rather than a fiction, and `r ≤ 1` returns `w`
+            unchanged — a true single is its own maximum.
+
+
             Null when the set can't support an estimate: no weight recorded,
             or more than 12 effective reps, past which every rep-max curve is
             fiction.
@@ -3139,6 +3232,9 @@ components:
             exercise, so the current one reads as progress rather than as a
             bare number. Not simply the heaviest set — 5×100 estimates above a
             110 single.
+
+
+            Per implement, on the same rule as `estimated_1rm_kg` above.
         code:
           type: string
           enum: [add_reps, add_load, deload, hold, no_history, not_applicable,
@@ -3204,7 +3300,15 @@ components:
         total_reps: { type: integer }
         tonnage_kg:
           type: number
-          description: Sum of reps × weight over completed, non-warm-up sets.
+          description: >
+            Sum of `reps × weight_kg × load_factor` over completed, non-warm-up
+            sets — **total work moved**, so a pair of dumbbells counts twice.
+
+
+            The factor is the reason this is not simply `reps × weight_kg`:
+            `weight_kg` is per implement (see `Set.weight_kg`), and this is the
+            one published figure that converts it to a total. Every OTHER load
+            this API returns — top set, records, 1RM — stays per implement.
         hardest_rpe:
           type: number
           description: >
@@ -3267,8 +3371,25 @@ components:
             In storage units — kilograms, reps, seconds or metres, according
             to `kind` — so a client formats it the way it formats everything
             else.
+
+
+            For the two weight kinds (`heaviest_weight`, `estimated_1rm`) that
+            is kilograms **per implement, `load_factor` not applied**, like
+            every other load this API publishes. A pair of 30 kg dumbbells sets
+            a `heaviest_weight` of 30, never 60 — records are claims about a
+            lift, and only `tonnage_kg` asks about total work. See
+            `Set.weight_kg`.
         reps: { type: integer, nullable: true }
-        weight_kg: { type: number, nullable: true }
+        weight_kg:
+          type: number
+          nullable: true
+          description: >
+            The evidence set's load, per implement — the same reading as
+            `value`, so the two are directly comparable. Recomputing an
+            `estimated_1rm` from it uses the documented rule rather than bare
+            Brzycki on `reps`: that count is the FULL one, and the estimate
+            derives from the solo count with effort folded in (see
+            `assisted_reps`).
         seconds: { type: integer, nullable: true }
         distance_m: { type: integer, nullable: true }
         rir: { type: integer, nullable: true }
@@ -3313,7 +3434,15 @@ components:
         top_weight_kg:
           type: number
           nullable: true
-          description: Heaviest working set. Null for bodyweight, timed or distance work.
+          description: >
+            Heaviest working set, **as logged — per implement, `load_factor`
+            not applied**. Null for bodyweight, timed or distance work.
+
+
+            A pair of 30 kg dumbbells reports 30 here while the same set's
+            `tonnage_kg` counts 60 per rep. That is deliberate and is the whole
+            of `Set.weight_kg`: a top set is a load, and a load is quoted as
+            what one hand holds.
         best_1rm_kg:
           type: number
           nullable: true
@@ -3323,6 +3452,13 @@ components:
             done unaided and the two surfaces cannot publish different bests
             for one set. Null when no set supports one, including when every
             rep of the only candidate was assisted.
+
+
+            Per implement, like every load this API publishes. **This object is
+            the one that carries both readings at once** — `best_1rm_kg` does
+            not apply `load_factor` and `tonnage_kg` below does — so a client
+            rendering them together is showing two correct numbers computed
+            from the same column two ways. See `Set.weight_kg`.
         best_1rm_reps:
           type: integer
           nullable: true
@@ -3332,7 +3468,19 @@ components:
             `best_1rm_assisted_reps` alongside, matching how `/records` reports
             evidence; the estimate itself derives from the solo count, so the
             two only reconcile when both are shown.
-        best_1rm_weight_kg: { type: number, nullable: true }
+        best_1rm_weight_kg:
+          type: number
+          nullable: true
+          description: >
+            The weight the estimate was taken from, in the SAME per-implement
+            unit as the estimate. Doubling it first for a pair of dumbbells
+            gives twice the published number.
+
+
+            **Recomputing `best_1rm_kg` takes the documented rule, not bare
+            Brzycki on `best_1rm_reps`** — that count is the FULL one, and the
+            estimate uses the solo count with effort folded in. See
+            `best_1rm_reps` and `best_1rm_rir`, which carry the two corrections.
         best_1rm_assisted_reps: { type: integer, nullable: true }
         best_1rm_rir:
           type: integer
@@ -3376,7 +3524,10 @@ components:
         total_reps: { type: integer }
         tonnage_kg:
           type: number
-          description: Sum of reps × weight over completed, non-warm-up sets.
+          description: >
+            Sum of `reps × weight_kg × load_factor` over completed, non-warm-up
+            sets, under the one tonnage rule — implements folded in, drops
+            counted, warm-ups excluded. See `Set.weight_kg`.
         duration_seconds:
           type: integer
           description: Total logged duration. Sessions still in progress contribute 0.
@@ -3402,7 +3553,11 @@ components:
         sessions: { type: integer }
         working_sets: { type: integer }
         total_reps: { type: integer }
-        tonnage_kg: { type: number }
+        tonnage_kg:
+          type: number
+          description: >
+            That day's `reps × weight_kg × load_factor`, the same rule as
+            `HistoryTotals.tonnage_kg`. See `Set.weight_kg`.
         duration_seconds: { type: integer }
         sports:
           type: array
