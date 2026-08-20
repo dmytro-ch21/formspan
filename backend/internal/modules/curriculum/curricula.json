@@ -128,67 +128,522 @@
   },
   {
     "id": "white-belt-basics",
-    "name": "White belt: learn the map",
+    "name": "White belt: learn the basic game",
     "belt": "white",
     "track": "belt",
-    "description": "Goal: understand what is actually happening in a round, and have one dependable answer from every major position. It opens with the map — the shape every round has — and then works the positions in the order they go wrong: out of the bad places first, then stop losing the guard you have, then the handful of attacks that genuinely work at white belt. Milestones complete from what you log live; the concepts around them are the ideas each phase is really teaching.",
+    "description": "Goal: understand what is actually happening in a BJJ match, and have a basic answer from every major position. White belt is position, safety, escapes and a small number of dependable techniques — not a large collection of them. The eleven milestones follow a match from its beginning: standing, to the ground, guard, the sweep or the pass, the pins, the back, the turtle, and then how to get out of all of it. The shape to hold in your head: standing → takedown or guard pull → guard → sweep or pass → side control → mount or back → submission; and when position is lost, escape → recover guard or get on top → start attacking again. Milestones complete from what you log live. Nothing here can be ticked off by hand.",
     "phases": [
       {
-        "title": "How this belt works",
-        "description": "White belt is roughly 40% escapes and defense, 20% guard retention, 20% positional control, and only 10% submissions — and that split is the curriculum, not a limitation of it. A white belt who can survive, escape and hold position is dangerous at blue; one who only hunts submissions is starting over.",
+        "title": "Start Standing",
+        "description": "Learn how to safely begin an exchange. Nothing in this section scores a point and all of it decides whether the rest of the round happens on your terms.",
         "items": [
           {
-            "kind": "concept",
-            "title": "Where this belt sits",
-            "notes": "Four belts, four different jobs. White learns the map: what is happening, and one answer from every position on it. Blue builds reliable routes through the map — technique, their reaction, your second technique. Purple connects the routes into systems and starts choosing which reaction to provoke. Brown controls the whole decision tree. You are not behind; you are on the step the other three are built on."
+            "technique_id": "grappling-stance-motion",
+            "notes": "Knees bent, back straight, weight between your feet — the posture everything else is played from.",
+            "target_drilled_sessions": 10
           },
           {
             "kind": "concept",
-            "title": "Defense is the syllabus, not the warm-up",
-            "notes": "Protect the neck, then the elbows, then frame, then move. Every phase below starts from the bottom of its position on purpose: you will spend most of this year underneath people, and what you do there decides how fast the rest arrives."
+            "title": "Base and balance",
+            "notes": "Being hard to move is a skill before it is a technique. Weight through the whole foot, hips underneath you, and never let your feet cross or your head travel past your knee."
           },
           {
-            "kind": "concept",
-            "title": "Know when the escape is gone",
-            "notes": "Armbar straight and your elbow past their hips: tap. Choke sunk under the chin: tap. The skill of recognising a lost position early is worth more this year than any single escape — it is what lets you roll again tomorrow."
+            "technique_id": "gi-grip-fighting-sleeve-lapel",
+            "notes": "In the gi, a collar and a sleeve is worth more than being stronger.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "hand-fighting-inside-position",
+            "notes": "Whoever gets their hands inside decides what happens next.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "breakfall-side",
+            "notes": "Learn to land before you learn to be thrown. The backward breakfall is the same skill on the other axis — drill both.",
+            "target_drilled_sessions": 8
+          },
+          {
+            "technique_id": "technical-standup",
+            "notes": "How you get up without giving away your back or your legs.",
+            "target_drilled_sessions": 8
+          },
+          {
+            "technique_id": "standing-sprawl",
+            "notes": "The answer to a leg attack, and the first thing to drill until it is a reflex.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.35
           }
         ]
       },
       {
-        "title": "The map: how a round goes",
-        "description": "Jiu-jitsu is unreadable as a list of moves and obvious as a map. Read this before the phases below — nothing here is trained and nothing here is scored. It is the shape every round has, so that everything after it has somewhere to sit.",
+        "title": "Get the Fight to the Ground",
+        "description": "Know a few simple ways to initiate. The goal is not to know ten takedowns — a white belt should have two or three they understand well, and should recognise the rest when they are being done to them.",
         "items": [
           {
-            "kind": "concept",
-            "title": "The route",
-            "notes": "Standing, then a takedown or a guard pull, then guard — and from guard either you sweep from the bottom or you pass from the top. Passing lands in side control, side control climbs to mount or to the back, and the submission comes from there. Every round you will ever watch is somewhere on that line. When you have no idea what to do, find the step you are on and go to the next one."
+            "technique_id": "double-leg-takedown",
+            "notes": "The one everybody learns, and it still works.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
           },
           {
-            "kind": "concept",
-            "title": "The loop back",
-            "notes": "Nobody runs the route cleanly. When you lose a position the answer is always the same three moves in the same order: survive, escape, then recover guard or come up on top — and you rejoin the route where you left it. Most of white belt is this loop, which is why the phases below start with the escapes rather than the attacks."
+            "technique_id": "single-leg-outside",
+            "notes": "The other half of the pair — they defend one by giving you the other.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
           },
           {
-            "kind": "concept",
-            "title": "The hierarchy",
-            "notes": "From best to worst: their back, mount, side control, guard on top, guard on the bottom, then pinned underneath. Every position is worth more than the one below it and the entire sport is trading upward. It is also why a submission thrown from a position you have not secured usually costs you the position — you traded down to reach for it."
+            "technique_id": "body-lock-outside-trip",
+            "notes": "No level change, no scramble, and it travels to no-gi.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
           },
           {
-            "kind": "concept",
-            "title": "Position before submission",
-            "notes": "The oldest rule in jiu-jitsu, and the one that makes the route work: improve the position first and finish second. A tap that arrives from a stable position will arrive again next week, because you can reproduce how you got there. One that arrives out of a scramble was luck, and luck does not compound."
+            "technique_id": "de-ashi-barai",
+            "notes": "A foot sweep costs nothing when it fails, which is what makes it worth trying often.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "snapdown-front-headlock",
+            "notes": "What their bad posture is for.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "guard-pull-seated",
+            "notes": "Pulling guard is a decision, not a surrender — but only if you choose the position you land in.",
+            "target_drilled_sessions": 8
           }
         ]
       },
       {
-        "title": "Mount: get out, then hold",
-        "description": "The worst place a beginner spends time, and the first thing worth fixing. The expectation by the end: escape mount against training partners of comparable experience, hold it for short stretches without just being heavy, and connect two attacks from the top.",
+        "title": "Understand Guard",
+        "description": "Learn what guard is and why it matters. The thing that makes a guard a guard, rather than being underneath somebody, is that your legs are between you and them.",
         "items": [
           {
-            "kind": "concept",
-            "title": "The elbow–knee connection",
-            "notes": "Elbows tight to knees is what makes every mount escape possible and high mount impossible. The moment an elbow floats away from your body, it belongs to them."
+            "technique_id": "closed-guard-posture-control",
+            "notes": "The first guard, and the one that teaches posture-breaking.",
+            "target_drilled_sessions": 10
           },
+          {
+            "technique_id": "seated-guard-hand-fighting",
+            "notes": "Open guard starts with the hands, not the feet.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "knee-shield-half-guard",
+            "notes": "Half guard is a position with its own fight, not a failed guard.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "butterfly-guard-double-underhooks",
+            "notes": "The close-range guard, and the one that lifts.",
+            "target_drilled_sessions": 8
+          },
+          {
+            "kind": "concept",
+            "title": "Keep opponent between your legs",
+            "notes": "Every guard is one answer to a single question: are your legs still between you and them? The moment they are not, you are not in guard — you are being passed."
+          },
+          {
+            "kind": "concept",
+            "title": "Control distance",
+            "notes": "There are two safe distances and one dangerous one. Far enough that their weight is off you, or close enough that they cannot build a base. The middle is where you get passed."
+          },
+          {
+            "kind": "concept",
+            "title": "Break posture",
+            "notes": "A posture-broken opponent cannot pass, cannot strike and cannot see. Breaking it is worth more than any single attack, because every attack comes after it."
+          },
+          {
+            "kind": "concept",
+            "title": "Protect yourself",
+            "notes": "Elbows in, hands in front of your neck, chin down. Most of what goes wrong from the bottom starts with an arm that drifted away from your body."
+          },
+          {
+            "kind": "concept",
+            "title": "Create angles",
+            "notes": "Square-on, they have all their weight and both arms. Off to one side, half of that is gone. Almost everything that works from guard begins by getting off the centre line."
+          }
+        ]
+      },
+      {
+        "title": "Sweep From Bottom",
+        "description": "Learn how to get from bottom to top. The important concept: if you cannot submit safely, improve your position — and a sweep is how that is done from underneath.",
+        "items": [
+          {
+            "technique_id": "scissor-sweep-closed-guard",
+            "notes": "The first one most people land in a live round.",
+            "target_scored": 15,
+            "target_sessions": 12,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "hip-bump-sweep-closed-guard",
+            "notes": "When they sit back to open your guard, the space they made is the sweep.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "pendulum-sweep-closed-guard",
+            "notes": "The flower sweep and the pendulum are one movement; it takes the arm with it.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "tripod-sweep",
+            "notes": "Distance guard, standing opponent — the one that works when they stand up.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "butterfly-sweep-basic",
+            "notes": "Close range, hooks in, and the whole body does the work.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "dogfight-knee-tap-sweep",
+            "notes": "The half-guard underhook, cashed in.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          }
+        ]
+      },
+      {
+        "title": "Pass the Guard From Top",
+        "description": "Understand that before attacking, you usually need to get past the legs. The main concept is the order: legs, then hips, then shoulders, then control.",
+        "items": [
+          {
+            "technique_id": "closed-guard-standing-break",
+            "notes": "You cannot pass a closed guard; you open it first, and standing is the safest way.",
+            "target_scored": 15,
+            "target_sessions": 12,
+            "min_hit_rate": 0.35
+          },
+          {
+            "technique_id": "knee-cut-pass",
+            "notes": "The pass that works in both gi and no-gi and never stops working.",
+            "target_scored": 15,
+            "target_sessions": 12,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "toreando-pass",
+            "notes": "Move their legs rather than your own weight.",
+            "target_scored": 15,
+            "target_sessions": 12,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "double-under-pass",
+            "notes": "When you cannot go around the legs, pick them up and stack.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "over-under-pass",
+            "notes": "The slow one, and the one nobody enjoys being underneath.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "half-guard-knee-slice-pass",
+            "notes": "Half guard is where most passes stall — this is how they finish.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          }
+        ]
+      },
+      {
+        "title": "Establish Side Control",
+        "description": "Learn how to actually hold someone after passing. A pass is not finished until the pin is, and the pin is what every attack in this section is launched from.",
+        "items": [
+          {
+            "technique_id": "side-control-crossface-underhook",
+            "notes": "The crossface turns their head away from you, and their hips have to follow it.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "kind": "concept",
+            "title": "Underhook",
+            "notes": "The far underhook is what stops them turning in and rebuilding a guard. Crossface on one side, underhook on the other — that pair is the pin."
+          },
+          {
+            "kind": "concept",
+            "title": "Hip control",
+            "notes": "Your hips stay low and off theirs, not resting on them. Weight on their chest and shoulders, space where their hips are, so there is nothing for them to shrimp against."
+          },
+          {
+            "kind": "concept",
+            "title": "Chest-to-chest pressure",
+            "notes": "Pressure is chest on chest, not arms braced on the mat. If you are holding yourself up, you are holding yourself up — they are free."
+          },
+          {
+            "kind": "concept",
+            "title": "Prevent guard recovery",
+            "notes": "Everything they do from here is an attempt to get a knee or an elbow back in front of you. Block the knee line and the escape has nowhere to go."
+          },
+          {
+            "technique_id": "side-control-to-mount",
+            "notes": "The pin is a place you leave, and mount is the usual next stop.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "side-control-knee-on-belly",
+            "notes": "Lighter, more mobile, and it makes them give you something.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "side-control-gift-wrap",
+            "notes": "Trap the near arm across their own neck and the back is already half taken.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "americana-side-control",
+            "notes": "The first submission most people ever finish, and it is right there in the pin.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "kimura-side-control",
+            "notes": "The far arm is an attack that starts from the pin you already hold.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "side-control-near-side-armbar",
+            "notes": "When they push into you with the near arm, they have handed it over.",
+            "target_scored": 8,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "arm-triangle-side-control",
+            "notes": "Their own shoulder does the choking, which is why it works without much strength.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          }
+        ]
+      },
+      {
+        "title": "Establish Mount",
+        "description": "Learn to stabilize before attacking. Chasing a submission from an unstable mount is how you end up back in their guard.",
+        "items": [
+          {
+            "technique_id": "low-mount-control",
+            "notes": "Knees near the hips, weight forward. Low mount is where you survive their first bridge.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "high-mount-control",
+            "notes": "When they turn on their side, you climb. High mount is where the attacks live.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "technical-mount-control",
+            "notes": "The position mount becomes every time they turn away — not a mistake, a stop on the way to the back.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "mount-bridge-maintenance",
+            "notes": "Ride the bridge rather than fighting it. Posting into the roll is what makes their escape fail.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.35
+          },
+          {
+            "technique_id": "americana-mount",
+            "notes": "Holding the pin is not the end of the round — the arm they push with is the arm you take.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "arm-triangle-mount",
+            "notes": "The same choke as from side control, arrived at from the other side.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "cross-collar-choke-mount",
+            "notes": "The oldest choke in the gi, and it still catches blue belts.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "ezekiel-choke-mount",
+            "notes": "The one they never see, because it needs almost no space.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "armbar-mount",
+            "notes": "When the collar choke makes them push, the armbar is already there.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          }
+        ]
+      },
+      {
+        "title": "Take and Control the Back",
+        "description": "Understand why the back is one of the strongest positions: they cannot see you, they cannot reach you, and everything you do from here they have to defend blind.",
+        "items": [
+          {
+            "technique_id": "seatbelt-back-control",
+            "notes": "One arm over the shoulder, one under the armpit, hands joined. Without it there is no back control.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "double-hooks-back-control",
+            "notes": "The hooks keep you attached while they turn. They are not what holds them — the seatbelt is.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "kind": "concept",
+            "title": "Chest-to-back connection",
+            "notes": "Your chest stays glued to their back. The moment a gap opens they can slide down and put their shoulders on the mat, which is the whole escape."
+          },
+          {
+            "kind": "concept",
+            "title": "Head position",
+            "notes": "Head on the same side as your choking arm, jaw tight to their shoulder. Heads on opposite sides is how you get rolled over the top."
+          },
+          {
+            "technique_id": "back-control-hip-scoop",
+            "notes": "Back control is followed, not held. When they slide out, you go with them.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "rear-naked-choke",
+            "notes": "The one submission that needs no gi, no leverage and no strength advantage.",
+            "target_scored": 12,
+            "target_defended": 5,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "sliding-collar-choke-back",
+            "notes": "The gi's version, and it arrives before they know it started.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          }
+        ]
+      },
+      {
+        "title": "Turtle",
+        "description": "Know what to do from both sides. Turtle is a door rather than a home — it is where scrambles pause, and staying still in it is volunteering your back.",
+        "items": [
+          {
+            "technique_id": "turtle-hand-fighting",
+            "notes": "Neck first, always. Everything else is negotiable.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "turtle-base-structure",
+            "notes": "Elbows to knees, no space underneath. A hook cannot go where there is no room.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "turtle-sitout-escape",
+            "notes": "The wrestler's answer, and the fastest way out of the position.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "turtle-granby-to-guard",
+            "notes": "Roll across the shoulders, thread the legs back through, and you have a guard again.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "turtle-pull-half-guard",
+            "notes": "Sometimes the guard you recover is half of one, and that is fine.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "turtle-standup-escape",
+            "notes": "If nothing is holding you down, stand up. It is allowed and it is often best.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "turtle-seatbelt-control",
+            "notes": "From the top, the seatbelt comes before anything else — same grip, same reason.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "turtle-spiral-ride",
+            "notes": "Break them down to one side and the turtle stops being a shell.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "turtle-hook-insertion",
+            "notes": "The first hook goes in on the side your chest is already on. Chasing the far one is what gets you rolled.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "rolling-back-take-from-turtle",
+            "notes": "The turtle's real punishment: you end up on the back with both hooks in.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          }
+        ]
+      },
+      {
+        "title": "Escape Bad Positions",
+        "description": "One of the most important white belt areas, and the one that decides whether training is enjoyable. The order never changes: survive, then escape, then recover — and rejoin the round where you left it.",
+        "items": [
           {
             "technique_id": "mount-trap-roll-escape",
             "notes": "When someone mounts you and reaches for something, you can put them underneath you.",
@@ -198,277 +653,147 @@
           },
           {
             "technique_id": "mount-elbow-knee-escape",
-            "notes": "The escape that works when they don't give you the roll: elbow, knee, half guard, guard.",
+            "notes": "The escape that works when they do not give you the roll: elbow, knee, half guard, guard.",
             "target_scored": 15,
             "target_sessions": 12,
             "min_hit_rate": 0.35
-          },
-          {
-            "kind": "concept",
-            "title": "Holding mount is hips, not weight",
-            "notes": "Grapevines, a low base, hands posting against the bridge — and climbing to high mount when they turn on their side. Chasing submissions before the mount is stable is how you end up back in their guard."
-          },
-          {
-            "technique_id": "americana-mount",
-            "notes": "Holding the pin is not the end of the round — the arm they use to push is the arm you take.",
-            "target_scored": 12,
-            "target_defended": 4,
-            "target_sessions": 10,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "Side control: frames before everything",
-        "description": "Where every passed guard lands and every stalled roll settles. Bottom first — being pinned is uncomfortable rather than dangerous, and you can keep it that way — then the top game: a pass is not finished until side control is stabilised.",
-        "items": [
-          {
-            "technique_id": "side-control-bottom-frames",
-            "notes": "Being pinned is uncomfortable rather than dangerous, and you can keep it that way.",
-            "target_scored": 25,
-            "target_sessions": 15,
-            "min_hit_rate": 0.4
           },
           {
             "technique_id": "side-control-frame-hip-escape",
             "notes": "You can turn frames into space and get your guard back.",
-            "target_scored": 25,
-            "target_sessions": 12,
-            "min_hit_rate": 0.4
-          },
-          {
-            "kind": "concept",
-            "title": "Protect the near arm",
-            "notes": "Most of what goes wrong under side control starts with the near arm drifting — into a crossface, an americana, an arm triangle. Elbow to your ribs, hand guarding your neck, always."
-          },
-          {
-            "technique_id": "side-control-crossface-underhook",
-            "notes": "What you passed to, you keep.",
-            "target_scored": 15,
-            "target_sessions": 12,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "kimura-side-control",
-            "notes": "The far arm is an attack that starts from the pin you already hold.",
-            "target_scored": 12,
-            "target_defended": 4,
-            "target_sessions": 10,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "Closed guard: your first weapon system",
-        "description": "The one bottom position that attacks. The expectation by the end: break posture on demand, two sweeps that work, one sweep connected to one submission, and an opening game from the top that doesn't feed your arms to an armbar.",
-        "items": [
-          {
-            "technique_id": "closed-guard-posture-control",
-            "notes": "Nobody stands up and opens your guard on their terms.",
             "target_scored": 20,
             "target_sessions": 12,
             "min_hit_rate": 0.4
           },
           {
-            "technique_id": "scissor-sweep-closed-guard",
-            "notes": "You can sweep from closed guard and end up on top.",
-            "target_scored": 20,
-            "target_defended": 5,
-            "target_sessions": 12,
-            "min_hit_rate": 0.3
-          },
-          {
-            "technique_id": "hip-bump-sweep-closed-guard",
-            "notes": "When they sit back to open your guard, the space they made is the sweep.",
-            "target_scored": 15,
-            "target_defended": 4,
-            "target_sessions": 10,
-            "min_hit_rate": 0.3
-          },
-          {
-            "kind": "concept",
-            "title": "The attacks arrive together",
-            "notes": "Triangle, armbar and omoplata are one system with three exits — defending one exposes the next. Learn the triangle first, then notice the armbar is already there every time they pull the arm out."
-          },
-          {
-            "technique_id": "triangle-closed-guard",
-            "notes": "When they leave an arm in and posture up, the triangle is already there.",
+            "technique_id": "side-control-underhook-to-knees",
+            "notes": "When the guard is not coming back, go the other way and come up.",
             "target_scored": 12,
-            "target_defended": 5,
-            "target_sessions": 10,
-            "min_hit_rate": 0.25
-          },
-          {
-            "technique_id": "standing-guard-break-knee-cut",
-            "notes": "A closed guard does not stop you: you can open it standing and cut straight through.",
-            "target_scored": 15,
-            "target_defended": 5,
-            "target_sessions": 12,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "Half guard is a position, not a failure",
-        "description": "Half guard is where passes stall and where bottom players start winning exchanges. Recognise it as a real position with its own battle — the underhook — rather than a guard that half-failed.",
-        "items": [
-          {
-            "kind": "concept",
-            "title": "The underhook battle decides everything",
-            "notes": "Bottom half guard with the underhook is an attacking position; bottom half guard flattened under a crossface is mount with extra steps. The knee shield buys the time; the underhook spends it."
-          },
-          {
-            "technique_id": "knee-shield-half-guard",
-            "notes": "The frame that stops the crossface arriving and keeps the distance yours.",
-            "target_scored": 15,
-            "target_sessions": 10,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "dogfight-knee-tap-sweep",
-            "notes": "Underhook, up to the knees, and their base is suddenly negotiable.",
-            "target_scored": 12,
-            "target_defended": 4,
             "target_sessions": 10,
             "min_hit_rate": 0.3
           },
           {
-            "technique_id": "half-guard-knee-slice-pass",
-            "notes": "From the top, half guard is a pass that is already half done: crossface, flatten, free the knee.",
-            "target_scored": 15,
-            "target_defended": 5,
-            "target_sessions": 12,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "Open guard: keep it, pass it",
-        "description": "White belts do not need every open guard — they need retention that survives pressure, one sweep from distance, and passing that starts from control instead of from hope.",
-        "items": [
-          {
-            "kind": "concept",
-            "title": "Four points of contact",
-            "notes": "An open guard is alive while your feet and hands are connected to them — feet on hips, grips on sleeves or collar. Lose the connections and you are not playing guard, you are lying down near an opponent."
-          },
-          {
-            "technique_id": "hip-escape-guard-recovery",
-            "notes": "When someone starts to pass, you can move your hips and take your guard back.",
-            "target_scored": 25,
-            "target_sessions": 12,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "tripod-sweep",
-            "notes": "A standing opponent has two legs and you have grips on both — the floor does the rest.",
-            "target_scored": 12,
-            "target_defended": 4,
-            "target_sessions": 10,
+            "technique_id": "reverse-kesa-half-guard-recovery",
+            "notes": "Half guard counts as recovering guard. It is a position, not a consolation.",
+            "target_scored": 10,
+            "target_sessions": 8,
             "min_hit_rate": 0.3
           },
           {
-            "kind": "concept",
-            "title": "Pass from headquarters, not from anywhere",
-            "notes": "One position — their bottom leg controlled between yours — feeds the knee cut, the toreando and the smash. Passing from a named place beats improvising around flying feet."
-          },
-          {
-            "technique_id": "toreando-pass",
-            "notes": "Their legs are steering wheels: move them, not yourself, and walk around what's left.",
-            "target_scored": 15,
-            "target_defended": 5,
-            "target_sessions": 12,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "The back: escape it, take it, finish from it",
-        "description": "The top of the positional hierarchy, in both directions. The expectation: hands that defend your neck automatically, one reliable escape, and a rear naked choke that finishes when the back is yours.",
-        "items": [
-          {
-            "technique_id": "rear-naked-choke-early-defense",
-            "notes": "Losing your back costs you position, not the round.",
+            "technique_id": "back-defence-hand-fighting",
+            "notes": "Two hands on one arm, chin buried. Nothing else matters until the choking arm is controlled.",
             "target_scored": 12,
             "target_sessions": 10,
             "min_hit_rate": 0.35
+          },
+          {
+            "technique_id": "back-control-hand-fighting",
+            "notes": "The two-on-one is the grip that makes the rest of the escape possible.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "back-escape-hook-peel",
+            "notes": "One hook removed is half the control gone.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "back-escape-shoulder-to-mat",
+            "notes": "Get both shoulders to the floor and their back control has become a bad side control.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
           },
           {
             "technique_id": "back-escape-safe-side",
-            "notes": "Fall toward their choking arm, shoulders to the mat, and walk out the side door.",
-            "target_scored": 12,
-            "target_sessions": 10,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "rear-naked-choke",
-            "notes": "The finish the whole hierarchy points at. Position first, seatbelt kept, and the choke arrives on its own.",
+            "notes": "Turn into them, not away. Turning away is how the choke finishes itself.",
             "target_scored": 10,
-            "target_defended": 3,
             "target_sessions": 8,
             "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "Turtle: a door, not a home",
-        "description": "Turtle is a position you move through — to guard, to your feet — never one you wait in. Staying still in turtle is volunteering your back.",
-        "items": [
+          },
           {
-            "kind": "concept",
-            "title": "Elbows and knees closed, neck hidden",
-            "notes": "A safe turtle has no gaps: elbows connected to knees, chin down, hands denying the collar. Every hook and every choke starts through a gap you left open."
+            "technique_id": "turtle-bottom-survival-posture",
+            "notes": "Compact, neck covered, no space for a hook. From here you have time to choose.",
+            "target_drilled_sessions": 10
           },
           {
             "technique_id": "turtle-to-guard-sitout",
-            "notes": "From turtle you are one sit-out from having your guard back — take it before they take your back.",
+            "notes": "The sit-out that ends facing them, with a guard back between you.",
             "target_scored": 10,
             "target_sessions": 8,
-            "min_hit_rate": 0.35
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "turtle-switch-escape",
+            "notes": "Standing back up is an escape, and often the best one available.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
           }
         ]
       },
       {
-        "title": "Standing: how rounds begin",
-        "description": "Every match and most rolls start here. The expectation is modest and real: one takedown you can finish, one you can stop, and the habit of getting back to your feet safely.",
+        "title": "Submission Defense",
+        "description": "Understand the danger before learning advanced attacks. These eight are what you will actually meet, and knowing the defence is what lets you train hard without getting hurt. Tap early — a defended submission and an injured joint are seconds apart.",
         "items": [
           {
-            "technique_id": "double-leg-takedown",
-            "notes": "When the round starts standing, you have a way in.",
-            "target_scored": 8,
-            "target_defended": 3,
-            "target_sessions": 6,
-            "min_hit_rate": 0.2
-          },
-          {
-            "technique_id": "body-lock-outside-trip",
-            "notes": "When the shot isn't there, chest to chest and a trip is.",
-            "target_scored": 8,
-            "target_defended": 3,
-            "target_sessions": 6,
-            "min_hit_rate": 0.2
-          },
-          {
-            "technique_id": "standing-sprawl",
-            "notes": "Their best shot ends with your hips on their shoulders.",
+            "technique_id": "rear-naked-choke-early-defense",
+            "notes": "Chin to the elbow crease, both hands on the choking wrist, before the grip closes.",
             "target_scored": 10,
-            "target_sessions": 8,
+            "target_sessions": 10,
             "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "The graduation standard",
-        "description": "What this roadmap adds up to. None of it is a promotion — that is your coach's call, made on the mat — but an athlete who clears these milestones has the game a new blue belt is supposed to have.",
-        "items": [
-          {
-            "kind": "concept",
-            "title": "What the record should show",
-            "notes": "Two mount escapes and two side-control escapes that work against your peers. A back escape and a neck that defends itself. Two sweeps, a sweep connected to a submission, and a guard you can open and pass three ways. Two takedowns and a sprawl. Positions held, not just reached."
           },
           {
-            "kind": "concept",
-            "title": "What it deliberately leaves out",
-            "notes": "Leg locks beyond knowing when to tap, berimbolos, and everything your favourite competitor does on Saturday. Blue belt is where a game gets built — this year is for the base it gets built on."
+            "technique_id": "guillotine-defense",
+            "notes": "Shoulder into the neck, head to the choking-arm side. Standing works only while their legs are open.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "triangle-defense",
+            "notes": "Posture and the angle. Pulling the arm out before you have either is what finishes it for them.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "armbar-defense",
+            "notes": "Thumb up, elbow away, hands joined, stack. Once the arm is straight and the hips are up, tap.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "side-control-kimura-defence",
+            "notes": "Shorten the lever and turn toward the trapped arm, never away from it.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "americana-defense",
+            "notes": "Straighten the arm and the lock has nothing to bend.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "arm-triangle-defense",
+            "notes": "Turn toward the trapped arm before they walk past your head. It is a race against the walk.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "straight-ankle-lock-defense",
+            "notes": "Boot the foot, sit up toward the lock, hand-fight the grip down. Rolling away is what finishes it.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
           }
         ]
       }
@@ -479,302 +804,646 @@
     "name": "Blue belt: build reliable systems",
     "belt": "blue",
     "track": "belt",
-    "description": "Goal: stop thinking in single techniques and start thinking technique → their reaction → your second technique. You already know how to survive; this belt is about choosing where the fight happens — one guard you play on purpose, one pass you trust, attacks that connect to each other instead of arriving one at a time, and the first honest look at the front headlock and the legs.",
+    "description": "Goal: stop thinking only in individual techniques and start understanding technique → opponent reaction → second technique. A blue belt should begin developing a real personal game. The ten milestones follow the same match order white belt learned, one layer deeper: chains instead of single attacks, retention before attacking, two guards that answer each other, passing and pinning as systems, and escapes that become combinations. The shape to hold in your head: standing combination → takedown or guard entry → your preferred guard → sweep, submission or wrestle-up → passing system → pin → advance position → submission chain → they escape → follow them into another attack. Milestones complete from what you log live.",
     "phases": [
       {
-        "title": "How this belt works",
-        "description": "Blue belt is where a game starts being chosen rather than inherited. Four questions run through everything below: what is my preferred game, what reactions am I trying to create, what is my second attack when the first fails, and how do I get back to my strongest position?",
+        "title": "Standing",
+        "description": "Build reliable combinations rather than single attacks. Start chaining: single leg → they defend → double leg. Snapdown → front headlock → go behind.",
         "items": [
           {
-            "kind": "concept",
-            "title": "Where this belt sits",
-            "notes": "White belt learned the map. Blue builds reliable routes through it: every technique has a most likely reaction, and the second technique is the one that beats the reaction. Purple connects those routes into systems, brown controls the whole tree. The change this belt asks for is that you stop collecting moves and start choosing a game."
+            "technique_id": "hand-fighting-inside-position",
+            "notes": "The grip fight decides which of the attacks below is even available.",
+            "target_drilled_sessions": 12
           },
           {
-            "kind": "concept",
-            "title": "Systems, not moves",
-            "notes": "A technique you know is a fact; a technique connected to the opponent's likeliest defence is a system. Every phase below pairs a first attack with where it sends you when it fails — that pairing, not the move list, is what blue belt adds."
-          }
-        ]
-      },
-      {
-        "title": "Defensive consolidation",
-        "description": "White belt escaped the ordinary pins. Blue closes the gaps: technical mount, the body triangle threat, late-stage submission defence — the escapes that work after the easy window has closed.",
-        "items": [
-          {
-            "technique_id": "back-escape-shoulder-to-shoulder",
-            "notes": "Having your back taken stops being the end of the round.",
-            "target_scored": 20,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "rear-naked-choke-late-defense",
-            "notes": "The arm is under your chin and you still get out.",
+            "technique_id": "single-leg-inside",
+            "notes": "The inside single is the one that chains, because it puts you on the centre line.",
             "target_scored": 12,
             "target_sessions": 10,
             "min_hit_rate": 0.3
           },
           {
-            "technique_id": "technical-mount-hip-escape",
-            "notes": "Technical mount is where trap-and-roll goes to die — this is the escape that lives there.",
-            "target_scored": 18,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          },
-          {
-            "kind": "concept",
-            "title": "Defend late, not just early",
-            "notes": "Every submission has an early, middle and late stage, and white belt only taught the early one. The middle is hand fighting; the late is structure — and knowing which stage you are in decides whether you fight or tap."
-          }
-        ]
-      },
-      {
-        "title": "Guard retention: the layers",
-        "description": "Retention is a ladder you fall down in order: distance, foot frames, knee frames, hand frames, hip movement, inversion, late recovery. A guard is hard to pass when losing one layer just means arriving at the next.",
-        "items": [
-          {
-            "technique_id": "high-leg-guard-recovery",
-            "notes": "Your legs get back in front of them before they can settle into the pass.",
-            "target_scored": 40,
-            "target_sessions": 16,
-            "min_hit_rate": 0.4
-          },
-          {
-            "kind": "concept",
-            "title": "Retention is posture, not scrambling",
-            "notes": "Feet between you and them, knees inside their lines, hands on the outside. When retention feels like panic it has already failed — the work happened two layers earlier."
-          }
-        ]
-      },
-      {
-        "title": "Closed guard: the chain",
-        "description": "At white belt the closed-guard attacks were separate answers. Now they are one question asked three ways: the defence to each attack is the entry to the next.",
-        "items": [
-          {
-            "technique_id": "armbar-triangle-omoplata-chain",
-            "notes": "One trapped arm gives you three finishes, and their defence to each one opens the next.",
-            "target_scored": 25,
-            "target_sessions": 15,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "kimura-sweep-from-closed-guard",
-            "notes": "The kimura grip is a fork: they post, you finish; they tuck, you sweep. Either answer is yours.",
-            "target_scored": 18,
-            "target_defended": 6,
-            "target_sessions": 12,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "Half guard: from surviving to winning",
-        "description": "White belt made half guard a real position. Blue makes it profitable — the underhook battle won on purpose, and a second engine underneath when the first stalls.",
-        "items": [
-          {
-            "technique_id": "dogfight-old-school-sweep",
-            "notes": "Half guard stops being where you get stuck and becomes where you get on top.",
-            "target_scored": 25,
-            "target_defended": 8,
-            "target_sessions": 12,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "half-butterfly-sweep",
-            "notes": "When the underhook is contested, the hook under their thigh is the tiebreaker.",
-            "target_scored": 15,
-            "target_defended": 5,
+            "technique_id": "blast-double-leg",
+            "notes": "What their single-leg defence hands you.",
+            "target_scored": 12,
             "target_sessions": 10,
             "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "Two guards that answer each other",
-        "description": "Not every open guard — two that cover each other's failures. The pairing here is De La Riva at long range and butterfly at close range; if your academy plays a different pair, the principle is the pairing, not these guards.",
-        "items": [
-          {
-            "technique_id": "de-la-riva-control",
-            "notes": "You have a guard you go to on purpose, not the one you end up in.",
-            "target_scored": 30,
-            "target_sessions": 15,
-            "min_hit_rate": 0.4
           },
           {
-            "technique_id": "de-la-riva-tripod-sweep",
-            "notes": "When they stand up to pass, you take them down instead.",
-            "target_scored": 25,
-            "target_defended": 5,
-            "target_sessions": 12,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "butterfly-elevator-sweep",
-            "notes": "When they kneel and hug close, the hooks lift what their base was standing on.",
-            "target_scored": 20,
-            "target_defended": 5,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "butterfly-guard-to-single-leg-x",
-            "notes": "Butterfly is also a doorway: elevate, slide under, and arrive at their leg with your whole body.",
-            "target_scored": 15,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          }
-        ]
-      },
-      {
-        "title": "Passing: one pressure, one movement",
-        "description": "A passing system needs a fast answer and a heavy answer, and they share a structure: control the feet or knees, set the angle, defeat the frames, control the hips, then the shoulders, then stabilise. A pass that skips a step is a scramble wearing a name.",
-        "items": [
-          {
-            "technique_id": "headquarters-position",
-            "notes": "You pass from one place you know, instead of improvising every time.",
-            "target_scored": 25,
-            "target_sessions": 12,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "knee-cut-long-step-chain",
-            "notes": "You have a pass you trust, and a ready answer for the way people stop it.",
-            "target_scored": 30,
-            "target_defended": 8,
-            "target_sessions": 15,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "knee-shield-leg-weave-pass",
-            "notes": "A knee in your chest stops being the end of your passing.",
-            "target_scored": 18,
-            "target_defended": 5,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "body-lock-pass",
-            "notes": "The heavy answer: chest to chest, their hips pinned, and nothing for their guard to hold onto.",
-            "target_scored": 20,
-            "target_defended": 6,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          }
-        ]
-      },
-      {
-        "title": "Pins that go somewhere",
-        "description": "Blue-belt pins are dynamic: side control, knee-on-belly, north–south and mount are one position seen from four angles, and the submissions live in the transitions between them.",
-        "items": [
-          {
-            "technique_id": "side-control-top-backtake",
-            "notes": "When they turn away from the pin, you are already behind them.",
-            "target_scored": 15,
-            "target_defended": 5,
-            "target_sessions": 12,
-            "min_hit_rate": 0.45
-          },
-          {
-            "technique_id": "seatbelt-back-control",
-            "notes": "Once you have the back you keep it, without racing for a finish.",
-            "target_scored": 15,
-            "target_sessions": 12,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "bow-arrow-choke-back",
-            "notes": "You can finish from the back against someone who knows exactly what is coming.",
-            "target_scored": 15,
-            "target_defended": 8,
-            "target_sessions": 12,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "north-south-choke",
-            "notes": "The pin they think is a rest stop has a choke in it.",
-            "target_scored": 12,
-            "target_sessions": 10,
+            "technique_id": "high-crotch-single",
+            "notes": "The third entry off the same level change.",
+            "target_scored": 8,
+            "target_sessions": 8,
             "min_hit_rate": 0.25
           },
           {
-            "kind": "concept",
-            "title": "A failed submission should end somewhere better",
-            "notes": "Attack so that the worst case is an improved pin — an armbar that loses the arm but keeps mount, a choke that converts to a back take. If failing costs the position, the attack was priced wrong."
-          }
-        ]
-      },
-      {
-        "title": "The front headlock",
-        "description": "Every snapdown, every stuffed shot and every duck-out lands here, and at blue belt it stops being a place where you just hold a neck. Chin strap and elbow control first — the chokes only work from a headlock that already controls them.",
-        "items": [
+            "technique_id": "body-lock-inside-trip",
+            "notes": "No level change and nothing to sprawl on.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
           {
-            "technique_id": "darce-front-headlock",
-            "notes": "The arm-in headlock is already most of a darce — learn to see the choke that is nearly finished.",
+            "technique_id": "snapdown-front-headlock",
+            "notes": "Their posture is the opening, and this is what it opens into.",
             "target_scored": 12,
-            "target_defended": 5,
             "target_sessions": 10,
-            "min_hit_rate": 0.25
+            "min_hit_rate": 0.3
           },
           {
-            "kind": "concept",
-            "title": "Position before choke, here too",
-            "notes": "Chin strap, elbow blocked, their head below your chest. Go behind when they defend the neck, choke when they defend the go-behind — the headlock is a fork, not a squeeze."
-          }
-        ]
-      },
-      {
-        "title": "Legs, responsibly",
-        "description": "Leg locks start with positional responsibility, not with submissions: control the position, know the rule set, and protect your training partners. The straight ankle is the whole family in miniature — everything harder is this with higher stakes.",
-        "items": [
-          {
-            "technique_id": "single-leg-x-outside-sweep",
-            "notes": "Single-leg X is first a sweep: their base goes, you come up, and the leg is still there if you want it.",
-            "target_scored": 15,
-            "target_sessions": 10,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "straight-ankle-lock-slx",
-            "notes": "The first leg attack, finished with the hips, released early. How you treat this one decides what you may be taught next.",
-            "target_scored": 12,
-            "target_defended": 5,
-            "target_sessions": 10,
-            "min_hit_rate": 0.25
-          },
-          {
-            "kind": "concept",
-            "title": "Defensive responsibility in entanglements",
-            "notes": "Control their second leg, clear your knee line, hide the heel, stand up through the gap. And the one that matters most: rotational pressure on a knee is a tap, not a puzzle — at every belt."
-          }
-        ]
-      },
-      {
-        "title": "Standing: chains, not singles",
-        "description": "One takedown fails against anyone good. Blue belt wrestling is the second attempt arriving before the first one has finished failing — and the takedown flowing straight into the pass.",
-        "items": [
-          {
-            "technique_id": "ankle-pick",
-            "notes": "You can start the match on your feet and finish the exchange on top.",
+            "technique_id": "standing-arm-drag",
+            "notes": "The cheapest back take in the sport, and it starts standing.",
             "target_scored": 10,
             "target_sessions": 8,
             "min_hit_rate": 0.25
           },
           {
+            "technique_id": "sasae-tsurikomi-ashi",
+            "notes": "A foot sweep is what makes them stop moving forward.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "guard-pull-de-la-riva",
+            "notes": "If you pull, pull into something. Landing in a guard you play is the whole point.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
             "kind": "concept",
-            "title": "Chain the shot to the finish, and the finish to the pass",
-            "notes": "Snapdown sets up the single, the single converts to the double, the double lands already past the guard. A takedown that ends standing still in their guard scored two points and started a new problem."
+            "title": "Attack in twos",
+            "notes": "Every attack above has a defence, and every defence opens the next one. Single leg → they sprawl → front headlock. Snapdown → they post → go behind. Learn the pair, not the move."
           }
         ]
       },
       {
-        "title": "The graduation standard",
-        "description": "What this roadmap adds up to — and as always, promotion is your coach's call, made on the mat, not a progress bar.",
+        "title": "Guard Retention",
+        "description": "Before becoming great at attacking guard, become difficult to pass. Losing a rung of this ladder is not losing the guard — it is moving to the next answer down.",
         "items": [
           {
+            "technique_id": "elbow-knee-connection-retention",
+            "notes": "The inside space is the guard. Frames are how you keep it.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "hip-escape-guard-recovery",
+            "notes": "The movement every recovery below is built from.",
+            "target_drilled_sessions": 12
+          },
+          {
             "kind": "concept",
-            "title": "What the record should show",
-            "notes": "Reliable escapes from every major pin. Two guards that answer each other, with retention underneath both. One pressure pass and one movement pass. Submission chains from mount, side control, back and guard — chains, not singles. A front headlock that forks, basic leg-lock literacy, and wrestling that comes in sequences."
+            "title": "Inside position",
+            "notes": "Feet, knees, hands and elbows: whoever is inside decides. Retention is a pummelling contest with four limbs rather than two."
+          },
+          {
+            "technique_id": "foot-pummel-guard-retention",
+            "notes": "Legs pummel like arms do, and whoever gets inside keeps the guard.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "knee-cut-guard-recovery",
+            "notes": "Frame the biceps, get the shin back in front of the cutting knee — or take the underhook and come up.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "toreando-guard-recovery",
+            "notes": "The toreando beats you on speed, so the answer is rotation rather than pushing.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "leg-drag-guard-recovery",
+            "notes": "The window is before their weight arrives. Flat is what gives up the back.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "sit-up-guard-recovery",
+            "notes": "From seated, the reset is the skill — you rebuild before they arrive.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "reverse-hip-escape-guard-recovery",
+            "notes": "Supine, the hips go the other way, and the guard comes back on the far side.",
+            "target_drilled_sessions": 10
+          }
+        ]
+      },
+      {
+        "title": "Build Two Guards",
+        "description": "Start developing at least two connected guards, so that when one is shut down the other is already there. The pairs that work: butterfly and half guard; De La Riva and single leg X; collar sleeve and lasso; seated guard and shin-to-shin.",
+        "items": [
+          {
+            "technique_id": "butterfly-guard-double-underhooks",
+            "notes": "Close range, both hooks in, and everything lifts.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "knee-shield-half-guard",
+            "notes": "The other half of the first pair, and the one that survives pressure.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "de-la-riva-control",
+            "notes": "The open guard that hooks rather than frames.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "butterfly-guard-to-single-leg-x",
+            "notes": "How De La Riva and the ashi family connect — one entry, two guards.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "collar-sleeve-guard-control",
+            "notes": "The gi guard that costs them their posture and their far arm at once.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "lasso-guard-control",
+            "notes": "Its partner: when the collar sleeve is cleared, the lasso is already set.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "seated-guard-hand-fighting",
+            "notes": "Seated is a guard, not a pause. It begins with the hands.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "shin-to-shin-control",
+            "notes": "The connection between seated guard and every leg entry below it.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "kind": "concept",
+            "title": "Two guards that answer each other",
+            "notes": "The point of a pair is that the passer's answer to one puts them in the other. If your second guard needs a reset to reach, it is not a pair — it is two separate games."
+          }
+        ]
+      },
+      {
+        "title": "Attack From Guard",
+        "description": "Build combinations rather than isolated moves. Each of the three chains below is one grip and several exits: defending the first is what opens the next.",
+        "items": [
+          {
+            "technique_id": "triangle-closed-guard",
+            "notes": "When they leave an arm in and posture up, it is already there.",
+            "target_scored": 12,
+            "target_defended": 5,
+            "target_sessions": 10,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "armbar-closed-guard",
+            "notes": "The triangle defence is the armbar entry.",
+            "target_scored": 12,
+            "target_defended": 5,
+            "target_sessions": 10,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "omoplata-closed-guard",
+            "notes": "And when they pull the arm back out, the shoulder is the third exit.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "kind": "concept",
+            "title": "Closed guard: triangle ↔ armbar ↔ omoplata",
+            "notes": "One system with three exits. Learn the triangle first, then notice the armbar was always there every time they pulled the arm out, and the omoplata every time they pulled it back in."
+          },
+          {
+            "technique_id": "butterfly-sweep-basic",
+            "notes": "The hook sweep is the threat that makes the arm drag work.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "butterfly-arm-drag-back-take",
+            "notes": "They post to stop the sweep, and the post is the drag.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "closed-guard-underhook-back-take",
+            "notes": "And the drag's destination: climbing to the back rather than settling for the sweep.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "Butterfly: sweep → arm drag → back take",
+            "notes": "Threaten the elevation, take the reaction. Nobody defends a butterfly sweep without giving you an arm."
+          },
+          {
+            "technique_id": "low-knee-shield-underhook",
+            "notes": "The underhook, taken from the knee shield before they flatten you.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "half-guard-underhook-dogfight",
+            "notes": "What the underhook becomes once you come up on it.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "dogfight-old-school-sweep",
+            "notes": "From the dogfight, the sweep is a matter of which way they lean.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "dogfight-limp-arm-backtake",
+            "notes": "And when they whizzer instead, the arm comes out and the back is there.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "Half guard: underhook → dogfight → sweep → back take",
+            "notes": "One underhook, three destinations. Which one you get is decided by them, not by you — which is the whole idea of a chain."
+          }
+        ]
+      },
+      {
+        "title": "Develop Passing Systems",
+        "description": "Two families, and a blue belt needs one of each. Start combining them: toreando → they recover → knee cut → they block → leg drag.",
+        "items": [
+          {
+            "technique_id": "toreando-pass",
+            "notes": "Movement passing starts here: their legs move, not your weight.",
+            "target_scored": 15,
+            "target_sessions": 12,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "knee-cut-pass",
+            "notes": "The one that works everywhere, and the hinge of every chain below.",
+            "target_scored": 15,
+            "target_sessions": 12,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "x-pass",
+            "notes": "The cross-step that beats a guard playing for distance.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "leg-drag-pass",
+            "notes": "Where movement passing ends up, and the fastest route to the back.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "over-under-pass",
+            "notes": "Pressure passing: slow, heavy, and nobody enjoys being underneath it.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "body-lock-pass",
+            "notes": "Take the hips away and the guard has nothing left to retain with.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "double-under-pass",
+            "notes": "When you cannot go around, pick them up and stack.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "half-guard-crossface-underhook",
+            "notes": "Half guard pressure is where most passes stall and where this one finishes.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "kind": "concept",
+            "title": "Combine them",
+            "notes": "A pass that fails is a reaction you asked for. Toreando to make them turn in, knee cut to make them block, leg drag into the space the block made."
+          }
+        ]
+      },
+      {
+        "title": "Control After Passing",
+        "description": "Become better at preventing escapes. Connect the pins instead of holding one forever — side control → north-south → knee-on-belly → mount → back.",
+        "items": [
+          {
+            "technique_id": "side-control-crossface-underhook",
+            "notes": "The pin you arrive in, and the one everything else leaves from.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "side-control-to-north-south",
+            "notes": "The head switch that answers their first frame.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "side-control-knee-on-belly",
+            "notes": "Lighter and more mobile, and it makes them give you something.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "north-south-to-mount",
+            "notes": "When their frames go to your hips, the mount is on the other side of them.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "north-south-to-backtake",
+            "notes": "And when they turn instead, the back is already exposed.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "Instead of holding one position forever",
+            "notes": "A pin is not a destination, it is a place you leave when they react. The athlete who transitions on every frame is much harder to escape than the one who squeezes harder."
+          }
+        ]
+      },
+      {
+        "title": "Build Submission Chains",
+        "description": "Three chains, one per position. In each, the defence to the first attack is the entry to the second.",
+        "items": [
+          {
+            "technique_id": "arm-triangle-mount",
+            "notes": "The mount chain starts with the choke that makes them turn.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "gift-wrap-backtake-mount",
+            "notes": "They turn away from the choke, and the gift wrap takes them to the back.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "rear-naked-choke",
+            "notes": "Where every one of these chains is trying to end up.",
+            "target_scored": 12,
+            "target_defended": 5,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "kind": "concept",
+            "title": "Mount: arm triangle → back take → RNC",
+            "notes": "Nobody escapes the arm triangle by staying flat. The turn that saves the neck is what hands you the back."
+          },
+          {
+            "technique_id": "kimura-side-control",
+            "notes": "The side control chain starts with the grip that outlives the position.",
+            "target_scored": 12,
+            "target_defended": 4,
+            "target_sessions": 10,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "side-control-far-side-armbar",
+            "notes": "They straighten the arm to save the shoulder, and the elbow is there.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "kimura-trap-side-control-backtake",
+            "notes": "And when they roll away from both, the kimura grip goes with them.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "Side control: kimura → armbar → back take",
+            "notes": "One grip, three answers. The kimura is worth learning as a control before it is worth learning as a finish."
+          },
+          {
+            "technique_id": "short-choke",
+            "notes": "From the back, the answer when the hand fight denies you the RNC.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "armbar-back-control",
+            "notes": "And when both hands go to the neck, the arm is unattended.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "kind": "concept",
+            "title": "Back: RNC → short choke → armbar",
+            "notes": "Their two hands cannot be in three places. Every defence from the back gives up one of the other two attacks."
+          }
+        ]
+      },
+      {
+        "title": "Front Headlock",
+        "description": "Begin treating the front headlock as a major attacking position rather than a place a scramble passes through.",
+        "items": [
+          {
+            "technique_id": "butterfly-snapdown-front-headlock",
+            "notes": "The seated snapdown: the front headlock is available from the bottom too.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "front-headlock-chinstrap-control",
+            "notes": "The chin strap is what makes it a position instead of a grab.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "front-headlock-go-behind",
+            "notes": "The default, and the one to reach for first.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "guillotine-front-headlock",
+            "notes": "The high-elbow finish, when the go-behind is denied.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "standing-guillotine",
+            "notes": "The arm-in version, which finishes on the shoulder rather than the throat.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "darce-front-headlock",
+            "notes": "When they turn in toward you, the near arm is already threaded.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "anaconda-choke-front-headlock",
+            "notes": "And when they turn away, the roll takes them with it.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "rolling-back-take-from-turtle",
+            "notes": "The other exit: when nothing finishes, take the back and start again.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "The go-behind is the default",
+            "notes": "Chase the choke first and you will be given up on the position when it fails. Chase the position and the chokes arrive on their own."
+          }
+        ]
+      },
+      {
+        "title": "Leg Locks",
+        "description": "Understand the fundamental leg-lock game — the positions first, one submission, and the safety rules that make training this survivable for both of you.",
+        "items": [
+          {
+            "technique_id": "butterfly-ashi-control",
+            "notes": "Straight ashi: the first entanglement, and the one every other is described against.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "single-leg-x-control",
+            "notes": "Single leg X, where the sweeps and the ankle lock share an entry.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "outside-ashi-control",
+            "notes": "Outside ashi, and the moment the knee line starts to matter.",
+            "target_drilled_sessions": 8
+          },
+          {
+            "technique_id": "fifty-fifty-control",
+            "notes": "50/50, introduced — a position both of you are in at once.",
+            "target_drilled_sessions": 8
+          },
+          {
+            "technique_id": "straight-ankle-lock-slx",
+            "notes": "The one submission here that is legal at every belt in every ruleset.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "The knee line",
+            "notes": "Whose knee is past whose decides who is attacking. Learn to read it before you learn any finish — it is the difference between a leg lock and a leg tangle."
+          },
+          {
+            "kind": "concept",
+            "title": "Control before submission",
+            "notes": "The same rule as everywhere else, and it matters more here because the failure mode is a knee rather than a lost point. Position, then the finish."
+          },
+          {
+            "technique_id": "underhook-leg-lock-escape",
+            "notes": "The safe escape: clear the knee line and come up, rather than rolling out of it.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "kind": "concept",
+            "title": "Hand fighting",
+            "notes": "Their grip on your foot is the whole submission. Fighting the hands is what buys the time to clear the entanglement, and it starts before you are caught."
+          }
+        ]
+      },
+      {
+        "title": "Improve Escapes",
+        "description": "White belt escapes become combinations. The blue belt should understand escape chains: elbow escape → they block → bridge → they post → recover half guard.",
+        "items": [
+          {
+            "technique_id": "mount-elbow-knee-escape",
+            "notes": "The first link, and the one they will be ready for.",
+            "target_scored": 15,
+            "target_sessions": 12,
+            "min_hit_rate": 0.35
+          },
+          {
+            "technique_id": "mount-trap-roll-escape",
+            "notes": "What their block hands you.",
+            "target_scored": 15,
+            "target_sessions": 12,
+            "min_hit_rate": 0.35
+          },
+          {
+            "technique_id": "mount-escape-chain",
+            "notes": "And the chain itself, run end to end without stopping to reset.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "side-control-elbow-push-escape",
+            "notes": "The same idea one position over: frame, push, and take whichever exit opens.",
+            "target_scored": 12,
+            "target_sessions": 10,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "rear-naked-choke-late-defense",
+            "notes": "The last link that matters, because the alternative is a nap.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "Escape chains, not escapes",
+            "notes": "A single escape is a thing they can prepare for. Two escapes that answer each other's defence cannot be blocked at the same time, which is the same insight as the attack chains three milestones up."
           }
         ]
       }
@@ -782,260 +1451,487 @@
   },
   {
     "id": "purple-belt-basics",
-    "name": "Purple belt: connect the game",
+    "name": "Purple belt: connect the entire game",
     "belt": "purple",
     "track": "belt",
-    "description": "Goal: connect the whole game, until the question stops being what do I do here and becomes which reaction do I want them to give me. Purple is less about new moves than about joining up the ones you have — a personal game named out loud, one guard taken from entry all the way to the back, one pass taken all the way to its counter, and the kimura and the legs as systems rather than submissions.",
+    "description": "Goal: stop seeing BJJ as separate positions. The question stops being \"what do I do from here\" and becomes \"what reaction do I want them to give me\". Most of this belt is systems, flows and strategy rather than new techniques, so most of what follows is written rather than counted — that is deliberate, and the milestones that do carry techniques are the ones where a specific thing has to work. The shape to hold in your head: create your preferred starting exchange → force your A-game position → create a reaction → they defend → transition to the secondary system → pass, sweep or back take → control → create a submission dilemma → they escape → use the escape to enter the next position → continue the chain.",
     "phases": [
       {
-        "title": "Name your game",
-        "description": "Purple belt starts with an architecture, written down: a primary standing entry, a primary guard, a secondary guard that solves the primary's problems, a passing system, and a finishing system. The phases below build one such game — swap the pieces for yours, but have answers for every slot.",
-        "items": [
-          {
-            "kind": "concept",
-            "title": "Where this belt sits",
-            "notes": "White learned the map, blue built reliable routes through it. Purple joins them up: you stop responding to what happens and start deciding what happens, by choosing which reaction to provoke. Brown then refines that same game until very little stops it. Almost nothing here is a new move."
-          },
-          {
-            "kind": "concept",
-            "title": "A-game, B-game, emergency game",
-            "notes": "The A-game is what you impose; the B-game is where you go when they refuse it; the emergency game is what happens when you are losing. Purple belt is knowing which one you are in — and moving between them on purpose rather than on panic."
-          },
-          {
-            "kind": "concept",
-            "title": "Techniques become decision trees",
-            "notes": "Every attack below is recorded with its counter and its counter's counter. If you cannot say what they will do when your sweep fails, you do not have a sweep — you have a hope with grips."
-          }
-        ]
-      },
-      {
-        "title": "Retention under everything",
-        "description": "Advanced retention is retention against intent: against leg drags, body locks, floating passers, and your own fatigue. Inversion joins the ladder, and turtle stops being a defeat and becomes a transitional guard.",
-        "items": [
-          {
-            "technique_id": "inversion-guard-retention",
-            "notes": "Your guard is hard to pass because you can turn upside down and still find their legs.",
-            "target_scored": 30,
-            "target_defended": 10,
-            "target_sessions": 16,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "turtle-bottom-granby-recovery",
-            "notes": "Turtle stops being somewhere you wait and becomes somewhere you leave.",
-            "target_scored": 18,
-            "target_sessions": 14,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "back-escape-body-triangle",
-            "notes": "Locked legs around your waist are a problem you solve, not one you survive.",
-            "target_scored": 15,
-            "target_sessions": 12,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "One guard, all the way down",
-        "description": "A developed guard is an entry system, a retention system, sweeps, back takes, wrestle-ups and leg entries that all start from the same grips. Here that guard is the K-guard; the shape of the phase is what matters, whatever your guard is.",
-        "items": [
-          {
-            "technique_id": "k-guard-entry-from-closed-guard",
-            "notes": "You can leave closed guard on your terms instead of waiting to be opened.",
-            "target_scored": 20,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "k-guard-wrestleup",
-            "notes": "You get up and get on top from underneath, without giving up the leg.",
-            "target_scored": 25,
-            "target_defended": 8,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "k-guard-matrix-back-take",
-            "notes": "When they defend the sweep, you end up behind them instead.",
-            "target_scored": 12,
-            "target_sessions": 10,
-            "min_hit_rate": 0.3
-          },
-          {
-            "technique_id": "k-guard-backside-50-50-entry",
-            "notes": "The same grips also enter the legs — the guard's fourth answer, for the opponent who has learned the first three.",
-            "target_scored": 12,
-            "target_sessions": 10,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "The back takes underneath",
-        "description": "Purple belt guard play points at the back: berimbolo and the crab-ride family turn a defended sweep into an arrival behind them. Expensive to learn, and worth it — the back is the one destination nobody concedes on purpose.",
-        "items": [
-          {
-            "technique_id": "de-la-riva-berimbolo",
-            "notes": "When they hide the far leg from your sweep, invert under and come up on their back instead.",
-            "target_scored": 15,
-            "target_sessions": 12,
-            "min_hit_rate": 0.3
-          },
-          {
-            "technique_id": "deep-half-waiter-sweep",
-            "notes": "Deep half is the b-side of the same idea: disappear under their base and surface on top.",
-            "target_scored": 15,
-            "target_sessions": 12,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "The kimura trap",
-        "description": "At purple the kimura stops being a shoulder lock and becomes a control system: a grip that passes guards, takes backs and survives scrambles, with the finish as just one of its exits.",
-        "items": [
-          {
-            "technique_id": "kimura-trap-half-guard-pass",
-            "notes": "Their half guard holds your leg; the kimura holds something they need more.",
-            "target_scored": 15,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "kimura-trap-side-control-backtake",
-            "notes": "When they turn away from the grip, the grip goes with them — and you arrive on the back holding it.",
-            "target_scored": 12,
-            "target_sessions": 10,
-            "min_hit_rate": 0.35
-          }
-        ]
-      },
-      {
-        "title": "Float passing, and the reaction map",
-        "description": "Advanced passing reads reactions instead of forcing outcomes: weight on their knees, direction changes off their answers, and a map of where each defence sends you next.",
-        "items": [
-          {
-            "technique_id": "float-pass",
-            "notes": "You pass by staying light on top rather than by out-muscling their guard.",
-            "target_scored": 25,
-            "target_defended": 8,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
-          },
-          {
-            "technique_id": "float-pass-backstep",
-            "notes": "When the float gets read, you change direction instead of restarting.",
-            "target_scored": 15,
-            "target_sessions": 12,
-            "min_hit_rate": 0.45
-          }
-        ]
-      },
-      {
-        "title": "Pins, backs, and the dilemmas between them",
-        "description": "Advanced control is making every escape attempt cost something: the pin follows them instead of resisting them, and each defensive turn exposes the next attack.",
-        "items": [
-          {
-            "technique_id": "straightjacket-back-control",
-            "notes": "Once you take the back, they stay there while you work.",
-            "target_scored": 20,
-            "target_defended": 6,
-            "target_sessions": 12,
-            "min_hit_rate": 0.4
-          },
-          {
-            "technique_id": "trap-triangle-back-control",
-            "notes": "Their own defensive hand becomes the thing that finishes them.",
-            "target_scored": 12,
-            "target_sessions": 10,
-            "min_hit_rate": 0.25
-          },
-          {
-            "technique_id": "brabo-choke-side-control",
-            "notes": "Turning in to escape your pass becomes the mistake that ends the round.",
-            "target_scored": 10,
-            "target_sessions": 8,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "The front headlock system",
-        "description": "Blue belt found the darce. Purple owns the whole junction: arm-in and arm-out, chokes that trade with go-behinds, and the headlock as the answer to every failed shot — theirs and yours.",
-        "items": [
-          {
-            "technique_id": "guillotine-front-headlock",
-            "notes": "Someone locking a guillotine on your neck is a problem you solve, not a tap.",
-            "target_defended": 15,
-            "target_sessions": 12
-          },
-          {
-            "technique_id": "peruvian-necktie",
-            "notes": "When they defend the darce by staying tight, the necktie was the price of staying tight.",
-            "target_scored": 10,
-            "target_sessions": 8,
-            "min_hit_rate": 0.25
-          }
-        ]
-      },
-      {
-        "title": "Leg entanglements as positions",
-        "description": "Purple treats entanglements the way white treated pins: positions with controls, escapes and exchanges — not lotteries. Sweep from them, pass from them, and defend them with structure instead of luck.",
-        "items": [
-          {
-            "technique_id": "inside-heel-hook-saddle",
-            "notes": "You know the saddle when you are in it, and you tap early rather than test your knee against it."
-          },
-          {
-            "technique_id": "heel-hook-defense",
-            "notes": "Hide the heel, control the line, and leave through the door their control left open — calmly, before the rotation starts.",
-            "target_scored": 12,
-            "target_sessions": 10,
-            "min_hit_rate": 0.3
-          },
-          {
-            "technique_id": "fifty-fifty-sweep",
-            "notes": "50/50 is only symmetrical on paper: whoever off-balances first is playing it alone.",
-            "target_scored": 15,
-            "target_sessions": 10,
-            "min_hit_rate": 0.35
-          }
-        ]
-      },
-      {
-        "title": "Scrambles, owned",
-        "description": "A scramble is not chaos — it is a race with rules: hips lower than theirs, head on the winning side, and a known exit. Purple belts finish takedowns against real sprawls and come up from turtle attacking.",
+        "title": "Establish a Standing Game",
+        "description": "Have a clear starting strategy. Grip fight → single leg → they sprawl → front headlock → guillotine or back take. Or: guard pull → immediate sweep attack. A purple belt should rarely begin a match without knowing what they want.",
         "items": [
           {
             "technique_id": "single-leg-crackdown-finish",
-            "notes": "You finish the single you already have, even against a good whizzer.",
+            "notes": "The finish that answers the sprawl instead of abandoning the leg.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "front-headlock-chinstrap-control",
+            "notes": "Where the failed single leg is supposed to arrive.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "kind": "concept",
+            "title": "Guillotine",
+            "notes": "One of the two exits from the sprawl, and the one they expect. The technique itself is milestone 7's, where the front headlock is built as a system rather than met as an outcome."
+          },
+          {
+            "kind": "concept",
+            "title": "Back take",
+            "notes": "The other exit, and the one that scores without risk. Also milestone 7's — what matters here is having decided which of the two you are hunting before the shot goes in."
+          },
+          {
+            "technique_id": "guard-pull-single-leg-x",
+            "notes": "If the answer is to pull, pull directly into an attack.",
             "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "Know what you want before it starts",
+            "notes": "Every exchange above is chosen, not discovered. The purple belt's advantage over the blue belt is rarely a better single leg — it is having decided what the sprawl was going to turn into before shooting."
+          }
+        ]
+      },
+      {
+        "title": "Build an A-Game Guard",
+        "description": "Choose a primary guard — butterfly, half guard, De La Riva, collar sleeve, lasso, X guard or a wrestle-up guard — and know six things about it rather than one.",
+        "items": [
+          {
+            "kind": "concept",
+            "title": "Choose one, and mean it",
+            "notes": "A guard you play in every round beats three you play sometimes. The choice matters less than the commitment: the depth is what makes it an A-game, not the guard."
+          },
+          {
+            "kind": "concept",
+            "title": "How to enter it",
+            "notes": "From standing, from a pull, from a failed pass, from a scramble, and from underneath a pin. A guard you can only start a round in is not yet a system."
+          },
+          {
+            "kind": "concept",
+            "title": "How to retain it",
+            "notes": "What is your answer when the first grip is stripped? An A-game guard has a second and a third configuration, not one."
+          },
+          {
+            "kind": "concept",
+            "title": "How to sweep from it",
+            "notes": "At least two, going in different directions, so their base cannot answer both."
+          },
+          {
+            "kind": "concept",
+            "title": "How to submit from it",
+            "notes": "One real threat, so the sweeps are not the only thing to defend."
+          },
+          {
+            "kind": "concept",
+            "title": "How to take the back from it",
+            "notes": "The exit that is worth more than the sweep, and the one most guards have and few people build."
+          },
+          {
+            "kind": "concept",
+            "title": "What to do when it is shut down",
+            "notes": "The honest question, and the one milestone 4 exists to answer. Every guard has a passer who beats it — the plan for that day is part of the guard."
+          }
+        ]
+      },
+      {
+        "title": "Build Guard Connections",
+        "description": "Move between guards naturally. Seated guard → shin-to-shin → single leg X → X guard → sweep. Or: De La Riva → reverse De La Riva → kiss of the dragon → back take.",
+        "items": [
+          {
+            "technique_id": "shin-on-shin-to-single-leg-x",
+            "notes": "The first connection, and the one that teaches the idea.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "butterfly-guard-to-x-guard",
+            "notes": "Underneath them, and the sweep is a formality once you arrive.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "x-guard-to-leg-drag",
+            "notes": "Where the first chain ends: on top, with their leg already dragged.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "reverse-de-la-riva-control",
+            "notes": "The second chain's hinge, and the guard most people skip.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "reverse-de-la-riva-kiss-dragon",
+            "notes": "And its exit — under and behind, rather than over the top.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "kind": "concept",
+            "title": "Guards are one position with several shapes",
+            "notes": "A blue belt has two guards and switches between them. A purple belt has one guard that changes shape as the passer moves, which is why nothing is ever reset."
+          }
+        ]
+      },
+      {
+        "title": "Advanced Guard Retention",
+        "description": "Recover during late-stage passes, not just early ones. This is the milestone that decides whether the A-game guard above is a game or a preference.",
+        "items": [
+          {
+            "technique_id": "foot-pummel-guard-retention",
+            "notes": "Still the foundation, and still the thing that fails first when it is neglected.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "inversion-guard-retention",
+            "notes": "Upside down is a position, not an emergency.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "granby-guard-recovery",
+            "notes": "The roll that gets the legs back in front from almost anywhere.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "turtle-bottom-granby-recovery",
+            "notes": "The same movement from turtle, which is where late recoveries actually start.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "high-leg-guard-recovery",
+            "notes": "When the shoulder line is gone, the leg goes over the top.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "half-guard-to-closed-guard",
+            "notes": "Half guard is a recovery, not a failure — and it goes all the way back.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "body-lock-guard-recovery",
+            "notes": "Before the hips connect, or not at all. Once the lock closes it is a pin escape.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "leg-drag-guard-recovery",
+            "notes": "The drag is the hardest of the three to recover from, because it is already past you.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          }
+        ]
+      },
+      {
+        "title": "Build a Passing Tree",
+        "description": "Instead of knowing passes, create reactions. Knee cut → they block the knee → back step → they follow → leg drag → they turtle → back take.",
+        "items": [
+          {
+            "technique_id": "knee-cut-long-step-chain",
+            "notes": "The first branch: what the blocked knee cut becomes.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "float-pass-backstep",
+            "notes": "The back step, which is the branch nobody defends because it goes backwards.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "leg-drag-to-backtake",
+            "notes": "And the branch that ends the tree, because they cannot turtle out of it.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "kind": "concept",
+            "title": "A pass is a question",
+            "notes": "Every pass in the tree is a question with two answers, and you have prepared both. The passer who is surprised by the defence has a list; the passer who was waiting for it has a tree."
+          }
+        ]
+      },
+      {
+        "title": "Control Transitions",
+        "description": "Move without giving space. Side control → north-south → kimura → they turn → back → they escape the back → mount. BJJ becomes circular rather than linear.",
+        "items": [
+          {
+            "technique_id": "north-south-kimura",
+            "notes": "The grip that survives the transition, which is why the chain starts here.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "north-south-to-backtake",
+            "notes": "Their turn away from the kimura is the back take.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "back-control-to-mount",
+            "notes": "And a back escape is not an escape if you are already mounting them.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "Circular, not linear",
+            "notes": "A linear game ends when the last position is escaped. A circular one has no last position: every escape is an entry into the position before it, so there is nothing to run out of."
+          }
+        ]
+      },
+      {
+        "title": "Develop Submission Systems",
+        "description": "Three systems, each one grip or one position with several finishes hanging off it. Every lesson below is one the document names, in the order it names them.",
+        "items": [
+          {
+            "technique_id": "guillotine-front-headlock",
+            "notes": "Front headlock: the finish the position is named for.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "darce-front-headlock",
+            "notes": "When they turn in toward you, the near arm is already threaded.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "anaconda-choke-front-headlock",
+            "notes": "And when they turn away, the roll takes them with it.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "front-headlock-go-behind",
+            "notes": "The exit that is not a choke, and the highest-percentage one in the family.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "kimura-side-control",
+            "notes": "Kimura: the grip, taken as a control rather than reached for as a finish.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "side-control-far-side-armbar",
+            "notes": "They straighten the arm to save the shoulder, and the elbow is there.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "kimura-trap-side-control-backtake",
+            "notes": "And when they roll away from both, the grip goes with them.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "mounted-triangle",
+            "notes": "The fourth exit, once the arm is out and across.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "rear-naked-choke",
+            "notes": "Back: what the other three exist to set up.",
+            "target_scored": 10,
+            "target_defended": 5,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "rear-triangle",
+            "notes": "When the neck is defended with both hands, the legs finish it.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "rear-triangle-armbar",
+            "notes": "And two hands on the neck means an arm is unattended.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
+          {
+            "kind": "concept",
+            "title": "Back → mount",
+            "notes": "The exit that is not a finish. It is milestone 6's Back Control to Mount, named again here because a submission system that ends when they escape is not a system — the mount is where the next one starts."
+          }
+        ]
+      },
+      {
+        "title": "Leg Entanglement System",
+        "description": "Guard → leg entanglement → submission, or sweep, or back take, or come on top. Positional leg locking, not just submissions.",
+        "items": [
+          {
+            "technique_id": "reverse-x-saddle-entry",
+            "notes": "The entry that turns a guard into an entanglement without a scramble.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "cross-ashi-saddle-control",
+            "notes": "The saddle, and the position the rest of this milestone is played from.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "kneebar-saddle",
+            "notes": "The finish that is legal where the heel hook is not.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "inside-heel-hook-saddle",
+            "notes": "Where the rules allow it — and the ruleset question is part of the technique.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "fifty-fifty-backtake",
+            "notes": "The exit that is worth more than any of the finishes above.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
+          {
+            "kind": "concept",
+            "title": "Pass from them, sweep from them, come up",
+            "notes": "An entanglement you can only submit from is a gamble. One you can also sweep, pass and take the back from is a position, and positions are what this belt is about."
+          }
+        ]
+      },
+      {
+        "title": "Scrambles and Wrestling",
+        "description": "Understand where the next dominant position will appear, and get there first.",
+        "items": [
+          {
+            "technique_id": "shin-to-shin-wrestleup",
+            "notes": "The wrestle-up: guard as a way to stand, not only a way to sweep.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "lapel-single-leg-wrestleup",
+            "notes": "Its gi version, which arrives with a grip already attached.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "rear-body-lock-mat-return",
+            "notes": "The mat return, so a scramble that ends standing does not end neutral.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "turtle-single-leg-counter",
+            "notes": "The counter that turns their go-behind into your takedown.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "crucifix-from-turtle",
+            "notes": "Turtle attacks: what the position offers when you are the one on top of it.",
+            "target_scored": 6,
             "target_sessions": 6,
             "min_hit_rate": 0.2
           },
           {
             "technique_id": "turtle-granby-wrestleup",
-            "notes": "From turtle you do not just recover guard — you come up attacking their legs.",
-            "target_scored": 15,
-            "target_sessions": 12,
-            "min_hit_rate": 0.35
+            "notes": "And turtle recoveries, which is the same scramble read from underneath.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "Scramble awareness",
+            "notes": "A scramble is not chaos, it is a race to a position both of you can already see. The purple belt's edge is knowing which position that is one beat earlier."
           }
         ]
       },
       {
-        "title": "Tactics, and the standard",
-        "description": "Purple belt is the first belt with a scoreboard brain: pace, score, boundaries, when to stabilise and when to scramble, how to protect a lead and how to chase one. And as at every belt: promotion is your coach’s call, made on the mat, never a progress bar.",
+        "title": "Strategy",
+        "description": "The part of the game that is decided before anyone touches anyone. None of this is a technique and none of it is counted — it is what the techniques are for.",
         "items": [
           {
             "kind": "concept",
-            "title": "Manage the round, not just the exchange",
-            "notes": "Know the score, know the clock, and know which of your games the situation calls for. Winning positions with thirty seconds left and losing ones with three minutes left are different sports."
+            "title": "Score",
+            "notes": "What is the score, what does it make them do, and what does it let you refuse? A guard pull down four points is a different guard pull."
           },
           {
             "kind": "concept",
-            "title": "What the record should show",
-            "notes": "A recognisable personal game, named and drilled. Positions that connect without pausing. Reactions you created on purpose, and second attacks that were waiting for them. Entanglements entered and survived. And the ability to explain why — to a training partner, out loud."
+            "title": "Time",
+            "notes": "Two minutes left changes which risk is correct for each of you, and it changes it in opposite directions."
+          },
+          {
+            "kind": "concept",
+            "title": "Risk",
+            "notes": "Every attack has a cost if it fails. The question is never whether an attack is good, it is whether the position you land in when it fails is acceptable right now."
+          },
+          {
+            "kind": "concept",
+            "title": "Energy",
+            "notes": "Yours and theirs. A pace that beats them in round three is worth more than a technique that beats them in round one."
+          },
+          {
+            "kind": "concept",
+            "title": "Opponent's strengths",
+            "notes": "Where do they want this to go? Half of strategy is simply refusing to go there, which costs nothing and is rarely done."
+          },
+          {
+            "kind": "concept",
+            "title": "Opponent's reactions",
+            "notes": "The most valuable thing on this list. What do they do when you do X? Once that is known, everything above becomes arithmetic."
           }
         ]
       }
@@ -1046,221 +1942,545 @@
     "name": "Brown belt: master your game",
     "belt": "brown",
     "track": "belt",
-    "description": "Goal: make ordinary jiu-jitsu extremely difficult to stop — knowing why, when, where and against whom each technique works. Almost nothing here is new: it is material you have had for years, held to a standard nobody applies at blue. A third of it is scored on attacks that never land on you rather than on ones you hit, and the rest is a single connected game where every escape ends in an attack.",
+    "description": "Goal: no longer learning every technique, but making fundamental BJJ extremely difficult to stop. Understand why, when, where and against whom a technique works. Almost nothing in this belt is new material — it is depth, answers and refinement, so nearly all of it is written rather than counted. The shape to hold in your head: control the initial engagement → force your preferred position → they react predictably → enter your A-game system → they defend → use the defence to advance → control the position → create multiple threats → finish. Or: they escape → immediately reconnect to another system → repeat.",
     "phases": [
       {
-        "title": "What brown belt is",
-        "description": "Refinement, not accumulation. The goal is not more techniques — it is proven techniques made extremely difficult to stop: timing, weight, grip efficiency, energy conservation, and control kept through every transition.",
+        "title": "Create a Complete Starting Strategy",
+        "description": "Have an answer for each of the seven people you will actually meet, and several ways to dictate where the match happens.",
         "items": [
           {
             "kind": "concept",
-            "title": "Where this belt sits",
-            "notes": "The map at white, reliable routes at blue, connected systems at purple, and now the whole decision tree under control. Nearly nothing in this roadmap is new material — it is what you have had for years, held to a standard nobody applies at blue, and scored as much on what never lands on you as on what you hit."
+            "title": "Against a wrestler",
+            "notes": "They want it standing and they are better at it. The question is whether you contest that or skip it, and either answer is fine as long as it was decided beforehand."
           },
           {
             "kind": "concept",
-            "title": "The defensive chain, complete",
-            "notes": "Prevent the position, prevent the control, prevent the isolation, prevent the alignment, clear the submission, recover the position, counterattack. Brown belt defence works so early it looks like nothing happened."
+            "title": "Against a guard puller",
+            "notes": "They will sit down. What you do in the second after that decides the match — engage, disengage, or make them stand back up."
+          },
+          {
+            "kind": "concept",
+            "title": "Against a bigger opponent",
+            "notes": "Angles and distance rather than frames and pressure. Anything that becomes a contest of position-holding is a contest you have chosen to lose."
+          },
+          {
+            "kind": "concept",
+            "title": "Against a smaller opponent",
+            "notes": "They are faster and they will scramble. Weight and connection, and refuse the scramble rather than winning it."
+          },
+          {
+            "kind": "concept",
+            "title": "Against a pressure player",
+            "notes": "Do not let it start. Pressure games are much easier to prevent than to escape, which is a statement about where your effort should go."
+          },
+          {
+            "kind": "concept",
+            "title": "Against a flexible guard player",
+            "notes": "Their retention is better than your passing. Attack the connections and the grips rather than the legs."
+          },
+          {
+            "kind": "concept",
+            "title": "Against a leg-lock player",
+            "notes": "Know the knee line better than they do, and decide in advance which entanglements you will accept."
+          },
+          {
+            "kind": "concept",
+            "title": "Multiple ways to dictate",
+            "notes": "A single game plan is a game plan they can prepare for. The brown belt's real advantage is having three, and choosing between them in the first thirty seconds."
           }
         ]
       },
       {
-        "title": "The pins stop working on you",
-        "description": "Escapes held to the brown-belt standard: out before the control settles, out against specialists, and out into an attack rather than into a reset.",
+        "title": "Master Your Best Takedown System",
+        "description": "A deep system around two or three, rather than ten average takedowns. Single leg → they sprawl → front headlock; they pull the leg away → double leg; they whizzer → body lock; they turn → back take.",
         "items": [
           {
-            "technique_id": "back-escape-body-triangle",
-            "notes": "Purple made the body triangle solvable; brown means you are out before their hands finish.",
-            "target_scored": 20,
-            "target_defended": null,
-            "target_sessions": 14,
-            "min_hit_rate": 0.45
+            "technique_id": "single-leg-crackdown-finish",
+            "notes": "The finish for the sprawl, so the shot is not abandoned.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
           },
           {
-            "technique_id": "mount-bridge-to-single-leg-x",
-            "notes": "Being mounted ends with you attacking a leg, not with you back in guard.",
-            "target_scored": 20,
-            "target_defended": null,
-            "target_sessions": 14,
-            "min_hit_rate": 0.4
+            "technique_id": "single-leg-tree-top",
+            "notes": "And the finish for when they stay upright instead.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
           },
           {
-            "technique_id": "side-control-frame-hip-escape",
-            "notes": "The escape you learned in your first month, now working more often than it fails.",
-            "target_scored": 40,
-            "target_defended": null,
-            "target_sessions": 20,
-            "min_hit_rate": 0.5
+            "technique_id": "blast-double-leg",
+            "notes": "What the cleared leg hands you, taken without a reset.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "uchi-mata",
+            "notes": "The throw that answers the whizzer, because the whizzer commits their hips.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "rear-body-lock-mat-return",
+            "notes": "And the ending for all of it: their turn is not an escape.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "kind": "concept",
+            "title": "Two or three, all the way down",
+            "notes": "Ten takedowns is ten shallow trees. Two with every branch answered is what beats somebody who wrestles better than you."
           }
         ]
       },
       {
-        "title": "The submissions stop landing",
-        "description": "The room’s best attacks, scored on facing them and stopping them. A defended count is evidence that the attack arrived and failed — which is the only version of safety that can be logged honestly.",
+        "title": "Master Your Primary Guard",
+        "description": "Answers against every major passing style. Not a technique list — a checklist you should be able to answer out loud for the one guard you actually play.",
+        "items": [
+          {
+            "kind": "concept",
+            "title": "When they kneel",
+            "notes": "The passer on their knees is playing a pressure game. What is your answer before the weight settles?"
+          },
+          {
+            "kind": "concept",
+            "title": "When they stand",
+            "notes": "Standing removes your frames' leverage and adds their mobility. Most guards have one honest answer here and it is worth knowing which."
+          },
+          {
+            "kind": "concept",
+            "title": "When they pressure pass",
+            "notes": "The answer is almost never more frame. It is usually an angle, taken earlier than feels necessary."
+          },
+          {
+            "kind": "concept",
+            "title": "When they body lock",
+            "notes": "The narrowest window in passing. Either you break the connection before it closes, or you are playing a different game."
+          },
+          {
+            "kind": "concept",
+            "title": "When they knee cut",
+            "notes": "The most common pass in the sport. If you do not have two answers to it, you do not yet have a primary guard."
+          },
+          {
+            "kind": "concept",
+            "title": "When they toreando",
+            "notes": "Speed beats structure here, so the answer is rotation. Anybody who tries to out-grip a toreando loses slowly."
+          },
+          {
+            "kind": "concept",
+            "title": "When they back step",
+            "notes": "The pass that goes backwards, and the one guard players most often have no answer to because it does not look like a pass."
+          },
+          {
+            "kind": "concept",
+            "title": "When they leg drag",
+            "notes": "Already past you when you notice it. The answer is a decision — spin back or take the turtle deliberately."
+          },
+          {
+            "kind": "concept",
+            "title": "When they attack your legs",
+            "notes": "A passer who enters an entanglement has changed the game. Know the knee line from underneath as well as on top."
+          },
+          {
+            "kind": "concept",
+            "title": "When they disengage",
+            "notes": "They stand up and back away. This is a scoring question and a patience question, and it is the one most people have never thought about."
+          }
+        ]
+      },
+      {
+        "title": "Remove Guard Weaknesses",
+        "description": "If the primary guard fails → secondary guard → half guard → turtle → wrestle up → return to top. There should always be another layer.",
+        "items": [
+          {
+            "kind": "concept",
+            "title": "The layers, in order",
+            "notes": "Nothing here is a failure state. Each layer is a position with its own attacks, and the athlete who treats half guard or turtle as an emergency is the one who gets passed from them."
+          },
+          {
+            "technique_id": "knee-shield-half-guard",
+            "notes": "The layer almost everything falls back to, so it has to be genuinely good.",
+            "target_drilled_sessions": 12
+          },
+          {
+            "technique_id": "turtle-granby-wrestleup",
+            "notes": "Turtle as a route back up rather than a place to wait.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "shin-to-shin-wrestleup",
+            "notes": "And the wrestle-up, which is what turns the last layer into a top position.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "There is always another layer",
+            "notes": "The purpose is not that every layer works. It is that losing one is never the end of the sequence, so nothing you do from the bottom is ever a gamble on a single answer."
+          }
+        ]
+      },
+      {
+        "title": "Master a Passing Philosophy",
+        "description": "Understand why passes work — control the feet, then the knees, then the hips, then the shoulders, then the head — and have a complete system against each guard you will meet.",
+        "items": [
+          {
+            "kind": "concept",
+            "title": "The order is the philosophy",
+            "notes": "Feet, knees, hips, shoulders, head. Every pass that works is that order; every pass that fails skipped a step. This is the single sentence the rest of this milestone is an application of."
+          },
+          {
+            "kind": "concept",
+            "title": "Against seated guard",
+            "notes": "They have their hands and their base. The work happens before you are in range."
+          },
+          {
+            "kind": "concept",
+            "title": "Against supine guard",
+            "notes": "They have their legs and their hips, and you have your weight. Distance is the whole contest."
+          },
+          {
+            "kind": "concept",
+            "title": "Against half guard",
+            "notes": "Where most passes stall, and the one where the underhook decides everything."
+          },
+          {
+            "kind": "concept",
+            "title": "Against butterfly",
+            "notes": "Do not let them get underneath you. Everything butterfly does needs elevation and elevation needs space."
+          },
+          {
+            "kind": "concept",
+            "title": "Against De La Riva",
+            "notes": "Their hook is a lever on your base. Clear the hook or take the leg away — arguing with it in place is how you get swept."
+          },
+          {
+            "kind": "concept",
+            "title": "Against lasso",
+            "notes": "Your arm is theirs until you get it back. Passing before the arm is free is passing with one arm."
+          },
+          {
+            "kind": "concept",
+            "title": "Against X guard",
+            "notes": "Already underneath you. The answer is usually the ground, not more base."
+          },
+          {
+            "kind": "concept",
+            "title": "Against inverted guards",
+            "notes": "They will be facing away and moving. Passing is a matter of following the hips rather than beating the legs."
+          },
+          {
+            "kind": "concept",
+            "title": "Against wrestle-up guards",
+            "notes": "They do not want to sweep you, they want to stand. Treat it as a takedown defence problem and it becomes simple."
+          }
+        ]
+      },
+      {
+        "title": "Master Pinning",
+        "description": "Force defensive reactions rather than simply holding. Side control pressure → they frame → north-south → they turn → take the back. Or: mount → they protect the neck → separate the elbow → armbar → they hide the arm → gift wrap → back take.",
+        "items": [
+          {
+            "technique_id": "north-south-to-backtake",
+            "notes": "The first chain's ending, and the reason the frame was worth provoking.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "mount-crossface-isolation",
+            "notes": "The second chain's hinge: the elbow separated from the body.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "armbar-mount",
+            "notes": "What the separated elbow becomes.",
+            "target_scored": 10,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "gift-wrap-backtake-mount",
+            "notes": "And what hiding the arm becomes, which is worse for them than the armbar was.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "A pin is a question you ask repeatedly",
+            "notes": "Holding a pin invites them to work. Threatening from it forces a reaction, and the reaction is the transition. The brown belt rarely holds anything still."
+          }
+        ]
+      },
+      {
+        "title": "Develop Finishing Systems",
+        "description": "Four families. Each is a position with several finishes hanging off it rather than a finish you happen to know — and the point of a family is that they cannot defend all of it with the two hands they have. Every lesson below is one the document names, in the order it names them.",
         "items": [
           {
             "technique_id": "rear-naked-choke",
-            "notes": "You learned the early escape at white and the late one at blue — now the strangle simply does not land.",
-            "target_scored": null,
-            "target_defended": 18,
-            "target_sessions": 16,
-            "min_hit_rate": null
+            "notes": "Back: the one everything else in this family exists to set up.",
+            "target_scored": 10,
+            "target_defended": 5,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
           },
           {
-            "technique_id": "triangle-closed-guard",
-            "notes": "At white you learned to land this; at brown nobody lands it on you.",
-            "target_scored": null,
-            "target_defended": 20,
-            "target_sessions": 18,
-            "min_hit_rate": null
+            "technique_id": "short-choke",
+            "notes": "What the hand fight leaves you when the RNC is denied.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
           },
           {
-            "technique_id": "darce-side-control",
-            "notes": "Turning in to get out stops being the thing that gets you strangled.",
-            "target_scored": null,
-            "target_defended": 10,
-            "target_sessions": 12,
-            "min_hit_rate": null
+            "technique_id": "rear-triangle",
+            "notes": "When the neck is defended with both hands, the legs finish it.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
           },
           {
-            "technique_id": "inside-heel-hook-saddle",
-            "notes": "At purple you knew the saddle and tapped early — now you get the leg back instead.",
-            "target_scored": null,
-            "target_defended": 15,
-            "target_sessions": 14,
-            "min_hit_rate": null
-          },
-          {
-            "technique_id": "knee-cut-pass",
-            "notes": "The most common pass in the room does not work on you.",
-            "target_scored": null,
-            "target_defended": 20,
-            "target_sessions": 18,
-            "min_hit_rate": null
-          },
-          {
-            "technique_id": "double-leg-takedown",
-            "notes": "At white this was your way in; now it is simply that nobody gets in on you.",
-            "target_scored": null,
-            "target_defended": 15,
-            "target_sessions": 14,
-            "min_hit_rate": null
-          }
-        ]
-      },
-      {
-        "title": "Elite retention",
-        "description": "Retention against every passing family, with limited grips, under explosion and under grind — and the deliberate choice of turtle over a compromised guard, made calmly.",
-        "items": [
-          {
-            "technique_id": "elbow-knee-connection-retention",
-            "notes": "Nothing gets past your knee, and it has not for a long time.",
-            "target_scored": 45,
-            "target_defended": null,
-            "target_sessions": 20,
-            "min_hit_rate": 0.55
-          }
-        ]
-      },
-      {
-        "title": "One connected game",
-        "description": "The A-game as a single circuit: the pass chains into the back take, the back cycles through mount and comes back, and prolonged control is a way to win — not a failure to finish.",
-        "items": [
-          {
-            "technique_id": "inside-passing-chain",
-            "notes": "You do not have a pass — you have a sequence, and it does not stop when the first one fails.",
-            "target_scored": 45,
-            "target_defended": 15,
-            "target_sessions": 20,
-            "min_hit_rate": 0.5
-          },
-          {
-            "technique_id": "leg-drag-to-backtake",
-            "notes": "The leg drag stops ending in side control and starts ending behind them.",
-            "target_scored": 30,
-            "target_defended": 10,
-            "target_sessions": 16,
-            "min_hit_rate": 0.45
-          },
-          {
-            "technique_id": "straightjacket-back-control",
-            "notes": "Purple kept the back through their first escape; brown keeps it through their best one.",
-            "target_scored": 32,
-            "target_defended": 10,
-            "target_sessions": 16,
-            "min_hit_rate": 0.5
+            "technique_id": "armbar-back-control",
+            "notes": "And both hands on the neck means an arm is unattended.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
           },
           {
             "technique_id": "back-control-to-mount",
-            "notes": "When they slip the back they slip into mount, never into your guard.",
-            "target_scored": 20,
-            "target_defended": null,
-            "target_sessions": 14,
-            "min_hit_rate": 0.5
+            "notes": "The exit that is not a finish: a back escape is not an escape if you are already mounting them.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "technique_id": "arm-triangle-mount",
+            "notes": "Mount: the choke that makes them turn.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "straight-armbar-mount",
+            "notes": "The straight arm, taken before they can bend it back in.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "mounted-triangle",
+            "notes": "And the triangle that arrives when they defend the arm triangle.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
           },
           {
             "kind": "concept",
-            "title": "Move around frames, never through them",
-            "notes": "Control the hips and shoulders, remove the wedges, follow their escapes into better controls. Forcing through a frame spends strength to stay even; moving around it spends nothing and gains ground."
-          }
-        ]
-      },
-      {
-        "title": "Submission families, finished",
-        "description": "Brown belt submissions are families with shared mechanics — isolate, control the rotation, control the next joint, remove slack, finish progressively. The legs join as a full family where the rule set allows.",
-        "items": [
+            "title": "Mount: the back take",
+            "notes": "The fourth exit, and it is the gift wrap from milestone 6 rather than a second technique — which is the point. A finishing family does not end at a submission; it ends wherever they are worst off, and from mount that is usually behind them."
+          },
+          {
+            "technique_id": "guillotine-front-headlock",
+            "notes": "Front headlock: the finish they expect, kept honest by the three below it.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "darce-front-headlock",
+            "notes": "When they turn in.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "anaconda-choke-front-headlock",
+            "notes": "When they turn away.",
+            "target_scored": 8,
+            "target_defended": 3,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "front-headlock-go-behind",
+            "notes": "And when they do neither, go behind. The unglamorous exit is the highest-percentage one.",
+            "target_scored": 10,
+            "target_sessions": 8,
+            "min_hit_rate": 0.3
+          },
+          {
+            "technique_id": "straight-ankle-lock-slx",
+            "notes": "Legs: the one that is legal everywhere, and the entry to the rest.",
+            "target_scored": 8,
+            "target_defended": 4,
+            "target_sessions": 8,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "kneebar-saddle",
+            "notes": "Where the ruleset allows it.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "toe-hold-ashi",
+            "notes": "The finish that answers a defended heel exposure.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
           {
             "technique_id": "outside-heel-hook-outside-ashi",
-            "notes": "The outside heel hook, from the position that makes it safe to hold and quick to release — control first, and let go the moment it is answered.",
-            "target_scored": 12,
-            "target_defended": 4,
-            "target_sessions": 10,
-            "min_hit_rate": 0.3
-          }
-        ]
-      },
-      {
-        "title": "Standing, specialised",
-        "description": "A primary takedown family, a complement, a counter system, and the mat return — the standing game as one structure rather than a list of throws.",
-        "items": [
+            "notes": "Where the rules allow it — and knowing which rules is part of the technique.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
           {
-            "technique_id": "rear-body-lock-mat-return",
-            "notes": "When they stand up out of your control, they come back down still in it.",
-            "target_scored": 12,
-            "target_sessions": 10,
-            "min_hit_rate": 0.35
+            "technique_id": "fifty-fifty-technical-standup-sweep",
+            "notes": "The entanglement is a position, so it sweeps as well as it finishes.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
+          },
+          {
+            "technique_id": "fifty-fifty-backtake",
+            "notes": "And the exit worth more than any finish above it.",
+            "target_scored": 6,
+            "target_sessions": 6,
+            "min_hit_rate": 0.2
           }
         ]
       },
       {
-        "title": "Strategy, troubleshooting, teaching",
-        "description": "The parts of brown belt that happen between rounds: match plans, score and energy management, diagnosing a failing technique, and the leadership the belt quietly obligates.",
+        "title": "Master Defensive Layers",
+        "description": "The best defense is increasingly preventative. Six stages, and the earlier you act the cheaper it is.",
         "items": [
           {
             "kind": "concept",
-            "title": "Diagnose before you drill",
-            "notes": "A failing technique fails for a reason from a short list: distance, connection, angle, a missing control point, weight in the wrong place, timing, or the wrong reaction read. Name the reason first — drilling a mis-diagnosed technique rehearses the mistake."
+            "title": "Before control happens",
+            "notes": "The cheapest layer and the one most people skip entirely. Almost every pin you escape was one you could have prevented for a fraction of the effort."
           },
           {
             "kind": "concept",
-            "title": "Adapt it to the body it belongs to",
-            "notes": "Modify for body type, age, flexibility, injury and rule set — yours and your students'. Knowing the difference between personal preference and universal principle is most of what teaching is."
+            "title": "During control",
+            "notes": "Frames, hips and the decision about which direction you are going before they have settled."
           },
           {
             "kind": "concept",
-            "title": "Teach a beginner safely",
-            "notes": "Structure a class, match partners sensibly, explain the positional goal before the technique, and correct without overwhelming. A brown belt is what most white belts think a black belt is — act accordingly."
+            "title": "Before submission isolation",
+            "notes": "The moment an arm or the neck becomes available is the moment to act. After this point every layer costs more."
+          },
+          {
+            "kind": "concept",
+            "title": "During submission",
+            "notes": "Structure rather than strength: the grip, the angle, the direction of the turn."
+          },
+          {
+            "kind": "concept",
+            "title": "Late-stage escape",
+            "notes": "It exists, it works more often than people think, and it should never be your first line."
+          },
+          {
+            "kind": "concept",
+            "title": "Counterattack",
+            "notes": "The layer that turns defence into offence, and the one that separates a brown belt from a very good blue belt."
           }
         ]
       },
       {
-        "title": "The graduation standard",
-        "description": "The record a brown belt approaching black should show — and, one last time: promotion is your coach's call, made on the mat.",
+        "title": "Control Scrambles",
+        "description": "Know when to scramble and, more importantly, when to stop. Every option below is a decision rather than a reflex.",
         "items": [
           {
             "kind": "concept",
-            "title": "What the record should show",
-            "notes": "No major positional weakness. A highly developed A-game with supporting systems. The room's best attacks failing against you at a rate you can point to. Varied guards passed, scrambles owned, leg-lock literacy appropriate to the academy — and juniors who are measurably better because you train with them."
+            "title": "When to scramble",
+            "notes": "When the position you would land in is better than the one you are in, and when you are the one who can see it first."
+          },
+          {
+            "kind": "concept",
+            "title": "When to stop scrambling",
+            "notes": "When neither of those is true. Stopping is a skill and it is almost never taught."
+          },
+          {
+            "technique_id": "turtle-base-structure",
+            "notes": "Turtle: the decision to take it, made deliberately rather than arrived at.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "kind": "concept",
+            "title": "When to wrestle",
+            "notes": "Standing is a scramble too, and the same question applies with higher stakes."
+          },
+          {
+            "technique_id": "sit-up-guard-recovery",
+            "notes": "Sit to guard: the reset that costs nothing when the scramble is not going your way.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "front-headlock-chinstrap-control",
+            "notes": "Attack the front headlock: where most scrambles hand you a position if you are ready for it.",
+            "target_drilled_sessions": 10
+          },
+          {
+            "technique_id": "rolling-back-take-from-turtle",
+            "notes": "Chase the back: the scramble's best possible ending.",
+            "target_scored": 8,
+            "target_sessions": 8,
+            "min_hit_rate": 0.25
+          },
+          {
+            "kind": "concept",
+            "title": "Stabilize position",
+            "notes": "The unglamorous one, and usually the correct one. A scramble that ends in a stable pin has been won regardless of how it looked."
+          }
+        ]
+      },
+      {
+        "title": "Strategic Mastery",
+        "description": "Five questions. A brown belt should be able to answer all five about a specific opponent before the match, and about themselves at any moment during it.",
+        "items": [
+          {
+            "kind": "concept",
+            "title": "Where do I want this fight?",
+            "notes": "Standing, in your guard, in their guard, or on top. If the honest answer is \"wherever it goes\", that is the thing to fix first."
+          },
+          {
+            "kind": "concept",
+            "title": "What is my strongest path there?",
+            "notes": "Not the shortest and not the most impressive. The one that works when you are tired and they are ready for it."
+          },
+          {
+            "kind": "concept",
+            "title": "What is my opponent likely to do?",
+            "notes": "Most people have two answers to any given situation and you can find out which within a minute."
+          },
+          {
+            "kind": "concept",
+            "title": "What is my answer?",
+            "notes": "Prepared beforehand, not improvised. This is the difference between reacting well and having already decided."
+          },
+          {
+            "kind": "concept",
+            "title": "What happens if my first strategy fails?",
+            "notes": "The question that makes the other four worth asking. A plan with no second branch is a hope."
           }
         ]
       }

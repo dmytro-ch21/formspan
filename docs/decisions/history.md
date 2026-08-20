@@ -36029,6 +36029,229 @@ is inlined at build time from a gitignored `.env.local` no worktree has, and the
 build succeeds while shipping an app with no keys. The issue stays open after
 merge.
 
+## 2026-08-20 — The belt roadmaps now teach the syllabus the user actually asked for
+
+**N97** (#445), and it is content authoring rather than a code change: no
+migration, no endpoint, no client work. `#446` (the roadmap screen) and `#447`
+(Today's BJJ card) were both blocked on it.
+
+**What was wrong.** The four belt roadmaps were authored in August from a
+survive-the-bad-places-first pedagogy: white belt opened *How this belt works →
+The map: how a round goes → Mount: get out, then hold*. The user then supplied a
+different ordering — committed as `docs/design/bjj-belt-curriculum.md` in #440
+and ruled authoritative — which follows a match from its beginning: *Start
+Standing → Get the Fight to the Ground → Understand Guard*. Not different labels
+for the same course. A different course.
+
+All four are re-authored against it. White 11 milestones, blue 10, purple 10,
+brown 10, and the milestone titles are now the document's verbatim.
+
+**The first thing the survey turned up was that most of the work was already
+done, in the wrong artifact.** The reference syllabuses (`white-belt-syllabus`
+and friends, N20/#277) were *already* on this ordering — their eleven sections
+have read *Start standing → Get the fight to the ground → …* since August. So
+the ordering did not have to be invented, only moved onto the roadmaps, and the
+542-technique library turned out to answer nearly everything the document names.
+
+**The one place it did not is worth recording on its own, because it is a
+library gap with consequences past this ticket.** There is no submission-defence
+family. 74 catalog entries mention escape, defence or counter, and they are
+positional escapes plus nine specific rows. White belt's *Submission Defense*
+milestone asks for basic defence against eight named submissions, and six of the
+eight had no entry at all — guillotine, triangle, armbar at white-belt level,
+americana, arm triangle, straight ankle lock. Nothing else in the app could
+reference them either.
+
+**Twelve techniques authored**, to catalog standard rather than as stubs, taking
+the library to 554:
+
+| id | why |
+|---|---|
+| `guillotine-defense` | white §11 — no guillotine defence existed |
+| `triangle-defense` | white §11 — only `mounted-triangle-escape`, one specific position |
+| `armbar-defense` | white §11 — only a Purple hitchhiker and a Brown counter |
+| `americana-defense` | white §11 — one of the first submissions a beginner meets |
+| `arm-triangle-defense` | white §11 — three appearances in the document, only the attacks existed |
+| `straight-ankle-lock-defense` | white §11 — legal at every belt, so its defence belongs at white |
+| `mount-bridge-maintenance` | white §7 — *maintaining mount during bridging*, distinct from static mount control |
+| `turtle-hook-insertion` | white §9 — carried only as an alias on a different technique |
+| `knee-cut-guard-recovery` | blue §2 — recovery against a *named* pass |
+| `toreando-guard-recovery` | blue §2 |
+| `leg-drag-guard-recovery` | blue §2, and again at purple §4 |
+| `body-lock-guard-recovery` | purple §4 |
+
+**The authoring rule, stated precisely, because a loose version of it is how
+two phases quietly lost lessons.** Four parts:
+
+1. Every technique the document names becomes exactly one item, in the order
+   named.
+2. Every non-technique bullet becomes one concept.
+3. Section-level prose that names a chain or a principle — the italic asides,
+   the "Start chaining:" lines — becomes one concept, or the phase description.
+4. Where a name is repeated and `curriculum_items_technique_unique` forbids a
+   second row pointing at the same technique, it becomes a **concept naming the
+   collision** — never a silent drop.
+
+Rule 4 is the one that was written down and then not followed, twice. Brown's
+*Develop Finishing Systems* names nineteen techniques and carried twelve;
+purple's *Develop Submission Systems* names twelve and carried eleven, with an
+undocumented `straightjacket-back-control` added on top so the count looked
+plausible. Both were found by review, not by the suite. Blue's *Attack From
+Guard* had a milder version — `underhook → dogfight` and `arm drag → back take`
+each folded into a single item.
+
+The first version of this entry claimed the rule held with "no exceptions, even
+where it is clumsy", which was false at the moment it was written. That is worse
+than the defect: a doc that overstates its own rigour is one the next session
+builds on without re-deriving.
+
+What is true now: rules 1 and 4 hold everywhere, and
+`TestNoBeltPhaseCarriesFewerLessonsThanTheDocumentNames` enforces the floor.
+Rules 2 and 3 mean a phase may carry MORE items than the document has bullets —
+so the honest claim is a **lower bound**, not equality: no milestone has fewer
+lessons than the document names.
+
+|  | phases | techniques | concepts | countable | items |
+|---|---|---|---|---|---|
+| white | 11 | 81 | 12 | 81 | 93 |
+| blue | 10 | 75 | 16 | 75 | 91 |
+| purple | 10 | 44 | 22 | 44 | 66 |
+| brown | 10 | 34 | 48 | 34 | 82 |
+
+Brown is the interesting row and it is not an accident: it is **majority
+prose**, which is the content agreeing with the document's own claim that brown
+belt is "no longer about learning every technique". Concepts carry no criteria
+by constraint (000051), so none of that counts toward progress, which is
+correct.
+
+**Criteria policy, stated once.** Movement and positional fundamentals — a
+stance, a breakfall, a frame, holding a pin — carry `target_drilled_sessions`,
+which is exactly what 000051 added the column for and the only honest claim
+available for something nobody scores. Everything actionable carries the
+volume/spread/rate triple the roadmaps already used. `target_defended` goes on
+**attacks only**, where the tag stream's `defended` event means "somebody tried
+this on you and you stopped it"; putting it on a defensive technique would be a
+criterion no coherent log entry could satisfy. Nothing became hand-completable;
+000034 stands.
+
+**Three phases had no counterpart in the document and all three are gone as
+phases.** *How this belt works*, *The graduation standard* — the two the ticket
+named — and a third it did not: white belt's *The map: how a round goes*. That
+one matters most, and #272 added it for a specific reason worth preserving: the
+roadmaps used to open straight into *Mount: get out, then hold*, which is
+correct triage and meaningless to somebody who does not yet know that a round
+has a shape. Deleting it silently would reintroduce exactly the complaint it
+was built to answer.
+
+None of the content was discarded. All three moved into the curriculum
+**`description`**, which both clients already render above the milestone list,
+and the document supplies its own version of each: the per-belt **Goal** for
+orientation, the per-belt **fundamental flow** block for the map, and the
+*simple progression* table's line for the standard. `TestEveryBeltRoadmapExplainsItselfInItsDescription`
+is what stops that description drifting back into a caption — a roadmap with a
+thin one renders as a list with no framing and merely looks plain.
+
+**What existing enrolments do, measured rather than asserted.** Seeded a
+database with the old content, enrolled an athlete on white and blue backdated
+60 days, logged 168 real tag rows across 12 sessions, then applied the new seed
+and read progress back:
+
+| | before | after |
+|---|---|---|
+| white | 42 items, 25 countable, **3 mastered** (12.0%) | 93 items, 81 countable, **7 mastered** (8.6%) |
+| blue | 33 items, 24 countable, **0 mastered** (0%) | 91 items, 75 countable, **3 mastered** (4.0%) |
+
+Enrolment intact, not archived, `started_on` unchanged at 2026-06-21, all 168
+evidence rows and 420 reps untouched. **And white belt's displayed percentage
+went DOWN — 12.0% to 8.6% — while its mastered count went UP.** That is correct
+and it is the thing that will look like a bug: the denominator grew faster than
+the numerator. Blue went up, from nothing to 4%, because the new roadmap
+includes techniques this athlete had already been logging.
+
+The property underneath is that progress lives in `bjj_session_tags` and is
+recomputed on read, so re-authoring content is a content edit and nothing more —
+no migration, no backfill, no reconciliation. An item added by a re-authoring
+arrives already carrying whatever was logged **since the athlete's original
+enrolment date**, not since the deploy.
+`TestAReseedKeepsTheEnrolmentAndTheEvidenceWhileTheFractionMoves` asserts all of
+it, including the part that reads as a regression.
+
+**The document is now authoritative mechanically rather than by assertion.**
+`TestEveryBeltRoadmapMatchesTheSuppliedDocument` parses
+`docs/design/bjj-belt-curriculum.md` and compares its numbered milestones to the
+seeded phase titles, in order. It reads the file off disk because it lives
+outside the Go module and `go:embed` cannot reach it, so an unreadable or
+unparseable document is a **failure** and never a skip. Four mutations, each red
+alone and green restored: swapped white milestones, retitled a blue one, a
+re-added `The graduation standard` phase, and a gutted description. Without it
+"the order matches the document" is a sentence in a PR body, and a curriculum
+with the wrong order is still a perfectly legal curriculum that seeds, renders
+and simply teaches something else.
+
+**A title check was not enough, and that is the lesson worth keeping.** It
+passes happily while a phase drops half its lessons, which is exactly what had
+happened in brown and purple. `TestNoBeltPhaseCarriesFewerLessonsThanTheDocumentNames`
+now parses each milestone's named techniques and asserts the phase carries at
+least that many items — a lower bound, because rules 2 and 3 above legitimately
+add concepts.
+
+Its parser is the interesting part. The document uses `→` **both** to join peer
+techniques (purple's "RNC → rear triangle → armbar → mount") and to join a
+technique to an opponent's reaction (blue's "arm triangle → opponent turns →
+back take"), so splitting on it can overcount. Excluding it was tried first and
+is strictly worse: purple's entire submission milestone is arrow-joined, so its
+three families counted as three lessons rather than twelve, and **the exact
+dropped `rear-naked-choke` review found there passed the guard.** Including it
+makes the bound conservative rather than wrong, and every phase satisfies the
+stricter version — measured, zero false failures. Three mutations, each red
+alone: brown truncated back to twelve items, purple's RNC removed again, and the
+document's bullet markers rewritten, which trips the "only N sections had
+countable lessons" floor that stops the parser rotting into a no-op.
+
+**The seeder's own path was run end to end on the final content**, because
+nothing in the suite does: `curriculum.Seed` has no database test, and
+`TestEverySeededTechniqueExistsInTheLibrary` checks ids without touching
+Postgres. `cmd/seed` against a migrated database wrote 554 techniques and 9
+curricula clean, so the rewritten content has been through the real constraints
+rather than only their Go-side mirror. Making that permanent — a
+`seed_postgres_test.go` on the `workout` module's model — is a gap this leaves
+open, and it is the same gap that let the two dropped-lesson phases seed
+happily.
+
+**Open questions:**
+
+- **One ordering now lives in two places.** The roadmap and the syllabus for a
+  belt share their titles and order and differ only in depth and criteria. That
+  is deliberate and it answers N20's own open question — nothing linked a
+  roadmap to its syllabus, and shared ordering *is* that link — but nothing
+  forces the two to stay in step, which is the `weightTrend.ts` / `trendSeries.ts`
+  shape this repo keeps paying for. **N100 (#480)** carries the cheap half: a
+  content test asserting both tracks hold identical phase titles in identical
+  order. The expensive half — deriving one from the other — is filed there too
+  and deliberately not attempted here.
+- **Triage order is gone and that was a real property.** A white belt being
+  mounted every round now meets *Escape Bad Positions* as milestone 10 rather
+  than milestone 3. Milestones expand one at a time and nothing requires working
+  them in order, but the content no longer does the triage. If it matters, the
+  fix is a "start here" affordance on #446's screen, not a re-ordering.
+- **81 countable items on white belt is a much longer progress bar than the 25
+  it replaces**, and #272's entry explicitly warned against exactly this: "70
+  criteria-bearing items is a progress bar nobody fills". The counter-argument
+  is that #446 renders progress per milestone rather than per belt, so the unit
+  an athlete sees is "3 of 7" and not "7 of 81". That is an argument about a
+  screen that does not exist yet, so it is a bet rather than a result.
+- **The curation is still one person's**, and no test can say whether the right
+  techniques were chosen for each named lesson — only that every id resolves and
+  every repeat resolves to a genuinely distinct position-specific row. Several
+  mappings are judgement calls worth a second opinion: *arm-in guillotine* at
+  blue resolves to `standing-guillotine`, and white's *Basic foot sweep* to
+  `de-ashi-barai`, which is Blue-tagged.
+- **Nothing has been seen on a screen.** Both clients render curricula from this
+  file unchanged, and their component tests cover the concept card, but a 93-item
+  white belt roadmap is roughly double the largest list either has rendered.
+  N30's entry already flagged the mobile curriculum screen as a plain
+  `ScrollView` at 85 items; this exceeds that.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.

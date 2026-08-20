@@ -1435,3 +1435,152 @@ func TestWorkingExcludesCurriculaWithNothingCompletable(t *testing.T) {
 		t.Errorf("reading list reports %d countable items; the fixture is wrong and this test proved nothing", back.CountableItems)
 	}
 }
+
+// What happens to an athlete who is mid-roadmap when the content underneath
+// them is re-authored.
+//
+// N97 rewrote all four belt roadmaps onto a different syllabus — different
+// phases, different order, roughly three times the items — and "existing
+// enrolments are not silently broken" was one of its acceptance criteria. The
+// answer is a property of the seeder rather than a hope, and this is that
+// property asserted:
+//
+//   - the ENROLMENT survives, with its original started_on. Curriculum ids are
+//     stable across the rewrite, and enrolment references the id.
+//   - the EVIDENCE survives. Progress lives in bjj_session_tags and is
+//     recomputed on read, so replacing items touches none of it. An item that
+//     leaves and comes back brings its progress with it.
+//   - the displayed FRACTION moves, in both directions. A removed item takes
+//     its countable and its mastered contribution with it; an added item
+//     arrives already carrying whatever was logged since the athlete's ORIGINAL
+//     enrolment date, not since the reseed.
+//
+// That last point is the one worth a test rather than a sentence, because it
+// will look like a bug to whoever sees it first: an athlete can open the app
+// after a deploy and find their percentage has gone DOWN without having done
+// anything. That is correct, and it is the cost of re-authoring content the
+// history entry for #272 already recorded — "removing a technique item does
+// move the displayed fraction".
+//
+// Uses the owner-edit path rather than Seed(), because the seeder writes the
+// embedded file and so cannot express "the old content" here.
+//
+// Be precise about what that costs, because the first version of this comment
+// was wrong twice: the owner path is `replaceContent`, and `seedOne` does NOT
+// share it — seed.go inlines its own DELETE of curriculum_items and
+// curriculum_phases followed by a re-INSERT. So this test exercises one of the
+// two write paths, not both.
+//
+// The property still holds for the seeder, by inspection rather than by this
+// test: neither path touches `curriculum_enrollments` or `bjj_session_tags` at
+// all, which is the whole reason a content rewrite is safe. The seeder's own
+// path was additionally run end to end by hand for N97 — see the history entry
+// for the measured before/after numbers — and a `seed_postgres_test.go` on the
+// `workout` module's model is the way to make that permanent.
+func TestAReseedKeepsTheEnrolmentAndTheEvidenceWhileTheFractionMoves(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	const athlete = "athlete-n97-reseed"
+	cleanupUser(t, pool, athlete)
+
+	stays := seedTechnique(t, pool, "n97-stays")
+	leaves := seedTechnique(t, pool, "n97-leaves")
+	arrives := seedTechnique(t, pool, "n97-arrives")
+
+	scored := 3
+	met := &Criteria{TargetScored: &scored}
+
+	// The "old" content: two items, both countable.
+	before, err := repo.Create(ctx, athlete, "", NewCurriculum{
+		Name: "Belt roadmap",
+		Items: []NewItem{
+			{TechniqueID: stays, Criteria: met},
+			{TechniqueID: leaves, Criteria: met},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, athlete, before.ID, ""); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	backdateEnrollment(t, pool, athlete, 30)
+
+	// Evidence for all three, including the one not yet on the roadmap. That is
+	// what makes the "arrives already carrying progress" claim testable rather
+	// than merely plausible.
+	for _, id := range []string{stays, leaves, arrives} {
+		logEvidence(t, pool, athlete, id, 10, map[string]int{"scored": 3})
+	}
+
+	got, err := repo.Get(ctx, athlete, before.ID, "")
+	if err != nil {
+		t.Fatalf("get before: %v", err)
+	}
+	startedOn := got.StartedOn
+	if got.CountableItems != 2 || got.MasteredItems != 2 {
+		t.Fatalf("before the reseed: %d of %d mastered, want 2 of 2",
+			got.MasteredItems, got.CountableItems)
+	}
+	if startedOn == nil {
+		t.Fatal("enrolled athlete has no started_on, so the clock claim below cannot be checked")
+	}
+
+	// The "new" content: one item removed, one added, one carried over — which
+	// is exactly the shape of N97's rewrite, in miniature.
+	if _, err := repo.Update(ctx, athlete, before.ID, "", Update{Items: []NewItem{
+		{TechniqueID: stays, Criteria: met},
+		{TechniqueID: arrives, Criteria: met},
+	}}); err != nil {
+		t.Fatalf("reseed: %v", err)
+	}
+
+	after, err := repo.Get(ctx, athlete, before.ID, "")
+	if err != nil {
+		t.Fatalf("get after: %v", err)
+	}
+	if !after.Enrolled {
+		t.Error("the reseed un-enrolled the athlete; enrolment references the curriculum id, " +
+			"which does not change when content is re-authored")
+	}
+	if after.StartedOn == nil || *after.StartedOn != *startedOn {
+		t.Errorf("started_on moved from %v to %v — the measurement window must survive a "+
+			"content edit, or every athlete's evidence silently stops counting", startedOn, after.StartedOn)
+	}
+	if after.CountableItems != 2 {
+		t.Errorf("countable is %d, want 2", after.CountableItems)
+	}
+	// The added item is mastered IMMEDIATELY, from evidence logged before it was
+	// ever on the roadmap but after the athlete enrolled. This is the half most
+	// likely to be mistaken for a bug in the other direction.
+	if after.MasteredItems != 2 {
+		t.Errorf("%d of %d mastered after the reseed, want 2 of 2 — an item added by a "+
+			"re-authoring arrives carrying evidence logged since the athlete enrolled, "+
+			"not since the deploy", after.MasteredItems, after.CountableItems)
+	}
+	for _, it := range after.Items {
+		if it.TechniqueID == leaves {
+			t.Error("the removed item is still on the roadmap")
+		}
+	}
+
+	// And the evidence for the removed item is untouched underneath: putting it
+	// back restores its progress rather than starting it from zero. This is the
+	// property that makes re-authoring content safe at all.
+	if _, err := repo.Update(ctx, athlete, before.ID, "", Update{Items: []NewItem{
+		{TechniqueID: stays, Criteria: met},
+		{TechniqueID: arrives, Criteria: met},
+		{TechniqueID: leaves, Criteria: met},
+	}}); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	restored, err := repo.Get(ctx, athlete, before.ID, "")
+	if err != nil {
+		t.Fatalf("get restored: %v", err)
+	}
+	if restored.CountableItems != 3 || restored.MasteredItems != 3 {
+		t.Errorf("restoring the removed item gives %d of %d mastered, want 3 of 3 — its "+
+			"evidence should never have been touched", restored.MasteredItems, restored.CountableItems)
+	}
+}

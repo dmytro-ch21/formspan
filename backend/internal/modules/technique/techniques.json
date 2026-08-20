@@ -17764,5 +17764,423 @@
     "video_reference": "",
     "source_notes": "Completes the wrist-lock family, which covered side control, mount and back but not guard.",
     "ibjjf_ruleset_id": "blue-only-adult-28ec8e"
+  },
+  {
+    "id": "mount-bridge-maintenance",
+    "name": "Mount Maintenance Against the Bridge",
+    "aliases": [
+      "Riding the bridge",
+      "Staying mounted",
+      "Upa recovery"
+    ],
+    "category": "Control/Pin",
+    "function": "control",
+    "position": "Mount - Top",
+    "position_detail": "Low Mount",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Ride the bridge rather than resisting it: post the hand on the mat over the direction of the roll, drop the head toward the same side, widen the knees, and let the hips fall back down as theirs return to the mat.",
+    "when_to_use": "Use the moment the hips lift, before the trap-and-roll gets an arm and a leg on one side. Posting into the bridge is what makes the roll fail; squeezing the knees and holding still is what makes it work for them.",
+    "setup_from": [
+      "Low Mount Control",
+      "High Mount Control",
+      "Side Control to Mount"
+    ],
+    "common_next_moves": [
+      "High Mount Control",
+      "Mount Crossface and Elbow Isolation",
+      "Technical Mount Control"
+    ],
+    "common_counters": [
+      "Trap-and-Roll Mount Escape",
+      "Elbow–Knee Mount Escape",
+      "Bridge and shrimp combination"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the white belt roadmap (N97); the supplied ordering names maintaining mount during bridging as its own lesson and the catalog held only static mount control.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "turtle-hook-insertion",
+    "name": "Hook Insertion from Turtle",
+    "aliases": [
+      "First hook",
+      "Getting the hooks in",
+      "Hook entry"
+    ],
+    "category": "Transition",
+    "function": "advance",
+    "position": "Turtle - Top",
+    "position_detail": "Seatbelt",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "With the seatbelt already set, drive the near knee into the space behind their thigh, roll them onto the seatbelt-side shoulder, and thread the top hook in first so the second arrives as they turn.",
+    "when_to_use": "Use once the seatbelt is connected and before they flatten out. The hook goes in on the side your chest is already on — chasing the far hook first is what feeds the roll-through and puts you underneath.",
+    "setup_from": [
+      "Seatbelt Control from Turtle",
+      "Spiral Ride",
+      "Tight-Waist Turtle Ride"
+    ],
+    "common_next_moves": [
+      "Double-Hooks Back Control",
+      "Seatbelt Back Control",
+      "Rear Naked Choke"
+    ],
+    "common_counters": [
+      "Turtle Hand Fighting",
+      "Defensive Turtle Structure",
+      "Roll through toward the hook"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the white belt roadmap (N97). Inserting the first hook is its own lesson in the supplied ordering; the catalog carried it only as an alias on Seatbelt Control from Turtle, which is a different skill.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "guillotine-defense",
+    "name": "Guillotine Defense",
+    "aliases": [
+      "Defending the front choke",
+      "Guillotine escape",
+      "Side-out defense"
+    ],
+    "category": "Escape",
+    "function": "escape",
+    "position": "Guard - Top",
+    "position_detail": "Defending the front choke",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Drive the shoulder into the near side of their neck, walk your head around to the choking-arm side so your throat leaves the crook of the elbow, strip the grip with both hands, and pass toward that same side.",
+    "when_to_use": "Use the instant the chin is trapped, before they close guard or elevate the hips. Standing to relieve pressure works only while the legs are open; once the guard closes, getting your head to the choking-arm side is the whole answer — and it is also the side the pass and the Von Flue are on, so the escape and the counter are one movement rather than two.",
+    "setup_from": [
+      "Guillotine from Closed Guard",
+      "Standing Guillotine",
+      "Guillotine from Front Headlock"
+    ],
+    "common_next_moves": [
+      "Von Flue Choke",
+      "Standing Closed-Guard Break",
+      "Knee-Cut Pass"
+    ],
+    "common_counters": [
+      "Close the guard",
+      "High-elbow finish",
+      "Switch to the arm-in variation"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the white belt roadmap (N97). The supplied ordering asks for basic defense against eight named submissions; the catalog held no guillotine defense at all.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "triangle-defense",
+    "name": "Triangle Defense",
+    "aliases": [
+      "Defending the triangle",
+      "Posture and stack",
+      "Triangle escape"
+    ],
+    "category": "Escape",
+    "function": "escape",
+    "position": "Guard - Top",
+    "position_detail": "Defending the triangle",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Get the trapped arm's shoulder across their throat, posture the head up, grip their far hip or shin to stop the angle, and stack toward the trapped shoulder while walking the free hand toward their hip.",
+    "when_to_use": "Use before the legs lock and the angle is finished. The two things that end the danger are posture and denying the angle — pulling the trapped arm out first, without either, is what completes the lock.",
+    "setup_from": [
+      "Triangle Choke from Closed Guard",
+      "Mounted Triangle",
+      "Rear Triangle Choke"
+    ],
+    "common_next_moves": [
+      "Standing Closed-Guard Break",
+      "Knee-Cut Pass",
+      "Stack pass to side control"
+    ],
+    "common_counters": [
+      "Cut the angle",
+      "Switch to the armbar",
+      "Omoplata from Closed Guard"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the white belt roadmap (N97). The catalog's only triangle answer was Mounted Triangle Escape, which is one specific position rather than the defense itself.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "armbar-defense",
+    "name": "Armbar Defense",
+    "aliases": [
+      "Defending juji gatame",
+      "Hide the thumb",
+      "Armbar escape"
+    ],
+    "category": "Escape",
+    "function": "escape",
+    "position": "Guard - Top",
+    "position_detail": "Defending the armbar",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Turn the thumb toward the ceiling so the elbow points away from their hips, grip your own hands together, then stack forward over their shoulders and walk toward the trapped-arm side until the leg slips over your head.",
+    "when_to_use": "Use the moment the leg crosses your face, while the arm is still bent. Once the arm is straight and the hips are elevated the answer is to tap — a defended armbar and a damaged elbow are seconds apart, which is why this belongs beside the attacks and not after them.",
+    "setup_from": [
+      "Armbar from Closed Guard",
+      "Armbar from Mount",
+      "Far-Side Armbar from Side Control"
+    ],
+    "common_next_moves": [
+      "Stack pass to side control",
+      "Knee-Cut Pass",
+      "Re-establish posture"
+    ],
+    "common_counters": [
+      "Break the grip",
+      "Omoplata from Closed Guard",
+      "Switch to the triangle"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the white belt roadmap (N97). The catalog held only Hitchhiker Escape from Armbar (Purple, mount-specific) and a Brown-belt counter.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "americana-defense",
+    "name": "Americana Defense",
+    "aliases": [
+      "Defending the keylock",
+      "Ude-garami defence",
+      "Straighten the arm"
+    ],
+    "category": "Escape",
+    "function": "escape",
+    "position": "Side Control - Bottom",
+    "position_detail": "Defending the figure-four",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Straighten the trapped arm to take the bend out of the lock, walk the hand toward your own hip or under their body, and turn onto the trapped side to follow the shoulder rather than fighting it flat.",
+    "when_to_use": "Use before the wrist is pinned to the mat and the elbow is walked down. Straightening the arm is what removes the lever — pulling straight up against their grip is a strength contest you are meant to lose.",
+    "setup_from": [
+      "Americana from Side Control",
+      "Americana from Mount"
+    ],
+    "common_next_moves": [
+      "Frame-and-Hip-Escape from Side Control",
+      "Underhook Escape to Knees",
+      "Side Control Bottom Frames"
+    ],
+    "common_counters": [
+      "Switch to the straight armlock",
+      "Kimura from Side Control",
+      "Walk the elbow down"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the white belt roadmap (N97). The americana is one of the first submissions a beginner meets and the catalog carried no defense for it.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "arm-triangle-defense",
+    "name": "Arm-Triangle Defense",
+    "aliases": [
+      "Defending kata gatame",
+      "Head-and-arm defence",
+      "Turn into the choke"
+    ],
+    "category": "Escape",
+    "function": "escape",
+    "position": "Side Control - Bottom",
+    "position_detail": "Defending the head-and-arm",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Turn toward the trapped arm so the shoulder comes off your own neck, frame into their hip to stop them walking to the far side, and bridge into them before the head and arm are squeezed together.",
+    "when_to_use": "Use while they are still on the near side. Once they have walked past the head and locked the shoulder against your neck the choke is already on, so the escape is a race against that walk, not against the squeeze.",
+    "setup_from": [
+      "Arm-Triangle from Side Control",
+      "Arm-Triangle from Mount"
+    ],
+    "common_next_moves": [
+      "Frame-and-Hip-Escape from Side Control",
+      "Recover half guard",
+      "Underhook Escape to Knees"
+    ],
+    "common_counters": [
+      "Walk to the far side",
+      "Von Flue Choke",
+      "Step over to mount"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the white belt roadmap (N97). Arm triangle appears three times in the supplied white belt ordering — twice as an attack, once as a defense — and only the attacks existed.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "straight-ankle-lock-defense",
+    "name": "Straight Ankle Lock Defense",
+    "aliases": [
+      "Defending the footlock",
+      "Boot and clear",
+      "Ankle lock escape"
+    ],
+    "category": "Escape",
+    "function": "escape",
+    "position": "Leg Entanglement",
+    "position_detail": "Leg Entanglement",
+    "gi_no_gi": "Both",
+    "typical_belt": "White",
+    "description": "Turn the toes toward their armpit and hold the foot rigid so the blade of their forearm slides off the Achilles, sit up toward the entangled leg, hand-fight their grip down, and pull the knee back out over the top.",
+    "when_to_use": "Use as soon as the leg is entangled, before they fall back and finish the arch. Sitting up toward the lock is the answer; rolling away from it is the reflex, and it feeds the finish by turning your own leg into the lever.",
+    "setup_from": [
+      "Straight Ankle Lock from Single-Leg X",
+      "Ankle Lock from Guard",
+      "Single-Leg X Control"
+    ],
+    "common_next_moves": [
+      "Come on top",
+      "Re-establish guard",
+      "Underhook Leg-Lock Escape"
+    ],
+    "common_counters": [
+      "Belly-Down Straight Ankle Lock",
+      "Switch to the outside ashi",
+      "Follow the escape into a sweep"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the white belt roadmap (N97). The straight ankle lock is legal at every belt, so its defense belongs at white; the catalog held only Heel Hook Defense (Purple, no-gi only) and a Purple wrestle-up escape.",
+    "ibjjf_ruleset_id": "straight-ankle-lock-adult-601f80"
+  },
+  {
+    "id": "knee-cut-guard-recovery",
+    "name": "Knee-Cut Guard Recovery",
+    "aliases": [
+      "Recovering from the knee slice",
+      "Knee-cut retention",
+      "Block the knee cut"
+    ],
+    "category": "Guard Retention",
+    "function": "escape",
+    "position": "Guard - Bottom",
+    "position_detail": "Open Guard",
+    "gi_no_gi": "Both",
+    "typical_belt": "Blue",
+    "description": "Fight the underhook with a frame into the biceps, get the bottom shin back in front of their cutting knee, and either re-pummel the leg inside or take the far underhook and come up into the dogfight.",
+    "when_to_use": "Use while the cutting knee is still on your thigh and the shoulder has not landed. Once they are chest-to-chest with the underhook the recovery is a half-guard fight, not a guard-retention one — which is the two answers this lesson pairs.",
+    "setup_from": [
+      "Knee-Cut Pass",
+      "Underhook Knee-Cut Pass",
+      "Headquarters Knee Cut"
+    ],
+    "common_next_moves": [
+      "Knee-Shield Half Guard",
+      "Half-Guard Underhook to Dogfight",
+      "Foot-Pummel Guard Retention"
+    ],
+    "common_counters": [
+      "Underhook Knee-Cut Pass",
+      "Knee-Cut to Long-Step Chain",
+      "Switch to the leg drag"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the blue belt roadmap (N97). The supplied ordering names recovery against three specific passes; the catalog held generic retention only.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "toreando-guard-recovery",
+    "name": "Toreando Guard Recovery",
+    "aliases": [
+      "Recovering from the bullfighter",
+      "Toreando retention",
+      "Beat the shins"
+    ],
+    "category": "Guard Retention",
+    "function": "escape",
+    "position": "Guard - Bottom",
+    "position_detail": "Open Guard",
+    "gi_no_gi": "Both",
+    "typical_belt": "Blue",
+    "description": "Turn the hips to face them as the legs are pushed aside, kick the trailing leg through to re-square, and reconnect a foot or a shin on the hip before they can put their weight down.",
+    "when_to_use": "Use while they are still moving laterally and have not settled. The toreando beats you on speed, so the recovery is a rotation rather than a frame — trying to out-push the grips keeps the legs where they already are.",
+    "setup_from": [
+      "Toreando Pass",
+      "Toreando to Knee-on-Belly",
+      "Outside Passing Chain"
+    ],
+    "common_next_moves": [
+      "Foot-Pummel Guard Retention",
+      "Seated-Guard Hand Fighting",
+      "High-Leg Guard Recovery"
+    ],
+    "common_counters": [
+      "Outside Passing Chain",
+      "Toreando to Knee-on-Belly",
+      "Switch to the knee cut"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the blue belt roadmap (N97); see knee-cut-guard-recovery.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "leg-drag-guard-recovery",
+    "name": "Leg-Drag Guard Recovery",
+    "aliases": [
+      "Recovering from the leg drag",
+      "Leg-drag retention",
+      "Spin out of the drag"
+    ],
+    "category": "Guard Retention",
+    "function": "escape",
+    "position": "Guard - Bottom",
+    "position_detail": "Open Guard",
+    "gi_no_gi": "Both",
+    "typical_belt": "Blue",
+    "description": "Before their hips settle on the dragged leg, turn into them and post on the far elbow, then either high-leg the top leg back over or turn to the knees and rebuild rather than staying flat.",
+    "when_to_use": "Use in the moment between the drag and the weight arriving. A leg drag that is allowed to settle becomes a back exposure, so the choice here is spin back to guard or take the turtle deliberately — staying flat is what gives up the back.",
+    "setup_from": [
+      "Leg-Drag Pass",
+      "Leg Drag to Back Take",
+      "Outside Passing Chain"
+    ],
+    "common_next_moves": [
+      "High-Leg Guard Recovery",
+      "Granby Guard Recovery",
+      "Turtle Pull to Half Guard"
+    ],
+    "common_counters": [
+      "Leg Drag to Back Take",
+      "Body-Lock Pass",
+      "Chase the exposed back"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the blue belt roadmap (N97); named again at purple as recovering against the leg drag.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
+  },
+  {
+    "id": "body-lock-guard-recovery",
+    "name": "Body-Lock Pass Recovery",
+    "aliases": [
+      "Recovering against the body lock",
+      "Body-lock retention",
+      "Break the lock"
+    ],
+    "category": "Guard Retention",
+    "function": "escape",
+    "position": "Guard - Bottom",
+    "position_detail": "Open Guard",
+    "gi_no_gi": "Both",
+    "typical_belt": "Purple",
+    "description": "Attack the locked hands with a two-on-one before the hips are flat, get a knee or a shin back inside the lock, and turn to the side their head is on so the body lock has to be reset from the start.",
+    "when_to_use": "Use before their hips connect and the lock closes below your own hips. Once the lock is set the retention window is gone and the work becomes a pin escape, which is why this is a purple-belt lesson rather than a blue-belt one.",
+    "setup_from": [
+      "Body-Lock Pass",
+      "Body-Lock Pass with Knee Block",
+      "Smash Pass"
+    ],
+    "common_next_moves": [
+      "Foot-Pummel Guard Retention",
+      "Knee-Shield Half Guard",
+      "Inversion Guard Retention"
+    ],
+    "common_counters": [
+      "Body-Lock Pass with Knee Block",
+      "Switch to the smash pass",
+      "Ride the turn to the back"
+    ],
+    "video_reference": "",
+    "source_notes": "Authored for the purple belt roadmap (N97). The supplied purple ordering names recovering against the body lock explicitly and the catalog had no entry.",
+    "ibjjf_ruleset_id": "generally-legal-adult-6a0242"
   }
 ]

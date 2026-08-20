@@ -7113,6 +7113,83 @@ belt word their curriculum would appear under.
 - **`owner_user_id` is never on the wire**, on any curriculum endpoint. The
   client is told whether something is VOLA's, never which account owns it.
 
+### The seeded belt content matches the supplied document (N97)
+
+The four belt roadmaps are authored FROM `docs/design/bjj-belt-curriculum.md`,
+which the user supplied and ruled authoritative. That relationship is the
+feature; everything here checks it survives.
+
+The failure mode is silent by construction, which is why these are worth
+writing down: a curriculum with the wrong phase order is a perfectly legal
+curriculum. It seeds, it renders, it draws progress — and it teaches a different
+syllabus than the one that was agreed. Nothing goes red on its own.
+
+- **Milestone titles and order.** Every `belt`-track curriculum's phases equal
+  the document's numbered milestones for that belt, same titles, same order —
+  white 11, blue 10, purple 10, brown 10. Covered by
+  `TestEveryBeltRoadmapMatchesTheSuppliedDocument`, which reads the markdown off
+  disk and cannot skip.
+- **The document moving is a failure, not a skip.** Rename or move
+  `docs/design/bjj-belt-curriculum.md` → the test **fails** naming the path. A
+  version that skipped on an unreadable file would restore exactly the silence
+  it exists to end.
+- **A belt in one and not the other is caught in both directions** — a fifth
+  roadmap with no section in the document, and a belt in the document with no
+  roadmap.
+- **Every technique id resolves in the library.** `TestEverySeededTechniqueExistsInTheLibrary`
+  reads the embedded catalog rather than a table: a hand-seeded database also
+  holds whatever the admin console authored, any of which would satisfy an id no
+  fresh deploy has.
+- **No technique appears twice in one curriculum** (`curriculum_items_technique_unique`).
+  The document repeats *Americana*, *Armbar*, *Arm triangle*, *Seatbelt* and
+  *protect neck* across sections, so each repeat must resolve to a distinct
+  position-specific row — never be silently dropped to satisfy the constraint.
+- **Concepts carry no criteria**, on every track, enforced by the schema. Brown
+  belt is 48 concepts against 28 techniques; do not "fix" that ratio by giving
+  strategy a completion bar.
+- **Every belt roadmap still has something completable**
+  (`TestEveryNonSyllabusCurriculumStillHasMilestones`), and nothing on the
+  `syllabus` track does (`TestNothingOnTheSyllabusTrackIsCompletable`).
+- **The curriculum description is load-bearing now.** The retired *How this belt
+  works*, *The map* and *The graduation standard* phases moved into it, so a
+  thin description silently drops a belt's framing and merely looks plain.
+  `TestEveryBeltRoadmapExplainsItselfInItsDescription` covers it.
+
+### Re-authoring the content under a mid-roadmap athlete (N97)
+
+**This is the one that looks like a bug and is not**, so run it before believing
+a report that progress was lost.
+
+- **Enrol on the old content, apply the new seed, read progress back.** The
+  enrolment survives, is not archived, and `started_on` is unchanged — curriculum
+  ids are stable across a re-authoring and enrolment references the id.
+- **No evidence is touched.** `bjj_session_tags` rows and counts are identical
+  before and after. Progress is recomputed on read, so a content edit needs no
+  migration and no backfill.
+- **The displayed fraction moves, and it can move DOWN.** Measured on the real
+  seed: white belt went from 3 of 25 mastered to 7 of 81 — mastered UP, percentage
+  from 12% to 8.6%, because the denominator grew faster. Blue went from 0 of 24
+  to 3 of 73. An athlete opening the app after the deploy sees a changed number
+  having done nothing.
+- **An added item arrives carrying evidence already logged**, from the athlete's
+  original enrolment date rather than from the deploy — which is why blue moved
+  off zero. Do not treat instant mastery on a new item as a bug.
+- **A removed item's evidence is not destroyed.** Put the item back and its
+  progress returns, computed over the same window. Covered by
+  `TestAReseedKeepsTheEnrolmentAndTheEvidenceWhileTheFractionMoves`.
+- **Nothing became completable by hand.** There is still no endpoint, field or
+  request shape anywhere that marks an item mastered — check the whole API
+  surface, not only the curriculum routes.
+
+### The library gap this exposed
+
+- **Six of the eight submission defences white belt names did not exist** before
+  N97 (guillotine, triangle, armbar at white-belt level, americana, arm triangle,
+  straight ankle lock). They are authored now. Worth a scenario because the same
+  hole would be invisible anywhere else: a technique nothing references is a
+  technique nothing reports missing. When adding a curriculum lesson, resolve
+  the name against the catalog **before** authoring the item, not after.
+
 ## The session timer, timed sets and guided runs (mobile)
 
 Mobile-only by the platform rule — a rest countdown on a desk you are not
