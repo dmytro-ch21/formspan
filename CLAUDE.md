@@ -471,6 +471,66 @@ value is that a `grep` in your working tree finds them. If your work touches one
 read it first — every entry there was found by review after the check suite went
 green.
 
+### Merged is not done: the evidence latch (hard rule)
+
+**`closes #N` fires on merge, and for a ticket carrying a `NEEDS HUMAN EVIDENCE`
+criterion that is the wrong answer** — the code has landed and the evidence has
+not. That is not an edge case. It is the normal end state for device-reported
+work, which is most of what the athlete actually notices.
+
+On 2026-08-20 six tickets closed that way and were reopened by hand (#414, #365,
+#406, #434, #444, #388), and **five more closed the same day and were not** —
+#388, #402, #409, #433, #446 — because nobody was watching those merges. A closed
+ticket is the one state nobody re-reads, so its outstanding criteria go with it.
+
+**You do not have to do anything differently.** Keep writing `closes #N`. GitHub
+still closes the issue, and `.github/workflows/evidence-latch.yml` reopens it
+within seconds, labels it `evidence-outstanding` and comments the outstanding
+checks. The label **is** the state — *merged, awaiting evidence* — and the board
+view filtered on it is the list of what is owed.
+
+**To finish one, say what you saw**, in a comment on the issue:
+
+```
+/evidence ran it on the 15 Pro, both belts, expanded and collapsed — labels stay
+above the keyboard
+```
+
+That ticks the evidence criteria, drops the label and closes the ticket. Ticking
+the boxes by hand works too. The observation has to read like a sentence — at
+least three words — because `/evidence xxxxxxxx` is the tick-box again.
+
+**If a ticket is not going to happen, close it as `not planned`.** That is left
+alone. Closing it as *completed* with evidence outstanding is what reopens it.
+
+**The observation is required, and a bare `/done` is refused on purpose.** Do not
+add one later as a convenience: a ticket asserting that evidence exists without
+saying what was seen is exactly the tick-box this replaced.
+
+Two things about how it decides, because both are easy to get wrong:
+
+- **The marker has to be a LABEL, not a noun.** It counts when it opens the
+  checkbox (the common form) or when a `:`/dash follows it mid-line. It does not
+  count when the phrase is the *subject* of a sentence — "a ticket whose
+  `NEEDS HUMAN EVIDENCE` criteria are outstanding" is a mention. Both errors are
+  real and both were measured: a naive substring rule reopens every ticket that
+  merely discusses this feature (#456 is one), and a purely positional rule
+  misses #410's genuine device check, which is the original bug with the sign
+  flipped. `--self-test` holds live lines of each kind.
+- **Only someone with write access can release the latch.** This repo is public,
+  and the workflow lends its `issues: write` token to whatever a comment says —
+  so without that check a stranger's `/evidence` would tick the maintainer's
+  criteria, rewrite the issue body and close the ticket. Unauthorised attempts
+  are ignored silently rather than answered, so the bot cannot be used as a
+  comment amplifier.
+- **The silent majority stays silent.** An issue closing with no unticked
+  evidence criterion is not touched, not labelled and not commented on. Closing
+  as `not planned` is likewise left alone — that is a decision, not a slip.
+
+There is no `Awaiting evidence` column on the board, deliberately: writing a
+Projects v2 field from CI needs a long-lived PAT, and that credential is the
+user's call to make. The label carries the state without one.
+
 ### Claiming (hard rule)
 
 The board is ordered by what an athlete would notice, so every session that opens
@@ -1058,6 +1118,31 @@ way:
   (`git branch --contains <sha>` returning nothing means your subject is gone),
   applied to anything that watches, polls or retries against an identifier that
   a rebase, a force-push or a cleanup can invalidate underneath it.
+
+### And verify that it can PASS (hard rule)
+
+**The same instrument, pointed the other way: before shipping a gate, check that
+its exit gesture is one somebody actually performs.** A gate that never opens
+gets ripped out within a week — and it takes the problem it solved out with it,
+because the removal looks like unblocking rather than regression.
+
+This is not symmetry for its own sake. It was measured on N456 (#456), whose
+first design released a latch when somebody ticked the ticket's evidence
+checkbox. That is the obvious gesture, it reads as free, and it would have
+deadlocked every device ticket in the repo — because:
+
+**0 of 415 acceptance-criteria checkboxes in this repository's entire issue
+history have ever been ticked.** Not the evidence ones. *Any* of them.
+
+Nothing about the code would have been wrong. The self-test would have passed,
+the mutation testing would have been clean, and the mechanism would have been
+unsatisfiable in production by a convention nobody had written down, because
+nobody had noticed it. The exit became an attestation comment instead, which is
+a gesture people already make.
+
+So when a check, gate or latch has a *release* condition, ask the same question
+you ask of its trigger: has this ever happened here? `git log`, the issue
+corpus and the PR history all answer it, and the answer is occasionally zero.
 
 ## Known gotchas
 
