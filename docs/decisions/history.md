@@ -34595,7 +34595,16 @@ trap #398 found on this same screen.
   worktree cannot produce a build with `EXPO_PUBLIC_*` in it. The airplane-mode
   round trip in particular — change it with no signal, restore the network,
   check web — is the one the acceptance criteria ask for by name and the one
-  the suite can only approximate.
+  the suite can only approximate. It is also the path the review found
+  unimplemented, so it is the *first* thing to try on a handset rather than the
+  last.
+- **Nothing drains the pref outbox except this screen.** The retry lives in the
+  Goals tab'''s focus effect, so an athlete who chooses a level offline and never
+  reopens that tab keeps the debt. That is acceptable for a value only this
+  screen writes, and it is the same shape `UnitsProvider` and
+  `TrackEffortProvider` already have — but three independent per-key retries is
+  the point at which a real preference-sync pass starts to look worth doing, and
+  this is the third.
 
 ## 2026-08-20 — A label photo that failed silently, and the two ways it could (N92)
 
