@@ -35281,16 +35281,28 @@ turned out to be three of them.** This matters, because only the first is what
    `0 rows [], want 1`. It also arrives *as* a count — `activity`'s
    `got 108 activities, want the ceiling of 500` and `workout`'s
    `got 169 workouts, want the ceiling of 500` are list-cap assertions
-   deflated by a neighbour's cleanup, not by anything about caps.
-2. **Unscoped count assertions inflated by another PACKAGE's rows** —
-   `technique`'s `seeded 542 but listed 544`. This is precisely the problem
-   `-p 1` exists for, arriving from a *second invocation*, where `-p 1` has no
-   jurisdiction; and it is the mechanism a per-package key cannot see, because
-   the rows come from `sequence`, `share`, `feed` and friends rather than from
-   `technique`.
+   deflated by a neighbour's cleanup, not by anything about caps. `feed`'s
+   `want bob's session in the feed, got []` is the same thing.
+2. **Unscoped assertions disturbed by another writer's rows** — `technique`'s
+   `seeded 542 but listed 544`, and `food`'s
+   `'chicken breast' ranked "chicken-breast" first, want the plain breast row`,
+   a relevance-ordering assertion over a catalog a second binary was seeding and
+   deleting underneath it. The `technique` case is precisely the problem `-p 1`
+   exists for, arriving from a *second invocation* where `-p 1` has no
+   jurisdiction — and it is the one mechanism a per-package key cannot see at
+   all, because the extra rows come from `sequence`, `share`, `feed` and friends
+   rather than from `technique` itself.
 3. **Fixed-id collisions between the two writers** — `already exists`,
-   `duplicate key value violates "workouts_pkey"`, `friend: already connected
-   or pending`, and a real `deadlock detected` in `bjj`.
+   `duplicate key value violates "workouts_pkey"`, a real `deadlock detected` in
+   `bjj`, and `feed`'s `send request: friend: already connected or pending`,
+   where the neighbour had already written the `friendships` row this run's
+   fixture was about to create. (That last one is a `feed` failure carrying a
+   `friend`-domain error message; the `friend` *package* did not fail in this
+   sample at all, and an earlier draft of this entry misfiled it as one. Review
+   caught it.)
+
+All nine reproduced packages are accounted for by one of the three; none was
+left as "presumably the same thing".
 
 **So the lock is keyed per DATABASE rather than per package**, which is the one
 design decision here worth arguing about. #426 keyed its lock to `session`, and
@@ -35309,7 +35321,7 @@ maintenance — the same rule `-p 1` already applies inside one invocation,
 extended to the several invocations a fleet runs at once.
 
 **What it cost, measured rather than asserted:** 24 runs across four lanes went
-from 386s to 452s, **+17% wall clock**. Per-run median 57s → 72s. Worth noting
+from 387s to 453s, **+17% wall clock**. Per-run median 57s → 72s. Worth noting
 alongside the median: the *spread* narrows, 39–105s → 63–93s, so a run's
 duration stops depending on who else happens to be running. It is cheaper than
 "serialise everything" sounds because the suite is not all database work — the
@@ -35387,6 +35399,34 @@ against the hash of an invented name and was therefore asserting only that two
 different strings hash differently. It connects to a second real database now.
 A fourth mutation, deleting the `lock_timeout` itself, fails by hanging to the
 test timeout — which is exactly the failure the deadline exists to prevent.
+
+**And the guard itself was wrong in a way only a fleet exposes — found twice,
+independently, on the same afternoon.** `AssertHeld` originally asked
+`pg_try_advisory_lock` and failed if it succeeded. That proves somebody holds the
+key. It does not prove *this binary* does — so delete the `TestMain`, run while a
+colleague's suite is up, and the probe still cannot take the lock and the guard
+still goes green. **Vacuously passing in precisely the conditions the lock exists
+for**, which is the sharpest version of "verify that a check can fail": the
+mutation test that cleared it was run on an idle database, where the hole cannot
+appear.
+
+A parallel session reviewing #426's own guard hit it first and fixed it there
+(`claude/n426-lock-guard-followup`); this branch's reviewer reached the same
+finding independently. The fix is theirs and is adopted here: `Lock` records
+`pg_backend_pid()` on the connection it succeeded on, and `AssertHeld` reads
+`pg_locks` and requires **exactly one** holder whose pid is that one. Demonstrated
+rather than argued — with the `Lock` call deleted **and an unrelated psql session
+holding the key**, the old probe passes and the new guard fails; unmutated, with
+the same neighbour holding, the package waits 81s for its turn and then passes.
+
+Two smaller things came out of the same review and are in: `TryLock`/`Unlock`
+take a concrete `*pgx.Conn` rather than the `Conn` interface, so locking through
+a *pool* — which would park the lock on an arbitrary pooled session nothing ever
+releases, wedging every other lane — is a type error instead of a warning in
+prose; and `testdb`'s own contention tests shorten the budget **before** the
+holder acquires, because unlike every consumer they wait inside a *test*, under
+Go's `-timeout` alarm, where a five-minute budget could panic the package instead
+of producing the message.
 
 **Left open.** `-p 1` is now doing less than it used to: the shared lock would
 serialise packages within one invocation as well. It stays, because it is the

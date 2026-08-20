@@ -623,7 +623,7 @@ One binary at a time owns the database; the lock dies with the connection, so a
 crashed run cannot wedge the next one, and the key is hashed against
 `current_database()` so a per-branch `vola_test_<branch>` and CI's throwaway
 database never queue at all. Same four-lane measurement after: **0 failures in
-24 runs**, for **+17% wall clock** (386s → 452s for the 24 runs; per-run median
+24 runs**, for **+17% wall clock** (387s → 453s for the 24 runs; per-run median
 57s → 72s, and the spread *narrows*, 39–105s → 63–93s). That is the price and it
 is worth naming: serialising is not free, it is cheaper than nine packages of
 spurious red. **`-p 1` stays** — it is the right thing inside one invocation and

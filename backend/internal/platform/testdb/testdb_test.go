@@ -29,6 +29,35 @@ func connect(t *testing.T) *pgx.Conn {
 	return conn
 }
 
+// takeTheLock returns a connection holding the real lock, and releases it after
+// the test.
+//
+// The budget is shortened FIRST, and that is not cosmetic. Every consumer
+// package waits inside `TestMain`, before `m.Run` starts Go's `-timeout` alarm,
+// so a five-minute wait there is safe. This package waits inside a *test*, under
+// CI's `-timeout 3m` — so at the shipped budget a neighbour holding for longer
+// than three minutes (a `-count=10` run: exactly the case the budget is sized
+// for) would panic this package on the test timeout instead of producing the
+// message. 60s is comfortably inside the alarm and still long enough to queue
+// behind a real neighbour, which happens: a review run of this file waited 14s
+// behind another worktree's binary.
+func takeTheLock(t *testing.T) *pgx.Conn {
+	t.Helper()
+	conn := connect(t) // skips without TEST_DATABASE_URL
+
+	restore := lockWait
+	lockWait = 60 * time.Second
+	// Take it properly rather than assuming it is free: another binary may
+	// legitimately hold it, and Lock is what queues for it.
+	err := Lock(context.Background(), conn)
+	lockWait = restore
+	if err != nil {
+		t.Fatalf("take the lock on the holding connection: %v", err)
+	}
+	t.Cleanup(func() { _ = Unlock(context.Background(), conn) })
+	return conn
+}
+
 // The deadline is the one behaviour here that no other test can reach: every
 // package's TestMain takes the lock on the happy path, so the WAIT is exercised
 // constantly and the give-up is exercised never. Left untested it would be the
@@ -40,14 +69,7 @@ func connect(t *testing.T) *pgx.Conn {
 // command that fixes it.
 func TestLockGivesUpWithAnActionableMessageRatherThanHanging(t *testing.T) {
 	ctx := context.Background()
-	holder := connect(t) // skips without TEST_DATABASE_URL
-
-	// Take it properly rather than assuming it is free: another binary may
-	// legitimately hold it, and Lock is what queues for it.
-	if err := Lock(ctx, holder); err != nil {
-		t.Fatalf("take the lock on the holding connection: %v", err)
-	}
-	defer func() { _ = Unlock(ctx, holder) }()
+	takeTheLock(t) // skips without TEST_DATABASE_URL
 
 	// Confirm the apparatus is armed before believing what it proves: if the
 	// holder did not really have the lock, the waiter below would simply take
@@ -97,11 +119,7 @@ func TestLockGivesUpWithAnActionableMessageRatherThanHanging(t *testing.T) {
 // failure with no visible connection to locking at all.
 func TestTheWaitDoesNotLeaveALockTimeoutOnTheConnection(t *testing.T) {
 	ctx := context.Background()
-	holder := connect(t)
-	if err := Lock(ctx, holder); err != nil {
-		t.Fatalf("take the lock on the holding connection: %v", err)
-	}
-	defer func() { _ = Unlock(ctx, holder) }()
+	takeTheLock(t)
 
 	restore := lockWait
 	lockWait = 300 * time.Millisecond

@@ -46,7 +46,7 @@
 //
 //	                       before        after
 //	failures               9 packages    none
-//	24 runs, wall clock    387s          453s   (+17%)
+//	24 runs, wall clock    386s          452s   (+17%)
 //	per run, median        57s           72s
 //	per run, spread        39–105s       63–93s
 //
