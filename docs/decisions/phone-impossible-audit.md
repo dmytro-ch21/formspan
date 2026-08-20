@@ -39,7 +39,7 @@ Counts at the time of the sweep: **26 web routes, 46 mobile routes.**
 | 6 | The nutrition analytical surface — intake vs bodyweight vs training load, 7-day mean, adherence % | `/dashboard/nutrition` | none | open |
 | 7 | Author a weekly training theme | `/dashboard/calendar` (`setTheme`) | `lib/themes.ts`: *"read-only on the phone… no write path here on purpose"* | open |
 | 8 | Create / edit / delete your own curriculum or roadmap | `curricula/new`, `[id]/edit` | mobile `lib/curriculum.ts` exports only `getCurriculum`, `enroll`, `archive` | open |
-| 9 | View, edit, copy or delete a sequence | `sequences/*` | mobile can only *capture* one inside `bjj/reflect/[id]` — **no list or detail screen exists** | **read-back by N80 (PRNUM); edit/copy/delete still open** |
+| 9 | View, edit, copy or delete a sequence | `sequences/*` | mobile can only *capture* one inside `bjj/reflect/[id]` — **no list or detail screen exists** | **read-back by N80 ([#449](https://github.com/dmytro-ch21/formspan/pull/449)); edit/copy/delete still open** |
 | 10 | The technique funnel as a browsable surface | `/dashboard/proficiency` | mobile `fetchProficiency` feeds the Today card only | open |
 | 11 | Per-exercise load over time | `records` + `LoadHistoryChart` | mobile has no `fetchLoadHistory` | open |
 | 12 | Session search by name, period/sport filters, a paged list | `/dashboard/sessions` | mobile's month sheet has neither | open |
@@ -49,7 +49,7 @@ Counts at the time of the sweep: **26 web routes, 46 mobile routes.**
 in the Library"* — a destination that does not exist on the phone. The app
 captured data it could never show back, and said otherwise.
 
-**N80 (PRNUM) closed the reading half.** `app/sequence/index.tsx` and
+**N80 ([#449](https://github.com/dmytro-ch21/formspan/pull/449)) closed the reading half.** `app/sequence/index.tsx` and
 `app/sequence/[id].tsx` list and render chains on the phone, accepting a shared
 sequence now navigates to the copy instead of describing where it went, and the
 You tab carries an entry point so a chain is findable a week later rather than
@@ -124,7 +124,7 @@ Each is superseded on the exclusivity, not on the design.
 | `nutrition-design.md` §4 | "Set / explain the target — **read-only** mobile" — the read-only half is what N72 closed |
 | `nutrition-design.md` §4 | "Intake vs weight vs training load — ✗ / ✅" |
 | `nutrition-design.md` §5 | "one web screen with three sections" — `CLAUDE.md` already rules this "one screen on each"; N69 delivered the feasibility section on both, the other two are still web-only |
-| `functional-scenarios.md` | "Building and refining [sequences] stay on web"; "No browse or detail screen on mobile" — **corrected on the exclusivity by N80 (PRNUM)**: reading is now on both, building is still web-only, and that is allowed |
+| `functional-scenarios.md` | "Building and refining [sequences] stay on web"; "No browse or detail screen on mobile" — **corrected on the exclusivity by N80 ([#449](https://github.com/dmytro-ch21/formspan/pull/449))**: reading is now on both, building is still web-only, and that is allowed |
 | `functional-scenarios.md` | Themes "Authored on web, read on the phone… **no way to author one on the phone**, deliberately" |
 | `curriculum-and-gameplan-design.md` | "roadmap *building* and the full funnel on web" |
 | `system-design.md` | *"nothing a user needs weekly may be desktop-only"* — this one is not an assignment but a rule, and #1–#6 violate it. Nutrition is daily. |
@@ -172,7 +172,7 @@ than bookkeeping:
   defect. That ordering was right for a second reason that only showed up in the
   fixing: the false sentence was the *cheap* half, and a ticket that can be
   half-closed truthfully in an afternoon is worth putting first. Closed by N80
-  (PRNUM) — see the note under the table for what it deliberately left.
+  ([#449](https://github.com/dmytro-ch21/formspan/pull/449)) — see the note under the table for what it deliberately left.
 - **Rows 6, 10 and 11 are one issue**, not three. They share a shape — a
   read-only analytical surface that exists on web and nowhere else — and a
   solution, so splitting them would be three tickets that each half-build the
