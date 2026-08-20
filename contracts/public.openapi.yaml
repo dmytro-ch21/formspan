@@ -5973,10 +5973,19 @@ paths:
 
 
         **Capped at 20 per athlete per rolling 24 hours**, persisted, so the
-        limit survives a restart. Failed and refused calls count too — they
-        spend tokens, and a quota counting only successes would let a client
+        limit survives a restart. Refused calls count too — a refusal is a
+        billed answer, and a quota counting only successes would let a client
         loop on a photo the model keeps declining and pay for every attempt. See
         the 429 below for how this differs from the shared burst limit.
+
+
+        **A call the provider never answered does NOT count.** A refused
+        connection, a DNS failure, a revoked key or an upstream error status
+        spends no tokens, so it spends none of the 20 — an outage would
+        otherwise empty the allowance during exactly the unfamiliar-gym session
+        this feature exists for, and the quota is persisted, so unlike the burst
+        limiter it does not recover on restart. Those arrive as `503` with the
+        code `unavailable`.
       requestBody:
         required: true
         content:
@@ -6119,8 +6128,17 @@ paths:
                 $ref: "#/components/schemas/Error"
         "503":
           description: >
-            The provider is unreachable, or this deploy has no API key
-            configured. A retry is reasonable.
+            The provider never answered — a refused connection, a DNS failure,
+            a revoked key, an upstream error status — or it answered with
+            something unusable, or this deploy has no API key configured.
+
+
+            **Read the `code` to tell them apart, and only the code** — the
+            message is not part of this contract. `unavailable` means the
+            provider never answered: nothing was spent and **this call did not
+            use one of the athlete's 20**, so a client may say so and may retry
+            the identical request once service returns. `internal` means the
+            call completed and was charged, or that this deploy has no key.
           content:
             application/json:
               schema:
@@ -7075,10 +7093,21 @@ paths:
 
 
         **Quota: 10 per athlete over a rolling 24 hours**, checked BEFORE the
-        model is called. Failed and refused calls count, because they cost
-        tokens too. Exhaustion is `429` with `rate_limited` and a `Retry-After`
+        model is called. Refused calls count, because a refusal is a billed
+        answer and a caller could otherwise loop on a dictation the model keeps
+        declining. Exhaustion is `429` with `rate_limited` and a `Retry-After`
         header in seconds; the reset is also stated in the message as a
         relative duration, never as a timestamp.
+
+
+        **A call the provider never answered does NOT count.** A refused
+        connection, a DNS failure, a revoked key or an upstream error status
+        spends no tokens, so it spends none of the ten — before this an outage
+        emptied the day's allowance one retry at a time and left the athlete
+        locked out for up to 24 hours after service returned. Those arrive as
+        `503` with the code `unavailable`, which is what separates them from
+        every other failure here: `unavailable` means our provider is broken
+        and the identical request will work later.
       security:
         - ClerkBearerAuth: []
       requestBody:
@@ -7153,6 +7182,15 @@ paths:
             or drafting is not configured on this deploy (no API key). All
             three are retryable and none is the client's fault; every other bjj
             route is unaffected.
+
+
+            **Read the `code` to tell them apart, and only the code** — the
+            message is not part of this contract. `unavailable` means the
+            provider never answered: nothing was spent and **this call did not
+            use one of the athlete's ten**, so a client may say so and may
+            retry the identical request once service returns. `internal` means
+            the call did complete and was charged, or that this deploy has no
+            API key.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -9579,10 +9617,20 @@ paths:
         of it.
 
 
-        Failed and refused calls count, because they cost tokens too.
-        Exhaustion is `429` with `rate_limited`, carrying a `Retry-After`
-        header in seconds; the reset is also stated in the message as a
-        relative duration, never as a timestamp.
+        Refused calls count, because a refusal is a billed answer and a caller
+        could otherwise loop on input the model keeps declining. Exhaustion is
+        `429` with `rate_limited`, carrying a `Retry-After` header in seconds;
+        the reset is also stated in the message as a relative duration, never
+        as a timestamp.
+
+
+        **A call the provider never answered does NOT count.** A refused
+        connection, a DNS failure, a revoked key or an upstream error status
+        spends no tokens, so it spends none of the 25 — before this an outage
+        emptied the day's allowance one retry at a time and left the athlete
+        locked out for up to 24 hours after service returned. Those arrive as
+        `503` with the code `unavailable`, distinct from the `502` below, which
+        is a provider that DID answer and answered with something unusable.
       tags: [Nutrition]
       security:
         - ClerkBearerAuth: []
@@ -9673,19 +9721,34 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '502':
           description: >
-            The model provider is unreachable, OR it answered with something
-            unusable — an absurd magnitude, a NaN, an item with no name. Both
-            are retryable and neither is the client's fault, which is why a
-            bad response is not reported as `400`: the request was already
-            validated before a token was spent, so there is nothing in it to
-            correct.
+            The provider ANSWERED and the answer was unusable — an absurd
+            magnitude, a NaN, an item with no name, an empty body. Retryable
+            and not the client's fault, which is why it is not reported as
+            `400`: the request was validated before a token was spent, so
+            there is nothing in it to correct.
+
+
+            **This one DID cost an estimate.** The provider produced a
+            response and billed for it, so the call is metered. A provider that
+            never answered at all is `503`/`unavailable` instead, and that one
+            costs nothing.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '503':
           description: >
-            Estimation is not configured on this deploy (no key for the
-            selected provider). Every other nutrition route is unaffected.
+            Either the provider never answered — refused connection, DNS
+            failure, revoked key, upstream error status — or estimation is not
+            configured on this deploy (no key for the selected provider).
+            Every other nutrition route is unaffected.
+
+
+            **Read the `code` to tell them apart, and only the code** — the
+            message is not part of this contract. `unavailable` means the
+            provider never answered: nothing was spent and **this call did not
+            use one of the athlete's 25**, so a client may say so and may
+            retry the identical request once service returns. `internal` means
+            this deploy has no API key, which no retry will fix.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

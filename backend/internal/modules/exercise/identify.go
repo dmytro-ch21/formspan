@@ -39,6 +39,22 @@ var ErrIdentifyRefused = errors.New("exercise: could not tell what machine that 
 // unconfigured.
 var ErrIdentifyUnavailable = errors.New("exercise: machine identification is unavailable")
 
+// ErrIdentifyUnreachable is the provider never answering at all — a refused
+// connection, a DNS failure, a revoked key, an upstream 5xx.
+//
+// **It WRAPS ErrIdentifyUnavailable**, so every existing check keeps matching
+// and forgetting it somewhere degrades to today's behaviour rather than to a
+// 500. Same shape as nutrition's and bjj's.
+//
+// This route was NOT in F16's original scope — the issue says "the identify
+// route uses an in-memory limiter, so it recovers on restart", which was true
+// when it was filed and stopped being true with N48. `identify_usage` is a
+// Postgres table with the same rolling 24-hour window as the other two, so an
+// outage burned this allowance exactly as hard. The in-memory limiter is still
+// there and still in memory; it is the second, tighter gate that the quota
+// backs up, not the one doing the locking out.
+var ErrIdentifyUnreachable = fmt.Errorf("%w: the provider never answered", ErrIdentifyUnavailable)
+
 // MaxIdentifyImageBytes bounds the photo before base64 expansion.
 //
 // Matches nutrition's bound deliberately. A gym photo and a plate photo come

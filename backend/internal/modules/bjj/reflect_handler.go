@@ -132,15 +132,28 @@ func (h *DraftHandler) Draft(w http.ResponseWriter, r *http.Request) {
 	// should not lose a draft they have already paid for because the meter
 	// write lost a race.
 	//
-	// **A transport failure that spent NOTHING is charged too, and that is the
-	// unhappy edge of this rule.** A refused connection or a revoked key never
-	// reached a token, but the sentinel cannot say so — `ErrDraftUnavailable`
-	// covers both "failed before the call" and "failed after it". So during a
-	// provider outage the 503's implicit advice to retry burns the athlete's ten
-	// and can lock them out for the rest of the day after service returns.
-	// Charging is still the right default (the alternative lets a caller loop on
-	// a failure mode they can induce), but the interaction is real and is filed
-	// as F16 rather than left for somebody to rediscover during an outage.
+	// **A transport failure that spent NOTHING is no longer charged.** This
+	// block used to say the opposite and file the consequence as F16; #367 is
+	// that fix. A refused connection, a DNS failure, a revoked key or an
+	// upstream 5xx never reached a token, and charging one of the athlete's ten
+	// for it meant a provider outage locked them out for the rest of the day
+	// after service returned — with the 503's own advice to retry doing the
+	// burning.
+	//
+	// The loop-prevention property is intact: a REFUSAL still meters, and a
+	// refusal is the input-determined failure a caller could otherwise sit in.
+	// An outage is not induced by anyone's dictation.
+	//
+	// Nothing is written on this path rather than a row marked unmetered —
+	// `bjj_reflection_drafts` records calls that happened, and this one did
+	// not. The log line carries the operational fact.
+	if errors.Is(draftErr, ErrDraftUnreachable) {
+		httplog.FromContext(r.Context()).Warn("bjj: reflection draft not metered, provider never answered",
+			"user_id", userID, "err", draftErr)
+		writeDraftError(w, draftErr)
+		return
+	}
+
 	if err := h.usage.RecordDraft(context.WithoutCancel(r.Context()), DraftRecord{
 		UserID: userID, Succeeded: draftErr == nil,
 		Model: draft.Model, TagCount: len(draft.Tags),
@@ -216,6 +229,18 @@ func writeDraftError(w http.ResponseWriter, err error) {
 			"could not read that as a session — try saying what happened in plainer terms")
 	case errors.Is(err, ErrInvalidInput):
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, draftValidationMessage(err))
+	case errors.Is(err, ErrDraftUnreachable):
+		// Same 503 as the default arm below, and a DIFFERENT code — which is
+		// the whole change here. `internal` says we are broken; `unavailable`
+		// says our provider is, and only the second is a retry instruction the
+		// client can act on without matching a prose message the conventions
+		// forbid it from matching. Before this an outage, an unconfigured
+		// deploy and an unmapped bug all arrived as `internal`.
+		//
+		// The message says the draft was not charged, because otherwise the
+		// athlete assumes it was and stops trying.
+		apihttp.WriteError(w, http.StatusServiceUnavailable, apihttp.CodeUnavailable,
+			"drafting a reflection is unavailable right now — this one did not use any of your daily drafts")
 	default:
 		// Everything else, including ErrDraftUnavailable. 503 rather than 500
 		// because a retry is the right advice, and the message is fixed — the

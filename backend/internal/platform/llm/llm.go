@@ -42,6 +42,8 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 )
 
 // ErrRefused means the provider declined to answer.
@@ -59,13 +61,118 @@ import (
 // so a retry produces the same truncation and bills the caller twice for it.
 var ErrRefused = errors.New("llm: the provider declined the request")
 
-// ErrUnavailable covers everything else — transport failure, an empty body, an
-// upstream 5xx.
+// ErrUnavailable covers a call that REACHED the provider and came back
+// unusable — an HTTP 200 with no choices, an empty body, a response whose
+// envelope could not be read.
 //
-// Implementations must map their own errors onto these two and never return a
+// It used to cover transport failures and upstream 5xxes as well. Those moved
+// to ErrUnreachable below, and the line between the two is now the one a caller
+// meters on: this sentinel means the model may well have answered and been
+// billed for it, so the call still counts against whatever budget the caller
+// keeps.
+//
+// Implementations must map their own errors onto these three and never return a
 // raw upstream error: those carry request ids and prompt fragments, and this
 // package's errors reach a client through the caller's error vocabulary.
 var ErrUnavailable = errors.New("llm: the provider is unavailable")
+
+// ErrUnreachable means the provider produced NO ANSWER, so nothing was billed
+// for one.
+//
+// # Why a third sentinel rather than a flag on ErrUnavailable
+//
+// Every LLM-backed endpoint in this repo meters failures on purpose: a refusal
+// costs tokens, so a caller that could loop on input the model keeps declining
+// would spend our money doing it. But two sentinels forced one answer for two
+// opposite situations. A connection refused, a DNS failure and a revoked key
+// spend NOTHING, and charging the athlete a slice of their daily allowance for
+// them means a provider outage locks them out of the feature for up to a day
+// after service returns — punishing the user for our supplier's failure, on a
+// request they did everything right on. That is F16 (#367).
+//
+// The knowledge needed to tell those apart exists only here. Above this package
+// an error is an error; the HTTP status, or the absence of any HTTP response at
+// all, is visible at the transport and nowhere else.
+//
+// # What maps here, exactly
+//
+//   - No HTTP response at all — connection refused, DNS failure, TLS failure,
+//     a dial timeout. Both SDKs return the `net/http` error unwrapped in this
+//     case ("Other errors are not wrapped by this SDK"), which is what makes it
+//     detectable rather than guessed at.
+//   - Any HTTP error status the provider's API answered with — 401 on a revoked
+//     key, 429, 500/503/529 during an outage. The API layer rejected or dropped
+//     the request; no completion exists, and neither provider returns a usage
+//     block on an error response.
+//
+// The name says "unreachable" and the second bullet stretches it — a 503 did
+// reach the provider's front door. They are one sentinel because the CALLER's
+// action is identical in both: do not meter it, and tell the client to try
+// again. Splitting them would create a distinction no caller acts on.
+//
+// # What deliberately does NOT map here
+//
+//   - A refusal or a truncation. Both are billed HTTP 200s. They stay
+//     ErrRefused and they stay metered — that is the loop-prevention property
+//     this whole scheme exists for, and it is untouched.
+//   - A CANCELLED or timed-out call. The request very likely reached the model
+//     and was billed for an answer nobody stayed to read, and "the caller hangs
+//     up mid-call" is precisely the spend-somebody-else's-money loop the meter
+//     was hardened against in review. Those keep costing the caller, so
+//     `neverReachedProvider` checks the context errors FIRST and answers false.
+//   - A 200 whose body could not be read or parsed. The model answered; we
+//     failed. ErrUnavailable, and metered, because it was billed.
+var ErrUnreachable = errors.New("llm: the provider never answered")
+
+// neverReachedProvider reports whether err means no HTTP response ever arrived.
+//
+// `*url.Error` is the discriminator, and it is exact rather than a heuristic:
+// `http.Client.Do` wraps every failure it returns in one, and it returns an
+// error ONLY when no response headers were received. Once headers are in, `Do`
+// succeeds and any later failure — a body read, a JSON parse — comes back
+// unwrapped by `*url.Error`. So this answers "the request never completed at
+// the HTTP level", which is the question, instead of "some network-ish thing
+// happened", which would also catch a body-read failure on a call that was
+// billed in full.
+//
+// **The context check has to come first.** A cancelled request can surface as a
+// `*url.Error` wrapping `context.Canceled`, and reading that as "never reached
+// the provider" would stop metering exactly the cancel-loop the meter was
+// hardened against.
+func neverReachedProvider(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var urlErr *url.Error
+	return errors.As(err, &urlErr)
+}
+
+// callFailure turns one provider's SDK error into this package's vocabulary.
+//
+// Shared rather than written twice, because two copies is two chances for the
+// backends to disagree about whether an outage costs the athlete a meal
+// estimate — the same reasoning that put the refusal and truncation branches
+// under one rule. What each provider supplies is the half only it can know:
+// `apiStatus`, the HTTP status its own SDK error type carries, or 0 when the
+// SDK returned something that is not an API error at all.
+//
+// The upstream text is embedded for the caller's LOG, never for its client;
+// every consumer writes a fixed message and logs this error, which is the
+// convention in docs/architecture/api-conventions.md.
+func callFailure(err error, apiStatus int) error {
+	switch {
+	case apiStatus >= 400:
+		// Deliberately NOT the upstream text on this branch: an API error's
+		// `Error()` renders the full response body, and a 4xx body is the one
+		// most likely to quote the request back. The status is the whole
+		// signal.
+		return fmt.Errorf("%w: provider answered HTTP %d", ErrUnreachable, apiStatus)
+	case neverReachedProvider(err):
+		return fmt.Errorf("%w: %v", ErrUnreachable, err)
+	default:
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+}
 
 // There is a THIRD outcome, and this package deliberately has no error for it.
 //

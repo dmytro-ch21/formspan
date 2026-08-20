@@ -50,6 +50,19 @@ var (
 	// ErrDraftUnavailable is the upstream being unreachable, erroring, or
 	// unconfigured. Retryable, unlike a refusal.
 	ErrDraftUnavailable = errors.New("bjj: drafting a reflection is unavailable")
+	// ErrDraftUnreachable is the provider never answering at all — a refused
+	// connection, a DNS failure, a revoked key, an upstream 5xx.
+	//
+	// **It WRAPS ErrDraftUnavailable**, so every existing `errors.Is(err,
+	// ErrDraftUnavailable)` keeps matching and the cost of overlooking this
+	// sentinel somewhere is "behaves as it did before" rather than a 500. Same
+	// shape as nutrition's ErrEstimateUnreachable, deliberately — two endpoints
+	// with the same problem should not grow two different answers to it.
+	//
+	// What it changes is that the handler does not METER a call carrying it.
+	// The provider spent nothing, so the athlete is charged nothing. F16
+	// (#367); `llm.ErrUnreachable` holds the taxonomy.
+	ErrDraftUnreachable = fmt.Errorf("%w: the provider never answered", ErrDraftUnavailable)
 	// ErrDraftQuotaExhausted is the per-athlete daily cap. Its own error rather
 	// than a generic invalid-input, because the client's response is to say when
 	// the cap resets rather than to change the request.
