@@ -32158,6 +32158,121 @@ not the work.
 - **#232 predates all of this** — an open issue about the share-card export size
   that `TASKS.md` records as fixed. Added to the board as `Todo`; it is probably
   closeable, but that is the user's call, not a migration decision.
+## 2026-08-20 — Why a branch gets zero CI checks: it conflicts with its base (N65)
+
+**A pull request that conflicts with `main` receives ZERO check runs, silently,
+and that is indistinguishable from every check passing.** N65 (#368) had the
+symptom precisely documented and five hypotheses eliminated with evidence; none
+of them was the cause, and the cause turns out to be a documented property of
+how GitHub schedules `pull_request` workflows.
+
+A `pull_request` workflow does not run on your branch. It runs on
+`refs/pull/N/merge` — the commit GitHub builds by merging head into base. When
+the pull request conflicts, that commit cannot be built, so **no workflow run is
+created at all**: no failure, no annotation, no `action_required`, nothing
+queued. `gh pr view` reports no failed checks because there are none.
+`statusCheckRollup` is `[]`. `mergeStateStatus` does not distinguish it either.
+
+### The evidence, in both directions
+
+Retrospective, on #338 (`feat/n50-web-telemetry`), the branch #368 was filed
+from. Its force-pushed head SHAs are still fetchable from GitHub, so the
+reconstruction is measurement rather than inference:
+
+| time (UTC) | event | head | base tip | mergeable | runs |
+|---|---|---|---|---|---|
+| 22:09:15 | opened, claim commit | `ef7cf0ac` | `5434f910` | clean | **5** |
+| ~22:15 | `main` moves to `99c597c7` | — | — | **conflicts** | — |
+| 22:43:26 | `reopened` | — | `94a63d2e` | conflicts | **0** |
+| 22:49:11 | force-push | `d6aba090` | `94a63d2e` | conflicts | **0** |
+| 22:52:53 | force-push, **rebased** | `701451d5` | `94a63d2e` | clean | **5** (4s later) |
+
+`git merge-tree --write-tree 94a63d2e d6aba090` exits 1 with conflicts in
+`docs/TASKS.md` and `docs/testing/functional-scenarios.md`. Sweeping the same
+head against every intermediate `main` tip puts the onset at `99c597c7`, six
+minutes after the one run the branch ever got — which is exactly the observation
+in #368 that "the only run that branch ever had was on its empty claim commit".
+
+Note what the table also shows: **the base tip was the same `94a63d2e` for both
+the 22:49 force-push that got nothing and the 22:52 one that got five.** So it
+was never staleness of the base. It was mergeability of the head against it, and
+those two are easy to confuse because rebasing fixes both.
+
+Prospective, because a story consistent with the record is not the same as a
+demonstrated mechanism — and this repo has been burned by exactly that gap
+before (the provider stub that agreed perfectly with its own tests). Throwaway
+PR #393 edited one `docs/TASKS.md` line that `main` had already changed, so it
+conflicted deliberately:
+
+- conflicting head `978bf8bc` — **0** check runs, `mergeable: CONFLICTING`,
+  `mergeStateStatus: DIRTY`, `statusCheckRollup` empty.
+- rebased head `ee6d49ca`, **the same one-line diff**, only the base changed —
+  **5** check runs within about two minutes, `mergeable: MERGEABLE`.
+
+Draft status is not involved: #390, a clean draft, had its five throughout.
+#393 was closed and its branch deleted once measured.
+
+### What shipped
+
+`scripts/check-ci-checks.py`, wired as `pnpm run ci:checks`. It reads the pull
+request's **`headRefOid`** — not the newest run on the branch, which
+`gh run list --branch` will happily report green for a commit two pushes ago —
+counts the check runs on it, compares the run *names* against the jobs the
+workflow files actually declare, and exits non-zero for zero runs (1), a missing
+declared check (1), a failure (2) and a still-pending check (3). When it finds
+zero and `mergeable` is `CONFLICTING` it says so and prints the rebase.
+
+The expected set is derived from `.github/workflows/*.yml` rather than
+hardcoded, so a sixth CI job raises the bar by itself — but cross-checked
+against a measured literal `EXPECTED_CHECK_RUNS = 5`, because **a parser that
+silently reads one job would make the whole detector vacuous**, which is the
+usual way a detector dies. Disagreement between the two fails loudly rather than
+trusting either. A job `matrix:` is refused for the same reason: it would
+under-count silently.
+
+It is deliberately **not** in `verify` — `verify` runs before a pull request
+exists and must work offline. What is in `verify` is
+`check:ci-detector`, its offline `--self-test`: eight decision vectors that each
+assert an exit *code*, not merely non-zero, since a mutant returning 1 for
+everything would satisfy a non-zero assertion while being useless.
+
+**Demonstrated failing before being believed**, per the rule this repo already
+has. Mutating `evaluate` to return `EXIT_OK` unconditionally turns 6 of the 8
+vectors red; removing only the zero-run branch — the seductive "no runs means
+nothing failed" simplification, which is the bug itself expressed as a
+refactor — turns exactly the `zero runs` vector red on its message. Against real
+commits: `--sha d6aba090` (the historical wedged commit) exits 1 reporting 0;
+`--pr 393` while conflicting exited 1 and named the cause; `--pr 390` exits 0
+reporting 5. The green baseline was confirmed in the same session, so the red
+runs are evidence rather than an unrelated breakage.
+
+### What this leaves behind
+
+**The files every task edits are the mechanism's fuel**: `docs/decisions/history.md`,
+`docs/testing/functional-scenarios.md` and `package.json`'s one-line `verify`
+chain — plus `docs/TASKS.md`, which was the fourth until the entry above
+archived it, and which is the file that actually wedged #338. Every branch
+touches at least two, so any branch open long enough will eventually conflict
+and go quiet. N63/N66 already treat that churn as a problem in its own right;
+this is a second cost of it, and the one that is invisible. Moving the open list
+to Issues removes one of the four; it does not remove the mechanism, and this
+branch hit it itself — the rebase onto `811f346` conflicted in `history.md`, on
+an append-versus-append, which is the half of N63 that migration explicitly did
+not solve.
+
+**Nothing prevents it, and nothing yet notices it unprompted.** `ci:checks` has
+to be run. A repository ruleset requiring the five checks as *required status
+checks* would block the merge instead — a required check that never runs leaves
+the PR blocked rather than mergeable — and that is the structural fix. It is not
+done here because branch protection is a repository setting the user owns, not
+a change a PR can make.
+
+**Not investigated: whether every zero-check case is this one.** #368 recorded
+two occurrences in a day; #338 is the one with a preserved record, and it is
+fully explained. A future occurrence should have `mergeable` captured **before**
+rebasing, since the rebase destroys the evidence — `ci:checks` now prints it
+automatically, which is the cheapest way to make that happen.
+
 
 
 ## 2026-08-20 — The polite client was the one being punished (F15)

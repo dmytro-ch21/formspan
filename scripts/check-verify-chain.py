@@ -93,7 +93,7 @@ GATE_PREFIXES = (
 # with nothing objecting, because the check only ever sees the gates that are
 # still named like gates. Same floor `check-tasks-integrity.py` puts on ids.
 # Raise this deliberately when a gate is genuinely retired.
-MIN_GATES = 27
+MIN_GATES = 28
 
 # A CI command shorter than this substring-matches by accident.
 MIN_CI_COMMAND_LEN = 12

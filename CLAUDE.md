@@ -262,6 +262,57 @@ needs no `setup-python`.
 
 Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch <run-id> --exit-status`.
 
+### CI can run ZERO checks, and that looks exactly like passing (hard rule)
+
+**Count the check runs. Never read the absence of failures.**
+
+```bash
+pnpm run ci:checks          # the current branch's PR; --pr <n> or --sha <sha> also work
+```
+
+It must report 5 and exit 0. A count of **0** satisfies "no failures"
+trivially: `gh pr view` shows nothing red because there is nothing at all,
+`statusCheckRollup` is an empty list, and `mergeStateStatus` does not
+distinguish the two either. This is the absence-reads-as-answer failure landing
+in the one place that decides whether code ships, so it gets its own command
+rather than a habit.
+
+**The cause is known, as of 2026-08-20 (N65, #368).** A `pull_request` workflow
+does not run on your branch — it runs on `refs/pull/N/merge`, the commit GitHub
+builds by merging your head into the base. **If the PR conflicts with its base,
+that merge commit cannot be built, so no workflow run is created at all**, with
+no failure, no annotation and nothing anywhere saying so. Your branch is not
+broken and CI is not down; the pull request is simply unmergeable and GitHub
+declines silently.
+
+So **if a PR shows zero checks, this is the first thing to do, not the last**:
+
+```bash
+git fetch origin && git rebase origin/main && git push --force-with-lease
+```
+
+It costs nothing when CI is healthy and it is the fix when it is not. Note the
+trap in the shape of it: a long-lived branch is *fine* until `main` happens to
+touch a line it also touches, and then it goes quiet — so the branches this
+bites are the ones that have been open longest and had the most pushed to them.
+`docs/decisions/history.md`, `docs/testing/functional-scenarios.md` and
+`package.json`'s `verify` line are the files every task edits, which is why this
+recurs. (`docs/TASKS.md` was a fourth until 2026-08-20 archived it — and it was
+the one that wedged the branch in #368, so moving the open list to Issues
+removes one source of this, not the mechanism.)
+
+Measured, both directions, on one throwaway PR with the same one-line diff and
+only the base changed: conflicting head → **0** check runs, `mergeable:
+CONFLICTING`, `mergeStateStatus: DIRTY`; rebased head → **5** runs within two
+minutes, `mergeable: MERGEABLE`. Draft status is not involved — a clean draft
+PR gets its five.
+
+`pnpm run ci:checks` reads the PR's **`headRefOid`**, not the newest run on the
+branch, because `gh run list --branch` will hand you a green run for a commit
+two pushes ago. It also prints `CONFIRMED CAUSE` when `mergeable` is
+`CONFLICTING`. `check:ci-detector` in `verify` is its offline self-test, not a
+check of any PR.
+
 **Never merge a PR without the user's explicit go-ahead, even if CI is green.** This has been the rule for every PR in this project — don't treat a passing CI run as implicit merge permission.
 
 ## The open list (hard rule)
@@ -740,6 +791,10 @@ a piece of apparatus returning a confident result while measuring nothing.
 - Two check-digit guards validating arithmetic the code had just performed
   itself, so they were true by construction.
 - CI silently skipping pushes, so an absent run read exactly like a passing one.
+  **Diagnosed 2026-08-20 (N65) — the cause is a merge conflict with the base,
+  and the detector is `pnpm run ci:checks`. See "CI can run zero checks" in
+  the Git/PR workflow section; this bullet is the symptom, that is the
+  mechanism.**
 - A build failing with `PluginError` and **exiting 0** while printing it.
 
 **A stub built from an assumption cannot falsify it.** The sharpest instance:
@@ -757,7 +812,8 @@ way:
 - **Absence is not evidence.** No checks is not passing; no output is not
   silence; a grep that finds nothing has found nothing, not proven nothing is
   there. (`gh run list --branch` will hand you a green run for a stale commit —
-  compare `headSha` against the PR's `headRefOid`.)
+  compare `headSha` against the PR's `headRefOid`.) **The sharpest instance is
+  CI itself: count the check runs, never the failures — `pnpm run ci:checks`.**
 - **A guard whose outcome is redundant still needs a test**, on its *message*
   if not its effect — otherwise a surviving mutation reads as dead code, and
   "the tests still pass without it" is a very persuasive argument for deleting
