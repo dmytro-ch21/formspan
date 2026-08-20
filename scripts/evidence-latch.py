@@ -128,12 +128,30 @@ CHECKBOX_RE = re.compile(r"^[ \t]*[-*][ \t]+\[([ xX])\][ \t]*(.*)$", re.MULTILIN
 # directly after it. Both dash characters appear in the corpus.
 LABEL_SEPARATOR_RE = re.compile(r"^\s*[:\u2014\u2013-]")
 
-# `/evidence <observation>`, at the start of a line so it cannot be triggered by
-# somebody quoting the instruction mid-paragraph.
-ATTEST_RE = re.compile(r"^[ \t]*/evidence\b[ \t:]*(.*)$", re.MULTILINE)
+# `/evidence <observation>` at COLUMN ZERO. The leading `[ \t]*` this pattern
+# used to carry looked like ordinary tolerance and was a live defect:
+#
+#   **The latch's own comment contains a worked `/evidence` example**, indented
+#   as a code block. Comments written by GITHUB_TOKEN do not retrigger
+#   workflows, so the loop is masked on the ordinary path — but the BACKFILL
+#   posts that same comment under a human token, and the workflow then read the
+#   instructions as an attestation and closed the ticket it had just reopened.
+#   Measured 2026-08-20: #409, #433 and #446 reopened and re-closed by the bot
+#   within thirteen seconds, twice each.
+#
+# Requiring column zero means an indented or quoted example cannot attest, which
+# is why the example in `render_latch_comment` is indented. `LATCH_SENTINEL`
+# below is the second, independent guard.
+ATTEST_RE = re.compile(r"^/evidence\b[ \t:]*(.*)$", re.MULTILINE)
 
 # Forms deliberately NOT accepted, answered with guidance instead of silence.
-REJECTED_RE = re.compile(r"^[ \t]*/(done|verified|evidence-done|ok)\b.*$", re.MULTILINE)
+REJECTED_RE = re.compile(r"^/(done|verified|evidence-done|ok)\b.*$", re.MULTILINE)
+
+# Stamped into every comment this script writes, and refused on the way back in.
+# The column-zero rule already covers today's template; this covers the template
+# CHANGING — an author who reformats the example without indenting it would
+# otherwise re-arm the loop, and nothing would look wrong.
+LATCH_SENTINEL = "<!-- evidence-latch -->"
 
 # An observation has to look like one. Eight arbitrary characters was the first
 # floor and it was the tick-box in a costume with a longer hem: `/evidence
@@ -252,6 +270,9 @@ def parse_attestation(comment: str | None) -> Attestation | None:
     again or give up; `rejected` lets the caller answer with the right form.
     """
     text = comment or ""
+    if LATCH_SENTINEL in text:
+        # This script's own words coming back at it.
+        return None
     m = ATTEST_RE.search(text)
     if m:
         observation = m.group(1).strip().strip("`\"'")
@@ -350,14 +371,18 @@ def decide(
 
 def render_latch_comment(criteria: tuple[Criterion, ...], *, again: bool) -> str:
     lines = [c.text for c in criteria]
+    # Every comment this script writes carries the sentinel; `parse_attestation`
+    # refuses anything containing it. See LATCH_SENTINEL.
     checklist = "\n".join(f"{i}. {t}" for i, t in enumerate(lines, 1))
     if again:
         return (
+            f"{LATCH_SENTINEL}\n"
             f"**Still awaiting evidence — reopened again.**\n\n{checklist}\n\n"
             f"When you have run these, reply with what you saw:\n\n"
             f"    /evidence <what you observed>\n"
         )
     return (
+        f"{LATCH_SENTINEL}\n"
         f"**Reopened: the code merged, the evidence has not been produced.**\n\n"
         f"This ticket closed automatically, and it carries "
         f"{len(lines)} {'criterion' if len(lines) == 1 else 'criteria'} "
@@ -380,6 +405,7 @@ def render_latch_comment(criteria: tuple[Criterion, ...], *, again: bool) -> str
 
 def render_resolve_comment(observation: str) -> str:
     return (
+        f"{LATCH_SENTINEL}\n"
         f"**Evidence recorded — closing.**\n\n> {observation}\n\n"
         f"Evidence criteria ticked, `{LABEL}` removed.\n"
     )
@@ -388,12 +414,14 @@ def render_resolve_comment(observation: str) -> str:
 def render_guidance_comment(action: Action) -> str:
     if action.reason.startswith("evidence criteria were removed"):
         return (
+            f"{LATCH_SENTINEL}\n"
             f"The evidence criteria were removed from this ticket rather than ticked, "
             f"so `{LABEL}` has been dropped, but it has not been closed — deleting the "
             f"ask is not the same as answering it. Close it by hand if that was intended."
         )
     checklist = "\n".join(f"{i}. {c.text}" for i, c in enumerate(action.criteria, 1))
     return (
+        f"{LATCH_SENTINEL}\n"
         f"That does not release the latch, because it does not say what you saw.\n\n"
         f"    /evidence <what you observed>\n\n"
         f"Still outstanding:\n\n{checklist}\n"
@@ -662,7 +690,7 @@ def simulate(client: Client, number: int, event: str, comment: str | None) -> in
     return apply(client, number, issue, act)
 
 
-def backfill(client: Client) -> int:
+def backfill(client: Client, only: set[int] | None = None) -> int:
     """List (and optionally reopen) issues already closed with evidence outstanding.
 
     Listing is the default and reopening needs `--execute`, because a docstring
@@ -688,6 +716,22 @@ def backfill(client: Client) -> int:
         and outstanding(x.get("body"))
     ]
     hits.sort(key=lambda x: x["number"])
+
+    # `--only` exists because the first real backfill needed it. Five tickets
+    # matched the query and only THREE should have been reopened: on two of them
+    # the maintainer had written the evidence out in a comment and said so
+    # ("Staying closed — the evidence criterion was genuinely met"), leaving just
+    # the checkbox unticked. **An unticked box is not the same as absent
+    # evidence**, and no parser can tell them apart — reading the thread is what
+    # distinguishes them. So the narrowed list is the normal case for this
+    # command, not the exception, and it is expressible rather than something
+    # you achieve by running the unnarrowed version and apologising.
+    if only is not None:
+        missing = only - {x["number"] for x in hits}
+        if missing:
+            print(f"refusing: {sorted(missing)} are not in the outstanding set")
+            return 2
+        hits = [x for x in hits if x["number"] in only]
     print(f"{len(hits)} closed issue(s) with an unticked evidence criterion:\n")
     for x in hits:
         print(f"  #{x['number']}  {x['title'][:70]}")
@@ -812,6 +856,38 @@ def self_test() -> int:
     check("mid-line /evidence does not trigger",
           parse_attestation("reply with /evidence <what you saw> when done"), None)
 
+    # --- THE LOOP. This is the vector whose absence let a live defect ship. ---
+    #
+    # The latch's own comment shows a worked `/evidence` example. Feed that exact
+    # rendered comment back in: if it parses as an attestation, the mechanism
+    # closes the ticket it has just reopened. It did — #409, #433 and #446 were
+    # each reopened and re-closed within thirteen seconds during the first real
+    # backfill, because a backfill posts under a HUMAN token and human comments
+    # DO retrigger workflows (GITHUB_TOKEN ones do not, which is what masked it).
+    #
+    # Both guards are asserted separately, so neither can rot behind the other.
+    _example = tuple(outstanding("- [ ] **NEEDS HUMAN EVIDENCE** — seen on a device."))
+    check("LOOP: the latch's own comment must never attest",
+          parse_attestation(render_latch_comment(_example, again=False)), None)
+    check("LOOP: the re-latch comment must never attest",
+          parse_attestation(render_latch_comment(_example, again=True)), None)
+    check("LOOP: the resolve comment must never attest",
+          parse_attestation(render_resolve_comment("ran it on the device twice")), None)
+    check("LOOP guard 1 — an INDENTED /evidence does not attest",
+          parse_attestation("    /evidence ran it on the 15 Pro, all good"), None)
+    check("LOOP guard 2 — the sentinel alone refuses, indentation aside",
+          parse_attestation(f"{LATCH_SENTINEL}\n/evidence ran it on the 15 Pro, all good"), None)
+    check("every comment the latch writes carries the sentinel",
+          all(LATCH_SENTINEL in t for t in [
+              render_latch_comment(_example, again=False),
+              render_latch_comment(_example, again=True),
+              render_resolve_comment("ran it on the device twice"),
+              render_guidance_comment(Action("guidance", "x", _example)),
+          ]), True)
+    check("a real attestation at column zero still works",
+          parse_attestation("/evidence ran it on the 15 Pro, labels stayed put").kind,
+          "evidence")
+
     # --- the state machine ------------------------------------------------
     unmet = "- [ ] **NEEDS HUMAN EVIDENCE** — seen on a device."
     met = "- [x] **NEEDS HUMAN EVIDENCE** — seen on a device."
@@ -906,6 +982,8 @@ def main() -> int:
                    help="issues already closed with evidence outstanding (lists only)")
     p.add_argument("--execute", action="store_true",
                    help="with --backfill, actually reopen them (bulk board move)")
+    p.add_argument("--only", help="with --backfill, restrict to these issue numbers "
+                                  "(comma-separated) — read the threads first")
     p.add_argument("--dry-run", action="store_true", help="decide and print, change nothing")
     p.add_argument("--repo", default=os.environ.get("GH_REPO", DEFAULT_REPO))
     args = p.parse_args()
@@ -915,7 +993,10 @@ def main() -> int:
 
     client = Client(args.repo, args.dry_run, args.execute)
     if args.backfill:
-        return backfill(client)
+        only = None
+        if args.only:
+            only = {int(n) for n in args.only.replace(",", " ").split()}
+        return backfill(client, only)
     if args.event_file:
         return from_event(client, args.event_file)
     if args.issue:

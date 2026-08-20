@@ -529,7 +529,18 @@ Two things about how it decides, because both are easy to get wrong:
 
 There is no `Awaiting evidence` column on the board, deliberately: writing a
 Projects v2 field from CI needs a long-lived PAT, and that credential is the
-user's call to make. The label carries the state without one.
+board owner's call to make. The label carries the state without one.
+
+**The zero-credential version of that column is a saved board view filtered on
+`label:evidence-outstanding`** — ten seconds in the Projects UI, no secret, and
+it makes "merged, awaiting evidence" readable at a glance. Not done here because
+it is a UI action on somebody else's board, not a change to this repo.
+
+**Never post a comment containing `/evidence` at the start of a line unless you
+mean it.** The latch reads column zero only, and stamps its own comments with a
+sentinel it refuses on the way back in — both guards exist because the latch
+once attested to its own instructions and re-closed three tickets it had just
+reopened. Quote the gesture indented or inline, as this file does.
 
 ### Claiming (hard rule)
 
