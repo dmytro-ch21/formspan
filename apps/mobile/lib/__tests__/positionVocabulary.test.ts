@@ -110,7 +110,7 @@ describe('every client offers what the glossary names', () => {
   });
 
   it.each([
-    ['apps/mobile/app/(tabs)/library.tsx', 'const POSITIONS = ['],
+    ['apps/mobile/app/library.tsx', 'const POSITIONS = ['],
     ['apps/mobile/lib/bjjSession.ts', 'export const POSITIONS = ['],
     ['apps/web/src/lib/libraryTiles.ts', 'export const POSITIONS = ['],
   ])('%s covers every family', (relPath, marker) => {
@@ -120,7 +120,7 @@ describe('every client offers what the glossary names', () => {
   });
 
   it.each([
-    ['apps/mobile/app/(tabs)/library.tsx', 'const POSITIONS = ['],
+    ['apps/mobile/app/library.tsx', 'const POSITIONS = ['],
     ['apps/mobile/lib/bjjSession.ts', 'export const POSITIONS = ['],
     ['apps/web/src/lib/libraryTiles.ts', 'export const POSITIONS = ['],
   ])('%s invents no family the glossary lacks', (relPath, marker) => {

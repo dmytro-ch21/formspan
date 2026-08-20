@@ -9732,3 +9732,89 @@ target screen and the web derivation panel.
 - **The arithmetic must stay server-side.** Reimplementing it per client is the
   `offered_grips` mistake N16 records; a parity script standing in for one
   source of truth is what that lesson rejects.
+
+## The tab bar after N70 (`apps/mobile` — Library out, Goals in)
+
+Five tabs: **Today · Food · Plan · Goals · You**. The Library is a row inside
+`You`; the daily target lives in the Goals tab. Both moves are the user's own,
+quoted on N70's task line.
+
+**Happy path**
+
+- **Goals is a tab, and it holds the target.** Tapping it opens the screen that
+  used to be pushed from Food; accepting a target saves and says so **in
+  place**, because a tab has nowhere to go back to.
+- **Food still reaches the target in one tap** — its button now goes to the
+  Goals tab rather than to `/food/target`.
+- **The Library opens from `You`** and browses the same catalog it did as a tab.
+
+**The rules that must not break**
+
+- **The Library is reachable at all.** This is the whole risk of the move and
+  the one nothing else can see: before N70 no code pushed `/library`, because a
+  tab is reached by tapping it. The row in `You` is now the *only* way in, so a
+  test asserts it renders and pushes `/library` — delete the row and two
+  assertions go red.
+- **The Library row is never hidden.** The tab it replaced hid itself whenever
+  no enabled discipline had a catalog; that habit is what N61 is the bill for.
+  A row that is always present and explains itself when empty is the honest
+  version. A scenario that asserts the row disappears for a bare account is
+  asserting the bug.
+- **`/food/target` still resolves.** It is a `<Redirect>` to the Goals tab, not
+  a deletion — an in-flight push, a saved deep link and an installed build whose
+  JS predates the move all still point at it, and none of those is in this
+  repo's control. Typed routes cannot catch that class, because the caller is a
+  previous version of the app rather than a literal in this tree.
+- **Goals is gated with Food, on the same predicate.** Today it holds one thing,
+  the intake target, so an athlete with no food logging would get a tab that can
+  only ever be empty — and the Food tab beside it is already absent for exactly
+  that reason.
+
+### Edge cases & errors
+
+- **Saving a target from the tab.** The old screen called `router.back()`, which
+  *was* the confirmation — the screen you came from returning is the receipt. In
+  a tab that would drop the athlete wherever they happened to be last, so the
+  save now says "Saved" where they are standing. A write with no visible outcome
+  is the failure the offline branch beside it already exists to prevent.
+- **Editing after saving clears the acknowledgement**, so it can never describe
+  a number that is no longer on screen. **This sentence was false when it was
+  first written** — `setSaved(false)` ran only inside the save itself, so moving
+  an activity pill produced a fresh, unsaved suggestion with "Saved" still
+  sitting under it. Review caught it; a test now fails if it comes back.
+- **The tab refetches on every focus, and re-reads the date while doing it.**
+  The pushed screen got this free by remounting. As a tab it mounts once and
+  stays mounted, so without it the arithmetic ladder describes whatever was true
+  the first time the tab was ever opened — and `on`, the day the target is filed
+  under, freezes at that moment, which turns a stale read into a wrong write
+  after midnight.
+- **Focus is the only fetch trigger, deliberately.** An earlier fix had a focus
+  effect *and* a mount effect; they fired together, asked three times for one
+  opening, and a late answer wiped the "Saved" receipt a moment after it
+  appeared. `useFocusEffect` re-runs when its callback changes, so an activity
+  change goes through the same path rather than a second one.
+
+### Regression trap
+
+- **A route move is invisible to typecheck if the generator did not run.** Typed
+  routes are *generated* by Metro into a gitignored directory; if that step
+  silently produces nothing, every route literal checks against a loose `Href`
+  and passes, including dead ones. N35 exists because that shipped. The check
+  that actually proves it: delete `apps/mobile/.expo/types`, run
+  `pnpm run routes:mobile`, and confirm the file comes back naming the new
+  routes — `/library` and `/(tabs)/goals` present, `/(tabs)/library` absent.
+- **A test mock can violate an invariant the real code documents, and then the
+  correct component fails.** Two of these, both in `goalsScreen.test.tsx`:
+  mocking `useFocusEffect` with `[]` deps models a hook that never re-runs on a
+  callback change, which the screen depends on; and returning a fresh
+  `jest.fn()` from `useAuthToken` reintroduces the infinite refetch loop that
+  hook's `useCallback(..., [])` exists to prevent, inside the test only. Both
+  made a working screen look broken. When a screen test fails, check the mock
+  against the real module's contract before touching the screen.
+- **`getByText` does not match inside `react-native-svg`** — it mounts an
+  `RNSVGText` host node the matcher does not traverse, so an assertion on text
+  in a chart fails against a correct component. Measured by the N56 session.
+- **`lint:mobile` has zero headroom at 54 warnings**, and a navigation change
+  touches enough files to add one. Removing `router.back()` left `router` as an
+  unused `useCallback` dependency — one new warning, which failed the gate. The
+  fix is the dependency, never the ceiling.

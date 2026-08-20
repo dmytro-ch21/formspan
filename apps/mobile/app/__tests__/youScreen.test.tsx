@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { act, configure, render, screen, waitFor, within } from '@testing-library/react-native';
+import { fireEvent, act, configure, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import YouScreen, { badgeText, rowLabelFor } from '../(tabs)/you';
 
@@ -72,8 +72,13 @@ const mockUseCallback = useCallback;
 const mockUseEffect = useEffect;
 const mockUseRef = useRef;
 let refocus: () => void = () => {};
+// A STABLE push, not a fresh `jest.fn()` per call. The Library row's whole
+// point is where it goes (N70), and a mock that hands out a new spy on every
+// render can never be asserted against — the instance the component called is
+// not the instance the test holds.
+const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({ push: mockPush, back: jest.fn(), replace: jest.fn() }),
   // Fires on mount like the real one, and keeps the callback so the test can
   // fire it again — running the previous cleanup first, as a real blur would.
   useFocusEffect: (cb: () => void | (() => void)) => {
@@ -269,6 +274,35 @@ describe('the header', () => {
       expect(screen.getByTestId('you-social')).toBeTruthy();
       expect(screen.getByTestId('you-shared')).toBeTruthy();
     });
+  });
+});
+
+describe('the Library row (N70)', () => {
+  // The Library stopped being a tab and became a row here, on the user's own
+  // call. The risk in that move is not that it looks wrong — it is that the
+  // catalog becomes UNREACHABLE, which no typecheck can see: nothing in the
+  // tree pushed `/library` before, because a tab is reached by tapping it.
+  // So this row is now the only way in, and it is worth a test that fails if
+  // somebody tidies it away.
+  it('is present, and goes to the catalog', async () => {
+    mockPush.mockClear();
+    mockCounts.mockResolvedValue({});
+    render(<YouScreen />);
+
+    const row = await screen.findByTestId('you-library');
+    fireEvent.press(row);
+    expect(mockPush).toHaveBeenCalledWith('/library');
+  });
+
+  // Deliberately NOT gated on any module, unlike the tab it replaces — that
+  // tab hid itself when no enabled discipline had a catalog, which is the
+  // habit N61 is the bill for. This file's mock enables nothing in
+  // particular, so a row that appears here is a row that appears for an
+  // athlete with a bare account.
+  it('does not hide itself when nothing is enabled', async () => {
+    mockCounts.mockResolvedValue({});
+    render(<YouScreen />);
+    expect(await screen.findByTestId('you-library')).toBeTruthy();
   });
 });
 

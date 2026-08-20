@@ -250,6 +250,33 @@ export default function YouScreen() {
               />
             )}
 
+            {/* The catalog, which used to be a tab of its own.
+
+                Moved here on the user's own call — "library is what we dont
+                need a dedicated view and we can simply move to my profile and
+                be able to open from there library to explore". The tab bar is
+                for what you check; a catalog is what you explore, and it was
+                spending the app's most valuable fixed slot on something read
+                occasionally and deliberately.
+
+                DELIBERATELY NOT GATED, unlike the tab it replaces. That tab
+                hid itself whenever no enabled discipline had a catalog, and
+                N61 is the bill for exactly that habit: the user went looking
+                for the belt roadmaps on a real phone, reported them missing,
+                and they exist and work — an athlete cannot tell *not enabled*
+                from *not built* from *broken*. A row that is always here and
+                explains itself when empty is the honest version, and it costs
+                nothing now that it is not competing for a tab slot.
+
+                See the Library screen's own empty state for the other half:
+                naming the reason is what makes the absence readable. */}
+            <NavRow
+              label="Library"
+              detail="Techniques, exercises and the belt roadmaps"
+              onPress={() => router.push('/library')}
+              testID="you-library"
+            />
+
             {/* Everything that involves another person, in one place.
 
                 Both rows are BADGED, and both badges point at a screen that

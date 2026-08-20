@@ -207,7 +207,7 @@ export default function FoodScreen() {
           title="Food"
           action={
             <Pressable
-              onPress={() => router.push('/food/target')}
+              onPress={() => router.push('/(tabs)/goals')}
               accessibilityRole="button"
               accessibilityLabel={view.state === 'set' ? 'Why this target' : 'Set a target'}
               testID="food-target-link"

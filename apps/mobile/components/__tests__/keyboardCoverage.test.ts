@@ -105,7 +105,7 @@ describe('keyboard handling reaches every screen that takes typing', () => {
     const files = screensWithInputs.map((s) => s.file);
     // Named anchors, so "found 13 files" cannot be satisfied by 13 of the
     // wrong ones. These two are the screens the keyboard bug was reported on.
-    expect(files).toContain('app/(tabs)/library.tsx');
+    expect(files).toContain('app/library.tsx');
     expect(files).toContain('app/bjj/reflect/[id].tsx');
   });
 

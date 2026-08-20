@@ -17,7 +17,7 @@ import {
   KeyboardAwareScrollView,
 } from '@/components/KeyboardAwareScroll';
 import { LibraryTile, categoryBadge, patternBadge, positionBadge } from '@/components/LibraryTile';
-import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -976,7 +976,12 @@ export default function LibraryScreen() {
         <KeyboardAwareFlatList
           data={rows}
           keyExtractor={(r) => r.key}
-          contentContainerStyle={styles.list}
+          // Bottom padding from the SAFE AREA rather than the tab-bar constant this
+        // screen used as a tab. It is pushed over the tabs now, so it runs to the
+        // physical bottom of the display — and TAB_BAR_CLEARANCE (28pt) is less
+        // than the home indicator's inset, which would leave the last row sitting
+        // under it. Raised in review of the move.
+        contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 16) + 12 }]}
           // Virtualised: the merged catalog is ~1046 rows, and mounting that
           // many at once is a visible stall on a phone.
           initialNumToRender={12}
@@ -1417,7 +1422,7 @@ const styles = StyleSheet.create({
   error: { color: vola.danger, fontSize: 13, paddingHorizontal: 20, paddingTop: 10 },
   loader: { marginTop: 32 },
 
-  list: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: TAB_BAR_CLEARANCE },
+  list: { paddingHorizontal: 20, paddingTop: 14 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
