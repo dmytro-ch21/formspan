@@ -321,7 +321,7 @@ func (b *BarcodeFood) plausible() bool {
 	if b.FibreG != nil && !inRange(*b.FibreG, 500) {
 		return false
 	}
-	// The label macros, against migration 000064's own CHECKs. The milligram
+	// The label macros, against migration 000066's own CHECKs. The milligram
 	// pair matters most: a sodium figure that failed the bound is very likely a
 	// missed unit conversion rather than bad crowd data, and letting it through
 	// would show a 1000x number as measured fact.

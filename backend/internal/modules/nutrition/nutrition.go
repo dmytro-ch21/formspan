@@ -252,7 +252,7 @@ const (
 	maxKcal   = 20000
 	maxMacroG = 2000
 	maxFibreG = 500
-	// Milligram rails, matching the CHECKs in migration 000064. 100,000 mg is
+	// Milligram rails, matching the CHECKs in migration 000066. 100,000 mg is
 	// 100 g of sodium, which no serving of food reaches — 100 g of pure salt is
 	// about 39,000 mg.
 	maxMilligrams = 100000

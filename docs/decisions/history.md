@@ -31159,7 +31159,7 @@ half". Each is mutation-checked.
 The catalog carried kcal, protein, carbs, fat and fibre. The athlete asked for
 "all other that are important", and the panel they showed names Total Fat, Sat
 Fat, Cholesterol, Sodium, Total Carbs, Fiber, Sugars, Protein. Migration
-`000064` adds **saturated fat, total sugars, added sugars, sodium and
+`000066` adds **saturated fat, total sugars, added sugars, sodium and
 cholesterol** to five tables.
 
 ### The set was measured, not assumed
