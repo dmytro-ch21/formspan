@@ -266,6 +266,30 @@ export function moduleOffWithCatalog(modules: Module[], catalog: string): Module
 }
 
 /**
+ * The enabled discipline whose catalog is `catalog` — the positive half of
+ * {@link moduleOffWithCatalog}, and the gate every technique-shaped surface
+ * asks before it draws anything.
+ *
+ * A function for the reason `hasFoodLog` gives, except that this one had
+ * already rotted into **three** hand-written copies of the same two-part
+ * condition — `app/library.tsx`, the Plan tab's Roadmaps strip, and
+ * `lib/__tests__/moduleGating.test.ts` — before Today needed a fourth. Two
+ * copies is how one ends up checking only half; three is how one of them keeps
+ * checking a capability name the server has renamed.
+ *
+ * The two screens now call this. **The test deliberately still spells the
+ * condition out**, and should stay that way: a test that called this function
+ * would be asserting it against itself.
+ *
+ * Gated on the CAPABILITY, never on `key === 'bjj'`. A discipline gaining or
+ * losing a technique catalog should be one row on the server rather than an
+ * edit in four screens.
+ */
+export function moduleWithCatalog(modules: Module[], catalog: string): Module | undefined {
+  return modules.find((m) => m.enabled && m.capabilities.catalog === catalog);
+}
+
+/**
  * Disciplines that could hold a session and are turned off.
  *
  * The mirror of `enabledSports`, and `is_sport` filtered for the same reason:

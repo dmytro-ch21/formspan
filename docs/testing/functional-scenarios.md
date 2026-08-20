@@ -6712,6 +6712,59 @@ the schema rather than from taste:
   nothing rather than an error. Deliberate; test that an offline Plan tab still
   shows its templates.
 
+Finding a roadmap in the first place (N96, 2026-08-20):
+
+The half of this feature that had no scenarios, because until now there was
+nothing to write: the only surface that ever offered an un-enrolled roadmap was
+the Plan tab's strip, and Today and You were both enrolled-only. Today's roadmap
+slot now has **two states** — the progress line when you are on one, the offer
+when you are on none — and both entry points state a position in the syllabus
+rather than a bare fraction.
+
+- **A fresh account with BJJ on and no roadmap is offered one on Today**, inside
+  Upcoming, above the plan cards. It names a specific roadmap (foundations
+  leads), says what moves it, and opens that roadmap in one tap. The old
+  behaviour — nothing at all — is what the ticket was filed about.
+- **Enrolling replaces the offer with the progress line, and the offer never
+  comes back.** This is the self-limiting property that keeps it from being a
+  nag, and it is the one that needs a SECOND visit to observe: enrol, come back
+  to Today, and confirm the offer is gone rather than sitting under the line.
+  Read on mount instead of on focus, the offer survives enrolment for the life
+  of the process, which looks like nothing at all in a single-visit test.
+- **An unreadable roadmap list offers nothing**, and this is distinct from
+  offering nothing because the athlete has one. Airplane mode on a fresh
+  account: Today shows no roadmap row at all, no empty card, no error banner.
+  An offer rendered from a failed read is a claim that they are on no roadmap.
+- **BJJ off → no offer**, and the Plan tab's existing "turn it on" prompt is
+  still the only thing that says so. Today must not grow a second one.
+- **Nobody else's curriculum is ever offered.** Publish a curriculum from another
+  account with `track: "belt"` and `belt: "white"` and confirm it appears
+  nowhere on Today. This is F7 pointed at a stronger surface: an offer card
+  endorses a roadmap far harder than a strip tile does.
+- **A curriculum with no criteria-bearing items is never offered**, for the same
+  reason a reading list shows no progress bar — the card promises that logged
+  sessions move it.
+- **The entry point states the milestone in words**: `Milestone 3 of 11 · Mount:
+  get out, then hold`, on Today and on each roadmap row on You. Never a bare
+  percentage, and never only a title.
+- **The milestone follows the next STEP, not the next item.** Master every
+  criteria-bearing technique in a phase that also contains concept items, and
+  the milestone must advance — a concept can never complete, so counting one
+  pins the athlete to a phase they finished. Same shape as `countable_items`
+  versus `item_count`, one level up.
+- **The milestone number resolves when you arrive.** Tap through and the phase
+  headers on the roadmap screen are numbered the same way — a number naming
+  something you cannot find is worse than no number. Note the unphased group
+  renders FIRST and carries no number, so on a mixed curriculum "Milestone 1" is
+  the second block on screen.
+- **An unphased roadmap says no milestone at all**, and falls back to the next
+  step. So does a finished one, which says every technique on it is done. Three
+  different situations, three different sentences, and none of them a zero.
+- **The milestone is announced.** With VoiceOver on, the Today row should read
+  the roadmap name, then the milestone number and its title, then the next
+  step, then the mastered count — and the progress bar must stay silent, since
+  it repeats numbers already spoken.
+
 The round map (2026-08-18):
 
 - **`GET /v1/techniques/positions` carries `round_map`** beside `positions`, and

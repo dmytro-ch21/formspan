@@ -445,6 +445,34 @@ has a phone. Run it with the web app genuinely closed — every part of this was
 verified in jest against mocked transport, so what no test here reached is the
 real accept, the real sync, and a real dead-spot.
 
+### D15c — Find a roadmap without being told where it is (N96)
+
+**Do:** On an account with the BJJ module **on** and **no roadmap started**,
+open the app cold and go no further than Today. Then start whatever it offers,
+come back to Today, and look again. Finally, from You, tap through to the
+roadmap and find the milestone the entry point named.
+
+**Should:** Today offers one specific roadmap, by name, saying what moves it —
+and opening it is one tap. After enrolling, that offer is **gone**, replaced by
+a line reading `Milestone 1 of 11 · <phase title>` with the next technique under
+it. The same milestone appears on the You row, and the roadmap screen's own
+phase headers are numbered so the number you were shown resolves to a heading
+you can see.
+
+**Failure looks like:** Nothing about roadmaps anywhere on Today — which is the
+state this ticket was filed from, and which reads as the feature not existing.
+Or the offer still sitting there after enrolling, which is the read-on-mount bug
+and looks like the app not noticing what you did. Or a milestone number with no
+matching heading on the roadmap screen, which is worse than no number. Or an
+offer card with an empty name in it — that is the offline read rendering
+anyway, and silence is the correct answer there.
+
+**Why it needs a device:** the claim is *"an athlete can now find this"*, which
+is a claim about a person rather than about a diff. Every property above is
+covered by jest and none of that evidence bears on whether the row is noticed on
+a real screen, above the fold, before the athlete scrolls past it. Do the first
+step **without** knowing in advance where to look.
+
 ## Rendering that has never executed
 
 31 mobile route files execute **zero statements** under the entire test suite

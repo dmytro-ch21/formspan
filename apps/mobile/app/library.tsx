@@ -48,7 +48,14 @@ import { fetchPositions, type Position } from '@/lib/positions';
 import { listCurricula, type Curriculum } from '@/lib/curriculum';
 import { beltLabel, beltSyllabuses } from '@/lib/syllabuses';
 import { useModules } from '@/lib/ModulesProvider';
-import { enabledSports, moduleFor, moduleOffWithCatalog, type Module, usesBelt } from '@/lib/modules';
+import {
+  enabledSports,
+  moduleFor,
+  moduleOffWithCatalog,
+  moduleWithCatalog,
+  type Module,
+  usesBelt,
+} from '@/lib/modules';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -263,7 +270,7 @@ export default function LibraryScreen() {
    * should cut the request: the technique list is ~197 KB and was pulled on
    * every Library visit regardless of whether the user does BJJ.
    */
-  const techniqueSport = modules.find((m) => m.enabled && m.capabilities.catalog === 'techniques');
+  const techniqueSport = moduleWithCatalog(modules, 'techniques');
   /**
    * A technique discipline this server HAS, which this athlete has turned off.
    *
