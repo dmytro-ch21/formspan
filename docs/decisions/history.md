@@ -29651,6 +29651,26 @@ athlete as a measured fact and merely fail to cache — the cache write is
 non-fatal by design, so nothing stopped the value. Implausible figures are now
 `not_found`.
 
+### A guard that survived its own mutation test
+
+`moduleOffWithFoodLog` was written with both halves — `!m.enabled` and
+`m.capabilities.has_food_log` — and five tests. Dropping the **capability**
+half, leaving a bare `!m.enabled`, **passed all five**.
+
+Every vector had the same shape: the only disabled module in it *was* the
+food-log module, so `!enabled` alone was indistinguishable from the real
+predicate. The tests were valid, thorough, and could not tell a correct
+implementation from a broken one — because a guard is only exercised by the
+input it is meant to reject, and none of them supplied one.
+
+The missing case is a disabled module that does **not** carry the food log.
+Without it the Fuel slot would have offered to "turn Nutrition on" on any
+account with Running switched off. Added; the mutation dies now.
+
+The repo's standing rule, arriving from a new direction: not "does the test
+run" but "could this test have failed". Five green tests said the guard worked;
+only mutating it said whether the tests did.
+
 ### Known gaps
 
 - **Household portions are not imported.** Every row is per 100 g, which is what
@@ -33082,15 +33102,22 @@ nothing to configure.
   landed hours ago in N70 and a second opinion on its shape belongs with that
   work rather than smuggled in here. Filed as its own issue. The Sports row now
   at least makes it *findable*; it does not make it self-explaining.
-- **Today's Fuel card vanishes the same way**, gated on `hasFoodLog` at
-  `index.tsx:578` and rendered at `1478`. **This was missing from the first
-  version of the audit**, and the miss is worth recording because of its shape
-  rather than its size: it fell between two rows that each looked like they
-  covered it. The tabs row is about the tab BAR; the Today row said "a disabled
-  **sport**", and nutrition is `is_sport: false`. Two adjacent categories, and
-  the thing sat in the gap between their wordings — so the audit read as
-  complete while one surface had no row. Found by `ac-verifier` reading the
-  code against the table rather than reading the table.
+- ~~Today's Fuel card~~ — **fixed too, on the user's call.** It was going to be
+  deferred with the tabs and they overruled that. It renders a **dashed**
+  placeholder rather than a card: Today's own precedent for "this is off, go
+  turn it on" is the dashed "Choose what you train" button, and a solid card in
+  the Fuel slot would read as content — an athlete would take it for the thing
+  rather than for its absence.
+
+  The miss that preceded it is worth keeping, for its shape rather than its
+  size. It fell between two rows that each looked like they covered it: the
+  tabs row is about the tab BAR; the Today row said "a disabled **sport**", and
+  nutrition is `is_sport: false`. Two adjacent categories, and the surface sat
+  in the gap between their wordings — so the audit read as complete while one
+  thing had no row. Found by `ac-verifier` reading the code *against* the table
+  rather than reading the table. **A list can be wrong by omission in a way
+  that is invisible from the list itself** — this ticket's own failure, one
+  level up.
 - **Today still does not hint** that a disabled sport exists. The all-off case
   is handled; the partial case relies on the picker, one tap away.
 - **Five sites compare `m.key === 'bjj'`** — the pattern this codebase bans in

@@ -10006,3 +10006,18 @@ The scenarios that matter are the ones distinguishing three states, not two.
 - **"Off" and "empty" are different failures.** A prompt that fires on an empty
   list rather than on a disabled module turns "we could not reach the server"
   into "you do not train this".
+
+### Today's Fuel card (added after the first audit missed it)
+
+- **Nutrition off**: the Fuel slot shows a **dashed** placeholder naming the
+  module and leading to the toggles — not a solid card. The distinction is
+  deliberate: a card there reads as content, and an athlete would take it for
+  the thing rather than for its absence.
+- **Nutrition on**: the real `NutritionCard`, and **no** placeholder. Assert
+  both — they are a ternary, and rendering both at once, or neither, is the
+  failure mode.
+- **A disabled module that is not the food log** (Running off, nutrition on)
+  must NOT produce the placeholder. This is the case that let a mutation live:
+  a bare `!enabled` check passes every test whose only disabled module happens
+  to be the food-log one.
+- **A deployment with no food-log module at all**: nothing is offered.

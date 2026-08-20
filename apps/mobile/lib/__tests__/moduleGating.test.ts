@@ -1,4 +1,11 @@
-import { moduleOffWithCatalog, offSports, enabledSports, type Module } from '../modules';
+import {
+  moduleOffWithCatalog,
+  moduleOffWithFoodLog,
+  offSports,
+  enabledSports,
+  hasFoodLog,
+  type Module,
+} from '../modules';
 
 /**
  * N61 — telling "turned off" apart from "does not exist".
@@ -131,5 +138,71 @@ describe('an on-and-off pair', () => {
     expect(on).toBeDefined();
     // The guard the screens apply.
     expect(on === undefined && off !== undefined).toBe(false);
+  });
+});
+
+
+/**
+ * The food log, and the surface the first audit missed.
+ *
+ * Today's Fuel card is gated on `hasFoodLog` and vanished silently with
+ * nutrition off — and it escaped the audit table because it fell between two
+ * rows that each looked like they covered it: one about the tab BAR, one about
+ * a disabled SPORT, which nutrition is not. Same three states as everything
+ * else here.
+ */
+describe('moduleOffWithFoodLog', () => {
+  const nutritionOn = mod({
+    key: 'nutrition', label: 'Nutrition', is_sport: false,
+    capabilities: { has_food_log: true } as Module['capabilities'],
+  });
+  const nutritionIsOff = { ...nutritionOn, enabled: false };
+
+  it('finds the food-log module when it is turned off', () => {
+    expect(moduleOffWithFoodLog([strength, nutritionIsOff])?.key).toBe('nutrition');
+  });
+
+  it('returns nothing when it is enabled', () => {
+    expect(moduleOffWithFoodLog([strength, nutritionOn])).toBeUndefined();
+  });
+
+  // The third state: a deployment with no food log at all must not be offered
+  // one.
+  it('returns nothing when this server has no food log', () => {
+    expect(moduleOffWithFoodLog([strength])).toBeUndefined();
+  });
+
+  // Matched on the CAPABILITY, never on `key === 'nutrition'` — the pattern
+  // this codebase bans, and the tab layout's own comment says so.
+  it('matches on the capability rather than the key', () => {
+    const fuel = { ...nutritionIsOff, key: 'fuel', label: 'Fuel' };
+    expect(moduleOffWithFoodLog([fuel])?.key).toBe('fuel');
+  });
+
+  // **This one exists because its absence let a mutation live.** Dropping the
+  // `has_food_log` half of the predicate — leaving a bare `!m.enabled` —
+  // passed all fifteen other tests, because in every one of them the only
+  // disabled module WAS the food-log module. Every vector was valid and none
+  // could tell the two apart.
+  //
+  // A guard is only exercised by the input it is meant to reject: a disabled
+  // module that does not carry the food log. Without this, the Fuel slot would
+  // offer to "turn Nutrition on" on any account with Running switched off.
+  it('ignores a disabled module that does not carry the food log', () => {
+    const runningOff = mod({ key: 'running', label: 'Running', enabled: false });
+    expect(moduleOffWithFoodLog([strength, runningOff])).toBeUndefined();
+  });
+
+  // Exactly one of the two must answer, or the Fuel slot renders both the card
+  // and its own placeholder, or neither.
+  it('is the exact complement of hasFoodLog', () => {
+    for (const set of [[strength, nutritionOn], [strength, nutritionIsOff], [strength]]) {
+      const on = hasFoodLog(set);
+      const off = moduleOffWithFoodLog(set) !== undefined;
+      expect(on && off).toBe(false);
+    }
+    // And when the module exists, one of them is always true.
+    expect(hasFoodLog([nutritionOn]) || moduleOffWithFoodLog([nutritionOn]) !== undefined).toBe(true);
+    expect(hasFoodLog([nutritionIsOff]) || moduleOffWithFoodLog([nutritionIsOff]) !== undefined).toBe(true);
   });
 });

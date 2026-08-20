@@ -266,6 +266,28 @@ export function moduleOffWithCatalog(modules: Module[], catalog: string): Module
 }
 
 /**
+ * A module this server HAS that carries the food log, which this athlete has
+ * turned OFF.
+ *
+ * The mirror of `hasFoodLog`, and the same three-state reasoning as
+ * `moduleOffWithCatalog`: on, off-but-available, or genuinely absent from this
+ * deployment. Only the middle one may offer to turn something on.
+ *
+ * Returns the MODULE rather than a boolean, because the prompt names it — "1
+ * discipline is off" does not tell an athlete it is the one they were looking
+ * for, and the label carries the registry's spelling rather than a
+ * capitalised key.
+ *
+ * A `find`, not a `some`, for that reason; and a helper rather than an inline
+ * `!m.enabled && m.capabilities.has_food_log`, for the one `hasFoodLog` itself
+ * gives — two copies of a two-part condition is how one ends up checking only
+ * half.
+ */
+export function moduleOffWithFoodLog(modules: Module[]): Module | undefined {
+  return modules.find((m) => !m.enabled && m.capabilities.has_food_log);
+}
+
+/**
  * Disciplines that could hold a session and are turned off.
  *
  * The mirror of `enabledSports`, and `is_sport` filtered for the same reason:

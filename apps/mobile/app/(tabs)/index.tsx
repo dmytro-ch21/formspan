@@ -74,7 +74,7 @@ import {
   logFood,
   recentsFor,
 } from '@/lib/foodLog';
-import { hasFoodLog } from '@/lib/modules';
+import { hasFoodLog, moduleOffWithFoodLog } from '@/lib/modules';
 import {
   rankRecents,
   scale,
@@ -576,6 +576,9 @@ export default function TodayScreen() {
   const [foodView, setFoodView] = useState<TargetView>({ state: 'checking' });
   const [foodQuick, setFoodQuick] = useState<Food[]>([]);
   const foodEnabled = hasFoodLog(modules);
+  // The module that WOULD carry the Fuel card, turned off. See the card's
+  // render below — N61.
+  const foodOff = moduleOffWithFoodLog(modules);
 
   const refreshFood = useCallback(() => {
     let live = true;
@@ -1475,7 +1478,7 @@ export default function TodayScreen() {
             than reporting, and the two belong together above the blocks that
             only report. Two numbers and nothing else: remaining calories and
             remaining protein. */}
-        {foodEnabled && (
+        {foodEnabled ? (
           <NutritionCard
             eaten={foodEaten}
             logged={foodLogged}
@@ -1485,6 +1488,36 @@ export default function TodayScreen() {
             onOpenDay={() => router.push('/food')}
             onQuickAdd={(f) => void quickLog(f)}
           />
+        ) : (
+          /* N61's last surface, and the one the first audit missed — it fell
+             between two rows that each looked like they covered it: the tabs
+             row is about the tab BAR, and the Today row said a disabled SPORT,
+             which nutrition is not (`is_sport: false`).
+
+             DASHED, not a card, and that is the point rather than decoration.
+             Today's own precedent for "this is off, go turn it on" is the
+             dashed "Choose what you train" button below, and a solid card in
+             the Fuel slot would read as content — an athlete would take it for
+             the thing rather than for its absence. A placeholder should look
+             like a placeholder.
+
+             Only when the module EXISTS and is off; a deployment without a
+             food log shows nothing, because promising a feature the server
+             does not have is the same lie as hiding one it does. */
+          foodOff !== undefined && (
+            <Pressable
+              style={({ pressed }) => [styles.fuelOff, pressed && styles.fuelOffPressed]}
+              onPress={() => router.push('/profile/edit')}
+              accessibilityRole="button"
+              accessibilityLabel={`${foodOff.label} is turned off. Turn it on to track calories and protein here`}
+              testID="today-fuel-off"
+            >
+              <Text style={styles.fuelOffTitle}>{foodOff.label} is turned off</Text>
+              <Text style={styles.fuelOffNote}>
+                Turn it on to track calories and protein here.
+              </Text>
+            </Pressable>
+          )
         )}
 
         {/*
@@ -1838,6 +1871,23 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   startText: { color: vola.text, fontWeight: '600', fontSize: 16 },
+
+  // The Fuel slot when nutrition is off. Dashed and unfilled, matching
+  // `startButton` above rather than NutritionCard — it marks an absence, and
+  // a solid card here would read as the thing itself.
+  fuelOff: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderStyle: 'dashed',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 2,
+  },
+  fuelOffPressed: { opacity: 0.6 },
+  fuelOffTitle: { color: vola.text, fontWeight: '600', fontSize: 14 },
+  // textMuted, not textDim: at 12pt this is small text and textDim is below AA.
+  fuelOffNote: { color: vola.textMuted, fontSize: 12 },
 
   // The cards space themselves; the header sits a touch closer to the first
   // one than the gap between cards, so the label reads as belonging to them.
