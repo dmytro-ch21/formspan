@@ -31108,6 +31108,44 @@ varied ±29% across nine identical calls** (795 to 1,374 output tokens), against
 ±13% on the typed path. Writing "0 cached" from two samples is exactly the
 mistake this task existed to stop, committed inside the fix for it.
 
+### A migration number BELOW the database's version is silently skipped
+
+Worth recording on its own, because the advice that produced it was reasonable
+and the failure is invisible.
+
+Three branches held `000064` at once tonight. When N33's merged first, this one
+was told to take **`000065`** — "the gap reserved for you", since `main` had by
+then gone 62, 63, 64, **66** with 65 free. That is how a human reads a list of
+filenames, and it is not how `golang-migrate` works: it tracks **one integer**,
+and `up` applies only what is strictly above it.
+
+Measured rather than reasoned about, on a database migrated from `main`:
+
+```
+version after main's migrations   66
+add 000065, run `migrate up`      "migrate: up: done"     <- exit 0
+version after                     66                      <- unchanged
+input_tokens column               absent
+```
+
+**It reports success.** No error, no warning, no dirty flag — the one output a
+deploy would check says the migration ran. Staging is already at 66, and so is
+every developer machine that has pulled `main`, so the columns would simply
+never exist there while CI stayed green on a throwaway database that starts at
+zero and applies everything in order. The symptom would have arrived later and
+somewhere else: every estimate call failing on `column "input_tokens" does not
+exist`, which reads as a code bug and is a numbering one.
+
+Renumbered to **`000067`**, above `main`'s top, and the fix was verified the
+same way — same database at 66, `up`, version 67, columns and index present.
+Both directions demonstrated; neither assumed.
+
+The rule that follows is narrower than "claim your number at rebase time",
+which this branch had already done twice and which did not save it: **claim a
+number strictly ABOVE the highest on `main`, never a gap below it.** A gap in
+the sequence is not free space. It is a number that can only ever be applied by
+a database that has not yet reached it.
+
 ### Known gaps
 - **Production caching will differ from these numbers.** Every measurement here
   repeats one prompt and one image, which caches far better than real traffic
