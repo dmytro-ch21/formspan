@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import GoalsScreen from '../(tabs)/goals';
 import { saveTarget, suggestedTarget } from '@/lib/nutritionApi';
@@ -18,6 +18,15 @@ import { saveTarget, suggestedTarget } from '@/lib/nutritionApi';
  * about LIFECYCLE: what a refocus does, and what a stale receipt is still
  * claiming afterwards. There is nothing pure to extract.
  */
+
+// RNTL's default `asyncUtilTimeout` is ONE SECOND, and this suite needs longer:
+// clearing the receipt runs a refetch, a promise resolution and a re-render, and
+// on a CI runner that chain exceeded a second. It passed locally at ~1.4s and
+// failed on CI, which is the worst way to find out. Six suites here already
+// raise it for the same reason, and `jest.config.js`'s `testTimeout: 15_000`
+// is what makes ten seconds actually reachable — see F13, where five files
+// asked for ten and jest killed them at five.
+configure({ asyncUtilTimeout: 10_000 });
 
 jest.mock('@/lib/nutritionApi', () => ({
   suggestedTarget: jest.fn(),
@@ -130,6 +139,12 @@ describe('the saved receipt', () => {
     mockSuggested.mockResolvedValue(suggestion(2100));
     fireEvent.press(screen.getByTestId('target-activity-active'));
 
+    // Sequenced in two steps rather than one, because they fail for different
+    // reasons and a single `waitFor` cannot say which happened: the refetch not
+    // firing at all, or firing and not clearing the receipt. The first version
+    // asserted only the second and went red on CI while passing locally — the
+    // race was invisible because the machine was fast enough to hide it.
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByTestId('target-saved')).toBeNull());
   });
 
@@ -141,6 +156,7 @@ describe('the saved receipt', () => {
     expect(await screen.findByTestId('target-saved')).toBeTruthy();
 
     refocus();
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByTestId('target-saved')).toBeNull());
   });
 });
