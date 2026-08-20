@@ -296,9 +296,9 @@ func humaniseDraftWait(d time.Duration) string {
 // Never below one for the same family of reason — a `Retry-After: 0` invites the
 // immediate retry the quota just refused.
 //
-// (`nutrition.retryAfterSeconds` still truncates; this was copied from it before
-// the rounding rule was checked. Filed as F15 rather than fixed here, because
-// that endpoint's own tests pin its arithmetic.)
+// (This was copied from `nutrition.retryAfterSeconds` before the rounding rule
+// was checked, so it inherited the truncation and was fixed here first. That
+// one is fixed too as of F15, and pinned by its own test; the two now agree.)
 func draftRetryAfterSeconds(d time.Duration) int {
 	if d <= 0 {
 		return 1

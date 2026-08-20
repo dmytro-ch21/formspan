@@ -209,6 +209,35 @@ func TestMiddlewareRejectsWithRetryAfterAndTheContractCode(t *testing.T) {
 	}
 }
 
+// **`Reject` rounds up on its own, so the invariant is local.** (F15.)
+//
+// Every caller today reaches it through `Allow`, which already returns a
+// whole-second duration — so this can only be tested by calling `Reject`
+// DIRECTLY with a fractional one, which is exactly the future caller the guard
+// exists for. Through the middleware the two roundings agree and the assertion
+// would pass with the ceiling deleted.
+func TestRejectRoundsUpAFractionalWaitItIsHandedDirectly(t *testing.T) {
+	for _, tc := range []struct {
+		d    time.Duration
+		want string
+	}{
+		{1500 * time.Millisecond, "2"},
+		{100 * time.Millisecond, "1"},
+		{5 * time.Second, "5"}, // exact: not carried to 6
+		{0, "1"},               // never 0 — that invites the retry just refused
+		{-time.Hour, "1"},
+	} {
+		rec := httptest.NewRecorder()
+		Reject(rec, httptest.NewRequest(http.MethodGet, "/v1/anything", nil), "p", tc.d)
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("Reject(%s) wrote status %d, want 429", tc.d, rec.Code)
+		}
+		if got := rec.Header().Get("Retry-After"); got != tc.want {
+			t.Errorf("Reject(%s) set Retry-After %q, want %q", tc.d, got, tc.want)
+		}
+	}
+}
+
 // FAILS OPEN with no key. A limiter that rejects what it cannot attribute
 // turns a momentary identity gap into an outage.
 func TestMiddlewareLetsUnidentifiedRequestsThrough(t *testing.T) {

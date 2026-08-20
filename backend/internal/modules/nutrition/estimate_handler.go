@@ -318,11 +318,31 @@ func humaniseWait(d time.Duration) string {
 	return fmt.Sprintf("about %d hours", h)
 }
 
-// retryAfterSeconds is the header value: whole seconds, never below one, since
-// a Retry-After of 0 invites the immediate retry the quota just refused.
+// retryAfterSeconds is the header value: whole seconds, never below one.
+//
+// **ROUNDED UP, and that is the contract rather than a preference.**
+// `docs/architecture/api-conventions.md` promises a `Retry-After` "rounded up
+// so that obeying it exactly succeeds", and `internal/platform/ratelimit`
+// honours it with `roundUpSecond`. Truncating instead is a real bug and not a
+// cosmetic one: the window is `created_at > since`, so a client that waits
+// exactly the advertised number of seconds is still INSIDE the window by the
+// fractional part that was dropped, gets a second 429, and learns that obeying
+// the header does not work. The polite client is the one punished; an
+// impatient one that overshoots succeeds.
+//
+// Never below one for the same family of reason — a `Retry-After: 0` invites
+// the immediate retry the quota just refused.
+//
+// (F15. `bjj.draftRetryAfterSeconds` copied this function before the rounding
+// rule was checked, was fixed first, and is pinned by its own test; the two
+// now agree.)
 func retryAfterSeconds(d time.Duration) int {
-	if s := int(d.Seconds()); s > 0 {
-		return s
+	if d <= 0 {
+		return 1
 	}
-	return 1
+	s := int((d + time.Second - 1) / time.Second)
+	if s < 1 {
+		return 1
+	}
+	return s
 }

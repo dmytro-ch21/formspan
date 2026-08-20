@@ -172,6 +172,52 @@ func TestAnExhaustedIdentifyQuotaSaysWhenAndSetsRetryAfter(t *testing.T) {
 	}
 }
 
+// **Retry-After is rounded UP**, which api-conventions.md states as a promise:
+// obeying it exactly has to succeed. Truncating is not a rounding preference —
+// this quota's window is `created_at > since`, so a client that waits the
+// advertised whole seconds is still inside it by the fraction that was dropped,
+// gets a second 429, and learns that obeying the header does not work. (F15,
+// which fixed the same truncation here, in `nutrition` and in `bjj`.)
+func TestIdentifyRetryAfterRoundsUpSoObeyingItWorks(t *testing.T) {
+	// **Every case has to be one where flooring and ceiling DIFFER, or it is not
+	// testing the fix.** A whole number of seconds — "wait 30" — gives the same
+	// answer under both roundings, so a table of round numbers passes against
+	// the bug. The exact-second cases are here for the opposite reason: the
+	// ceiling must not push a client a second further out than the window needs.
+	//
+	// Wanted values are written out rather than computed, so this cannot become
+	// a check on arithmetic the function just performed itself.
+	for _, tc := range []struct {
+		d    time.Duration
+		want int
+	}{
+		{100 * time.Millisecond, 1},
+		{900 * time.Millisecond, 1},
+		{time.Second, 1},                   // exact: not carried to 2
+		{time.Second + time.Nanosecond, 2}, // the tightest discriminating case
+		{30 * time.Second, 30},             // exact
+		{30*time.Second + time.Millisecond, 31},
+		{59*time.Second + 400*time.Millisecond, 60},
+		{time.Hour + 200*time.Millisecond, 3601},
+	} {
+		if got := identifyRetryAfterSeconds(tc.d); got != tc.want {
+			t.Errorf("identifyRetryAfterSeconds(%s) = %d, want %d", tc.d, got, tc.want)
+		}
+	}
+
+	// Never zero: a Retry-After of 0 invites the immediate retry just refused.
+	//
+	// Both boundaries, because only one discriminates. A NEGATIVE duration is
+	// below zero under any comparison, so it passes whether the guard reads
+	// `> 0` or `>= 0`. The case that separates them is a positive duration under
+	// one second, which truncates to exactly 0.
+	for _, d := range []time.Duration{-time.Hour, 0, 500 * time.Millisecond} {
+		if got := identifyRetryAfterSeconds(d); got < 1 {
+			t.Errorf("identifyRetryAfterSeconds(%s) = %d, want at least 1", d, got)
+		}
+	}
+}
+
 func TestASuccessfulIdentificationIsMetered(t *testing.T) {
 	id := &fakeIdentifier{out: goodIdentification()}
 	usage := &memIdentifyUsage{}

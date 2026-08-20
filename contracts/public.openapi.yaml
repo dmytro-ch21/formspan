@@ -5943,7 +5943,11 @@ paths:
             reconnaissance.
           headers:
             Retry-After:
-              description: Whole seconds, never below 1.
+              description: >
+                Whole seconds, never below 1, and ROUNDED UP so that waiting
+                exactly this long succeeds — the same promise
+                `components/responses/RateLimited` and the other metered
+                endpoints make. Both limits behind this status answer with it.
               schema: { type: integer, minimum: 1 }
           content:
             application/json:
@@ -6979,7 +6983,11 @@ paths:
             something this endpoint knows.
           headers:
             Retry-After:
-              description: Whole seconds until one more draft is available. Never zero.
+              description: >
+                Whole seconds until one more draft is available, ROUNDED UP so
+                that waiting exactly this long succeeds — same promise the
+                estimate endpoint and `components/responses/RateLimited` make.
+                Never zero.
               schema: { type: integer, minimum: 1 }
           content:
             application/json:
@@ -9490,13 +9498,20 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '429':
           description: >
-            The daily cap for this path is used up. `Retry-After` gives the
-            wait in whole seconds; the message repeats it as a relative
-            duration. Neither is ever an absolute timestamp — the athlete's
-            timezone is not something this endpoint knows.
+            The daily cap is used up — one budget across both paths, not one
+            per path. `Retry-After` gives the wait in whole seconds; the
+            message repeats it as a relative duration. Neither is ever an
+            absolute timestamp — the athlete's timezone is not something this
+            endpoint knows.
           headers:
             Retry-After:
-              description: Whole seconds until one more estimate is available. Never zero.
+              description: >
+                Whole seconds until one more estimate is available, ROUNDED UP
+                so that waiting exactly this long succeeds — consistent with
+                `components/responses/RateLimited`. The window is a rolling 24
+                hours from the oldest call still counted, so a truncated value
+                would land a client back inside it and earn a second 429 for
+                obeying the header. Never zero.
               schema: { type: integer, minimum: 1 }
           content:
             application/json:

@@ -85,9 +85,16 @@ func goodEstimate() Estimate {
 // call drives the handler as an authenticated athlete.
 func call(t *testing.T, h *EstimateHandler, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	return callAs(t, h, "eater", body)
+}
+
+// callAs is the same, as a NAMED athlete — which the database-backed tests need,
+// since their metering rows are cleaned up by user id.
+func callAs(t *testing.T, h *EstimateHandler, userID, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, "/v1/nutrition/estimate", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
-	r = r.WithContext(auth.ContextWithClaims(r.Context(), &auth.Claims{UserID: "eater"}))
+	r = r.WithContext(auth.ContextWithClaims(r.Context(), &auth.Claims{UserID: userID}))
 	w := httptest.NewRecorder()
 	h.Estimate(w, r)
 	return w
@@ -382,6 +389,43 @@ func TestHowTheWaitIsSpoken(t *testing.T) {
 			t.Errorf("humaniseWait(%s) = %q, want %q", tc.d, got, tc.want)
 		}
 	}
+}
+
+// **Retry-After is rounded UP**, which api-conventions.md states as a promise:
+// obeying it exactly has to succeed. Truncating is not a rounding preference —
+// the quota window is `created_at > since`, so a client that waits the
+// advertised whole seconds is still inside it by the fraction that was dropped,
+// gets a second 429, and learns that obeying the header does not work. The
+// polite client is punished and an impatient one that overshoots is not, which
+// is the incentive backwards. (F15.)
+func TestRetryAfterRoundsUpSoObeyingItWorks(t *testing.T) {
+	// **Every case here has to be one where flooring and ceiling DIFFER, or it
+	// is not testing the fix.** A whole number of seconds — "wait 30" — gives
+	// the same answer under both the truncating and the rounding version, so a
+	// table of round numbers passes against the bug. The exact-second cases
+	// below are present for the opposite reason: they pin that the ceiling does
+	// NOT push a client a second further out than the window actually needs.
+	//
+	// Wanted values are written out rather than computed, so this cannot become
+	// a check on arithmetic the function just performed itself.
+	for _, tc := range []struct {
+		d    time.Duration
+		want int
+	}{
+		{100 * time.Millisecond, 1},
+		{900 * time.Millisecond, 1},
+		{time.Second, 1},                   // exact: not carried to 2
+		{time.Second + time.Nanosecond, 2}, // the tightest discriminating case
+		{30 * time.Second, 30},             // exact
+		{30*time.Second + time.Millisecond, 31},
+		{59*time.Second + 400*time.Millisecond, 60},
+		{time.Hour + 200*time.Millisecond, 3601},
+	} {
+		if got := retryAfterSeconds(tc.d); got != tc.want {
+			t.Errorf("retryAfterSeconds(%s) = %d, want %d", tc.d, got, tc.want)
+		}
+	}
+
 	// Never zero: a Retry-After of 0 invites the immediate retry just refused.
 	//
 	// Both boundaries, because only one of them discriminates. A NEGATIVE
