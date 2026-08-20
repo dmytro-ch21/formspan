@@ -266,85 +266,112 @@ Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch
 
 ## The open list (hard rule)
 
-[docs/TASKS.md](docs/TASKS.md) is the shared task list — every known gap, fix and
-queued feature, one line each with a stable id. **Read it before starting work**
-and **tick your line when you finish**, in the same PR.
+**The open list is GitHub Issues, on the `VOLA` board:**
+<https://github.com/users/dmytro-ch21/projects/2> (also linked from the repo's
+Projects tab). Every known gap, fix and queued feature is one issue. **Read the
+board before starting work, and claim your issue before you write anything.**
 
-Three rules make it survive several agents at once:
+`docs/TASKS.md` is an **archive**. It is the record of everything considered up
+to 2026-08-20 and the place the `T` traps still live (below). **Do not add a line
+to it and do not tick one** — a tick there now means nothing, because nothing
+reads it.
 
-- **One line per task, marked in place.** `- [ ]` becomes `- [x]` with a PR
-  number appended; the line is never deleted, because a finished task is the
-  record that it was considered. One line also means a concurrent edit conflicts
-  over one line rather than a paragraph.
-- **Ids are never reused**, so "closes W2" in a commit message still means
-  something a year later.
-- **Claim a task before you work it**, below.
+Each issue keeps its **stable id** in the title — `N74 — one shared image-upload
+helper` — and the id is the same one `TASKS.md` used, so "closes N42" in a commit
+message from a year ago still resolves. The prefix is the section:
+
+| Prefix | Means |
+|---|---|
+| **W** | Wrong on screen right now — contradicts itself or overstates what the athlete did |
+| **T** | A trap: compiles, passes its tests, and is wrong |
+| **F** | Worth fixing |
+| **N** | New work |
+| **L** | Recorded, low |
+| **H** | Housekeeping |
+
+Labels carry the same thing (`section: N`, `priority: high`, `area: mobile`) so
+the list is readable from `gh issue list` without the `project` scope. The board
+adds `Status`, `Priority` and `Section` columns on top.
+
+**Ids are never reused.** Allocate the next one by scanning **all** issues, open
+and closed, **and open PR titles** — a claim PR can hold an id whose issue does
+not exist yet:
+
+```bash
+gh issue list --state all  --limit 500 --json title -q '.[].title'
+gh pr list    --state open --limit 100 --json title -q '.[].title'
+```
+
+Take the highest number for that prefix and add one. **Never fill a gap below
+it** — a gap records an id that was allocated and abandoned, not free space.
+
+**Detail belongs in `docs/decisions/history.md`.** An issue is an index entry
+with acceptance criteria, not a narrative.
+
+**The `T` section of `docs/TASKS.md` is still live and still load-bearing.** Those
+are traps — changes that compile, pass their tests, and are wrong. They are not
+tickets: nobody claims one, nobody closes one, and they are read *before* you
+touch the area they describe. They stayed in the repo deliberately, because their
+value is that a `grep` in your working tree finds them. If your work touches one,
+read it first — every entry there was found by review after the check suite went
+green.
 
 ### Claiming (hard rule)
 
-This list is ordered by what an athlete would notice, so every session that
-opens it independently picks the same top line. Two full rounds of work were
-lost that way in a single afternoon — W2, then W4 — both times with the checks
-genuinely run, because **a check cannot see work that has not been pushed.**
+The board is ordered by what an athlete would notice, so every session that opens
+it independently picks the same top line. Two full rounds of work were lost that
+way in a single afternoon — W2, then W4 — both times with the checks genuinely
+run.
 
-So, before writing anything:
-
-```bash
-gh pr list --state open        # includes drafts; a draft IS a claim
-```
-
-and if the task is free, claim it before you start:
+**A claim is one server-side write, and it is visible the moment you make it:**
 
 ```bash
-git commit --allow-empty -m "Claim <ID> — <task>"
-git push -u origin <branch>
-gh pr create --draft --title "[claim] <ID> — <task>" --body "Claiming <ID>."
+gh issue list --state open --json number,title,assignees \
+  -q '.[] | select(.assignees|length==0) | "\(.number) \(.title)"'   # what is free
+
+gh issue edit <n> --add-assignee @me                                 # claim it
+gh project item-edit ...                                             # Status -> In Progress
 ```
 
-Then do the work on that branch and mark the PR ready when it is reviewable:
+Assigned, or `Status` past `Todo`, means taken. Unassigned and `Todo` means free.
 
-```bash
-gh pr ready <n>
-gh api -X PATCH repos/dmytro-ch21/formspan/pulls/<n> -f title="..." -F body=@body.md
-```
+Then open your PR with **`closes #<issue>`** in the body, so merging closes the
+issue and moves it to `Done` without anyone remembering to.
 
-The claim PR becomes the real one; nothing is thrown away. **Use `gh api`, not
-`gh pr edit`** — the latter fails outright in this repo on a deprecated
-Projects-classic GraphQL query (`repository.pullRequest.projectCards`) and
-silently changes nothing, so a title still reading `[claim] …` after an apparent
-success is that, not a typo. `gh pr ready` and `gh pr create` are unaffected.
+**Why this replaced the empty-commit-plus-draft-PR convention.** That convention
+existed for one reason: *a check cannot see work that has not been pushed*, so a
+claim had to be pushed to exist. It worked, and it cost an empty commit, a
+branch and a draft PR before any thinking had happened — and **it still lost W2
+and W4**, because the window between deciding and pushing stayed invisible.
+Assigning an issue closes that window: there is nothing local about it, so there
+is no unpushed state to be blind to.
 
-**Why a draft PR rather than a field in this file.** TASKS.md is itself the
-contended resource — a claim written here is one more edit to the file two
-sessions are already fighting over, and it still needs a push to be visible, so
-it costs the same and conflicts more. `gh pr list` is the one channel every
-session can already see without pulling anything.
+Three things it also fixes, all of which bit:
 
-**What it does not fix.** The window between deciding and claiming is still
-invisible, so claim *early* — the empty commit exists precisely so you can claim
-before there is anything to show. And nothing enforces any of this; it is a
-convention, and it works only if the check half is done too.
+- **A claim is no longer a `[claim] …` PR title that has to be edited later.**
+  `gh pr edit` fails outright in this repo on a deprecated Projects-classic
+  GraphQL query and silently changes nothing, so a title still reading
+  `[claim] …` after an apparent success was that, not a typo. Use `gh api -X
+  PATCH repos/dmytro-ch21/formspan/pulls/<n>` if you must retitle a PR;
+  `gh pr ready` and `gh pr create` are unaffected.
+- **A new id is visible immediately.** `gh pr list` shows titles, not diffs, so a
+  new id filed inside an open PR's `TASKS.md` used to be invisible to every other
+  session until that PR merged — two sessions allocated **N19** the same
+  afternoon that way. An issue exists the moment it is created.
+- **A tick can no longer lag its fix.** Migrating the list on 2026-08-20 found
+  **three** tasks marked open whose work had already merged — N68 (fixed in #353,
+  ticked a day later in #362), N73 and N70. Each was a separate file edit that a
+  feature PR had not made. `closes #<issue>` is not a separate edit.
 
-**And an id is only claimed if it is in a PR TITLE.** `gh pr list` shows titles,
-not diffs — so a new id you file inside an open PR's `TASKS.md` is invisible to
-every other session until that PR merges. Two sessions allocated **N19** the same
-afternoon that way, both correctly: one had it in a draft PR's title, the other
-had written the line into a branch nobody could see. The one in the title wins,
-because that is the channel the convention is built on. If you file forward-looking
-ids for follow-up work, either claim them immediately with their own draft PR, or
-expect to renumber.
+**What it does not fix.** Nothing enforces any of this. Claim *early* — an issue
+can be assigned before there is anything to show, which is the whole point.
 
-It does work when it is. This convention was written after a session picked up
-**H1**, ran `gh pr list` first, found #216 already open with the work complete
-but a week stale, and rebased and landed that instead of writing a second copy
-of it.
+**And treat silence as ambiguous.** An unassigned issue is not proof nobody is
+working on it, only that nobody has said so; an empty query result is not an
+empty world. That is the same rule as *Verify that a check can fail* below, and
+it applies to the board exactly as it applies to CI — see **absence is not
+evidence** there.
 
-Detail belongs in `docs/decisions/history.md`. TASKS.md is an index, and it stops
-being useful the moment it becomes prose.
-
-**The `T` section is load-bearing.** Those are traps: changes that compile, pass
-their tests, and are wrong. If your work touches one, read it first — every entry
-there was found by review after the check suite went green.
 
 ## Keep the history log current (hard rule)
 
@@ -365,8 +392,21 @@ exactly that, and it has been repaired three times. One side, always: before. Sk
 ## Review before every PR (hard rule)
 
 **Run `/pre-merge` before opening or updating any PR.** It is one gate that
-runs both the CI-equivalent check suite *and* the review subagents in
-`.claude/agents/`:
+runs the CI-equivalent check suite, the **acceptance-criteria check**, and the
+review subagents in `.claude/agents/`:
+
+- **`ac-verifier`** — the branch against the acceptance criteria of the issue
+  it closes. **Every criterion must be `MET`, or carry a stated reason, before
+  the PR goes ready-for-review** — that is exactly what moving the issue to
+  `In Review` on the board asserts. It returns four verdicts, and
+  `NEEDS HUMAN EVIDENCE` is the one that matters: a criterion saying *seen on a
+  device*, *verified against the live provider*, or *mutation-check the suite
+  and confirm it goes red* **cannot be upgraded to met by code that looks
+  right** — reading the code is the thing those criteria exist because it
+  fails. Produce what evidence you can yourself, then **hand the remainder to
+  the user as a numbered checklist and wait** — they run these deliberately, to
+  catch bugs early, and the issue does not move to `In Review` until they
+  report back.
 
 - **`backend-reviewer`** — for `backend/**` or `contracts/**`. Security
   (authorization gaps/IDOR, information disclosure, secrets/PII in logs),
@@ -377,9 +417,13 @@ runs both the CI-equivalent check suite *and* the review subagents in
   Components, `useEffect` deps, error states), performance, accessibility,
   and design-token/convention adherence.
 
-Both are **read-only diagnostics** — they report, they don't fix. Resolve or
-explicitly justify every `[blocking]` finding *before* opening the PR;
+All three are **read-only diagnostics** — they report, they don't fix. Resolve
+or explicitly justify every `[blocking]` finding *before* opening the PR;
 `[suggestion]` items are judgment calls.
+
+**Hand the acceptance criteria to the reviewers too, not just to
+`ac-verifier`.** They already ask for design intent, and the criteria are that
+intent already written down — it is the cheapest handover available.
 
 **Why one command and not two rules:** it used to be two, and the check
 suite got run while the reviewers got skipped — repeatedly, over several
@@ -799,4 +843,5 @@ way:
 - [docs/architecture/api-conventions.md](docs/architecture/api-conventions.md) — full REST/OpenAPI conventions
 - [contracts/public.openapi.yaml](contracts/public.openapi.yaml) — the wire contract
 - [docs/testing/functional-scenarios.md](docs/testing/functional-scenarios.md) — recommended functional test scenarios per feature
-- [docs/TASKS.md](docs/TASKS.md) — the open list: every known gap, fix and queued feature
+- **The open list — GitHub Issues on the [`VOLA` board](https://github.com/users/dmytro-ch21/projects/2)**: every known gap, fix and queued feature
+- [docs/TASKS.md](docs/TASKS.md) — the archive of that list up to 2026-08-20, and the live home of the `T` traps

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Fail if `docs/TASKS.md` has lost, duplicated, or un-finished a task.
 
-`docs/TASKS.md` is the shared task list, and it is the one load-bearing file in
-this repo that **every check is blind to**. It is prose: `lint`, `typecheck`,
+`docs/TASKS.md` is the ARCHIVE of the task list — the live list moved to GitHub
+Issues on 2026-08-20 (see CLAUDE.md, *The open list*). This check stays, because
+the archive is still the record that a task was considered and its ids are still
+what "closes W2" resolves against; losing or un-ticking one silently rewrites
+history. It remains a file **every other check is blind to**. It is prose: `lint`, `typecheck`,
 every test suite and every parity script look straight past it. So a task that
 silently goes from `[x]` back to `[ ]`, an id that gets duplicated, or a line
 that disappears entirely will pass `verify`, pass CI, and merge.

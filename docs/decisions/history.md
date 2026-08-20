@@ -32086,6 +32086,79 @@ and confirmed the regenerated file names `/library`, `/(tabs)/goals` and
 indistinguishable from its failing form unless you delete the file first.
 
 
+## 2026-08-20 — The open list moves to GitHub Issues, and the migration finds three tasks that were already done
+
+**What changed.** `docs/TASKS.md` is now an archive. The live list is GitHub
+Issues on a `VOLA` project board (user-level project 2, linked to the repo), one
+issue per task, ids carried over verbatim so `closes W2` still resolves. 26 tasks
+migrated; labels carry `section:`, `priority:` and `area:` so the list is
+readable from `gh issue list` with the plain `repo` scope, and the board adds
+`Status` / `Priority` / `Section` on top.
+
+**Issues, not draft project items**, and that was the load-bearing choice. An
+issue has a number a PR can close, a URL a commit can name, and it is visible
+without the `project` OAuth scope. A draft project item has none of the three,
+and making the work list unreadable without extra auth would have recreated the
+invisibility the whole convention exists to fight. The scope is needed to *see
+the board*; it is not needed to see the work.
+
+**Claiming got stronger, not merely relocated.** The empty-commit-plus-draft-PR
+convention existed for exactly one reason — *a check cannot see work that has not
+been pushed* — and it still lost W2 and W4, because the window between deciding
+and pushing stayed invisible. Assigning an issue closes that window: there is no
+local state, so there is nothing to be blind to. `closes #<issue>` in the PR body
+then does the tick.
+
+**The migration was its own best argument.** Three of the tasks it carried across
+as open had already shipped:
+
+- **N68** — fixed in #353 a day earlier; `TASKS.md` was only ticked in #362,
+  because #353 never touched the file.
+- **N73** and **N70** — both merged *during* this session, from the very draft
+  PRs the ticket drafts had recorded as in-flight claims.
+
+None was anyone's mistake. Each is one file edit that a feature PR did not make,
+which is precisely N63's complaint, and it means the file had been lying about
+its own contents for a day. `closes #<issue>` is not a separate edit, so this
+class of drift ends with the move.
+
+Two smaller things fell out of it. The board's first item count read **24 of 25**
+— a stale read, not a lost item; re-querying showed all 25. And `origin/main`
+moved three commits mid-migration, which is why the numbers were re-derived
+against a fresh fetch rather than the snapshot the drafts were written from.
+Absence is not evidence, and neither is a count taken once.
+
+**What was kept.** `scripts/check-tasks-integrity.py` (N64, #343) stays and still
+guards the archive — an id that silently un-ticks or duplicates still rewrites
+history, and no other check reads the file. It was **mutation-tested against the
+new archive format** rather than assumed: un-ticking N68 and duplicating F16 each
+turn it red, and the baseline is green in the same session. Its docstring, which
+called the file "the shared task list", was corrected.
+
+**The `T` section stayed in the repo, deliberately.** Traps are not tickets —
+nobody claims one and nobody closes one — and their value is that a `grep` in
+your working tree finds them before you touch the area they describe. Moving them
+to a board would have made them findable only by someone who already thought to
+look.
+
+**Also added:** a `ticket-manager` agent (`.claude/agents/`) scoped to
+Bash/Read/Grep/Glob, so it structurally cannot edit code. It manages the list,
+not the work.
+
+### Open questions this leaves
+
+- **Nothing enforces the new convention either.** It is still a convention. The
+  difference is that a claim is now visible the instant it is made rather than
+  after a push.
+- **`docs/decisions/history.md` still conflicts on every merge**, so N63 shrank
+  rather than dissolved — the `TASKS.md` half is gone, the append-versus-append
+  half is not. N63 (#369) was re-scoped rather than closed.
+- **The board is private and user-owned.** If a second person ever needs it,
+  an org-level project is the move; migrating items between projects is not free.
+- **#232 predates all of this** — an open issue about the share-card export size
+  that `TASKS.md` records as fixed. Added to the board as `Todo`; it is probably
+  closeable, but that is the user's call, not a migration decision.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
