@@ -22,7 +22,7 @@ const selectColumns = `
 	f.id, f.name, f.brand, f.category, f.aliases, f.serving_label, f.serving_grams,
 	f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g,
 	f.saturated_fat_g, f.sugar_g, f.added_sugar_g, f.sodium_mg, f.cholesterol_mg,
-	f.market, f.source,
+	f.market, f.rank_tier, f.source,
 	f.external_id, f.external_source, f.created_at, f.updated_at`
 
 type scannable interface {
@@ -35,7 +35,7 @@ func scanFood(row scannable) (*Food, error) {
 		&f.ID, &f.Name, &f.Brand, &f.Category, &f.Aliases, &f.ServingLabel, &f.ServingGrams,
 		&f.KCal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG,
 		&f.SaturatedFatG, &f.SugarG, &f.AddedSugarG, &f.SodiumMG, &f.CholesterolMG,
-		&f.Market, &f.Source,
+		&f.Market, &f.RankTier, &f.Source,
 		&f.ExternalID, &f.ExternalSource, &f.CreatedAt, &f.UpdatedAt,
 	)
 	if err != nil {
@@ -69,7 +69,11 @@ func (r *PostgresRepository) Search(ctx context.Context, f SearchFilter) ([]Food
 		// market browse pages non-deterministically, repeating rows on one page
 		// and skipping them on the next. The query path has the same guard in
 		// SearchRank; this is the path it does not cover. Raised in review.
-		order = "f.name ASC, f.id ASC"
+		// rank_tier leads here too, so browsing a category shows the curated
+		// foods before the bulk import rather than whatever sorts first
+		// alphabetically — "Abiyuch, raw" is a real SR Legacy row and is not
+		// what anyone opening `category=fruit` is looking for.
+		order = "f.rank_tier ASC, f.name ASC, f.id ASC"
 	)
 
 	if f.Query != "" {
@@ -142,7 +146,7 @@ func (r *PostgresRepository) Search(ctx context.Context, f SearchFilter) ([]Food
 			&item.CarbG, &item.FatG, &item.FibreG,
 			&item.SaturatedFatG, &item.SugarG, &item.AddedSugarG,
 			&item.SodiumMG, &item.CholesterolMG,
-			&item.Market, &item.Source,
+			&item.Market, &item.RankTier, &item.Source,
 			&item.ExternalID, &item.ExternalSource, &item.CreatedAt, &item.UpdatedAt, &n,
 		)
 		if err != nil {
@@ -245,7 +249,9 @@ func (r *PostgresRepository) CountMarket(ctx context.Context, market string) (in
 //     PATCH sets source='admin', and from then on a deploy skips the row. Drop
 //     this and the next deploy silently reverts every edit anybody made.
 //   - The `IS DISTINCT FROM` comparison stops a no-op deploy touching
-//     `updated_at` on 173 rows it did not change.
+//     `updated_at` on 12,651 rows it did not change. That mattered little at
+//     177 rows and matters a great deal now: seeding the full catalog takes
+//     ~9s measured, and without this every deploy would rewrite every row.
 //
 // **Both lists are EXPLICIT columns, and that is load-bearing rather than
 // stylistic.** A column left out of both is never written by a deploy and
@@ -258,8 +264,8 @@ const upsertSQL = `
 		id, name, brand, category, aliases, serving_label, serving_grams,
 		kcal, protein_g, carb_g, fat_g, fibre_g,
 		saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-		market, external_id, external_source
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+		market, rank_tier, external_id, external_source
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 	ON CONFLICT (id) DO UPDATE SET
 		name            = EXCLUDED.name,
 		brand           = EXCLUDED.brand,
@@ -278,6 +284,7 @@ const upsertSQL = `
 		sodium_mg       = EXCLUDED.sodium_mg,
 		cholesterol_mg  = EXCLUDED.cholesterol_mg,
 		market          = EXCLUDED.market,
+		rank_tier       = EXCLUDED.rank_tier,
 		external_id     = EXCLUDED.external_id,
 		external_source = EXCLUDED.external_source,
 		updated_at      = now()
@@ -288,7 +295,7 @@ const upsertSQL = `
 		food_catalog.fat_g, food_catalog.fibre_g,
 		food_catalog.saturated_fat_g, food_catalog.sugar_g, food_catalog.added_sugar_g,
 		food_catalog.sodium_mg, food_catalog.cholesterol_mg,
-		food_catalog.market,
+		food_catalog.market, food_catalog.rank_tier,
 		food_catalog.external_id, food_catalog.external_source
 	) IS DISTINCT FROM (
 		EXCLUDED.name, EXCLUDED.brand, EXCLUDED.category,
@@ -297,7 +304,7 @@ const upsertSQL = `
 		EXCLUDED.fat_g, EXCLUDED.fibre_g,
 		EXCLUDED.saturated_fat_g, EXCLUDED.sugar_g, EXCLUDED.added_sugar_g,
 		EXCLUDED.sodium_mg, EXCLUDED.cholesterol_mg,
-		EXCLUDED.market,
+		EXCLUDED.market, EXCLUDED.rank_tier,
 		EXCLUDED.external_id, EXCLUDED.external_source
 	)`
 
@@ -310,7 +317,7 @@ func upsertArgs(f Food) []any {
 		f.ID, f.Name, f.Brand, f.Category, aliases, f.ServingLabel, f.ServingGrams,
 		f.KCal, f.ProteinG, f.CarbG, f.FatG, f.FibreG,
 		f.SaturatedFatG, f.SugarG, f.AddedSugarG, f.SodiumMG, f.CholesterolMG,
-		f.Market,
+		f.Market, f.RankTier,
 		f.ExternalID, f.ExternalSource,
 	}
 }

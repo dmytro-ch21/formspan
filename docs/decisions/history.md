@@ -33456,6 +33456,199 @@ worktree of its own.
   is not in this PR.
 
 
+## 2026-08-20 — The food catalog stops being 177 rows (N88)
+
+`GET /v1/nutrition/catalog` searched **177** foods. The athlete asked why, given
+that USDA publishes rather more than that.
+
+The answer was that 177 was never a partial import. `scripts/import_usda_foods.py`
+already read the whole SR Legacy dump and threw almost all of it away: `SPEC` was
+an *inclusion filter*, a hand-written list of foods a person actually logs, each
+resolved to exactly one USDA row. The argument, written into the script, was that
+7,793 rows would make search worse — USDA's own relevance ranks *"Lunchmeat,
+chicken breast, sliced"* above chicken breast, and the long tail is baby food and
+school lunches.
+
+That was right about relevance and wrong about the remedy. 177 curated generics
+cannot answer "pad thai", and an athlete logging dinner is rarely logging a raw
+ingredient. The catalog is **12,651 rows** now: SR Legacy and FNDDS in full, with
+the 177 surviving as a ranking tier rather than a filter.
+
+### What was imported, and what was measured out
+
+Every figure below was measured against the bulk downloads, not assumed.
+
+| dataset | array | usable rows | why |
+|---|---|---|---|
+| SR Legacy 2018-04 | 7,793 | 7,448 | generics, 100% state kcal |
+| FNDDS 2024-10 | 5,432 | 5,203 | **cooked and mixed dishes**, 100% on all nine nutrients |
+| Foundation 2026-04-30 | 395 | — | **excluded** |
+| Branded 2026-04-30 | ~2,000,000 | — | **excluded** |
+
+**FNDDS is the half the catalog never had.** "Chicken breast, fried, coated, skin
+/ coating eaten, from pre-cooked", "Lobster gumbo", "Pizza, cheese, from
+restaurant or fast food, thick crust" — SR Legacy contains no cooked dish of any
+kind. It is also the cleanest dataset of the three: every one of its 5,431
+nutrient-bearing rows states all nine nutrients we store.
+
+**Foundation Foods is excluded on measurement, and the flag exists anyway.**
+`--foundation` is implemented and works; the committed build does not use it.
+Of its 363 real rows only **95 (26%) state energy** as nutrient 1008, 226 more
+carry Atwater energy instead (so importing it at all needs a fallback, which is
+now written), **5 rows (1%) state sugar**, and **88 (24%) duplicate an SR Legacy
+description verbatim**. The net offer is ~233 new rows that would render `n/a`
+across most of the nutrition panel N52 built. Worth revisiting — it is the
+dataset USDA is actively growing — but not worth taking today.
+
+**Branded stays out.** 3.1 GB unzipped cannot be a `go:embed` seed file, and its
+relevance would drown the generics. If it lands it belongs behind the barcode
+resolver. Licensing is not the obstacle: FDC is public domain / CC0 including
+Branded, verified against the live site, which is exactly what Open Food Facts
+(ODbL) is not — and why migration 000062 quarantines OFF in a third table.
+
+**497 rows were deliberately dropped**: 345 SR Legacy baby foods, 152 FNDDS
+infant-food and formula rows, and FNDDS's 77-row "Not included in a food
+category", which is recipe fragments rather than meals — "Beef, for use with
+vegetables", "Chocolate beverage powder, dry mix, not reconstituted".
+
+### rank_tier, and the test that was decoration until it was measured
+
+**803 catalog rows contain the word "chicken"** — 394 from SR Legacy, 409 from
+FNDDS. At 177 rows the search's two existing signals were enough; at 12,651 they
+are not, and the reason is specific. `SearchRank` orders by the earliest position
+a typed word appears in the name, then by trigram similarity. Both the curated
+"Chicken breast" and FNDDS's "Chicken breast, fried, coated, …" *lead* with the
+typed word, so lead position ties, and similarity then breaks the tie by string
+length — which is not a question about food, and is the very failure the
+lead-position rule was invented to fix.
+
+So provenance became the primary sort key: `rank_tier` 0 for a food a human
+named and gave aliases to, 1 for the bulk import. A SMALLINT rather than a
+boolean, because Foundation, branded and console-authored rows each have a claim
+to a tier later. `DEFAULT 1` is the safe direction — a row arriving without an
+opinion sorts *behind* the curated set rather than ahead of it.
+
+Ten realistic queries were run against the built catalog with and without the
+tier. **Two changed answer, and both changed from wrong to right:**
+
+| query | without `rank_tier` | with |
+|---|---|---|
+| `greek yogurt` | Yogurt, Greek, with oats | Greek yogurt, plain, nonfat |
+| `salmon` | Salmon salad | Salmon, sockeye |
+
+**That comparison is the only reason the test is worth anything, and the first
+version of it was decoration.** It used "chicken breast", where the curated row
+is also the shortest string and therefore wins on similarity regardless — the
+test passed with `f.rank_tier ASC` deleted from the ORDER BY. Caught by the
+standing rule: apply the mutation, *check it applied*, then ask whether the suite
+went red. It had applied. The suite was green. The test now uses the greek-yogurt
+pair, where the curated row genuinely loses without the tier, and it goes red on
+that mutation.
+
+A second test guards the opposite failure, which would rot silently: 12,474 of
+the 12,651 rows are tier 1, so for any query with no curated match every ordering
+decision is still made by lead position and similarity. A change that sorted on
+`rank_tier` alone would pass the first test and leave the entire bulk catalog
+unordered.
+
+The shared integration fixtures are now pinned to one tier with a named constant
+and a comment saying why — a single tier-0 fixture among them would make the
+pre-existing decoy and synonym tests pass because of the tier instead of the
+signal they were written for.
+
+### Search performance, measured, and an index that is now worth having
+
+`EXPLAIN (ANALYZE, BUFFERS)` at 12,651 rows, table 2.9 MB / indexes 6.0 MB:
+
+| query | plan | time |
+|---|---|---|
+| `chicken breast` | Seq Scan, 63 matched, 12,588 filtered | **31.6 ms** |
+| `e` (worst case, one common letter) | Seq Scan, 12,041 matched | **169.9 ms** |
+| category browse, no query | Seq Scan + top-N heapsort | **4.0 ms** |
+
+Acceptable, and the interesting result is *why* the first one is 31 ms. **The
+`gin_trgm_ops` index on `name` is still unused, and the alias `OR` is what
+defeats it.** `SearchClause` emits `name ILIKE $n OR EXISTS (SELECT 1 FROM
+unnest(f.aliases) …)` per token, and the `OR` against a subplan forces a
+sequential scan. Measured directly: the same two-token predicate with the alias
+half removed plans as a Bitmap Index Scan on `food_catalog_name_trgm_idx` and
+runs in **0.97 ms** — a ~30× difference on the mainline query.
+
+Migration 000062 called that index "measured as unused at 173 rows, and kept
+anyway… as headroom". The headroom is now real and reachable; it just needs the
+alias branch restructured (a UNION, or an expression index spanning aliases) so
+the planner can use the index for the name half. Filed as its own ticket rather
+than smuggled into this one, because it changes matching semantics and deserves
+its own tests.
+
+No index was added on `rank_tier`. It is a sort key rather than a filter — every
+search reads every tier — and a two-value column could never be selective. The
+ordering is computed above the scan either way.
+
+### Two schema consequences, both forced by real data
+
+**`name` widened from 120 to 200 characters.** 72 rows (0.5%) exceed 120, longest
+184: *"Chicken or turkey, potatoes, and vegetables including carrots, broccoli,
+and/or dark-green leafy; cream sauce, white sauce, or mushroom sauce"*.
+Truncating was the obvious alternative and is wrong — the part that overflows is
+the part that distinguishes the row, and it is also where the disambiguating
+search tokens live. This works against N58 ("results should be scannable, not a
+wall of names"); that is a rendering problem, and shortening stored data to fix a
+layout is discarding evidence.
+
+**`rank_tier` is `*int` in the seed struct, not `int`.** An absent `rank_tier` in
+the JSON would unmarshal to 0 — the *curated* tier — silently promoting all
+12,651 rows and disabling the ranking with no error anywhere. `validate` requires
+the field to be present. The first version of this checked only `< 0` while its
+comment claimed to check absence; the comment was right about what was needed and
+the code was not.
+
+### Everything else that moved
+
+- **A second scanner.** `Search` scans `selectColumns` inline rather than through
+  `scanFood`, because it appends a window-function count. Adding `rank_tier` to
+  one and not the other failed with "25 and 24" — loudly, which is what the
+  comment sitting directly above it predicted. It is the third time that comment
+  has earned itself.
+- Seeding 12,651 rows through the real `UpsertAll` batch takes **~9 s**, in one
+  transaction. The `IS DISTINCT FROM` guard in the upsert stops a no-op deploy
+  rewriting every row; it mattered little at 177 and matters now.
+- `foods.json` is **5.6 MB** embedded, against `techniques.json` at 669 KB and
+  `exercises.json` at 382 KB. By far the largest asset in the binary.
+
+### The frozen dataset was not byte-stable, and 38 rows changed
+
+The script's docstring claimed this build was "reproducible forever" because SR
+Legacy is frozen at 2018-04. **It is not.** The file at that URL now carries
+`Last-Modified: 2025-05-01`, and rebuilding from it changed **38 of the 177
+curated rows**: 19 sugar values, 18 saturated fat, 10 sodium, 3 cholesterol.
+`bacon` sodium 2193 → 2190 mg, `canola-oil` saturated fat 7.37 → 7.36 g, `apple`
+sugar 10.39 → 10.4 g.
+
+Verified against the raw source rather than assumed: the importer reproduces
+USDA's current file exactly, and the committed values are what disagree. **kcal,
+protein, carbohydrate, fat and fibre are unchanged on all 177** — only the label
+macros N52 added moved, which is consistent with those having been read from a
+different snapshot.
+
+The new values ship. They are what USDA publishes today, every one is checkable
+through the `external_id` already on the row, and none is athlete-visible in
+magnitude. But the reproducibility claim was false and is now written down as
+false: FNDDS and Foundation are *dated releases* that USDA reissues, and even the
+"frozen" one moved. The importer pins exact filenames so changing release is a
+deliberate, reviewable edit rather than something that happens because somebody
+re-downloaded on a Tuesday.
+
+### Not done here
+
+Household portions. USDA carries **14,449** of them in SR Legacy and **22,194**
+in FNDDS — "1 medium banana, 118 g" — and every row this ships is still per 100 g
+with `serving_label` hardcoded to `'100 g'`. That is N89, and N90 is the quantity
+control that makes them usable: change the grams, switch to oz. Until both land,
+the catalog is 71× larger and an athlete still logs one banana as 100 g of
+banana.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

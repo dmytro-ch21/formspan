@@ -79,7 +79,7 @@ func TestSeedKeepsUnstatedFibreNull(t *testing.T) {
 func TestSeedValidatorRejectsBadContent(t *testing.T) {
 	good := seedFood{
 		ID: "ok", Name: "Ok", Category: "dairy", Market: "us",
-		ExternalID: "1", ServingGrams: 100, KCal: 1,
+		ExternalID: "1", ServingGrams: 100, KCal: 1, RankTier: ptr(0),
 	}
 	cases := map[string]func(*seedFood){
 		"no id":          func(f *seedFood) { f.ID = "" },
@@ -90,6 +90,11 @@ func TestSeedValidatorRejectsBadContent(t *testing.T) {
 		"no external id": func(f *seedFood) { f.ExternalID = "" },
 		"zero serving":   func(f *seedFood) { f.ServingGrams = 0 },
 		"negative macro": func(f *seedFood) { f.ProteinG = -1 },
+		// Absent, not merely invalid. An `int` field would read a missing
+		// rank_tier as 0 — the CURATED tier — silently promoting every bulk row
+		// ahead of nothing and disabling the ranking with no error anywhere.
+		"no rank tier":       func(f *seedFood) { f.RankTier = nil },
+		"negative rank tier": func(f *seedFood) { f.RankTier = ptr(-1) },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -116,9 +121,14 @@ func TestSeedValidatorRejectsAnEmptyFile(t *testing.T) {
 }
 
 func TestSeedDuplicateIDIsRejected(t *testing.T) {
-	f := seedFood{ID: "dup", Name: "A", Category: "c", Market: "us", ExternalID: "1", ServingGrams: 100}
+	f := seedFood{ID: "dup", Name: "A", Category: "c", Market: "us", ExternalID: "1", ServingGrams: 100, RankTier: ptr(1)}
 	err := validate([]seedFood{f, f})
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("err = %v, want a duplicate-id error", err)
 	}
 }
+
+// ptr is a local helper for the nullable seed fields. Declared here rather than
+// imported so the seed tests stay runnable without a database or a helper
+// package.
+func ptr(v int) *int { return &v }

@@ -8775,6 +8775,32 @@ list — scenarios that confuse the two will pass against the wrong resource.
 - `GET /v1/nutrition/catalog/coverage` reports a non-zero food count, at least
   one market, and category counts that **sum to the total**.
 
+### Ranking at 12,651 rows (N88)
+
+The catalog was 177 curated foods when the scenarios above were written. It is
+**12,651** now — SR Legacy and FNDDS in full — and **803 rows contain the word
+"chicken"**. Ranking stopped being a nicety and became the whole feature.
+
+- `greek yogurt` returns the curated `Greek yogurt, plain, nonfat` first, NOT
+  `Yogurt, Greek, with oats`. **This is the measured case**: the bulk row wins
+  this query on similarity, and `rank_tier` is the only thing that overrides it.
+  `salmon` is the same shape — `Salmon, sockeye` must beat `Salmon salad`.
+- Every result carries `rank_tier`. A client must treat an unrecognised value as
+  bulk, never as curated — the server owns this vocabulary and will extend it.
+- **Ordering must survive within a tier.** For a query with no curated match at
+  all — `lobster gumbo`, `pad thai`, both real FNDDS rows — results must still be
+  ordered by lead position and similarity. A regression that sorted on
+  `rank_tier` alone would leave 12,474 rows unordered and still pass every
+  curated-row scenario above.
+- FNDDS vocabulary resolves: `pad thai`, `beef burrito`, `lobster gumbo` return
+  something. Under the 177-row catalog every one of these was `no_match`, so
+  these double as the proof the import actually landed.
+- Paging is stable across the new size: page 2 of a broad query (`chicken`)
+  repeats no id from page 1. Ties are constant at this row count, and a
+  non-total sort silently repeats and skips.
+- A category browse (`?category=prepared`, now thousands of rows) puts curated
+  foods before bulk ones rather than whatever sorts first alphabetically.
+
 ### Edge cases & errors — the availability half
 
 Each of these must produce a DIFFERENT `outcome`. A test that only asserts

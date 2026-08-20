@@ -45,6 +45,19 @@ type fixture struct {
 	kcal                       float64
 }
 
+// EVERY shared fixture is seeded at the SAME rank_tier, and that is deliberate
+// rather than incidental.
+//
+// N88 made rank_tier the primary sort key, which means a single tier-0 fixture
+// in this list would rank first for its query and the assertions below would
+// pass because of the tier instead of because of the signal they were written
+// to test. TestSearchRanksThePlainRowAboveTheDecoy would still be green with
+// the lead-position rule deleted.
+//
+// The curated-versus-bulk behaviour is tested in
+// TestSearchRanksACuratedRowAboveTheBulkImport, which seeds its own rows.
+const sharedFixtureTier = 1
+
 var searchFixtures = []fixture{
 	// The word-order case: every typed word is present, in order, and a
 	// contiguous match still fails because USDA puts commas between them.
@@ -74,9 +87,9 @@ func seedFixtures(t *testing.T, repo *PostgresRepository) context.Context {
 		_, err := repo.pool.Exec(ctx, `
 			INSERT INTO food_catalog (
 				id, name, brand, category, aliases, serving_label, serving_grams,
-				kcal, protein_g, carb_g, fat_g, fibre_g, market, source,
+				kcal, protein_g, carb_g, fat_g, fibre_g, market, rank_tier, source,
 				external_id, external_source)
-			VALUES ($1, $2, '', $3, $4, '100 g', 100, $5, 1, 1, 1, 0, $6, 'seed', NULL, NULL)
+			VALUES ($1, $2, '', $3, $4, '100 g', 100, $5, 1, 1, 1, 0, $6, $7, 'seed', NULL, NULL)
 			ON CONFLICT (id) DO UPDATE SET
 				name = EXCLUDED.name, brand = EXCLUDED.brand,
 				category = EXCLUDED.category, aliases = EXCLUDED.aliases,
@@ -84,9 +97,10 @@ func seedFixtures(t *testing.T, repo *PostgresRepository) context.Context {
 				kcal = EXCLUDED.kcal, protein_g = EXCLUDED.protein_g,
 				carb_g = EXCLUDED.carb_g, fat_g = EXCLUDED.fat_g,
 				fibre_g = EXCLUDED.fibre_g, market = EXCLUDED.market,
+				rank_tier = EXCLUDED.rank_tier,
 				source = EXCLUDED.source, external_id = EXCLUDED.external_id,
 				external_source = EXCLUDED.external_source`,
-			f.id, f.name, f.category, aliases, f.kcal, f.market)
+			f.id, f.name, f.category, aliases, f.kcal, f.market, sharedFixtureTier)
 		if err != nil {
 			t.Fatalf("seed %s: %v", f.id, err)
 		}
@@ -593,5 +607,111 @@ func TestLabelMacrosRoundTripThroughTheCatalog(t *testing.T) {
 	if again.SodiumMG == nil || *again.SodiumMG != 410 {
 		t.Errorf("a sodium-only re-seed changed nothing (%v) — the column is "+
 			"missing from the change-detection tuple", again.SodiumMG)
+	}
+}
+
+// tierFixture is a row seeded with an explicit rank_tier, for the N88 tests.
+type tierFixture struct {
+	id, name, category string
+	tier               int
+}
+
+func seedTierFixtures(t *testing.T, repo *PostgresRepository, rows []tierFixture) context.Context {
+	t.Helper()
+	ctx := context.Background()
+	for _, f := range rows {
+		_, err := repo.pool.Exec(ctx, `
+			INSERT INTO food_catalog (
+				id, name, brand, category, aliases, serving_label, serving_grams,
+				kcal, protein_g, carb_g, fat_g, fibre_g, market, rank_tier, source,
+				external_id, external_source)
+			VALUES ($1, $2, '', $3, '{}', '100 g', 100, 120, 1, 1, 1, 0, 'us', $4, 'seed', NULL, NULL)
+			ON CONFLICT (id) DO UPDATE SET
+				name = EXCLUDED.name, rank_tier = EXCLUDED.rank_tier,
+				category = EXCLUDED.category, market = EXCLUDED.market,
+				source = EXCLUDED.source`,
+			f.id, f.name, f.category, f.tier)
+		if err != nil {
+			t.Fatalf("seed %s: %v", f.id, err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, f := range rows {
+			if _, err := repo.pool.Exec(context.Background(),
+				`DELETE FROM food_catalog WHERE id = $1`, f.id); err != nil {
+				t.Errorf("cleanup %s: %v", f.id, err)
+			}
+		}
+	})
+	return ctx
+}
+
+// The case N88 exists for, with the REAL rows and a REAL measured failure.
+//
+// The catalog went from 177 curated foods to 12,651. Ten realistic queries were
+// run against the built catalog with and without `rank_tier` in the ORDER BY;
+// two changed answer, and both changed from wrong to right:
+//
+//	query           without rank_tier             with rank_tier
+//	"greek yogurt"  Yogurt, Greek, with oats      Greek yogurt, plain, nonfat
+//	"salmon"        Salmon salad                  Salmon, sockeye
+//
+// **The pair below is the "greek yogurt" case verbatim, and it is chosen
+// precisely because the curated row LOSES without the tier.** An earlier
+// version of this test used "chicken breast", where the curated row is also the
+// shortest string and therefore wins on similarity anyway — it passed with
+// `rank_tier` deleted from the ORDER BY, which made it decoration. Both signals
+// tie on lead position here (each name contains a typed word at position 1), and
+// similarity then prefers the shorter bulk row.
+//
+// If you change these fixtures, delete `f.rank_tier ASC` from SearchRank and
+// confirm this test goes red. It is the only thing proving the column does
+// anything.
+func TestSearchRanksACuratedRowAboveTheBulkImport(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := seedTierFixtures(t, repo, []tierFixture{
+		{"fd-n88-curated-greek", "Greek yogurt, plain, nonfat", "dairy", 0},
+		// Verbatim from FNDDS 2024-10, and the row that wins without the tier.
+		{"fd-n88-bulk-greek-oats", "Yogurt, Greek, with oats", "dairy", 1},
+	})
+
+	got, _, err := repo.Search(ctx, SearchFilter{Query: "greek yogurt", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 2 {
+		t.Fatalf("expected BOTH rows to match, got %d — this test is about ranking and is vacuous if the WHERE already excluded the competition", len(got))
+	}
+	if got[0].ID != "fd-n88-curated-greek" {
+		t.Errorf("'greek yogurt' ranked %q first, want the curated row — measured, the bulk row wins this query on similarity and rank_tier is the only thing that overrides it", got[0].ID)
+	}
+	if got[0].RankTier != 0 {
+		t.Errorf("curated row came back with rank_tier %d, want 0 — the column is not being read back", got[0].RankTier)
+	}
+}
+
+// The other half, and the one that would rot silently: rank_tier must NOT
+// flatten the ranking among rows that share a tier.
+//
+// 12,474 of the catalog's 12,651 rows are tier 1, so for any query with no
+// curated match — "lobster gumbo", "pad thai" — every ordering decision is made
+// entirely by lead position and similarity. A change that sorted on rank_tier
+// ALONE would pass the test above and make the whole bulk catalog unordered.
+func TestRankTierDoesNotFlattenOrderingWithinATier(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := seedTierFixtures(t, repo, []tierFixture{
+		{"fd-n88-same-plain", "Chicken, broilers or fryers, breast, meat only, raw", "poultry", 1},
+		{"fd-n88-same-decoy", "Lunchmeat, chicken breast, sliced, prepackaged", "poultry", 1},
+	})
+
+	got, _, err := repo.Search(ctx, SearchFilter{Query: "chicken breast", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 2 {
+		t.Fatalf("both rows must match for this to test anything, got %d", len(got))
+	}
+	if got[0].ID != "fd-n88-same-plain" {
+		t.Errorf("within one tier the decoy ranked first (%q) — lead position is no longer doing its job", got[0].ID)
 	}
 }
