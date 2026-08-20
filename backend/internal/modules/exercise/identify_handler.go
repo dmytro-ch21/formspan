@@ -268,14 +268,33 @@ func humaniseIdentifyWait(d time.Duration) string {
 	return fmt.Sprintf("about %d hours", h)
 }
 
-// identifyRetryAfterSeconds is the header value: whole seconds, never below
-// one, since a Retry-After of 0 invites the immediate retry the quota just
-// refused.
+// identifyRetryAfterSeconds is the header value: whole seconds, never below one.
+//
+// **ROUNDED UP, and that is the contract rather than a preference.**
+// `docs/architecture/api-conventions.md` promises a `Retry-After` "rounded up
+// so that obeying it exactly succeeds", and `internal/platform/ratelimit`
+// honours it with `roundUpSecond`. Truncating instead is a real bug: this
+// quota's window is `created_at > since`, so a client that waits exactly the
+// advertised number of seconds is still INSIDE it by the fractional part that
+// was dropped, gets a second 429, and learns that obeying the header does not
+// work. The polite client is punished and an impatient one is not.
+//
+// Never below one for the same family of reason — a `Retry-After: 0` invites
+// the immediate retry the quota just refused.
+//
+// (F15 fixed this in all three places at once. It was the third copy of one
+// truncation: `bjj` inherited it from `nutrition`, this inherited it alongside
+// `humaniseIdentifyWait`, and the docstring above already says a change to
+// either should change both.)
 func identifyRetryAfterSeconds(d time.Duration) int {
-	if s := int(d.Seconds()); s > 0 {
-		return s
+	if d <= 0 {
+		return 1
 	}
-	return 1
+	s := int((d + time.Second - 1) / time.Second)
+	if s < 1 {
+		return 1
+	}
+	return s
 }
 
 // identifyCallerID reads the authenticated athlete from the request.

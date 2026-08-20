@@ -9188,6 +9188,11 @@ which is unchanged.
 - **The reset is derived from the oldest call still inside the window**, not
   from the oldest row overall. Computed from the wrong row it reports a wait of
   nearly a day when the real answer is minutes.
+- **`Retry-After` is rounded UP, so obeying it exactly must be admitted (F15).**
+  Same rule and same trap as the nutrition estimate cap: the discriminating case
+  is a remaining window with a FRACTIONAL part, because at a whole number of
+  seconds flooring and ceiling agree and the scenario passes against the bug.
+  A sub-second remainder must never advertise `0`.
 - **A refused (422) or failed (503) identification still counts.** They spend
   tokens. A quota counting only successes lets a client loop on a photo the
   model keeps declining and pay for every attempt.

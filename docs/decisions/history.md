@@ -32174,10 +32174,28 @@ telling a machine something a machine could not act on.
 It is now `(d + time.Second - 1) / time.Second`, which is what
 `internal/platform/ratelimit.roundUpSecond` and `bjj.draftRetryAfterSeconds`
 already did and what `docs/architecture/api-conventions.md` has promised all
-along: "rounded up so that obeying it exactly succeeds". Three implementations,
-one rule, and now no exception. `bjj`'s docstring — which named this endpoint as
-still-broken and pointed at the open task — is corrected rather than left as a
-stale accusation.
+along: "rounded up so that obeying it exactly succeeds". `bjj`'s docstring —
+which named this endpoint as still-broken and pointed at the open task — is
+corrected rather than left as a stale accusation.
+
+### There was a third copy, and finding it is the reason to grep
+
+The task named one function. Grepping `int(d.Seconds())` across the backend
+found **two**: `nutrition.retryAfterSeconds` and
+`exercise.identifyRetryAfterSeconds`, which serves `/v1/exercises/identify`'s
+daily quota over the identical `created_at > since` window — and which had no
+test on it at all. It is fixed here too, with the same table, because fixing two
+of three and filing the third is precisely the move that produced F15: `bjj`
+copied the arithmetic, was fixed first, and left a note saying the original was
+still wrong. `identifyRetryAfterSeconds`'s own neighbouring docstring already
+says a change to one of these should change both. Doing otherwise would have
+meant filing F18 for a one-line typo somebody had just read.
+
+`ratelimit.Reject` also writes `int(retryAfter.Seconds())` and is deliberately
+left alone: every caller reaches it through `Allow`, which already returns a
+whole-second duration from `roundUpSecond`, so the conversion is exact rather
+than truncating. It is a latent trap only if some future caller passes a raw
+duration — worth knowing, not worth changing blind.
 
 ### The only test that could have caught it
 
@@ -32212,8 +32230,11 @@ Measured rather than assumed, per the standing rule: with the truncation
 restored, the table fails on four of its eight cases and the integration test
 fails on the header value; with the header assertion temporarily relaxed so the
 round trip could be observed directly, it fails at the end instead — `status 429
-after waiting the advertised 1s`. Both files restored, both packages green
-afterwards in the same session.
+after waiting the advertised 1s`. The identify table was mutated separately and
+fails on the same four cases. Every file restored, and the whole backend suite
+green afterwards in the same session — which is the half of that ritual that is
+easy to skip, since a red suite only means something once its green baseline has
+been seen.
 
 ### The server half is only half — filed as F17
 

@@ -5943,7 +5943,11 @@ paths:
             reconnaissance.
           headers:
             Retry-After:
-              description: Whole seconds, never below 1.
+              description: >
+                Whole seconds, never below 1, and ROUNDED UP so that waiting
+                exactly this long succeeds — the same promise
+                `components/responses/RateLimited` and the other metered
+                endpoints make. Both limits behind this status answer with it.
               schema: { type: integer, minimum: 1 }
           content:
             application/json:
