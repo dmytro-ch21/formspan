@@ -20,6 +20,28 @@
  * asking the same question in March gets March's numbers back rather than a
  * fresh derivation from a body that has since changed.
  *
+ * ## Three ways a target gets its number, and this screen offers all three
+ *
+ * Until N72 it offered one. The derivation was here, in full, and the two ways
+ * of DISAGREEING with it were on web only: typing your own number, and the
+ * weekly adjustment that corrects a target against what your weight actually
+ * did. So an athlete on a phone could read the entire argument for 2,700 kcal
+ * and had nowhere to answer it — the reasoning reachable, the action not, which
+ * is the exact failure the mobile-first rule in `CLAUDE.md` was written from.
+ *
+ *  - **derived** — the ladder below, accepted with `Use this target`.
+ *  - **adjustment** — a weekly correction from what actually happened to your
+ *    weight, shown in full before you take it. N27; see `AdjustmentCard`.
+ *  - **manual** — a number you typed. It has no arithmetic and the screen says
+ *    so rather than inventing one.
+ *
+ * **`What you are eating to` is the authority, and the ladder is not.** With
+ * one source that distinction did not exist; with three it is the thing most
+ * worth getting right, because a suggestion sitting under the heading "Your
+ * target" is a number nobody chose being read as the number in force. So the
+ * live row is fetched from the server, states its own provenance, and is
+ * refreshed by every one of the three writes.
+ *
  * ## When it cannot
  *
  * An incomplete profile returns `suggestion: null` with the fields named. The
@@ -36,14 +58,25 @@ import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Text } from '@/components/Themed';
+import { AdjustmentCard } from '@/components/nutrition/AdjustmentCard';
+import { ManualTarget } from '@/components/nutrition/ManualTarget';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { ApiError } from '@/lib/apiError';
+import { addDays } from '@/lib/history';
 import { useAuthToken } from '@/lib/useAuthToken';
-import { profileGap, todayString } from '@/lib/nutrition';
+import { useUnits } from '@/lib/useUnits';
+import type { ManualDraft, ManualTargetInput } from '@/lib/manualTarget';
+import { profileGap, todayString, type Target } from '@/lib/nutrition';
 import {
+  fetchAdjustment,
+  listTargets,
   saveTarget,
   suggestedTarget,
+  targetOn,
+  type Adjustment,
+  type AdjustmentResponse,
   type Projection,
   type Suggested,
 } from '@/lib/nutritionApi';
@@ -65,16 +98,101 @@ const ACTIVITIES = [
  *  reader than to the screen is two receipts. */
 const SAVED_MESSAGE = 'Saved. Food measures the day against this from now on.';
 
+/**
+ * How far back the target history is read.
+ *
+ * The window is not "the targets in these dates" — `listTargets` carries in the
+ * row live at its start, which is what makes a target set months ago the
+ * answer to "what am I eating to" today. A year is arbitrary and generous; the
+ * carry-in is what actually matters, and shortening this cannot lose the live
+ * row.
+ */
+const HISTORY_DAYS = 365;
+
+/** The one offline sentence, said the same way wherever a write fails. */
+const OFFLINE_MESSAGE =
+  'Could not save it — this one needs a connection. Nothing has changed; try again when you have signal.';
+
+/**
+ * Why a save failed, in words that match what actually happened.
+ *
+ * **The distinction is the whole point, and getting it wrong is a dead end
+ * dressed as weather.** Every write on this screen used to report the offline
+ * sentence unconditionally, so an athlete who typed 700 kcal — a dropped digit
+ * — got a permanent 400 from the server's 800–8,000 rail and was told to try
+ * again when they had signal. It would fail identically forever, and the copy
+ * sent them to look for a better connection.
+ *
+ * An `ApiError` means the server ANSWERED and refused: its message is written
+ * for a human and is the most useful thing available, so it is shown. Anything
+ * else — `OfflineError`, a dropped socket — means nothing was answered at all,
+ * and only then is "try again when you have signal" true.
+ *
+ * The client's own bounds now match the server's, so the refusal branch should
+ * be rare. It is here because "should be rare" is not "cannot happen": the two
+ * can drift, and this is what makes the drift legible instead of silent.
+ */
+function refusalOrWeather(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  return OFFLINE_MESSAGE;
+}
+
+/** What the typed-target form opens on, given a target. */
+function draftFrom(t: {
+  kcal: number;
+  protein_g: number;
+  carb_g: number;
+  fat_g: number;
+  fibre_g: number | null;
+}): ManualDraft {
+  return {
+    kcal: String(t.kcal),
+    protein_g: String(t.protein_g),
+    carb_g: String(t.carb_g),
+    fat_g: String(t.fat_g),
+    // Absent, not zero — seeding "0" would turn a target that never stated
+    // fibre into one that claims none, on the athlete's next save.
+    fibre_g: t.fibre_g == null ? '' : String(t.fibre_g),
+  };
+}
+
 export default function TargetScreen() {
   const router = useRouter();
   const accent = useAccent();
   const getToken = useAuthToken();
+  const { units } = useUnits();
 
   const [activity, setActivity] = useState<string>('light');
   const [data, setData] = useState<Suggested | null>(null);
   const [failed, setFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+
+  // What is actually in force, and the weekly proposal — both read from the
+  // server, and both deliberately independent of the activity pills. Web
+  // learned this the expensive way: sharing one loader with the suggestion made
+  // every chip press refetch a year of targets and re-run the adjustment check,
+  // neither of which a chip can affect.
+  const [targets, setTargets] = useState<Target[] | null>(null);
+  const [adjustment, setAdjustment] = useState<AdjustmentResponse | null>(null);
+  const [writing, setWriting] = useState<null | 'manual' | 'adjustment'>(null);
+  // The MESSAGE travels with the failure, not just which write failed. A
+  // boolean here is what forced every failure to share one sentence, which is
+  // how a permanent server refusal came to be reported as a bad connection.
+  const [writeFailed, setWriteFailed] = useState<{
+    which: 'manual' | 'adjustment';
+    message: string;
+  } | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  /**
+   * Remount key for the typed-target form.
+   *
+   * The form seeds itself at mount and never again, which is what stops a late
+   * fetch overwriting digits somebody is mid-way through typing. Bumping this
+   * is therefore the ONLY way to reseed it — done when it is opened, and after
+   * a save, so it opens on what is now in force rather than on what was.
+   */
+  const [manualSeq, setManualSeq] = useState(0);
   // Saved-in-place, because this screen is a TAB now rather than something
   // pushed from Food. It used to `router.back()` on success, which was the
   // whole confirmation: the screen you were on returning IS the receipt. A tab
@@ -161,6 +279,49 @@ export default function TargetScreen() {
     }, [load]),
   );
 
+  /**
+   * What is in force, and whether the weekly check has a proposal.
+   *
+   * A SECOND focus effect rather than more work inside the first, and the
+   * dependency list is the reason: `load` changes with the activity pills, so
+   * folding these in would refetch a year of target history and re-run the
+   * adjustment computation on every pill press — two server round trips a chip
+   * cannot possibly affect, on a phone that may be on cellular. Web made
+   * exactly that mistake and its review caught it.
+   *
+   * Neither failure is fatal to the screen, so neither gets an error banner:
+   * the derivation below still works, and a live-target row that cannot be read
+   * simply says so. What it must NOT do is render a stale row as current, which
+   * is why the state is a nullable rather than an empty array.
+   */
+  const loadLive = useCallback(() => {
+    let live = true;
+    listTargets(getToken, { from: addDays(on, -HISTORY_DAYS), to: on })
+      .then((t) => {
+        if (live) setTargets(t);
+      })
+      .catch(() => {
+        if (live) setTargets(null);
+      });
+    fetchAdjustment(getToken, on)
+      .then((a) => {
+        if (live) setAdjustment(a);
+      })
+      .catch(() => {
+        // Silence, deliberately. The weekly check is an offer; an offer that
+        // could not be fetched is nothing to report, and an error card here
+        // would put a red box on a screen whose main job succeeded.
+        if (live) setAdjustment(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [getToken, on]);
+
+  useFocusEffect(loadLive);
+
+  const live = targets ? targetOn(targets, on) : null;
+
   const accept = useCallback(async () => {
     const s = data?.suggestion;
     if (!s || saving) return;
@@ -178,6 +339,12 @@ export default function TargetScreen() {
         basis: s.basis,
       });
       setSaved(true);
+      // The live row is the screen's authority on what is in force, so every
+      // write has to move it. Without this the athlete accepts 2,400 and the
+      // heading above still says 2,700 — which reads as the save not having
+      // worked, and is the exact disagreement between the three sources this
+      // screen exists to prevent.
+      loadLive();
       // SPOKEN, not just rendered. `router.back()` used to be the confirmation
       // and navigation announces itself; a Text appearing mid-page while focus
       // stays on the button does not, so a VoiceOver user tapped "Use this
@@ -193,7 +360,89 @@ export default function TargetScreen() {
     } finally {
       setSaving(false);
     }
-  }, [data, getToken, on, saving]);
+  }, [data, getToken, on, saving, loadLive]);
+
+  /**
+   * A target somebody typed.
+   *
+   * `basis: null` and `source: 'manual'`, and both halves matter. The source is
+   * what lets the row above say "you typed this one" instead of offering an
+   * explanation that was never true; the null basis is what stops a derivation
+   * being attached to a number that has none. Sending the current suggestion's
+   * basis along would be the tidy-looking version of exactly that lie.
+   */
+  const saveManual = useCallback(
+    async (input: ManualTargetInput) => {
+      if (writing) return;
+      setWriting('manual');
+      setWriteFailed(null);
+      try {
+        await saveTarget(getToken, on, { ...input, source: 'manual', basis: null });
+        setManualOpen(false);
+        // Reseed, so reopening the form starts from what is now in force rather
+        // than from the numbers that were there before the save.
+        setManualSeq((n) => n + 1);
+        loadLive();
+        AccessibilityInfo.announceForAccessibility(
+          `Saved. Your target is ${input.kcal} kcal from ${on}.`,
+        );
+      } catch (e) {
+        const why = refusalOrWeather(e);
+        setWriteFailed({ which: 'manual', message: why });
+        // Spoken as well as rendered. Both SUCCESS paths announce and the
+        // invalid-form path announces, each because focus stays on the button
+        // and iOS has no live regions — and the failure path had the identical
+        // shape while saying nothing at all. A VoiceOver user heard "Saving…",
+        // then silence, and concluded the target was set. Raised in review.
+        AccessibilityInfo.announceForAccessibility(why);
+      } finally {
+        setWriting(null);
+      }
+    },
+    [getToken, on, writing, loadLive],
+  );
+
+  /**
+   * Take the weekly proposal.
+   *
+   * Filed under the PROPOSAL's own date, never today's. The server picks
+   * tomorrow deliberately — a target applied retroactively judges a day already
+   * mostly eaten, and the remaining figure would jump under the athlete's
+   * thumb. Substituting `on` here is the one-character version of that bug.
+   */
+  const acceptAdjustment = useCallback(
+    async (a: Adjustment) => {
+      if (writing) return;
+      setWriting('adjustment');
+      setWriteFailed(null);
+      try {
+        await saveTarget(getToken, a.effective_on, {
+          kcal: a.to_kcal,
+          protein_g: a.protein_g,
+          carb_g: a.carb_g,
+          fat_g: a.fat_g,
+          fibre_g: a.fibre_g,
+          source: 'adjustment',
+          // An adjustment's arithmetic is a DIFFERENT shape from a derivation's,
+          // and the target row stores the latter. Null keeps the stored
+          // explanation honest: this came from an adjustment, and `source` says
+          // so.
+          basis: null,
+        });
+        loadLive();
+        AccessibilityInfo.announceForAccessibility(
+          `Saved. You are eating ${a.to_kcal} kcal from ${a.effective_on}.`,
+        );
+      } catch (e) {
+        const why = refusalOrWeather(e);
+        setWriteFailed({ which: 'adjustment', message: why });
+        AccessibilityInfo.announceForAccessibility(why);
+      } finally {
+        setWriting(null);
+      }
+    },
+    [getToken, writing, loadLive],
+  );
 
   const s = data?.suggestion ?? null;
   // Null once a target is derivable, so the fix-this button cannot render for a
@@ -209,6 +458,33 @@ export default function TargetScreen() {
         contentContainerStyle={styles.body}
         keyboardShouldPersistTaps="handled"
       >
+        {/* THE AUTHORITY, and it comes first for that reason. Everything below
+            is a proposal — a derivation, a weekly correction, a field to type
+            in — and with three of them on one screen the number actually in
+            force has to be unmistakable and has to say where it came from. */}
+        <SectionHeader label="What you are eating to" />
+        <LiveTarget target={live} known={targets !== null} />
+
+        {adjustment ? (
+          <AdjustmentCard
+            response={adjustment}
+            units={units}
+            onAccept={(a) => void acceptAdjustment(a)}
+            accepting={writing === 'adjustment'}
+          />
+        ) : null}
+        {writeFailed?.which === 'adjustment' ? (
+          <Text
+            style={styles.problem}
+            testID="adjustment-failed"
+            // Android's half; iOS takes the imperative announcement in the
+            // catch, having no live regions of its own.
+            accessibilityLiveRegion="polite"
+          >
+            {writeFailed.message}
+          </Text>
+        ) : null}
+
         <SectionHeader label="Daily movement" />
         <View style={styles.pills}>
           {ACTIVITIES.map((a) => {
@@ -312,7 +588,11 @@ export default function TargetScreen() {
                 {b.phase_kind === 'maintenance' ? 'Start a cut or a bulk' : 'Change phase'}
               </Text>
             </Pressable>
-            <Row label="Your target" value={`${s.kcal} kcal`} strong />
+            {/* "This works out to", not "Your target" — it was the latter when
+                the derivation was the only way to get a number, and with three
+                on one screen that heading now names something nobody has
+                chosen. What you are eating to is at the top and says so. */}
+            <Row label="This works out to" value={`${s.kcal} kcal`} strong />
 
             <Feasibility p={b.projection} />
 
@@ -362,10 +642,112 @@ export default function TargetScreen() {
             </Text>
           </>
         )}
+
+        {/*
+          OUTSIDE the derivation block, and that placement is the point.
+
+          An athlete whose profile cannot support a derivation gets
+          `suggestion: null` — no height on file, no recent weigh-in — and they
+          are precisely the person who most needs to type a number in. Nesting
+          this inside `s && b` would hide the escape hatch from the only people
+          with no other way out, which is the same class of mistake as putting
+          it on web.
+        */}
+        <SectionHeader label="Or set it yourself" />
+        <Pressable
+          onPress={() => {
+            // Reseed on the way OPEN only, so the form picks up a target that
+            // landed while it was closed.
+            //
+            // Read off the RENDERED `manualOpen` rather than from inside a
+            // `setManualOpen` updater. An updater has to be pure — React may
+            // call it twice — and `setManualSeq` inside one is a side effect
+            // that would then bump the key by two. Harmless for a remount key
+            // and wrong in a way that generalises badly.
+            if (!manualOpen) setManualSeq((n) => n + 1);
+            setManualOpen(!manualOpen);
+          }}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: manualOpen }}
+          accessibilityLabel="Type your own target"
+          testID="manual-toggle"
+        >
+          <Text style={[styles.link, { color: accent.ink }]}>
+            {manualOpen ? 'Never mind' : 'Type your own target'}
+          </Text>
+        </Pressable>
+        {manualOpen ? (
+          <ManualTarget
+            key={manualSeq}
+            // What is in force first, the suggestion second, blank last. The
+            // common act on a phone is disagreeing with ONE number, not
+            // authoring five on a number pad — so the form opens on something
+            // to edit whenever there is anything at all to open on.
+            seed={live ? draftFrom(live) : s ? draftFrom(s) : null}
+            on={on}
+            saving={writing === 'manual'}
+            failed={writeFailed?.which === 'manual' ? writeFailed.message : null}
+            onSave={(input) => void saveManual(input)}
+          />
+        ) : null}
       </KeyboardAwareScrollView>
     </View>
   );
 }
+
+/**
+ * The number actually in force, and where it came from.
+ *
+ * Three states, and collapsing any two of them is the bug this component
+ * exists to avoid:
+ *
+ *  - **not known** — the read failed or has not finished. Says so. It must
+ *    never render as "no target yet", which would tell an athlete who set one
+ *    last week to go and set it again.
+ *  - **none** — read fine, genuinely nothing set.
+ *  - **set** — the number, the date it took effect, and its provenance.
+ *
+ * The provenance line is not decoration. A derived target has an explanation
+ * and a typed one does not, so saying which is what stops the ladder below
+ * being read as the working behind a number it had nothing to do with.
+ */
+function LiveTarget({ target, known }: { target: Target | null; known: boolean }) {
+  if (!known) {
+    return (
+      <Text style={styles.note} testID="live-target-unknown">
+        Could not read what you are eating to — that lives on the server. The workings below
+        still add up.
+      </Text>
+    );
+  }
+  if (!target) {
+    return (
+      <Text style={styles.note} testID="live-target-none">
+        No target yet. Take the one below, or set your own.
+      </Text>
+    );
+  }
+  return (
+    <View style={styles.live} testID="live-target">
+      <Text style={styles.liveKcal}>{target.kcal} kcal</Text>
+      <Text style={styles.note}>
+        from {target.effective_on}
+        {target.source ? ` · ${SOURCE_LABEL[target.source]}` : ''}
+      </Text>
+      <Text style={styles.note}>
+        {target.protein_g} g protein · {target.fat_g} g fat · {target.carb_g} g carbs
+        {target.fibre_g != null ? ` · ${target.fibre_g} g fibre` : ''}
+      </Text>
+    </View>
+  );
+}
+
+/** Provenance in the athlete's words, not the column's. */
+const SOURCE_LABEL: Record<string, string> = {
+  derived: 'worked out below',
+  manual: 'you typed this one',
+  adjustment: 'from a weekly adjustment',
+};
 
 /**
  * "Does this look right?" — §5's third section, and the one that existed
@@ -479,6 +861,8 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vola.bg },
   body: { paddingHorizontal: 20, paddingBottom: 48, gap: 10 },
   gap: { gap: 12 },
+  live: { gap: 2, paddingBottom: 4 },
+  liveKcal: { fontSize: 26, fontWeight: '800', color: vola.text, fontVariant: ['tabular-nums'] },
   pills: { gap: 8 },
   pill: {
     borderWidth: 1,

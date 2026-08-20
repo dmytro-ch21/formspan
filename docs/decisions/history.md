@@ -32667,6 +32667,140 @@ second copy is how two copies drift.
 - **The un-claim path is manual.** A session that dies mid-task leaves a claim
   standing, and nobody notices until somebody wonders why a ticket has not moved.
 
+
+## 2026-08-20 — Disagreeing with the number, from the phone (N72)
+
+The mobile-first rule set on 2026-08-19 was written from one concrete failure:
+`nutrition-design.md` §5 put target-setting on "one web screen", so an athlete
+looking at a derived 2,700 kcal **on their phone** had the entire derivation in
+front of them and no way to answer it. Manual entry existed on web only. The
+reasoning was reachable and the action was not. This is that debt, paid.
+
+**Three ways a target gets its number, and the Goals tab now offers all three.**
+It offered one. `derived` — the arithmetic ladder, accepted with `Use this
+target` — was already there in full. The two ways of *disagreeing* were not:
+`manual`, a number you type, and `adjustment`, N27's weekly correction from what
+your weight actually did. Both are ported from `apps/web/.../targets/`, rather
+than reinvented, because their properties are the feature and re-deriving them
+is how a second surface quietly loses one.
+
+**How it is reachable on a phone**, since `CLAUDE.md` asks for that explicitly:
+`Goals` tab → `What you are eating to` at the top, the weekly proposal under it,
+the derivation ladder, then `Or set it yourself` → `Type your own target`. Five
+numeric fields inside the screen's existing `KeyboardAwareScrollView`, so a
+focused field lifts above the number pad — which matters, because the previous
+version of a screen in this app shipped an input that was present and physically
+unreachable, and passed every test it had.
+
+**The form opens prefilled — on what is in force, else on the suggestion.** This
+is the difference between disagreeing with a target and authoring one from
+scratch, and it is why this reads as a phone screen rather than a port of a desk
+form: the common act is editing one number on a number pad, not typing five. The
+seed is taken at mount and never after, and the parent remounts the form by
+`key` when it is opened. Doing it with an effect instead would be a
+setState-in-effect *and* would overwrite digits somebody was mid-way through
+typing — in that order.
+
+**`What you are eating to` is the authority, and the ladder is not.** With one
+source that distinction did not exist. With three it is the thing most easily
+got wrong, so the live row is fetched from the server, states its own provenance
+in the athlete's words (`you typed this one` / `worked out below` / `from a
+weekly adjustment`), and is refreshed by all three writes. The ladder's own
+result row was relabelled from `Your target` to `This works out to` for the same
+reason — under three sources that heading named something nobody had chosen.
+
+Three smaller decisions worth keeping:
+
+- **The typed-target form sits OUTSIDE the derivation block.** An athlete whose
+  profile cannot support a derivation gets `suggestion: null`, and they are
+  precisely the person with no other way to get a target. Nesting it would have
+  hidden the escape hatch from the only people who need it — the same class of
+  mistake as putting it on web.
+- **A second focus effect, not more work in the first.** `load` changes with the
+  activity pills, so folding the target history and the adjustment check into it
+  would refetch both on every pill press — two round trips a chip cannot affect,
+  on a phone that may be on cellular. Web made exactly that mistake and its
+  review caught it; there is now a test that fails if it comes back.
+- **An accepted proposal is filed under ITS OWN `effective_on`, never today's.**
+  The server picks tomorrow deliberately: a target applied retroactively judges a
+  day already mostly eaten, and the remaining figure jumps under the athlete's
+  thumb. Substituting `on` is a one-character bug that looks completely correct.
+
+**The parse is pure and lives in `lib/manualTarget.ts`**, because what can be
+wrong here is arithmetic on strings rather than lifecycle. `Number('')` is a
+perfectly finite `0`, which is the whole trap: without a blank check first, an
+untouched form saves a target of zero calories, a field nobody reached saves 0 g
+of protein as though it were a decision, and an unstated fibre becomes a
+confident zero that drags every average it lands in. A ceiling at 20,000 kcal
+catches the fat-fingered `24000` that would otherwise be judged against for
+months and noticed only as "the ring never fills". The macro-vs-calorie
+disagreement is a **nudge, never a block** — and the justification inverts
+`food/add.tsx`'s: there a packet's stated kcal wins because real labels do not
+reconcile, here there is no packet and a target is a plan, so its macros should
+add up. Still not a block, because a coach's numbers are the athlete's to enter
+as given, and refusing them puts us back where the screen started.
+
+**Verification.** 25 pure tests and 18 screen tests, and nine guards mutation-
+tested to red and back: the blank-fibre check, the zero-calorie floor,
+`parseField`'s blank branch, the ceiling's `>` boundary, the adjustment's own
+date, `source: 'manual'`, the post-save refresh of the live row, the
+unknown-versus-none distinction, and the two-loader split. The existing suite's
+`useFocusEffect` mock had to become an **array** rather than one callback: with
+two focus effects each registered `useFocusEffect` overwrote the last, so
+`refocus()` re-ran only whichever came second and the other was silently
+untested through the one door that exercises it. Two of the first-draft
+assertions failed against *correct* code — both had assumed a blank form where
+the prefill had filled it — which is the useful kind of red.
+
+**Not verified on a device.** Everything above is jest and a typecheck. That the
+field is reachable with a keyboard up, that the ladder plus two new sections
+still scroll sanely on a 4.7" screen, and that the announcements land in
+VoiceOver are all claims about a screen nobody has opened.
+
+### The audit is the larger half, and it is written down
+
+`docs/decisions/phone-impossible-audit.md` — a route-by-route sweep of all 26
+web and 46 mobile routes, with a verdict per capability. **Twelve capabilities
+were phone-impossible; this PR closes two of them.** The other ten are filed as
+**#411–#419** and deliberately not fixed here — nine issues for ten findings,
+because the three analytical surfaces share a shape and a solution.
+
+**Filed, not merely written down**, and the distinction was made the hard way:
+the acceptance-criteria gate marked that criterion NOT MET while the findings
+existed only as a table in this repo. Under the Issues convention a markdown row
+is exactly as invisible to the board as a `TASKS.md`-only id was, which is the
+thing that convention exists to end. The audit's closing section now carries the
+ids, so the doc and the board cannot drift apart.
+
+The audit also records a **parity** row, and recording it is the point: template
+and plan authoring was checked and is genuinely fine on the phone — `create`,
+`replaceItems`, `rename` and `delete` all exist in `lib/workouts.ts` and are all
+used by `workout/[id].tsx`, against the same four functions web calls. Web is
+better at it, with a two-pane builder and a keyboard, and that is exactly what
+the rule permits. It is written down because **the absence of a row is
+indistinguishable from not having looked.**
+
+Two findings are worth repeating outside that file:
+
+- **`shared/index.tsx` tells an athlete who accepts a shared sequence that
+  "your copy is in the Library".** There is no sequence browse or detail screen
+  on mobile at all. The app captures chains it can never show back, and says
+  otherwise — the only item in the audit where the phone states something
+  untrue rather than merely omitting it.
+- **"Reduced" and "impossible" are not always different.** Correcting a past
+  day's food is nominally reduced on mobile — web has a six-week list and a date
+  jump, the phone has a ±1-day stepper. Fixing a day three months ago is
+  therefore about ninety taps, which is impossibility wearing a reduced form's
+  clothes. Session history has the same shape: the phone's month sheet reads
+  local SQLite and the server pull is capped at 20 rows, so on a fresh install
+  older sessions are unreachable.
+
+And one that is a rule rather than a design: `system-design.md` already says
+*"nothing a user needs weekly may be desktop-only"*. Six of the twelve findings
+are nutrition, which is daily. The mobile-first rule did not introduce that
+constraint; it made somebody go and check it.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

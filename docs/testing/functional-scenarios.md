@@ -9857,3 +9857,103 @@ quoted on N70's task line.
   touches enough files to add one. Removing `router.back()` left `router` as an
   unused `useCallback` dependency — one new warning, which failed the gate. The
   fix is the dependency, never the ceiling.
+
+## Setting a target by hand, and taking the weekly adjustment (N72, mobile — `app/(tabs)/goals.tsx`, `components/nutrition/ManualTarget.tsx`, `components/nutrition/AdjustmentCard.tsx`, `lib/manualTarget.ts`)
+
+The Goals tab offered one of the three ways a target gets its number. The other
+two — a number you type, and N27's weekly correction — were on web only, so a
+phone-only athlete could read the whole argument for 2,700 kcal and had nowhere
+to answer it. Both are now on the phone.
+
+### Happy path
+
+- **Type a target and it persists.** Goals → `Or set it yourself` → `Type your
+  own target` → change the calories → `Use this from <today>`. Reopen the tab:
+  `What you are eating to` reads the typed number and says *you typed this one*.
+- **The form opens prefilled** — on what is in force, else on the current
+  suggestion. The intended act is editing one number, not authoring five on a
+  number pad. A test asserts the calorie field opens on the live target's value.
+- **The live row names its source**, in the athlete's words rather than the
+  column's, and refreshes after all three writes. Its heading is the authority;
+  the derivation ladder's own result row says `This works out to` precisely so
+  it is not read as the number in force.
+- **A weekly proposal can be accepted from the phone**, with its arithmetic
+  shown rather than summarised — trend weight now, a week earlier, the observed
+  rate, what the phase asks for, the gap, the raw ask, and the capped result.
+- **A withheld proposal explains itself.** Each of the six blocked states
+  (`no_target`, `no_phase`, `too_soon`, `not_logging`, `not_weighing`,
+  `on_track`) gets a title and a sentence saying what would clear it. The copy
+  matches web's in substance; two surfaces explaining the same guard differently
+  teaches an athlete to distrust both.
+
+### Edge cases & errors
+
+- **Blank fibre is null, never zero.** `Number('')` is a finite `0`. A target
+  that does not state fibre is not a zero-fibre target, and averaging silence as
+  zero drags every fibre figure that touches it. A stated `0` stays `0` — that
+  is somebody saying something.
+- **A blank macro is refused, not defaulted.** Same `Number('')` behaviour, worse
+  consequence: 0 g of protein reads as a decision nobody made.
+- **Zero calories is refused.** Without the floor, an untouched form saves a
+  target of nothing.
+- **A fat-fingered figure is refused** above 20,000 kcal or 2,000 g of a single
+  macro. A number pad has no thousands separator, and a 24,000 kcal target is
+  judged against for months before anyone notices the ring never fills.
+- **Macros that do not add up to the calories are a NUDGE, never a block.** A
+  target is a plan rather than a measurement, so unlike a food label its macros
+  genuinely should reconcile — but a coach's numbers are the athlete's to enter
+  as given. It saves either way. The nudge is silent when every macro is zero,
+  because a calories-only target has said nothing about macros and firing on all
+  of them teaches people to ignore it.
+- **A failed save says so.** Both writes need a connection and neither has an
+  outbox. A button that simply un-dims reads as a successful save.
+- **The typed-target form is reachable when nothing can be derived.** An athlete
+  with an incomplete profile gets `suggestion: null` and is exactly the person
+  with no other way to get a target. A scenario asserting the form only appears
+  alongside a derivation is asserting the bug.
+- **"Could not read it" and "you have none" are different answers.** Both are
+  zero rows. Reporting a failed read as "no target yet" tells somebody who set
+  one last week to go and set it again.
+
+### Auth / correctness
+
+- **An accepted proposal is filed under its own `effective_on`, never today's.**
+  The server picks tomorrow deliberately: a target applied retroactively judges a
+  day already mostly eaten, and the remaining figure jumps under the athlete's
+  thumb. Substituting today is one character and looks completely correct.
+- **A typed target is stored `source: 'manual'` with `basis: null`.** Attaching
+  the current suggestion's basis would be the tidy-looking way to put an
+  explanation on a number that never had one — and the live row would then offer
+  to show it.
+- **An accepted adjustment is stored `source: 'adjustment'` with `basis: null`
+  too.** Its arithmetic is a different shape from a derivation's, and the row
+  stores the latter.
+- **Nothing writes until the athlete presses something.** The adjustment endpoint
+  cannot write; the card is what makes that visible rather than merely true.
+  Declining is doing nothing — there is no Decline control, because one would
+  imply something is recorded when you press it.
+
+### Regression trap
+
+- **One `useFocusEffect` mock cannot serve two focus effects.** The screen has
+  two now — the derivation, which the activity pills change, and the live target
+  plus proposal, which they cannot. A mock keeping a single `refocus` lets each
+  registration overwrite the last, so only the second is ever re-run and the
+  other is silently untested through the one door that exercises it. The mock
+  keeps an array.
+- **The activity pills must not refetch the targets or the proposal.** A chip
+  cannot change a year of target history or the weekly check, so refetching
+  either is two round trips on a cellular connection for an answer that cannot
+  have moved. Web made this mistake; a test fails if the loaders are merged.
+- **The form seeds at mount and never after.** Reseeding from an effect would be
+  a setState-in-effect *and* would overwrite digits somebody is mid-way through
+  typing. The parent remounts it by `key` when the disclosure is opened.
+- **An assertion written against a blank form fails when the prefill fills it.**
+  Two first-draft tests here did exactly that and went red against correct code.
+  Check what the seed put in the field before asserting on what was typed.
+- **Jest can prove the handler fires; it cannot prove the field is reachable.**
+  A previous version of a screen in this app shipped an input that was present
+  and physically unreachable because it had no `ScrollView`, and it passed every
+  test it had. The five fields here sit inside the screen's existing
+  `KeyboardAwareScrollView`; that it lifts them clear of the number pad is a
+  device claim, not a suite claim.
