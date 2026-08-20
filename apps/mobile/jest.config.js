@@ -70,10 +70,11 @@ const config = {
  * Which suite loses is arbitrary; three different ones have been blamed.
  *
  * Measured on the full suite, 119 files, with the load that made it flake:
- *   unset (3 workers): 3 failures / 10 runs, 311–330% CPU, 28–31s
- *   maxWorkers: 2:     0 failures / 15 runs, 240–251% CPU, 24–32s
- * The cap costs no wall time, because the oversubscription was never buying
- * throughput — the same result the 10-core local measurement reached.
+ *   unset (3 workers): 6 failures / 35 runs, 311–330% CPU, 28–31s
+ *   maxWorkers: 2:     0 failures / 30 runs, 240–251% CPU, 24–32s
+ * Fisher's exact, one-sided: p = 0.02. The cap costs no wall time, because the
+ * oversubscription was never buying throughput — the same result the 10-core
+ * local measurement reached.
  *
  * NOT `workerIdleMemoryLimit`, and that was measured rather than assumed: peak
  * RSS on the failing runs was 785–910 MB against 15,989 MB of RAM. Memory was
