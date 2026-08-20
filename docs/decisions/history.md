@@ -32214,6 +32214,30 @@ conflicted deliberately:
 Draft status is not involved: #390, a clean draft, had its five throughout.
 #393 was closed and its branch deleted once measured.
 
+### And then it happened to this branch, unprompted, mid-review
+
+The best evidence was not arranged. Twenty minutes after the probe was closed,
+`pnpm run ci:checks` on **this** pull request reported:
+
+```
+check runs on this commit: 0 (expected 5)
+ZERO CHECK RUNS. This commit has not been checked at all.
+CONFIRMED CAUSE: `mergeable` is CONFLICTING.
+```
+
+`gh pr checks 390` said `no checks reported on the branch`. `mergeable`
+`CONFLICTING`, `mergeStateStatus` `DIRTY`, `statusCheckRollup` empty. The cause:
+#404 and #391 had merged in the meantime, both appending to
+`docs/decisions/history.md`, and this branch appends there too — the
+append-versus-append conflict named further down, arriving on the branch that
+named it, while it was being reviewed.
+
+So the detector's first real catch was its own pull request, and it caught it in
+the only window that matters: between the push and believing the push was fine.
+`git fetch && git rebase origin/main && git push --force-with-lease` restored
+the five. Nothing about this run was constructed, which is what makes it worth
+more than the probe.
+
 ### What shipped
 
 `scripts/check-ci-checks.py`, wired as `pnpm run ci:checks`. It reads the pull
