@@ -4836,7 +4836,9 @@ are still what proves the behaviour.
 ## Capturing a sequence on the phone (reflection wizard, `lib/sequences.ts`)
 
 The mobile half of sequences: tag a chain you already have, or capture the one
-your class just taught. Building and refining stay on web.
+your class just taught. **Building and refining stay on web; READING does not,
+as of N80** — see "Reading a chain back on the phone" below. This section's
+title used to be the whole mobile story for sequences and is now half of it.
 
 **Every scenario here should be run with the network OFF at least once.** The
 capture moment is a changing room after class, which is a dead-spot more often
@@ -4893,9 +4895,84 @@ pass proves the least interesting half.
 
 ### Not covered yet
 
-- **No browse or detail screen on mobile.** Chains are reachable only from
-  inside the reflection wizard; reading one back is unbuilt.
-- A captured chain has no step destinations until someone opens it on web.
+- **Editing a chain on the phone.** Reordering, renaming, adding or removing a
+  step, copying a reference chain and deleting are all still web-only. That is
+  *reduced-on-mobile*, not phone-impossible — reading is now on both — but it is
+  the half a follow-up ticket has to close.
+
+## Reading a chain back on the phone (`app/sequence/`, N80)
+
+The half that used to be missing, and the reason it was filed above every other
+phone-impossible gap: `shared/index.tsx` told an athlete who accepted a shared
+sequence that "your copy is in the Library", and **there was no sequence route
+in the app at all** — and the Library tab is the technique and exercise catalog,
+which has never held a chain. Every other audit finding omitted a surface; this
+one made a claim the athlete would act on.
+
+**Two screens**: `/sequence` (the list) and `/sequence/[id]` (the chain). Reached
+from the You tab's *Sequences* row, and directly by accepting a shared sequence.
+
+### Happy path
+
+- You tab → **Sequences** lists every chain you own, newest-updated first, each
+  showing its name and `N steps · from <start position>`.
+- Opening one shows the steps **in the order they were recorded**, numbered, with
+  the library's own name, `position · category` and any note on each — and the
+  position each step leaves you in shown *between* the steps.
+- Tapping a step opens that technique in the library, and its `Set up from` rows
+  are walkable from there.
+- A chain with a start position says so; one without says nothing rather than
+  "from ".
+- **Accepting a shared sequence opens the copy**, not a message about where it
+  went. The id opened is the RECIPIENT'S — the sender's is in the card and is
+  the natural thing to reach for, and it 404s.
+
+### Offline and the outbox
+
+**Run every one of these with the network off at least once.** Capture happens in
+a changing room; reading it back happens there too.
+
+- A chain captured in airplane mode appears in the list immediately, marked
+  **"On this phone only — not synced yet"**, and opens.
+- That marker is absent on a chain the server has seen. A marker on everything
+  says nothing.
+- Opening a not-yet-synced chain resolves its step names from the technique
+  library. On a **cold launch with no signal** the library is memory-only, so the
+  names cannot be resolved: the step must say **"Name unavailable offline"** and
+  must **not** render the raw technique id as if it were a name.
+- Opening a chain that lives only on the server when the request gets no answer
+  says **"Can't reach VOLA… nothing has been lost"**, and never reads as deleted.
+- **It must not say "offline" or "signal."** Since N55 (#365) `getSequence`
+  returns `null` for a **timeout** and a **dropped connection** as well as for
+  no route, so this card is what an athlete on four bars sees when a request
+  times out. Run it that way — throttle rather than airplane-mode — and check
+  the copy does not send them looking for signal they already have.
+- A **500** while listing shows the error AND still lists what this device is
+  holding. It must never render as "no chains yet". Being offline shows your
+  captures; an outage hiding them would be the wrong way round.
+- The empty state appears only for a genuinely empty answer.
+
+### Edge cases & errors
+
+- A chain whose steps were cleared on web lists as `0 steps` and opens to "No
+  steps recorded on this chain."
+- A VOLA reference chain (`editable: false`) says it is one and points at the web
+  app to copy it. Nothing seeds an ownerless sequence today, so this arm is
+  currently unreachable in practice — check it when one lands.
+- A repeated technique in one chain renders twice, in both places. Sweep, get
+  passed, sweep again is a legal chain.
+- Capture two chains offline, open each: neither shows the other's steps.
+- The **Sequences** row is gated on the BJJ module — a strength-only account does
+  not get a list that can only be empty. The Library row above it is
+  deliberately not gated; these two are different on purpose.
+
+### Auth / security
+
+- Another athlete's sequence id in `/sequence/{id}` is a **404**, indistinguish-
+  able from an id that never existed. The screen must not render a 403 as
+  "reference chain".
+- Signing out and in as a different athlete shows none of the previous account's
+  chains, including its unsynced captures.
 ## Linked cross-references in the technique library (web + mobile)
 
 `setup_from` and `common_next_moves` rows navigate where they name a real
@@ -6080,8 +6157,10 @@ yet.
 
 ## Sequences (`/v1/sequences`)
 
-A sequence is a chain: what a class taught, in the order it flows. Backend only
-so far — no client renders one yet, so these are API-level scenarios.
+A sequence is a chain: what a class taught, in the order it flows. These are
+API-level scenarios; both clients render one now — web at
+`/dashboard/sequences`, mobile at `/sequence` (see the two mobile sections
+above).
 
 ### Happy path — recording the class that motivated the feature
 

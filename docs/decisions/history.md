@@ -34014,6 +34014,236 @@ reddens the in-flight-edit test.
   size and is the first thing to change if a history view arrives.
 
 
+## 2026-08-20 — N80: the app stopped telling athletes their chain was somewhere it never was
+
+**The defect, exactly.** `apps/mobile/app/shared/index.tsx` had a
+`landedMessage` whose one special case read *"Accepted — your copy is in the
+Library."* for a shared **sequence**. It was false twice over: this app had no
+sequence route of any kind, and the Library tab is the technique and exercise
+catalog, which has never held a chain. An athlete who accepted a share would go
+and look, twice, and find nothing.
+
+The phone-impossible audit (`docs/decisions/phone-impossible-audit.md`, #372 /
+#398) swept 26 web and 46 mobile routes and turned up twelve capabilities that
+web owned outright. This one was filed **above** the others, out of severity
+order, and the reason is worth keeping: **every other finding omits a surface;
+this one made a statement.** An omission is a gap. A false statement is a
+defect, and the athlete acts on it.
+
+**Two things shipped, and they are different in kind.**
+
+1. **The copy stopped lying**, which was cheap. `landedMessage` is now a single
+   constant that says only what *happened* — "Accepted — the copy is yours now."
+   — and names no destination at all. A message that says where to look can go
+   stale when a route lands or moves; one that says what happened cannot. That
+   arm now only fires for a `resource_type` this build has never heard of, which
+   is the case it was written for.
+
+2. **A read-back surface**, which is the real fix. `app/sequence/index.tsx`
+   lists every chain you own; `app/sequence/[id].tsx` renders one — steps
+   numbered in the order they were recorded, the library's own name and
+   `position · category` on each, notes, and the position each step leaves you
+   in shown *between* the steps rather than beside them, because that is what
+   makes a chain a chain. Every step is a link into `/technique/[id]`, so a
+   chain is something you can study on a phone rather than a list of names you
+   already know. `sequence` joins `workout` in `DESTINATION`, so accepting a
+   shared chain now opens the copy.
+
+**How it is reachable on a phone** — `CLAUDE.md` asks for this explicitly, and
+asking it is what produced the third piece of work. Two ways in, deliberately:
+accepting a share navigates straight to the copy, and the **You** tab carries a
+`Sequences` row beside `Position map`, gated on the BJJ module the same way. The
+second one is not decoration. A destination reachable *only* by having just
+arrived at it answers the athlete who tapped Accept ten seconds ago and nobody
+else — the same phone-impossible gap in a smaller form, a week later.
+
+**No backend, no contract, no lib.** `GET /v1/sequences` and
+`GET /v1/sequences/{id}` already existed, and `apps/mobile/lib/sequences.ts`
+already had `listSequences`, `getSequence` and `pendingSequences` — written for
+the reflection wizard's chain chips. The whole ticket was two screens, one map
+entry, one row and one sentence. Worth recording, because the audit row read as
+a feature and was a UI-only fix sitting on finished plumbing.
+
+**Three things the screens have to get right, all of which look like success
+when wrong:**
+
+- **A 500 while listing must not read as "you have no chains".** `listSequences`
+  rejects the *whole* promise on a server fault, including the outbox half it
+  had already read — so degrading to `[]` would make an outage hide this
+  device's own captures while being *offline* showed them: inconsistent, and the
+  wrong way round. The list falls back to `pendingSequences` **and** shows the
+  error. This is the same defect `records/pinned.tsx` documents, and the
+  reflection wizard's chip loader had already learned it once.
+- **Offline is not 404.** `getSequence` resolves to `null` for a chain this
+  device has never held when the network cannot be reached. Rendering that as
+  not-found tells an athlete their chain was deleted, which is a much worse
+  claim than the one this ticket exists to remove. It gets its own state and its
+  own sentence.
+- **A local capture has no library fields on its steps.** The server resolves
+  `name`, `position` and `category` on read; a row still in the outbox carries
+  only the technique ids the reflection wizard tagged. The detail screen
+  resolves those from the memory-cached technique summaries — and only when a
+  step actually needs it, since that list is ~197 KB on a cold cache. When it
+  cannot (cold launch, no signal — the known gap that the technique library is
+  memory-only), the step says **"Name unavailable offline"** rather than
+  rendering `knee-cut` as if it were a name. A raw id in a name's slot is a
+  false claim dressed as a fallback, which is the same bug as the one at the top
+  of this entry, one layer down.
+
+**A rebase caught the sharpest defect in this branch, which no test of mine
+could have.** N55 (#365, #448) landed while this was in review and changed
+`getSequence` from `isOffline` to `isTransportFailure`: it now returns `null`
+for a timeout and a dropped connection as well as for no route. This screen's
+card said *"you're offline… try again when you have signal"* — which is false
+for the athlete on four bars whose request timed out, and sending that person to
+go and find signal is **the exact complaint N55 exists to fix**. This branch
+would have reintroduced it, in a ticket about the app saying untrue things, one
+day later and one screen over.
+
+Two things follow that are worth more than the fix. **A merge that applies
+cleanly can still be semantically wrong**: `lib/sequences.ts` auto-merged, the
+suite stayed green, and nothing in `verify` can see that a *comment about
+behaviour* two files away has become a lie. Only reading the other branch's diff
+found it. And **the vocabulary was already there to copy**: `OfflineError` is
+itself worded *"Can't reach VOLA"* rather than "you are offline", precisely
+because a reachable phone and a down API are indistinguishable from the client.
+The card now says the same, and the state is `unreachable` rather than
+`offline`, so the next person to read it is not invited back into the claim. Its
+test asserts the **absence** of the words "offline" and "signal" against
+literals, because copy drifting back toward naming an unobservable cause is the
+failure mode.
+
+**Nineteen mutations, nineteen reds**, run against a baseline that was green in
+the same session. Including: inverting the pluralisation in `stepSummary`; making
+`stepName` fall back to the technique id; removing `sequence` from `DESTINATION`
+again; **restoring the old "in the Library" sentence**; rounding a failed list
+down to `[]`; making a real failure read as offline; reversing the step order;
+fetching the library unconditionally; both arms of the You-tab gate; and both
+arms of the empty-state gate.
+
+**Score a mutation on FAILING TESTS, never on a non-zero exit.** This is the
+harness-level form of a rule `CLAUDE.md` already states about a single mutation
+— *"a mutation that produced a compile error rather than a test failure is also
+a non-zero exit, and also proves nothing"* — and it is worth stating separately
+because a harness inverts it silently. Two of those mutants were first written
+as `error ? null : (` → `true ? (`, which is a malformed ternary rather than a
+behaviour change. jest reported `Tests: 0 total`, exit non-zero. A harness
+scoring on the exit code would have counted both as **caught**, adding two
+fabricated reds to the tally; one scoring on "did jest report failing tests"
+counts them as **survived**, which is the safe direction and sent them back to
+be rewritten. `false ? null :` / `true ? null :` both go red for real.
+
+**`Tests: 0 total` and a real red are indistinguishable by exit code**, so the
+harness asserts the run happened before reading its verdict. Another session hit
+the same shape this morning mutating a `try/catch` and leaving the braces
+unbalanced, and caught it only because the total said `0` rather than `10`.
+
+Every expectation in `sequenceRow.test.ts` is likewise pinned to a **literal**
+rather than rebuilt from the template the function uses, which would be true by
+construction.
+
+**And the sharper of the two: a green suite run against the wrong tree.** The
+first test run here was issued from `apps/mobile` in the **primary checkout**
+rather than the worktree. It *passed* — nine green tests — and the only thing
+that gave it away was that it printed the **old test names**. Nothing about the
+result was suspicious; a false green is invisible to any amount of care about
+the verdict, because the verdict was true. It just answered a question nobody
+asked: does the unmodified tree still work.
+
+This is worse than the mutation case, which at least fails loudly enough to
+inspect. The fixes are cheap and both are worth the habit: **absolute paths**,
+and a `pwd` in the same command so the transcript records which tree answered.
+`cd A || cd B` fallbacks are the same hazard with a coin toss in front of it —
+another session hit exactly that today. And in a repo where several worktrees
+hold different branches of the same files, "I ran the tests" is not a claim
+about a branch until you can say which directory produced it.
+
+**Review took three of its four suggestions, and one of them is the better
+version of this ticket's own lesson.** `frontend-reviewer` found no blocking
+issues and noticed that the detail screen reloads on **focus**, so the ordinary
+path — read a chain, background the app, lose signal, come back — replaced the
+steps on screen with the full-page *"you're offline"* card. Every word of that
+card is true, and it is still worse than the chain that was already there:
+"nothing to show" is a different claim from "here is what I have". `setSequence`
+now keeps what it holds (`(prev) => found ?? prev`), so the offline branch means
+what it says. The list screen deliberately does **not** match — there the outbox
+fallback is the better answer, and the error is shown beside it.
+
+Also taken: `accessibilityLiveRegion="polite"` on both error texts (an error
+that appears without moving focus is silent to a screen reader), and clearing
+`refreshing` on the signed-out early return so a pull cannot spin forever.
+**The live-region change initially had no test and its mutation came back
+green**, which is the whole reason to mutate a change you are confident in; it
+is asserted on the prop now, against the literal `'polite'`. Declined: keying
+the step rows on `technique_id` alone — a chain may legally repeat a technique,
+so the index is load-bearing, and it is now commented as such.
+
+**What was deliberately not built.** Editing, reordering, renaming, adding or
+removing a step, copying a reference chain, and deleting are all still web-only.
+That is *reduced-on-mobile*, which the mobile-first rule permits — web may be
+richer — rather than phone-impossible, which it forbids. The audit row is
+updated to say exactly that rather than being marked closed, and whoever closes
+the writing half should file it as its own id.
+
+**One narrow case is knowingly left, and it is a judgement rather than an
+oversight.** The `Sequences` row is gated on the BJJ module, matching every
+other BJJ surface on that tab — so a *strength-only* athlete who is sent a chain
+reaches the copy once, through the accept navigation, and then has no row to
+re-find it from. That is the "reachable only by having just arrived" gap
+surviving in one configuration. Ungating was considered and not taken: the row
+would then appear, permanently, on accounts that can never populate it, and the
+inconsistency with `Position map` immediately above it would need its own
+justification. It is the same shape as #370 (N61) — *every BJJ surface with
+the module switched off* — and #423, the nutrition-tab instance of it.
+
+**Both of those are CLOSED**, checked rather than assumed, which changes what
+"file it there" means: the specific case is recorded as a comment on #423 and
+says so in its first line, because a note on a closed issue is exactly the kind
+of thing that is never read again. If the pattern is considered settled rather
+than still collecting instances, this needs its own id. It is deliberately not
+one today: the general question those two issues ask — can an athlete tell *this
+needs turning on* from *this does not exist* — wants one consistent answer
+across the app, and a third screen guessing at it separately is how the app ends
+up answering it three ways.
+
+**Also unbuilt, and smaller:** the mobile `Sequence` type still has no
+`official` field, so a VOLA reference chain is detected as `editable === false`.
+That is equivalent today — the backend's visibility rule admits only your own
+rows plus ownerless ones — but it is an inference rather than the field, and
+nothing seeds an ownerless sequence yet, so that arm has never rendered against
+real data.
+
+**Not verified on hardware.** Everything above was exercised in jest against
+mocked transport. `docs/testing/device-checks.md` gains **D15b**, which is the
+check that matters: accept a shared chain on the phone with the web app genuinely
+closed, find it again from cold a screen later, and capture one in a dead-spot.
+
+**This branch rebased three times and conflicted three times, always on the same
+line of this file.** #440, #448 and #452 landed while it was open; each had
+appended an entry immediately before `## Open items`, and so had this one, so
+the merge base saw two blocks growing into the same seam. The resolution is
+mechanical every time — keep both entries, in landing order, heading and list
+untouched below — and the convention that produces it is right: the alternative,
+appending *after* the heading, strands the gap list under whatever landed last,
+which this file has already been repaired for three times.
+
+Worth knowing rather than fixing: with five or six agents landing on one day,
+`history.md` is a **guaranteed** conflict between any two PRs open at once, and
+`strict: false` on the branch protection does not help because the conflict is
+real rather than a staleness policy. Budget a rebase per PR that lands ahead of
+yours, and check `pnpm run ci:checks` **twice** — GitHub computes `mergeable`
+lazily, so the first call reported `UNKNOWN` and the second reported
+`CONFLICTING` on an otherwise all-green PR, twice on this branch. A green that
+has not been re-checked for staleness is the same class of false green as the
+suite run against the wrong tree above.
+
+**The one number this entry should not be trusted on is the lint ratchet.** It
+was measured at 54 against `origin/main`, reported as such, and was **53** by
+the time the branch rebased — another PR lowered it in between. The branch holds
+at exactly 53/53 with zero errors. A ratchet with no headroom is a number that
+is only true as of a commit, which is worth saying out loud in a repo where
+several branches are in flight at once.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
