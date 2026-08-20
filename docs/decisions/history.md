@@ -35540,6 +35540,154 @@ tracked separately as its own defect — the convention has no way to express
 *code merged, evidence outstanding*, which is the normal end state for every
 device-reported ticket.
 
+## 2026-08-20 — The trend chart an athlete can actually read (N56, part 2)
+
+#340 landed the metric-agnostic series layer and rendered nothing. This is the
+half you can see: `components/TrendChart.tsx` (the drawing), `TrendCard` (the
+compact card), `WeightTrendCard` (weight's wiring of it), and
+`app/goals/trend.tsx` (the full page). `components/WeightTrend.tsx` is deleted
+— N56 replaces it rather than sitting beside it, and two chart components in
+one tree is how a codebase ends up with three.
+
+**Why it may carry labels at all.** The mobile carve-out forbade "axes to read
+values off" until the user struck that on 2026-08-19 (N57). The rule was meant
+to keep *analysis* off the phone and instead produced a 105-line chart with no
+axis, value or point labels, which the user called "pretty much useless" — a
+chart you cannot read a number off answers no question in three seconds, so the
+athlete goes to a desk anyway, which is what the carve-out existed to prevent.
+Still disqualifying and unchanged: a second metric, or a date-range picker.
+**The seven range chips are seven PRESETS that all end today**, `Plan`
+included, which is one question asked at seven depths rather than a comparison
+— worth stating because the next person to count seven chips will wonder.
+
+**Where it lives, and why it moved.** Settled with N70's owner rather than
+guessed. The full page is `app/goals/trend.tsx`: a projection toward a labelled
+goal line is goal-tracking rendered, and targets live in Goals as of N70. It
+was at `checkin/trend.tsx` because check-in was the only place it could go.
+They verified the route-group question by MEASURING it — dropped a stub,
+regenerated the typed routes, confirmed `/goals`, `/goals/trend` and
+`/(tabs)/goals` coexist, deleted the stub. **`app/goals/` must never gain an
+`index.tsx`** or it fights the tab for `/goals`.
+
+`checkin/trend.tsx` stays as a redirect. Logging your weight and then seeing
+the line is the natural gesture, mobile-first makes "harder to reach than it
+was" a defect, and a redirect also protects installed builds whose bundled JS
+predates the move and still pushes the old path.
+
+**Two dates that sound identical in English.** N56's spec sentence is "Based on
+your current plan, you'll reach your goal on…", which is a claim about the rate
+the PLAN prescribes — exactly what N69 computes server-side and serves on the
+derivation basis. The local `projectToGoal` answers a different question: at
+the rate you are observably trending. They routinely disagree, because an
+athlete under-eating their plan arrives early. Rendering the local one under
+that sentence would put a date on this screen contradicting the same sentence
+in Goals, under copy asserting they are the same thing — the `offered_grips`
+drift. `Projection` therefore carries `source: 'plan' | 'observed'`, and the
+weight surfaces read the server's. The adapter TRANSLATES the server's
+refusals rather than re-judging them.
+
+**Every absence says which absence it is**, which is this codebase's most
+repeated bug and the reason the series layer returns a union. Four empty
+states, four sentences, and the load-bearing one is that a failed load never
+renders as "record your weight and the trend appears" — that is a claim about
+the athlete when the truth is a claim about the network. The projection
+renders a sentence for every refusal too, including `no-trend`, which
+deliberately does NOT say "on track": we did not check, and that is not the
+same as fine. A `reached_on` the server did not compute is not an all-clear.
+
+**The existing suite caught a real defect in this change, and the tempting fix
+was the wrong one.** The card first fetched its own `suggestedTarget`, which
+made two components on the Goals screen request the same derivation on every
+focus. `goalsScreen.test.tsx` went red on six assertions pinning "does not
+refetch the targets or the proposal" — a call count of 3 where 2 was expected.
+Updating the expected number would have legitimised the duplicate request and
+disarmed the guard. The projection is a prop now; Goals already holds it. The
+card still fetches its own check-ins and phases, because `goals.tsx` is 1190
+lines and several sessions edit it, so it gains two lines instead of three
+requests and their failure states.
+
+**Typed routes caught a dead link during this work** — `router.push('/checkin')`
+against a route that does not exist. That is N32 exactly, and the only reason
+it failed instead of passing is N45 keeping the generator honest, which is
+worth recording as the check paying for itself.
+
+14 render tests across the chart and the card, all mutation-checked: bridging
+the gaps, pointing the callouts at the smoothed line, drawing a refused
+projection, collapsing the emptiness union, and dropping the evidence line each
+turn tests red. 2100 mobile tests pass. Lint sits at exactly 53 of 53 —
+deleting `WeightTrend.tsx` cleared one finding and the ratchet had already been
+lowered to match.
+
+**Review found two blocking bugs after the check suite was green, and both are
+the kind a green suite cannot see.**
+
+**The card rendered the forbidden sentence while loading.** `TrendEmpty` has
+four kinds; a card has FIVE states, because "not answered yet" is not one of
+them. Before the first fetch settled, `checkins == null` produced `readings:
+[]`, which is a legitimate `none`, which rendered *"Record your weight and the
+trend appears here"* — the exact athlete-blaming sentence the union exists to
+forbid — on every cold open of Goals, to an athlete with two years of
+weigh-ins. The type could not catch it, because an unanswered fetch and an
+empty one look identical. The page had a loading gate and the card did not, and
+that divergence existed only because the two had copies of the same fetch — so
+the fix is `lib/useWeightTrend.ts`, one hook owning the fetch, the
+null/`[]`/failed discipline and an explicit `loading`, used by both.
+
+**The chart cropped a TRAILING gap out of existence.** `daySpan` measured the
+POINTS rather than the window, so for anybody who stopped logging a week ago
+the axis shrank to their last weigh-in: the line ran to the right edge and the
+tick labelled "Today" sat on a reading that could be weeks old. Time appeared
+to end when the athlete stopped logging — and a lapsed logger is exactly who
+the "Record Weight" action is for. The series already carried `from` and `to`;
+the component ignored them.
+
+**The first test written for that second bug did not catch it**, which is worth
+recording because it is the more useful half. It asserted the rightmost mark
+sat below a pixel threshold — and the buggy value was also below it, so the
+mutation passed. A threshold chosen to look safe proves nothing; the assertion
+now compares against the day's PROPORTION of the window, and the mutation goes
+red. Checking that a test fails for the right reason is the only thing that
+separates it from decoration.
+
+**The first fix for the backward-drawing projection was itself incomplete, and
+its comment claimed otherwise** — which review caught on the second pass. The
+floor protected the DOMAIN only; `projEnd` still read the raw `daysAway`, so a
+negative one satisfied `-3 <= 0` and the dashed line was drawn backward from
+the latest reading to the goal: an arrival behind the athlete, the exact lie
+the floor was added to prevent. Clamped once now and used everywhere, with zero
+treated as no projection rather than as arrival today (it would otherwise draw
+a degenerate vertical dash reading as a cliff). **A partial clamp carrying a
+comment that asserts completeness is worse than no clamp**, because the next
+reader stops looking.
+
+The same pass found the x divisor dividing by the day COUNT where indices run
+`0..count-1`, so the last day never reached the right edge — sub-pixel over a
+year, ~14% of the width at `1W`, and self-consistent enough to look fine while
+making the comment's claim that the projection "exits the right edge" quietly
+untrue.
+
+Also from review, as suggestions taken: the projection sentence now checks
+`source === 'plan'` at the RENDER SITE, because the claim that the
+discriminator makes an observed date unrenderable was true only of today's call
+graph rather than being an invariant; `futureDays` is floored at 0, so a stale
+server `reached_on` cannot draw the dashed line backwards into a claimed
+arrival; the entries list is scoped to the window and capped with the cap
+STATED, since a list that quietly stops reads as "that is all of them"; the
+footer says LATEST with its date rather than TODAY over a reading that may be
+weeks old; and `lib/weightTrend.ts` plus its test are deleted, having been
+orphaned the moment `WeightTrend.tsx` went.
+
+One measured note worth keeping: **`getByText` does not match inside
+`react-native-svg`.** It mounts an `RNSVGText` host node RNTL's text matcher
+does not traverse, so an assertion on chart text fails against a perfectly
+correct component — and the natural repair is to weaken the check. Query the
+serialised tree instead.
+
+**Not done here:** per-exercise load does not use this yet. The layer is
+metric-agnostic and the card takes its formatter, unit and smoother as
+parameters, so the second consumer should be wiring rather than building — but
+until one exists, "reusable" is a claim rather than a demonstration.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.

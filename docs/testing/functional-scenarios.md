@@ -10815,3 +10815,73 @@ Reading the diff cannot settle any of these. They need a build.
   a bare `!enabled` check passes every test whose only disabled module happens
   to be the food-log one.
 - **A deployment with no food-log module at all**: nothing is offered.
+
+## Weight trend — the card and the full page (N56)
+
+`components/TrendCard` + `WeightTrendCard` (top of Goals), `app/goals/trend.tsx`
+(the full page), `components/TrendChart` (the drawing). Mobile only.
+
+### Happy path
+
+1. **The card opens Goals.** With a year of weigh-ins and a live phase carrying
+   a target, the Goals tab shows the weight card above "Daily movement": title,
+   a delta reading `↓ 13.3 kg past year`, the line, `TODAY` with the latest
+   value, and `Record Weight`.
+2. **`TODAY` is what the scale said.** Log a weigh-in that differs sharply from
+   the seven-day mean and confirm the card shows the READING, not the mean.
+   This is the number an athlete checks against the scale in front of them.
+3. **Tapping the chart opens `/goals/trend`.** `Record Weight` opens today's
+   check-in instead.
+4. **All seven ranges draw** — `1W 1M 3M 6M 1Y All Plan` — and switching is
+   instant, with no refetch (the screen fetches wide once and slices locally).
+5. **`Plan` reaches back to the live phase's start**, and falls back to a real
+   window rather than collapsing when no phase is live.
+6. **The entries list** shows every reading newest-first with its date.
+7. **The old path still works.** `/checkin/trend` redirects to `/goals/trend` —
+   this is what an installed build predating the move will push.
+
+### The absences — each is a distinct sentence, and this is the section worth
+### spending time on
+
+8. **Offline / failed load never says "no readings".** Kill the network and
+   open the card. It must say it could not load them. "Record your weight and
+   the trend appears here" is a claim about the athlete and is FALSE here.
+9. **Never recorded** says exactly that, and invites the first reading.
+10. **Readings outside the window.** With weigh-ins only from a year ago,
+    select `1W`. It must say nothing is in this range and how many exist
+    further back — not that there are none.
+11. **Too few to smooth** reports the counts, and the dots still draw.
+12. **No goal set** (a maintenance phase, `target_weight_kg` null): no goal
+    line, no projection sentence, and the card still works.
+13. **Every projection refusal gets a sentence.** Reachable states: already
+    there; a plan that moves away from the goal; a stalled rate; and not enough
+    to say yet. None may render as blank space, and **none may read as "on
+    track"** — we did not check is not the same as it checks out.
+
+### Correctness traps
+
+14. **A gap is a gap.** Leave a fortnight unweighed and confirm the line
+    BREAKS rather than running straight through it. A single line across the
+    hole is the app inventing a fortnight of data and it looks entirely normal.
+15. **The projection date matches Goals.** The sentence on `/goals/trend` and
+    the feasibility line in Goals must show the SAME date — both read the
+    server's `reached_on`. If they differ, something has started computing it
+    locally again.
+16. **A projection beyond the drawn window exits the right edge** still
+    travelling, rather than bending to meet the goal line inside the box. A
+    line that visibly lands is a claim that it lands within the period shown.
+17. **Timezone.** Run west of Greenwich in the evening and east of it in the
+    morning: today's weigh-in must appear, and the chart's right edge must be
+    the local day. A UTC date drops a morning reading as "future" on the day it
+    was logged.
+18. **Units.** Switch kg/lbs and confirm the callouts, the goal-line label,
+    `TODAY`, the delta and the entries all move together.
+
+### Accessibility
+
+19. The chart carries a text alternative naming the direction, the amount, the
+    period and the reading count. Chart text itself is invisible to a screen
+    reader — and note `getByText` cannot see it in tests either, since
+    `react-native-svg` mounts an `RNSVGText` host node.
+20. The selected range chip announces itself as selected, and its label reads
+    as a period rather than as "1W".

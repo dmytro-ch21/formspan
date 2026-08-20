@@ -58,6 +58,7 @@ import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { WeightTrendCard } from '@/components/WeightTrendCard';
 import { Text } from '@/components/Themed';
 import { AdjustmentCard } from '@/components/nutrition/AdjustmentCard';
 import { ManualTarget } from '@/components/nutrition/ManualTarget';
@@ -722,6 +723,11 @@ export default function TargetScreen() {
             {writeFailed.message}
           </Text>
         ) : null}
+
+        {/* Where you are against the goal, before any control that changes
+            it. N56 — the card fetches its own check-ins so this screen does
+            not grow three more requests and their failure states. */}
+        <WeightTrendCard projection={b?.projection ?? null} />
 
         <SectionHeader label="Daily movement" />
         <View style={styles.pills}>

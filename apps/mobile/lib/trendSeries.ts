@@ -5,9 +5,10 @@ import { daysBetween, shiftDate } from './anthropometry';
  *
  * ## Why this is metric-agnostic and `lib/weightTrend.ts` was not
  *
- * `weightTrend.ts` is this shape with `kg` welded through it — the point type,
- * the bounds, the delta. Per-exercise load needs the same chart, and so does
- * whatever is trended after it. Copying the file and renaming `kg` to `value`
+ * `weightTrend.ts` WAS this shape with `kg` welded through it — the point type,
+ * the bounds, the delta — and is deleted now that nothing imports it.
+ * Per-exercise load needs the same chart, and so does whatever is trended
+ * after it. Copying the file and renaming `kg` to `value`
  * is how a codebase ends up with three chart layers that disagree about what a
  * gap means, so this is the one layer and the metric is a parameter.
  *
@@ -516,6 +517,16 @@ export type PlanProjection = {
  * `unreachable` are decided once, where the plan's rate lives, and this only
  * translates them. Recomputing "is this reachable" on the phone is the second
  * implementation that the `source` discriminator above exists to prevent.
+ *
+ * **It DROPS `unreachable_reason`, and the screen invents its own wording.**
+ * That is a known gap, not the design: the server's reason is display-ready
+ * prose that says what to change, and threading it through would be strictly
+ * better copy. Both server cases currently collapse to `'moving-away'`, whose
+ * rendered sentence is a truthful superset of both, so nothing false reaches
+ * the athlete today — it is merely vaguer than what we already computed. An
+ * earlier version of this comment claimed the screen showed the server's
+ * reason, which was simply untrue; filed as follow-up rather than left as a
+ * lie in a doc block.
  */
 export function fromPlanProjection(
   p: PlanProjection | null | undefined,
