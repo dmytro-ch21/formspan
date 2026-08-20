@@ -41,7 +41,12 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { profileGap, todayString } from '@/lib/nutrition';
-import { saveTarget, suggestedTarget, type Suggested } from '@/lib/nutritionApi';
+import {
+  saveTarget,
+  suggestedTarget,
+  type Projection,
+  type Suggested,
+} from '@/lib/nutritionApi';
 
 /**
  * The NEAT-only vocabulary, and the reason it stops at "active".
@@ -234,6 +239,8 @@ export default function TargetScreen() {
             </Pressable>
             <Row label="Your target" value={`${s.kcal} kcal`} strong />
 
+            <Feasibility p={b.projection} />
+
             <SectionHeader label="Macros" />
             <Row label="Protein" value={`${s.protein_g} g`} hint={`${fmt(b.protein_g_per_kg)} g per kg`} />
             <Row label="Fat" value={`${s.fat_g} g`} hint={`${fmt(b.fat_g_per_kg)} g per kg`} />
@@ -271,6 +278,55 @@ export default function TargetScreen() {
         )}
       </KeyboardAwareScrollView>
     </View>
+  );
+}
+
+/**
+ * "Does this look right?" — §5's third section, and the one that existed
+ * nowhere until N69.
+ *
+ * A phase carries a goal weight, a deadline and a rate, and nothing compared
+ * them. So an athlete could set "lose eight kilos by Christmas", be handed a
+ * perfectly safe rate that arrives in April, and find out in April.
+ *
+ * **Renders nothing when there is nothing to say.** `projection` is null with
+ * no goal weight or no live phase, and an all-clear in that case would be a
+ * claim we never checked — the same absence-is-not-an-answer rule the rest of
+ * this module runs on. Silence is the honest output.
+ *
+ * The arithmetic is the server's, so this screen and web cannot disagree about
+ * whether a plan works.
+ */
+function Feasibility({ p }: { p: Projection | null }) {
+  if (!p) return null;
+
+  if (p.already) {
+    return (
+      <Text style={styles.note} testID="target-feasibility">
+        You are already at {p.target_weight_kg} kg. This phase has done its job.
+      </Text>
+    );
+  }
+  if (p.unreachable) {
+    return (
+      <Text style={styles.problem} testID="target-feasibility">
+        This plan never reaches {p.target_weight_kg} kg — {p.unreachable_reason}. Change the
+        goal weight or the phase.
+      </Text>
+    );
+  }
+
+  const late = p.meets_deadline === false;
+  return (
+    <Text style={late ? styles.problem : styles.note} testID="target-feasibility">
+      {p.kg_to_go} kg to go. At this rate you reach {p.target_weight_kg} kg around{' '}
+      {p.reached_on}
+      {p.meets_deadline === null
+        ? '.'
+        : late
+          ? `, which is ${p.days_late} days after your ${p.deadline_on} deadline — about ${p.shortfall_kg} kg short on the day.`
+          : `, ahead of your ${p.deadline_on} deadline.`}
+    </Text>
   );
 }
 

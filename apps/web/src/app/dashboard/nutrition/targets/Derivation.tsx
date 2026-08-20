@@ -1,6 +1,6 @@
 "use client";
 
-import type { Basis } from "@/lib/nutritionApi";
+import type { Basis, Projection } from "@/lib/nutritionApi";
 import { formatWeight, type UnitSystem } from "@/lib/units";
 
 /**
@@ -165,7 +165,62 @@ export function Derivation({
           </p>
         )}
       </div>
+
+      <Feasibility p={basis.projection} />
     </div>
+  );
+}
+
+/**
+ * "Does this look right?" — `nutrition-design.md` §5's third section, and the
+ * one nothing had built on either platform.
+ *
+ * A phase carries a goal weight, a deadline and a rate, and nothing compared
+ * them: an athlete could set "lose eight kilos by Christmas", be handed a
+ * perfectly safe rate that arrives in April, and find out in April. §5's own
+ * words — it "catches an impossible goal before six weeks of failing at it".
+ *
+ * **Renders nothing when there is nothing to say.** `projection` is null with
+ * no goal weight or no live phase, and an all-clear there would assert a check
+ * that never ran.
+ *
+ * The arithmetic is the server's, so this and the phone cannot disagree about
+ * whether a plan works — the same reason `offered_grips` is served rather than
+ * reimplemented (N16).
+ */
+function Feasibility({ p }: { p: Projection | null }) {
+  if (!p) return null;
+
+  if (p.already) {
+    return (
+      <p className="mt-4 text-sm text-text-muted" data-testid="target-feasibility">
+        Already at {p.target_weight_kg} kg — this phase has done its job.
+      </p>
+    );
+  }
+  if (p.unreachable) {
+    return (
+      <p className="mt-4 text-sm text-danger-ink" data-testid="target-feasibility">
+        This plan never reaches {p.target_weight_kg} kg — {p.unreachable_reason}. Change the goal
+        weight or the phase.
+      </p>
+    );
+  }
+
+  const late = p.meets_deadline === false;
+  return (
+    <p
+      className={`mt-4 text-sm ${late ? "text-danger-ink" : "text-text-muted"}`}
+      data-testid="target-feasibility"
+    >
+      {p.kg_to_go} kg to go. At this rate you reach {p.target_weight_kg} kg around{" "}
+      <strong className="tabular-nums">{p.reached_on}</strong>
+      {p.meets_deadline === null
+        ? "."
+        : late
+          ? ` — ${p.days_late} days after your ${p.deadline_on} deadline, about ${p.shortfall_kg} kg short on the day.`
+          : `, ahead of your ${p.deadline_on} deadline.`}
+    </p>
   );
 }
 

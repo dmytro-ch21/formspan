@@ -157,6 +157,39 @@ export type Basis = {
   relaxed?: string;
   protein_g_per_kg: number;
   fat_g_per_kg: number;
+
+  /**
+   * "Does this look right?" — when the phase's goal weight arrives at this
+   * phase's own rate, and whether that beats its deadline.
+   *
+   * **Null is the ordinary case**: no goal weight, or no live phase. Render
+   * NOTHING for null — never an all-clear. "We did not check" and "it checks
+   * out" are different answers and only one of them is reassuring, which is the
+   * same rule that governs every other absent value in this module.
+   *
+   * Computed server-side so this app and web agree by construction rather than
+   * by a parity script — the lesson N16 records for `offered_grips`.
+   */
+  projection: Projection | null;
+};
+
+export type Projection = {
+  target_weight_kg: number;
+  /** Unsigned — how far is left, whichever way the phase is going. */
+  kg_to_go: number;
+  /** `YYYY-MM-DD`, or '' when `unreachable`. Never a computed date in the past. */
+  reached_on: string;
+  weeks_to_go: number;
+  /** Within 0.1 kg of the goal — a scale resolves no better than that. */
+  already: boolean;
+  /** The rate is zero, or points away from the goal. */
+  unreachable: boolean;
+  unreachable_reason?: string;
+  deadline_on?: string;
+  /** **Null when no deadline was set** — absent, not false. */
+  meets_deadline: boolean | null;
+  shortfall_kg?: number;
+  days_late?: number;
 };
 
 export function suggestedTarget(
