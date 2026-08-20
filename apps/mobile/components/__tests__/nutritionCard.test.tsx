@@ -16,7 +16,7 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 
 import { NutritionCard } from '../NutritionCard';
-import type { Entry, Target } from '@/lib/nutrition';
+import { eatenFrom, type Entry, type Target } from '@/lib/nutrition';
 
 const target: Target = {
   effective_on: '2026-08-01',
@@ -49,7 +49,7 @@ function entry(over: Partial<Entry> = {}): Entry {
 function renderCard(over: Partial<React.ComponentProps<typeof NutritionCard>> = {}) {
   return render(
     <NutritionCard
-      entries={[]}
+      eaten={eatenFrom([])}
       view={{ state: 'set', target }}
       quickAdd={[]}
       onLog={() => {}}
@@ -65,7 +65,7 @@ describe('the four absent states, which are four different sentences', () => {
     // Asserting "nothing logged yet" while offline is a false claim about the
     // athlete's day — the same distinction CheckinCard makes.
     renderCard({ view: { state: 'checking' } });
-    expect(screen.getByText('Checking…')).toBeTruthy();
+    expect(screen.getByText('Checking your target…')).toBeTruthy();
   });
 
   it('an unreachable target is NOT reported as no target', () => {
@@ -86,26 +86,86 @@ describe('the four absent states, which are four different sentences', () => {
   });
 
   it('a target with nothing logged shows the whole target as remaining', () => {
-    renderCard({ entries: [] });
+    renderCard({ eaten: eatenFrom([]) });
     expect(screen.getByTestId('fuel-remaining-kcal').props.children).toBe('2,400');
+    expect(screen.getByText('nothing logged yet')).toBeTruthy();
+  });
+});
+
+describe('the day total, which is what N54 reported missing', () => {
+  it('shows what was eaten even with NO target', () => {
+    // The reported bug, exactly. The eaten figure used to live only in the
+    // caption of the has-a-target branch, so an athlete who had not set one saw
+    // per-meal subtotals and no day total anywhere — the number they said did
+    // not add up was simply never drawn. What you ate does not depend on
+    // whether you have a goal.
+    renderCard({ eaten: eatenFrom([entry()]), view: { state: 'none' } });
+    expect(screen.getByText('180 eaten · 1 entry')).toBeTruthy();
+  });
+
+  it('shows what was eaten when the target could not be checked', () => {
+    renderCard({ eaten: eatenFrom([entry()]), view: { state: 'unknown' } });
+    expect(screen.getByText('180 eaten · 1 entry')).toBeTruthy();
+  });
+
+  it('shows what was eaten while the target is still loading', () => {
+    renderCard({ eaten: eatenFrom([entry()]), view: { state: 'checking' } });
+    expect(screen.getByText('180 eaten · 1 entry')).toBeTruthy();
+  });
+
+  it('labels the total with how many entries it came from', () => {
+    // N28's honesty rule, which applies to a total exactly as to an average.
+    renderCard({ eaten: eatenFrom([entry(), entry()]) });
+    expect(screen.getByText('360 eaten · 2 entries')).toBeTruthy();
+  });
+});
+
+describe('a failed read is not a day nobody ate on', () => {
+  it('says it could not read, rather than claiming nothing was logged', () => {
+    // The N28 failure on the phone: an empty list means BOTH "nothing logged"
+    // and "the read failed", and the screen used to render the second as the
+    // first. `.catch(() => {})` in both callers is what produced it.
+    renderCard({ eaten: { state: 'unavailable' } });
+    expect(screen.queryByText('nothing logged yet')).toBeNull();
+    expect(screen.getByText('Could not read today’s food from this device')).toBeTruthy();
+  });
+
+  it('shows dashes, not zeros, when the read failed', () => {
+    // A zero here reads as "you have your whole target left", which is a
+    // confident claim built on a read that never happened.
+    renderCard({ eaten: { state: 'unavailable' } });
+    expect(screen.getByTestId('fuel-remaining-kcal').props.children).toBe('—');
+  });
+
+  it('does not claim nothing was logged while still loading', () => {
+    renderCard({ eaten: { state: 'loading' } });
+    expect(screen.queryByText('nothing logged yet')).toBeNull();
+    expect(screen.getByText('Loading your day…')).toBeTruthy();
+  });
+
+  it('a genuine zero is still reported as a zero', () => {
+    // The case that must NOT be swept up by the two above: an athlete who has
+    // logged nothing has logged nothing, and saying so is correct.
+    renderCard({ eaten: eatenFrom([]) });
     expect(screen.getByText('nothing logged yet')).toBeTruthy();
   });
 });
 
 describe('remaining, not consumed', () => {
   it('leads with what is left', () => {
-    renderCard({ entries: [entry()] });
+    renderCard({ eaten: eatenFrom([entry()]) });
     expect(screen.getByTestId('fuel-remaining-kcal').props.children).toBe('2,220');
     expect(screen.getByTestId('fuel-remaining-protein').props.children).toBe('155 g');
   });
 
   it('shows eaten once, as context, not as the headline', () => {
-    renderCard({ entries: [entry()] });
-    expect(screen.getByText('2,400 target · 180 eaten')).toBeTruthy();
+    renderCard({ eaten: eatenFrom([entry()]) });
+    expect(screen.getByText('2,400 target')).toBeTruthy();
+    expect(screen.getByText('180 eaten · 1 entry')).toBeTruthy();
   });
 
   it('says "over" past the target rather than a negative number', () => {
-    renderCard({ entries: [entry({ kcal: 2500 })] });
+    renderCard({ eaten: eatenFrom([entry({ kcal: 2500 })]) });
     expect(screen.getByText('kcal over')).toBeTruthy();
     expect(screen.getByTestId('fuel-remaining-kcal').props.children).toBe('100');
   });
@@ -113,7 +173,7 @@ describe('remaining, not consumed', () => {
 
 describe('what it does not show', () => {
   it('shows no carbs, fat, fibre or percentage', () => {
-    renderCard({ entries: [entry()] });
+    renderCard({ eaten: eatenFrom([entry()]) });
     // Two numbers answer "what do I eat next". Everything else is a dashboard
     // you admire and do not act on.
     expect(screen.queryByText(/carb/i)).toBeNull();
@@ -123,7 +183,7 @@ describe('what it does not show', () => {
   });
 
   it('shows no streak', () => {
-    renderCard({ entries: [entry()] });
+    renderCard({ eaten: eatenFrom([entry()]) });
     expect(screen.queryByText(/streak/i)).toBeNull();
   });
 });

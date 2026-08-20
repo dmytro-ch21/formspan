@@ -125,6 +125,56 @@ export function viewTarget(view: TargetView): Target | null {
   return view.state === 'set' ? view.target : null;
 }
 
+/**
+ * What this device knows about what was EATEN.
+ *
+ * The mirror of {@link TargetView}, and it exists for the same reason. Entries
+ * were passed around as a bare `Entry[]`, so an empty array meant three
+ * different things at once — the read has not finished, the read failed, or
+ * the athlete has genuinely logged nothing — and all three rendered as a zero.
+ *
+ * That is the failure N28's reviewer caught on web, where a failed fetch
+ * printed forty-two "Nothing logged" rows under an error banner. **"Nothing
+ * logged" and "we could not load it" are different statements, and an empty
+ * list means both.** A zero is a claim that somebody ate nothing.
+ *
+ * It is also the reported N54 bug from a real device: the day total was only
+ * ever rendered inside the has-a-target branch, so an athlete with no target
+ * saw per-meal subtotals and no day total anywhere — a fourth way for the same
+ * empty array to be misread.
+ *
+ * - `loading` — the read has not settled.
+ * - `unavailable` — the local read failed. Rare, and it must not say "0".
+ * - `ready` — a real answer, including a genuine zero with `entries: 0`.
+ */
+export type EatenView =
+  | { state: 'loading' }
+  | { state: 'unavailable' }
+  /**
+   * `rows` and `totals` together, with the count derived from `rows` rather
+   * than stored beside it — a separate `entries: number` is a second source of
+   * truth for the same fact, and this module's own package doc is about
+   * exactly that class of drift.
+   */
+  | { state: 'ready'; rows: Entry[]; totals: Macros };
+
+/**
+ * The totals in a view, or null in every state that has none.
+ *
+ * Deliberately **not** a zeroed `Macros` fallback. Returning zeros here would
+ * put the misreading back one level down, where every caller would inherit it
+ * without being able to see it — which is precisely how the bare `Entry[]`
+ * behaved.
+ */
+export function viewTotals(view: EatenView): Macros | null {
+  return view.state === 'ready' ? view.totals : null;
+}
+
+/** An `EatenView` from rows that loaded. The one place a total is derived. */
+export function eatenFrom(rows: Entry[]): EatenView {
+  return { state: 'ready', rows, totals: dayTotals(rows) };
+}
+
 export type Remaining = {
   kcal: number;
   protein_g: number;

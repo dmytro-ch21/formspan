@@ -39,7 +39,14 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { addDays, dayString } from '@/lib/calendar';
 import { cacheTargets, localEntries, localTargetView, removeEntry } from '@/lib/foodLog';
-import { bySlot, dayTotals, type Entry, type Meal, type TargetView } from '@/lib/nutrition';
+import {
+  bySlot,
+  eatenFrom,
+  type EatenView,
+  type Entry,
+  type Meal,
+  type TargetView,
+} from '@/lib/nutrition';
 import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { request as requestSync, useSyncState } from '@/lib/sync';
@@ -60,7 +67,14 @@ export default function FoodScreen() {
   // An OFFSET rather than a Date, so the screen cannot drift out of sync with
   // the wall clock while it sits mounted — the same shape Today uses.
   const [dayOffset, setDayOffset] = useState(0);
-  const [entries, setEntries] = useState<Entry[]>([]);
+  // Keyed to the day, like `dated` below and for the same reason: unkeyed, a
+  // day step leaves the PREVIOUS day's rows standing under the new date until
+  // the read resolves, so the total on screen belongs to a day you are no
+  // longer looking at. That is its own way for calories to "not add up".
+  const [loaded, setLoaded] = useState<{ on: string; eaten: EatenView }>({
+    on: '',
+    eaten: { state: 'loading' },
+  });
   // Keyed to the DAY it was computed for. Without the key, stepping to another
   // day leaves the previous day's target standing while the new day's entries
   // render against it — a wrong remaining figure, not merely a stale one — and
@@ -86,9 +100,16 @@ export default function FoodScreen() {
     // fails the gate.
     (userId ? localEntries(userId, on) : Promise.resolve<Entry[]>([]))
       .then((rows) => {
-        if (live) setEntries(rows);
+        if (live) setLoaded({ on, eaten: eatenFrom(rows) });
       })
-      .catch(() => {});
+      .catch(() => {
+        // **Was `.catch(() => {})`.** A failed local read left `entries` at
+        // `[]`, which renders as "nothing logged" — a claim that the athlete
+        // ate nothing, made from a read that never happened. Swallowing it is
+        // right (nothing here may throw at the screen); reporting it as a zero
+        // is not.
+        if (live) setLoaded({ on, eaten: { state: 'unavailable' } });
+      });
 
     // The target is the one thing this screen cannot compute — it needs
     // training history the phone does not hold. So: the CACHE first, then the
@@ -140,7 +161,8 @@ export default function FoodScreen() {
     return stop;
   }, [lastSyncAt, refresh]);
 
-  const totals = dayTotals(entries);
+  const eaten: EatenView = loaded.on === on ? loaded.eaten : { state: 'loading' };
+  const entries = eaten.state === 'ready' ? eaten.rows : [];
   const slots = bySlot(entries);
   const view: TargetView = dated.on === on ? dated.view : { state: 'checking' };
 
@@ -151,7 +173,7 @@ export default function FoodScreen() {
     // tombstone sits until the next foreground or timer tick, and a row deleted
     // on the phone stays on web for minutes.
     requestSync('food deleted');
-    setEntries(await localEntries(userId, on));
+    setLoaded({ on, eaten: eatenFrom(await localEntries(userId, on)) });
   }
 
   return (
@@ -190,7 +212,7 @@ export default function FoodScreen() {
           />
 
           <View style={styles.summary}>
-            <RemainingBlock totals={totals} view={view} testID="food-remaining" />
+            <RemainingBlock eaten={eaten} view={view} testID="food-remaining" />
           </View>
 
           {slots.map((slot) => (
