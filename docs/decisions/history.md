@@ -33456,6 +33456,48 @@ worktree of its own.
   is not in this PR.
 
 
+## 2026-08-20 — The belt curricula have an authoritative ordering, and it is not the one in the seed
+
+The user supplied a full four-belt BJJ syllabus — white, blue, purple, brown,
+with a numbered milestone list per belt and a "fundamental flow" for each. It is
+committed as `docs/design/bjj-belt-curriculum.md`.
+
+**It is committed rather than summarised because it existed only in a chat
+message and on a Desktop.** The roadmap redesign's central acceptance criterion
+is "the milestone order matches this", and a criterion pointing at something
+that can be lost is not a criterion. Two accompanying mockups are described in
+prose inside the redesign ticket for the same reason — the same treatment N56's
+trend card and N58's food cards got.
+
+**It supersedes `curricula.json`'s phase order, and the difference is a teaching
+philosophy rather than a re-labelling.** The seeded white belt has **11** phases
+opening *How this belt works → The map: how a round goes → Mount: get out, then
+hold* — survive-the-bad-places-first. The supplied one opens *Start Standing →
+Get the Fight to the Ground → Understand Guard* — standing-first, following a
+match from its beginning. Blue belt likewise: **12** seeded phases opening with
+*Defensive consolidation*, against 10 opening with *Standing*.
+
+Two structural phases in the seed — *How this belt works* and *The graduation
+standard* — have no counterpart in the supplied ordering. Whether they stay is
+an open question, not an omission to be quietly resolved.
+
+**One discrepancy is recorded rather than resolved.** The white-belt mockup shows
+**10** milestones and drops *Turtle* as a milestone of its own; the written
+curriculum has **11** and keeps it. Blue belt agrees exactly at 10 in both. The
+document says to treat the written list as authoritative and to ask — inventing
+an answer here would put a guess into the one artefact everything else measures
+against.
+
+### Open questions this leaves
+
+- **Nothing reconciles the document with `curricula.json` yet.** Re-authoring the
+  seed against it is real work: item ids must resolve against the 542-technique
+  library, and the seeded curricula carry criteria that derive progress.
+- **Purple and brown are far less concrete than white and blue** — much of their
+  content is systems and strategy rather than named techniques, which the
+  `concept` item kind exists for but which no roadmap has leaned on at this
+  scale.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
