@@ -14,6 +14,7 @@ import {
   type Suggested,
   type Target,
 } from "@/lib/nutritionApi";
+import { updateActivityLevel } from "@/lib/api";
 import { useUnits } from "@/lib/useUnits";
 import { AdjustmentCard } from "./AdjustmentCard";
 import { Derivation } from "./Derivation";
@@ -60,7 +61,22 @@ export default function NutritionTargetPage() {
   const [targets, setTargets] = useState<Target[]>([]);
   const [suggested, setSuggested] = useState<Suggested | null>(null);
   const [adjustment, setAdjustment] = useState<AdjustmentResponse | null>(null);
-  const [activity, setActivity] = useState("light");
+  /**
+   * The level this page is PINNED to, or null to follow the account.
+   *
+   * Null is the normal state and is what makes the two surfaces agree: the
+   * request goes out with no `activity` parameter, the server answers from
+   * `profile.activity_level`, and this page derives at whatever the athlete
+   * last chose — on either device. It used to be `useState("light")`, which
+   * meant a browser and a phone computed different targets for one athlete on
+   * one day (N93).
+   *
+   * A chip click sets it, so the derivation moves immediately rather than
+   * waiting on the PATCH — and keeps it set for the rest of the visit, because
+   * clearing it on success would change the request and refetch the ladder for
+   * an answer that cannot have moved.
+   */
+  const [pinnedActivity, setPinnedActivity] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<null | "derived" | "manual" | "adjustment">(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,14 +126,19 @@ export default function NutritionTargetPage() {
     const c = new AbortController();
     suggestRef.current = c;
     try {
-      const s = await suggestedTarget(getToken, now, activity, c.signal);
+      const s = await suggestedTarget(
+        getToken,
+        now,
+        pinnedActivity ?? undefined,
+        c.signal,
+      );
       if (!c.signal.aborted) setSuggested(s);
     } catch (e) {
       if (!c.signal.aborted) {
         setError(e instanceof Error ? e.message : "Could not derive a target.");
       }
     }
-  }, [getToken, now, activity]);
+  }, [getToken, now, pinnedActivity]);
 
   useEffect(() => {
     // The same disable every fetch-on-mount screen in this app carries: the
@@ -135,6 +156,44 @@ export default function NutritionTargetPage() {
     loadSuggestion();
     return () => suggestRef.current?.abort();
   }, [loadSuggestion]);
+
+  /**
+   * The level the number on screen was ACTUALLY derived at.
+   *
+   * Read off the response rather than off local state, so the chips and the
+   * arithmetic cannot describe different things. `pinnedActivity` wins only
+   * while a click is still in flight, which is the one moment the response is
+   * known to be about the previous level.
+   */
+  const derivedAt = pinnedActivity ?? suggested?.activity ?? "light";
+  /** Nobody has picked one; the derivation is running on an assumption. */
+  const assumed =
+    pinnedActivity === null && suggested != null && !suggested.activity_chosen;
+
+  /**
+   * Record a level the athlete just clicked.
+   *
+   * Pinned first so the derivation moves at once, then written to the account.
+   * A failed write says so rather than leaving a chip that has visibly moved
+   * standing for a preference nothing stored — the same rule the rest of this
+   * page follows for its three saves.
+   */
+  const chooseActivity = useCallback(
+    async (level: string) => {
+      setPinnedActivity(level);
+      setError(null);
+      try {
+        await updateActivityLevel(getToken, level);
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? e.message
+            : "Could not save how much you move. The number below is right for this visit only.",
+        );
+      }
+    },
+    [getToken],
+  );
 
   const live = useMemo(() => {
     let best: Target | null = null;
@@ -287,23 +346,44 @@ export default function NutritionTargetPage() {
                 separately, from your logged sessions — do not include it here.
               </p>
               <div className="flex flex-wrap gap-2" role="group" aria-label="Daily activity">
-                {ACTIVITY.map((a) => (
-                  <button
-                    key={a.key}
-                    type="button"
-                    onClick={() => setActivity(a.key)}
-                    aria-pressed={a.key === activity}
-                    title={a.detail}
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                      a.key === activity
-                        ? "border-lime bg-lime/10 text-lime-ink"
-                        : "border-line text-text-muted hover:text-text"
-                    }`}
-                  >
-                    {a.label}
-                  </button>
-                ))}
+                {ACTIVITY.map((a) => {
+                  const isOn = !assumed && a.key === derivedAt;
+                  // The level the derivation fell back to with nobody having
+                  // chosen. Dashed rather than filled, and `aria-pressed` stays
+                  // false: a pressed chip claims the athlete decided this, and
+                  // they did not. `activity_chosen` is in the contract exactly
+                  // so a client can tell the two apart.
+                  const isAssumed = assumed && a.key === derivedAt;
+                  return (
+                    <button
+                      key={a.key}
+                      type="button"
+                      onClick={() => void chooseActivity(a.key)}
+                      aria-pressed={isOn}
+                      title={a.detail}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        isOn
+                          ? "border-lime bg-lime/10 text-lime-ink"
+                          : isAssumed
+                            ? "border-dashed border-text-muted text-text-muted"
+                            : "border-line text-text-muted hover:text-text"
+                      }`}
+                    >
+                      {a.label}
+                    </button>
+                  );
+                })}
               </div>
+              {assumed ? (
+                <p className="text-xs text-text-muted" data-testid="activity-assumed">
+                  Assuming{" "}
+                  <span className="font-semibold">
+                    {ACTIVITY.find((a) => a.key === derivedAt)?.label ?? derivedAt}
+                  </span>{" "}
+                  until you pick one. Whichever you choose is kept on your
+                  account, so the phone works your target out the same way.
+                </p>
+              ) : null}
             </div>
 
             {suggested?.suggestion?.basis ? (
