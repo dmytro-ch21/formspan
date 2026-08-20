@@ -1,12 +1,16 @@
 /*
- * N67 PROBE ARM 3 — the FOUR scope-row tests skipped. TEMPORARY.
+ * N67 PROBE ARM 4 — the TWO glyph tests skipped; the other 18 all run.
+ * TEMPORARY.
  *
  * Arm 1: all 20 skipped -> 5/0 pass.  Arm 2: N58's nine skipped -> 5/0 pass.
- * So the nine are the trigger. This halves them.
+ * Arm 3: the four scope tests skipped -> FAILED, same test and same assertion,
+ * so the culprit is among the five CARD tests.
  *
- *   green -> the four scope tests are it (they press chips, re-render, and
- *            exercise the `scope !== 'all'` early return in the debounce effect)
- *   red   -> it is among the five card tests
+ * These two are the coherent pair: both query with `includeHiddenElements`,
+ * which nothing else in this file uses.
+ *
+ *   green -> the glyph tests are it
+ *   red   -> it is among brand-omission / name-composition / serving-line
  */
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -264,7 +268,7 @@ it('states the calories WITH the serving they belong to', async () => {
  * at all and that it is the category's, not a name-derived guess — the
  * substitution `foodGlyph` exists to prevent.
  */
-it('shows the category glyph, not one guessed from the name', async () => {
+it.skip('shows the category glyph, not one guessed from the name', async () => {
   mockSearchCatalog.mockResolvedValue(
     answer({
       foods: [{ ...CATALOG_OATS, id: 'usda-7', name: 'Beef-flavoured tofu', category: 'plant_protein' }],
@@ -292,7 +296,7 @@ it('shows the category glyph, not one guessed from the name', async () => {
  * default: the glyph is findable by testID and NOT by text, which is exactly
  * the pair of facts wanted.
  */
-it('does not announce the glyph to a screen reader', async () => {
+it.skip('does not announce the glyph to a screen reader', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
@@ -399,14 +403,14 @@ describe('the scope row', () => {
     mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   });
 
-  it.skip('shows both sources under All', async () => {
+  it('shows both sources under All', async () => {
     await search('o');
     await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
     expect(screen.getByTestId('add-food-mine-food')).toBeTruthy();
   });
 
   /** The catalog is an additional source; My Foods is the athlete's own. */
-  it.skip('hides the catalog under My Foods', async () => {
+  it('hides the catalog under My Foods', async () => {
     await search('o');
     await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
     await act(async () => {
@@ -417,7 +421,7 @@ describe('the scope row', () => {
   });
 
   /** Recipes reads the STORED kind rather than guessing from the name. */
-  it.skip('shows only recipes under Recipes', async () => {
+  it('shows only recipes under Recipes', async () => {
     await search('o');
     await waitFor(() => expect(screen.getByTestId('add-food-mine-food')).toBeTruthy());
     await act(async () => {
@@ -438,7 +442,7 @@ describe('the scope row', () => {
    * that adding one later is a deliberate act with data behind it rather than
    * a quiet completion of the mockup.
    */
-  it.skip('offers no chip that nothing backs', async () => {
+  it('offers no chip that nothing backs', async () => {
     render(<AddFoodScreen />);
     expect(screen.queryByTestId('add-scope-meals')).toBeNull();
     expect(screen.queryByTestId('add-scope-verified')).toBeNull();
