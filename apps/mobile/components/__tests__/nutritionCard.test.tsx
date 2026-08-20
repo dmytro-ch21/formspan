@@ -50,6 +50,7 @@ function renderCard(over: Partial<React.ComponentProps<typeof NutritionCard>> = 
   return render(
     <NutritionCard
       eaten={eatenFrom([])}
+      logged={null}
       view={{ state: 'set', target }}
       quickAdd={[]}
       onLog={() => {}}
@@ -172,14 +173,62 @@ describe('remaining, not consumed', () => {
 });
 
 describe('what it does not show', () => {
-  it('shows no carbs, fat, fibre or percentage', () => {
+  /**
+   * **This assertion changed in N53, and the change was a decision rather than
+   * a repair.**
+   *
+   * It used to be "shows no carbs, fat, fibre or percentage", on the ground
+   * that two numbers answer "what do I eat next" and everything else is a
+   * dashboard you admire and do not act on. The user then asked directly for a
+   * macro split, with a reference screenshot. That ask was put to them
+   * alongside `nutrition-design.md` §5's rejection of "six stacked
+   * ring-and-bar cards", and they chose the counter-proposal: the three macros,
+   * on ONE row, rather than the stack.
+   *
+   * So the boundary moved, and this test now guards where it moved TO. Deleting
+   * it would have thrown away the guard along with the old position — and the
+   * thing being guarded (no dashboard) was never the thing that changed.
+   */
+  it('shows the three macros on one row, and refuses the dashboard beyond them', () => {
     renderCard({ eaten: eatenFrom([entry()]) });
-    // Two numbers answer "what do I eat next". Everything else is a dashboard
-    // you admire and do not act on.
-    expect(screen.queryByText(/carb/i)).toBeNull();
-    expect(screen.queryByText(/fat/i)).toBeNull();
+
+    // The approved split: three macros, each against its goal.
+    expect(screen.getByTestId('macro-protein_g')).toBeTruthy();
+    expect(screen.getByTestId('macro-carb_g')).toBeTruthy();
+    expect(screen.getByTestId('macro-fat_g')).toBeTruthy();
+
+    // And nothing beyond them. N52 landed saturated fat, sugar, sodium, added
+    // sugar and cholesterol on the entry; putting those here is exactly how
+    // three figures becomes the six stacked cards the doc refuses, and it is
+    // the likeliest next edit now that the data exists.
     expect(screen.queryByText(/fibre/i)).toBeNull();
+    expect(screen.queryByText(/sodium/i)).toBeNull();
+    expect(screen.queryByText(/sugar/i)).toBeNull();
+    expect(screen.queryByText(/saturated/i)).toBeNull();
+    expect(screen.queryByText(/cholesterol/i)).toBeNull();
+
+    // Still no percentages: a percentage of a goal invites optimising the
+    // number rather than the eating.
     expect(screen.queryByText(/%/)).toBeNull();
+  });
+
+  it('shows a macro goal only when there is a target', () => {
+    renderCard({ eaten: eatenFrom([entry()]), view: { state: 'none' } });
+    // `60 / 0g` reads as being over a limit nobody set.
+    expect(screen.queryByText(/\/ 0g/)).toBeNull();
+  });
+
+  it('says nothing about the week until the count has been read', () => {
+    // Null, not zero. "0 of 7 days logged" from a query that has not run is a
+    // claim about the athlete's week — and a discouraging one, which is the
+    // shape the no-shame rule exists to avoid.
+    renderCard({ logged: null });
+    expect(screen.queryByTestId('fuel-days-logged')).toBeNull();
+  });
+
+  it('labels the logged-day count with its denominator', () => {
+    renderCard({ logged: { logged: 5, considered: 7 } });
+    expect(screen.getByText('5 of 7 days logged this week')).toBeTruthy();
   });
 
   it('shows no streak', () => {

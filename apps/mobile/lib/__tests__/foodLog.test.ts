@@ -18,6 +18,7 @@ import {
   editEntry,
   cacheTargets,
   localEntries,
+  localLoggedDays,
   localEntry,
   localFoods,
   localTargetView,
@@ -569,5 +570,63 @@ describe('recents', () => {
 
     const breakfast = await recentsFor(USER, 'breakfast');
     expect(breakfast[0].uses).toBe(1);
+  });
+});
+
+/**
+ * `localLoggedDays` — the SQL half of the logged-day count.
+ *
+ * A fixture test rather than a pure one, deliberately: this repo's rule is that
+ * anything about SQL behaviour belongs against a real database, never a regex
+ * over the query string or an array mock, because a text assertion proves a
+ * clause is present and not that SQLite honours it — and both mistakes have
+ * shipped here before.
+ *
+ * The JS window arithmetic is covered in `n53Macros.test.ts`; this covers what
+ * the query actually returns, and the two together are what make the count
+ * trustworthy. Neither half alone would catch a mismatch between the SQL range
+ * and the JS window.
+ */
+describe('localLoggedDays', () => {
+  it('returns each day once, however many entries it has', () => {
+    return (async () => {
+      await logFood(USER, meal());
+      await logFood(USER, meal({ name: 'Rice' }));
+      await logFood(USER, meal({ eaten_on: '2026-08-17' }));
+      const days = await localLoggedDays(USER, '2026-08-12', TODAY);
+      expect(days.sort()).toEqual(['2026-08-17', TODAY]);
+    })();
+  });
+
+  it('is inclusive at BOTH ends of the range', async () => {
+    // The window `daysLogged` applies is [today-6, today] inclusive. If the
+    // SQL were exclusive at either end the count would silently be short by a
+    // day, and nothing else would notice.
+    await logFood(USER, meal({ eaten_on: '2026-08-12' }));
+    await logFood(USER, meal({ eaten_on: TODAY }));
+    expect((await localLoggedDays(USER, '2026-08-12', TODAY)).sort()).toEqual([
+      '2026-08-12',
+      TODAY,
+    ]);
+  });
+
+  it('excludes days outside the range', async () => {
+    await logFood(USER, meal({ eaten_on: '2026-08-01' }));
+    expect(await localLoggedDays(USER, '2026-08-12', TODAY)).toEqual([]);
+  });
+
+  it('stops counting a day whose only entry was deleted', async () => {
+    // Tombstones, which is the half a `SELECT DISTINCT` most easily forgets —
+    // and a deleted day still counting is a claim the athlete logged when they
+    // have just undone exactly that.
+    const id = await logFood(USER, meal());
+    expect(await localLoggedDays(USER, '2026-08-12', TODAY)).toEqual([TODAY]);
+    await removeEntry(USER, id);
+    expect(await localLoggedDays(USER, '2026-08-12', TODAY)).toEqual([]);
+  });
+
+  it('does not see another athlete’s days', async () => {
+    await logFood('someone-else', meal());
+    expect(await localLoggedDays(USER, '2026-08-12', TODAY)).toEqual([]);
   });
 });

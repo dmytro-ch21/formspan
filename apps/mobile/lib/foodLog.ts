@@ -192,6 +192,32 @@ export async function localEntries(userId: string, on: string): Promise<Entry[]>
 }
 
 /**
+ * The distinct days in `[from, to]` that have at least one entry.
+ *
+ * DISTINCT days, not a row count — the figure it feeds is "how many days you
+ * logged", and a day with six entries is one day. Tombstones excluded, so a
+ * day whose only entry was deleted correctly stops counting.
+ *
+ * Deliberately returns the DAYS rather than a number: the caller owns the
+ * window arithmetic (`daysLogged`), which is pure and tested, and a count
+ * computed in SQL would put that rule in a second place where it could
+ * disagree with the first.
+ */
+export async function localLoggedDays(
+  userId: string,
+  from: string,
+  to: string,
+): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ eaten_on: string }>(
+    `SELECT DISTINCT eaten_on FROM food_entries
+      WHERE user_id = ? AND eaten_on BETWEEN ? AND ? AND deleted_at IS NULL`,
+    userId, from, to,
+  );
+  return rows.map((r) => r.eaten_on);
+}
+
+/**
  * One entry by id, tombstones excluded.
  *
  * Scoped by `user_id` like every other read here. A row is not addressable

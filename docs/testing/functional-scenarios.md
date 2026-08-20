@@ -9588,3 +9588,64 @@ split will pass against a per-path regression, so they have to change.
   includes cached tokens, Anthropic's `input_tokens` excludes them. Any test
   asserting an input figure must say which provider produced it, or it pins a
   number that is wrong by ~400x on the other one.
+
+## Calories against goal, and what you can eat now (N53, `NutritionCard`, `MacroSplit`, `app/(tabs)/food.tsx`)
+
+Built as a **counter-proposal**: the ask as written would have added three
+things `docs/decisions/nutrition-design.md` §5 rejects by name. So several of
+these scenarios assert what must NOT appear, and those are as load-bearing as
+the ones asserting what does — a future change that "just adds sodium to the
+row" is the drift they exist to catch.
+
+### The macro row
+
+- Three macros — protein, carbs, fat — each showing eaten against goal in
+  `0 / 141g` shape, on **one row**.
+- **Nothing beyond them.** Assert no fibre, sodium, sugar, saturated fat or
+  cholesterol, even though N52 landed all of those on the entry. Three figures
+  becoming six stacked cards is the exact thing §5 refuses, and the data now
+  existing makes it the likeliest next edit.
+- **No percentages.** A percentage of a goal invites optimising the number
+  rather than the eating.
+- **With no target there is no denominator.** Assert `/ 0g` never appears —
+  `60 / 0g` reads as being over a limit nobody set.
+- With nothing loaded the figures are dashes, not zeros.
+- Over goal renders muted, never `danger`: one day over is not an error state.
+
+### The logged-day count
+
+- `5 of 7 days logged this week`, **with the denominator**.
+- **It is a count, not a streak, and this is the assertion that matters.** Log
+  days with a gap in the middle — three days out of the last seven, not
+  consecutive — and assert it reads **3**, not 1. A streak has a length you can
+  lose, so it rewards logging a fake day to save it; that is what the no-shame
+  rule refuses.
+- A day with six entries counts once.
+- Days outside the window, and future days, do not count.
+- **Absent, not zero, until the read answers.** Assert the line is not rendered
+  at all while loading — "0 of 7" from a query that has not run is a claim about
+  somebody's week, and a discouraging one.
+
+### The meal-section line
+
+- Each section shows `536 kcal left today · 28g protein · 48g carbs · 13g fat`.
+- **It is the DAY's remaining, not a per-meal budget**, and the wording carries
+  that. Assert the figure equals the day's target minus the day's total — not
+  the target divided by four. A per-meal allocation is wrong the moment one meal
+  is bigger than a quarter of the day, which is §5's stated objection.
+- Assert the same figure appears on every section, since there is one day and
+  one number. (If it reads as noise on a device, showing it only on the slot
+  matching the clock is the smaller fix — `slotForClock` exists.)
+- **Absent when either half is unknown.** No target, or an unread day, means no
+  line — not a partial one. A line assembled from half an answer is the failure
+  N54 was filed for.
+- Never negative: past the target it floors at zero, because "−140 kcal left" is
+  a contradiction and `RemainingBlock` already says "140 over" in its own words.
+
+### Needs a device
+
+- **The two screens grew rows.** Both have `ScrollView`s (checked after N68
+  found `food/target.tsx` had outgrown a plain `View`), but neither the Today
+  card's new height nor the repetition of the meal line across four sections has
+  been seen on a real screen. Those are the two judgement calls to look at
+  first.

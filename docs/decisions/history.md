@@ -31629,6 +31629,140 @@ through it.
   retry affordance on this screen and adding one is a bigger change than the
   bug warrants; a pull-to-refresh or a re-focus already re-reads.
 
+## 2026-08-19 — The three asks, and the three decisions they would have deleted (N53)
+
+Two design asks from the user, with reference screenshots: calories against goal
+and a macro split on Today, and meal sections carrying their own budget on Food
+instead of four bare `+ Add` rows.
+
+**Reading the task line against the code found that it asked for three things
+`docs/decisions/nutrition-design.md` §5 rejects by name.** That section is
+titled "What the reference apps do that we deliberately do not" and opens
+"Reviewed against a full walkthrough of Lose It!'s onboarding and logging" — and
+the screenshots are almost certainly Lose It!. Verbatim, it rejects:
+
+- **Per-meal calorie allocation** ("536 calories now available for breakfast"),
+  as false precision: it requires knowing a day the app cannot see, it is wrong
+  the moment you eat a big lunch, and it manufactures four budgets to fail
+  against instead of one honest running total.
+- **Streaks**, because a missed day becomes a loss and a streak rewards logging
+  a fake day to save it — against the **no-shame rule**, which is a product
+  principle rather than a screen-level choice.
+- **Six stacked ring-and-bar cards**, "the dashboard graveyard Today's design
+  doc exists to prevent".
+
+The same argument is repeated on `app/(tabs)/food.tsx` itself, quoting the
+**identical `536` string** the task line uses. So it was not a stale doc nobody
+remembered; it was written where the change would be made.
+
+### What was done about it
+
+Not built as written, and not refused. The conflict was put to the user with the
+doc quoted, alongside three honest equivalents — and they chose the
+counter-proposal. **`nutrition-design.md` §5 stands unamended.**
+
+**The day's remaining on the meal row.** Their question — *what can I eat now* —
+is a good one, and the doc's objection is to ALLOCATING a budget per meal, not
+to answering that at the point of action. So the line appears in the placement
+they asked for, saying `536 kcal left today · 28g protein · 48g carbs · 13g
+fat`. "left today" is load-bearing in that sentence. It is computed once for the
+day and shown on each section rather than four different figures, and it is null
+unless BOTH halves are known — no target means nothing is "left", an unread day
+means the eaten half is unknown, and a line assembled from half an answer is the
+shape this whole evening has been about.
+
+**A count, not a chain.** `5 of 7 days logged this week`. A streak has a length
+you can lose, so there is something to protect by inventing a meal; a count goes
+up and down and cannot be broken. It also carries N28's honesty rule by
+construction, since the denominator travels with the figure — and it is null,
+not zero, until the query answers, because "0 of 7" from a read that has not run
+is both a claim about somebody's week and a discouraging one.
+
+**One macro row, not a stack.** Three macros against their goals in `0 / 141g`
+shape. The doc's objection is to six STACKED cards; three figures on one line
+under the figure they split is not that. The goal is `null` rather than `0` with
+no target — `60 / 0g` reads as being over a limit nobody set, the same refusal
+`viewTotals` makes one level up.
+
+**N52's five new macros are deliberately excluded, and that is tested.**
+Saturated fat, sugar, sodium, added sugar and cholesterol landed on the entry
+while this was being built. They are label detail for one food, not a daily
+split an athlete steers by — and adding them is exactly how three figures
+becomes the six the doc refuses. The test says so, because the data now existing
+makes it the likeliest next edit.
+
+### A test that changed position rather than being repaired
+
+`nutritionCard.test.tsx` asserted "shows no carbs, fat, fibre or percentage",
+on the ground that two numbers answer "what do I eat next" and everything else
+is a dashboard. That assertion is now false by decision.
+
+It was **rewritten rather than deleted**, and the distinction matters: the thing
+it guarded — no dashboard — was never what changed, only where the line sits. It
+now asserts the three macros are present AND that fibre, sodium, sugar,
+saturated fat, cholesterol and percentages are not. Deleting it would have
+thrown away the guard along with the old position.
+
+### Verification
+
+17 pure tests on `macroSplit` and `daysLogged`, plus the meal-line rule. Three
+mutations red: a `0` goal fallback instead of `null`, `daysLogged` becoming a
+streak that stops at the first gap, and a day counted once per entry rather than
+once. Removing the macro row from the card turns a component test red. `verify`
+exit 0, 1737 mobile tests, zero lint warnings added.
+
+### What review caught, and one of them was mine twice over
+
+**[blocking] The line said "left today" on days that are not today.** The Food
+screen has a day stepper, and both halves of `mealBudgetLine` resolve for
+whatever day is being viewed — so yesterday rendered yesterday's remaining under
+the word "today", and tomorrow rendered the whole target the same way. Correct
+numbers, false sentence, on **every** non-today view. The commit that introduced
+it had a comment saying "left today" was load-bearing and must not be shortened,
+which was right and was exactly why the render needed gating on `isToday`. A
+past day has nothing "left", so suppression is the honest state.
+
+**And the three tests covering that line were tautologies.** `mealBudgetLine`
+lived in `food.tsx` and was not exported, so the tests re-declared a local
+lambda and asserted on hand-written literals: "never divides the target between
+meals" was `expect(1500).not.toBe(600)`. Deleting the shipped function, or
+changing it to divide by four, left all three green — and the commit message
+counted them in its total.
+
+That is the failure this suite was founded on, and the fix is structural rather
+than a better assertion: **the function moved into `lib/nutrition.ts`, because a
+rule inside a component is a rule no test can reach.** Divide-by-four now turns
+three tests red, and the two null gates — the load-bearing half, previously
+untested anywhere — are covered.
+
+Also fixed: the signed-out branch resolved `[]` into `daysLogged` and rendered
+"0 of 7 days logged", the confident zero the comment two lines above it exists
+to forbid; and `MacroSplit`'s unloaded accessibility label interpolated an em
+dash, which VoiceOver reads as "em dash" or drops entirely ("Protein: of 141
+grams").
+
+`localLoggedDays` gained a **fixture** test rather than a pure one, per this
+repo's rule that SQL behaviour belongs against a real database — a text
+assertion proves a clause is present, not that SQLite honours it. Four
+mutations red: dropping the tombstone filter, dropping the user scoping, making
+the range exclusive at the start, and dropping `DISTINCT`.
+
+### What this leaves open
+
+- **Nothing here has run on a device**, and this is the one that most needs it:
+  it is a layout change on the two screens an athlete actually opens, and the
+  user is about to build `main` to a phone. The repetition of the day's-remaining
+  line across four meal sections is the specific judgement call to look at — it
+  is the placement they asked for, and it may read as noise on a real screen.
+  If it does, showing it only on the slot matching the clock (`slotForClock`
+  already exists) is the smaller change.
+- The Today card grew two rows. Both screens have `ScrollView`s — checked after
+  N68 found `food/target.tsx` had outgrown a plain `View` — but the compact
+  card's height was not measured on a device.
+- `daysLogged` counts a rolling seven days rather than a calendar week, so
+  "this week" is loose. A Monday reset would make Monday morning always read
+  "0 of 7", which is the discouraging shape the no-shame rule avoids.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

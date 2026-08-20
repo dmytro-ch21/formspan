@@ -42,6 +42,7 @@ import { cacheTargets, localEntries, localTargetView, removeEntry } from '@/lib/
 import {
   bySlot,
   eatenFrom,
+  mealBudgetLine,
   type EatenView,
   type Entry,
   type Meal,
@@ -165,6 +166,17 @@ export default function FoodScreen() {
   const entries = eaten.state === 'ready' ? eaten.rows : [];
   const slots = bySlot(entries);
   const view: TargetView = dated.on === on ? dated.view : { state: 'checking' };
+  // Computed ONCE for the day and shown on every section, rather than four
+  // different figures. Null unless both halves are known: with no target there
+  // is nothing left to be left of, and with no read there is no eaten figure
+  // to subtract — and inventing either is the false precision this replaces.
+  // Only on TODAY. The screen has a day stepper, and both halves resolve for
+  // whatever day is being viewed — so on yesterday this rendered yesterday's
+  // remaining under the words "left today", and on tomorrow it rendered the
+  // whole target the same way. Correct numbers, false sentence, on 100% of
+  // non-today views. A past day has nothing "left", so suppression is the
+  // honest state rather than a rewording. Found in review.
+  const budget = isToday ? mealBudgetLine(eaten, view) : null;
 
   async function onDelete(id: string) {
     if (!userId) return;
@@ -245,6 +257,21 @@ export default function FoodScreen() {
               <SectionHeader
                 label={`${MEAL_LABELS[slot.meal]}${slot.kcal > 0 ? ` · ${Math.round(slot.kcal)} kcal` : ''}`}
               />
+              {/* **The day's remaining, not a per-meal budget**, and the
+                  distinction is the whole reason this line reads the way it
+                  does. The user asked for "536 calories now available" per
+                  meal; `nutrition-design.md` §5 rejects that by name as false
+                  precision — it requires knowing a day the app cannot see, it
+                  is wrong the moment you eat a big lunch, and it manufactures
+                  four budgets to fail against instead of one honest total.
+                  They chose this counter-proposal: the placement they asked
+                  for, one true number under it. "left today" is doing load-
+                  bearing work in that sentence and must not be shortened. */}
+              {budget && (
+                <Text style={styles.budget} testID={`food-budget-${slot.meal}`}>
+                  {budget}
+                </Text>
+              )}
               {slot.entries.map((e) => (
                 <SwipeToDelete
                   key={e.id}
@@ -311,6 +338,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   slotsAbsent: { fontSize: 13, color: vola.textMuted, marginTop: 18 },
+  budget: { fontSize: 12, color: vola.textMuted, marginTop: -2, marginBottom: 6 },
   slot: { gap: 6 },
   // Matches SwipeToDelete's own backing exactly — surface at radius 12 — or the
   // revealed action shows a seam behind the row.

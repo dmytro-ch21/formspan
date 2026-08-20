@@ -175,6 +175,113 @@ export function eatenFrom(rows: Entry[]): EatenView {
   return { state: 'ready', rows, totals: dayTotals(rows) };
 }
 
+/**
+ * One macro against its goal, for the row Today draws.
+ *
+ * `goal` is null when there is no target — NOT zero. A zero goal renders as
+ * "12 / 0g", which reads as being over a limit nobody set, and it is the same
+ * misreading `viewTotals` refuses one level up.
+ */
+export type MacroProgress = {
+  key: 'protein_g' | 'carb_g' | 'fat_g';
+  label: string;
+  eaten: number;
+  goal: number | null;
+};
+
+/**
+ * The macro split, in the order a label lists them.
+ *
+ * **Deliberately three, and deliberately one row.** `nutrition-design.md` §5
+ * rejects "six stacked ring-and-bar cards" as the dashboard graveyard Today's
+ * design doc exists to prevent, and that objection is to the STACK. Three
+ * figures on one line is a split, not a dashboard — and calories are not
+ * repeated here because `RemainingBlock` already leads with them.
+ *
+ * N52 has since landed saturated fat, sugar, sodium, added sugar and
+ * cholesterol on the entry. They are deliberately NOT here: they are label
+ * detail for a single food, not a daily split an athlete steers by, and adding
+ * them is how three figures becomes the six the doc refuses.
+ */
+export function macroSplit(totals: Macros | null, target: Target | null): MacroProgress[] {
+  return [
+    { key: 'protein_g', label: 'Protein', eaten: totals?.protein_g ?? 0, goal: target?.protein_g ?? null },
+    { key: 'carb_g', label: 'Carbs', eaten: totals?.carb_g ?? 0, goal: target?.carb_g ?? null },
+    { key: 'fat_g', label: 'Fat', eaten: totals?.fat_g ?? 0, goal: target?.fat_g ?? null },
+  ];
+}
+
+/**
+ * How many of the last `days` days have anything logged on them.
+ *
+ * **A count, not a streak, and the difference is the whole point.**
+ * `nutrition-design.md` §5 rejects streaks: "a missed day becomes a loss, and a
+ * streak rewards logging a fake day to save it. Against the no-shame rule." A
+ * chain has a length you can lose; a count is a number that goes up and down
+ * and cannot be broken, so there is nothing to protect by inventing a meal.
+ *
+ * It also carries N28's honesty rule by construction — the denominator travels
+ * with the figure, so "5" is never shown without "of 7". `logged` counts days
+ * with at least one entry; a day nobody logged is a gap, and the count says so
+ * by being smaller rather than by asserting a zero.
+ */
+export function daysLogged(
+  datesWithEntries: readonly string[],
+  today: string,
+  days: number,
+): { logged: number; considered: number } {
+  const window = new Set<string>();
+  for (let i = 0; i < days; i++) window.add(addDaysISO(today, -i));
+  const hit = new Set<string>();
+  for (const d of datesWithEntries) if (window.has(d)) hit.add(d);
+  return { logged: hit.size, considered: days };
+}
+
+/** Calendar arithmetic on `YYYY-MM-DD`, in UTC so every day is 24 hours —
+ *  the same reasoning `lib/calendar.ts` and web's `history.ts` both record. */
+function addDaysISO(key: string, n: number): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const at = new Date(Date.UTC(y, m - 1, d));
+  at.setUTCDate(at.getUTCDate() + n);
+  return at.toISOString().slice(0, 10);
+}
+
+/**
+ * "536 kcal left today · 28g protein · 48g carbs · 13g fat", or null.
+ *
+ * The counter-proposal to the one thing `nutrition-design.md` §5 rejects by
+ * name. Their objection is to ALLOCATING a budget per meal — "it requires
+ * knowing a day the app cannot see, it is wrong the moment you eat a big lunch,
+ * and it manufactures four budgets to fail against instead of one honest
+ * running total". This is the DAY's remaining, computed once, shown in the
+ * placement the athlete asked for. "left today" is load-bearing in that
+ * sentence, and the caller is responsible for only rendering it on today.
+ *
+ * **Null rather than a partial line** in every state that cannot support one:
+ * no target means nothing is "left", and an unread day means the eaten half is
+ * unknown. A line assembled from half an answer is the failure N54 was for.
+ *
+ * Lives here rather than in the screen because it is a rule, and a rule in a
+ * component is a rule no test can reach — the first version of it was in
+ * `food.tsx` and its "tests" asserted on hand-written literals instead, so
+ * deleting the function left them all green. Found in review.
+ */
+export function mealBudgetLine(eaten: EatenView, view: TargetView): string | null {
+  const totals = viewTotals(eaten);
+  const target = viewTarget(view);
+  if (!totals || !target) return null;
+  // Floored at zero: "−140 kcal left" is a contradiction, and `RemainingBlock`
+  // already says "140 over" in its own words. Two surfaces phrasing one
+  // overage differently is the drift the shared component exists to prevent.
+  const left = (goal: number, eatenAmount: number) => Math.max(0, Math.round(goal - eatenAmount));
+  return (
+    `${left(target.kcal, totals.kcal)} kcal left today · ` +
+    `${left(target.protein_g, totals.protein_g)}g protein · ` +
+    `${left(target.carb_g, totals.carb_g)}g carbs · ` +
+    `${left(target.fat_g, totals.fat_g)}g fat`
+  );
+}
+
 export type Remaining = {
   kcal: number;
   protein_g: number;
