@@ -2,6 +2,9 @@ package migrateguard
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -226,29 +229,48 @@ func assertProblemMentions(t *testing.T, p Provenance, substrings ...string) {
 
 // The guard has no off switch, and this is the test that keeps it that way.
 //
-// An environment variable that disables it would be exported in a shell
-// profile within a fortnight and the guard would become decoration — so the
-// package reads no environment at all, and the only way to vouch for a
-// migration set outside a repository is the link-time attestation.
+// An environment variable that disables it would be exported in a shell profile
+// within a fortnight and the guard would become decoration — so the package
+// reads no environment at all, and the only way to vouch for a migration set
+// outside a repository is the link-time attestation.
+//
+// It walks the AST rather than grepping the text, because a grep also matches
+// the PROSE: the comment in runGit explaining why it appends to the command's
+// own environment named the forbidden call and turned this red. A test that
+// cannot tell code from a comment about code gets weakened until it passes.
 func TestPackageReadsNoEnvironmentVariables(t *testing.T) {
+	forbidden := map[string]bool{"Getenv": true, "LookupEnv": true, "Environ": true}
+
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
+	checked := 0
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		src, err := os.ReadFile(name)
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0) // 0 = comments dropped
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing %s: %v", name, err)
 		}
-		for _, forbidden := range []string{"os.Getenv", "os.LookupEnv", "os.Environ"} {
-			if strings.Contains(string(src), forbidden) {
-				t.Errorf("%s reads the environment (%s). The guard must have no off switch; "+
-					"the only provenance outside a repository is BuildChannel, set at link time.", name, forbidden)
+		checked++
+		ast.Inspect(file, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
 			}
-		}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok || pkg.Name != "os" || !forbidden[sel.Sel.Name] {
+				return true
+			}
+			t.Errorf("%s calls os.%s. The guard must have no off switch; the only "+
+				"provenance outside a repository is BuildChannel, set at link time.", name, sel.Sel.Name)
+			return true
+		})
+	}
+	if checked == 0 {
+		t.Fatal("no non-test .go files were parsed, so this test measured nothing")
 	}
 }

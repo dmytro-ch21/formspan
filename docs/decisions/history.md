@@ -16327,123 +16327,7 @@ unasked: there is nothing left to gate.
 
 ### Unrelated, found while writing this
 
-The `## 2026-08-20 — `migrate` refuses a database it cannot vouch for
-
-An unmerged branch's `000069`/`000070`/`000071` were applied to the **staging**
-Postgres by hand. Staging's recorded version went to 71 while `main` topped out
-at 70, so every `api` deploy after that died in pre-deploy with `no migration
-found for version 71`, and `main`'s own `000069` and `000070` were left
-permanently unreachable — below a version the database had already recorded.
-The API stayed up on its last good container, so the environment failed
-**stale** rather than down: nothing went red, and every ticket "verified against
-staging" during those forty minutes was verified against a six-commit-old build.
-The incident is #461; this is #465, the hole it exposed.
-
-**The loud failure was luck, and that is the finding worth keeping.** Both modes
-were reproduced against a scratch database before any of this was designed.
-Version above the highest file: `no migration found for version 71`, exit 1 —
-what staging did. Version 70 with a *new* `000065` dropped in: `migrate: up:
-done`, **exit 0**, and the column absent from `information_schema`. golang-
-migrate applies only versions strictly above the recorded one, so the second
-mode leaves no trace at all and surfaces days later as `column "…" does not
-exist`, reading as a code bug. Had the branch numbered below staging instead of
-above, that is the incident there would have been.
-
-**Nothing could have caught it.** CI migrates a throwaway database that starts
-at zero, so a collision with a real environment is invisible there and green
-forever. `CLAUDE.md` documented this trap at length — but only for `vola_test`,
-the shared *local* test database, so a session that had read and internalised
-the rule had no reason to apply it to a remote one.
-
-**And #465's own suggested mitigation was already in place.** The suggestion was
-to keep staging credentials out of a variable a `source` would pick up.
-`backend/.env.staging.local` already does exactly that: it defines
-`DATABASE_URL_INTERNAL` and `DATABASE_URL_PUBLIC`, not `DATABASE_URL`, and even
-carries a comment endorsing manual `migrate` runs. So a bare `source` could not
-have caused this — somebody re-typed the value deliberately. The
-credentials-side mitigation is spent, which is the argument for the guard living
-inside the tool: the remaining failure path runs through a human decision, and
-no amount of naming discipline reaches it.
-
-### What was built
-
-`backend/internal/platform/migrateguard`, asked as three questions, the first
-two before any connection is opened:
-
-1. **What is the target?** Derived from the DSN the operator already typed, not
-   from a flag they must remember — the dangerous case is precisely the one
-   nobody declares. Local means loopback, `localhost`/`*.localhost`, a Unix
-   socket, `host.docker.internal`, or the compose service name `postgres`.
-   Everything else is remote, an unparseable DSN **fails closed**, and — the
-   part most likely to be quietly relaxed — **an RFC1918 LAN address is
-   remote**. The claim being made is "a database on this machine", not "a
-   database I can reach"; "it's on my own network" is exactly the reasoning that
-   would hollow this out.
-2. **Is this migration set trustworthy?** Asked only of a remote target, and
-   answered two ways. `backend/Dockerfile` links the binary with
-   `-X …/migrateguard.BuildChannel=deploy`, so the deploy image attests to its
-   own provenance and never looks for the git repository it does not have —
-   **the legitimate deployer types nothing, sets nothing and disables nothing.**
-   Otherwise every file in the migrations directory is hashed the way `git
-   hash-object` does and compared against `git ls-tree origin/main`, after a
-   `git fetch`; extra, modified or missing files are all refusals. Hashing what
-   is **on disk** is deliberate, since that is what golang-migrate reads, and it
-   catches an untracked file and a dirty tracked one by the same mechanism.
-3. **Does the database agree with the repo?** Asked of **every** target,
-   including your own scratch database, because mode 2 above bites hardest on a
-   per-branch local one. Recorded version above the highest file, or a file that
-   is not on `origin/main` numbered at or below the recorded version, is a
-   refusal that names the situation *and* the fix, in place of golang-migrate's
-   `read down for version 71`, which names neither.
-
-Also: `down` against a non-local database is refused outright (it takes no step
-argument and unwinds everything); a new read-only `migrate status`, so the next
-incident starts from a fact rather than a hand-written query; and `up` now
-prints its target, its source and verification, the current version and the
-pending list before acting — none of which was visible, and all of which would
-have made this obvious in seconds.
-
-**There is deliberately no bypass environment variable.** Nothing to disable is
-the only version of "don't make it painful" that survives the second person;
-anything readable from a shell gets exported in a shell profile within a
-fortnight. The one legitimate path that gets a worse day is a hand-run deploy
-from a shell whose `git fetch origin main` fails, which refuses rather than
-trusting a possibly-stale ref. That was a deliberate call: a warning would be
-one more line printed by a process that exits 0, which is the failure mode this
-whole class is made of.
-
-### Demonstrated, not asserted
-
-The LAN address is what made an end-to-end demonstration possible — this
-machine's own Postgres is reachable at `192.168.86.30:5432`, so a genuinely
-non-local host and a database that can be wrecked freely are the same database.
-Refused from a branch carrying an unmerged `000071`, exit 1, database untouched
-at 70. **Permitted** with the migrations clean against `origin/main`, applying
-`000070` for real (the column exists afterwards) — the legitimate path, watched
-failing to fail. The same binary run from `/tmp` with no repository anywhere:
-refused unstamped, permitted when built with the deploy ldflags. And both
-original failure modes now produce the new wording, with mode 2 no longer
-exiting 0.
-
-Nine mutations, each applied and each caught — **except one, which was the point
-of doing it.** Changing the skip check's `<=` to `<` left the suite green,
-because every vector sat safely below the recorded version and none sat exactly
-on it. A migration numbered *equal* to the recorded version is skipped too, so
-that boundary is the whole reason the comparison is `<=`; the missing vector was
-written and the mutation then failed. Two other measurements worth keeping: the
-first `git ls-tree` resolved its pathspec against the current directory rather
-than the repository root and silently listed nothing, which four tests caught
-immediately — and a mutation that produced a *compile* error was re-done, since
-a non-zero exit from the compiler proves nothing about a test.
-
-### What this does not do
-
-It does not stop anyone running `psql` against staging, and it does not stop
-anyone typing the staging DSN as `DATABASE_URL`. It makes `migrate` refuse. The
-guard makes the consequence legible and the action impossible **through this
-tool only**; every other route to that database is unchanged.
-
-## Open items / known gaps as of this entry` heading had been lost in a
+The `## Open items / known gaps as of this entry` heading had been lost in a
 merge, leaving that whole list orphaned under the sharing entry's "Not
 verified" prose and reading as though those gaps belonged to sharing. Heading
 restored; the list is unchanged.
@@ -36892,6 +36776,147 @@ is the escaping trap that section warns about.
 The five already-closed tickets are a separate, deliberate decision: the script
 lists them (`--backfill --dry-run`) and reopening them is a bulk board move, so
 it waits on the user rather than happening as a side effect of this landing.
+
+## 2026-08-20 — `migrate` refuses a database it cannot vouch for
+
+An unmerged branch's `000069`/`000070`/`000071` were applied to the **staging**
+Postgres by hand. Staging's recorded version went to 71 while `main` topped out
+at 70, so every `api` deploy after that died in pre-deploy with `no migration
+found for version 71`, and `main`'s own `000069` and `000070` were left
+permanently unreachable — below a version the database had already recorded.
+The API stayed up on its last good container, so the environment failed
+**stale** rather than down: nothing went red, and every ticket "verified against
+staging" during those forty minutes was verified against a six-commit-old build.
+The incident is #461; this is #465, the hole it exposed.
+
+**The loud failure was luck, and that is the finding worth keeping.** Both modes
+were reproduced against a scratch database before any of this was designed.
+Version above the highest file: `no migration found for version 71`, exit 1 —
+what staging did. Version 70 with a *new* `000065` dropped in: `migrate: up:
+done`, **exit 0**, and the column absent from `information_schema`. golang-
+migrate applies only versions strictly above the recorded one, so the second
+mode leaves no trace at all and surfaces days later as `column "…" does not
+exist`, reading as a code bug. Had the branch numbered below staging instead of
+above, that is the incident there would have been.
+
+**Nothing could have caught it.** CI migrates a throwaway database that starts
+at zero, so a collision with a real environment is invisible there and green
+forever. `CLAUDE.md` documented this trap at length — but only for `vola_test`,
+the shared *local* test database, so a session that had read and internalised
+the rule had no reason to apply it to a remote one.
+
+**And #465's own suggested mitigation was already in place.** The suggestion was
+to keep staging credentials out of a variable a `source` would pick up.
+`backend/.env.staging.local` already does exactly that: it defines
+`DATABASE_URL_INTERNAL` and `DATABASE_URL_PUBLIC`, not `DATABASE_URL`, and even
+carries a comment endorsing manual `migrate` runs. So a bare `source` could not
+have caused this — somebody re-typed the value deliberately. The
+credentials-side mitigation is spent, which is the argument for the guard living
+inside the tool: the remaining failure path runs through a human decision, and
+no amount of naming discipline reaches it.
+
+### What was built
+
+`backend/internal/platform/migrateguard`, asked as three questions, the first
+two before any connection is opened:
+
+1. **What is the target?** Derived from the DSN the operator already typed, not
+   from a flag they must remember — the dangerous case is precisely the one
+   nobody declares. Local means loopback, `localhost`/`*.localhost`, a Unix
+   socket, `host.docker.internal`, or the compose service name `postgres`.
+   Everything else is remote, an unparseable DSN **fails closed**, and — the
+   part most likely to be quietly relaxed — **an RFC1918 LAN address is
+   remote**. The claim being made is "a database on this machine", not "a
+   database I can reach"; "it's on my own network" is exactly the reasoning that
+   would hollow this out.
+2. **Is this migration set trustworthy?** Asked only of a remote target, and
+   answered two ways. `backend/Dockerfile` links the binary with
+   `-X …/migrateguard.BuildChannel=deploy`, so the deploy image attests to its
+   own provenance and never looks for the git repository it does not have —
+   **the legitimate deployer types nothing, sets nothing and disables nothing.**
+   Otherwise every file in the migrations directory is hashed the way `git
+   hash-object` does and compared against `git ls-tree origin/main`, after a
+   `git fetch`; extra, modified or missing files are all refusals. Hashing what
+   is **on disk** is deliberate, since that is what golang-migrate reads, and it
+   catches an untracked file and a dirty tracked one by the same mechanism.
+3. **Does the database agree with the repo?** Asked of **every** target,
+   including your own scratch database, because mode 2 above bites hardest on a
+   per-branch local one. Recorded version above the highest file, or a file that
+   is not on `origin/main` numbered at or below the recorded version, is a
+   refusal that names the situation *and* the fix, in place of golang-migrate's
+   `read down for version 71`, which names neither.
+
+Also: `down` against a non-local database is refused outright (it takes no step
+argument and unwinds everything); a new read-only `migrate status`, so the next
+incident starts from a fact rather than a hand-written query; and `up` now
+prints its target, its source and verification, the current version and the
+pending list before acting — none of which was visible, and all of which would
+have made this obvious in seconds.
+
+**There is deliberately no bypass environment variable.** Nothing to disable is
+the only version of "don't make it painful" that survives the second person;
+anything readable from a shell gets exported in a shell profile within a
+fortnight. The one legitimate path that gets a worse day is a hand-run deploy
+from a shell whose `git fetch origin main` fails, which refuses rather than
+trusting a possibly-stale ref. That was a deliberate call: a warning would be
+one more line printed by a process that exits 0, which is the failure mode this
+whole class is made of.
+
+### Demonstrated, not asserted
+
+The LAN address is what made an end-to-end demonstration possible — this
+machine's own Postgres is reachable at `192.168.86.30:5432`, so a genuinely
+non-local host and a database that can be wrecked freely are the same database.
+Refused from a branch carrying an unmerged `000071`, exit 1, database untouched
+at 70. **Permitted** with the migrations clean against `origin/main`, applying
+`000070` for real (the column exists afterwards) — the legitimate path, watched
+failing to fail. The same binary run from `/tmp` with no repository anywhere:
+refused unstamped, permitted when built with the deploy ldflags. And both
+original failure modes now produce the new wording, with mode 2 no longer
+exiting 0.
+
+Nine mutations, each applied and each caught — **except one, which was the point
+of doing it.** Changing the skip check's `<=` to `<` left the suite green,
+because every vector sat safely below the recorded version and none sat exactly
+on it. A migration numbered *equal* to the recorded version is skipped too, so
+that boundary is the whole reason the comparison is `<=`; the missing vector was
+written and the mutation then failed. Two other measurements worth keeping: the
+first `git ls-tree` resolved its pathspec against the current directory rather
+than the repository root and silently listed nothing, which four tests caught
+immediately — and a mutation that produced a *compile* error was re-done, since
+a non-zero exit from the compiler proves nothing about a test.
+
+### What review caught, which the green suite did not
+
+Three findings, all in code that compiled, passed and had been demonstrated by
+hand:
+
+- **The refusal leaked the credential it was refusing to use.** `Target.Display`
+  was redacted and asserted to be; `Target.Why`, printed on the line directly
+  beneath it, interpolated the parse error — and `url.Parse` quotes the *entire*
+  URL in its error text, while the libpq keyword scanner quoted twenty raw bytes
+  "near" the problem, which for a forgotten `=` after `password` is the secret.
+  A `%` in a generated password is all it takes. Every `dissect` error is now a
+  constant with no input in it, and the test that missed this had the shape that
+  let it: its fixtures mostly carried no password, so it could not have failed.
+  The replacement asserts each fixture actually reaches the failing branch.
+- **The silent success came back one level up.** With `MIGRATIONS_PATH` set to
+  anything unreadable, the plan was empty, `up` printed "nothing to apply" and
+  exited 0 — the exact class this guard exists to end, resurrected in the guard.
+  Now fatal for anything that writes.
+- **The history entry was inserted mid-sentence**, anchored on the first
+  occurrence of `## Open items / known gaps as of this entry` — which is a
+  *quotation* of that heading inside an older entry's prose, not the trailing
+  heading itself. The hard rule in `CLAUDE.md` says insert before it; it does not
+  say the phrase appears four times in the file. Anchor on the **last**
+  occurrence.
+
+### What this does not do
+
+It does not stop anyone running `psql` against staging, and it does not stop
+anyone typing the staging DSN as `DATABASE_URL`. It makes `migrate` refuse. The
+guard makes the consequence legible and the action impossible **through this
+tool only**; every other route to that database is unchanged.
 
 ## Open items / known gaps as of this entry
 

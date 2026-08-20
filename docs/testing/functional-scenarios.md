@@ -205,10 +205,11 @@ Domain: the CLI that applies migrations, and its refusal to touch a database it 
 - Database marked dirty → refused, naming the version.
 - `migrate down` against a non-local database → refused outright (it takes no step argument and unwinds everything).
 - An unparseable `DATABASE_URL` → treated as **not local** (fail closed) and the DSN fully redacted in output.
+- `MIGRATIONS_PATH` set to something this tool cannot read (a non-`file://` source, or `file://` with an empty path) → `up` and `down` refuse. Without that refusal the plan is empty and `up` prints "nothing to apply" and exits 0 — the same silent success the guard exists to end, one level up. `status` still reports what it can.
 
 **Auth/security**
 - No output path may print the password: URL userinfo, a `?password=` query parameter, and libpq `password=` keyword form all have to be redacted, and an unparseable DSN redacted entirely since the password could be anywhere in it.
-- There is deliberately **no environment variable that disables the guard**. A test that asserts one does not exist is worth having: the failure mode is somebody adding one "temporarily".
+- There is deliberately **no environment variable that disables the guard**. A test that asserts one does not exist is worth having: the failure mode is somebody adding one "temporarily". Assert it over the **AST**, not the text — a grep also matches a comment that merely names the call, and a test that cannot tell code from prose gets weakened until it passes.
 
 ---
 

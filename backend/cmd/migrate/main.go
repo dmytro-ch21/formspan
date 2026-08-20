@@ -68,6 +68,24 @@ func main() {
 		prov.Problems = []string{fmt.Sprintf("%s is not a file:// source, so its contents cannot be compared with origin/main", migrationsPath)}
 	}
 
+	// A source this tool cannot read is fatal for anything that writes.
+	//
+	// Without this, `up` finds no migration files, computes an empty plan and
+	// prints "nothing to apply" — a clean exit 0 that applied nothing, which is
+	// precisely the failure class this guard exists to end, resurrected one
+	// level up. Only `source/file` is registered anyway, so nothing legitimate
+	// is lost; MIGRATIONS_PATH="file://" (an easy typo) lands here too.
+	if command != "status" && !inspectable {
+		fatal(fmt.Sprintf(`REFUSING to run '%s': MIGRATIONS_PATH is not a readable file:// source.
+
+  MIGRATIONS_PATH: %s
+
+This tool has to read the migration files to know what it is about to apply and
+to compare them with origin/main. It cannot, so it will not guess. Set
+MIGRATIONS_PATH to a file:// path (the default is file://migrations, relative to
+the working directory).`, command, migrationsPath))
+	}
+
 	if command != "status" && !target.Local {
 		if command == "down" {
 			refuseRemoteDown(target)

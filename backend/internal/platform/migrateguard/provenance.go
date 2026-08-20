@@ -208,6 +208,20 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+
+	// `git fetch` spawns children (git-remote-https, ssh, credential helpers)
+	// that inherit the output pipes, so killing the parent at the deadline is
+	// not enough: CombinedOutput blocks until those pipes close. WaitDelay
+	// makes the timeout unconditional.
+	cmd.WaitDelay = 5 * time.Second
+
+	// And an https remote with no cached credentials would otherwise sit in a
+	// terminal prompt until the deadline. Fail fast instead — an unverifiable
+	// set is a refusal either way, and 30 seconds of silence looks like a hang.
+	// cmd.Environ(), not os.Environ(): this package reads no environment of its
+	// own, and the test that enforces that greps for the call by name.
+	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
+
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

@@ -13,6 +13,7 @@
 package migrateguard
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -43,6 +44,22 @@ var localHostnames = map[string]bool{
 	"host.docker.internal": true,
 	"postgres":             true,
 }
+
+// The errors dissect can return. Every one is a CONSTANT with no input in it.
+//
+// This is load-bearing, not tidiness. Target.Why is printed on the refusal
+// path, and the DSN it describes is routinely a live production credential —
+// so an error that quotes what it failed to parse defeats the redaction two
+// fields away. url.Parse quotes the entire URL in its error text, and a
+// keyword-form DSN with a missing `=` puts the password in the "near ..."
+// clause. Both were doing exactly that until review caught it.
+var (
+	errEmpty        = errors.New("it is empty")
+	errNotAURL      = errors.New("it starts with postgres:// but is not a valid URL")
+	errNoPairs      = errors.New("it is neither a postgres:// URL nor libpq key=value pairs")
+	errBadKey       = errors.New("it has a malformed keyword")
+	errUnterminated = errors.New("it has an unterminated quoted value")
+)
 
 // ParseTarget classifies a DSN. It NEVER returns an error: an unparseable DSN
 // is classified as not-local with its display fully redacted, because failing
@@ -108,7 +125,7 @@ func hostIsLocal(h string) bool {
 func dissect(dsn string) (hosts []string, display string, err error) {
 	trimmed := strings.TrimSpace(dsn)
 	if trimmed == "" {
-		return nil, "", fmt.Errorf("empty")
+		return nil, "", errEmpty
 	}
 	if strings.HasPrefix(trimmed, "postgres://") || strings.HasPrefix(trimmed, "postgresql://") {
 		return dissectURL(trimmed)
@@ -119,7 +136,9 @@ func dissect(dsn string) (hosts []string, display string, err error) {
 func dissectURL(dsn string) ([]string, string, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
-		return nil, "", err
+		// Deliberately NOT wrapped: url.Parse quotes the ENTIRE url in its
+		// error, password included, and this value is printed. See errNoInput.
+		return nil, "", errNotAURL
 	}
 	// url.Host holds every host when the DSN names several
 	// ("host1:5432,host2:5432"); split on the comma, then drop the port.
@@ -134,9 +153,13 @@ func dissectURL(dsn string) ([]string, string, error) {
 		}
 		hosts = append(hosts, host)
 	}
-	// pgx also accepts ?host=, including a Unix socket directory.
-	if q := u.Query()["host"]; len(q) > 0 {
-		for _, h := range q {
+	// pgx also accepts ?host=, including a Unix socket directory. hostaddr is
+	// mirrored from the keyword form for symmetry: no driver in the tree reads
+	// it from a URL query today, and classification must not depend on that
+	// staying true.
+	query := u.Query()
+	for _, key := range []string{"host", "hostaddr"} {
+		for _, h := range query[key] {
 			hosts = append(hosts, strings.Split(h, ",")...)
 		}
 	}
@@ -145,9 +168,9 @@ func dissectURL(dsn string) ([]string, string, error) {
 	if u.User != nil {
 		redacted.User = url.User(u.User.Username())
 	}
-	q := redacted.Query()
 	// A password can also arrive as a query parameter.
-	if q.Has("password") {
+	if query.Has("password") {
+		q := redacted.Query()
 		q.Set("password", "REDACTED")
 		redacted.RawQuery = q.Encode()
 	}
@@ -163,7 +186,7 @@ func dissectKeywords(dsn string) ([]string, string, error) {
 		return nil, "", err
 	}
 	if len(kv) == 0 {
-		return nil, "", fmt.Errorf("no key=value pairs")
+		return nil, "", errNoPairs
 	}
 
 	var hosts []string
@@ -195,11 +218,11 @@ func scanKeywords(dsn string) (map[string]string, []string, error) {
 		}
 		eq := strings.IndexByte(rest, '=')
 		if eq <= 0 {
-			return nil, nil, fmt.Errorf("expected key=value near %q", truncate(rest))
+			return nil, nil, errNoPairs
 		}
 		key := strings.TrimSpace(rest[:eq])
 		if key == "" || strings.ContainsAny(key, " \t") {
-			return nil, nil, fmt.Errorf("invalid key %q", truncate(key))
+			return nil, nil, errBadKey
 		}
 		rest = strings.TrimLeft(rest[eq+1:], " \t")
 
@@ -211,7 +234,7 @@ func scanKeywords(dsn string) (map[string]string, []string, error) {
 				switch rest[i] {
 				case '\\':
 					if i+1 >= len(rest) {
-						return nil, nil, fmt.Errorf("trailing backslash in value for %q", key)
+						return nil, nil, errUnterminated
 					}
 					i++
 					value.WriteByte(rest[i])
@@ -226,7 +249,7 @@ func scanKeywords(dsn string) (map[string]string, []string, error) {
 				}
 			}
 			if !closed {
-				return nil, nil, fmt.Errorf("unterminated quote in value for %q", key)
+				return nil, nil, errUnterminated
 			}
 		} else {
 			end := strings.IndexAny(rest, " \t\n\r")
@@ -241,11 +264,4 @@ func scanKeywords(dsn string) (map[string]string, []string, error) {
 		}
 		kv[key] = value.String()
 	}
-}
-
-func truncate(s string) string {
-	if len(s) > 20 {
-		return s[:20] + "…"
-	}
-	return s
 }

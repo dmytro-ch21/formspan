@@ -112,3 +112,48 @@ func TestParseTarget_RedactsPasswordQueryParameter(t *testing.T) {
 		t.Fatalf("Display leaked a password passed as a query parameter: %q", got.Display)
 	}
 }
+
+// The refusal path prints Why directly beneath the line claiming the DSN is
+// redacted, so a password in Why defeats the redaction entirely.
+//
+// Review caught this shipping: url.Parse quotes the WHOLE url in its error, and
+// the keyword scanner quoted 20 raw bytes "near" the problem — which for a
+// forgotten `=` after `password` is the secret itself. Every fixture here is
+// shaped to carry a password INTO the failing branch; without that the test
+// passes vacuously, which is how the first version of it would have.
+func TestParseTarget_UnparseableNeverLeaksTheDSN(t *testing.T) {
+	cases := []struct {
+		name string
+		dsn  string
+	}{
+		{"invalid percent escape in password", "postgres://vola:" + fixturePassword + "%zz@monorail.proxy.rlwy.net:5432/railway"},
+		{"invalid port", "postgres://vola:" + fixturePassword + "@monorail.proxy.rlwy.net:notaport/railway"},
+		{"control character", "postgres://vola:" + fixturePassword + "@rlwy.net\x7f:5432/railway"},
+		{"missing equals after password", "host=rlwy.net user=vola password " + fixturePassword},
+		{"unterminated quoted password", "host=rlwy.net password='" + fixturePassword},
+		{"trailing backslash in password", `host=rlwy.net password='` + fixturePassword + `\`},
+		{"keyword with no pairs at all", "password " + fixturePassword},
+		{"malformed keyword", "= " + fixturePassword + " host=rlwy.net"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseTarget(tc.dsn)
+			if got.Local {
+				t.Fatalf("classified LOCAL, which fails open: %q", tc.dsn)
+			}
+			// Prove the fixture actually REACHED the failing branch. A DSN that
+			// parses cleanly would have its password redacted by the ordinary
+			// path and this test would pass while measuring nothing.
+			if got.Display != "(unparseable DSN — redacted)" {
+				t.Fatalf("fixture parsed successfully, so it does not exercise the failing branch: Display = %q", got.Display)
+			}
+			// Every printed field, not just Display.
+			for field, value := range map[string]string{"Display": got.Display, "Why": got.Why} {
+				if strings.Contains(value, fixturePassword) {
+					t.Errorf("%s leaked the password: %q", field, value)
+				}
+			}
+		})
+	}
+}
