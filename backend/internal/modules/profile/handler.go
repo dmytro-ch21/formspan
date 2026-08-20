@@ -187,6 +187,11 @@ type updateRequest struct {
 	// means unchanged here too, so no PATCH can widen a disclosure it did not
 	// name.
 	ShareTrainingDetails *bool `json:"share_training_details"`
+	// Daily movement outside logged training. Absent means unchanged, so a
+	// client that knows nothing about this field cannot clear it — which is
+	// what lets the mobile and web target screens PATCH one key each without
+	// sending a profile they never read.
+	ActivityLevel *string `json:"activity_level"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +226,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ActivityLevel != nil && !ValidActivityLevel(*req.ActivityLevel) {
+		// Refused rather than silently coerced to the default. A PATCH that
+		// stored `light` for a typo'd `moderate` would hand back a 200 naming
+		// a level the caller never asked for, and the client would cache it as
+		// the athlete's own choice.
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"activity_level must be sedentary, light or active")
+		return
+	}
+
 	if !ValidHeightCM(req.HeightCM) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			"height must be between 50 and 260 cm")
@@ -236,6 +251,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		TrackEffort:              req.TrackEffort,
 		ShareTrainingWithFriends: req.ShareTrainingWithFriends,
 		ShareTrainingDetails:     req.ShareTrainingDetails,
+		ActivityLevel:            req.ActivityLevel,
 	})
 	if err != nil {
 		writeError(w, r, err)

@@ -10193,6 +10193,116 @@ The scenarios that matter are the ones distinguishing three states, not two.
   into "you do not train this".
 
 
+## The activity level, and where it lives (N93 — `profiles.activity_level`, `app/(tabs)/goals.tsx`, web `nutrition/targets`)
+
+Reported from a device as *"Target doesn't save previously added type of
+activity"*. The three daily-movement pills were component state on both clients,
+so they reset on every navigation — and the derived calorie target reset with
+them. It is stored on the profile now, nullable, with `NULL` meaning *never
+chosen*.
+
+### Happy path
+
+- **A chosen level survives leaving the tab.** Goals → `Physical job`, note the
+  target, switch to another tab, come back. **Both** the pill and the number are
+  unchanged. This is the whole ticket, and it needs a *return to the tab* rather
+  than a fresh launch — a tab mounts once and stays mounted, so a screen that
+  re-reads only on mount passes every other check here.
+- **It survives a force-quit and relaunch**, and a cold launch with no network.
+- **The web app agrees.** Set `Physical job` on the phone, open
+  `/dashboard/nutrition/targets` in a browser signed in as the same athlete: the
+  same chip is active and the derivation runs at the same factor. Set it on web,
+  return to the phone's Goals tab, and the phone follows. Agreement is by
+  construction — one column, both clients omit the `activity` parameter and
+  adopt what the server reports — not by a parity script.
+- **A level chosen in airplane mode reaches the account by itself.** Pick one
+  with no signal, see the "saved on this phone" line, restore the network,
+  revisit the tab. It syncs once, the line goes away, and it does not revert —
+  then check web and confirm the browser derives at the new level too.
+
+  **Both halves matter and only one is obvious.** "Not lost" is satisfied by
+  any local write; "reaches the account" needs a retry, and the first draft of
+  this feature had none — the PATCH fired only on a pill press, so the debt
+  stood forever unless the athlete tapped again while online, and web derived
+  at the stale level indefinitely. Three places in the diff *said* it retried.
+  A scenario that stops at "the phone still shows it" passes against that bug.
+
+### Edge cases & errors
+
+- **Never-chosen is not the same as chose-`light`.** A brand-new athlete gets
+  the documented default in the arithmetic and **no selected pill** — the
+  assumed one is dashed and a line names it. A filled pill would attribute a
+  decision to somebody who never made one, and the next request would then send
+  it as truth, making the assumption permanent and invisible. `activity_chosen`
+  is in the contract for exactly this.
+- **A pending offline choice beats the server, not the other way round.** With a
+  local change not yet pushed, a successful profile read must NOT adopt the
+  server's older value. That failure shipped once in `useTrackEffort`: the
+  switch turned itself back on minutes later with nothing said.
+- **A cached level the account no longer holds is dropped.** Nothing owed means
+  the server is authoritative, including when it says nobody has chosen.
+- **A stored level the vocabulary no longer knows is treated as never chosen**,
+  on both the server (`TargetInputs`) and the device. Carried through it does
+  NOT break visibly — `Suggest` coerces an invalid activity to `light` on its
+  own — which is exactly why it matters: the athlete gets a plausible number
+  derived at `light` while the response claims they chose a level their client
+  cannot render.
+- **`?activity=` must be OMITTED, never sent empty or as the string
+  `"undefined"`.** `new URLSearchParams({ on, activity })` with an undefined
+  activity serialises the literal text `undefined`, which the server rejects as
+  an unknown level — so **every** derivation 400s, not just the pills.
+- **An out-of-vocabulary PATCH is a 400, not a silent coercion.** Storing
+  `light` for a typo'd `moderate` would return 200 naming a level the caller
+  never asked for, and the client would cache it as the athlete's own choice.
+- **A PATCH that does not mention `activity_level` leaves it alone.** Changing
+  units from Settings must not blank it — the `updateWithin` failure mode that
+  has silently wiped authored data three times.
+- **A failed save says so, and says WHAT failed.** A chip that visibly moves
+  reads as a successful save; "changed" and "changed on this phone only" are
+  different outcomes. On web, check the message is attributed — a bare
+  "Failed to fetch" in a shared error slot reads as a failed derivation, not a
+  failed save, while the chip sits filled for a level nothing stored.
+- **An offline pill change leaves the arithmetic behind, and must say so.** The
+  ladder is fetched from the server, so with no signal the new pill sits above
+  the previous level's working out. Silence there is the "pill shows one level,
+  arithmetic used another" failure in its persistent form.
+- **A cache read in flight must not revert a pill pressed while it was
+  running.** Narrow, but not closed: the read's snapshot predates the tap, and
+  applying it puts the pill back under the athlete's thumb for the rest of the
+  visit.
+
+### Auth / correctness
+
+- **The level is per-athlete and per-account.** The device cache is scoped by
+  user id: a shared phone must not hand one account's level — and therefore
+  one account's calorie target — to whoever signs in next.
+- **Choosing the default level still records a choice.** Picking `On your feet`
+  when `light` was already being assumed must store something, or the screen
+  goes on claiming it assumed.
+- **The vocabulary stops at `active` (1.45) deliberately.** Textbook multipliers
+  run to 1.9 with exercise already folded in; the derivation adds logged
+  training as its own line, so admitting `moderate` double-counts every mat
+  class — a few hundred kcal a day, in the direction that makes a cut silently
+  not happen.
+
+### Regression trap
+
+- **Re-focus, not mount.** Every case here has to be exercised by returning to
+  the tab. A test that renders the screen twice is testing a lifecycle this
+  screen does not have and passes against the bug.
+- **Do not drive the query parameter off the "unsynced" flag.** It clears the
+  instant a push succeeds, which changes the request and refetches the entire
+  derivation for an answer that cannot have moved. The pin and the sync notice
+  are separate on purpose.
+- **The pills must still not refetch the target history or the weekly
+  proposal.** A chip cannot change either; web made that mistake once already.
+- **Assert defaults against LITERALS, not against the constant that defines
+  them.** `"light"`, not `ACTIVITY_DEFAULT`. Two tests on this same screen
+  asserted a constant against itself and both stayed green when the constant
+  moved (#398).
+- **Needs a device.** The dashed assumed pill, the offline write, and the
+  keyboard-free tap targets are all runtime claims the suite cannot reach.
+
 ## A provider outage must not spend the athlete's allowance (F16, #367)
 
 Three endpoints meter LLM calls against a persisted rolling-24-hour quota:

@@ -809,6 +809,14 @@ export type Profile = {
   display_name: string | null;
   unit_system: UnitSystemPref;
   track_effort: boolean;
+  /**
+   * Daily movement outside logged training, or null when never chosen.
+   *
+   * Optional on the TYPE only, so a response from a server predating N93 still
+   * parses. Null is a real answer and not a missing one: it means the athlete
+   * has never said, which the target screen renders differently from a choice.
+   */
+  activity_level?: string | null;
 };
 
 export type Token = () => Promise<string | null>;
@@ -1099,6 +1107,39 @@ export function getProfile(
   signal?: AbortSignal,
 ): Promise<Profile> {
   return request<Profile>(getToken, "/profile", {}, signal);
+}
+
+/**
+ * Stores the daily-movement level, creating the profile if there isn't one.
+ *
+ * The SAME field the phone writes, which is the entire point of the change
+ * this belongs to. Held in each client's component state instead, a browser
+ * defaulting to `light` and a phone set to `active` derive different calorie
+ * targets for one athlete on one day, and neither surface can tell it is
+ * disagreeing — the failure #425 records for per-hand dumbbell weights,
+ * arriving in the one place the app claims to be auditable.
+ */
+export async function updateActivityLevel(
+  getToken: Token,
+  level: string,
+): Promise<Profile> {
+  const patch = () =>
+    request<Profile>(getToken, "/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ activity_level: level }),
+    });
+  try {
+    return await patch();
+  } catch (err) {
+    // Status, not message: messages are explicitly not part of the contract.
+    // Someone can reach the target screen without ever having onboarded.
+    if (!(err instanceof ApiError) || err.status !== 404) throw err;
+    await request<Profile>(getToken, "/profile", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    return patch();
+  }
 }
 
 /**

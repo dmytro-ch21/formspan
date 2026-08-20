@@ -51,8 +51,9 @@
  * never happens, invisibly, forever.
  */
 
+import { useAuth } from '@clerk/clerk-expo';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -63,7 +64,19 @@ import { ManualTarget } from '@/components/nutrition/ManualTarget';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import {
+  ACTIVITY_DEFAULT,
+  activityParam,
+  adoptServerActivity,
+  cacheActivityLevel,
+  isActivityLevel,
+  readActivityChoice,
+  rememberActivityChoice,
+  settleActivityChoice,
+  type ActivityLevel,
+} from '@/lib/activityLevel';
 import { ApiError } from '@/lib/apiError';
+import { setActivityLevel } from '@/lib/profile';
 import { addDays } from '@/lib/history';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -93,6 +106,12 @@ const ACTIVITIES = [
   { key: 'light', label: 'On your feet', hint: 'Some walking through the day' },
   { key: 'active', label: 'Physical job', hint: 'Moving most of the day' },
 ] as const;
+
+/** The pill labels by key, so the assumption can be NAMED in prose rather than
+ *  leaving "we guessed something" as the whole message. */
+const ACTIVITY_LABELS: Record<string, string> = Object.fromEntries(
+  ACTIVITIES.map((a) => [a.key, a.label]),
+);
 
 /** Said once, written once — a receipt that reads differently to a screen
  *  reader than to the screen is two receipts. */
@@ -162,7 +181,42 @@ export default function TargetScreen() {
   const getToken = useAuthToken();
   const { units } = useUnits();
 
-  const [activity, setActivity] = useState<string>('light');
+  /**
+   * The daily-movement level, and how much authority this device has over it.
+   *
+   * **`null` means the cache has not been consulted yet**, which is distinct
+   * from `{ level: null }` — a device that HAS looked and found the athlete has
+   * never chosen. The derivation waits for the first; it renders an assumption
+   * for the second.
+   *
+   * Three fields rather than the two `readActivityChoice` returns, because the
+   * debt does two unrelated jobs and collapsing them costs a round trip:
+   *
+   *  - `pinned` decides whether to SEND the level as a query parameter. It goes
+   *    true when the athlete presses a pill, and is only cleared by a later
+   *    focus re-reading the cache and finding nothing owed. Driving the
+   *    parameter off `unsynced` instead would flip it back the instant a push
+   *    succeeded, which changes the request and refetches the whole derivation
+   *    a second time for an answer that cannot have moved.
+   *  - `unsynced` is for the athlete: "this is on your phone, not your account
+   *    yet". It clears the moment the push lands.
+   *
+   * See `lib/activityLevel.ts` for why the value lives on the profile at all.
+   */
+  const { userId } = useAuth();
+  /**
+   * How many times a pill has been pressed this session.
+   *
+   * Read only inside promise callbacks, never during render. Its single job is
+   * to let an in-flight cache read notice that the athlete chose something
+   * after it started, so a stale snapshot cannot revert a fresh tap.
+   */
+  const choiceSeq = useRef(0);
+  const [activity, setActivity] = useState<{
+    level: ActivityLevel | null;
+    pinned: boolean;
+    unsynced: boolean;
+  } | null>(null);
   const [data, setData] = useState<Suggested | null>(null);
   const [failed, setFailed] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -226,13 +280,133 @@ export default function TargetScreen() {
    * Found in review of the move, not by a test — nothing in the suite mounts a
    * tab twice, and both symptoms need a second visit to appear.
    */
+  /**
+   * Read the stored level back, ON EVERY FOCUS.
+   *
+   * **A tab mounts once and stays mounted for the life of the process**, so a
+   * `useEffect` keyed on `[userId]` would run exactly once, ever — and this
+   * screen's whole ticket is a value that has to survive leaving the tab. The
+   * same mistake is already documented one file over: Today read its
+   * suggestion preferences from a mount effect, and the Settings switches
+   * appeared to do nothing until the app was killed. Settings looked correct
+   * when checked by hand because a pushed screen remounts and always reads back
+   * what it just wrote; only the RETURN was broken.
+   *
+   * It also picks up a level chosen on ANOTHER device — the cache is refreshed
+   * from the server by the derivation below, so coming back to this tab is what
+   * makes the browser's answer appear here.
+   *
+   * The value is compared before being stored rather than set unconditionally.
+   * `load` is keyed on what this produces, and a fresh object every focus would
+   * change its identity, re-run the focus effect and ask the server twice for
+   * one visit.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      let live = true;
+      // Bumped by every pill press. Captured before the read so the resolution
+      // can tell whether a tap landed while it was in flight: the read's
+      // snapshot would then be older than what the athlete just chose, and
+      // applying it reverts the pill under their thumb for the rest of the
+      // visit. One SQLite read is a narrow window, but it is not a closed one.
+      const seq = choiceSeq.current;
+      readActivityChoice(userId ?? '')
+        .then(async (c) => {
+          if (!live || seq !== choiceSeq.current) return;
+          setActivity((prev) =>
+            prev && prev.level === c.level && prev.pinned === c.owed && prev.unsynced === c.owed
+              ? prev
+              : { level: c.level, pinned: c.owed, unsynced: c.owed },
+          );
+
+          /**
+           * Retry a push the account has never heard.
+           *
+           * **Without this the offline half of the feature does not exist.**
+           * The only other `setActivityLevel` call is a pill press, so a choice
+           * made in a gym dead-spot would stay owed *forever* unless the
+           * athlete happened to tap the same pill again while online — and web
+           * would go on deriving at the stale level indefinitely, which is the
+           * cross-surface disagreement this whole change exists to remove. The
+           * screen even promises otherwise in as many words ("It reaches your
+           * account next time you have signal"). Caught in review; the doc and
+           * the copy described it and nothing implemented it.
+           *
+           * `pinned` is deliberately left set. It is what keeps this visit's
+           * derivation on the athlete's own level, and clearing it here would
+           * change the query and refetch the ladder for an answer that cannot
+           * have moved. The next focus clears it, having re-read a settled
+           * cache.
+           */
+          if (!c.owed || !c.level || !userId) return;
+          try {
+            await setActivityLevel(getToken, c.level);
+            await settleActivityChoice(userId, c.level).catch(() => {});
+            if (!live || seq !== choiceSeq.current) return;
+            setActivity((prev) =>
+              prev?.level === c.level ? { ...prev, unsynced: false } : prev,
+            );
+          } catch {
+            // Still unreachable. The debt stands on disk and the next focus
+            // tries again — which is the whole contract.
+          }
+        })
+        .catch(() => {
+          // The cache is unreadable — a corrupt database, or a signed-out
+          // launch. Fall through to "never chosen" rather than blocking the
+          // derivation forever: the server still knows, and the screen will
+          // adopt its answer.
+          if (live) setActivity((prev) => prev ?? { level: null, pinned: false, unsynced: false });
+        });
+      return () => {
+        live = false;
+      };
+    }, [userId, getToken]),
+  );
+
+  /**
+   * Keep the cache in step with whatever we have settled on.
+   *
+   * A plain effect rather than a write inside the fetch callback, because that
+   * callback updates state through a FUNCTIONAL updater — React may invoke one
+   * twice, and a database write is not something to run twice by accident.
+   * Nothing here sets state, so it is not the `set-state-in-effect` shape the
+   * lint ratchet holds.
+   *
+   * Skipped while a debt is outstanding: `cacheActivityLevel` writes without
+   * `owed`, and although `writePref` preserves an existing debt rather than
+   * clearing it, writing the server's value over a pending local choice would
+   * still be wrong.
+   */
+  useEffect(() => {
+    if (!userId || !activity || activity.unsynced || !activity.level) return;
+    void cacheActivityLevel(userId, activity.level).catch(() => {});
+  }, [userId, activity]);
+
+  /**
+   * What to send as `?activity=`, and whether we may ask at all.
+   *
+   * Extracted as PRIMITIVES rather than letting `load` depend on the `activity`
+   * object, and that is load-bearing: adopting the server's answer produces a
+   * new object but the same query, so keying on the object would refetch the
+   * derivation every time it confirmed what we already had.
+   */
+  const activityReady = activity !== null;
+  const activityQuery = activity
+    ? activityParam({ level: activity.level, owed: activity.pinned })
+    : undefined;
+
   const load = useCallback(() => {
+    // Nothing until the cache has answered. Asking first would send no
+    // parameter, adopt whatever the server said, and overwrite a choice made
+    // offline a moment before the read landed.
+    if (!activityReady) return;
     let live = true;
     // Both flags are set from the CALLBACKS, never synchronously here. A reset
     // on the way in is a setState during the effect — the rule the lint ratchet
     // holds — and it also flickers the previous answer away for a frame each
     // time the activity pills move.
-    suggestedTarget(getToken, on, activity)
+    suggestedTarget(getToken, on, activityQuery)
       .then((d) => {
         if (!live) return;
         setData(d);
@@ -243,6 +417,16 @@ export default function TargetScreen() {
         // "Saved" under it would attach a confirmation to something that was
         // never stored, which is worse than showing nothing at all.
         setSaved(false);
+        // Take the server's word for the level, when we are not holding a
+        // choice it has never heard. This is the ONLY path by which a level set
+        // in the browser reaches this phone — and the identity check is what
+        // stops a confirmation of what we already believed from re-running this
+        // very fetch.
+        setActivity((prev) => {
+          if (!prev) return prev;
+          const next = adoptServerActivity({ level: prev.level, owed: prev.pinned }, d);
+          return next.level === prev.level ? prev : { ...prev, level: next.level };
+        });
       })
       .catch(() => {
         if (live) setFailed(true);
@@ -250,7 +434,7 @@ export default function TargetScreen() {
     return () => {
       live = false;
     };
-  }, [getToken, on, activity]);
+  }, [getToken, on, activityQuery, activityReady]);
 
   /**
    * FOCUS is the only trigger, and it is deliberately the only one.
@@ -320,7 +504,61 @@ export default function TargetScreen() {
 
   useFocusEffect(loadLive);
 
+  /**
+   * Record a level the athlete just picked.
+   *
+   * **Local first, then the account.** The pill has to move under the thumb and
+   * the ladder has to recompute whether or not there is any signal — this is a
+   * gym — so the choice is written to the device and marked owed BEFORE the
+   * push is attempted. Marking it owed only in the catch would lose the change
+   * to a crash between the two.
+   *
+   * Never rejects. The caller is an `onPress`, and an escaping rejection is an
+   * unhandled rejection.
+   */
+  const chooseActivity = useCallback(
+    async (level: ActivityLevel) => {
+      // Before any await, so a cache read already in flight sees it.
+      choiceSeq.current += 1;
+      // `pinned` stays true through the successful push: it decides what the
+      // NEXT derivation asks for, and flipping it back here would change the
+      // query and refetch the whole ladder for an answer that cannot have
+      // moved. The next focus clears it, having re-read the cache.
+      setActivity({ level, pinned: true, unsynced: true });
+      if (userId) {
+        await rememberActivityChoice(userId, level).catch(() => {
+          // In memory for this launch only. Nothing here can recover that, and
+          // the push below may still succeed.
+        });
+      }
+      try {
+        await setActivityLevel(getToken, level);
+        if (userId) await settleActivityChoice(userId, level).catch(() => {});
+        setActivity((prev) => (prev?.level === level ? { ...prev, unsynced: false } : prev));
+      } catch {
+        // Offline, or refused. The debt is already on disk from the write
+        // above; leaving `unsynced` set is what tells the athlete their phone
+        // and their account currently disagree.
+      }
+    },
+    [getToken, userId],
+  );
+
   const live = targets ? targetOn(targets, on) : null;
+
+  /**
+   * The level the number below was actually derived at.
+   *
+   * Taken from the RESPONSE rather than from local state, so the pills and the
+   * arithmetic can never describe different things — which is the reported bug
+   * in its purest form. Falls back to the documented default only before the
+   * first response arrives.
+   */
+  const derivedAt: ActivityLevel = isActivityLevel(data?.activity)
+    ? data.activity
+    : (activity?.level ?? ACTIVITY_DEFAULT);
+  /** Nobody has picked one; the ladder is running on an assumption. */
+  const assumed = activity !== null && activity.level === null;
 
   const accept = useCallback(async () => {
     const s = data?.suggestion;
@@ -488,15 +726,30 @@ export default function TargetScreen() {
         <SectionHeader label="Daily movement" />
         <View style={styles.pills}>
           {ACTIVITIES.map((a) => {
-            const isOn = a.key === activity;
+            const isOn = !assumed && a.key === activity?.level;
+            // The one the derivation fell back to, with nobody having chosen.
+            // Drawn as a DASHED outline rather than the accent border, and
+            // `selected` stays false: a filled pill claims the athlete decided
+            // this, and they did not. The contract's `activity_chosen` exists
+            // precisely so a client can tell these apart, and rendering them
+            // the same throws that away.
+            const isAssumed = assumed && a.key === derivedAt;
             return (
               <Pressable
                 key={a.key}
-                onPress={() => setActivity(a.key)}
-                style={[styles.pill, isOn && { borderColor: accent.accent }]}
+                onPress={() => void chooseActivity(a.key)}
+                style={[
+                  styles.pill,
+                  isOn && { borderColor: accent.accent },
+                  isAssumed && styles.pillAssumed,
+                ]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: isOn }}
-                accessibilityLabel={`${a.label}. ${a.hint}`}
+                accessibilityLabel={
+                  isAssumed
+                    ? `${a.label}. ${a.hint}. Assumed — you have not chosen yet.`
+                    : `${a.label}. ${a.hint}`
+                }
                 testID={`target-activity-${a.key}`}
               >
                 <Text style={[styles.pillLabel, isOn && { color: accent.ink }]}>{a.label}</Text>
@@ -506,10 +759,33 @@ export default function TargetScreen() {
           })}
         </View>
 
+        {assumed && (
+          <Text style={styles.note} testID="target-activity-assumed">
+            {`Assuming ${ACTIVITY_LABELS[derivedAt]} until you pick one. Whichever you choose is
+              kept on your account, so the web app works your target out the same way.`.replace(
+              /\s+/g,
+              ' ',
+            )}
+          </Text>
+        )}
+
+        {activity?.unsynced && (
+          <Text style={styles.note} testID="target-activity-unsynced">
+            Saved on this phone. It reaches your account next time you have signal.
+          </Text>
+        )}
+
         {failed && (
           <Text style={styles.note}>
             Could not reach the server. This one number is worked out there, because it needs
             your training history — everything else in Food works offline.
+          </Text>
+        )}
+
+        {failed && activity?.unsynced && (
+          <Text style={styles.note} testID="target-activity-stale">
+            The working out below is still from your previous answer. Your new one is saved and
+            the number will catch up once there is signal.
           </Text>
         )}
 
@@ -872,6 +1148,15 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 2,
   },
+  // The level the derivation ASSUMED, nobody having chosen. Deliberately not
+  // the accent border a real choice gets — see the render site.
+  //
+  // `textMuted` (4.67:1) rather than `textDim`, which `constants/Colors.ts`
+  // itself records at 2.51:1 — under the 3:1 floor for a non-text element, so
+  // the dashed-versus-solid distinction would simply not exist for a low-vision
+  // reader. The state is carried in prose and in the accessibility label too,
+  // so this was never the sole channel; it costs nothing to make it legible.
+  pillAssumed: { borderStyle: 'dashed', borderColor: vola.textMuted },
   pillLabel: { fontSize: 14, fontWeight: '600' },
   pillHint: { fontSize: 12, color: vola.textDim },
   row: {

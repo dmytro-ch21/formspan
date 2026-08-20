@@ -34383,6 +34383,228 @@ at exactly 53/53 with zero errors. A ratchet with no headroom is a number that
 is only true as of a commit, which is worth saying out loud in a repo where
 several branches are in flight at once.
 
+## 2026-08-20 — Where the activity level lives, and what that cost (N93, #434)
+
+Reported from a real device as *"Target doesn't save previously added type of
+activity"*. The three daily-movement pills — `Desk job` / `On your feet` /
+`Physical job` — reset to the default every time the athlete left the Goals tab.
+`apps/mobile/app/(tabs)/goals.tsx` held them as `useState<string>('light')`, the
+server took activity as a query parameter with a default, and **no migration
+anywhere added a column**. So the value existed nowhere except a React hook, and
+leaving the tab was enough to lose it.
+
+**It is worse than losing a preference, and that is the reason this got a
+schema change rather than a one-liner.** Pick "Physical job", watch the target
+recalculate, leave, come back: the pill has reverted *and so has the number it
+derived*. The target an athlete read and the target they came back to were
+different, with nothing saying so — the same class as W2 and W4, one screen
+giving two answers under two rules.
+
+### The decision, and the two options it beat
+
+**Chosen: on the profile, server-side** — `profiles.activity_level`, nullable,
+migration `000070`. **It was renumbered twice**, and the second time is the one
+worth recording. Written as `000068`, moved to `000069` when
+`000068_create_daily_trackers` landed mid-branch, and moved again to `000070`
+when `000069_bjj_focus_provenance` landed while the PR was open.
+
+The second collision is the instructive one because **re-checking against
+`origin/main` by hand did not catch it** — the check had already been done, and
+`main` moved afterwards. What caught it was CI: the `Backend (Go)` job died on
+`duplicate migration file`, because a `pull_request` workflow builds
+`refs/pull/N/merge` — this branch merged into CURRENT `main` — while
+`git diff origin/main...HEAD` locally showed nothing at all. That is exactly the
+property CLAUDE.md warns about: a three-dot diff uses the merge base, so the
+collision exists only in the merged tree and is invisible from the branch. A
+local check is a snapshot; the merge ref is the truth, and on a long-lived
+branch the two drift apart every time somebody else lands a migration.
+
+- **Device-local storage** (`useState` → a local write) fixes the reported bug
+  completely, costs one line, and needs no migration, no contract change and no
+  server work. It was rejected on one consequence: the level is an input to a
+  **calorie target**, and `apps/web` derives that target too. Held per-device, a
+  phone set to `active` and a browser defaulting to `light` compute different
+  numbers for the same athlete on the same day, and *neither surface can tell it
+  is disagreeing*. That is #425 — web and mobile disagreeing about whether a
+  dumbbell weight is per-hand — arriving in the one place the app claims to be
+  auditable. The N16 `offered_grips` lesson says the same thing: agree by
+  construction, not by a parity script.
+- **Derived from logged training** is the wrong question, and worth a sentence
+  because it sounds like the sophisticated answer. This term is NEAT —
+  everything that is *not* logged training. The derivation already adds training
+  as its own auditable line, so inferring this from sessions would count every
+  mat class twice, which is the exact double-count the truncated 1.20/1.30/1.45
+  ladder exists to prevent (see the `Activity` type doc). And no amount of
+  session logging tells you whether somebody stands up all day at work.
+
+**What was given up.** A migration, a contract change, and — the real price —
+the level is now **part of the athlete's record rather than a calculator
+input**. It is one more field to export, to delete on request, and to reason
+about on a shared device. That was accepted because a target that changes
+depending on which screen you asked is worse than a field that has to be
+governed.
+
+### Nullable, and why that is the substantive half
+
+`NULL` means *never chosen*, which is a different fact from *chose light*. A
+`NOT NULL DEFAULT 'light'` would have made them indistinguishable and the screen
+would then show a filled pill attributing a decision to somebody who never made
+one. So the derivation applies the default **at read time, where it can be
+labelled**: the response carries `activity` (the level actually used) and
+`activity_chosen` (whether the athlete picked it). With `activity_chosen: false`
+no pill is selected, the assumed one is drawn dashed, and a line names it.
+
+`activity` and `activity_chosen` are **top level, not inside `suggestion`**.
+`basis.activity` already carried the same value, but `basis` is null for an
+incomplete profile — and that athlete still has a level to display and change.
+Reading it off the basis leaves the control unrenderable in exactly the state
+the rest of the screen is telling them to go and fix.
+
+No CHECK constraint, per the convention `000021` set and `000040` restates: an
+enumerated vocabulary is validated in Go, where changing it is a code change
+rather than a migration. `nutrition.TargetInputs` consequently **drops a stored
+level the vocabulary no longer knows** rather than carrying it. The damage a
+carried one does is worth stating precisely, because the intuitive guess is
+wrong and this branch's first comment about it *was* wrong: `Suggest` coerces
+any invalid activity to `light` itself, so nothing visibly breaks. It derives a
+perfectly plausible number at `light` while the response reports
+`activity_chosen: true` for a spelling the athlete's client cannot even render
+— a number nobody chose, presented as their own decision, with every figure on
+screen looking reasonable. Caught in review; the review was right and the
+comment was not.
+
+### The rule that makes the two surfaces agree
+
+`?activity=` is now an **override**, not a defaulted parameter, and omitting it
+is the normal case. Precedence is parameter → stored → `light`.
+
+- **Nothing owed** — send no parameter, adopt what comes back. This is the only
+  path by which a level chosen in a browser reaches the handset.
+- **A local choice the account has not heard** — send it, and retry the push.
+  The server holds the stale copy, so adopting its answer would silently revert
+  a choice made offline. That is not hypothetical: it is the exact failure
+  `useTrackEffort` shipped once, where the switch turned itself back on minutes
+  later with nothing said.
+
+Both directions are needed and they are not symmetric.
+
+### Offline, and the mobile plumbing
+
+`lib/activityLevel.ts` is a device-local cache in front of the profile, riding
+the `prefs` table's existing `dirty` column — the same outbox `unit_system` and
+`track_effort` already use, so **no new mobile schema**. A choice is written
+locally and marked owed *before* the push is attempted; recording the debt only
+in a `catch` loses the change to a crash between the two. The debt is cleared by
+compare-and-swap against the value actually pushed, so a change made while a
+push was in flight stays owed rather than being marked as sent.
+
+### Re-focus, not mount — the thing that would have shipped broken
+
+**A tab mounts once and stays mounted for the life of the process.** The
+resolution runs in the screen's own `useFocusEffect`, not a `useEffect`. This is
+the same bug Today had with its suggestion preferences: the write half worked
+perfectly, Settings always read back what it had just written because a pushed
+screen remounts, and only the *return* was broken. A mutation replacing the
+focus effect with a mount effect fails exactly one test — *"is read back on
+every focus, not only on mount"* — and passes all 37 others in the file.
+
+Three fields rather than the two the cache returns: `pinned` drives the query
+parameter and is cleared only by a later focus, `unsynced` is what the athlete
+is told. Collapsing them makes a successful push change the request and refetch
+the whole ladder for an answer that cannot have moved.
+
+### What the tests found rather than confirmed
+
+- **`adoptServerActivity` correctly drops a cached level the server says nobody
+  chose.** The first fixture paired a stored `active` with
+  `activity_chosen: false`, which is not a stale cache but an incoherent world.
+  The behaviour now has a test of its own, in both directions.
+- **`openManualForm` always depended on the derivation having landed and never
+  said so.** It passed because `mockResolvedValue` settled within one microtask;
+  putting a cache read in front of the fetch flipped the race, and the same code
+  with the same intent went red. The dependency is now explicit — the typed
+  form seeds at mount and never again, so a form opened early seeds on nothing.
+- **`new URLSearchParams({ on, activity })` with an undefined activity
+  serialises the string `"undefined"`**, which the server rejects as an unknown
+  level. Every derivation on the screen would 400, not just the pills, and
+  nothing above that line can see it: the caller passed `undefined` correctly,
+  the rule returned `undefined` correctly, and the screen tests mock the
+  function away. It has a test at the wire level on both clients' behalf.
+
+### The review caught a promise with nothing behind it
+
+Two reviewers and the acceptance-criteria check independently found the same
+hole, and it is the one worth recording: **the offline retry did not exist.**
+`setActivityLevel` had exactly one call site — a pill press — so a choice made
+in a gym dead-spot stayed owed *forever* unless the athlete happened to tap the
+same pill again while online, and web went on deriving at the stale level
+indefinitely. That re-opens the agree-by-construction goal for precisely the
+athlete the offline criterion names.
+
+What makes it worth a paragraph rather than a line is that **three places said
+otherwise**: `lib/activityLevel.ts`'s own module doc ("the push is retried on
+the next focus that has a connection"), the on-screen copy ("It reaches your
+account next time you have signal"), and the first draft of this entry. The
+design was written down, described accurately, reviewed against — and not
+implemented. Every other test on the screen passed. A doc that describes
+intended behaviour is indistinguishable from one that describes real behaviour,
+which is why the retry now has a test that fails when it is removed.
+
+Two smaller review findings, both real:
+
+- **A comment of mine was factually wrong in three places.** I wrote that a
+  carried out-of-vocabulary level would derive at "a zero multiplier". It would
+  not — `Suggest` coerces an invalid activity to `light` itself. The truth is
+  worse: a perfectly plausible number, derived at `light`, reported as the
+  athlete's own choice. Checked against the code rather than taken on trust.
+- **Web's honest failure message sat in an unreachable branch.** The sentence
+  explaining what failed was the fallback for `!(e instanceof Error)`, and
+  almost nothing reaches that — `ApiError` extends `Error`, and a dropped
+  connection is a `TypeError` reading `Failed to fetch`. So the athlete got a
+  bare "Failed to fetch" attached to nothing, while a chip sat filled and
+  `aria-pressed` for a level the account never stored.
+
+### Measurement
+
+**Twenty-seven mutations — twelve backend, fifteen mobile — each scored on failing tests
+with the test count checked — never on exit codes**. The first attempt at the
+mount-vs-focus mutation replaced only the head of
+`useFocusEffect(useCallback(...))` and left its tail: a parse error, 17 tests
+running instead of 55, and failures reported. An exit-code harness scores that a
+kill; it is the opposite, and it was rescored `INCONCLUSIVE` and redone
+properly.
+
+Defaults are pinned to **literals** rather than to the constants that define
+them — `"light"`, not `ActivityLight`. A constant asserted against itself is
+true by construction and survives the constant moving, which is precisely the
+trap #398 found on this same screen.
+
+### Open, and deliberately not done here
+
+- **The two surfaces still use different labels** for the same three keys —
+  mobile says `Desk job` / `On your feet` / `Physical job`, web says
+  `Sedentary` / `Lightly active` / `Active`. They now derive identical numbers,
+  which was the ticket; the wording predates it and unifying it is a copy
+  decision rather than a bug fix.
+- **Un-choosing is not expressible.** `null` in a PATCH means "leave unchanged"
+  by the profile-wide COALESCE contract, so an athlete cannot return to "never
+  chosen" once they have picked. Same call already made for `username`; nothing
+  needs it yet.
+- **Not verified on a device.** The pills, the dashed assumed state and the
+  offline path are all claims a simulator or a handset has to confirm, and a
+  worktree cannot produce a build with `EXPO_PUBLIC_*` in it. The airplane-mode
+  round trip in particular — change it with no signal, restore the network,
+  check web — is the one the acceptance criteria ask for by name and the one
+  the suite can only approximate. It is also the path the review found
+  unimplemented, so it is the *first* thing to try on a handset rather than the
+  last.
+- **Nothing drains the pref outbox except this screen.** The retry lives in the
+  Goals tab'''s focus effect, so an athlete who chooses a level offline and never
+  reopens that tab keeps the debt. That is acceptable for a value only this
+  screen writes, and it is the same shape `UnitsProvider` and
+  `TrackEffortProvider` already have — but three independent per-key retries is
+  the point at which a real preference-sync pass starts to look worth doing, and
+  this is the third.
 
 ## 2026-08-20 — A label photo that failed silently, and the two ways it could (N92)
 

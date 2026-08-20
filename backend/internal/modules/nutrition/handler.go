@@ -470,11 +470,11 @@ func (h *Handler) Suggested(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "on must be a date, as YYYY-MM-DD")
 		return
 	}
-	activity := Activity(r.URL.Query().Get("activity"))
-	if activity == "" {
-		activity = ActivityLight
-	}
-	if !activity.valid() {
+	// Validated BEFORE the read, so a nonsense parameter still costs one cheap
+	// 400 rather than three queries. An ABSENT parameter is not an error — it
+	// is the normal case now, and means "use whatever this athlete has stored".
+	asked := r.URL.Query().Get("activity")
+	if asked != "" && !Activity(asked).valid() {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			"activity must be sedentary, light or active")
 		return
@@ -485,6 +485,10 @@ func (h *Handler) Suggested(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+
+	// The parameter wins, then the stored choice, then the default — and
+	// `chosen` records which of those it was. See ResolveActivity.
+	activity, chosen := ResolveActivity(asked, in.ActivityLevel)
 
 	p := energy.Profile{
 		WeightKG: in.WeightKG, HeightCM: in.HeightCM,
@@ -504,5 +508,21 @@ func (h *Handler) Suggested(w http.ResponseWriter, r *http.Request) {
 		"suggestion": suggestion,
 		"missing":    missing,
 		"activities": Activities,
+		// The level this derivation actually ran at, and whether the athlete
+		// chose it.
+		//
+		// **Top level rather than inside `suggestion`, and that placement is
+		// the point.** `basis.activity` already carries it, but `basis` is null
+		// for an incomplete profile — and an athlete who cannot be given a
+		// number yet still has an activity level to display and change. Reading
+		// it off the basis would leave the pills unrenderable in exactly the
+		// state where the rest of the screen is asking them to go and fix
+		// something.
+		//
+		// It also makes the two halves inseparable: the pill and the number now
+		// come out of ONE response, so they cannot disagree the way they did
+		// when each client tracked the level in its own component state.
+		"activity":        activity,
+		"activity_chosen": chosen,
 	})
 }
