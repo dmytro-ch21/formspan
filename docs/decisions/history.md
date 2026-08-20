@@ -37555,6 +37555,126 @@ created, so there is no board `Status` for this state — only the label. The
 zero-credential version is a saved board view filtered on
 `label:evidence-outstanding`; it is a ten-second UI action and it is the board
 owner's to take.
+## 2026-08-20 — A food stops being "100 g", and the athlete can say how much (N89, N90)
+
+N88 made the catalog 71x bigger and left the thing an athlete actually does
+untouched: tapping a catalog row logged **one 100 g serving**, whatever they ate.
+Someone eating one banana logged 100 g of banana. The reasoning was on screen and
+the ability to disagree with it was not — the same failure the mobile-first rule
+in CLAUDE.md was written about.
+
+Two tickets, landed together because either alone is half a feature: portions
+with no quantity control are invisible, and a quantity control with no portions
+makes an athlete do arithmetic.
+
+### N89 — 29,634 household portions
+
+`food_catalog` carried ONE serving_label/serving_grams pair, so a food could only
+ever be measured one way. USDA has the data — 14,449 portions in SR Legacy,
+22,194 in FNDDS — and `seed.go` recorded not importing it as a known gap in as
+many words.
+
+A new table, `food_catalog_portions`, keyed `(food_id, seq)`. `seq` is USDA's own
+`sequenceNumber`, **verified unique within a food across 30,966 source rows**,
+which is what makes it safe as a key component; it is also the display order,
+because USDA lists the most representative portion first and any ordering we
+invented would be a guess dressed as editorial judgement.
+
+**The two datasets describe portions in genuinely different shapes**, and getting
+this wrong is not subtle:
+
+| | SR Legacy | FNDDS |
+|---|---|---|
+| label from | `amount` + `modifier` | `portionDescription` |
+| `measureUnit.name` | `"undetermined"` on all 14,449 | `"undetermined"` |
+| `modifier` | the human phrase | **a bare numeric code — `"63480"`** |
+
+Reading `modifier` for FNDDS is the obvious move, since SR Legacy uses it, and it
+would have put **"63480"** in front of an athlete as a serving size.
+
+**1,332 source portions were dropped, all of them deliberately.** 5,363 FNDDS rows
+say "Quantity not specified" — one with a `gramWeight` of literally 0 — and 314
+are "Guideline amount per cup of hot cereal" style entries, which are
+recipe-building amounts for the survey's own analysts rather than a way anybody
+eats. `grams` is `NOT NULL CHECK (> 0)`: a portion whose weight is unknown cannot
+be logged against a calorie target, and inventing one makes every total computed
+from it fictional.
+
+No unique constraint on `(food_id, label)`, because **18 SR Legacy foods carry two
+portions with the same label and different gram weights** — the same words
+describing a different preparation. Rejecting real data to enforce tidiness is
+the same mistake migration 000066 declined to make with `added_sugar_g <=
+sugar_g`.
+
+Portions are served by `GET /v1/nutrition/catalog/{id}` and deliberately **not**
+by search: a 25-row page would haul ~60 of them for a choice the athlete has not
+made yet.
+
+**The guard worth knowing about**: a deploy replaces portions wholesale, and both
+the DELETE and the INSERT are scoped to `source = 'seed'`. Without that, a reseed
+wipes the portions of a food the console has taken ownership of — invisibly,
+because the food row itself is left correct by the upsert's own ownership rule.
+That is the `updateWithin` shape that has shipped three times in `exercise`. Both
+halves are mutation-tested independently.
+
+### N90 — change the grams, switch to oz
+
+Asked for directly: *"we should be able to change the grams and switch to oz if
+want to."*
+
+**The unit is its own setting, not a reading of `unit_system`.** It defaults from
+it — imperial starts on oz — and stops following the moment the athlete touches
+the toggle. The reason it cannot simply be derived: **kitchen scales and US
+nutrition labels are both in grams**, so an imperial athlete weighing chicken
+still wants grams, and deriving would be wrong for most of the people it affects.
+`profiles.food_unit` is nullable, and null is a real state — "not chosen yet",
+which still follows a later switch to imperial where an explicit `'g'` does not.
+
+Grams are stored, always, exactly as kilograms are for training. The entry model
+needed no new column: `servings` is `grams / serving_grams`, so 150 g of a
+per-100 g food is 1.5 servings.
+
+**The toggle CONVERTS rather than relabels**, and there is a test named after the
+alternative: relabelling turns 150 grams of chicken into 150 ounces, a 28x
+overcount with nothing changing on screen but two letters. Grams are the
+component's state and the text field is a view of it, which is what makes that
+structural rather than remembered.
+
+**There are now two different ounces in `units.ts`.** `G_PER_OZ` is the
+avoirdupois ounce (28.349523125 g, mass); another session added `ML_PER_FL_OZ`
+(29.5735 ml, volume) for the water tracker while this was in flight. They differ
+by 4%, both are said as "oz", and using one for the other produces an entirely
+plausible number. Both symbols now say which they are — the same hazard
+`formatVolume`/`formatFluid` already carry.
+
+### Web is NOT done, and the reason is a scope finding rather than a shortfall
+
+The user picked mobile **and** "web recipes + day editing" as in scope. Mobile is
+done. Web is not, and building it would have meant building something else first:
+
+**`apps/web` never calls `/v1/nutrition/catalog` — zero references in the entire
+app.** Web edits already-logged entries (`DayEditor`, a servings multiplier over a
+free-text `serving_label`) and authors recipes by hand. There is no catalog food
+behind either, so there is no gram basis for a portion picker to attach to and no
+food whose portions could be listed.
+
+Putting N90's control on web therefore requires catalog search on web first,
+which is a feature in its own right and is not what N90 describes. What did land
+on web is `apps/web/src/lib/units.ts` gaining the same conversion helpers with the
+same tests, because that file is a deliberate duplicate of the mobile one and a
+conversion that drifted between them would show one meal at two quantities
+depending on which screen was open. Filed as its own ticket.
+
+The mobile-first rule is satisfied either way — an athlete with only a phone can
+now do this, which is the test that rule actually sets.
+
+### Still not done
+
+`app/food/entry/[id].tsx` — correcting an already-logged entry — still edits a
+servings multiplier rather than grams. The quantity control is on the ADD path
+only. That is the more common action and the one the ticket describes, but
+"change the grams" is a fair reading of the edit path too.
+
 
 ## Open items / known gaps as of this entry
 

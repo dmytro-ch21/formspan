@@ -53,6 +53,20 @@ type Profile struct {
 	// stored in kilograms and metres regardless, so changing it can never
 	// alter a recorded number, only how it's shown and entered.
 	UnitSystem string `json:"unit_system"`
+	// FoodUnit is the display unit for FOOD quantities — "g" | "oz" | null.
+	//
+	// **Its own field rather than derived from UnitSystem**, and the reason is
+	// specific: kitchen scales and US nutrition labels are both in grams, so an
+	// imperial athlete weighing chicken still wants grams. Deriving it would be
+	// wrong for most of the people it would affect.
+	//
+	// NULL means "not chosen yet — derive from UnitSystem", which is a
+	// materially different state from having chosen "g": the first still follows
+	// a later switch to imperial and the second does not.
+	//
+	// Display only. Grams are stored, always, exactly as kilograms are for
+	// training.
+	FoodUnit *string `json:"food_unit"`
 	// TrackEffort decides whether the clients collect RIR and RPE at all.
 	// On by default: the progression rule is built on them, and silently
 	// withholding its only input would make the app look broken rather
@@ -120,6 +134,7 @@ type ProfileUpdate struct {
 	Sex                      *string
 	HeightCM                 *float64
 	UnitSystem               *string
+	FoodUnit                 *string
 	TrackEffort              *bool
 	ShareTrainingWithFriends *bool
 	ShareTrainingDetails     *bool
@@ -178,6 +193,9 @@ func ValidUnitSystem(v string) bool { return v == "metric" || v == "imperial" }
 func ValidActivityLevel(v string) bool {
 	return v == "sedentary" || v == "light" || v == "active"
 }
+
+// ValidFoodUnit reports whether v is a food display unit this API accepts.
+func ValidFoodUnit(v string) bool { return v == "g" || v == "oz" }
 
 type Repository interface {
 	Get(ctx context.Context, userID string) (*Profile, error)

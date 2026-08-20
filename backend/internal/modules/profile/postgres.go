@@ -25,7 +25,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 func (r *PostgresRepository) Get(ctx context.Context, userID string) (*Profile, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
+		SELECT user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, food_unit, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
 		FROM profiles WHERE user_id = $1`, userID)
 	return scanProfile(row)
 }
@@ -56,7 +56,7 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewPr
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO profiles (user_id, display_name, date_of_birth, sex, height_cm)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
+		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, food_unit, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
 	`, userID, in.DisplayName, dob, in.Sex, in.HeightCM)
 	p, err := scanProfile(row)
 	if err != nil {
@@ -78,6 +78,12 @@ func (r *PostgresRepository) Update(ctx context.Context, userID string, in Profi
 			sex = COALESCE($5, sex),
 			height_cm = COALESCE($6, height_cm),
 			unit_system = COALESCE($7, unit_system),
+			-- COALESCE like its neighbours, so an omitted field means "leave it
+			-- alone". NOTE this makes the column un-clearable through PATCH:
+			-- once an athlete has chosen, they can switch g<->oz but cannot go
+			-- back to "derive from unit_system". Nothing in the UI offers that,
+			-- and a tri-state toggle would be a worse answer than a binary one.
+			food_unit = COALESCE($12, food_unit),
 			track_effort = COALESCE($8, track_effort),
 			share_training_with_friends = COALESCE($9, share_training_with_friends),
 			share_training_details = COALESCE($10, share_training_details),
@@ -88,8 +94,8 @@ func (r *PostgresRepository) Update(ctx context.Context, userID string, in Profi
 			activity_level = COALESCE($11, activity_level),
 			updated_at = now()
 		WHERE user_id = $1
-		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
-	`, userID, in.Username, in.DisplayName, dob, in.Sex, in.HeightCM, in.UnitSystem, in.TrackEffort, in.ShareTrainingWithFriends, in.ShareTrainingDetails, in.ActivityLevel)
+		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, food_unit, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
+	`, userID, in.Username, in.DisplayName, dob, in.Sex, in.HeightCM, in.UnitSystem, in.TrackEffort, in.ShareTrainingWithFriends, in.ShareTrainingDetails, in.ActivityLevel, in.FoodUnit)
 	p, err := scanProfile(row)
 	if err != nil {
 		return nil, translatePgError(err)
@@ -152,7 +158,7 @@ func scanProfile(row pgx.Row) (*Profile, error) {
 	var p Profile
 	var dob *time.Time
 	err := row.Scan(&p.UserID, &p.Username, &p.DisplayName, &dob, &p.Sex, &p.HeightCM,
-		&p.UnitSystem, &p.TrackEffort, &p.ShareTrainingWithFriends, &p.ShareTrainingDetails,
+		&p.UnitSystem, &p.FoodUnit, &p.TrackEffort, &p.ShareTrainingWithFriends, &p.ShareTrainingDetails,
 		&p.ActivityLevel, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -205,6 +211,8 @@ func translatePgError(err error) error {
 			// Postgres includes the offending value and the constraint body
 			// in that text, and it used to go straight to the client.
 			switch {
+			case strings.Contains(pgErr.ConstraintName, "food_unit"):
+				return fmt.Errorf("%w: food_unit must be g or oz", ErrInvalidInput)
 			case strings.Contains(pgErr.ConstraintName, "unit_system"):
 				return fmt.Errorf("%w: unit_system must be metric or imperial", ErrInvalidInput)
 			case strings.Contains(pgErr.ConstraintName, "sex"):

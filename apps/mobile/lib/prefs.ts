@@ -91,6 +91,16 @@ export async function countOwedPrefs(userID: string): Promise<number> {
  */
 export const PREF_UNIT_SYSTEM = 'unit_system';
 /**
+ * The display unit for FOOD quantities — 'g' | 'oz' (N90).
+ *
+ * A SECOND key rather than a reading of `PREF_UNIT_SYSTEM`, because kitchen
+ * scales and US nutrition labels are both in grams: an imperial athlete
+ * weighing chicken still wants grams. Absent means "not chosen yet", which
+ * falls back to `defaultFoodUnit(unit_system)` — and that is a different state
+ * from having chosen 'g', because it still follows a later switch to imperial.
+ */
+export const PREF_FOOD_UNIT = 'food_unit';
+/**
  * `'1'` while the local unit choice hasn't reached the account.
  *
  * Persisted rather than held in component state because Settings is a screen

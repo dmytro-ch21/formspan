@@ -354,6 +354,45 @@ components:
             curated**: guessing in the confident direction is the trap N41 hit
             on `source` and N51 hit on `outcome`.
           example: 0
+        portions:
+          type: array
+          description: >
+            Household ways this food is measured — "1 large" = 50 g on an egg,
+            "1 cup" = 158 g on cooked rice. From USDA `foodPortions`; 98% of the
+            catalog has at least one, 2.4 on average.
+
+
+            **Returned by `GET /v1/nutrition/catalog/{id}` only, and ABSENT from
+            search results.** A 25-row search page would carry ~60 portions for a
+            choice the athlete has not made yet. Clients must not expect this
+            field on a list response.
+
+
+            100 g is deliberately NOT in this array — it is always available from
+            `serving_grams`, so a client always has at least one way to measure a
+            food even when this is empty.
+          items:
+            type: object
+            required: [seq, label, grams]
+            properties:
+              seq:
+                type: integer
+                description: >
+                  USDA's own `sequenceNumber`, and the display order. They list
+                  the most representative portion first; re-sorting client-side
+                  replaces their editorial judgement with a guess.
+              label:
+                type: string
+                description: The phrase a person would say — "1 cup", "1 medium".
+                example: 1 large
+              grams:
+                type: number
+                description: >
+                  What the portion weighs. Always present and always > 0 — a
+                  portion whose weight is unknown is dropped at import rather
+                  than served with a null, because it could not be logged
+                  against a calorie target.
+                example: 50
         source: { type: string, enum: [seed, admin] }
         external_id:
           type: string
@@ -1881,6 +1920,26 @@ components:
             number — only how it's shown and entered. Storing converted
             values would make every historical row ambiguous, and would break
             the progression rule, which compares weights across sessions.
+        food_unit:
+          type: string
+          nullable: true
+          enum: [g, oz]
+          description: >
+            Display unit for FOOD quantities (N90). **Null is a real state** —
+            "not chosen yet", which falls back to deriving from `unit_system`
+            (imperial to oz, metric to g) and still follows a later change to
+            it. An explicit `g` does not, which is why null is not defaulted
+            away.
+
+
+            Its own field rather than derived from `unit_system`, because
+            kitchen scales and US nutrition labels are both in grams: an
+            imperial athlete weighing chicken still wants grams.
+
+
+            Display only — quantities are stored in grams, always, exactly as
+            training weights are stored in kilograms. Note PATCH cannot clear
+            this back to null.
         track_effort:
           type: boolean
           description: >
@@ -2010,6 +2069,26 @@ components:
             number — only how it's shown and entered. Storing converted
             values would make every historical row ambiguous, and would break
             the progression rule, which compares weights across sessions.
+        food_unit:
+          type: string
+          nullable: true
+          enum: [g, oz]
+          description: >
+            Display unit for FOOD quantities (N90). **Null is a real state** —
+            "not chosen yet", which falls back to deriving from `unit_system`
+            (imperial to oz, metric to g) and still follows a later change to
+            it. An explicit `g` does not, which is why null is not defaulted
+            away.
+
+
+            Its own field rather than derived from `unit_system`, because
+            kitchen scales and US nutrition labels are both in grams: an
+            imperial athlete weighing chicken still wants grams.
+
+
+            Display only — quantities are stored in grams, always, exactly as
+            training weights are stored in kilograms. Note PATCH cannot clear
+            this back to null.
         track_effort:
           type: boolean
           description: >

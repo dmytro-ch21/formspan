@@ -2,6 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  PREF_FOOD_UNIT,
   PREF_UNIT_SYSTEM,
   adoptLegacyOwedFlags,
   clearPrefOwed,
@@ -9,8 +10,8 @@ import {
   readPref,
   writePref,
 } from './prefs';
-import { getProfile, updateUnitSystem } from './profile';
-import type { UnitSystem } from './units';
+import { getProfile, updateFoodUnit, updateUnitSystem } from './profile';
+import { defaultFoodUnit, type FoodUnit, type UnitSystem } from './units';
 import { useAuthToken } from './useAuthToken';
 
 /**
@@ -69,6 +70,16 @@ type UnitsState = {
    * materially different outcome from "changed".
    */
   unsynced: boolean;
+  /**
+   * The unit food quantities are typed and shown in (N90).
+   *
+   * **Derived from `units` only until the athlete chooses**, after which it is
+   * its own account-level setting and stops following. That distinction is the
+   * whole design: kitchen scales and US nutrition labels are both in grams, so
+   * an imperial athlete weighing chicken still wants grams.
+   */
+  foodUnit: FoodUnit;
+  setFoodUnit: (u: FoodUnit) => Promise<void>;
 };
 
 const UnitsContext = createContext<UnitsState>({
@@ -76,6 +87,8 @@ const UnitsContext = createContext<UnitsState>({
   unitsReady: false,
   setUnits: async () => {},
   unsynced: false,
+  foodUnit: 'g',
+  setFoodUnit: async () => {},
 });
 
 export function UnitsProvider({ children }: { children: React.ReactNode }) {
@@ -84,6 +97,10 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
   const [units, setLocal] = useState<UnitSystem>('metric');
   const [unitsReady, setReady] = useState(false);
   const [unsynced, setUnsynced] = useState(false);
+  // null = never chosen, so `foodUnit` below still follows `units`. Storing the
+  // derived value here instead would freeze today's default in place and stop a
+  // later switch to imperial having any effect.
+  const [foodChoice, setFoodChoice] = useState<FoodUnit | null>(null);
 
   // The current account, readable from inside an in-flight promise. Comparing
   // a captured copy against a closed-over `userId` compares a value with
@@ -104,6 +121,7 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
           setLocal('metric');
           setUnsynced(false);
           setReady(false);
+          setFoodChoice(null);
         }
         return;
       }
@@ -114,9 +132,14 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
       await adoptLegacyOwedFlags(userId).catch(() => {});
       const cached = await readPref(userId, PREF_UNIT_SYSTEM);
       const local = cached === 'metric' || cached === 'imperial' ? cached : null;
-      const owed = (await owedPrefs(userId)).some((p) => p.key === PREF_UNIT_SYSTEM);
+      const owedKeys = await owedPrefs(userId);
+      const owed = owedKeys.some((p) => p.key === PREF_UNIT_SYSTEM);
+      const foodOwed = owedKeys.some((p) => p.key === PREF_FOOD_UNIT);
+      const cachedFood = await readPref(userId, PREF_FOOD_UNIT);
+      const localFood = cachedFood === 'g' || cachedFood === 'oz' ? cachedFood : null;
       if (!alive || forUser !== currentUser.current) return;
       if (local) setLocal(local);
+      if (localFood) setFoodChoice(localFood);
       if (owed) setUnsynced(true);
       // Ready once the CACHE has been consulted. Offline, that is the answer.
       setReady(true);
@@ -146,6 +169,19 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
           // as sent.
           await clearPrefOwed(userId, PREF_UNIT_SYSTEM, local);
           if (alive) setUnsynced(false);
+        }
+
+        // Same three-way reconciliation for the food unit, and the same reason
+        // for it: a choice made offline must not be reverted by the first
+        // successful profile read.
+        if (foodOwed && localFood && localFood !== p.food_unit) {
+          await updateFoodUnit(getToken, localFood);
+          await clearPrefOwed(userId, PREF_FOOD_UNIT, localFood);
+        } else if (!foodOwed) {
+          // A null from the server is meaningful — nobody has chosen — so it is
+          // adopted as null rather than coerced to a default here.
+          setFoodChoice(p.food_unit ?? null);
+          if (p.food_unit) await writePref(userId, PREF_FOOD_UNIT, p.food_unit);
         }
       } catch {
         // Offline, or the retry failed: the local value stands and stays owed.
@@ -188,9 +224,34 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
     [getToken, userId],
   );
 
+  const setFoodUnit = useCallback(
+    async (u: FoodUnit) => {
+      setFoodChoice(u);
+      try {
+        if (userId) await writePref(userId, PREF_FOOD_UNIT, u, { owed: true });
+      } catch {
+        // In-memory only; see setUnits for why this must not reject.
+      }
+      try {
+        await updateFoodUnit(getToken, u);
+        if (userId) await clearPrefOwed(userId, PREF_FOOD_UNIT, u).catch(() => {});
+      } catch {
+        // The debt is already on disk. Deliberately does NOT set `unsynced`,
+        // which names the unit-system debt specifically and is rendered next to
+        // that control in Settings.
+      }
+    },
+    [getToken, userId],
+  );
+
+  // The derivation happens HERE, on read, rather than at write time — so an
+  // athlete who has never chosen a food unit and later switches to imperial
+  // gets ounces, while one who explicitly picked grams keeps them.
+  const foodUnit = foodChoice ?? defaultFoodUnit(units);
+
   const value = useMemo(
-    () => ({ units, unitsReady, setUnits, unsynced }),
-    [units, unitsReady, setUnits, unsynced],
+    () => ({ units, unitsReady, setUnits, unsynced, foodUnit, setFoodUnit }),
+    [units, unitsReady, setUnits, unsynced, foodUnit, setFoodUnit],
   );
   return <UnitsContext.Provider value={value}>{children}</UnitsContext.Provider>;
 }

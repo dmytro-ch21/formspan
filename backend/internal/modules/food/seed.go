@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // The catalog lives in version-controlled JSON, like `exercises.json` and
@@ -72,6 +73,17 @@ type seedFood struct {
 	Market          string   `json:"market"`
 	ExternalID      string   `json:"external_id"`
 	USDADescription string   `json:"usda_description"`
+	// Portions is absent on the 268 rows USDA states none for, which is a
+	// legitimate state — 100 g still works. Not a pointer, because unlike
+	// RankTier the zero value (nil) means exactly what an absent field means.
+	Portions []seedPortion `json:"portions"`
+}
+
+// seedPortion is one household measure, as it sits in the JSON.
+type seedPortion struct {
+	Seq   int     `json:"seq"`
+	Label string  `json:"label"`
+	Grams float64 `json:"grams"`
 }
 
 // SeedServingLabel is the serving every seeded row carries.
@@ -122,12 +134,28 @@ func SeedData() ([]Food, error) {
 			CholesterolMG:  s.CholesterolMG,
 			Market:         s.Market,
 			RankTier:       *s.RankTier,
+			Portions:       portionsOf(s),
 			Source:         SourceSeed,
 			ExternalID:     &externalID,
 			ExternalSource: &externalSource,
 		})
 	}
 	return foods, nil
+}
+
+// portionsOf converts one row's portions, preserving the file's order.
+//
+// Returns nil rather than an empty slice for a food with none, so the wire
+// omits the field entirely (see Food.Portions) instead of sending `[]`.
+func portionsOf(s seedFood) []Portion {
+	if len(s.Portions) == 0 {
+		return nil
+	}
+	out := make([]Portion, 0, len(s.Portions))
+	for _, p := range s.Portions {
+		out = append(out, Portion{Seq: p.Seq, Label: p.Label, Grams: p.Grams})
+	}
+	return out
 }
 
 // validSlug matches the column's own CHECK. Enforced here too so a bad id
@@ -183,6 +211,29 @@ func validate(foods []seedFood) error {
 			return fmt.Errorf("food: seed %q has a negative macro", f.ID)
 		}
 		seen[f.ID] = true
+
+		// Portions get their own pass rather than another switch arm, because
+		// each row has many and the error has to name which one.
+		seqs := make(map[int]bool, len(f.Portions))
+		for _, p := range f.Portions {
+			switch {
+			case p.Grams <= 0:
+				// The one rule that matters. A portion with no weight cannot be
+				// logged against a target, and FNDDS really does ship one
+				// (gramWeight 0 on "Milk, human"). The column CHECKs this too;
+				// failing here names the food instead of the constraint.
+				return fmt.Errorf("food: seed %q portion %q has a non-positive gram weight", f.ID, p.Label)
+			case strings.TrimSpace(p.Label) == "":
+				return fmt.Errorf("food: seed %q has a portion with no label", f.ID)
+			case p.Seq < 0:
+				return fmt.Errorf("food: seed %q portion %q has a negative seq", f.ID, p.Label)
+			case seqs[p.Seq]:
+				// seq is half the primary key, so a duplicate would be a
+				// constraint violation mid-deploy naming only the constraint.
+				return fmt.Errorf("food: seed %q has two portions at seq %d", f.ID, p.Seq)
+			}
+			seqs[p.Seq] = true
+		}
 	}
 	return nil
 }
