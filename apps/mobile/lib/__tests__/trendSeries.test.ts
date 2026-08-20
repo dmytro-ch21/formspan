@@ -1,5 +1,6 @@
 import {
   buildTrend,
+  fromPlanProjection,
   projectToGoal,
   RANGE_DAYS,
   trendBounds,
@@ -303,4 +304,62 @@ test('gaining toward a higher goal projects normally', () => {
   const s = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings) });
   const p = projectToGoal(s, 80);
   expect(p.kind).toBe('projected');
+});
+
+// ---------------------------------------------------------------------------
+// Two projections that sound identical in English
+//
+// "Based on your current plan, you'll reach your goal on…" is a claim about the
+// PLAN's rate, which N69 computes server-side and web renders from the same
+// number. Answering it with the observed trend would put a different date on
+// the phone under copy asserting the two are the same thing — the offered_grips
+// drift (N16). The discriminator is what makes that unrenderable rather than
+// merely discouraged.
+// ---------------------------------------------------------------------------
+
+test('a locally computed projection can never claim to speak for the plan', () => {
+  const p = projectToGoal(losing(), 90);
+  expect(p.kind).toBe('projected');
+  if (p.kind !== 'projected') return;
+  expect(p.source).toBe('observed');
+  expect(p.source).not.toBe('plan');
+});
+
+test("the server's projection is the one tagged 'plan'", () => {
+  const p = fromPlanProjection(
+    {
+      reached_on: '2027-01-18',
+      target_weight_kg: 79.4,
+      kg_to_go: 14.6,
+      weeks_to_go: 21.4,
+      already: false,
+      unreachable: false,
+    },
+    { on: TODAY, value: 94 },
+  );
+  expect(p.kind).toBe('projected');
+  if (p.kind !== 'projected') return;
+  expect(p.source).toBe('plan');
+  expect(p.onDate).toBe('2027-01-18');
+});
+
+// The server decides these once, where the plan's rate lives. Re-deriving
+// "is this reachable" on the phone is the second implementation the whole
+// discriminator exists to prevent.
+test("the server's refusals are translated, not re-judged", () => {
+  const base = { reached_on: '', target_weight_kg: 80, kg_to_go: 5, weeks_to_go: 0 };
+  expect(fromPlanProjection({ ...base, already: true, unreachable: false }, null)).toEqual({
+    kind: 'none',
+    reason: 'reached',
+  });
+  expect(
+    fromPlanProjection(
+      { ...base, already: false, unreachable: true, unreachable_reason: 'a bulk toward a lower goal' },
+      null,
+    ),
+  ).toEqual({ kind: 'none', reason: 'moving-away' });
+});
+
+test('no plan projection at all is the no-goal absence, not a blank', () => {
+  expect(fromPlanProjection(null, null)).toEqual({ kind: 'none', reason: 'no-goal' });
 });

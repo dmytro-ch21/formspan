@@ -374,8 +374,42 @@ export type ProjectionBasis = {
   basis: 'smoothed' | 'readings';
 };
 
+/**
+ * WHICH QUESTION A PROJECTION ANSWERS. Two different ones sound identical in
+ * English and give different dates:
+ *
+ * - `plan` — *at the rate your plan prescribes*, when do you arrive? Computed
+ *   SERVER-SIDE by N69 and served on the derivation basis
+ *   (`nutrition.Projection`, `reached_on`), so phone and web agree by
+ *   construction rather than by a parity script.
+ * - `observed` — *at the rate you are actually trending*, when do you arrive?
+ *   Computed here, from the readings on screen.
+ *
+ * They are both real questions and they routinely disagree — an athlete
+ * under-eating their plan arrives earlier than it says. The discriminator
+ * exists so a caller CANNOT render an `observed` date under the spec's
+ * sentence, which reads "Based on your current plan, you'll reach your goal
+ * on…". That sentence is a claim about the plan; answering it with the
+ * observed trend would put a number on screen that disagrees with the same
+ * sentence on web, under copy asserting they are the same thing. This is the
+ * `offered_grips` drift (N16), and the fix there was the same one: compute it
+ * in one place and serve it, rather than deriving it twice and hoping.
+ *
+ * So: **for weight, pass the server's projection through
+ * {@link fromPlanProjection}.** {@link projectToGoal} is for metrics that have
+ * no server-side plan — per-exercise load has no prescribed rate — and what it
+ * returns must be labelled as the observed trend wherever it is shown.
+ */
+export type ProjectionSource = 'plan' | 'observed';
+
 export type Projection =
-  | { kind: 'projected'; onDate: string; daysAway: number; basis: ProjectionBasis }
+  | {
+      kind: 'projected';
+      onDate: string;
+      daysAway: number;
+      source: ProjectionSource;
+      basis: ProjectionBasis;
+    }
   | {
       kind: 'none';
       /**
@@ -443,6 +477,9 @@ export function projectToGoal(
     kind: 'projected',
     onDate: shiftDate(last.on, daysAway),
     daysAway,
+    // OBSERVED, never 'plan'. This function only ever sees readings; it has no
+    // access to a prescribed rate and must never claim to speak for one.
+    source: 'observed',
     basis: {
       ratePerWeek,
       fromValue: last.value,
@@ -451,6 +488,62 @@ export function projectToGoal(
       spanDays,
       n: series.readings.length,
       basis: usingSmoothed ? 'smoothed' : 'readings',
+    },
+  };
+}
+
+/**
+ * The shape N69 serves on the derivation basis, as far as this file cares.
+ *
+ * Deliberately structural rather than an import: `lib/nutrition.ts` owns the
+ * wire types, and a chart module reaching into them would couple every metric's
+ * trend to nutrition's contract.
+ */
+export type PlanProjection = {
+  reached_on: string;
+  target_weight_kg: number;
+  kg_to_go: number;
+  weeks_to_go: number;
+  already: boolean;
+  unreachable: boolean;
+  unreachable_reason?: string;
+};
+
+/**
+ * Adapt the server's plan projection into what the chart draws.
+ *
+ * The refusals are the server's, not re-derived here — `already` and
+ * `unreachable` are decided once, where the plan's rate lives, and this only
+ * translates them. Recomputing "is this reachable" on the phone is the second
+ * implementation that the `source` discriminator above exists to prevent.
+ */
+export function fromPlanProjection(
+  p: PlanProjection | null | undefined,
+  latest: { on: string; value: number } | null,
+): Projection {
+  if (p == null) return { kind: 'none', reason: 'no-goal' };
+  if (p.already) return { kind: 'none', reason: 'reached' };
+  if (p.unreachable) {
+    // The server distinguishes a contradictory plan (a bulk toward a lower
+    // goal) from one that simply never arrives. Both are refusals here; the
+    // screen shows the server's own `unreachable_reason` rather than inventing
+    // wording for a judgement it did not make.
+    return { kind: 'none', reason: 'moving-away' };
+  }
+  if (!p.reached_on) return { kind: 'none', reason: 'no-trend' };
+  return {
+    kind: 'projected',
+    onDate: p.reached_on,
+    daysAway: latest ? daysBetween(latest.on, p.reached_on) : Math.round(p.weeks_to_go * 7),
+    source: 'plan',
+    basis: {
+      ratePerWeek: p.weeks_to_go > 0 ? round(-p.kg_to_go / p.weeks_to_go, 3) : 0,
+      fromValue: latest?.value ?? p.target_weight_kg + p.kg_to_go,
+      fromDate: latest?.on ?? '',
+      goal: p.target_weight_kg,
+      spanDays: 0,
+      n: 0,
+      basis: 'smoothed',
     },
   };
 }
