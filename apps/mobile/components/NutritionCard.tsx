@@ -24,6 +24,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
+import { MacroSplit } from '@/components/food/MacroSplit';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -31,6 +32,7 @@ import { type EatenView, type Food, type TargetView } from '@/lib/nutrition';
 
 export function NutritionCard({
   eaten,
+  logged,
   view,
   quickAdd,
   onLog,
@@ -40,6 +42,15 @@ export function NutritionCard({
 }: {
   /** Everything Today knows about what was eaten. See {@link EatenView}. */
   eaten: EatenView;
+  /**
+   * How many of the last seven days have anything logged, and out of how many.
+   *
+   * A COUNT, not a streak — `nutrition-design.md` §5 refuses streaks because a
+   * missed day becomes a loss and a chain rewards logging a fake day to save
+   * it. Null while the read has not answered, so it can say nothing rather
+   * than say zero.
+   */
+  logged: { logged: number; considered: number } | null;
   /** Everything Today knows about the target. See {@link TargetView}. */
   view: TargetView;
   /** The three most-logged foods for the current slot. May be empty. */
@@ -59,6 +70,17 @@ export function NutritionCard({
       </View>
 
       <RemainingBlock eaten={eaten} view={view} compact />
+
+      <MacroSplit eaten={eaten} view={view} />
+
+      {logged && (
+        <Text style={styles.logged} testID="fuel-days-logged">
+          {/* The denominator travels with the figure — N28's honesty rule —
+              and it is also what keeps this readable as "you logged five days"
+              rather than as a score you can lose. */}
+          {logged.logged} of {logged.considered} days logged this week
+        </Text>
+      )}
 
       {quickAdd.length > 0 && (
         <View style={styles.quick}>
@@ -106,6 +128,7 @@ export function NutritionCard({
 }
 
 const styles = StyleSheet.create({
+  logged: { fontSize: 12, color: vola.textMuted, marginTop: 12 },
   // Radius 14 and padding 14/12, matching CheckinCard and themeCard — its
   // immediate neighbours on Today.
   card: {

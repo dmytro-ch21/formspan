@@ -66,7 +66,14 @@ import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
 import { listCheckins, listPhases, type Checkin, type Phase } from '@/lib/body';
-import { cacheTargets, localEntries, localTargetView, logFood, recentsFor } from '@/lib/foodLog';
+import {
+  cacheTargets,
+  localEntries,
+  localLoggedDays,
+  localTargetView,
+  logFood,
+  recentsFor,
+} from '@/lib/foodLog';
 import { hasFoodLog } from '@/lib/modules';
 import {
   rankRecents,
@@ -75,6 +82,7 @@ import {
   type Entry,
   type Food,
   type TargetView,
+  daysLogged,
   eatenFrom,
   type EatenView,
 } from '@/lib/nutrition';
@@ -236,6 +244,11 @@ function describeSession(s: Session, mods: Module[]): string {
  * readout. All of it was plumbing on display, and none of it answered the
  * question someone opens this tab to ask.
  */
+/** The logged-day count's window. Seven, so it reads as "this week" without
+ *  needing a week boundary — a Monday reset would make Monday morning always
+ *  say "0 of 7", which is the discouraging shape the no-shame rule avoids. */
+const LOGGED_WINDOW_DAYS = 7;
+
 export default function TodayScreen() {
   const accent = useAccent();
   const { modules } = useModules();
@@ -556,6 +569,10 @@ export default function TodayScreen() {
   // Fuel. Read locally first, exactly like the day screen: the card must be
   // right with no signal, because the log it reports is written offline.
   const [foodEaten, setFoodEaten] = useState<EatenView>({ state: 'loading' });
+  // Null until the read answers, so the card can say nothing rather than say
+  // "0 of 7" — which would be a claim about the athlete's week made from a
+  // query that has not run.
+  const [foodLogged, setFoodLogged] = useState<{ logged: number; considered: number } | null>(null);
   const [foodView, setFoodView] = useState<TargetView>({ state: 'checking' });
   const [foodQuick, setFoodQuick] = useState<Food[]>([]);
   const foodEnabled = hasFoodLog(modules);
@@ -574,6 +591,19 @@ export default function TodayScreen() {
         // failed read as "nothing logged" — a claim the athlete ate nothing.
         // See `EatenView`.
         if (live) setFoodEaten({ state: 'unavailable' });
+      });
+
+    // The week's logged-day count. Its own read, because it spans seven days
+    // and the entries read above is one — and a failure here leaves the count
+    // absent rather than zero, for the same reason.
+    (userId
+      ? localLoggedDays(userId, dayString(addDays(new Date(), -6)), today)
+      : Promise.resolve<string[]>([]))
+      .then((days) => {
+        if (live) setFoodLogged(daysLogged(days, today, LOGGED_WINDOW_DAYS));
+      })
+      .catch(() => {
+        if (live) setFoodLogged(null);
       });
 
     // Ranked for the CURRENT slot, so the chips are porridge at breakfast and
@@ -1443,6 +1473,7 @@ export default function TodayScreen() {
         {foodEnabled && (
           <NutritionCard
             eaten={foodEaten}
+            logged={foodLogged}
             view={foodView}
             quickAdd={foodQuick}
             onLog={() => router.push('/food/add')}

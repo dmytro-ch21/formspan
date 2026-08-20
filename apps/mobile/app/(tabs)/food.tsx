@@ -42,6 +42,8 @@ import { cacheTargets, localEntries, localTargetView, removeEntry } from '@/lib/
 import {
   bySlot,
   eatenFrom,
+  viewTarget,
+  viewTotals,
   type EatenView,
   type Entry,
   type Meal,
@@ -165,6 +167,11 @@ export default function FoodScreen() {
   const entries = eaten.state === 'ready' ? eaten.rows : [];
   const slots = bySlot(entries);
   const view: TargetView = dated.on === on ? dated.view : { state: 'checking' };
+  // Computed ONCE for the day and shown on every section, rather than four
+  // different figures. Null unless both halves are known: with no target there
+  // is nothing left to be left of, and with no read there is no eaten figure
+  // to subtract — and inventing either is the false precision this replaces.
+  const budget = mealBudgetLine(eaten, view);
 
   async function onDelete(id: string) {
     if (!userId) return;
@@ -245,6 +252,21 @@ export default function FoodScreen() {
               <SectionHeader
                 label={`${MEAL_LABELS[slot.meal]}${slot.kcal > 0 ? ` · ${Math.round(slot.kcal)} kcal` : ''}`}
               />
+              {/* **The day's remaining, not a per-meal budget**, and the
+                  distinction is the whole reason this line reads the way it
+                  does. The user asked for "536 calories now available" per
+                  meal; `nutrition-design.md` §5 rejects that by name as false
+                  precision — it requires knowing a day the app cannot see, it
+                  is wrong the moment you eat a big lunch, and it manufactures
+                  four budgets to fail against instead of one honest total.
+                  They chose this counter-proposal: the placement they asked
+                  for, one true number under it. "left today" is doing load-
+                  bearing work in that sentence and must not be shortened. */}
+              {budget && (
+                <Text style={styles.budget} testID={`food-budget-${slot.meal}`}>
+                  {budget}
+                </Text>
+              )}
               {slot.entries.map((e) => (
                 <SwipeToDelete
                   key={e.id}
@@ -292,6 +314,27 @@ export default function FoodScreen() {
   );
 }
 
+/**
+ * "536 kcal left today · 28g protein · 48g carbs · 13g fat", or null.
+ *
+ * Null rather than a partial line in every state that cannot support it: no
+ * target means nothing is "left", and an unread day means the eaten half is
+ * unknown. A line assembled from half an answer is the shape this whole task
+ * has been about.
+ */
+function mealBudgetLine(eaten: EatenView, view: TargetView): string | null {
+  const totals = viewTotals(eaten);
+  const target = viewTarget(view);
+  if (!totals || !target) return null;
+  const left = (a: number, b: number) => Math.max(0, Math.round(a - b));
+  return (
+    `${left(target.kcal, totals.kcal)} kcal left today · ` +
+    `${left(target.protein_g, totals.protein_g)}g protein · ` +
+    `${left(target.carb_g, totals.carb_g)}g carbs · ` +
+    `${left(target.fat_g, totals.fat_g)}g fat`
+  );
+}
+
 /** 1.5 stays 1.5; 1.0 becomes 1. Nobody writes "1.0 × 100 g". */
 function trimZero(n: number): string {
   return String(Math.round(n * 100) / 100);
@@ -311,6 +354,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   slotsAbsent: { fontSize: 13, color: vola.textMuted, marginTop: 18 },
+  budget: { fontSize: 12, color: vola.textMuted, marginTop: -2, marginBottom: 6 },
   slot: { gap: 6 },
   // Matches SwipeToDelete's own backing exactly — surface at radius 12 — or the
   // revealed action shows a seam behind the row.
