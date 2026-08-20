@@ -63,11 +63,16 @@ func TestTargetInputsDropsALevelTheVocabularyNoLongerKnows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("target inputs: %v", err)
 	}
-	// Dropped, not carried. Carried, it would reach ResolveActivity, fall
-	// through ActivityFactors to a zero multiplier, and the response would
-	// still claim the athlete had chosen — a wrong number presented as their
-	// own decision. "Never chosen" is the truthful answer for a level this
-	// version cannot honour.
+	// Dropped, not carried.
+	//
+	// Note what the damage actually is, because the obvious guess is wrong:
+	// `Suggest` coerces any invalid activity to `light` itself, so a carried
+	// value does NOT produce a zero multiplier or any other visibly broken
+	// number. It produces a perfectly plausible one — derived at `light` —
+	// while the response says `activity: "moderate", activity_chosen: true`.
+	// A number nobody chose, presented as the athlete's own decision, with
+	// nothing on screen looking wrong. "Never chosen" is the truthful answer
+	// for a level this version cannot honour.
 	if in.ActivityLevel != nil {
 		t.Fatalf("an unknown level must be dropped, got %q", *in.ActivityLevel)
 	}

@@ -34439,9 +34439,15 @@ the rest of the screen is telling them to go and fix.
 No CHECK constraint, per the convention `000021` set and `000040` restates: an
 enumerated vocabulary is validated in Go, where changing it is a code change
 rather than a migration. `nutrition.TargetInputs` consequently **drops a stored
-level the vocabulary no longer knows** rather than carrying it — carried, it
-would fall through `ActivityFactors` to a zero multiplier while the response
-still claimed the athlete had chosen.
+level the vocabulary no longer knows** rather than carrying it. The damage a
+carried one does is worth stating precisely, because the intuitive guess is
+wrong and this branch's first comment about it *was* wrong: `Suggest` coerces
+any invalid activity to `light` itself, so nothing visibly breaks. It derives a
+perfectly plausible number at `light` while the response reports
+`activity_chosen: true` for a spelling the athlete's client cannot even render
+— a number nobody chose, presented as their own decision, with every figure on
+screen looking reasonable. Caught in review; the review was right and the
+comment was not.
 
 ### The rule that makes the two surfaces agree
 

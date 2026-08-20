@@ -10171,9 +10171,11 @@ chosen*.
 - **A cached level the account no longer holds is dropped.** Nothing owed means
   the server is authoritative, including when it says nobody has chosen.
 - **A stored level the vocabulary no longer knows is treated as never chosen**,
-  on both the server (`TargetInputs`) and the device. Carried through, it would
-  reach the factor table, miss, and derive at a zero multiplier while the
-  response still claimed the athlete had chosen.
+  on both the server (`TargetInputs`) and the device. Carried through it does
+  NOT break visibly — `Suggest` coerces an invalid activity to `light` on its
+  own — which is exactly why it matters: the athlete gets a plausible number
+  derived at `light` while the response claims they chose a level their client
+  cannot render.
 - **`?activity=` must be OMITTED, never sent empty or as the string
   `"undefined"`.** `new URLSearchParams({ on, activity })` with an undefined
   activity serialises the literal text `undefined`, which the server rejects as

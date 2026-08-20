@@ -72,6 +72,37 @@ func TestResolveActivityTreatsNilStoredAsNeverChosenRatherThanEmpty(t *testing.T
 	}
 }
 
+func TestResolveActivityRefusesAnUnknownAskedLevelEvenThoughTheHandlerAlreadyDid(t *testing.T) {
+	// The handler 400s this today, so this is a guard on a guard. It earns its
+	// place because ResolveActivity is EXPORTED: a second caller that forgot
+	// the 400 would otherwise get `moderate` echoed back with chosen=true,
+	// while Suggest quietly derived at light. Nothing on screen would look
+	// wrong — which is what makes it worth a redundant check rather than a
+	// comment saying the caller handles it.
+	stored := ActivityActive
+	got, chosen := ResolveActivity("moderate", &stored)
+	if got != ActivityActive {
+		t.Fatalf("an unknown asked level must not displace the stored one; got %q", got)
+	}
+	if !chosen {
+		t.Fatal("the stored level is still the athlete's own choice")
+	}
+}
+
+func TestResolveActivityFallsAllTheWayToTheDefaultWhenNothingIsUsable(t *testing.T) {
+	// Both inputs junk. Reachable if a retired spelling ever reaches both the
+	// query string and the column — and the answer has to be `chosen=false`,
+	// or the response claims a decision out of two values it just rejected.
+	bad := Activity("very_active")
+	got, chosen := ResolveActivity("moderate", &bad)
+	if string(got) != "light" {
+		t.Fatalf("want the documented default, got %q", got)
+	}
+	if chosen {
+		t.Fatal("two rejected values cannot add up to a choice")
+	}
+}
+
 // TestActivityVocabularyIsPinnedToLiterals is the other half of a deliberate
 // duplication.
 //
