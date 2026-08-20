@@ -109,7 +109,7 @@ WORKFLOWS = ROOT / ".github/workflows"
 # workflow files — this literal exists so a parser that silently finds nothing
 # cannot make the whole check vacuous, which is the way a detector most often
 # dies. If CI genuinely gains or loses a job, change this in the same commit.
-EXPECTED_CHECK_RUNS = 5
+EXPECTED_CHECK_RUNS = 6
 
 # A check run that actually did the work. ONLY `success`.
 #
@@ -531,7 +531,12 @@ def _run(name: str, status: str = "completed", conclusion: str = "success") -> d
     return {"name": name, "status": status, "conclusion": conclusion}
 
 
-FIVE = ["Backend (Go)", "Web (Next.js)", "Admin (Next.js)", "Scripts (Python)", "Mobile (Expo)"]
+# Named FIVE when there were five. It is the full declared set, whatever the
+# count — renaming it on every addition would churn ~20 call sites below for
+# no gain, and the count that matters is EXPECTED_CHECK_RUNS, which the
+# self-test cross-checks against the workflows themselves.
+FIVE = ["Backend (Go)", "Web (Next.js)", "Admin (Next.js)", "Scripts (Python)",
+        "Mobile (Expo)", "Ready PRs contain work"]
 
 
 def self_test() -> int:
@@ -547,18 +552,18 @@ def self_test() -> int:
         ("five green", FIVE, [_run(n) for n in FIVE], EXIT_OK, "passed"),
         # The N65 case itself, and the reason this file exists.
         ("zero runs", FIVE, [], EXIT_NOT_CHECKED, "ZERO CHECK RUNS"),
-        ("four of five", FIVE, [_run(n) for n in FIVE[:4]], EXIT_NOT_CHECKED, "MISSING"),
+        ("four of five", FIVE, [_run(n) for n in FIVE[:-1]], EXIT_NOT_CHECKED, "MISSING"),
         (
             "one failed",
             FIVE,
-            [_run(n) for n in FIVE[:4]] + [_run(FIVE[4], conclusion="failure")],
+            [_run(n) for n in FIVE[:-1]] + [_run(FIVE[-1], conclusion="failure")],
             EXIT_FAILED,
             "FAILED",
         ),
         (
             "one still running",
             FIVE,
-            [_run(n) for n in FIVE[:4]] + [_run(FIVE[4], status="in_progress", conclusion=None)],
+            [_run(n) for n in FIVE[:-1]] + [_run(FIVE[-1], status="in_progress", conclusion=None)],
             EXIT_PENDING,
             "STILL RUNNING",
         ),
@@ -576,7 +581,7 @@ def self_test() -> int:
         (
             "one skipped",
             FIVE,
-            [_run(n) for n in FIVE[:4]] + [_run(FIVE[4], conclusion="skipped")],
+            [_run(n) for n in FIVE[:-1]] + [_run(FIVE[-1], conclusion="skipped")],
             EXIT_NOT_CHECKED,
             "SKIPPED, so NOT CHECKED",
         ),
@@ -584,7 +589,7 @@ def self_test() -> int:
         (
             "one neutral",
             FIVE,
-            [_run(n) for n in FIVE[:4]] + [_run(FIVE[4], conclusion="neutral")],
+            [_run(n) for n in FIVE[:-1]] + [_run(FIVE[-1], conclusion="neutral")],
             EXIT_FAILED,
             "neutral",
         ),
