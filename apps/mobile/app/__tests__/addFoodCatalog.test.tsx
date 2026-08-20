@@ -1,17 +1,3 @@
-/*
- * N67 PROBE ARM 4 — the TWO glyph tests skipped; the other 18 all run.
- * TEMPORARY.
- *
- * Arm 1: all 20 skipped -> 5/0 pass.  Arm 2: N58's nine skipped -> 5/0 pass.
- * Arm 3: the four scope tests skipped -> FAILED, same test and same assertion,
- * so the culprit is among the five CARD tests.
- *
- * These two are the coherent pair: both query with `includeHiddenElements`,
- * which nothing else in this file uses.
- *
- *   green -> the glyph tests are it
- *   red   -> it is among brand-omission / name-composition / serving-line
- */
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
@@ -268,7 +254,7 @@ it('states the calories WITH the serving they belong to', async () => {
  * at all and that it is the category's, not a name-derived guess — the
  * substitution `foodGlyph` exists to prevent.
  */
-it.skip('shows the category glyph, not one guessed from the name', async () => {
+it('shows the category glyph, not one guessed from the name', async () => {
   mockSearchCatalog.mockResolvedValue(
     answer({
       foods: [{ ...CATALOG_OATS, id: 'usda-7', name: 'Beef-flavoured tofu', category: 'plant_protein' }],
@@ -296,7 +282,7 @@ it.skip('shows the category glyph, not one guessed from the name', async () => {
  * default: the glyph is findable by testID and NOT by text, which is exactly
  * the pair of facts wanted.
  */
-it.skip('does not announce the glyph to a screen reader', async () => {
+it('does not announce the glyph to a screen reader', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
