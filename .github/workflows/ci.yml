@@ -302,5 +302,43 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck:mobile
 
+      # jest's worker budget is sized against this machine, so print what the
+      # machine actually is. Issue #409 was exactly the failure of not doing
+      # that: `apps/mobile/jest.config.js` carried no `maxWorkers` and CLAUDE.md
+      # justified it with "CI runs one instance, where 9 workers is right" — a
+      # number measured on a 10-core Mac, for a job that has never run on one.
+      #
+      # `os.cpus().length` is the figure jest divides, and it counts THREADS.
+      # `lscpu` is here because it is the one that disagrees: the runner reports
+      # 4 CPUs and 2 physical cores, and the gap between those two numbers is
+      # the entire bug. Three lines of output on every run is the cheapest
+      # possible defence against re-deriving a worker count from a spec sheet.
+      - name: Runner capacity (what jest sizes its pool against)
+        working-directory: apps/mobile
+        run: |
+          echo "nproc: $(nproc)"
+          # The `|| lscpu` is load-bearing twice over, and neither reason is
+          # obvious. (1) A bare `grep` that matches nothing exits 1, and the job
+          # shell is `bash -e` — a diagnostic step that can turn the build red
+          # would be worse than the flake it documents. (2) GitHub's ARM runners
+          # print "Core(s) per cluster" rather than "per socket", where the
+          # alternation would still match on `CPU(s):`, exit 0, and SILENTLY
+          # drop the physical-core count — the one number this step exists to
+          # surface, at the exact moment (a runner change) it exists for.
+          lscpu | grep -E '^(CPU\(s\)|Thread\(s\) per core|Core\(s\) per (socket|cluster)):' || lscpu
+          free -m | head -2
+          # Prints the RESOLVED worker count, not just what jest would default
+          # to, so the step verifies the cap rather than merely describing the
+          # machine. If these two ever read the same number on CI, the guard in
+          # jest.config.js has stopped firing.
+          node -e "
+          const os = require('os');
+          const cfg = require('./jest.config.js');
+          const logical = os.cpus().length;
+          console.log('os.cpus().length      =', logical);
+          console.log('jest default would be =', Math.max(logical - 1, 1));
+          console.log('jest.config resolves  =', cfg.maxWorkers ?? '(unset -> jest default)');
+          "
+
       - name: Test
         run: pnpm run test:mobile
