@@ -32474,6 +32474,98 @@ failure a new photo cannot fix.
 None of that is this fix's scope, and all of it means an athlete notices nothing
 from this PR on its own. It is F17 (#403), and it is the half with the user-visible
 behaviour in it.
+## 2026-08-20 — A device-check script, and the coverage number behind it (L1, #380)
+
+L1 has been open since the beginning as one long line of things "typechecked and
+tested, never looked at". It kept growing because it was written as an inventory
+of *features* someone remembered building, which is a list only its author can
+extend. This turns it into a **method**: what the test suite structurally cannot
+reach, ranked by expected harm × likelihood, written so somebody standing in a
+gym can follow it without reading any code.
+[`docs/testing/device-checks.md`](../testing/device-checks.md) is the artefact.
+
+**The deliverable is deliberately a list and not a fix.** Nothing in it was
+repaired here. The bottleneck this ticket addresses is not "we cannot fix device
+bugs", it is "we do not know what to look at" — and every device bug found this
+week was found because the user happened to open a screen. N68 (a target screen
+that could not scroll) and N73 (a machine photo that failed on real hardware)
+both passed CI.
+
+### What it is ranked on
+
+The top five, in order: photographing a gym machine; Continue with Google;
+sharing a session card; photographing a plate of food; scanning a barcode.
+Four of the five are camera paths and **the iOS Simulator has no camera**, so
+they are not merely untested, they are untestable anywhere but a phone. The
+fifth, Google sign-in, has zero coverage of any kind and by its own docstring
+has never been exercised against a real build — while Google-created accounts
+have **no password at all**, so for those athletes that button is the only door.
+
+Two entries earn their rank on evidence rather than reasoning:
+
+- **The machine photo is first because it has already failed on a device once**,
+  and the fix (#361) has never been run on hardware since. Its failure mode is
+  the interesting part: an oversized upload times out and the screen reports it
+  as *"try again when you have signal"* to somebody with four bars.
+- **The share card is third because its capture has never produced a pixel.**
+  `lib/shareCard.ts`'s export arithmetic differs per platform, and it was
+  derived by *reading* `RNViewShot.mm` and `ViewShot.java`. The test that
+  covers it `jest.mock`s `react-native-view-shot` and `expo-sharing` outright
+  and asserts the numbers handed to a stub. That is the shape CLAUDE.md already
+  names — a stub built from an assumption cannot falsify it — sitting on a
+  surface that publishes a calorie figure inferred from body data.
+
+### The numbers, and how they were established
+
+Three methods, because one grep has burned this repo repeatedly:
+
+1. A filesystem walk of the route trees — 48 mobile route files, 40 web/admin
+   routed pages.
+2. Static import analysis of every test file, minus what it `jest.mock`s.
+3. A measured `jest --coverage` run, as an independent check on (2).
+
+**(2) was wrong on its first run and (3) is what would have caught it.** The
+resolver handled relative specifiers only, and this codebase imports screens as
+`@/components/…`; four tests came back covering nothing when they cover four
+real components. Corrected, the two methods agree exactly — every route the
+static pass flagged appears in the measured zero-coverage set.
+
+- Mobile statement coverage across `app/` + `components/`: **33.1%**.
+- **44 of 93** mobile screen/component files execute **zero** statements under
+  the whole suite; **31 of 48** routes have no test that renders them.
+- **0 of 40** web and admin pages have a test that renders them. Both suites are
+  `environment: "node"` with no jsdom, so nothing in either app has ever been
+  clicked by anything.
+
+None of this is a criticism of the mobile suite's shape. Not writing component
+tests is a deliberate and defensible choice — what breaks in that app is
+concurrency and state reconciliation, and that is what it covers. The
+consequence is simply that rendering is unverified, and the answer to unverified
+rendering is a person looking at it, not a new tier of tests.
+
+**One false alarm, recorded so nobody re-chases it.** The coverage run reported
+two failing suites. It is the instrumentation pushing them past jest's
+`testTimeout`; the plain suite is green in the same session — 118 suites, 1757
+tests, 16.3s — and `dictateScreen` passes alone. The measurement measured the
+apparatus, which is the failure mode CLAUDE.md's *Verify that a check can fail*
+section is entirely about, arriving this time in the mirror image: apparatus
+manufacturing a red rather than a green.
+
+### What it leaves open
+
+- **Nothing has been run yet.** This is a script, not a result. The value is
+  realised on a phone, and #380 stays open until items start coming off it.
+- **`tests/functional/` is not in this repo.** CLAUDE.md describes a Playwright
+  suite; there is no `playwright.config.*`, no `@playwright/test` dependency,
+  and not one `page.goto` anywhere tracked. It may exist untracked in the
+  primary checkout. Either way, the "0 of 40" figure above is what the
+  repository can demonstrate about itself.
+- **The list is mobile-weighted**, which follows the mobile-first rule but means
+  web's 31 unwalked pages get four entries between them rather than one each.
+- **The `T` traps were read as input** and one of them (T3/T4, a grip erased by
+  a wholesale set write) became a device check, because a field silently
+  disappearing on a round trip is exactly what a suite cannot see and a person
+  can.
 
 ## Open items / known gaps as of this entry
 
