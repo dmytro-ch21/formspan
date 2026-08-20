@@ -71,6 +71,63 @@ export type FocusProposal = {
   unchanged: boolean;
 };
 
+/**
+ * The same proposal for ONE technique — what "work on this" does from a lesson.
+ *
+ * The roadmap screen expands a lesson in place and offers to start it, which is
+ * a different request from "apply this whole roadmap": the athlete named one
+ * thing, so nothing else may be pulled in behind it. Rules 3 and 4 still hold —
+ * what they already had is kept, and the cap still evicts from the end — but
+ * rule 2 is narrowed to the single id, and rule 1 does not apply at all: this
+ * is an addition, not an advance.
+ *
+ * The chosen technique goes FIRST, which is also what stops the cap silently
+ * refusing the request. Appended, a sixth pick would be the one dropped, and
+ * the button would do nothing while reporting success.
+ *
+ * Returns `unchanged` when it is already in focus, so the caller can say so
+ * rather than writing an identical list.
+ */
+export function proposeOneFocus(
+  items: CurriculumItem[],
+  current: Focus[],
+  techniqueID: string,
+  max: number = MAX_FOCUS,
+): FocusProposal {
+  const item = items.find((i) => i.technique_id === techniqueID);
+  const inRoadmap = new Map(
+    items
+      .filter((i): i is CurriculumItem & { technique_id: string } => !!i.technique_id)
+      .map((i) => [i.technique_id, i]),
+  );
+
+  const next: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [techniqueID, ...current.map((f) => f.technique_id)]) {
+    if (next.length >= max) break;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    next.push(id);
+  }
+
+  const before = new Set(current.map((f) => f.technique_id));
+  const after = new Set(next);
+
+  return {
+    next,
+    fromRoadmap: next.filter((id) => inRoadmap.has(id)),
+    added: before.has(techniqueID) || !item ? [] : [item],
+    // Only ever `evicted` here: nothing is being retired for being mastered,
+    // so anything that falls off did so because the athlete is at the cap.
+    dropped: current
+      .filter((f) => !after.has(f.technique_id))
+      .map((f) => ({ focus: f, reason: 'evicted' as const })),
+    unchanged:
+      next.length === current.length &&
+      next.every((id, i) => current[i]?.technique_id === id),
+  };
+}
+
 export function proposeFocus(
   items: CurriculumItem[],
   current: Focus[],

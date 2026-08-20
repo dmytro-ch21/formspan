@@ -1,4 +1,4 @@
-import { proposeFocus } from '../roadmapFocus';
+import { proposeFocus, proposeOneFocus } from '../roadmapFocus';
 import type { Focus } from '../bjjFocus';
 import type { CurriculumItem } from '../curriculum';
 
@@ -215,5 +215,64 @@ describe('unchanged', () => {
 
   it('is true for a roadmap with nothing left to work and an empty list', () => {
     expect(proposeFocus([step('a', true)], []).unchanged).toBe(true);
+  });
+});
+
+/**
+ * The single-technique form — what "work on this" does from an expanded lesson.
+ *
+ * The distinction from `proposeFocus` is the whole reason it exists: the
+ * athlete named ONE thing, so nothing else may ride in behind it, and nothing
+ * is retired for being mastered either. Same wholesale-replacement endpoint, so
+ * the same stakes.
+ */
+describe('proposeOneFocus', () => {
+  it('adds only the one named, and keeps everything already there', () => {
+    const items = [step('a', false), step('b', false), step('c', false)];
+    const p = proposeOneFocus(items, [focus('z')], 'b');
+    expect(p.next).toEqual(['b', 'z']);
+    expect(p.added.map((i) => i.technique_id)).toEqual(['b']);
+    // 'a' and 'c' are unmastered roadmap steps and are still NOT pulled in.
+    expect(p.next).not.toContain('a');
+  });
+
+  it('puts the chosen technique first, so the cap cannot silently refuse it', () => {
+    // Appended, a sixth pick is the one dropped — the button would report
+    // success and change nothing.
+    const held = ['v', 'w', 'x', 'y', 'z'].map(focus);
+    const p = proposeOneFocus([step('a', false)], held, 'a');
+    expect(p.next[0]).toBe('a');
+    expect(p.next).toHaveLength(5);
+    expect(p.dropped.map((d) => d.focus.technique_id)).toEqual(['z']);
+  });
+
+  it('calls anything it displaces evicted, never mastered', () => {
+    // Nothing is being retired for being finished here, so `mastered` would be
+    // a false explanation of a loss the athlete should be asked about.
+    const held = ['v', 'w', 'x', 'y', 'z'].map(focus);
+    const p = proposeOneFocus([step('a', false)], held, 'a');
+    expect(p.dropped.every((d) => d.reason === 'evicted')).toBe(true);
+  });
+
+  it('reports unchanged when it is already in focus, in the same place', () => {
+    const p = proposeOneFocus([step('a', false)], [focus('a'), focus('b')], 'a');
+    expect(p.unchanged).toBe(true);
+    expect(p.added).toEqual([]);
+  });
+
+  it('moves it to the front when it is in focus lower down', () => {
+    const p = proposeOneFocus([step('b', false)], [focus('a'), focus('b')], 'b');
+    expect(p.next).toEqual(['b', 'a']);
+    expect(p.unchanged).toBe(false);
+    // Already held, so this is a reorder rather than an addition.
+    expect(p.added).toEqual([]);
+  });
+
+  it('attributes only the roadmap ids, never the athlete\'s own', () => {
+    // `fromRoadmap` is what the roadmap may later take back. Naming a
+    // hand-picked technique here would let deactivating this roadmap delete it.
+    const p = proposeOneFocus([step('a', false)], [focus('mine')], 'a');
+    expect(p.next).toEqual(['a', 'mine']);
+    expect(p.fromRoadmap).toEqual(['a']);
   });
 });

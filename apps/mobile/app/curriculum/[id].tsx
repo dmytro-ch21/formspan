@@ -1,11 +1,20 @@
-import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View as RNView,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BeltMark } from '@/components/BeltMark';
 import { Text, View } from '@/components/Themed';
-import { SectionHeader } from '@/components/ui/Section';
-import { TechniqueRow } from '@/components/ui/TechniqueRow';
-import { vola } from '@/constants/Colors';
+import { Icon } from '@/components/ui/Icon';
+import { ProgressRing } from '@/components/ui/ProgressRing';
+import { activeBeltAccent, vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { fetchFocus, setFocus, type Focus } from '@/lib/bjjFocus';
 import {
@@ -13,24 +22,44 @@ import {
   enrollInCurriculum,
   getCurriculum,
   type Curriculum,
-  type CurriculumItem,
 } from '@/lib/curriculum';
-import { groupByPhase } from '@/lib/curriculumPhases';
-import { criteriaChips, hasEvidence } from '@/lib/curriculumRow';
-import { proposeFocus, type FocusProposal } from '@/lib/roadmapFocus';
+import { proposeFocus, proposeOneFocus, type FocusProposal } from '@/lib/roadmapFocus';
+import { buildRoadmap, percent, type Lesson, type Milestone } from '@/lib/roadmapView';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
- * One roadmap, and the action that makes the phone self-sufficient.
+ * One belt's roadmap: a numbered timeline of milestones, each opening onto its
+ * lessons, each lesson opening onto how it is measured.
  *
- * **Why this is here and not only on web.** The design doc's own connective
- * table puts roadmap progress on Plan and the focus chips in the reflection
- * wizard — both this app. Only *building* a curriculum was ever meant to be a
- * desk job. Until this screen existed the loop was broken across devices: the
- * chips were here, the events were here, the criteria read those events, and
- * the one step that chose which techniques to work sat on a laptop.
+ * ## Why it is a hierarchy of collapsed things
  *
- * The three things the numbers have to be honest about, same as web:
+ * The user's own framing: *"each bigger thing on tap expands, that's how we see
+ * first high level next more in details."* Belt → milestone → lesson, one open
+ * at a time at each level, everything closed on arrival.
+ *
+ * That is a design decision and a **performance** one, and they are the same
+ * answer. White belt is 93 lessons across 11 milestones — double the largest
+ * list this screen was ever drawn for, and N30 already flagged it as a plain
+ * `ScrollView` at 85. Closed, the screen mounts eleven cards, a header and two
+ * summary cards regardless of belt; the 93 exist only when an athlete has asked
+ * for them, one milestone at a time. So the container stays a `ScrollView`
+ * — the worst realistic case is one open milestone, not eleven.
+ *
+ * **A lesson expands IN PLACE and never navigates away.** In a 93-item roadmap
+ * leaving the screen loses your position, and the point of expanding is that
+ * the context stays on screen around it.
+ *
+ * ## What the lesson level says, and what it must never offer
+ *
+ * It says **how it is measured** — "landed live 12", "classes drilled in 10" —
+ * and where the athlete stands against that. It does not offer a checkbox, and
+ * cannot: completion is derived from logged evidence, and migration 000034 is
+ * explicit that there is deliberately no way to mark a technique mastered by
+ * hand. A concept carries no criteria by design, so it reads as *understand
+ * this* rather than as an unfinished measurable.
+ *
+ * The three things the numbers have to be honest about, unchanged from the
+ * screen this replaces:
  *
  *  1. **Counting starts the day you enrol.** Someone who has drilled the arm
  *     drag for two years starts at zero. Correct — a rate over your whole
@@ -38,29 +67,41 @@ import { useAuthToken } from '@/lib/useAuthToken';
  *     a bug unless the screen says so.
  *  2. **Mastery can be taken back**, because it is derived rather than stored.
  *     The copy says "your record shows", never "you have earned".
- *  3. **Not every item counts.** Items with no criteria are reading, and the
- *     denominator is `countable_items`, which the API sends for that reason.
+ *  3. **Not every item counts.** A milestone with nothing completable in it
+ *     shows no progress at all rather than 0%.
  */
+
+/** The gutter the numbered circles and their connecting rule live in. */
+const RAIL_W = 46;
+const CIRCLE = 34;
+/** The current milestone's circle is larger, as in the reference. */
+const CIRCLE_NOW = 40;
+
 export default function CurriculumScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const getToken = useAuthToken();
   const accent = useAccent();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [curriculum, setCurriculum] = useState<Curriculum | null>(null);
   const [focus, setFocusList] = useState<Focus[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Everything closed on open: the screen's first job is to show the SHAPE of
+  // the belt — eleven milestones and where you are — not its contents.
+  const [openMilestone, setOpenMilestone] = useState<number | null>(null);
+  const [openLesson, setOpenLesson] = useState<string | null>(null);
+  const [headerOpen, setHeaderOpen] = useState(false);
+
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      // Both, because the focus panel is a comparison — what the roadmap wants
-      // against what the athlete already holds. Either alone renders half an
-      // answer.
-      const [c, f] = await Promise.all([
-        getCurriculum(getToken, id),
-        fetchFocus(getToken),
-      ]);
+      // Both, because the lesson-level action is a comparison — what this
+      // roadmap wants against what the athlete already holds. Either alone
+      // renders half an answer.
+      const [c, f] = await Promise.all([getCurriculum(getToken, id), fetchFocus(getToken)]);
       setCurriculum(c);
       setFocusList(f);
       setError(null);
@@ -77,6 +118,8 @@ export default function CurriculumScreen() {
       void load();
     }, [load]),
   );
+
+  const view = useMemo(() => (curriculum ? buildRoadmap(curriculum) : null), [curriculum]);
 
   const toggleEnrollment = useCallback(async () => {
     if (!curriculum) return;
@@ -98,8 +141,8 @@ export default function CurriculumScreen() {
       setBusy(true);
       try {
         // `fromRoadmap`, never `next` — the difference is the athlete's own
-        // entries, which this roadmap carries along but does not own. Attributing
-        // those to it would delete them when it is deactivated.
+        // entries, which this roadmap carries along but does not own.
+        // Attributing those to it would delete them when it is deactivated.
         await setFocus(getToken, proposal.next, {
           curriculum_id: curriculum.id,
           technique_ids: proposal.fromRoadmap,
@@ -137,365 +180,708 @@ export default function CurriculumScreen() {
     [applyFocus],
   );
 
+  /** "Work on this" from an expanded lesson — one technique, nothing behind it. */
+  const workOnLesson = useCallback(
+    (techniqueID: string) => {
+      if (!curriculum || !focus) return;
+      const proposal = proposeOneFocus(curriculum.items ?? [], focus, techniqueID);
+      if (proposal.unchanged) return;
+      confirmFocus(proposal);
+    },
+    [confirmFocus, curriculum, focus],
+  );
+
+  /**
+   * The overflow, and everything that is not reading lives in it.
+   *
+   * Enrolment and the bulk focus write are both about the whole roadmap rather
+   * than about any milestone, and the reference gives them no place on the
+   * timeline. An `Alert` rather than a sheet because this app has no sheet
+   * primitive and the destructive case already goes through one.
+   */
+  const openMenu = useCallback(() => {
+    if (!curriculum) return;
+    const proposal = focus ? proposeFocus(curriculum.items ?? [], focus) : null;
+    const options: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
+
+    if (proposal && !proposal.unchanged && proposal.added.length > 0) {
+      options.push({
+        text: `Work these next (${proposal.added.length})`,
+        onPress: () => confirmFocus(proposal),
+      });
+    }
+    options.push({
+      // Keyed on `countable_items`, not on the track — a track is a grouping
+      // hint and must never gate anything. "Start working this" on a list with
+      // nothing completable promises progress that cannot arrive.
+      text: curriculum.enrolled
+        ? 'Put this down'
+        : curriculum.countable_items > 0
+          ? 'Start working this'
+          : 'Keep this handy',
+      style: curriculum.enrolled ? 'destructive' : undefined,
+      onPress: () => void toggleEnrollment(),
+    });
+    options.push({ text: 'Cancel', style: 'cancel' });
+
+    Alert.alert(
+      curriculum.name,
+      curriculum.enrolled && curriculum.started_on !== null
+        ? `Counted from what you have logged since ${curriculum.started_on}. Your record decides these, so a long run of misses can take one back.`
+        : 'Nothing here can be ticked off by hand — milestones complete from what you log.',
+      options,
+    );
+  }, [confirmFocus, curriculum, focus, toggleEnrollment]);
+
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, [router]);
+
   if (error && !curriculum) {
     return (
-      <View style={styles.screen}>
-        <Stack.Screen options={{ title: 'Roadmap' }} />
+      <View style={[styles.fallback, { paddingTop: insets.top + 12 }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <BackButton onPress={goBack} />
         <Text style={styles.error}>{error}</Text>
       </View>
     );
   }
-  if (!curriculum) {
+  if (!curriculum || !view) {
     return (
-      <View style={styles.screen}>
-        <Stack.Screen options={{ title: 'Roadmap' }} />
+      <View style={[styles.fallback, { paddingTop: insets.top + 12 }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <BackButton onPress={goBack} />
         <ActivityIndicator style={styles.loading} />
       </View>
     );
   }
 
-  const items = curriculum.items ?? [];
-  const isRoadmap = curriculum.countable_items > 0;
-  const proposal = focus ? proposeFocus(items, focus) : null;
+  // The belt's own colour carries the whole screen — the rule, the counts, the
+  // dots, both rings. An athlete's own list belongs to no belt and falls back
+  // to their chosen accent.
+  const tone = view.beltKey ? activeBeltAccent[view.beltKey] : accent.accent;
+  const ringPercent =
+    curriculum.enrolled && view.progress !== null ? percent(view.progress) : null;
+  // The first milestone that is not finished and has something to finish.
+  const current = view.milestones.find((m) => m.progress !== null && !m.complete)?.index ?? null;
 
   return (
-    /* A plain ScrollView, and the number that decides whether that stays right
-       is 85 — the white belt syllabus, now reachable from the Library since
-       #282. That is DOUBLE the largest roadmap (42) and this screen's previous
-       ceiling.
-
-       Left un-virtualised deliberately, not by omission. The catalog list on
-       the Library tab IS virtualised, at 542 rows of richer content, which is
-       where this app's threshold actually sits; 85 rows of text is roughly
-       300 native views, well under it. Revisit if a syllabus passes ~150
-       items, or the first time somebody sees a pause opening one on an older
-       phone — neither has been measured, because a worktree cannot build this
-       app (the EXPO_PUBLIC_ trap).
-
-       And the fix is smaller than the first draft of this comment claimed:
-       not a SectionList, just one pre-pass. Walk `groupByPhase` once into a
-       flat array of {kind: 'phaseHeader' | 'concept' | 'technique', item,
-       step}, assigning step numbers in that walk, and hand it to a FlatList
-       with phase headers as ordinary rows. About ten lines, and it retires
-       `renderGroups`' render-time `++step` mutation as a side effect. */
-    <ScrollView contentContainerStyle={styles.scroll} testID="curriculum-screen">
-      <Stack.Screen options={{ title: curriculum.name }} />
-
-      {curriculum.description !== '' && (
-        <Text style={styles.description}>{curriculum.description}</Text>
-      )}
-
-      {error && <Text style={styles.error}>{error}</Text>}
-
-      {isRoadmap && curriculum.enrolled && (
-        <View style={styles.card}>
-          <Text style={styles.headline}>
-            <Text style={[styles.headlineNumber, { color: accent.ink }]}>
-              {curriculum.mastered_items}
-            </Text>
-            <Text style={styles.headlineRest}> of {curriculum.countable_items} mastered</Text>
-          </Text>
-          {/* The two sentences this screen exists to say. Both surprising, both
-              correct, neither discoverable. */}
-          <Text style={styles.note}>
-            Counted from what you have logged since {curriculum.started_on} — anything before
-            that does not count, because a rate over your whole history mostly measures the
-            months you were still learning. Your record decides these, so a long run of misses
-            can take one back.
-          </Text>
-        </View>
-      )}
-
-      {isRoadmap && !curriculum.enrolled && (
-        <View style={styles.card}>
-          <Text style={styles.note}>
-            {curriculum.countable_items} of these have completion criteria. Start working this
-            to begin counting — the clock runs from the day you take it on.
-          </Text>
-        </View>
-      )}
-
-      <Pressable
-        onPress={toggleEnrollment}
-        disabled={busy}
-        style={({ pressed }) => [
-          styles.primary,
-          curriculum.enrolled
-            ? { borderColor: vola.line, borderWidth: 1 }
-            : { backgroundColor: accent.accent },
-          pressed && styles.pressed,
-          busy && styles.disabled,
+    <View style={styles.screen}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScrollView
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 40 },
         ]}
-        accessibilityRole="button"
-        testID="curriculum-enrollment"
+        testID="curriculum-screen"
       >
-        <Text style={[styles.primaryText, !curriculum.enrolled && { color: vola.bg }]}>
-          {/* Keyed on `countable_items`, not on the track — a track is a
-              grouping hint and must never gate anything. "Start working this"
-              on a list with nothing completable promises progress that cannot
-              arrive. Enrolment itself stays: on a criteria-free list it is a
-              bookmark, which is what an athlete's own curriculum has always
-              been. */}
-          {curriculum.enrolled
-            ? 'Put this down'
-            : curriculum.countable_items > 0
-              ? 'Start working this'
-              : 'Keep this handy'}
+        <RNView style={styles.topRow}>
+          <BackButton onPress={goBack} />
+          <Pressable
+            onPress={openMenu}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel="Roadmap options"
+            testID="roadmap-menu"
+            style={({ pressed }) => [styles.circleButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.menuGlyph}>•••</Text>
+          </Pressable>
+        </RNView>
+
+        {/* The belt name is the most distinctive type on the screen: uppercase,
+            wide-tracked, centred, and NOT a navigation title. */}
+        <Text style={styles.beltName} numberOfLines={2} testID="roadmap-title">
+          {view.title}
         </Text>
-      </Pressable>
+        {view.beltKey && (
+          <RNView style={styles.markRow}>
+            <BeltMark belt={view.beltKey} width={64} />
+          </RNView>
+        )}
 
-      {/* `isRoadmap` too, matching web. On a criteria-free list `proposeFocus`
-          always returns unchanged, so the panel said either "Nothing left to
-          work on this one" (false — nothing was ever workable) or "Your focus
-          already matches this roadmap" (false — the focus has nothing to do
-          with it). Review found the asymmetry with web, which has always
-          gated on all three. */}
-      {isRoadmap && curriculum.enrolled && proposal && (
-        <FocusPanel proposal={proposal} busy={busy} onApply={() => confirmFocus(proposal)} />
-      )}
-
-      <SectionHeader label={`${items.length} item${items.length === 1 ? '' : 's'}`} />
-      {renderGroups(curriculum, accent.ink)}
-    </ScrollView>
-  );
-}
-
-/**
- * The items, grouped by phase — the structure the phased syllabuses carry.
- *
- * Step numbers count TECHNIQUES continuously across every group, so "step 9"
- * still means the ninth thing to learn: concepts are ideas beside the path,
- * not stops on it, and numbering them would shift every milestone's number by
- * how much prose came before it. Unphased items lead, labelled only when
- * phases exist — see `groupByPhase` for why they must not sink.
- *
- * **The phase headers are numbered as of N96, and that is not decoration.**
- * Today and You now say "Milestone 3 of 11 · Mount: get out, then hold", and a
- * number that names nothing you can find when you arrive is worse than no
- * number. The count is the phase's position in `phases`, which is the array
- * `CurriculumItem.phase` indexes by contract and the order this function
- * renders them in — the same arithmetic `roadmapMilestone` does, reached from
- * the other end.
- *
- * `indexOf` rather than the map's own counter, because `groupByPhase` puts the
- * UNPHASED group first: counting rendered groups would make phase one
- * "Milestone 2" on any mixed curriculum. A phase that somehow is not in the
- * array gets no number rather than "Milestone 0".
- */
-function renderGroups(curriculum: Curriculum, tone: string) {
-  const items = curriculum.items ?? [];
-  const phases = curriculum.phases ?? [];
-  let step = 0;
-  return groupByPhase(phases, items).map((group) => (
-    <RNView key={group.phase ? `p${group.phase.order}` : 'unphased'} style={styles.group}>
-      {group.phase ? (
-        <RNView style={styles.phaseHeader}>
-          {phases.indexOf(group.phase) >= 0 && (
-            <Text style={[styles.phaseCount, { color: tone }]}>
-              MILESTONE {phases.indexOf(group.phase) + 1} OF {phases.length}
+        {/* The belt level's own disclosure: the thesis is the one line, and the
+            author's full rationale is behind it rather than pushing the
+            milestones off the first screen. */}
+        <Pressable
+          onPress={() => setHeaderOpen((v) => !v)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: headerOpen }}
+          accessibilityLabel={headerOpen ? 'Hide what this belt is for' : 'What is this belt for'}
+          testID="roadmap-thesis"
+          style={({ pressed }) => [styles.thesisWrap, pressed && styles.pressed]}
+        >
+          <Text style={styles.thesis}>{view.thesis}</Text>
+          {headerOpen && (
+            <Text style={styles.description} testID="roadmap-description">
+              {view.description}
             </Text>
           )}
-          <Text style={styles.phaseTitle}>{group.phase.title}</Text>
-          {group.phase.description !== '' && (
-            <Text style={styles.note}>{group.phase.description}</Text>
-          )}
-        </RNView>
-      ) : (
-        phases.length > 0 && (
-          /* Only in a MIXED curriculum: without a label the leading unphased
-             items read as a preamble of the first phase rather than as items
-             nobody assigned. A flat curriculum keeps no chrome at all. */
-          <Text style={styles.unassigned}>Unassigned</Text>
-        )
-      )}
-      {group.items.map((item) =>
-        item.kind === 'concept' ? (
-          <ConceptCard key={`c${item.order}`} item={item} />
-        ) : (
-          <TechniqueRow
-            key={item.technique_id}
-            step={++step}
-            name={item.name}
-            position={item.position}
-            category={item.category}
-            notes={item.notes}
-            criteria={criteriaChips(item, curriculum.enrolled)}
-            mastered={item.progress?.mastered ?? false}
-            started={hasEvidence(item.progress)}
-            reading={item.criteria === null}
-            tone={tone}
-            testID={`curriculum-item-${item.technique_id}`}
+        </Pressable>
+
+        {error && <Text style={styles.error}>{error}</Text>}
+
+        {/* Progress card. Both belts get one — the reference only drew it on
+            blue, and two belts behaving differently is a worse outcome than
+            matching one image exactly. It is also where "0 of 11 milestones
+            completed" lives, which is the sentence the screen exists to say. */}
+        <RNView style={styles.card} testID="roadmap-progress-card">
+          <RNView style={[styles.tile, { borderColor: tone }]}>
+            <Icon name="trophy" size={22} color={tone} />
+          </RNView>
+          <RNView style={styles.cardBody}>
+            <Text style={styles.cardTitle}>{titleCase(view.title)} path</Text>
+            <Text style={styles.cardNote}>
+              {view.completedMilestones} of {view.countableMilestones} milestone
+              {view.countableMilestones === 1 ? '' : 's'} completed
+            </Text>
+            <Bar fraction={curriculum.enrolled ? (view.progress ?? 0) : 0} tone={tone} />
+          </RNView>
+          <ProgressRing
+            percent={ringPercent}
+            color={tone}
+            label={
+              ringPercent === null
+                ? 'Not started — nothing is being counted yet'
+                : `${ringPercent} percent of milestones completed`
+            }
+            testID="roadmap-progress-ring"
           />
-        ),
-      )}
-    </RNView>
-  ));
-}
+        </RNView>
 
-/**
- * A concept: authored text — an idea the phase is teaching, not a step the
- * record can complete. No criteria chips, no step number, no "reading"
- * treatment: its body IS the content, and dressing it as an unfinished
- * technique would misreport it.
- */
-function ConceptCard({ item }: { item: CurriculumItem }) {
-  return (
-    <View style={styles.concept} testID={`curriculum-concept-${item.order}`}>
-      <Text style={styles.conceptTitle}>{item.title}</Text>
-      {item.notes !== '' && <Text style={styles.conceptBody}>{item.notes}</Text>}
-    </View>
-  );
-}
+        {!curriculum.enrolled && (
+          <Pressable
+            onPress={() => void toggleEnrollment()}
+            disabled={busy}
+            style={({ pressed }) => [
+              styles.primary,
+              { backgroundColor: tone },
+              pressed && styles.pressed,
+              busy && styles.disabled,
+            ]}
+            accessibilityRole="button"
+            testID="curriculum-enrollment"
+          >
+            <Text style={[styles.primaryText, { color: vola.bg }]}>
+              {curriculum.countable_items > 0 ? 'Start working this' : 'Keep this handy'}
+            </Text>
+          </Pressable>
+        )}
 
-/**
- * The bridge, shown before it is taken.
- *
- * Names what would leave, and distinguishes the two reasons: a mastered
- * technique retiring is the machine working, an evicted one is the athlete
- * losing a choice to the five-slot cap.
- */
-function FocusPanel({
-  proposal,
-  busy,
-  onApply,
-}: {
-  proposal: FocusProposal;
-  busy: boolean;
-  onApply: () => void;
-}) {
-  const accent = useAccent();
-  const evicted = proposal.dropped.filter((d) => d.reason === 'evicted');
-  const finished = proposal.dropped.filter((d) => d.reason === 'mastered');
-
-  if (proposal.unchanged) {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Focus</Text>
-        <Text style={styles.note}>
-          {proposal.next.length === 0
-            ? 'Nothing left to work on this one.'
-            : 'Your focus already matches this roadmap — these show as one-tap chips when you log a session.'}
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.card} testID="curriculum-focus-panel">
-      <Text style={styles.cardTitle}>Work these next</Text>
-      <Text style={styles.note}>
-        Putting them in your focus list makes them one-tap chips in the reflection wizard —
-        which is what records the evidence these criteria read.
-      </Text>
-
-      {proposal.added.length > 0 && (
-        <RNView style={styles.chips}>
-          {proposal.added.map((it) => (
-            <RNView key={it.technique_id} style={styles.chip}>
-              <Text style={styles.chipText}>{it.name}</Text>
-            </RNView>
+        <RNView style={styles.timeline}>
+          {view.milestones.map((m, i) => (
+            <MilestoneCard
+              key={m.index}
+              milestone={m}
+              tone={tone}
+              enrolled={curriculum.enrolled}
+              isCurrent={m.index === current}
+              isFirst={i === 0}
+              isLast={i === view.milestones.length - 1}
+              open={openMilestone === m.index}
+              openLesson={openMilestone === m.index ? openLesson : null}
+              busy={busy}
+              onToggle={() => {
+                setOpenLesson(null);
+                setOpenMilestone((v) => (v === m.index ? null : m.index));
+              }}
+              onToggleLesson={(key) => setOpenLesson((v) => (v === key ? null : key))}
+              onWork={workOnLesson}
+            />
           ))}
         </RNView>
-      )}
 
-      {finished.length > 0 && (
-        <Text style={styles.note}>
-          Retiring {finished.map((d) => d.focus.name).join(', ')} — your record already clears{' '}
-          {finished.length === 1 ? 'it' : 'them'}.
-        </Text>
-      )}
-
-      {evicted.length > 0 && (
-        <Text style={[styles.note, styles.warn]}>
-          This will drop {evicted.map((d) => d.focus.name).join(', ')} to stay within five.
-        </Text>
-      )}
-
-      <Pressable
-        onPress={onApply}
-        disabled={busy}
-        style={({ pressed }) => [
-          styles.secondary,
-          { borderColor: accent.accent },
-          pressed && styles.pressed,
-          busy && styles.disabled,
-        ]}
-        accessibilityRole="button"
-        testID="curriculum-apply-focus"
-      >
-        <Text style={[styles.secondaryText, { color: accent.ink }]}>
-          {busy ? 'Saving…' : 'Put these in my focus'}
-        </Text>
-      </Pressable>
+        {/* Completion card — what the athlete will have, in the author's own
+            words, and the same figure the progress ring carries. */}
+        <RNView style={styles.card} testID="roadmap-completion-card">
+          <RNView style={[styles.tile, { borderColor: tone }]}>
+            <Icon name="goal" size={22} color={tone} />
+          </RNView>
+          <RNView style={styles.cardBody}>
+            <Text style={styles.cardTitle}>{titleCase(view.title)} complete</Text>
+            <Text style={styles.cardNote}>{view.goal}</Text>
+          </RNView>
+          <ProgressRing
+            percent={ringPercent}
+            size={44}
+            color={tone}
+            label={
+              ringPercent === null
+                ? 'Not started — nothing is being counted yet'
+                : `${ringPercent} percent complete`
+            }
+            testID="roadmap-completion-ring"
+          />
+        </RNView>
+      </ScrollView>
     </View>
   );
+}
+
+function BackButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Back"
+      testID="roadmap-back"
+      style={({ pressed }) => [styles.circleButton, pressed && styles.pressed]}
+    >
+      <Icon name="back" size={20} color={vola.text} />
+    </Pressable>
+  );
+}
+
+/**
+ * One milestone: a circled number on the belt-coloured rule, and a card.
+ *
+ * The rule is drawn per row and butted against its neighbours rather than as
+ * one element behind the list, so it stays continuous without anything having
+ * to measure the rows. The first row's segment starts at its circle's centre
+ * and the last row's ends at its own, which is what stops the line running off
+ * into the cards above and below.
+ */
+function MilestoneCard({
+  milestone: m,
+  tone,
+  enrolled,
+  isCurrent,
+  isFirst,
+  isLast,
+  open,
+  openLesson,
+  busy,
+  onToggle,
+  onToggleLesson,
+  onWork,
+}: {
+  milestone: Milestone;
+  tone: string;
+  enrolled: boolean;
+  isCurrent: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  open: boolean;
+  openLesson: string | null;
+  busy: boolean;
+  onToggle: () => void;
+  onToggleLesson: (key: string) => void;
+  onWork: (techniqueID: string) => void;
+}) {
+  const size = isCurrent ? CIRCLE_NOW : CIRCLE;
+  const half = Math.round(size / 2);
+
+  return (
+    <RNView style={styles.row}>
+      <RNView style={styles.gutter}>
+        {!(isFirst && isLast) && (
+          <RNView
+            style={[
+              styles.rail,
+              { backgroundColor: tone },
+              isFirst ? { top: half, bottom: 0 } : isLast ? { top: 0, height: half } : null,
+            ]}
+            testID={`roadmap-rail-${m.index}`}
+          />
+        )}
+        <RNView
+          style={[
+            styles.circle,
+            {
+              width: size,
+              height: size,
+              borderRadius: half,
+              borderColor: m.complete || isCurrent ? tone : vola.line,
+              borderWidth: isCurrent ? 2 : 1.5,
+            },
+            m.complete && { backgroundColor: tone },
+          ]}
+        >
+          {m.complete ? (
+            <Icon name="check" size={16} color={vola.bg} />
+          ) : (
+            <Text style={[styles.circleText, isCurrent && { color: vola.text }]}>{m.index}</Text>
+          )}
+        </RNView>
+      </RNView>
+
+      <RNView style={styles.cardCol}>
+        <Pressable
+          onPress={onToggle}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityLabel={`Milestone ${m.index}, ${m.title}, ${m.lessons.length} lesson${
+            m.lessons.length === 1 ? '' : 's'
+          }${m.progress === null ? '' : `, ${m.mastered} of ${m.countable} mastered`}`}
+          testID={`roadmap-milestone-${m.index}`}
+          style={({ pressed }) => [styles.milestone, open && styles.milestoneOpen, pressed && styles.pressed]}
+        >
+          <RNView style={styles.milestoneHead}>
+            <RNView style={styles.milestoneTitleCol}>
+              <Text style={styles.milestoneTitle}>{m.title}</Text>
+              <Text style={[styles.lessonCount, { color: tone }]}>
+                {m.lessons.length} lesson{m.lessons.length === 1 ? '' : 's'}
+              </Text>
+            </RNView>
+            {/* One glyph, turned over — the kit has no chevron-up, and a
+                different drawing for "open" reads as a different control. */}
+            <RNView style={open ? styles.chevronUp : undefined}>
+              <Icon name="chevron-down" size={18} color={vola.textMuted} />
+            </RNView>
+          </RNView>
+
+          {/* Progress at this level's own granularity, so a closed milestone
+              still answers "have I done this". Absent entirely when nothing
+              here can be completed — a milestone of concepts at 0% reads as
+              failure, and it is not one. */}
+          {enrolled && m.progress !== null && (
+            <RNView style={styles.milestoneProgress}>
+              <Bar fraction={m.progress} tone={tone} />
+              <Text style={styles.milestoneCount}>
+                {m.mastered}/{m.countable}
+              </Text>
+            </RNView>
+          )}
+        </Pressable>
+
+        {open && (
+          <RNView style={styles.lessons} testID={`roadmap-lessons-${m.index}`}>
+            {m.description !== '' && <Text style={styles.milestoneNote}>{m.description}</Text>}
+            {m.lessons.map((l, i) => (
+              <LessonRow
+                key={l.key}
+                lesson={l}
+                tone={tone}
+                enrolled={enrolled}
+                isFirst={i === 0}
+                isLast={i === m.lessons.length - 1}
+                open={openLesson === l.key}
+                busy={busy}
+                onToggle={() => onToggleLesson(l.key)}
+                onWork={onWork}
+              />
+            ))}
+          </RNView>
+        )}
+      </RNView>
+    </RNView>
+  );
+}
+
+/**
+ * One lesson: a dot on an inner rule, and its detail underneath when open.
+ *
+ * **The detail says how it is MEASURED and offers no checkbox**, because there
+ * is nothing a tap could set: completion is read back off logged evidence.
+ * What the athlete can do from here is start it — put it in the focus list, so
+ * it becomes a one-tap chip in the reflection wizard, which is what records the
+ * evidence these thresholds read.
+ */
+function LessonRow({
+  lesson: l,
+  tone,
+  enrolled,
+  isFirst,
+  isLast,
+  open,
+  busy,
+  onToggle,
+  onWork,
+}: {
+  lesson: Lesson;
+  tone: string;
+  enrolled: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  open: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  onWork: (techniqueID: string) => void;
+}) {
+  const techniqueID = l.techniqueID;
+  const state = l.mastered
+    ? 'Your record clears this'
+    : l.started
+      ? 'Under way — your record has evidence for this'
+      : enrolled
+        ? 'Nothing logged against this yet'
+        : 'Start working this roadmap to begin counting';
+
+  return (
+    <RNView style={styles.lessonWrap}>
+      <RNView style={styles.lessonGutter}>
+        {!(isFirst && isLast) && (
+          <RNView
+            style={[
+              styles.innerRail,
+              { backgroundColor: tone },
+              isFirst ? { top: 11, bottom: 0 } : isLast ? { top: 0, height: 11 } : null,
+            ]}
+          />
+        )}
+        <RNView
+          style={[
+            styles.dot,
+            { borderColor: tone },
+            (l.mastered || l.measures === null) && { backgroundColor: tone },
+          ]}
+        />
+      </RNView>
+
+      <RNView style={styles.lessonCol}>
+        <Pressable
+          onPress={onToggle}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityLabel={`${l.name}. ${l.measures === null ? 'Something to understand' : state}`}
+          testID={`roadmap-lesson-${l.key}`}
+          style={({ pressed }) => [styles.lessonHead, pressed && styles.pressed]}
+        >
+          <Text style={[styles.lessonName, l.mastered && { color: tone }]}>{l.name}</Text>
+        </Pressable>
+
+        {open && (
+          <RNView style={styles.lessonDetail} testID={`roadmap-lesson-detail-${l.key}`}>
+            {l.notes !== '' && <Text style={styles.lessonNotes}>{l.notes}</Text>}
+
+            {l.measures === null ? (
+              /* A concept carries no criteria by design, and dressing one as an
+                 unfinished measurable would misreport it. */
+              <Text style={styles.understand}>
+                Understand this. There is nothing to count — it is an idea the
+                milestone is teaching, not a step your record completes.
+              </Text>
+            ) : (
+              <>
+                <Text style={styles.measureHead}>HOW THIS IS MEASURED</Text>
+                {l.measures.map((mu) => (
+                  <RNView key={mu.label} style={styles.measureRow}>
+                    <Text style={[styles.measureLabel, mu.met && { color: tone }]}>{mu.label}</Text>
+                    <Text style={[styles.measureValue, mu.met && { color: tone }]}>
+                      {mu.have === null ? mu.need : `${mu.have} / ${mu.need}`}
+                    </Text>
+                  </RNView>
+                ))}
+                <Text style={styles.lessonState}>{state}</Text>
+              </>
+            )}
+
+            {techniqueID !== null && l.measures !== null && !l.mastered && (
+              <Pressable
+                onPress={() => onWork(techniqueID)}
+                disabled={busy}
+                accessibilityRole="button"
+                testID={`roadmap-work-${l.key}`}
+                style={({ pressed }) => [
+                  styles.secondary,
+                  { borderColor: tone },
+                  pressed && styles.pressed,
+                  busy && styles.disabled,
+                ]}
+              >
+                <Text style={[styles.secondaryText, { color: tone }]}>Work on this</Text>
+              </Pressable>
+            )}
+          </RNView>
+        )}
+      </RNView>
+    </RNView>
+  );
+}
+
+/** The thin full-width rule under a card's text. Never labelled — the number
+ *  beside or above it always says the same thing in words. */
+function Bar({ fraction, tone }: { fraction: number; tone: string }) {
+  const pct = Math.max(0, Math.min(1, fraction)) * 100;
+  return (
+    <RNView style={styles.barTrack}>
+      {pct > 0 && (
+        <RNView style={[styles.barFill, { width: `${pct}%`, backgroundColor: tone }]} />
+      )}
+    </RNView>
+  );
+}
+
+/** "WHITE BELT" → "White belt". The cards read as sentences, not as mastheads. */
+function titleCase(s: string): string {
+  const lower = s.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, padding: 20 },
-  scroll: { padding: 20, gap: 12, paddingBottom: 48 },
+  screen: { flex: 1 },
+  fallback: { flex: 1, paddingHorizontal: 20, gap: 12 },
+  scroll: { paddingHorizontal: 20, gap: 12 },
   loading: { marginTop: 24 },
   error: { color: vola.danger, fontSize: 14 },
-  description: { color: vola.textMuted, fontSize: 14, lineHeight: 20 },
-  card: {
-    backgroundColor: vola.surface,
-    borderColor: vola.line,
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    gap: 8,
-  },
-  cardTitle: { color: vola.text, fontSize: 14, fontWeight: '700' },
-  headline: { color: vola.text },
-  headlineNumber: { fontSize: 26, fontWeight: '800' },
-  headlineRest: { color: vola.textMuted, fontSize: 14 },
-  note: { color: vola.textMuted, fontSize: 12, lineHeight: 17 },
-  warn: { color: vola.warn },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: {
-    borderColor: vola.line,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  chipText: { color: vola.text, fontSize: 13, fontWeight: '600' },
-  primary: {
-    borderRadius: 12,
-    paddingVertical: 13,
+
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  circleButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: vola.surfaceRaised,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  primaryText: { color: vola.text, fontSize: 15, fontWeight: '700' },
+  menuGlyph: { color: vola.text, fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
+
+  beltName: {
+    textAlign: 'center',
+    color: vola.text,
+    fontSize: 19,
+    fontWeight: '700',
+    // The signature of the whole screen. Wide enough that "WHITE BELT" reads
+    // as a masthead rather than as a navigation title.
+    letterSpacing: 4.5,
+    marginTop: 4,
+  },
+  markRow: { alignItems: 'center', marginTop: -2 },
+  thesisWrap: { gap: 8 },
+  thesis: {
+    textAlign: 'center',
+    color: vola.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  description: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
+
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: vola.surface,
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 4,
+  },
+  tile: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    backgroundColor: vola.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardBody: { flex: 1, gap: 5 },
+  cardTitle: { color: vola.text, fontSize: 16, fontWeight: '700' },
+  cardNote: { color: vola.textMuted, fontSize: 12, lineHeight: 17 },
+
+  barTrack: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: vola.line,
+    overflow: 'hidden',
+    marginTop: 2,
+  },
+  barFill: { height: 3, borderRadius: 2 },
+
+  primary: { borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  primaryText: { fontSize: 15, fontWeight: '700' },
   secondary: {
     borderRadius: 10,
     borderWidth: 1,
-    paddingVertical: 10,
+    paddingVertical: 9,
     alignItems: 'center',
-    marginTop: 2,
+    marginTop: 4,
   },
-  secondaryText: { fontSize: 14, fontWeight: '700' },
+  secondaryText: { fontSize: 13, fontWeight: '700' },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.5 },
-  group: { gap: 12 },
-  phaseHeader: { gap: 4, marginTop: 8 },
-  phaseCount: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  phaseTitle: { color: vola.text, fontSize: 16, fontWeight: '800' },
-  unassigned: {
+
+  timeline: { marginTop: 4 },
+  // No gap: the rows butt together so the rule segments join into one line.
+  row: { flexDirection: 'row', paddingBottom: 10 },
+  gutter: { width: RAIL_W, alignItems: 'center' },
+  rail: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 2,
+    left: RAIL_W / 2 - 1,
+  },
+  circle: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Opaque, so the rule passes BEHIND the circle rather than through it.
+    backgroundColor: vola.bg,
+  },
+  circleText: {
+    color: vola.textMuted,
+    fontSize: 15,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+
+  cardCol: { flex: 1 },
+  milestone: {
+    backgroundColor: vola.surface,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  // Square off the bottom when open, so the header and its lessons read as one
+  // card rather than as a card with a list floating under it.
+  milestoneOpen: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, paddingBottom: 10 },
+  milestoneHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  milestoneTitleCol: { flex: 1, gap: 2 },
+  milestoneTitle: { color: vola.text, fontSize: 17, fontWeight: '700' },
+  lessonCount: { fontSize: 13, fontWeight: '600' },
+  milestoneProgress: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  milestoneCount: {
     color: vola.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  milestoneNote: { color: vola.textMuted, fontSize: 12, lineHeight: 17, marginBottom: 2 },
+
+  lessons: {
+    backgroundColor: vola.surface,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    // The hairline the reference draws under the milestone's own header.
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: vola.line,
+    paddingTop: 10,
+  },
+  lessonWrap: { flexDirection: 'row' },
+  lessonGutter: { width: 22, alignItems: 'center' },
+  innerRail: { position: 'absolute', top: 0, bottom: 0, width: 1, left: 10.5, opacity: 0.45 },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    marginTop: 7,
+    backgroundColor: vola.surface,
+  },
+  lessonCol: { flex: 1, paddingBottom: 4 },
+  lessonHead: { paddingVertical: 3 },
+  lessonName: { color: vola.text, fontSize: 14, lineHeight: 19 },
+  lessonDetail: { gap: 6, paddingTop: 4, paddingBottom: 8 },
+  lessonNotes: { color: vola.textMuted, fontSize: 12, lineHeight: 17 },
+  understand: { color: vola.textMuted, fontSize: 12, lineHeight: 17, fontStyle: 'italic' },
+  measureHead: {
+    color: vola.textDim,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginTop: 2,
+  },
+  measureRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  measureLabel: { color: vola.textMuted, fontSize: 12, flex: 1 },
+  measureValue: {
+    color: vola.text,
     fontSize: 12,
     fontWeight: '700',
-    marginTop: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    fontVariant: ['tabular-nums'],
   },
-  concept: {
-    backgroundColor: vola.surface,
-    borderColor: vola.lineSoft,
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    gap: 6,
-  },
-  conceptTitle: { color: vola.text, fontSize: 14, fontWeight: '700' },
-  conceptBody: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
+  lessonState: { color: vola.textDim, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  chevronUp: { transform: [{ rotate: '180deg' }] },
 });
