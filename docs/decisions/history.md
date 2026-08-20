@@ -32189,7 +32189,7 @@ of three and filing the third is precisely the move that produced F15: `bjj`
 copied the arithmetic, was fixed first, and left a note saying the original was
 still wrong. `identifyRetryAfterSeconds`'s own neighbouring docstring already
 says a change to one of these should change both. Doing otherwise would have
-meant filing F18 for a one-line typo somebody had just read.
+meant filing a fresh ticket for a one-line typo somebody had just read.
 
 `ratelimit.Reject` also writes `int(retryAfter.Seconds())` and is deliberately
 left alone: every caller reaches it through `Allow`, which already returns a
@@ -32236,7 +32236,7 @@ green afterwards in the same session — which is the half of that ritual that i
 easy to skip, since a red suite only means something once its green baseline has
 been seen.
 
-### The server half is only half — filed as F17
+### The server half is only half — filed as F17 (#403)
 
 Searched the clients before calling this done, and the answer is worth more than
 the fix: **nothing reads the header.** Not one line in `apps/mobile`,
@@ -32256,7 +32256,7 @@ therefore tells a rate-limited athlete to *retake the photo* — advice for a
 failure a new photo cannot fix.
 
 None of that is this fix's scope, and all of it means an athlete notices nothing
-from this PR on its own. It is F17, and it is the half with the user-visible
+from this PR on its own. It is F17 (#403), and it is the half with the user-visible
 behaviour in it.
 
 ## Open items / known gaps as of this entry

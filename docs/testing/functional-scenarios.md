@@ -5570,13 +5570,13 @@ number would describe something still happening.
 - Re-requesting after a decline is still possible but now bounded — that was
   the residual this closes.
 
-### Known gap: no client reads the header (F17)
+### Known gap: no client reads the header (F17 — #403)
 
 - Server-side scenarios above are all reachable today. **Client-side ones are
   not yet**: nothing in `apps/mobile`, `apps/web` or `apps/admin` reads a
   response header at all, so no app can honour `Retry-After` regardless of what
   the server sends. Anyone writing a client scenario for it is writing a test
-  for F17, not a regression test for existing behaviour.
+  for F17 (#403), not a regression test for existing behaviour.
 - What to assert once it lands: the identify screen stops inventing "a few
   minutes" and says the real wait; the outbox in `sync.ts` respects a delay
   longer than its `[5s, 15s, 60s, 300s]` ladder rather than burning retries
