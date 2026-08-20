@@ -36608,6 +36608,135 @@ Documented in `CLAUDE.md` beside the merge rules, with the query, and with the
 instruction to re-check after **every** body edit — because an edit that
 reintroduces the phrase re-arms the link silently.
 
+## 2026-08-20 — "Merged, evidence outstanding" is now a state the board can hold (N456)
+
+`closes #N` fires on merge. For a ticket whose criteria the diff satisfies that
+is right; for one carrying a `NEEDS HUMAN EVIDENCE` criterion it is wrong, and
+**that is the normal end state for device-reported work** — which is most of
+what the athlete actually notices. The convention had no way to say *the code
+landed and the evidence has not*, so it said `Done`.
+
+Measured on the day: **six tickets closed that way and were reopened by hand**
+(#414, #365, #406, #434, #444, #388). That was already known. What was not known
+until this ticket counted them is that **five more closed the same day and were
+never reopened** — #388, #402, #409, #433, #446 — because the six had somebody
+watching the merge and these did not. That number is the actual size of the
+problem: a closed ticket is the one state nobody re-reads, so its outstanding
+criteria go with it.
+
+The entry immediately above this one is the other half of the argument. A session
+tried to keep such a ticket open **by hand**, wrapping the keyword in backticks
+to quote it, and GitHub closed the ticket anyway — then the correction
+reintroduced the bug by quoting it again. The manual route was not merely
+unreliable; it was actively hard to get right, and invisible when wrong.
+
+**The shape.** GitHub cannot be told not to close, so the merge is not fought.
+`.github/workflows/evidence-latch.yml` converts the wrong close back into the
+right state within seconds — reopen, label `evidence-outstanding`, and comment
+the outstanding checks as a numbered list. The label **is** the state, and the
+board view filtered on it is the list of what is owed. Nobody changes how they
+write a PR; `closes #N` stays, and the backtick dance is retired.
+
+Because it keys on the **close event** rather than on a merge, it also catches an
+issue closed by somebody clicking — the #380 / #423 shape — for free. Which, per
+that entry above, may have been armed keywords rather than people all along.
+
+### The rule is positional, and that was measured, not designed
+
+The trigger is the repo's own existing convention, so no new authoring habit was
+invented: across all 88 issues, **28 real evidence criteria**, in four
+punctuation forms, every one of them a checkbox *opening* with the marker.
+
+The subtlety is the three occurrences that are **not** criteria — one in prose,
+**two inside checkboxes** — where a ticket refers to the concept while asking for
+something a diff can settle. A naive substring match latches all three forever.
+One of them is in **#456 itself**, the ticket that asked for this mechanism, so
+the naive rule would have reopened every future ticket that merely *discusses*
+the feature: the never-opens-gate failure arriving through the front door. All
+three live lines are `--self-test` vectors now, as must-not-match cases.
+
+Worth recording how that surfaced: the first measurement was reported as a clean
+"30 of 30", the coordinator **re-ran a claim that was already convincing**, and
+the discrepancy was one issue in thirty. A round number is exactly the kind that
+stops being re-checked.
+
+### The lesson that generalises: verify the check can PASS
+
+This repo has a standing section on verifying a check *can fail*. **Pointed the
+other way it is just as sharp, and it killed this design's first draft.**
+
+That draft released the latch when somebody ticked the ticket's evidence
+checkbox — the obvious gesture, apparently free. It would have deadlocked every
+device ticket in the repo, because:
+
+**0 of 415 acceptance-criteria checkboxes in this repository's entire issue
+history have ever been ticked.** Not the evidence ones. Any of them.
+
+Nothing about the code would have been wrong. The self-test would have passed,
+the mutation testing would have been clean, and the mechanism would have been
+unsatisfiable in production by a convention nobody had written down because
+nobody had noticed it — and a gate that never opens gets ripped out within a
+week, *taking the problem it solved with it*, because the removal looks like
+unblocking rather than regression.
+
+So the exit is an **attestation comment**, a gesture people already make:
+
+```
+/evidence ran it on the 15 Pro, both belts, expanded and collapsed — labels stay
+above the keyboard
+```
+
+The observation is **required**, and a bare `/done` is refused on purpose rather
+than ignored silently: it would recreate the tick-box in a costume — an assertion
+that evidence exists with no record of what was seen. `CLAUDE.md` now says not to
+add one later as a convenience. Ticking by hand still works as a second path.
+
+The general form is in `CLAUDE.md` beside its twin: **when a gate has a release
+condition, ask whether that gesture has ever happened here.** The issue corpus,
+`git log` and the PR history all answer it, and the answer is occasionally zero.
+
+### What it deliberately does not do
+
+- **It never chirps on an ordinary ticket.** An issue closing with no unticked
+  evidence criterion is not touched, not labelled, not commented on — confirmed
+  against real closed tickets, not just fixtures. A gate that is noisy on the
+  majority path gets muted, which is the same death as one that never opens.
+- **Closing as `not planned` is left alone.** That is a decision, not a slip.
+- **It adds no PR check.** It never triggers on `pull_request`, so the six
+  required contexts and `enforce_admins` are untouched — verified by
+  `check-ci-checks.py` still reporting exactly 6 declared checks after the
+  change. Nothing here can block a merge.
+- **There is no `Awaiting evidence` board column**, and that is a deferral rather
+  than an oversight. Writing a Projects v2 field from Actions needs a long-lived
+  PAT with project write access — `GITHUB_TOKEN` has no such permission and this
+  repo has zero secrets. Creating that credential is the user's decision. The
+  label carries the state without one; the column is a small follow-up if they
+  want it.
+
+### Why the logic is not in the YAML
+
+`issues:` events **always run the workflow from the default branch**, so a
+branch's copy of the workflow never fires. Logic inline in the YAML could
+therefore not be exercised until after it merged — untestable in the way that
+matters. It lives in `scripts/evidence-latch.py`: pure decision functions with no
+network (`--self-test`, in `verify` and in the `Scripts (Python)` CI job), and a
+standalone driver that runs against the real API (`--issue N --simulate closed`).
+
+**Demonstrated rather than described**, on a scratch issue driven through the
+full lifecycle against the live API: closed as a merge would close it → reopened
+and labelled (re-read to confirm, not assumed) → an ordinary comment stayed
+silent → `/done` refused and the latch held → `/evidence <observation>` ticked
+**only** the evidence box, left the ordinary criterion and the mid-sentence
+mention untouched, removed the label and closed it as completed. Scratch deleted
+afterwards. Nine mutations of the script were each confirmed to turn the
+self-test red, with the baseline green in the same session — and the tenth
+attempt failed to apply and reported itself as such rather than as a pass, which
+is the escaping trap that section warns about.
+
+The five already-closed tickets are a separate, deliberate decision: the script
+lists them (`--backfill --dry-run`) and reopening them is a bulk board move, so
+it waits on the user rather than happening as a side effect of this landing.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.

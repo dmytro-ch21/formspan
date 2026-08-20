@@ -288,6 +288,21 @@ jobs:
       - name: Dictation eval corpus
         run: python3 scripts/check-dictation-evals.py
 
+      # The evidence latch (N456) decides whether a closing issue still owes a
+      # human-run check, and it runs on `issues:` events where NOBODY IS
+      # WATCHING — no PR, no reviewer, no red tick anyone would notice. Its own
+      # workflow self-tests on every event for that reason, and this step is the
+      # other half: it puts the guard on the PR that CHANGES it, which is the
+      # only moment a person is looking.
+      #
+      # What it protects is a positional rule measured against the live corpus:
+      # a checkbox OPENING with the marker is a criterion, a line merely
+      # mentioning it is not. Three real lines in this repo are mentions, two of
+      # them inside checkboxes, and a naive substring match reopens all three
+      # forever — including every future ticket that discusses this feature.
+      - name: Evidence latch decides correctly
+        run: python3 scripts/evidence-latch.py --self-test
+
       # Until this job existed, NOTHING in this repo read a .py file: no CI
       # step, no `verify` link, no pyproject/ruff config anywhere. The content
       # pipeline is Python, and the script that imports the whole catalog is

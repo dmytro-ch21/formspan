@@ -1,0 +1,92 @@
+name: Evidence latch
+
+# Reopens an issue that closed while a `NEEDS HUMAN EVIDENCE` criterion was
+# still unticked, labels it `evidence-outstanding`, and closes it again when
+# somebody attests to what they saw. Full reasoning is in the script's module
+# docstring; the three things worth knowing at THIS level:
+#
+# 1. **The logic is in `scripts/evidence-latch.py`, not inline here, and that is
+#    load-bearing.** `issues:` events ALWAYS run the workflow from the DEFAULT
+#    BRANCH — a branch's version of this file is never what fires. Logic living
+#    in the YAML could therefore not be exercised until after it merged, which
+#    is untestable in the way that matters. The script runs standalone against
+#    the real API (`--issue N --simulate closed`) and decides in pure functions
+#    with no network at all (`--self-test`).
+#
+# 2. **This adds no check to any PR.** It never triggers on `pull_request`, so
+#    the six required contexts on `main` are untouched and branch protection is
+#    not involved. Nothing here can block a merge.
+#
+# 3. **The silent majority path is silent.** An issue closing with no unticked
+#    evidence criterion is not reopened, not labelled and not commented on. A
+#    gate that chirps on ordinary tickets gets muted, which is the same death as
+#    one that never opens.
+
+on:
+  issues:
+    # `closed`: the whole point — and keyed on the CLOSE rather than on a merge,
+    # so an issue closed by somebody clicking is caught too (the #380 / #423
+    # shape), not only one closed by `closes #N`.
+    types: [closed, edited]
+    # `edited`: ticking the boxes by hand is the second exit path. It fires on
+    # every body edit, which is a ~15s job we accept; the script no-ops
+    # immediately unless the issue is actually labelled.
+  issue_comment:
+    # `created`: `/evidence <what you saw>` is the primary exit path, because
+    # ticking a box is a gesture nobody in this repo has ever performed —
+    # 0 of 415 acceptance-criteria boxes, measured.
+    types: [created]
+
+permissions:
+  contents: read
+  # Reopen, label, comment, and edit the body to tick the criteria.
+  issues: write
+
+# An issue can receive a close and a comment within a second of each other. Two
+# runs deciding against the same ticket concurrently could reopen and close it
+# in either order, so they are serialised PER ISSUE. Not cancel-in-progress: a
+# superseded run here has usually already performed a write, and cancelling it
+# half way is how a ticket ends up labelled but not reopened.
+concurrency:
+  group: evidence-latch-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  latch:
+    name: Evidence latch
+    runs-on: ubuntu-latest
+    # Every job in this repo is bounded; GitHub's default is six hours. This is
+    # a checkout and a handful of API calls.
+    timeout-minutes: 10
+    # Cheapest possible guard against the pointless run: `issue_comment` fires
+    # on pull request comments too, because a PR is an issue. The script refuses
+    # them as well — this just avoids spinning a runner for every PR comment in
+    # the repo.
+    if: github.event.issue.pull_request == null
+    steps:
+      # No `fetch-depth: 0`: unlike the `Ready PRs contain work` gate, nothing
+      # here reads git history. The default shallow clone is all the script
+      # needs, which is itself.
+      - uses: actions/checkout@v7
+
+      # No `setup-python`, matching `Scripts (Python)` and `PR has work`: the
+      # script is stdlib-only, the runner image ships python3, and every extra
+      # action is one more thing that can fail to download before any of this
+      # repo's own code runs.
+      #
+      # No pipe and no grep on this line, deliberately — `grep -c` exits 1 on no
+      # match and `gofmt -l` exits 0 while printing offenders, and both have
+      # bitten this repo. The script's exit status IS the step's exit status.
+      - name: Decide and act on this event
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/evidence-latch.py --event-file "$GITHUB_EVENT_PATH"
+
+      # Runs regardless of the verdict above, so the apparatus is exercised on
+      # every event rather than only when it acts. If this ever goes red, the
+      # step above cannot be trusted whatever it just did — and unlike a PR
+      # check, nobody is watching this workflow, so it has to say so itself.
+      - name: The latch can still decide (self-test)
+        if: always()
+        run: python3 scripts/evidence-latch.py --self-test

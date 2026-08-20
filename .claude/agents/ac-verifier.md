@@ -111,6 +111,20 @@ Exactly one of four, and the third is the one that matters most here:
 A table first — criterion (trimmed), verdict, evidence or what is missing. Then
 the detail for anything not MET.
 
+**Your `NEEDS HUMAN EVIDENCE` verdict now has a consumer, and it reads the
+ISSUE, not your report.** The evidence latch
+(`.github/workflows/evidence-latch.yml`) reopens a ticket that closes on merge
+with an unticked `**NEEDS HUMAN EVIDENCE**` criterion in its body. So:
+
+- **If you return that verdict for a criterion the issue does not carry in the
+  marked form, say so explicitly and tell the caller to mark it.** The marker has
+  to OPEN the checkbox — `- [ ] **NEEDS HUMAN EVIDENCE** — …`. A criterion that
+  merely mentions the phrase is a mention, and the latch ignores it by design.
+  An unmarked criterion means the ticket closes on merge and the check is never
+  run, which is the exact failure the latch exists to end.
+- **Never mark a criterion as evidence-needed in the issue yourself** — you are
+  read-only, and it is the caller's decision.
+
 Then, whenever anything is `NEEDS HUMAN EVIDENCE`, a section headed
 **"For the user to check"** — because that is where those go. The user has said
 they will run these themselves, deliberately, to catch bugs early. So write it

@@ -92,6 +92,36 @@ An issue moves to `In Review` when its PR goes ready-for-review, and closes when
 that PR merges — `closes #<n>` in the PR body does this automatically, which is
 the point of using issues.
 
+**Merging is not always the end, and the board says so now.** If the issue
+carries an unticked `**NEEDS HUMAN EVIDENCE**` criterion, the evidence latch
+(`.github/workflows/evidence-latch.yml`) reopens it within seconds of the merge
+and labels it **`evidence-outstanding`** — *merged, awaiting evidence*. That is a
+real state, distinct from both `In Review` and `Done`, and it is where most
+device-reported tickets legitimately sit for a while.
+
+- **Do not "clean up" a labelled issue by closing it.** It will reopen, and the
+  latch will say so again. The label comes off when the evidence is produced.
+- **The way to finish one is a comment**: `/evidence <what you actually saw>`.
+  That ticks the criteria, drops the label and closes the ticket. A bare `/done`
+  is refused on purpose — the observation is the point.
+- **When reporting the board, show it as its own state.** An
+  `evidence-outstanding` ticket is not "in progress" and not "done"; it is owed a
+  device run, and the user runs those personally.
+
+```bash
+gh issue list --repo dmytro-ch21/formspan --label evidence-outstanding
+```
+
+**When you write a ticket that will need a device check, write the criterion in
+the marked form**, or the latch cannot see it:
+
+```
+- [ ] **NEEDS HUMAN EVIDENCE** — seen on a real device, both belts.
+```
+
+The marker must OPEN the checkbox. A criterion that mentions the phrase
+mid-sentence is a mention, not a criterion, and is deliberately ignored.
+
 **`In Review` is a claim about the acceptance criteria, not just about a PR
 existing.** `/pre-merge` runs `ac-verifier`, which checks the branch against
 the issue's own criteria; every one must be `MET` or carry a stated reason
@@ -128,7 +158,8 @@ add issues to the board, assign, and comment.
 
 ## What you must confirm first
 
-- **Closing** an issue.
+- **Closing** an issue. (Note you generally should not need to: a merge closes
+  it, and the evidence latch reopens it if it is owed a device run.)
 - **Deleting** anything — an issue, a project item, a field, a board.
 - **Bulk moves**: more than three items changed in one action.
 - **Reordering the top of the priority list**, since that is what every session reads first.
