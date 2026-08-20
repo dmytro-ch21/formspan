@@ -35688,6 +35688,98 @@ metric-agnostic and the card takes its formatter, unit and smoother as
 parameters, so the second consumer should be wiring rather than building — but
 until one exists, "reusable" is a claim rather than a demonstration.
 
+## 2026-08-20 — The phone stops throwing away the server's reason (N101)
+
+`nutrition.Projection` has carried `unreachable_reason` since N69 — display-ready
+prose naming the setting at fault, in one of two variants that
+`backend/internal/modules/nutrition/target.go` picks between: *"this phase holds
+your weight where it is"* when the prescribed rate is zero, and *"this phase
+moves your weight away from that goal"* when the signs disagree. `apps/web`'s
+`Feasibility` has rendered it from the start. `fromPlanProjection` in
+`apps/mobile/lib/trendSeries.ts` collapsed both into
+`{ kind: 'none', reason: 'moving-away' }` and dropped the string, after which
+`app/goals/trend.tsx` rendered one invented sentence for both: *"Your plan
+doesn't move toward 80 kg, so there's no date to show yet."*
+
+**Nothing false was on screen, and that is the whole reason this is a separate
+entry.** N56's frontend review read both server strings and confirmed the
+invented sentence is a truthful superset of each. So the defect was never
+correctness: it was that we computed the better sentence, shipped it to the
+device, and then discarded it — leaving the athlete a vaguer claim than the one
+already in the payload, and specifically without the half that names what to
+change. Two surfaces looking at one plan and telling the athlete different
+amounts about it.
+
+`Projection`'s `none` variant now carries an optional `serverReason`, and the
+screen prefers it. Three things about the shape are deliberate:
+
+**The enum did NOT get refined.** Both server cases still arrive as
+`'moving-away'`. Splitting them would mean the phone reading display prose to
+decide which kind of unreachable a plan is — deriving a judgement from a string
+meant for eyes, which is a worse re-implementation than the coarse enum it
+replaces. The refusal remains the server's; the string rides alongside the enum
+rather than refining it, which is the same rule `source: 'plan' | 'observed'`
+exists to enforce.
+
+**`projectToGoal` never sets it.** It decides locally, so there is no other
+party whose words it could be quoting, and a string invented there would be the
+metric-agnostic series layer authoring copy about bodies — the thing that file's
+header spends three paragraphs refusing to do. Asserted, so it cannot drift in.
+
+**Blank is normalised to absent in the adapter, not at the render site.**
+`unreachable_reason` is `omitempty`, so a whitespace-only value is not something
+this server sends; the point is that `if (serverReason)` is then the entire
+check a screen needs, and no caller can print a dangling em dash with nothing
+after it. Cheaper than trusting a wire field's manners.
+
+**The copy is web's sentence verbatim** — *"This plan never reaches 80 kg — this
+phase moves your weight away from that goal. Change the goal weight or the
+phase."* Same claim, same order, same imperative. Since both surfaces now render
+the server's own string, the two cannot drift on the substance either; only the
+frame around it is duplicated, and it is duplicated deliberately rather than
+extracted, because a shared copy module spanning a Next.js app and a React
+Native app is a bigger coupling than one sentence is worth. Note the imperative
+is honest on the phone: `app/phase/index.tsx` edits the goal weight, so an
+athlete told to change it has somewhere to go, which the mobile-first rule
+requires before advice like that may be given.
+
+**The fallbacks are not dead code and are asserted as such.** `reached`,
+`no-trend` and a locally computed `stalled` never carry prose and each still
+owes a sentence — the "every absence says which absence it is" invariant that
+this area is built around. `no-goal` continues to render nothing on purpose: a
+sentence about a goal nobody set is noise.
+
+**Mutation-checked in four directions**, because a green suite here proves
+nothing on its own: drop the carrying in the adapter (3 red), ignore
+`serverReason` at the render site (3 red), remove the blank normalisation
+(2 red), and make one fallback return `''` (1 red). Baseline green in the same
+session before and after, and the restore was confirmed by re-running rather
+than by reading the file.
+
+**And one of the new assertions was itself vacuous — found in review, not by
+any of that.** The dangling-em-dash guard was written as
+`expect(copy).not.toContain('—  .')` with two spaces, and neither mutant ever
+produces two: deleting the normalisation renders `'   '` as the dash followed
+by FOUR spaces and `''` as one. It passed under exactly the mutation it names.
+The test still went red, but only on the neighbouring line, so the assertion
+carrying the intent was dead while the suite looked like it was doing its job —
+this file's own instance of the apparatus trap, inside the change that
+mutation-tested everything else. It is a regex now, and the mutation was re-run
+afterwards to confirm that *that line* is the one which fails.
+
+**Why it was not part of #462.** It widens an exported type in
+`lib/trendSeries.ts`, and N56 was already replacing the chart wholesale; the
+honest note in that file's doc block said the drop was a known gap rather than
+the design, and this closes it. The doc block was itself a correction — an
+earlier version claimed the screen already showed the server's reason, which
+was untrue.
+
+**Not done here:** the compact `WeightTrendCard` on the Goals tab draws the
+chart but renders no projection sentence at all, so an unreachable plan is
+silent there and explained only on the full page. That is pre-existing and
+arguably right for a card, but it is the same absence-with-no-explanation shape
+this entry is about, and nobody has decided it deliberately.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.
