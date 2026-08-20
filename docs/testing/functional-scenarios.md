@@ -7424,6 +7424,48 @@ this section.
   declared one.
 - **A meter write that fails does not cost the athlete their draft.** They have
   already paid for it.
+- **This endpoint always answers with a STATUS (N92).** The one outcome no
+  client can render is silence, because a client that receives no response has
+  nothing left to say except that it could not reach the server — which is the
+  sentence N92 was reported with, on a working connection. The scenario is a
+  provider that never returns: the response must be **504** with
+  `unavailable`, not a hung request. **It only tests anything if the fake
+  provider actually blocks on its context** — one that returns an error
+  immediately passes against a handler with no deadline at all, which is the
+  state this was reported from.
+- **A 504 must not promise the allowance is untouched.** That promise belongs
+  to `503`/`unavailable` alone. A timed-out call reached the provider and its
+  tokens were very likely bought, so it IS metered — assert the usage row
+  exists, and assert it beside the F16 case that must NOT have one, or the two
+  drift into agreeing.
+- **A caller that hangs up is not answered 504.** Both a disconnect and our own
+  deadline arrive at the estimator as a context error, so a scenario that only
+  covers the timeout passes against a handler that reads `ctx.Err() != nil` and
+  mislabels every abandoned request.
+- **No error message on this route talks about signal, connection or being
+  offline.** Grep the copy for those words rather than eyeballing one status:
+  the defect is a *class*, and it only shows up on whichever status nobody
+  thought to look at.
+
+**On the phone (mobile `/food/describe`)**
+
+- **The DOWNSCALED frame is what is uploaded, not the one the camera returned.**
+  Assert the uri handed to `photographMeal`. A scenario asserting the
+  manipulator was *called* passes against a screen that shrinks the frame and
+  then sends the original anyway — which is exactly the 4–12MB upload N73 was,
+  and that mutation survives a call-count check.
+- **A failure before the request never mentions the network.** Make the
+  re-encode reject: the radio has been idle throughout, so any message about
+  signal is false by construction. Assert nothing was uploaded either, which is
+  the other half of the claim.
+- **A permission denial names Settings, not a retry.** There is no camera to
+  retry with.
+- **A server failure shows the SERVER's sentence.** A 503, a 429 and a 422 each
+  arrive with copy written for this screen; substituting our own is how a spent
+  quota and a provider outage became one indistinguishable message.
+- **The fallback for a failure carrying no message diagnoses nothing.** It fires
+  precisely when nothing is known about the cause, and it used to assert the one
+  an athlete cannot act on.
 
 **Privacy**
 

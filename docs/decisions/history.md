@@ -34531,6 +34531,169 @@ trap #398 found on this same screen.
   offline path are all claims a simulator or a handset has to confirm, and a
   worktree cannot produce a build with `EXPO_PUBLIC_*` in it.
 
+## 2026-08-20 — A label photo that failed silently, and the two ways it could (N92)
+
+Reported from a device: photographing a product label failed with "can't reach
+server". The ticket (#433) was explicit that this is not #365 — that one is
+that the app *describes* failures wrongly, this one is that the request
+actually failed — and it named four candidates, each a different HTTP status.
+
+### The path, first, because the strongest lead was about a different one
+
+"Photograph the label" is `apps/mobile/app/food/describe.tsx`. The
+unknown-barcode screen sends the athlete there in as many words —
+`food/scan.tsx`'s "Photograph the label or say what it is, and we'll draft the
+numbers for you to check" — and it is the same photo path a meal uses.
+
+**So the N73-repeat theory is dead, and it is worth saying plainly rather than
+forcing.** N73 was `session/[id]/identify.tsx` uploading a raw 48MP frame
+against an 8MB cap; `describe.tsx` has downscaled to 1080px at `compress: 0.8`
+since it shipped, and the manipulator's uri — not the picker's — is what
+reaches `photographMeal`. Checked rather than assumed: the endpoint caps a body
+at 8MB and an image at 5MB (`maxEstimateBody`, `MaxImageBytes`), and a 1080px
+JPEG is two orders of magnitude under both. The theory required those two
+numbers to conflict and they do not.
+
+### What else was eliminated, and how
+
+- **503, no provider key.** Dead. Staging's boot log says
+  `nutrition: estimation enabled provider="openai" model="gpt-5.6-luna"`.
+- **A missing or broken route.** Dead. `POST /v1/nutrition/estimate` answers
+  401 unauthenticated, and the deployment log carries a real
+  `status=200 duration_ms=7695` for it on 2026-08-20.
+- **429, a spent quota.** Not the reported failure. A 429 arrives with the
+  server's own sentence — "you have used all 25 estimates for today — one more
+  in about 3 hours" — and `messageFor` renders the server's message verbatim.
+  The same is true of the 503 and the 422. **Every status this endpoint can
+  answer with already renders as itself.**
+
+That last point is what turned the investigation around. If every status reads
+correctly, then the reported sentence can only come from a path where **there
+is no status** — and there were exactly two of those.
+
+### The first: the server had no deadline at all
+
+Not on the request context, not on the provider's HTTP client, and `cmd/api`
+runs `http.ListenAndServe` with no `WriteTimeout`. A slow provider therefore
+ran until the *phone's* request timeout fired instead, and a client that times
+out receives no status and no body. It has nothing left to say except that it
+could not reach the server.
+
+It is also why such a failure leaves nothing an operator can find. A 429 and a
+503 are in the log with a status on them; a request the client abandoned is a
+200 several minutes later, indistinguishable from a success nobody received.
+
+It answers **504** with `unavailable`, and the code is the half that matters: a
+client's correct move is to retry the identical request, exactly as for the 503.
+
+**The number is derived, and getting it wrong was a live near-miss worth
+recording.** `estimateTimeout` was written at 45s — six times the measured 7.7s
+working call, and inside the time somebody will hold a phone up at a shelf. Then
+**N55 (#448) landed while this was in flight and gave the client its own
+deadline**, setting the estimate route's to `SLOW_REQUEST_TIMEOUT_MS` — 45s. The
+rebase turned a deliberate margin into an **exact tie**, which is no better than
+no server deadline at all: the two race, the phone may abort first, and the
+athlete gets a generic client-side timeout instead of the status this change
+exists to deliver. Both suites stayed green. Nothing in the build had an
+opinion, because the two numbers live in two languages and each is individually
+reasonable.
+
+It is now **35s**, and the margin is ten seconds rather than nominal because
+**the two clocks do not start together**: the client's starts when it begins
+writing the request, ours when the handler runs — after the body has arrived. A
+photo upload on gym wifi is spent entirely out of a one- or two-second gap.
+
+`scripts/check-timeout-parity.py` is what keeps it true, and it is the fourth
+parity check in `verify` — but the first that demands the two copies **differ,
+and in which direction**. Its three siblings check for equality. Verified it can
+fail three ways: on the tie, on the server exceeding the client, and on the
+constant being renamed out from under its parser.
+
+**It is metered, and that placement is the whole meaning of the sentinel.**
+`ErrEstimateTimeout` wraps `ErrEstimateUnavailable` and deliberately *not*
+`ErrEstimateUnreachable`, which is F16's not-metered exemption. A call we
+abandoned mid-flight almost certainly bought its tokens, and `llm.go` already
+says so of timed-out calls — and exempting it would make the daily cap
+avoidable by abandoning every request. So the 504's copy says nothing about the
+allowance being untouched; that promise belongs to the 503 alone.
+
+The discriminator between our deadline and a caller hanging up is
+`callCtx.Err()` matching `context.DeadlineExceeded`, and **not** the three
+readings that look equivalent. `estErr` cannot separate them, because
+`translateLLMError` maps both to the generic case. `callCtx.Err() != nil`
+catches the disconnect too. And a first draft ANDed `r.Context().Err() == nil`
+onto the check — **measured to change nothing**, because a `WithTimeout` child
+whose parent is cancelled reports `Canceled`, not `DeadlineExceeded`. It was
+removed rather than kept as reassurance: in the one race where it does differ,
+it would relabel a genuine timeout as a generic fault.
+
+### The second: a local failure was reported as a network one
+
+`manipulateAsync` sat inside the same `try` as the request, so any
+deterministic on-device failure — an unreadable frame, no disk, a format the
+encoder will not take — fell through to `messageFor`, whose fallback read
+*"Could not reach the server. Try again when you have signal."* The radio is
+idle at that point. Nothing had been sent.
+
+**N55 fixed the fallback and does not fix this**, which is the distinction worth
+keeping. N55 classifies *dead requests* — it makes the transport say which kind
+of failure it was instead of calling all of them a signal problem. A frame that
+could not be re-encoded is not a dead request; it is not a request. It reaches
+the same handler by falling past the network call entirely, so no amount of
+transport taxonomy sees it. The guard is what does.
+
+`identify.tsx` already had exactly this guard, added by #361, with a comment
+saying in as many words that without it the false diagnosis is "the same N73
+was reported for, just moved one line up". **That was still true here, one
+screen over.** Same bug, second path, which is the pattern #392 (N74) exists
+for — and it is now evidence that the shared image helper should own the
+*guard*, not only the resize.
+
+The fallback itself no longer diagnoses a network either. It fired precisely
+when nothing is known about the failure, which is the worst moment to assert a
+specific cause, and it asserted the one an athlete cannot act on.
+
+### What is verified and what is not
+
+Every guard was mutation-tested to red, scored on a failing assertion rather
+than an exit code: the raw uri on the wire, the inner guard removed, the old
+fallback restored, `WithTimeout` swapped for `WithCancel`, the 504 arm
+shadowed by the generic one, and the sentinel rewrapped onto the F16 exemption.
+**The 1080px assertion survives the raw-uri mutation** — a screen that shrinks
+the frame and then uploads the original passes it — which is why the test
+asserts *which uri reaches `photographMeal`*, not that the manipulator ran.
+
+**Not established: which of the two mechanisms the reporter actually hit.**
+Both produce the reported sentence and neither leaves a server-side trace, so
+the honest position is that the failure was made impossible to attribute and
+both paths to it are now closed. The original status is still recoverable from
+`health_events` on staging, and a device run is still owed — #433 keeps its
+NEEDS HUMAN EVIDENCE box open on both counts.
+
+### Open questions this leaves
+
+- **The OS-level ceiling under both deadlines is still unmeasured**, and now
+  matters less. React Native passes `timeoutInterval` straight through from the
+  JS `timeout` option (`RCTNetworking.mm`) and `fetch` never sets one, so the
+  phone inherited the platform default — reportedly 60s on iOS, unverified, and
+  different on Android's OkHttp. N55's explicit 45s now fires first on both, so
+  the platform number is no longer load-bearing; it would become so again only
+  if either deadline were raised past it.
+- **The 504 has no client-side reading of its own**, and probably does not need
+  one: N55's `estimateErrorMessage` special-cases the 503 (which needs to say
+  "not switched on here yet") and otherwise renders the server's sentence, which
+  for the 504 is already written for this screen. Worth revisiting only if the
+  copy has to differ per platform.
+- **`messageFor` on this screen is now N55's `estimateErrorMessage`.** This
+  branch changed that fallback independently and the rebase discarded its
+  version in favour of N55's, which is the better one and owns the concern.
+  What survives here is the guard *above* it — the half N55 does not cover,
+  because it is about a failure that never reaches the transport at all.
+- **Nothing reports a failed estimate to `/v1/client-errors`.** The endpoint,
+  the table and the admin Health screen all exist. Wiring the photo path into
+  them is what would make the *next* occurrence answerable without a proxy, and
+  it is deliberately not in this PR.
+
 ## Open items / known gaps as of this entry
 
 - **Twelve backend packages still delete each other's fixtures across concurrent test binaries — filed as #454.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.
