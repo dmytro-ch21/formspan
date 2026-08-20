@@ -112,6 +112,24 @@ with a known-bad diff spends that attention on something already known.
 
 `[suggestion]` items are judgment calls: act on them, or say why not.
 
+## After the PR exists: count the checks, never the failures
+
+Once the branch is pushed and the PR is open, run:
+
+```bash
+pnpm run ci:checks
+```
+
+It must report **5** check runs and exit 0. **A count of 0 is not "nothing
+failed" — it is "nothing ran", and the two are indistinguishable** in
+`gh pr view`, in an empty `statusCheckRollup`, and in `mergeStateStatus`. A
+conflicting PR receives zero runs silently, because GitHub cannot build the
+`refs/pull/N/merge` commit that a `pull_request` workflow runs on; the fix is
+`git fetch origin && git rebase origin/main && git push --force-with-lease`.
+See "CI can run ZERO checks" in `CLAUDE.md`.
+
+Never report a PR as green off the absence of failures. Report the number.
+
 Everything green means **CI will likely pass**. It does not mean the PR
 should be merged. Merging always needs the user's own explicit go-ahead,
 every time, however green it looks.

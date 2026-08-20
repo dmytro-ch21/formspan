@@ -32160,6 +32160,204 @@ not the work.
   closeable, but that is the user's call, not a migration decision.
 
 
+## 2026-08-20 — Why a branch gets zero CI checks: it conflicts with its base (N65)
+
+**A pull request that conflicts with `main` receives ZERO check runs, silently,
+and that is indistinguishable from every check passing.** N65 (#368) had the
+symptom precisely documented and five hypotheses eliminated with evidence; none
+of them was the cause, and the cause turns out to be a documented property of
+how GitHub schedules `pull_request` workflows.
+
+A `pull_request` workflow does not run on your branch. It runs on
+`refs/pull/N/merge` — the commit GitHub builds by merging head into base. When
+the pull request conflicts, that commit cannot be built, so **no workflow run is
+created at all**: no failure, no annotation, no `action_required`, nothing
+queued. `gh pr view` reports no failed checks because there are none.
+`statusCheckRollup` is `[]`. `mergeStateStatus` does not distinguish it either.
+
+### The evidence, in both directions
+
+Retrospective, on #338 (`feat/n50-web-telemetry`), the branch #368 was filed
+from. Its force-pushed head SHAs are still fetchable from GitHub, so the
+reconstruction is measurement rather than inference:
+
+| time (UTC) | event | head | base tip | mergeable | runs |
+|---|---|---|---|---|---|
+| 22:09:15 | opened, claim commit | `ef7cf0ac` | `5434f910` | clean | **5** |
+| ~22:15 | `main` moves to `99c597c7` | — | — | **conflicts** | — |
+| 22:43:26 | `reopened` | — | `94a63d2e` | conflicts | **0** |
+| 22:49:11 | force-push | `d6aba090` | `94a63d2e` | conflicts | **0** |
+| 22:52:53 | force-push, **rebased** | `701451d5` | `94a63d2e` | clean | **5** (4s later) |
+
+`git merge-tree --write-tree 94a63d2e d6aba090` exits 1 with conflicts in
+`docs/TASKS.md` and `docs/testing/functional-scenarios.md`. Sweeping the same
+head against every intermediate `main` tip puts the onset at `99c597c7`, six
+minutes after the one run the branch ever got — which is exactly the observation
+in #368 that "the only run that branch ever had was on its empty claim commit".
+
+Note what the table also shows: **the base tip was the same `94a63d2e` for both
+the 22:49 force-push that got nothing and the 22:52 one that got five.** So it
+was never staleness of the base. It was mergeability of the head against it, and
+those two are easy to confuse because rebasing fixes both.
+
+Prospective, because a story consistent with the record is not the same as a
+demonstrated mechanism — and this repo has been burned by exactly that gap
+before (the provider stub that agreed perfectly with its own tests). Throwaway
+PR #393 edited one `docs/TASKS.md` line that `main` had already changed, so it
+conflicted deliberately:
+
+- conflicting head `978bf8bc` — **0** check runs, `mergeable: CONFLICTING`,
+  `mergeStateStatus: DIRTY`, `statusCheckRollup` empty.
+- rebased head `ee6d49ca`, **the same one-line diff**, only the base changed —
+  **5** check runs within about two minutes, `mergeable: MERGEABLE`.
+
+Draft status is not involved: #390, a clean draft, had its five throughout.
+#393 was closed and its branch deleted once measured.
+
+### And then it happened to this branch, unprompted, mid-review
+
+The best evidence was not arranged. Twenty minutes after the probe was closed,
+`pnpm run ci:checks` on **this** pull request reported:
+
+```
+check runs on this commit: 0 (expected 5)
+ZERO CHECK RUNS. This commit has not been checked at all.
+CONFIRMED CAUSE: `mergeable` is CONFLICTING.
+```
+
+`gh pr checks 390` said `no checks reported on the branch`. `mergeable`
+`CONFLICTING`, `mergeStateStatus` `DIRTY`, `statusCheckRollup` empty. The cause:
+#404 and #391 had merged in the meantime, both appending to
+`docs/decisions/history.md`, and this branch appends there too — the
+append-versus-append conflict named further down, arriving on the branch that
+named it, while it was being reviewed.
+
+So the detector's first real catch was its own pull request, and it caught it in
+the only window that matters: between the push and believing the push was fine.
+`git fetch && git rebase origin/main && git push --force-with-lease` restored
+the five. Nothing about this run was constructed, which is what makes it worth
+more than the probe.
+
+### What shipped
+
+`scripts/check-ci-checks.py`, wired as `pnpm run ci:checks`. It reads the pull
+request's **`headRefOid`** — not the newest run on the branch, which
+`gh run list --branch` will happily report green for a commit two pushes ago —
+counts the check runs on it, compares the run *names* against the jobs the
+workflow files actually declare, and exits non-zero for zero runs (1), a missing
+declared check (1), a failure (2) and a still-pending check (3). When it finds
+zero and `mergeable` is `CONFLICTING` it says so and prints the rebase.
+
+The expected set is derived from `.github/workflows/*.yml` rather than
+hardcoded, so a sixth CI job raises the bar by itself — but cross-checked
+against a measured literal `EXPECTED_CHECK_RUNS = 5`, because **a parser that
+silently reads one job would make the whole detector vacuous**, which is the
+usual way a detector dies. Disagreement between the two fails loudly rather than
+trusting either. A job `matrix:` is refused for the same reason: it would
+under-count silently.
+
+It is deliberately **not** in `verify` — `verify` runs before a pull request
+exists and must work offline. What is in `verify` is
+`check:ci-detector`, its offline `--self-test`: eight decision vectors that each
+assert an exit *code*, not merely non-zero, since a mutant returning 1 for
+everything would satisfy a non-zero assertion while being useless.
+
+**Demonstrated failing before being believed**, per the rule this repo already
+has. Mutating `evaluate` to return `EXIT_OK` unconditionally turns 6 of the 8
+vectors red; removing only the zero-run branch — the seductive "no runs means
+nothing failed" simplification, which is the bug itself expressed as a
+refactor — turns exactly the `zero runs` vector red on its message. Against real
+commits: `--sha d6aba090` (the historical wedged commit) exits 1 reporting 0;
+`--pr 393` while conflicting exited 1 and named the cause; `--pr 390` exits 0
+reporting 5. The green baseline was confirmed in the same session, so the red
+runs are evidence rather than an unrelated breakage.
+
+### Two things review found, and both were the detector failing its own test
+
+Recorded because the whole point of this entry is that a detector which has only
+ever been green is not a detector, and reading one's own is not enough.
+
+**`GOOD_CONCLUSIONS` forgave `skipped`.** The first version held
+`{"success", "neutral", "skipped"}`, on the reasoning that neither of the last
+two means "failed". Measured: five jobs concluding `skipped` made the script
+print *"all declared checks ran and passed"* and exit 0 — this script's central
+claim being false in precisely the shape it exists to catch. It is reachable in
+one edit, a job-level `if:` on the five jobs, and neither the count nor the name
+set moves, because five skipped jobs really are five check runs with the right
+names. Worse, the permissiveness was **untested**: of eight vectors, the only
+conclusions exercised were `success`, `failure` and `None`, so deleting
+`skipped` changed no result. `skipped` is now NOT-CHECKED with its own message
+(a different remedy: a red check is a bug in the branch, a skipped one is a bug
+in the workflow's `if:`), `GOOD_CONCLUSIONS` is `{"success"}`, and three vectors
+cover it.
+
+**An external contract was asserted from belief, exactly as the rule warns.**
+The docstring claimed a re-run adds a duplicate run name, and a self-test vector
+asserted tolerance for it. Measured against the live endpoint on a commit with
+five workflow attempts: `check-runs?per_page=100` returns `total_count` **5**;
+adding `filter=all` returns **25**. The endpoint defaults to `filter=latest`, so
+the duplicate the vector tolerated can never arrive — the one vector guaranteed
+never to catch anything. It is deleted, `filter=latest` is now pinned in the URL
+rather than relied on implicitly, and the measurement is recorded next to the
+call. Note the tolerance did not even generalise: on a duplicate list holding a
+stale `failure` beside a fresh `success`, `evaluate` returns FAILED, so anyone
+who believed the docstring and switched to `filter=all` would have every
+red-then-green re-run reporting failure.
+
+Four smaller ones, same family: an inline `matrix: {…}` slipped past a regex
+anchored with `$`; `--pr` and `--sha` together let `--sha` win silently and skip
+the conflict diagnosis; every `gh` failure shared exit code 1 with the N65 case
+itself, so "I could not ask GitHub" and "GitHub says nothing ran" were
+indistinguishable (now 4); and the self-test pinned the derived *count* but not
+the derived *names*, which a trailing comment on a job key corrupts — it stops
+the key matching, so the next `name:` overwrites the previous job's. That one
+was only visible because it also moved the count. Both are pinned now, and a
+mutation that corrupts a name while keeping the count at five goes red.
+
+`check:ci-detector` also runs in CI now, not only in `verify`. It was the one
+python gate absent from the `Scripts (Python)` job — and the things its
+self-test notices (a sixth job, a matrix, a reformat, a renamed check) are all
+edits to `ci.yml` itself, so leaving it on an author's laptop put the guard
+furthest from the thing it guards.
+
+### What this leaves behind
+
+**The files every task edits are the mechanism's fuel**: `docs/decisions/history.md`,
+`docs/testing/functional-scenarios.md` and `package.json`'s one-line `verify`
+chain — plus `docs/TASKS.md`, which was the fourth until the entry above
+archived it, and which is the file that actually wedged #338. Every branch
+touches at least two, so any branch open long enough will eventually conflict
+and go quiet. N63/N66 already treat that churn as a problem in its own right;
+this is a second cost of it, and the one that is invisible. Moving the open list
+to Issues removes one of the four; it does not remove the mechanism, and this
+branch hit it itself — the rebase onto `811f346` conflicted in `history.md`, on
+an append-versus-append, which is the half of N63 that migration explicitly did
+not solve.
+
+**#388 lands a sixth CI check, and the disagreement is deliberate.** Once it
+merges, the workflows declare six `pull_request` jobs while
+`EXPECTED_CHECK_RUNS` still says five, and `check:ci-detector` goes red in
+`verify` naming both numbers. That is the cross-check working: whoever merges
+second bumps the constant, and the alternative — a detector that silently
+accepted five of six — is the bug it exists to catch. The two changes are
+complementary: #388 catches "checks ran, the diff is empty", this catches "the
+diff is real, no checks ran".
+
+**Nothing prevents it, and nothing yet notices it unprompted.** `ci:checks` has
+to be run. A repository ruleset requiring the five checks as *required status
+checks* would block the merge instead — a required check that never runs leaves
+the PR blocked rather than mergeable — and that is the structural fix. It is not
+done here because branch protection is a repository setting the user owns, not
+a change a PR can make.
+
+**Not investigated: whether every zero-check case is this one.** #368 recorded
+two occurrences in a day; #338 is the one with a preserved record, and it is
+fully explained. A future occurrence should have `mergeable` captured **before**
+rebasing, since the rebase destroys the evidence — `ci:checks` now prints it
+automatically, which is the cheapest way to make that happen.
+
+
+
 ## 2026-08-20 — The polite client was the one being punished (F15)
 
 `nutrition`'s `Retry-After` truncated. `retryAfterSeconds` was
