@@ -10216,3 +10216,204 @@ not a guess**: on an unclassifiable failure the phone sends one bodyless GET to
 - **A host that resolves but refuses TLS**, pointing `EXPO_PUBLIC_API_URL` at
   it — to confirm the app does not claim the athlete is offline.
 - **A deploy with no provider key**, to read the 503 copy in place.
+
+## Daily trackers — water first, and the model the next two need (N76)
+
+Backend `internal/modules/tracker` (`/v1/trackers`), mobile `lib/trackerModel.ts`,
+`lib/trackers.ts`, `components/TrackerCard.tsx`, `app/trackers/[id].tsx`, rendered
+on Today and in Food.
+
+**Read the scope before writing a test here.** Water is a *seeded preset* of a
+generic model, not a feature. Most of what is worth testing is the model: N77
+(coffee) and N78 (custom trackers) are meant to land as configuration, and a test
+that only exercises water cannot tell whether that is true.
+
+### Happy path
+
+- Open Today signed in for the first time. The Water card is there with no setup:
+  `0 of 8 cups`, `0 ml`, an empty row of eight glyphs and a leading `+`.
+- Tap `+` four times. Four glyphs fill left to right; the value line reads
+  `4 of 8 cups · 1 L`.
+- Tap the third filled glyph. It empties, the count drops to 3, and the entry
+  removed is the third one — not "some cup".
+- Open Food. The same card is there, showing the same day, and the day stepper
+  moves it: stepping back a day shows that day's cups.
+- Open the card's settings from the phone, change the target to 10, save. The row
+  re-renders with ten slots. **No web screen is involved at any point** — that is
+  the criterion, not a detail.
+- Clear the target field entirely and save. The card becomes a plain count with
+  no "N to go" line and no implied goal.
+
+### Edge cases & errors
+
+- **Ten of eight logs.** Log ten cups against an eight-cup target: all ten log,
+  ten glyphs draw, the line reads `10 of 8 cups`, nothing is blocked and nothing
+  changes tone. Read every string on the card and find no praise and no scolding
+  — `trackerModel.test.ts` asserts this over an enumerated word list, and a
+  functional test should confirm it on screen.
+- **Thirteen of eight becomes a bar.** Past twelve glyphs the row must not wrap
+  into an uncountable block; it switches to a bar with the number stated.
+- **A single-dose tracker draws one large glyph**, not a one-item row.
+- **Units.** Switch the profile between metric and imperial. The volume line
+  follows (`1 L` ↔ `33.8 fl oz`), the cup *count* does not change, and no stored
+  number moves. Nothing unit-bearing renders before `unitsReady`.
+- **A failed read never renders as zero.** With no network and nothing cached,
+  the card is absent rather than claiming "you have no trackers" — the same
+  `unknown` vs `none` distinction the nutrition target already makes.
+
+### Offline
+
+- Airplane mode: tap three cups. They stick, the card is correct, and nothing
+  spins. Restore the network; they sync once and do not double-count.
+- Airplane mode: change the target. It applies immediately and pushes later.
+- Airplane mode: tap a cup then untap it. Both survive a relaunch, and the sync
+  screen's pending count includes them (a tap that is owed but reported as
+  nothing owed reads as "it saved", which is the reassurance that must not be
+  false).
+
+### The local day
+
+- Set the device clock to 23:58 local, log a cup, cross midnight. The cup belongs
+  to the earlier day and the new day starts empty. **West of Greenwich this is
+  the failing case** — a UTC-derived date files a 23:58 glass under tomorrow, and
+  the mobile suite runs under `TZ=America/Los_Angeles` for exactly this.
+
+### VoiceOver
+
+- Turn VoiceOver on and add and remove a cup without looking at the screen.
+- Each glyph announces its position, total, state and tracker: `Water, cup 3 of
+  8, filled`. A row of eight identically-labelled shapes is unusable even though
+  every shape is technically labelled — the hazard is sameness, not silence.
+- Each glyph is a checkbox to the system as well as in its label, and its hint
+  says what a double-tap will do.
+- The settings control announces what it opens, not "more": it is the only route
+  to the target on a phone.
+
+### Auth & security
+
+- Every `/v1/trackers` route 401s without a bearer token.
+- Ids are client-generated, so every read and write is scoped to the caller:
+  another athlete's tracker id 404s on PATCH and DELETE, does not appear in the
+  list, cannot be logged against, and re-creating it returns `already_exists`
+  rather than handing the row over.
+- A client cannot claim a `preset` on create — that would collide with
+  provisioning and make somebody's water card unreachable.
+- The entries window is bounded; an unbounded `from`/`to` is a way to ask for
+  every row an athlete has ever written in one request.
+
+### Regression trap
+
+- **A partial PATCH must never blank a field it did not name.** This is the bug
+  `exercise.updateWithin` shipped three times (migrations 000052, 000057,
+  000061), each time caught in review and never by the suite. The guard here is
+  structural: `patch_test.go` enumerates `Patch`'s fields by reflection and fails
+  if one is unwired in either direction, and `postgres_test.go` patches each
+  field alone and asserts the other seven are unchanged. **If you add a column,
+  write the restore-path case before the migration** — `oneOf` in that file
+  fatals on a field it has no case for, so the omission is loud.
+- **`target` is nullable and three-state.** Absent means leave it alone, `null`
+  means the athlete wants no ceiling, a number sets one. A client that builds its
+  patch with `{ target: x ?? null }` silently turns the first into the second and
+  clears targets nobody asked to clear.
+- **Provisioning is a write on a read.** `GET /v1/trackers` creates the default
+  presets. It must stay idempotent under concurrency (the `(user_id, preset)`
+  unique index, not a flag), must not overwrite an edited target, and must not
+  re-provision a tracker the athlete archived.
+- **The preset id is derived from `(user_id, preset)`, not random.** With a
+  random id, two devices provisioning at once each believe a different id is "the
+  water tracker" and one device's cups reference a tracker the server never
+  stored.
+- **A tracker colour is a KEY, never a hex.** `scripts/validate_palette.mjs`
+  measures every entry in `trackerColors` for contrast on `surface`/`raised` and
+  CIEDE2000 separation from `info` and from each other under three CVD
+  simulations. A free colour picker cannot be checked at authoring time. Adding
+  one means bumping the expected count in that script, which is what forces the
+  measurement.
+- **The suite's timezone is set on the `test` script, at process launch.**
+  Running `jest` directly loses it, and the local-day assertions then pass in the
+  wrong zone — measured here: `formatClock` returned `19:40` under the machine's
+  zone and `16:40` under `America/Los_Angeles`.
+- **`lint:mobile` has zero headroom at 54 warnings.** `useRef(new
+  Animated.Value(...)).current` is a `react-hooks/refs` warning; a lazy
+  `useState` initialiser is the same value with no ref read during render.
+
+### Added after review — the cases the first pass missed
+
+These are not extra coverage; each is a defect review found in the original
+branch, written down so the next glyph row does not repeat it.
+
+- **The midnight case has TWO directions and the first pass wrote one.** 23:58
+  must land on the day that is ending *and* 00:05 must land on the day that has
+  started. A screen that never unmounts computes its day key during render, so
+  the second one fails while the first passes. The two are also caught by
+  different mutations: swapping `dayString` for `toISOString().slice(0,10)`
+  reddens only the 23:58 test; freezing the day at module load reddens only the
+  mirror. Neither substitutes for the other.
+- **Two quick taps on the same filled glyph must remove one cup, not two.** The
+  re-render that empties the glyph lands after the second tap, so anything that
+  resolves a *position* at tap time can resolve two taps against two different
+  snapshots.
+- **A tap target is a number, and 30pt is not 44.** Measure the effective target
+  (drawn size + `hitSlop`), not the drawn size. Horizontal slop above half the
+  row gap makes adjacent targets overlap, which on a row of identical glyphs
+  makes mis-taps *worse* — so a bigger number is not automatically better here.
+- **An `accessibilityLabel` on a plain `View` is inert on iOS.** It is not an
+  accessibility element without `accessible`, and adding `accessible` collapses
+  the row into one element and swallows the per-glyph labels. Check a label is
+  reachable before trusting it exists.
+- **`accessibilityState={{checked}}` is ignored on `role="button"` in iOS.** The
+  state has to be in the label text. A row of glyphs that announces position but
+  not filled/empty is the failure this looks like it prevents and does not.
+- **A name rendered through `.toUpperCase()` is spelled out letter by letter.**
+  Uppercase with `textTransform` so the accessible string keeps its original
+  casing.
+- **A text field is not labelled by the `Text` above it.** Without an explicit
+  `accessibilityLabel`, VoiceOver reads the placeholder — so the target field
+  announced itself as "No target".
+- **The derived preset id is a namespace somebody can squat.** It is
+  `sha256(userID + preset)` and a Clerk user id is not a secret, so a foreign
+  athlete can compute it, create a tracker on it, and collide the victim's
+  provisioning on the PRIMARY KEY — which the `(user_id, preset)` arbiter does
+  not cover. That was a permanent 409 on every `GET /v1/trackers` with no way to
+  free the id. Two independent guards now: the create path refuses the reserved
+  prefix, and provisioning uses a bare `ON CONFLICT DO NOTHING` so a taken id
+  costs one card rather than the whole list. **Test both; either alone leaves a
+  hole.**
+- **Run every check from the worktree, not the primary checkout.** Two real
+  typecheck errors passed a `tsc --noEmit` issued from the wrong directory,
+  because it checked a tree without the changes in it. No output from the wrong
+  place is indistinguishable from success.
+
+### For the user to check on a device
+
+Reading the diff cannot settle any of these. They need a build.
+
+1. **The row.** Open Today. Tap `+` four times — four cups fill left to right,
+   animated, and the line reads `4 of 8 cups · 1 L`.
+2. **Correction.** Tap the third filled cup. It empties, the count drops to 3,
+   and the cup that empties is the third one.
+3. **Double-tap.** Tap one filled cup twice, fast. Exactly one cup should go.
+4. **Over target.** Log 10 of 8. All ten log, ten cups draw, nothing scolds,
+   nothing blocks, nothing changes colour.
+5. **Thirteen.** Keep going past twelve. The row must become a bar with the
+   number stated, never a wrapped block of identical glyphs.
+6. **Units.** Settings → switch metric/imperial. The volume follows
+   (`1 L` ↔ `33.8 fl oz`); the cup count does not move.
+7. **The target, from the phone.** Open the card's settings, set the target to
+   10, save. The row re-renders with ten slots. Then clear the field entirely —
+   the card becomes a plain count with no goal line.
+8. **Offline.** Airplane mode: tap three cups, force-quit, reopen. They are
+   still there. Restore the network and confirm they sync once — the count must
+   not double.
+9. **Midnight.** Set the device clock to 23:58, log a cup, wait past midnight
+   *with the app still open*, log another. The first belongs to the earlier day,
+   the second to the new one, and the row resets. **This is the one that has
+   already gone wrong twice in this repo today.**
+10. **VoiceOver.** Turn it on and add and remove a cup without looking. Each cup
+    should announce like `Water, cup 3 of 8, filled` — check the *name* is read
+    as a word and not spelled out, that empty cups offer to add, and that the
+    settings button says what it opens rather than "button".
+11. **Tap targets.** With VoiceOver off, try the row one-handed with a thumb.
+    The `+` and the settings button are 44pt; the cups are 34 × 44. If the cups
+    still feel unhittable, that is a real finding and the row idiom needs
+    rethinking rather than the numbers nudging.

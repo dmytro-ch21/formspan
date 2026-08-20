@@ -72,8 +72,23 @@ jest.mock('../foodLog', () => ({
   syncFood: jest.fn(async () => ({ pushed: 0, failed: 0 })),
 }));
 
+// The FIFTH outbox, and this mock has now grown five times — which is itself
+// the finding: every feature that logs something adds one, and the orchestrator
+// is the one place that has to know about all of them. Same reason as the other
+// four: the real module opens SQLite, which jest-expo stubs out.
+//
+// Like sequences and food it has NO `deferred` — a tapped cup cannot be waiting
+// on another local row to land first. (Its own internal ordering, definitions
+// before entries, is `trackers.ts`'s business and is tested there.)
+jest.mock('../trackers', () => ({
+  pendingTrackerCount: jest.fn(async () => 0),
+  syncTrackers: jest.fn(async () => ({ pushed: 0, failed: 0 })),
+}));
+
 // eslint-disable-next-line import/first -- must follow the jest.mock above
 import { pendingFoodCount, syncFood } from '../foodLog';
+// eslint-disable-next-line import/first -- must follow the jest.mock above
+import { pendingTrackerCount, syncTrackers } from '../trackers';
 // eslint-disable-next-line import/first -- must follow the jest.mock above
 import { countPendingPlans } from '../plan';
 // eslint-disable-next-line import/first -- must follow the jest.mock above
@@ -414,11 +429,84 @@ describe('the pending count', () => {
     (countPendingPlans as jest.Mock).mockResolvedValue(0);
     (pendingSequenceCount as jest.Mock).mockResolvedValue(0);
     (pendingFoodCount as jest.Mock).mockResolvedValue(5);
+    (pendingTrackerCount as jest.Mock).mockResolvedValue(0);
 
     setSyncIdentity('u1', async () => 'tok');
     await refreshPending();
 
     expect(syncState().pending).toBe(7);
+  });
+
+  it('includes tapped TRACKERS, not just the other four', async () => {
+    // The fifth time this has needed writing, and for the fifth identical
+    // reason: every mock returns 0, so every other assertion here sums the
+    // other four and stays green with `pendingTrackerCount` unwired from
+    // `refreshPending`.
+    //
+    // The consequence is the quietest of the five. `schedule()` refuses a retry
+    // timer when it reads 0 pending, so a cup tapped in a gym with no signal
+    // would get no backoff retry and no foreground retry — and the card reads
+    // the local row, so it looks perfectly correct while the sync screen
+    // reports nothing owed. That reads as "it saved", which is exactly the
+    // reassurance that must not be false.
+    (countPendingSessions as jest.Mock).mockResolvedValue(1);
+    (countPendingWorkouts as jest.Mock).mockResolvedValue(0);
+    (countPendingPlans as jest.Mock).mockResolvedValue(0);
+    (pendingSequenceCount as jest.Mock).mockResolvedValue(0);
+    (pendingFoodCount as jest.Mock).mockResolvedValue(0);
+    (pendingTrackerCount as jest.Mock).mockResolvedValue(3);
+
+    setSyncIdentity('u1', async () => 'tok');
+    await refreshPending();
+
+    expect(syncState().pending).toBe(4);
+  });
+});
+
+describe('trackers in the merge', () => {
+  it('surfaces a tracker failure the way it surfaces every other one', async () => {
+    // Mirrors the food case above. Without the tracker terms in the merged
+    // result, a tap that failed to send reports nothing at all: the banner
+    // stays clean and the athlete has no way to know, because the card reads
+    // the local row and looks perfectly correct.
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue({ pushed: 0, pulled: 0, failed: 0, deferred: 0 });
+    (syncTrackers as jest.Mock).mockResolvedValue({
+      pushed: 0,
+      failed: 1,
+      error: 'cup refused',
+      errorKind: 'transient',
+    });
+    await syncNow();
+
+    expect(syncState().lastError).toBe('cup refused');
+    expect(syncState().online).toBe(true);
+
+    (syncTrackers as jest.Mock).mockResolvedValue({ pushed: 0, failed: 0 });
+  });
+
+  it('reports OFFLINE when only the tracker push could not reach the server', async () => {
+    // `rankKind` rather than `??`: offline outranks everything, whichever of
+    // the five outboxes noticed it. With `??` the answer would depend on
+    // position, and `online: true` while the phone is in a basement is the
+    // claim that makes the sync screen useless.
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue({ pushed: 0, pulled: 0, failed: 0, deferred: 0 });
+    (syncTrackers as jest.Mock).mockResolvedValue({
+      pushed: 0,
+      failed: 1,
+      error: 'no signal',
+      errorKind: 'offline',
+    });
+    await syncNow();
+
+    expect(syncState().online).toBe(false);
+
+    (syncTrackers as jest.Mock).mockResolvedValue({ pushed: 0, failed: 0 });
   });
 });
 

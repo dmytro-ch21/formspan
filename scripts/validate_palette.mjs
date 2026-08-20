@@ -344,6 +344,13 @@ function loadPalette() {
     SPORTS: block('sportColors', 4),
     MONOGRAM: block('monogramColors', 5),
     MONOGRAM_INK: block('monogramInk', 5),
+    // Two today: water (N76) and coffee (N77, seeded before it is rendered so
+    // that ticket is a seed row rather than a colour search). The expected
+    // count is what forces the next addition through this file — adding a
+    // tracker colour without running the gate throws here rather than shipping
+    // an unmeasured fill.
+    TRACKER: block('trackerColors', 2),
+    MONO_TRACKER: block('monoTrackerColors', 2),
     MONO: {
       rest: monoOne('gridRest'),
       ramp: monoRamp,
@@ -361,7 +368,7 @@ function loadPalette() {
   };
 }
 
-const { S, P, BELT, BELT_ON, ACCENTS, SPORTS, MONOGRAM, MONOGRAM_INK, MONO, MONO_MEDAL, MONO_BELT, MONO_BELT_ON } =
+const { S, P, BELT, BELT_ON, ACCENTS, SPORTS, MONOGRAM, MONOGRAM_INK, MONO, MONO_MEDAL, MONO_BELT, MONO_BELT_ON, TRACKER, MONO_TRACKER } =
   loadPalette();
 
 heading('Text');
@@ -506,6 +513,72 @@ for (const [name, hex] of tiles) ratio(`${name} on surface`, hex, S.surface, 4.5
 for (let i = 0; i < tiles.length; i++) {
   for (let j = i + 1; j < tiles.length; j++) {
     separation(`${tiles[i][0]} vs ${tiles[j][0]}`, tiles[i][1], tiles[j][1]);
+  }
+}
+
+/*
+  Daily-tracker fills. Categorical, and unusually exposed:
+
+  - TWO different floors, because the colour does two jobs. On `surface` it is
+    also TEXT — the card's value line ("4 of 8 cups") is tinted, so 4.5:1. On
+    `raised` it is only ever a filled glyph, which WCAG 1.4.11 puts at 3:1, the
+    same floor `beltAccent` is held to on the same ground. Holding a fill to
+    4.5:1 is stricter than the standard and stricter than anything else in this
+    file; the two candidates it rejected here (4.35 and 4.40) were rejected for
+    a rule nothing else obeys, which is how a gate stops meaning anything.
+    **If a tracker colour is ever used for text on `raised`, this becomes 4.5
+    and two of these values have to move.**
+  - several cards sit on Today at once (water and coffee, then whatever N78's
+    athlete adds), so the set has to separate pairwise under CVD;
+  - `info` is the categorical blue the app already uses, and a water-blue is the
+    one hue in the product most likely to collide with it. That pair is why
+    water is a deep teal rather than the vivid cyan it wants to be — see the
+    measurements in the `trackerColors` doc comment.
+
+  This is a loop over the whole block, not a list of named checks, so adding a
+  colour for N77 or N78 is one line in Colors.ts and the gate covers it
+  automatically. The `block(..., 2)` count above is what stops that line being
+  added without anybody running this.
+*/
+heading('Daily-tracker fills — several cards share Today');
+const trackers = Object.entries(TRACKER);
+for (const [name, hex] of trackers) {
+  ratio(`${name} on surface`, hex, S.surface, 4.5, 'The value line renders in this colour.');
+  ratio(`${name} on raised`, hex, S.raised, 3, 'A filled glyph on a raised ground: WCAG 1.4.11.');
+  ratio(`${name} — ink on a filled glyph`, S.bg, hex, 4.5);
+  separation(`${name} vs info`, hex, P.info);
+}
+for (let i = 0; i < trackers.length; i++) {
+  for (let j = i + 1; j < trackers.length; j++) {
+    separation(`${trackers[i][0]} vs ${trackers[j][0]}`, trackers[i][1], trackers[j][1]);
+  }
+}
+
+heading('Daily-tracker fills in monochrome — the same guarantees, on one axis');
+const monoTrackers = Object.entries(MONO_TRACKER);
+if (monoTrackers.length !== trackers.length) {
+  failures.push(
+    `Daily-tracker fills in monochrome — ${monoTrackers.length} greys for ` +
+      `${trackers.length} colours. A hue with no mono twin stays coloured in a ` +
+      `black-and-white app, which is how a gold medal and a blue belt survived ` +
+      `the first mono pass.`,
+  );
+}
+for (const [name, hex] of monoTrackers) {
+  if (!(name in TRACKER)) {
+    failures.push(`Daily-tracker fills in monochrome — '${name}' has no coloured original`);
+  }
+  ratio(`mono ${name} on surface`, hex, S.surface, 4.5);
+  ratio(`mono ${name} on raised`, hex, S.raised, 3);
+  ratio(`mono ${name} — ink on a filled glyph`, S.bg, hex, 4.5);
+}
+for (let i = 0; i < monoTrackers.length; i++) {
+  for (let j = i + 1; j < monoTrackers.length; j++) {
+    separation(
+      `mono ${monoTrackers[i][0]} vs ${monoTrackers[j][0]}`,
+      monoTrackers[i][1],
+      monoTrackers[j][1],
+    );
   }
 }
 

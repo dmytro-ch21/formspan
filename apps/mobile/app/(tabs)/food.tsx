@@ -32,6 +32,7 @@ import { Text } from '@/components/Themed';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
+import { TrackerList } from '@/components/TrackerList';
 import { Icon } from '@/components/ui/Icon';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { SectionHeader } from '@/components/ui/Section';
@@ -50,6 +51,8 @@ import {
 } from '@/lib/nutrition';
 import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { useTrackerDay } from '@/lib/useTrackerDay';
+import { useUnits } from '@/lib/useUnits';
 import { request as requestSync, useSyncState } from '@/lib/sync';
 
 const MEAL_LABELS: Record<Meal, string> = {
@@ -88,6 +91,16 @@ export default function FoodScreen() {
   const { userId } = useAuth();
 
   const on = dayString(addDays(new Date(), dayOffset));
+
+  // The daily trackers, for whatever day is on screen.
+  //
+  // Food is the surface where the day is the SUBJECT — the stepper is the point
+  // of the screen — so unlike Today these cards follow it. Reading back what
+  // you drank on Tuesday belongs here; Today pins its row to today, because a
+  // tap there logs a cup now.
+  const trackerDay = useTrackerDay();
+  const { refresh: refreshTrackers } = trackerDay;
+  const { units, unitsReady } = useUnits();
   const isToday = dayOffset === 0;
 
   const refresh = useCallback(() => {
@@ -148,8 +161,12 @@ export default function FoodScreen() {
   useFocusEffect(
     useCallback(() => {
       const stop = refresh();
-      return stop;
-    }, [refresh]),
+      const stopTrackers = refreshTrackers(on);
+      return () => {
+        stop?.();
+        stopTrackers?.();
+      };
+    }, [refresh, refreshTrackers, on]),
   );
 
   // And again after a sync lands, so a push that completed in the background is
@@ -235,6 +252,21 @@ export default function FoodScreen() {
           <View style={styles.summary}>
             <RemainingBlock eaten={eaten} view={view} testID="food-remaining" />
           </View>
+
+          {/* Water and anything else being tracked, for the day on screen.
+              Above the meals because a tap is one gesture and a meal is a flow
+              — and in both places because the ticket says both, so an athlete
+              who lives in Food never has to go to Today for it. */}
+          <TrackerList
+            day={trackerDay}
+            // The day being LOOKED AT, unlike Today's clock read: the stepper is
+            // the point of this screen, so a tap while reading Tuesday belongs
+            // to Tuesday.
+            dayAtTap={() => on}
+            units={units}
+            unitsReady={unitsReady}
+            testID="food-trackers"
+          />
 
           {/* The meal sections render ONLY on a real answer.
               Rendered while loading, or after a failed read, they are four

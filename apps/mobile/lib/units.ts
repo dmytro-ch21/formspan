@@ -122,6 +122,52 @@ export function fromDisplayDistance(v: number, u: UnitSystem): number {
   return u === 'imperial' ? round(v * M_PER_YARD, 2) : v;
 }
 
+/**
+ * Liquid volume — a daily tracker's millilitres, shown as ml or fl oz.
+ *
+ * **Not `formatVolume` above**, which already owns that word and means
+ * cumulative barbell LOAD. The collision is real enough to be worth the
+ * awkward name: a tracker card asking for "the volume" and getting tonnes is
+ * exactly the kind of thing that compiles.
+ *
+ * Stored in millilitres, always, for the same reason weights are kilograms —
+ * an athlete who flips the setting must not find last week's water rewritten.
+ * The US fluid ounce (29.5735 ml), not the imperial one (28.4131): this app's
+ * "imperial" is the American convention throughout (pounds, miles, yards), and
+ * mixing the two ounces would put a 4% error into a number nobody would think
+ * to question.
+ */
+const ML_PER_FL_OZ = 29.5735295625;
+
+export function fluidUnit(u: UnitSystem): string {
+  return u === 'imperial' ? 'fl oz' : 'ml';
+}
+
+/** Storage (ml) → what to show. */
+export function toDisplayFluid(ml: number, u: UnitSystem): number {
+  return u === 'imperial' ? round(ml / ML_PER_FL_OZ, 1) : round(ml, 0);
+}
+
+/** What was typed → storage (ml). */
+export function fromDisplayFluid(v: number, u: UnitSystem): number {
+  return u === 'imperial' ? round(v * ML_PER_FL_OZ, 2) : v;
+}
+
+/**
+ * A volume with its unit, promoted to litres past a litre in metric.
+ *
+ * "2000 ml" is a number you read digit by digit; "2 L" is one you take in. The
+ * imperial side deliberately does NOT promote to US pints or quarts — an
+ * athlete tracking water thinks in fluid ounces all the way up, and "62.5 fl
+ * oz" stays comparable with the 8 fl oz glass beside it.
+ */
+export function formatFluid(ml: number | null | undefined, u: UnitSystem): string {
+  if (ml == null) return '—';
+  if (u === 'imperial') return `${trim(toDisplayFluid(ml, u))} fl oz`;
+  if (Math.abs(ml) >= 1000) return `${trim(round(ml / 1000, 2))} L`;
+  return `${trim(round(ml, 0))} ml`;
+}
+
 function round(v: number, places: number): number {
   const f = 10 ** places;
   return Math.round(v * f) / f;
