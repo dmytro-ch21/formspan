@@ -48,6 +48,7 @@ import {
   toDisplayDistance,
   toDisplayWeight,
   weightUnit,
+  weightUnitName,
   type UnitSystem,
 } from "@/lib/units";
 import { useUnits } from "@/lib/useUnits";
@@ -789,10 +790,8 @@ function ExerciseBlock({
           <button
             type="button"
             onClick={() => onToggleUnit(exerciseID)}
-            title={`Showing ${units === "imperial" ? "pounds" : "kilograms"} for this exercise`}
-            aria-label={`${exercise?.name ?? "This exercise"} is in ${
-              units === "imperial" ? "pounds" : "kilograms"
-            }. Switch.`}
+            title={`Showing ${weightUnitName(units)} for this exercise`}
+            aria-label={`${exercise?.name ?? "This exercise"} is in ${weightUnitName(units)}. Switch.`}
             className="shrink-0 rounded-pill border border-line px-3 py-1 text-xs font-bold text-text-muted transition hover:bg-surface-raised"
           >
             {weightUnit(units)}

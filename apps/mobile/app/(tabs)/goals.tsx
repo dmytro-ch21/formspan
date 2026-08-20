@@ -83,6 +83,7 @@ import { foodLogGate } from '@/lib/modules';
 import { setActivityLevel } from '@/lib/profile';
 import { addDays } from '@/lib/history';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { formatWeight, type UnitSystem } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
 import type { ManualDraft, ManualTargetInput } from '@/lib/manualTarget';
 import { profileGap, todayString, type Target } from '@/lib/nutrition';
@@ -871,7 +872,7 @@ export default function TargetScreen() {
         {s && b && (
           <>
             <SectionHeader label="The arithmetic" />
-            <Row label="Resting rate" value={`${b.rmr_kcal} kcal`} hint={`${b.weight_kg} kg on ${b.weight_measured_on}`} />
+            <Row label="Resting rate" value={`${b.rmr_kcal} kcal`} hint={`${formatWeight(b.weight_kg, units)} on ${b.weight_measured_on}`} />
             <Row label="Daily movement" value={`+${b.neat_kcal} kcal`} hint={`×${b.activity_factor} on resting`} />
             <Row
               label="Training"
@@ -885,7 +886,7 @@ export default function TargetScreen() {
               hint={
                 b.target_rate_kg_per_week === 0
                   ? 'Weight held where it is'
-                  : `${fmt(b.target_rate_kg_per_week)} kg a week`
+                  : `${formatWeight(b.target_rate_kg_per_week, units)} a week`
               }
             />
             {b.clamped && b.clamp_reason ? <Text style={styles.note}>{b.clamp_reason}.</Text> : null}
@@ -905,7 +906,7 @@ export default function TargetScreen() {
                 chosen. What you are eating to is at the top and says so. */}
             <Row label="This works out to" value={`${s.kcal} kcal`} strong />
 
-            <Feasibility p={b.projection} />
+            <Feasibility p={b.projection} units={units} />
 
             <SectionHeader label="Macros" />
             <Row label="Protein" value={`${s.protein_g} g`} hint={`${fmt(b.protein_g_per_kg)} g per kg`} />
@@ -1076,21 +1077,26 @@ const SOURCE_LABEL: Record<string, string> = {
  * The arithmetic is the server's, so this screen and web cannot disagree about
  * whether a plan works.
  */
-function Feasibility({ p }: { p: Projection | null }) {
+function Feasibility({ p, units }: { p: Projection | null; units: UnitSystem }) {
   if (!p) return null;
 
+  // Every weight here arrives in kilograms and every one of them is a number
+  // the athlete is meant to act on — a goal, a gap, a shortfall against a
+  // competition deadline. They were all printed as literal `kg`, so an
+  // imperial athlete read four figures in a unit they do not think in, on the
+  // screen whose entire job is showing them the arithmetic.
   if (p.already) {
     return (
       <Text style={styles.note} testID="target-feasibility">
-        You are already at {p.target_weight_kg} kg. This phase has done its job.
+        You are already at {formatWeight(p.target_weight_kg, units)}. This phase has done its job.
       </Text>
     );
   }
   if (p.unreachable) {
     return (
       <Text style={styles.problem} testID="target-feasibility">
-        This plan never reaches {p.target_weight_kg} kg — {p.unreachable_reason}. Change the
-        goal weight or the phase.
+        This plan never reaches {formatWeight(p.target_weight_kg, units)} —{' '}
+        {p.unreachable_reason}. Change the goal weight or the phase.
       </Text>
     );
   }
@@ -1098,12 +1104,12 @@ function Feasibility({ p }: { p: Projection | null }) {
   const late = p.meets_deadline === false;
   return (
     <Text style={late ? styles.problem : styles.note} testID="target-feasibility">
-      {p.kg_to_go} kg to go. At this rate you reach {p.target_weight_kg} kg around{' '}
-      {p.reached_on}
+      {formatWeight(p.kg_to_go, units)} to go. At this rate you reach{' '}
+      {formatWeight(p.target_weight_kg, units)} around {p.reached_on}
       {p.meets_deadline === null
         ? '.'
         : late
-          ? `, which is ${p.days_late} days after your ${p.deadline_on} deadline — about ${p.shortfall_kg} kg short on the day.`
+          ? `, which is ${p.days_late} days after your ${p.deadline_on} deadline — about ${formatWeight(p.shortfall_kg, units)} short on the day.`
           : `, ahead of your ${p.deadline_on} deadline.`}
     </Text>
   );

@@ -27,6 +27,7 @@ import {
   type WorkoutItem,
 } from "@/lib/api";
 import {
+  distanceInputUnit,
   formatWeight,
   fromDisplayWeight,
   toDisplayWeight,
@@ -618,7 +619,16 @@ function ItemRow({
       {editable ? (
         <div className="flex shrink-0 items-end gap-2">
           {fields.map((f) => {
-            const label = f === "weight" ? weightUnit(units) : FIELD_LABEL[f];
+            // `distance` gains an arm here for the same reason `weight` had
+            // one: FIELD_LABEL no longer carries a unit, and this column used
+            // to read "Metres" to an athlete entering yards. Matches the
+            // session logger's own header, which already did both.
+            const label =
+              f === "weight"
+                ? weightUnit(units)
+                : f === "distance"
+                  ? distanceInputUnit(units)
+                  : FIELD_LABEL[f];
             const stored = item[FIELD_KEY[f]] as number | null;
             // Shown in the athlete's units, stored in kilograms — the same
             // rule the session logger follows, so a template written in

@@ -4,7 +4,7 @@ import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
 import type { Exercise } from './exercises';
-import { formatWeight, type UnitSystem } from './units';
+import { formatDistance, formatWeight, type UnitSystem } from './units';
 import { newTraceId, traceparent } from './trace';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
@@ -129,13 +129,11 @@ export function summariseTargets(item: WorkoutItem, units: UnitSystem = 'metric'
     const s = item.target_seconds % 60;
     parts.push(m ? `${m}m${s ? ` ${s}s` : ''}` : `${s}s`);
   }
-  if (item.target_distance_m) {
-    parts.push(
-      item.target_distance_m >= 1000
-        ? `${(item.target_distance_m / 1000).toFixed(1)}km`
-        : `${item.target_distance_m}m`,
-    );
-  }
+  // `formatDistance` rather than a local km/m split: it already switches unit
+  // by magnitude in BOTH systems, so an imperial athlete gets miles and yards
+  // instead of the kilometres this hand-rolled version printed regardless of
+  // preference — on a function that was already being handed `units`.
+  if (item.target_distance_m) parts.push(formatDistance(item.target_distance_m, units));
   return parts.join(' · ') || 'No targets set';
 }
 

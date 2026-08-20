@@ -7,7 +7,7 @@ import { newTraceId, traceparent } from "@/lib/trace";
 // and `positionVocabulary.test.ts` exists because they drift.
 import { inPositionFamily } from "@/lib/libraryTiles";
 import { localZone } from "@/lib/history";
-import { formatWeight, type UnitSystem } from "@/lib/units";
+import { formatDistance, formatWeight, type UnitSystem } from "@/lib/units";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 const API_BASE = `${API_URL}/v1`;
@@ -150,14 +150,20 @@ export function targetFieldsFor(loadType: LoadType): TargetField[] {
   }
 }
 
+/**
+ * Field NAMES, deliberately carrying no unit.
+ *
+ * `weight` read "kg" and `distance` read "Metres", described in a comment as
+ * "the metric default for anything that hasn't been wired up yet" — which is
+ * precisely how the wrong unit eventually reaches a screen. Callers that show
+ * a unit resolve it from the athlete's preference; this table names the field.
+ */
 export const FIELD_LABEL: Record<TargetField, string> = {
   sets: "Sets",
   reps: "Reps",
-  // Overridden by the caller with the athlete's own unit — kept here only
-  // as the metric default for anything that hasn't been wired up yet.
-  weight: "kg",
+  weight: "Weight",
   seconds: "Secs",
-  distance: "Metres",
+  distance: "Distance",
 };
 
 export const FIELD_KEY: Record<TargetField, keyof WorkoutItem> = {
@@ -183,13 +189,10 @@ export function summariseTargets(
     const s = i.target_seconds % 60;
     parts.push(m ? `${m}m${s ? ` ${s}s` : ""}` : `${s}s`);
   }
-  if (i.target_distance_m) {
-    parts.push(
-      i.target_distance_m >= 1000
-        ? `${(i.target_distance_m / 1000).toFixed(1)} km`
-        : `${i.target_distance_m} m`,
-    );
-  }
+  // `formatDistance` already switches unit by magnitude in BOTH systems, so an
+  // imperial athlete gets miles and yards rather than the kilometres this
+  // hand-rolled split printed regardless of preference.
+  if (i.target_distance_m) parts.push(formatDistance(i.target_distance_m, units));
   return parts.join(" · ") || "No targets";
 }
 
@@ -450,11 +453,12 @@ export function measuresFor(loadType: LoadType): Measure[] {
   }
 }
 
+/** Measure NAMES. Unit-free, for the reason on `FIELD_LABEL` above. */
 export const MEASURE_LABEL: Record<Measure, string> = {
   reps: "Reps",
-  weight: "kg",
+  weight: "Weight",
   seconds: "Secs",
-  distance: "Metres",
+  distance: "Distance",
 };
 
 export const MEASURE_KEY: Record<Measure, keyof LoggedSet> = {
@@ -789,14 +793,14 @@ export function sessionVolume(sets: LoggedSet[]): {
   };
 }
 
-export function describeSet(s: LoggedSet): string {
+export function describeSet(s: LoggedSet, units: UnitSystem = "metric"): string {
   const parts: string[] = [];
   if (s.reps != null && s.weight_kg != null)
-    parts.push(`${s.reps} × ${s.weight_kg}kg`);
+    parts.push(`${s.reps} × ${formatWeight(s.weight_kg, units)}`);
   else if (s.reps != null) parts.push(`${s.reps} reps`);
-  else if (s.weight_kg != null) parts.push(`${s.weight_kg}kg`);
+  else if (s.weight_kg != null) parts.push(formatWeight(s.weight_kg, units));
   if (s.seconds != null) parts.push(`${s.seconds}s`);
-  if (s.distance_m != null) parts.push(`${s.distance_m}m`);
+  if (s.distance_m != null) parts.push(formatDistance(s.distance_m, units));
   if (s.rpe != null) parts.push(`RPE ${s.rpe}`);
   else if (s.rir != null) parts.push(`${s.rir} RIR`);
   return parts.join(" · ") || "Not recorded";

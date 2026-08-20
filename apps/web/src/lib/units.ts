@@ -26,6 +26,21 @@ const LB_PER_KG = 2.2046226218;
 const M_PER_MILE = 1609.344;
 const M_PER_YARD = 0.9144;
 
+/** The default an account starts on, and what to fall back to when unknown. */
+export const DEFAULT_UNIT_SYSTEM: UnitSystem = 'metric';
+
+/**
+ * The one-line description of a system, for a settings row.
+ *
+ * An accessor rather than `UNIT_SYSTEMS[0]` at the call site: indexing the
+ * table couples the caller to its ORDER, and `you.tsx` previously avoided that
+ * by writing the words out a second time instead — which is the duplication
+ * this whole module is being reshaped to remove.
+ */
+export function unitSystemDetail(u: UnitSystem): string {
+  return UNIT_SYSTEMS.find((s) => s.key === u)?.detail ?? '';
+}
+
 export function weightUnit(u: UnitSystem): string {
   return u === 'imperial' ? 'lb' : 'kg';
 }

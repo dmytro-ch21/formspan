@@ -166,7 +166,7 @@ export function Derivation({
         )}
       </div>
 
-      <Feasibility p={basis.projection} />
+      <Feasibility p={basis.projection} units={units} />
     </div>
   );
 }
@@ -188,21 +188,26 @@ export function Derivation({
  * whether a plan works — the same reason `offered_grips` is served rather than
  * reimplemented (N16).
  */
-function Feasibility({ p }: { p: Projection | null }) {
+function Feasibility({ p, units }: { p: Projection | null; units: UnitSystem }) {
   if (!p) return null;
 
+  // Four weights, all arriving in kilograms, all printed as literal `kg` — the
+  // goal, the gap, and the shortfall against a competition deadline. Mirrors
+  // the same fix on mobile's Goals tab; the two screens render the same
+  // projection and disagreeing about its units is exactly the inconsistency
+  // N105 exists to end.
   if (p.already) {
     return (
       <p className="mt-4 text-sm text-text-muted" data-testid="target-feasibility">
-        Already at {p.target_weight_kg} kg — this phase has done its job.
+        Already at {formatWeight(p.target_weight_kg, units)} — this phase has done its job.
       </p>
     );
   }
   if (p.unreachable) {
     return (
       <p className="mt-4 text-sm text-danger-ink" data-testid="target-feasibility">
-        This plan never reaches {p.target_weight_kg} kg — {p.unreachable_reason}. Change the goal
-        weight or the phase.
+        This plan never reaches {formatWeight(p.target_weight_kg, units)} —{" "}
+        {p.unreachable_reason}. Change the goal weight or the phase.
       </p>
     );
   }
@@ -213,12 +218,13 @@ function Feasibility({ p }: { p: Projection | null }) {
       className={`mt-4 text-sm ${late ? "text-danger-ink" : "text-text-muted"}`}
       data-testid="target-feasibility"
     >
-      {p.kg_to_go} kg to go. At this rate you reach {p.target_weight_kg} kg around{" "}
+      {formatWeight(p.kg_to_go, units)} to go. At this rate you reach{" "}
+      {formatWeight(p.target_weight_kg, units)} around{" "}
       <strong className="tabular-nums">{p.reached_on}</strong>
       {p.meets_deadline === null
         ? "."
         : late
-          ? ` — ${p.days_late} days after your ${p.deadline_on} deadline, about ${p.shortfall_kg} kg short on the day.`
+          ? ` — ${p.days_late} days after your ${p.deadline_on} deadline, about ${formatWeight(p.shortfall_kg, units)} short on the day.`
           : `, ahead of your ${p.deadline_on} deadline.`}
     </p>
   );

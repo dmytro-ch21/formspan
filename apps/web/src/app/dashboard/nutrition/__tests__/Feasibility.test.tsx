@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { Derivation } from "../targets/Derivation";
 import type { Basis, Projection } from "@/lib/nutritionApi";
+import type { UnitSystem } from "@/lib/units";
 
 /**
  * "Does this look right?" on the render path (N69).
@@ -41,9 +42,9 @@ const basis = (projection: Projection | null): Basis =>
     projection,
   }) as unknown as Basis;
 
-const render = (p: Projection | null) =>
+const render = (p: Projection | null, units: UnitSystem = "metric") =>
   renderToStaticMarkup(
-    <Derivation basis={basis(p)} kcal={1933} proteinG={180} carbG={140} fatG={72} fibreG={30} units="metric" />,
+    <Derivation basis={basis(p)} kcal={1933} proteinG={180} carbG={140} fatG={72} fibreG={30} units={units} />,
   );
 
 const base: Projection = {
@@ -66,7 +67,9 @@ describe("the feasibility line", () => {
   it("says when the goal arrives, with no verdict when no deadline was set", () => {
     const html = render(base);
     expect(html).toContain("2026-03-25");
-    expect(html).toContain("8 kg to go");
+    // `8kg`, not `8 kg` — `formatWeight`'s own spacing, which is what this
+    // line renders through since N105. It used to print a literal `kg`.
+    expect(html).toContain("8kg to go");
     // No deadline: it must not claim one is met or missed.
     expect(html).not.toContain("deadline");
   });
@@ -107,5 +110,42 @@ describe("the feasibility line", () => {
     const html = render({ ...base, already: true, kg_to_go: 0 });
     expect(html).toContain("done its job");
     expect(html).not.toContain("text-danger-ink");
+  });
+});
+
+/**
+ * The same projection in imperial (N105).
+ *
+ * Every weight on this line — the gap, the goal, the shortfall — was printed as
+ * a literal `kg` regardless of the athlete's profile, so a US athlete read four
+ * numbers in a unit they do not think in on the screen whose entire job is
+ * showing them the arithmetic they are being asked to trust.
+ */
+describe("the feasibility line follows the athlete's units", () => {
+  it("renders pounds for an imperial athlete, and no kilograms anywhere", () => {
+    const html = render(base, "imperial");
+    // 8 kg = 17.6 lb, 82 kg = 180.8 lb.
+    expect(html).toContain("17.6lb to go");
+    expect(html).toContain("180.8lb");
+    expect(html).not.toContain("8kg to go");
+  });
+
+  it("still renders kilograms for a metric athlete", () => {
+    // Both directions: a conversion applied unconditionally would break this
+    // one while leaving the imperial case above perfectly green.
+    const html = render(base, "metric");
+    expect(html).toContain("8kg to go");
+    expect(html).not.toContain("17.6lb");
+  });
+
+  it("converts the shortfall on a missed deadline too", () => {
+    const late = render(
+      { ...base, deadline_on: "2026-02-01", meets_deadline: false, days_late: 12, shortfall_kg: 3 },
+      "imperial",
+    );
+    // 3 kg = 6.6 lb. The easiest of the four to miss, being inside a template
+    // literal in the trailing clause rather than in JSX text.
+    expect(late).toContain("6.6lb short");
+    expect(late).not.toContain("3 kg short");
   });
 });
