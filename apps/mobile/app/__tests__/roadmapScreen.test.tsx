@@ -61,9 +61,10 @@ jest.mock('@/lib/curriculum', () => ({
 }));
 
 const mockSetFocus = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve());
+const mockFetchFocus = jest.fn((): Promise<unknown> => Promise.resolve([]));
 jest.mock('@/lib/bjjFocus', () => ({
   ...jest.requireActual('@/lib/bjjFocus'),
-  fetchFocus: () => Promise.resolve([]),
+  fetchFocus: () => mockFetchFocus(),
   setFocus: (...a: unknown[]) => mockSetFocus(...a),
 }));
 
@@ -141,6 +142,7 @@ const WHITE: Curriculum = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetCurriculum.mockResolvedValue(WHITE);
+  mockFetchFocus.mockResolvedValue([]);
 });
 
 async function open() {
@@ -356,6 +358,34 @@ describe('a lesson', () => {
       curriculum_id: 'white-belt-basics',
       technique_ids: ['scissor-sweep'],
     });
+  });
+
+  it('says so instead of offering a dead button when it is already in focus', async () => {
+    // A control that returns silently is indistinguishable from one that is
+    // broken: the athlete's reading of "nothing happened" is that the tap was
+    // dropped. `proposeOneFocus` would return `unchanged` here, so there is
+    // nothing for the button to do and it must not be drawn.
+    mockFetchFocus.mockResolvedValue([
+      {
+        technique_id: 'scissor-sweep',
+        name: 'Scissor sweep',
+        position: 'Guard - Bottom',
+        category: 'Sweep',
+        started_on: '2026-01-02',
+      },
+    ]);
+    await open();
+    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+
+    expect(screen.queryByTestId('roadmap-work-scissor-sweep')).toBeNull();
+    expect(screen.getByTestId('roadmap-in-focus-scissor-sweep')).toHaveTextContent(
+      /Already in your focus/,
+    );
+
+    // And the lesson beside it, which is NOT in focus, still offers the button.
+    fireEvent.press(screen.getByTestId('roadmap-lesson-hip-bump-sweep'));
+    expect(screen.getByTestId('roadmap-work-hip-bump-sweep')).toBeTruthy();
   });
 
   it('reads a concept as something to understand, with nothing to count', async () => {

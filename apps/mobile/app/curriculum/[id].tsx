@@ -138,6 +138,20 @@ export default function CurriculumScreen() {
 
   const view = useMemo(() => (curriculum ? buildRoadmap(curriculum) : null), [curriculum]);
 
+  /**
+   * What is already in the focus list.
+   *
+   * A `Set` built once rather than a `.some()` per lesson: an open milestone
+   * draws up to thirteen of these and the focus list is capped at five, so the
+   * cost is trivial either way — but the lesson row needs the ANSWER, not the
+   * list, which is the same argument `criteriaChips` makes about keeping
+   * display decisions out of the component.
+   */
+  const inFocus = useMemo(
+    () => new Set((focus ?? []).map((f) => f.technique_id)),
+    [focus],
+  );
+
   const toggleEnrollment = useCallback(async () => {
     if (!curriculum) return;
     setBusy(true);
@@ -197,7 +211,17 @@ export default function CurriculumScreen() {
     [applyFocus],
   );
 
-  /** "Work on this" from an expanded lesson — one technique, nothing behind it. */
+  /**
+   * "Work on this" from an expanded lesson — one technique, nothing behind it.
+   *
+   * The `unchanged` guard stays as a backstop, but the button is no longer
+   * RENDERED for a technique already in focus, which is the real fix: a control
+   * that returns silently is indistinguishable from a control that is broken,
+   * and the athlete's reasonable reading of "nothing happened" is that the app
+   * dropped their tap. The row says "Already in your focus" instead — which is
+   * also the more useful answer, since it tells them the chip is waiting for
+   * them in the reflection wizard.
+   */
   const workOnLesson = useCallback(
     (techniqueID: string) => {
       if (!curriculum || !focus) return;
@@ -421,6 +445,7 @@ export default function CurriculumScreen() {
               }}
               onToggleLesson={(key) => setOpenLesson((v) => (v === key ? null : key))}
               onWork={workOnLesson}
+              inFocus={inFocus}
             />
           ))}
         </RNView>
@@ -489,6 +514,7 @@ function MilestoneCard({
   onToggle,
   onToggleLesson,
   onWork,
+  inFocus,
 }: {
   milestone: Milestone;
   tone: string;
@@ -502,6 +528,7 @@ function MilestoneCard({
   onToggle: () => void;
   onToggleLesson: (key: string) => void;
   onWork: (techniqueID: string) => void;
+  inFocus: ReadonlySet<string>;
 }) {
   const size = isCurrent ? CIRCLE_NOW : CIRCLE;
   const half = Math.round(size / 2);
@@ -616,6 +643,7 @@ function MilestoneCard({
                 busy={busy}
                 onToggle={() => onToggleLesson(l.key)}
                 onWork={onWork}
+                inFocus={l.techniqueID !== null && inFocus.has(l.techniqueID)}
               />
             ))}
           </RNView>
@@ -644,6 +672,7 @@ function LessonRow({
   busy,
   onToggle,
   onWork,
+  inFocus,
 }: {
   lesson: Lesson;
   tone: string;
@@ -654,6 +683,8 @@ function LessonRow({
   busy: boolean;
   onToggle: () => void;
   onWork: (techniqueID: string) => void;
+  /** Already in the focus list, so there is nothing left for the button to do. */
+  inFocus: boolean;
 }) {
   const techniqueID = l.techniqueID;
   const state = l.mastered
@@ -730,7 +761,13 @@ function LessonRow({
               </>
             )}
 
-            {techniqueID !== null && l.measures !== null && !l.mastered && (
+            {techniqueID !== null && l.measures !== null && !l.mastered && inFocus && (
+              <Text style={styles.alreadyFocused} testID={`roadmap-in-focus-${l.key}`}>
+                Already in your focus — it shows as a one-tap chip when you log a session.
+              </Text>
+            )}
+
+            {techniqueID !== null && l.measures !== null && !l.mastered && !inFocus && (
               <Pressable
                 onPress={() => onWork(techniqueID)}
                 disabled={busy}
@@ -955,5 +992,6 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   lessonState: { color: vola.textDim, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  alreadyFocused: { color: vola.textDim, fontSize: 11, lineHeight: 16, marginTop: 4 },
   chevronUp: { transform: [{ rotate: '180deg' }] },
 });

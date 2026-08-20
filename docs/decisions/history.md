@@ -36362,6 +36362,65 @@ turns 2 tests red; letting a concept-only milestone divide by
 `Math.max(1, countable)` turns 5 red across both files. Baseline green in the
 same session, 63 tests.
 
+### What review caught, and what writing the test for it caught
+
+Two findings, and the second one is the reason the first was worth a test rather
+than a fix.
+
+**The connecting rule was eleven dashes, not one line.** `styles.row` carried
+`paddingBottom: 10`; the gutter is a stretched *child*, so its height is the
+row's CONTENT box, and an absolutely-positioned `bottom: 0` rail cannot reach
+into the row's padding. The single defining feature of the reference design was
+broken by ten pixels in a place nothing pointed at — and the comment on that
+line **claimed the opposite**, that "the rows butt together so the rule segments
+join into one line". A comment asserting the property its own styles break is
+worse than no comment: the next person reads it and does not look. The spacing
+moved to `cardCol`, inside the box the gutter matches, which is exactly the
+`lessonWrap`/`lessonCol` arrangement one level down — which is why the inner
+rule never had the bug.
+
+**Writing the test for that found a second defect nobody had seen.**
+`styles.rail` set `top: 0, bottom: 0` in the base style, so the last segment's
+`{ top: 0, height: half }` override merged onto an inherited `bottom: 0` — and
+**Yoga resolves top+bottom by stretching and ignoring the height**. The final
+segment ran past its circle and down into the completion card. `innerRail` had
+the identical shape and the identical bug. Both now supply their own vertical
+extent in all three cases and the base style carries none, so there is nothing
+to inherit. This one would have survived a screenshot review: it is a
+belt-coloured line overshooting onto a belt-coloured card edge.
+
+The lesson generalises past this screen. **A style that one branch overrides and
+another inherits is the hazard**, not the individual value; and a layout claim
+in a comment is worth exactly as much as the test under it, which here was
+nothing until there was one.
+
+**The header hid its own content from VoiceOver.** An `accessibilityLabel`
+REPLACES an element's children for a screen reader, so labelling the thesis
+button silenced the thesis; and anything nested inside an accessible element is
+not reachable as its own node, so the expanded description — where #445 put all
+three of the belt's orphaned framing phases — was announced by nothing at all. A
+belt's entire framing, invisible. The label is gone (the button speaks its own
+text), a hint says what tapping does, and the description is rendered outside
+the pressable.
+
+Two smaller ones taken at the same time. The **spoken** "X of Y mastered" is now
+gated on enrolment exactly like the visible counter — ungated it announced "0 of
+2 mastered" to someone who had not started counting, which is the precise
+reading the rest of the screen refuses, leaking through the one layer nobody
+looks at. And **"Work on this" on a technique already in focus was a dead
+control**: `proposeOneFocus` returned `unchanged` and the handler returned
+silently, which is indistinguishable from a dropped tap. The row says "Already
+in your focus" instead, which is also the more useful answer.
+
+Six mutations were run against the resulting guards — row padding reintroduced,
+`top`/`bottom` restored to each of the two rail base styles, the
+`accessibilityLabel` put back, the mastered suffix ungated, and the focus button
+drawn unconditionally. All six red, baseline green. **The first attempt at that
+measured nothing**: the runner helper `cd`'d away, so four apparent failures
+were all the *first* mutation still in place and the later substitutions never
+applied. Redone with absolute paths and an assertion that each target string
+exists before substituting.
+
 ### Gaps
 
 - **The belt mark is a judgement call.** It is a tied belt drawn from the
