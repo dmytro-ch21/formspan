@@ -32158,6 +32158,8 @@ not the work.
 - **#232 predates all of this** — an open issue about the share-card export size
   that `TASKS.md` records as fixed. Added to the board as `Todo`; it is probably
   closeable, but that is the user's call, not a migration decision.
+
+
 ## 2026-08-20 — Why a branch gets zero CI checks: it conflicts with its base (N65)
 
 **A pull request that conflicts with `main` receives ZERO check runs, silently,
@@ -32246,6 +32248,54 @@ commits: `--sha d6aba090` (the historical wedged commit) exits 1 reporting 0;
 reporting 5. The green baseline was confirmed in the same session, so the red
 runs are evidence rather than an unrelated breakage.
 
+### Two things review found, and both were the detector failing its own test
+
+Recorded because the whole point of this entry is that a detector which has only
+ever been green is not a detector, and reading one's own is not enough.
+
+**`GOOD_CONCLUSIONS` forgave `skipped`.** The first version held
+`{"success", "neutral", "skipped"}`, on the reasoning that neither of the last
+two means "failed". Measured: five jobs concluding `skipped` made the script
+print *"all declared checks ran and passed"* and exit 0 — this script's central
+claim being false in precisely the shape it exists to catch. It is reachable in
+one edit, a job-level `if:` on the five jobs, and neither the count nor the name
+set moves, because five skipped jobs really are five check runs with the right
+names. Worse, the permissiveness was **untested**: of eight vectors, the only
+conclusions exercised were `success`, `failure` and `None`, so deleting
+`skipped` changed no result. `skipped` is now NOT-CHECKED with its own message
+(a different remedy: a red check is a bug in the branch, a skipped one is a bug
+in the workflow's `if:`), `GOOD_CONCLUSIONS` is `{"success"}`, and three vectors
+cover it.
+
+**An external contract was asserted from belief, exactly as the rule warns.**
+The docstring claimed a re-run adds a duplicate run name, and a self-test vector
+asserted tolerance for it. Measured against the live endpoint on a commit with
+five workflow attempts: `check-runs?per_page=100` returns `total_count` **5**;
+adding `filter=all` returns **25**. The endpoint defaults to `filter=latest`, so
+the duplicate the vector tolerated can never arrive — the one vector guaranteed
+never to catch anything. It is deleted, `filter=latest` is now pinned in the URL
+rather than relied on implicitly, and the measurement is recorded next to the
+call. Note the tolerance did not even generalise: on a duplicate list holding a
+stale `failure` beside a fresh `success`, `evaluate` returns FAILED, so anyone
+who believed the docstring and switched to `filter=all` would have every
+red-then-green re-run reporting failure.
+
+Four smaller ones, same family: an inline `matrix: {…}` slipped past a regex
+anchored with `$`; `--pr` and `--sha` together let `--sha` win silently and skip
+the conflict diagnosis; every `gh` failure shared exit code 1 with the N65 case
+itself, so "I could not ask GitHub" and "GitHub says nothing ran" were
+indistinguishable (now 4); and the self-test pinned the derived *count* but not
+the derived *names*, which a trailing comment on a job key corrupts — it stops
+the key matching, so the next `name:` overwrites the previous job's. That one
+was only visible because it also moved the count. Both are pinned now, and a
+mutation that corrupts a name while keeping the count at five goes red.
+
+`check:ci-detector` also runs in CI now, not only in `verify`. It was the one
+python gate absent from the `Scripts (Python)` job — and the things its
+self-test notices (a sixth job, a matrix, a reformat, a renamed check) are all
+edits to `ci.yml` itself, so leaving it on an author's laptop put the guard
+furthest from the thing it guards.
+
 ### What this leaves behind
 
 **The files every task edits are the mechanism's fuel**: `docs/decisions/history.md`,
@@ -32259,6 +32309,15 @@ to Issues removes one of the four; it does not remove the mechanism, and this
 branch hit it itself — the rebase onto `811f346` conflicted in `history.md`, on
 an append-versus-append, which is the half of N63 that migration explicitly did
 not solve.
+
+**#388 lands a sixth CI check, and the disagreement is deliberate.** Once it
+merges, the workflows declare six `pull_request` jobs while
+`EXPECTED_CHECK_RUNS` still says five, and `check:ci-detector` goes red in
+`verify` naming both numbers. That is the cross-check working: whoever merges
+second bumps the constant, and the alternative — a detector that silently
+accepted five of six — is the bug it exists to catch. The two changes are
+complementary: #388 catches "checks ran, the diff is empty", this catches "the
+diff is real, no checks ran".
 
 **Nothing prevents it, and nothing yet notices it unprompted.** `ci:checks` has
 to be run. A repository ruleset requiring the five checks as *required status

@@ -270,7 +270,12 @@ Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch
 pnpm run ci:checks          # the current branch's PR; --pr <n> or --sha <sha> also work
 ```
 
-It must report 5 and exit 0. A count of **0** satisfies "no failures"
+It must report 5 and exit 0 — 5 being however many jobs the workflows declare
+today, which the script derives rather than assumes: it cross-checks the derived
+set against `EXPECTED_CHECK_RUNS` in `scripts/check-ci-checks.py` and **fails
+loudly if the two disagree**, so adding a CI job means changing that constant in
+the same commit rather than discovering later that the bar quietly moved.
+A count of **0** satisfies "no failures"
 trivially: `gh pr view` shows nothing red because there is nothing at all,
 `statusCheckRollup` is an empty list, and `mergeStateStatus` does not
 distinguish the two either. This is the absence-reads-as-answer failure landing
@@ -310,8 +315,15 @@ PR gets its five.
 `pnpm run ci:checks` reads the PR's **`headRefOid`**, not the newest run on the
 branch, because `gh run list --branch` will hand you a green run for a commit
 two pushes ago. It also prints `CONFIRMED CAUSE` when `mergeable` is
-`CONFLICTING`. `check:ci-detector` in `verify` is its offline self-test, not a
-check of any PR.
+`CONFLICTING`. `check:ci-detector` in `verify` (and in CI) is its offline
+self-test, not a check of any PR.
+
+Exit codes are distinct on purpose: **1** nothing ran, a declared check is
+missing, or one was **skipped**; **2** something failed; **3** still running;
+**4** could not ask GitHub. A *skipped* check is counted as not-checked rather
+than passed — five jobs behind a job-level `if:` are five check runs with the
+right names and a green tick, which is the same absence wearing better
+camouflage.
 
 **Never merge a PR without the user's explicit go-ahead, even if CI is green.** This has been the rule for every PR in this project — don't treat a passing CI run as implicit merge permission.
 
@@ -792,7 +804,7 @@ a piece of apparatus returning a confident result while measuring nothing.
   itself, so they were true by construction.
 - CI silently skipping pushes, so an absent run read exactly like a passing one.
   **Diagnosed 2026-08-20 (N65) — the cause is a merge conflict with the base,
-  and the detector is `pnpm run ci:checks`. See "CI can run zero checks" in
+  and the detector is `pnpm run ci:checks`. See "CI can run ZERO checks" in
   the Git/PR workflow section; this bullet is the symptom, that is the
   mechanism.**
 - A build failing with `PluginError` and **exiting 0** while printing it.

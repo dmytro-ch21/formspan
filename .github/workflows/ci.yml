@@ -235,6 +235,20 @@ jobs:
       - name: Every gate is reachable
         run: python3 scripts/check-verify-chain.py
 
+      # The detector for "this PR received ZERO check runs", which is
+      # indistinguishable from every check passing. This step runs its OFFLINE
+      # self-test only — the live half needs an authenticated `gh` and a PR, and
+      # is `pnpm run ci:checks`, run by hand or by /pre-merge.
+      #
+      # It is here because the self-test is what notices `ci.yml` itself
+      # changing shape: a sixth job, a `matrix:`, a reformat that breaks the
+      # parser, a renamed check. Every one of those is an edit to THIS file, so
+      # leaving the check only on an author's laptop puts the guard furthest
+      # from the thing it guards. It was the one python gate absent from CI;
+      # found in review.
+      - name: The zero-checks detector still detects
+        run: python3 scripts/check-ci-checks.py --self-test
+
       # The telemetry buffer is duplicated between apps/mobile and apps/web
       # because a shared workspace package was built and measured worse here —
       # four bundlers to satisfy, two of them already failing, and no precedent.

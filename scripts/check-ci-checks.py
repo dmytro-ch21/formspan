@@ -48,14 +48,17 @@ Hence the remedy this script prints when it finds zero:
    branch. `gh run list --branch` will happily hand you a green run for a commit
    two pushes ago, which is the same absence-reads-as-answer failure wearing a
    green tick.
-3. Nothing has failed, and nothing is still running. A pending check is not a
-   pass, so it exits non-zero too, with its own code.
+3. Nothing has failed, nothing was SKIPPED, and nothing is still running. Each
+   gets its own exit code, because "not finished", "did not run" and "went red"
+   are three different answers: `1` nothing ran / a check missing / a check
+   skipped, `2` something failed, `3` still pending, `4` could not ask GitHub.
 
-Expected checks are derived from the workflow files rather than hardcoded, so a
-new CI job raises the bar automatically. `EXPECTED_CHECK_RUNS` is a literal
-somebody measured, cross-checked against that derivation: if they disagree the
-script fails loudly rather than trusting either. A parser that silently found
-one job would otherwise make this whole check vacuous.
+Expected checks are derived from the workflow files rather than hardcoded, and
+cross-checked against `EXPECTED_CHECK_RUNS`, a literal somebody measured: if the
+two disagree the script **refuses to run** rather than trusting either. So a new
+CI job does not raise the bar by itself — it turns `check:ci-detector` red until
+the constant is bumped in the same commit, which is the intended cost. A parser
+that silently found one job would otherwise make this whole check vacuous.
 
 ## What it does not promise
 
@@ -66,11 +69,19 @@ one job would otherwise make this whole check vacuous.
   `--self-test` mode is the part that runs in `verify`, and that mode proves the
   decision logic still rejects the zero-run case rather than proving anything
   about any pull request.
-- **Re-runs are not a failure.** A re-run adds a second run with the same name,
-  so the raw count can exceed the expected one legitimately; the name set is
-  what has to be complete.
+- **It cannot see a check the local tree does not declare.** The expected set is
+  parsed from *your* working copy while the runs come from the remote head, so
+  pointing `--pr` at somebody else's branch compares their runs to your
+  `ci.yml`. A run they have and you do not is reported as a `note:`, never a
+  failure.
+- **A new CI job does not raise the bar silently — it stops the script.** The
+  derivation and `EXPECTED_CHECK_RUNS` disagree, which is a loud refusal by
+  design; bump the constant in the same commit.
 - It reads `mergeable` for the diagnosis, and GitHub computes that lazily — an
   `UNKNOWN` immediately after a push means "ask again in a moment", not "fine".
+- **It needs Python 3.10+** for its `X | None` annotations, as several of its
+  siblings in `scripts/` already do. `check:python` cannot catch that: 3.9's
+  `ast.parse` accepts PEP 604 as *syntax* and the failure is at import.
 """
 
 import argparse
@@ -90,15 +101,28 @@ WORKFLOWS = ROOT / ".github/workflows"
 # dies. If CI genuinely gains or loses a job, change this in the same commit.
 EXPECTED_CHECK_RUNS = 5
 
-# A check run that has concluded acceptably. `skipped` and `neutral` are here
-# because GitHub uses them for a job that legitimately did not need to do work;
-# neither means "failed".
-GOOD_CONCLUSIONS = {"success", "neutral", "skipped"}
+# A check run that actually did the work. ONLY `success`.
+#
+# This set held `skipped` and `neutral` for one draft, on the reasoning that
+# neither means "failed" — and review measured what that bought: five jobs
+# concluding `skipped` made this script print "all declared checks ran and
+# passed" and exit 0. That is this script's own central claim being false in
+# precisely the shape it exists to catch, and it is reachable in one edit (a
+# job-level `if:` on the five jobs still derives all five names, so the count
+# cross-check does not fire either). A skipped check did not run.
+#
+# `skipped` is therefore NOT-CHECKED, not FAILED, because it is the same
+# category as a missing run: nothing verified anything. Everything else
+# non-success is reported with its conclusion named, so a `neutral` reads as
+# `neutral` rather than being silently forgiven.
+GOOD_CONCLUSIONS = {"success"}
+DID_NOT_RUN_CONCLUSIONS = {"skipped"}
 
 EXIT_OK = 0
-EXIT_NOT_CHECKED = 1  # zero runs, or a declared check missing — the N65 case
+EXIT_NOT_CHECKED = 1  # zero runs, a declared check missing, or skipped — the N65 case
 EXIT_FAILED = 2  # the checks ran and something is red
 EXIT_PENDING = 3  # the checks ran and have not finished
+EXIT_ERROR = 4  # we could not ask GitHub at all — deliberately NOT 1
 
 REMEDY = (
     "  git fetch origin && git rebase origin/main && git push --force-with-lease"
@@ -114,9 +138,17 @@ def strip_comments(text: str) -> str:
     """Drop whole-line YAML comments.
 
     Same reason as `check-verify-chain.py`: a commented-out job must not count
-    as a job CI runs. `ci.yml` in this repo carries long comment blocks whose
-    prose contains the word `pull_request`, so this is load-bearing here, not
-    defensive habit.
+    as a job CI runs.
+
+    **It changes nothing about today's `ci.yml`** — measured, `pull_request`
+    appears there exactly once and not in a comment, and the file has no
+    column-0 comments at all, so replacing this with the identity function
+    leaves the parse byte-identical. An earlier version of this docstring
+    claimed the opposite; review measured it. It is kept because a column-0
+    comment inside the `on:` block would otherwise trip
+    `triggers_on_pull_request`'s "left the block" test and silently drop the
+    whole workflow — and `self_test` has a fixture for exactly that, so the
+    guard is not resting on this paragraph.
     """
     return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
 
@@ -192,7 +224,12 @@ def expected_check_names() -> tuple[list[str], list[str]]:
         text = strip_comments(path.read_text())
         if not triggers_on_pull_request(text):
             continue
-        if re.search(r"^\s+matrix:\s*$", text, re.MULTILINE):
+        # No `$` anchor: `matrix: {node: [20, 22]}` on one line is still a
+        # matrix, and the anchored form missed it. Review measured that gap —
+        # the outcome was safe (the runs come back named `Mobile (Expo) (20)`,
+        # so they read as MISSING) but the message was wrong, printing N65's
+        # rebase remedy for what is really a parser limitation.
+        if re.search(r"^\s+matrix:", text, re.MULTILINE):
             # A matrix fans one job out into several check runs with generated
             # names, so counting job keys would under-report and the name set
             # would be wrong. Refuse rather than report a number that is quietly
@@ -292,6 +329,23 @@ def evaluate(expected: list[str], runs: list[dict]) -> tuple[int, list[str]]:
         ]
         return EXIT_PENDING, out
 
+    # Skipped before failed, because a skipped check is an ABSENCE and this
+    # script is about absences. Reporting it as "FAILED" would be true enough to
+    # act on but wrong about what happened, and the remedy differs: a red check
+    # is a bug in the branch, a skipped one is a bug in the workflow's `if:`.
+    skipped = [r for r in runs if r.get("conclusion") in DID_NOT_RUN_CONCLUSIONS]
+    if skipped:
+        out += [
+            "",
+            "SKIPPED, so NOT CHECKED: "
+            + ", ".join(f"{r.get('name')}" for r in skipped),
+            "",
+            "A skipped check produced a green tick and verified nothing. Find "
+            "the `if:` on that job — the check run exists, which is why the "
+            "count and the name set both look right.",
+        ]
+        return EXIT_NOT_CHECKED, out
+
     bad = [r for r in runs if r.get("conclusion") not in GOOD_CONCLUSIONS]
     if bad:
         out += [
@@ -303,6 +357,33 @@ def evaluate(expected: list[str], runs: list[dict]) -> tuple[int, list[str]]:
 
     out.append("all declared checks ran and passed: " + ", ".join(expected))
     return EXIT_OK, out
+
+
+def diagnose(code: int, facts: dict) -> str:
+    """The mergeability note that turns a bare count into a diagnosis.
+
+    Kept out of `main` and pure so `--self-test` can cover it. Review found it
+    living inline with no vector on it, which is the case CLAUDE.md's rule about
+    redundant guards is about: a guard whose *message* nothing asserts reads as
+    dead code to the next person, and this one carries the entire finding of
+    N65 to whoever is staring at a zero.
+    """
+    mergeable = facts.get("mergeable")
+    if code == EXIT_OK:
+        return ""
+    if code == EXIT_NOT_CHECKED and mergeable == "CONFLICTING":
+        return (
+            "CONFIRMED CAUSE: `mergeable` is CONFLICTING. GitHub cannot build "
+            "this pull request's merge ref, so no workflow run exists. Rebase "
+            "(above) and the checks appear within seconds."
+        )
+    if code == EXIT_NOT_CHECKED and mergeable == "UNKNOWN":
+        return (
+            "`mergeable` is UNKNOWN — GitHub computes it lazily. Re-run this in "
+            "a few seconds before concluding anything; UNKNOWN is not the same "
+            "as MERGEABLE."
+        )
+    return f"mergeable={mergeable} mergeStateStatus={facts.get('mergeStateStatus')}"
 
 
 # --------------------------------------------------------------------------
@@ -334,8 +415,27 @@ def pr_facts(pr: str | None) -> dict:
 
 
 def check_runs_for(slug: str, sha: str) -> list[dict]:
+    """The check runs on one commit, one per check name.
+
+    `filter=latest` is the endpoint's DEFAULT and is pinned here anyway, because
+    the behaviour is load-bearing and invisible when implicit. Measured
+    2026-08-20 against a commit with five workflow attempts (`ee91313`):
+
+        ?per_page=100              -> total_count 5,  array 5
+        ?per_page=100&filter=all   -> total_count 25, array 25
+
+    So a re-run does NOT add a duplicate name through this call — an earlier
+    draft of this file claimed it did, and built a self-test vector on the
+    claim, which is the "a stub built from an assumption cannot falsify it"
+    rule arriving as a docstring instead of a stub. Review measured it.
+
+    Do not switch to `filter=all` without also making duplicate handling
+    explicitly latest-wins: with every attempt returned, a check that went
+    red then green on a re-run reports FAILED, because the stale `failure`
+    is still in the list.
+    """
     payload = json.loads(
-        gh(["api", f"repos/{slug}/commits/{sha}/check-runs?per_page=100"])
+        gh(["api", f"repos/{slug}/commits/{sha}/check-runs?per_page=100&filter=latest"])
     )
     runs = payload.get("check_runs", [])
     total = payload.get("total_count")
@@ -389,8 +489,36 @@ def self_test() -> int:
             EXIT_PENDING,
             "STILL RUNNING",
         ),
-        # A re-run legitimately duplicates a name; that is not a failure.
-        ("a re-run", FIVE, [_run(n) for n in FIVE] + [_run(FIVE[0])], EXIT_OK, "passed"),
+        # The two conclusions that used to be quietly forgiven. `skipped` is the
+        # dangerous one: five skipped jobs are five check runs with the right
+        # names, so the count and the name set both look perfect. Review found
+        # this reporting "all declared checks ran and passed", exit 0.
+        (
+            "all skipped",
+            FIVE,
+            [_run(n, conclusion="skipped") for n in FIVE],
+            EXIT_NOT_CHECKED,
+            "SKIPPED, so NOT CHECKED",
+        ),
+        (
+            "one skipped",
+            FIVE,
+            [_run(n) for n in FIVE[:4]] + [_run(FIVE[4], conclusion="skipped")],
+            EXIT_NOT_CHECKED,
+            "SKIPPED, so NOT CHECKED",
+        ),
+        # Not forgiven either, but it is a different thing and says so.
+        (
+            "one neutral",
+            FIVE,
+            [_run(n) for n in FIVE[:4]] + [_run(FIVE[4], conclusion="neutral")],
+            EXIT_FAILED,
+            "neutral",
+        ),
+        # NO duplicate-name vector. The endpoint defaults to `filter=latest` and
+        # this script pins it, so a re-run cannot produce one — measured, see
+        # `check_runs_for`. A vector for input the code cannot receive is the
+        # one vector guaranteed never to catch anything.
         # An empty expectation must never pass vacuously — otherwise a parser
         # that stops reading the workflows turns this whole script green.
         ("nothing expected", [], [_run(n) for n in FIVE], EXIT_NOT_CHECKED, "nothing to compare"),
@@ -413,12 +541,72 @@ def self_test() -> int:
         elif want_text not in text:
             failures.append(f"  {label}: output does not mention {want_text!r}")
 
+    # The mergeability note. Its *effect* is redundant — the exit code already
+    # says the PR is unchecked — so nothing would go red if it were deleted,
+    # which is exactly why its message needs asserting: it is the sentence that
+    # tells whoever is staring at a zero what N65 found.
+    diagnoses: list[tuple[str, int, dict, str]] = [
+        ("conflicting", EXIT_NOT_CHECKED, {"mergeable": "CONFLICTING"}, "CONFIRMED CAUSE"),
+        ("mergeable unknown", EXIT_NOT_CHECKED, {"mergeable": "UNKNOWN"}, "UNKNOWN is not the same"),
+        # Zero runs on a perfectly mergeable PR is the case the diagnosis must
+        # NOT claim: something else is wrong and saying "CONFIRMED CAUSE" would
+        # send the reader down the wrong path.
+        ("clean but unchecked", EXIT_NOT_CHECKED, {"mergeable": "MERGEABLE"}, "mergeable=MERGEABLE"),
+        ("green says nothing", EXIT_OK, {"mergeable": "MERGEABLE"}, ""),
+    ]
+    for label, code, facts, want in diagnoses:
+        note = diagnose(code, facts)
+        if want == "":
+            if note != "":
+                failures.append(f"  diagnose/{label}: expected silence, got {note!r}")
+        elif want not in note:
+            failures.append(f"  diagnose/{label}: {note!r} does not mention {want!r}")
+    if "CONFIRMED CAUSE" in diagnose(EXIT_NOT_CHECKED, {"mergeable": "MERGEABLE"}):
+        failures.append("  diagnose: claims the conflict cause on a mergeable PR")
+
     # And the workflow parser, against the real files rather than a fixture —
     # the constant it cross-checks is the thing that stops a broken parser
     # silently lowering the bar.
     names, problems = expected_check_names()
     for problem in problems:
         failures.append("  workflow parsing: " + problem.splitlines()[0])
+
+    # Pin the NAMES, not only the count. Review found a case the count misses:
+    # a trailing comment on a job key (`  mobile:  # expo`) stops that line
+    # matching the job-key pattern, so the following `name:` OVERWRITES the
+    # previous job's — `Scripts (Python)` silently became `Mobile (Expo)`. That
+    # happened to move the count too, which is the only reason it was visible.
+    # A corruption that preserves the count would otherwise sail through.
+    if names and sorted(names) != sorted(FIVE):
+        failures.append(
+            f"  workflow parsing: derived {names}, expected the five in FIVE.\n"
+            "  If CI's job names genuinely changed, update FIVE and "
+            "EXPECTED_CHECK_RUNS together."
+        )
+
+    # Two parser fixtures, for guards whose effect on the CURRENT ci.yml is nil
+    # and which would therefore read as dead code to the next person.
+    on_block_with_comment = (
+        "name: CI\n"
+        "\n"
+        "on:\n"
+        "# a column-0 comment, which is what `strip_comments` is for\n"
+        "  pull_request:\n"
+        "\n"
+        "jobs:\n"
+        "  only:\n"
+        "    name: Only\n"
+    )
+    if not triggers_on_pull_request(strip_comments(on_block_with_comment)):
+        failures.append(
+            "  strip_comments: a column-0 comment inside `on:` hides the "
+            "pull_request trigger, dropping the whole workflow silently"
+        )
+    if triggers_on_pull_request(on_block_with_comment):
+        failures.append(
+            "  fixture is inert: it passes without strip_comments, so it "
+            "proves nothing about the guard it covers"
+        )
 
     if failures:
         print("check-ci-checks self-test FAILED:", file=sys.stderr)
@@ -427,6 +615,7 @@ def self_test() -> int:
 
     print(
         f"ci-check detector ok — {len(vectors)} decision vectors, "
+        f"{len(diagnoses)} diagnosis vectors, "
         f"{len(names)} check(s) declared by the workflows ({', '.join(names)})"
     )
     return EXIT_OK
@@ -439,8 +628,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Assert a pull request's head commit really was checked."
     )
-    parser.add_argument("--pr", help="pull request number (default: the current branch's)")
-    parser.add_argument(
+    # Mutually exclusive: with both, `--sha` used to win silently and answer a
+    # question nobody asked — and it skips the conflict diagnosis, so the answer
+    # was quieter as well as wrong. Found in review.
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--pr", help="pull request number (default: the current branch's)")
+    target.add_argument(
         "--sha",
         help="check a raw commit instead of a pull request — no headRefOid "
         "resolution and no conflict diagnosis",
@@ -459,7 +652,7 @@ def main() -> int:
     if problems:
         for problem in problems:
             print(problem, file=sys.stderr)
-        return EXIT_NOT_CHECKED
+        return EXIT_ERROR
 
     try:
         slug = repo_slug()
@@ -474,33 +667,23 @@ def main() -> int:
                 f"head commit (headRefOid): {sha}"
             )
         runs = check_runs_for(slug, sha)
-    except RuntimeError as err:
-        print(str(err), file=sys.stderr)
-        return EXIT_NOT_CHECKED
+    except (RuntimeError, OSError) as err:
+        # EXIT_ERROR, not EXIT_NOT_CHECKED. "I could not ask GitHub" and
+        # "GitHub says nothing ran" are different answers with different
+        # remedies, and giving them one exit code would blur the single signal
+        # this script exists to produce. `OSError` covers `gh` missing from
+        # PATH, which otherwise exits 1 with a traceback.
+        print(str(err) or repr(err), file=sys.stderr)
+        return EXIT_ERROR
 
     code, lines = evaluate(expected, runs)
     stream = sys.stdout if code == EXIT_OK else sys.stderr
     print("\n".join(lines), file=stream)
 
     if facts is not None:
-        mergeable = facts.get("mergeable")
-        if code == EXIT_NOT_CHECKED and mergeable == "CONFLICTING":
-            print(
-                "\nCONFIRMED CAUSE: `mergeable` is CONFLICTING. GitHub cannot "
-                "build this pull request's merge ref, so no workflow run exists. "
-                "Rebase (above) and the checks appear within seconds.",
-                file=sys.stderr,
-            )
-        elif code == EXIT_NOT_CHECKED and mergeable == "UNKNOWN":
-            print(
-                "\n`mergeable` is UNKNOWN — GitHub computes it lazily. Re-run "
-                "this in a few seconds before concluding anything; UNKNOWN is "
-                "not the same as MERGEABLE.",
-                file=sys.stderr,
-            )
-        elif code != EXIT_OK:
-            print(f"\nmergeable={mergeable} mergeStateStatus={facts.get('mergeStateStatus')}",
-                  file=sys.stderr)
+        note = diagnose(code, facts)
+        if note:
+            print("\n" + note, file=sys.stderr)
 
     return code
 
