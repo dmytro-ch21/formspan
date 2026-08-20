@@ -33553,6 +33553,20 @@ seed `implements` as a constant and `TestMainSeededTheFixtureExercises` names
 `ses_fx_db_bench` as wrong. A guard that cannot fail would have restored the
 silence this exists to end.
 
+**And one of those two guards was still not strong enough — review caught it,
+after the mutation test passed.** The lock guard asked `pg_try_advisory_lock`,
+which only establishes that *somebody* holds the key. With the `lockFixtures`
+call deleted it therefore still passes whenever a neighbouring binary happens to
+hold the lock — **vacuously green in precisely the fleet conditions the lock
+exists for.** The mutation test missed it because it ran alone, which is the one
+situation where "somebody holds it" and "we hold it" coincide. It now reads
+`pg_locks` and asserts there is exactly one holder and that it is this process's
+own backend pid. Demonstrated rather than argued: with the call removed *and* an
+unrelated session holding the lock, the old probe passes and the new guard fails,
+naming the foreign holder. Worth keeping as a shape — **a mutation test inherits
+the blind spots of the environment you run it in**, so a guard about concurrency
+has to be mutated under concurrency.
+
 **The lock budget was measured, not chosen.** At 60s, two lanes each running
 `-count=10` — a 20-40s hold, since the lock lives for the process — put the
 waiter within seconds of the budget every time, and 2 of 10 lane-runs then failed
