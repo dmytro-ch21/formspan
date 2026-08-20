@@ -33876,10 +33876,108 @@ stricter than anything else in that file, and a gate nothing else obeys is a gat
 that stops meaning anything. Said out loud in the file, with the condition under
 which it tightens again.
 
+### What review caught, and one of them was a permanent 409
+
+The check suite was green for all of this. Recorded in full because the ratio is
+the point: five mutation-verified guards did not find any of it.
+
+**`backend-reviewer` found a genuine denial of service, and the mechanism is one
+this entry got wrong two sections above.** The preset id is derived from the
+athlete's Clerk user id — which is not a secret — so anybody can compute another
+athlete's water id. Create your own tracker on it and the victim's provisioning
+collides on the **PRIMARY KEY**, which the `(user_id, preset)` arbiter does not
+cover: 23505 out of `EnsureDefaults`, 409 out of `GET /v1/trackers`, on every
+subsequent read, with no delete path to ever free the id. The derived id was
+introduced to make provisioning idempotent, and it opened a namespace somebody
+else could squat. Both halves of that sentence are true, which is why it was
+easy to miss.
+
+Reproduced first — both tests red against the old code — then fixed with two
+deliberately independent guards, each mutated on its own:
+
+| guard | mutation | result |
+|---|---|---|
+| `New.Validate` refuses the reserved `t_` namespace | disable the prefix check | `TestClientsCannotClaimTheDerivedPresetNamespace` red |
+| `EnsureDefaults` drops the ARBITER for a bare `ON CONFLICT DO NOTHING` | restore the arbiter | `TestProvisioningSurvivesASquattedID` red |
+
+Either alone leaves a hole, so both. With them, a squatted id costs one card
+rather than the whole list — a degraded Today is recoverable and a permanent 409
+is not. Provisioning legitimately mints ids in that namespace, so `New.Validate`
+splits into the client-facing rule and a shared `validateFields` the preset
+self-check uses. And `Create`/`Update` now validate **inside the repository**
+rather than trusting the handler: "the caller validates" is a convention, it
+holds until the second caller arrives, and one of the rules it now carries is a
+security guard.
+
+**The accessibility minimum caught the tap target, and that is worth saying
+plainly because the next glyph row will be built by somebody reading this.** The
+glyph shipped at 22pt with `hitSlop={4}` — a **30pt** target against iOS's 44pt
+minimum, on the one control whose entire purpose is correcting a one-handed
+mis-tap. The affordance for fixing a fat-finger error was itself
+fat-finger-hostile. Nothing in the suite can see that; the number is what caught
+it.
+
+It is **34 × 44pt** now, and the horizontal shortfall is arithmetic rather than
+taste. On a 375pt phone: 375 − 40 (Today's body padding) − 28 (the card's) − 30
+(the `+`) − 10 (the row gap) leaves **267pt**, and eight 44pt-wide targets need
+394. They would wrap to two rows, and eight cups across two rows is exactly the
+uncountable block the twelve-glyph cap exists to prevent — so the row idiom and
+a 44pt width are incompatible, and the row idiom is the feature. Horizontal slop
+is capped at **half the gap**, because beyond that adjacent targets *overlap*,
+and overlapping targets on a row of identical glyphs make mis-taps worse rather
+than better. The `+` and the settings button, which can be 44 both ways, now are.
+
+**The midnight case had been written in one direction only.** The 23:58 test was
+there; its mirror was not. Today computes its day key during *render* and never
+unmounts, so a phone left open across midnight holds yesterday's key and the
+first tap at 00:05 files a cup under the day that just ended. #398 met the same
+shape the same day — a date frozen at first render filing tomorrow's target
+under yesterday. **A stale read is a nuisance; a stale write is data.**
+
+`TrackerList` now takes `dayAtTap: () => string` rather than a day, and the
+*type* is the guard: a `string` prop can be computed once during render, a thunk
+cannot. Today reads the clock; Food passes its stepper's day, because there the
+day is the subject of the screen. Mutation-verified, and the mutation matters —
+swapping `dayString` for `toISOString().slice(0,10)` reddens only the 23:58
+test, while freezing the day at module load reddens only the mirror. Two tests,
+two different bugs; neither substitutes for the other.
+
+The rest, each a real defect rather than a tidy-up:
+
+- **A tap resolved an INDEX against a freshly-read day**, so two quick taps on
+  one glyph could each resolve against a different snapshot and remove two cups.
+  It takes the entry id now, and `removeTap` is idempotent on one.
+- **Empty glyphs were `disabled`**, which made `glyphHint(false)` unreachable
+  exactly when it applied and left a VoiceOver user with no add affordance where
+  they already were. They add now.
+- **The row's container `accessibilityLabel` was INERT.** A `View` without
+  `accessible` is not an accessibility element on iOS, so it was never spoken —
+  and adding `accessible` would have swallowed every glyph inside it, which is
+  strictly worse. Removed, and `rowLabel` with it: a tested function nothing can
+  hear reads as load-bearing. The `accessibilityState={{checked}}` beside it is
+  honestly labelled as braces rather than belt-and-braces, since iOS ignores
+  `checked` on `role="button"` — the *label* carries the state.
+- **`tracker.name.toUpperCase()`** is uppercased by style now. VoiceOver spells
+  short all-caps strings out letter by letter.
+- **Both number fields had no `accessibilityLabel`**, so VoiceOver read the
+  target field as its placeholder, "No target" — on the only screen in the app
+  that can change a target.
+- **`missing` was set and never cleared**, pinning "not on this device" forever
+  after one lookup that raced the first cache fill.
+- The entries window cap admitted 401 dates; both sides of the boundary are
+  asserted now.
+
+**And a process note worth more than any single finding.** Two typecheck errors
+introduced by these fixes passed a `tsc --noEmit` run — because that run was
+issued from the primary checkout rather than from this worktree, so it checked a
+tree without the changes in it. Absence of output from the wrong directory looks
+exactly like success. Every check was re-run from the worktree afterwards, and
+both errors were real.
+
 ### Numbers
 
-`pnpm run verify` green (exit 0), 120 suites / 1828 tests. Backend **38 packages,
-1 skip, 0 failures** on a migrated database — the skip is the intentional
+`pnpm run verify` green (exit 0), 120 suites / **1829 tests**. Backend **38
+packages, 1054 top-level tests, 1 skip, 0 failures** on a migrated database — the skip is the intentional
 `TestLiveComplete`. `lint:mobile` at **54** warnings, unchanged: the one new
 `react-hooks/refs` finding was cleared by replacing `useRef(new
 Animated.Value(...)).current` with a lazy `useState` initialiser rather than by

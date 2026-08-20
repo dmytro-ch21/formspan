@@ -139,6 +139,32 @@ describe('the day boundary is the athlete\'s local day', () => {
     expect(await localEntries(USER, '2026-08-21')).toHaveLength(0);
   });
 
+  it('the mirror case: a tap just after midnight lands on the NEW day', async () => {
+    // The 23:58 test above covers one direction; this is the other, and review
+    // found it because only the first was written. Today computes its day key
+    // during RENDER and never unmounts, so a phone left open across midnight
+    // holds yesterday's key until something re-renders it — and the first tap
+    // at 00:05 would file a cup under the day that just ended.
+    //
+    // The same shape bit #398 today: a date frozen at first render filed
+    // tomorrow's target under yesterday. A stale READ is a nuisance; a stale
+    // WRITE is data. This is the case a test written at 2pm never exercises,
+    // which is the whole argument for pinning the clock rather than trusting
+    // whenever the suite happens to run.
+    await cacheTrackers(USER, [wire()]);
+    jest.useFakeTimers().setSystemTime(new Date(2026, 7, 21, 0, 5, 0));
+    try {
+      await logTap(USER, water);
+    } finally {
+      jest.useRealTimers();
+    }
+
+    expect(await localEntries(USER, '2026-08-20')).toHaveLength(0);
+    const next = await localEntries(USER, '2026-08-21');
+    expect(next).toHaveLength(1);
+    expect(next[0].logged_on).toBe('2026-08-21');
+  });
+
   it('the new day starts empty', async () => {
     await cacheTrackers(USER, [wire()]);
     await logTap(USER, water, '2026-08-20');

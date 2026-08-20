@@ -17,28 +17,29 @@ import type { UnitSystem } from '@/lib/units';
  */
 export function TrackerList({
   day,
-  on,
   dayAtTap,
   units,
   unitsReady,
   testID,
 }: {
   day: TrackerDay;
-  /** The local calendar day these cards DESCRIBE — what is rendered. */
-  on: string;
   /**
-   * The day a tap should be FILED UNDER, resolved at the moment of the tap.
+   * The day a tap should be FILED UNDER, resolved at the MOMENT of the tap.
    *
-   * Separate from `on` because the two genuinely differ on Today. `on` is
-   * computed during render, and Today stays mounted for the life of the
-   * process — so a phone left open across midnight renders yesterday's key
-   * until something re-renders it, and the first tap at 00:05 would file a cup
-   * under the day that just ended. Food is the opposite case: its day is the
-   * subject of the screen, chosen with a stepper, and a tap there must land on
-   * the day being looked at rather than on today.
+   * A function, and the type is the guard: a `string` here would be computed
+   * during render, and Today stays mounted for the life of the process — so a
+   * phone left open across midnight would hold yesterday's value and the first
+   * tap at 00:05 would file a cup under the day that just ended. A stale read
+   * is a nuisance; a stale WRITE is data. Requiring a thunk makes passing a
+   * frozen day a type error rather than a bug nobody meets until midnight.
    *
-   * So the screen decides. Today passes a function reading the clock; Food
-   * passes its stepper's day.
+   * The screen decides what it means: Today reads the clock, Food passes its
+   * stepper's day, because there the day is the subject of the screen and a tap
+   * while reading Tuesday belongs to Tuesday.
+   *
+   * There is deliberately no separate "day being rendered" prop — the cards
+   * show whatever `day.refresh(on)` last loaded, and the screen owns that call.
+   * Two day inputs would be two things to keep in step.
    */
   dayAtTap: () => string;
   units: UnitSystem;

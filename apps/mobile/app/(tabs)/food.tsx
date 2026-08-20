@@ -259,7 +259,6 @@ export default function FoodScreen() {
               who lives in Food never has to go to Today for it. */}
           <TrackerList
             day={trackerDay}
-            on={on}
             // The day being LOOKED AT, unlike Today's clock read: the stepper is
             // the point of this screen, so a tap while reading Tuesday belongs
             // to Tuesday.

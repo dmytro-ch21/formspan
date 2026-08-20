@@ -10336,3 +10336,84 @@ that only exercises water cannot tell whether that is true.
 - **`lint:mobile` has zero headroom at 54 warnings.** `useRef(new
   Animated.Value(...)).current` is a `react-hooks/refs` warning; a lazy
   `useState` initialiser is the same value with no ref read during render.
+
+### Added after review — the cases the first pass missed
+
+These are not extra coverage; each is a defect review found in the original
+branch, written down so the next glyph row does not repeat it.
+
+- **The midnight case has TWO directions and the first pass wrote one.** 23:58
+  must land on the day that is ending *and* 00:05 must land on the day that has
+  started. A screen that never unmounts computes its day key during render, so
+  the second one fails while the first passes. The two are also caught by
+  different mutations: swapping `dayString` for `toISOString().slice(0,10)`
+  reddens only the 23:58 test; freezing the day at module load reddens only the
+  mirror. Neither substitutes for the other.
+- **Two quick taps on the same filled glyph must remove one cup, not two.** The
+  re-render that empties the glyph lands after the second tap, so anything that
+  resolves a *position* at tap time can resolve two taps against two different
+  snapshots.
+- **A tap target is a number, and 30pt is not 44.** Measure the effective target
+  (drawn size + `hitSlop`), not the drawn size. Horizontal slop above half the
+  row gap makes adjacent targets overlap, which on a row of identical glyphs
+  makes mis-taps *worse* — so a bigger number is not automatically better here.
+- **An `accessibilityLabel` on a plain `View` is inert on iOS.** It is not an
+  accessibility element without `accessible`, and adding `accessible` collapses
+  the row into one element and swallows the per-glyph labels. Check a label is
+  reachable before trusting it exists.
+- **`accessibilityState={{checked}}` is ignored on `role="button"` in iOS.** The
+  state has to be in the label text. A row of glyphs that announces position but
+  not filled/empty is the failure this looks like it prevents and does not.
+- **A name rendered through `.toUpperCase()` is spelled out letter by letter.**
+  Uppercase with `textTransform` so the accessible string keeps its original
+  casing.
+- **A text field is not labelled by the `Text` above it.** Without an explicit
+  `accessibilityLabel`, VoiceOver reads the placeholder — so the target field
+  announced itself as "No target".
+- **The derived preset id is a namespace somebody can squat.** It is
+  `sha256(userID + preset)` and a Clerk user id is not a secret, so a foreign
+  athlete can compute it, create a tracker on it, and collide the victim's
+  provisioning on the PRIMARY KEY — which the `(user_id, preset)` arbiter does
+  not cover. That was a permanent 409 on every `GET /v1/trackers` with no way to
+  free the id. Two independent guards now: the create path refuses the reserved
+  prefix, and provisioning uses a bare `ON CONFLICT DO NOTHING` so a taken id
+  costs one card rather than the whole list. **Test both; either alone leaves a
+  hole.**
+- **Run every check from the worktree, not the primary checkout.** Two real
+  typecheck errors passed a `tsc --noEmit` issued from the wrong directory,
+  because it checked a tree without the changes in it. No output from the wrong
+  place is indistinguishable from success.
+
+### For the user to check on a device
+
+Reading the diff cannot settle any of these. They need a build.
+
+1. **The row.** Open Today. Tap `+` four times — four cups fill left to right,
+   animated, and the line reads `4 of 8 cups · 1 L`.
+2. **Correction.** Tap the third filled cup. It empties, the count drops to 3,
+   and the cup that empties is the third one.
+3. **Double-tap.** Tap one filled cup twice, fast. Exactly one cup should go.
+4. **Over target.** Log 10 of 8. All ten log, ten cups draw, nothing scolds,
+   nothing blocks, nothing changes colour.
+5. **Thirteen.** Keep going past twelve. The row must become a bar with the
+   number stated, never a wrapped block of identical glyphs.
+6. **Units.** Settings → switch metric/imperial. The volume follows
+   (`1 L` ↔ `33.8 fl oz`); the cup count does not move.
+7. **The target, from the phone.** Open the card's settings, set the target to
+   10, save. The row re-renders with ten slots. Then clear the field entirely —
+   the card becomes a plain count with no goal line.
+8. **Offline.** Airplane mode: tap three cups, force-quit, reopen. They are
+   still there. Restore the network and confirm they sync once — the count must
+   not double.
+9. **Midnight.** Set the device clock to 23:58, log a cup, wait past midnight
+   *with the app still open*, log another. The first belongs to the earlier day,
+   the second to the new one, and the row resets. **This is the one that has
+   already gone wrong twice in this repo today.**
+10. **VoiceOver.** Turn it on and add and remove a cup without looking. Each cup
+    should announce like `Water, cup 3 of 8, filled` — check the *name* is read
+    as a word and not spelled out, that empty cups offer to add, and that the
+    settings button says what it opens rather than "button".
+11. **Tap targets.** With VoiceOver off, try the row one-handed with a thumb.
+    The `+` and the settings button are 44pt; the cups are 34 × 44. If the cups
+    still feel unhittable, that is a real finding and the row idiom needs
+    rethinking rather than the numbers nudging.

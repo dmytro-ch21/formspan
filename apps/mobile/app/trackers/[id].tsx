@@ -5,7 +5,7 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
 import { SelectAllTextInput } from '@/components/SelectAllTextInput';
-import { trackerFill, vola } from '@/constants/Colors';
+import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuth } from '@clerk/clerk-expo';
 import { localTrackers, updateTrackerLocally } from '@/lib/trackers';
@@ -181,7 +181,6 @@ export default function TrackerSettingsScreen() {
   }
 
   const noun = unitNoun(tracker);
-  const fill = trackerFill(tracker.color_key);
   const unitLabel = inputUnitLabel(tracker, units);
 
   return (

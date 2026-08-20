@@ -1525,7 +1525,6 @@ export default function TodayScreen() {
         */}
         <TrackerList
           day={trackerDay}
-          on={todayKey}
           // Read at the MOMENT of the tap, not at render. `todayKey` is computed
           // during render and this screen never unmounts, so a phone left open
           // across midnight still holds yesterday's key until something
