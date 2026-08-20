@@ -33,6 +33,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
@@ -124,7 +125,10 @@ export default function TargetScreen() {
       <Stack.Screen options={{ title: 'Your target' }} />
       <ScreenHeader title="Your target" />
 
-      <View style={styles.body}>
+      <KeyboardAwareScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+      >
         <SectionHeader label="Daily movement" />
         <View style={styles.pills}>
           {ACTIVITIES.map((a) => {
@@ -265,7 +269,7 @@ export default function TargetScreen() {
             </Text>
           </>
         )}
-      </View>
+      </KeyboardAwareScrollView>
     </View>
   );
 }
