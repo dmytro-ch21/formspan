@@ -34170,9 +34170,18 @@ re-find it from. That is the "reachable only by having just arrived" gap
 surviving in one configuration. Ungating was considered and not taken: the row
 would then appear, permanently, on accounts that can never populate it, and the
 inconsistency with `Position map` immediately above it would need its own
-justification. It is the same shape as #370 (N61) — *every BJJ surface with the
-module switched off* — which is already filed and claimed, and that is where it
-belongs rather than being solved twice.
+justification. It is the same shape as #370 (N61) — *every BJJ surface with
+the module switched off* — and #423, the nutrition-tab instance of it.
+
+**Both of those are CLOSED**, checked rather than assumed, which changes what
+"file it there" means: the specific case is recorded as a comment on #423 and
+says so in its first line, because a note on a closed issue is exactly the kind
+of thing that is never read again. If the pattern is considered settled rather
+than still collecting instances, this needs its own id. It is deliberately not
+one today: the general question those two issues ask — can an athlete tell *this
+needs turning on* from *this does not exist* — wants one consistent answer
+across the app, and a third screen guessing at it separately is how the app ends
+up answering it three ways.
 
 **Also unbuilt, and smaller:** the mobile `Sequence` type still has no
 `official` field, so a VOLA reference chain is detected as `editable === false`.
