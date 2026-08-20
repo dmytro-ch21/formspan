@@ -34547,6 +34547,173 @@ NEEDS HUMAN EVIDENCE box open on both counts.
   them is what would make the *next* occurrence answerable without a proxy, and
   it is deliberately not in this PR.
 
+## 2026-08-20 — A focus row now records WHY it is there, so leaving a roadmap can take its techniques back (N95)
+
+Reported from a device: activate a roadmap, deactivate it, and its techniques
+still appear when logging a BJJ class. The athlete's reading was the simple and
+correct one — *I turned this off, why is it still here.*
+
+**The mechanism was a seam, not sloppiness.** Enrolling writes focus **through
+the client**: `roadmapFocus.ts` computes a list and `PUT`s it, because only the
+client can propose one and show what it would evict. Un-enrolling goes **through
+the server**: one `DELETE`. `curriculum.go` states outright that *"nothing in
+this package reads or writes `bjj_focus`"*, kept apart so a curriculum cannot
+silently become a prescription. So the cleanup belonged to neither side, which
+is why nobody had written it.
+
+**The actual work was not the deletion — it was making the question askable.**
+Migration 000031 gave `bjj_focus` the columns `(user_id, technique_id, position,
+started_on)`. It records *what* is in focus and never *why*, so "remove what that
+roadmap added" had no answer, and an unanswerable question gets answered by
+doing nothing. **And the obvious fix is a data-loss bug wearing a fix's
+clothes**: clearing focus on deactivation destroys whatever the athlete chose by
+hand, which `roadmapFocus.ts` already refuses to do when it *writes* — "the
+roadmap is not entitled to it".
+
+### The provenance model
+
+Migration **000069** adds two things, because there are two questions.
+
+`bjj_focus.origin` answers *who owns this row*, with three values and **two
+behaviours**:
+
+- **`athlete`** — the athlete put it here. **Sovereign**: no roadmap may ever
+  remove it. This is the whole safety property, held structurally rather than by
+  everyone remembering.
+- **`roadmap`** — a roadmap put it here. Removed when the last roadmap still
+  asking for it lets go.
+- **`unknown`** — written before this migration. Behaves exactly like `athlete`.
+
+`bjj_focus_sources (user_id, technique_id, curriculum_id)` answers *which
+roadmaps are currently asking*, and it is a **set** rather than a column on
+purpose. A single `source_curriculum_id` gets the second question wrong: two
+syllabuses genuinely can both want the armbar, and on a list capped at five, two
+enrolled roadmaps overlapping is ordinary rather than exotic. With one column the
+first roadmap owns the row and deactivating it takes the technique away from the
+roadmap still working it — a fix that breaks the thing next to what it fixed.
+
+**The rule that makes the both-sources case work is the `started_on` rule
+again**: provenance is set when a row is **inserted** and never rewritten by a
+re-save. So a technique hand-picked *first* and later also named by a roadmap
+stays `athlete` and survives that roadmap's deactivation. A roadmap may claim a
+row only if it is **already roadmap-held** — which lets a second syllabus
+register its own claim while refusing to touch anything the athlete owns.
+
+The wire format carries the distinction rather than inferring it. `PUT
+/v1/bjj/focus` gains an optional `roadmap: { curriculum_id, technique_ids }`,
+where the inner list is a **strict subset** of the outer one. Applying a roadmap
+re-sends the athlete's own entries alongside its own, so a flat `curriculum_id`
+would have to mean "all of this is mine" — handing the roadmap the right to
+delete hand-picked techniques. The server never guesses which ids are whose;
+only the client holds the curriculum's item list.
+
+### Existing rows become hand-picked, deliberately
+
+They carry no provenance, so `unknown` is a **recorded absence rather than a
+backfilled guess**. Backfilling `roadmap` would fix the reported bug for everyone
+living with it today and would also delete, on their next deactivation, every
+technique they had picked by hand — the two are indistinguishable in the data as
+it stands. So the safe direction was taken: an athlete already carrying stale
+roadmap techniques keeps them until they clear them by hand, which is one tap on
+a list capped at five. **Wrong-and-recoverable beats right-and-destructive**, and
+a migration that guesses wrong here leaves no trace that it guessed.
+
+### Where the cleanup lives, since it belonged to neither side
+
+`releaseRoadmapFocus` in **`cmd/api/enrollment.go`** wraps `DELETE
+/v1/curricula/{id}/enrollment`. `curriculum` is untouched — its disclaimer still
+holds literally — and the client is not asked to make a second call, because
+`apps/web` has the same button and a client that crashes between two calls
+restores the bug. Cross-module policy went to the composition root, the one place
+already allowed to know about both.
+
+**Release runs BEFORE archive, and the order is what makes the whole thing
+idempotent.** `Archive` returns `ErrNotFound` once the enrolment is already
+archived, so archive-then-release cannot be retried: the retry would 404 at the
+first step and the focus rows would be stranded permanently. Releasing first is
+safe in the other direction because the only rows it can reach are ones that
+curriculum itself placed.
+
+### Two guards covered for each other, and mutation testing is what found it
+
+Eleven backend mutations plus two client ones, each **compile-gated** — a
+mutation that fails to build also exits non-zero and proves nothing. Eight were
+caught on the first pass. **Three survived, and none of the three was a wrong
+implementation.**
+
+Two were the same shape: the `origin = 'roadmap'` check appears on both the
+attribution `INSERT` and the release `DELETE`, and **either alone produces the
+right visible outcome**. An outcome-only test therefore passes with either
+removed — the exact situation in which "the tests still pass without it" becomes
+a persuasive argument for deleting something load-bearing. Fixed by asserting the
+claim rows *directly*, and by constructing, with raw SQL, the state `SetFocus`
+refuses to create (a claim naming an athlete-owned row) so the release is proved
+to defend itself rather than to be defended by its neighbour.
+
+**The third was a real cross-user bug the test could not see.** Dropping the user
+scope from the claim delete leaves the outer `DELETE` still reaching only the
+caller's rows, so every row-count assertion stays green — while *another*
+athlete's claim on the same public syllabus is silently withdrawn and their focus
+row is left `origin='roadmap'` with nothing able to release it. Their technique
+is stranded in the wizard permanently: the reported bug, made unfixable, in
+somebody else's account. The test now asserts the other athlete's claim survives
+and that their own deactivation still works.
+
+One more trap worth recording, because it fails silently in the safe-looking
+direction: a data-modifying CTE and the statement around it read the **same
+snapshot**, so the obvious spelling of the release — "delete rows with no
+sources remaining" — evaluates against sources that still include the ones being
+deleted, matches nothing, and reports success having done nothing. The subquery
+excludes the released curriculum explicitly rather than relying on an ordering
+the snapshot does not provide.
+
+### Open questions this leaves
+
+- **A second roadmap that adds nothing to the list can never register its claim,
+  and the repository test cannot see it.** Found by the frontend reviewer, not by
+  the suite, and it is a genuine residual on the "two roadmaps active" criterion.
+  Both panels hide the apply control when `proposal.unchanged`, which is true
+  when the roadmap's techniques are ALREADY all in focus in the same order —
+  exactly the case where a second overlapping syllabus needs to claim them. So:
+  apply roadmap A, enrol in roadmap B wanting the same techniques, and B is
+  offered no button; deactivating A then takes them while B is active. The
+  backend handles this correctly and `TestDeactivatingOneRoadmapLeavesAnother
+  RoadmapsTechniquesAlone` proves it — because that test drives the repository
+  directly and never passes through the gate that suppresses the write. **A
+  repository test cannot fail on a UI that declines to call it.**
+
+  Not fixed here because the honest fix changes a shared read: `unchanged` is
+  computed from the list alone, and the client would need to know which roadmaps
+  already claim each entry to compute it correctly — i.e. `GET /v1/bjj/focus`
+  exposing the claim set, which is also what would make provenance legible on the
+  read side rather than only in storage. That is a contract change arriving after
+  review, on the endpoint every BJJ surface depends on. Filed as **N100
+  (#458)**.
+
+  The failure it leaves is the mild one in this ticket's pair: a technique
+  disappears from focus and is one tap to re-add, versus the destructive failure
+  — deleting something hand-picked — which is closed and tested from several
+  directions.
+- **Not verified on a device**, which is where it was reported. The acceptance
+  criteria say so explicitly, and reading the code is the thing those criteria
+  exist because it fails.
+- **Mobile has no hand-pick focus screen.** `setFocus` is called from exactly one
+  place there — the curriculum detail screen — so an athlete on the phone can
+  only put techniques in focus *via a roadmap*. Step 1 of this ticket's own test
+  script ("add two techniques to focus by hand") is currently a web-only action,
+  which the mobile-first rule says is a gap. Out of scope here; it is the reason
+  the `athlete` origin is currently reachable only from web.
+- **`position` gaps are left behind.** A release deletes rows without renumbering
+  the survivors, so positions can read 0, 1, 4. Harmless — the read orders by
+  position and nothing depends on the values being dense — but worth knowing
+  before anyone writes something that does.
+- **Attribution does not check enrolment.** `roadmap.curriculum_id` need only
+  name an existing curriculum, because verifying enrolment would mean `bjj`
+  reading `curriculum_enrollments` — the mirror of the coupling this whole
+  design preserves. The blast radius is the caller's own rows only, and ids are
+  `gen_random_uuid()`, so the residual is a existence-probe against unguessable
+  ids.
+
 ## Open items / known gaps as of this entry
 
 - **Twelve backend packages still delete each other's fixtures across concurrent test binaries — filed as #454.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.

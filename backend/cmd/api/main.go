@@ -585,7 +585,11 @@ func main() {
 	mux.Handle("PATCH /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Update)))
 	mux.Handle("DELETE /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Delete)))
 	mux.Handle("PUT /v1/curricula/{curriculumID}/enrollment", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Enroll)))
-	mux.Handle("DELETE /v1/curricula/{curriculumID}/enrollment", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Archive)))
+	// Leaving a roadmap also withdraws its claim on the focus list. The wrapper
+	// is the only place that knows those two facts belong together — see
+	// enrollment.go for why it is here and not inside either module.
+	mux.Handle("DELETE /v1/curricula/{curriculumID}/enrollment",
+		verifier.RequireAuth(releaseRoadmapFocus(bjjRepo, http.HandlerFunc(curriculumHandler.Archive))))
 
 	// Sequences: the chain a class actually taught, in the order it flows.
 	//
