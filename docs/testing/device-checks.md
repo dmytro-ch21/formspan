@@ -396,9 +396,11 @@ can drop destinations with no error.
 
 ## Rendering that has never executed
 
-These 31 mobile routes execute **zero statements** under the entire test suite
-(measured, and agreeing with the static analysis). Nothing here is known to be
-broken — nothing here is known at all.
+31 mobile route files execute **zero statements** under the entire test suite
+(measured, and agreeing with the static analysis). Three of those are layout
+and scaffolding files with nothing to look at, so the walk list below names the
+**28 that are actual screens**. Nothing here is known to be broken — nothing
+here is known at all.
 
 ### D16 — Walk the untested screens
 
