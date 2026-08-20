@@ -173,7 +173,7 @@ export function ShareToFriend({
           `accessibilityRole="button"` and a "Close" label. An accessibility
           element does not expose its descendants on iOS, so VoiceOver reads
           the whole sheet as a single screen-sized "Close" button — friend
-          rows, retry and Done all unreachable. `app/(tabs)/library.tsx`
+          rows, retry and Done all unreachable. `app/library.tsx`
           records this exact bug and this exact fix ("opening the sheet
           announced 'Close filter options, button' instead of the sheet").
 

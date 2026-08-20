@@ -41,8 +41,20 @@ export default function TabLayout() {
   const accent = useAccent();
 
   /**
-   * The Library is the only tab whose whole reason for existing can be turned
-   * off: with no discipline that has a catalog, it has nothing to list.
+   * Goals is gated with Food, on the same predicate, because today it holds
+   * one thing: the daily intake target. An athlete with no food logging would
+   * get a tab that can only ever be empty — and the Food tab beside it is
+   * already absent for exactly that reason, so gating one and not the other
+   * would be the inconsistency, not the gate.
+   *
+   * Gated on the CAPABILITY, never on a module key. `key === 'nutrition'` is
+   * the pattern this codebase bans: a discipline gaining or losing a surface
+   * should be one row on the server rather than an edit in three apps.
+   *
+   * The Library used to be gated here too, on whether any enabled discipline
+   * had a catalog. It is a row in You now, and deliberately NOT gated there —
+   * see the comment on that row for why hiding it was the worse of the two
+   * failures.
    *
    * `href: null` rather than omitting the <Tabs.Screen>. Omitting one does NOT
    * hide it — expo-router auto-injects every route file in this folder whether
@@ -50,7 +62,6 @@ export default function TabLayout() {
    * `href: null` hides the button and keeps the route resolvable, which matters
    * for an in-flight router.push and for deep links.
    */
-  const anyCatalog = modules.some((m) => m.enabled && m.capabilities.catalog !== '');
   const anyFoodLog = hasFoodLog(modules);
 
   /**
@@ -63,7 +74,7 @@ export default function TabLayout() {
    * surface should be one row on the server rather than an edit in three apps.
    */
   const hiddenFor = (name: string): boolean =>
-    (name === 'library' && !anyCatalog) || (name === 'food' && !anyFoodLog);
+    (name === 'food' || name === 'goals') && !anyFoodLog;
 
   // Hold the frame until the cached module set has been read. This is the
   // whole reason the cache exists: without it the first frames compute
@@ -162,7 +173,13 @@ const TABS = [
   // cost an extra tap every time, on a screen whose contents move.
   { name: 'food', title: 'Food', icon: 'food' },
   { name: 'workouts', title: 'Plan', icon: 'calendar' },
-  { name: 'library', title: 'Library', icon: 'chart' },
+  // Library's old slot, and the swap is the user's own call: they asked for
+  // the Library out of the bar ("we dont need a dedicated view") and for
+  // targets to live in a Goals tab. A catalog is browsed occasionally and
+  // deliberately, which is what a profile row is for; a target is the number
+  // every food decision is measured against, which is what a fixed slot is
+  // for. The bar holds what you check, not what you explore.
+  { name: 'goals', title: 'Goals', icon: 'goal' },
   { name: 'you', title: 'You', icon: 'profile' },
 ] as const satisfies readonly { name: string; title: string; icon: IconName }[];
 
