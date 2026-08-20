@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"sort"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/testdb"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -118,52 +120,71 @@ func requireUnsorted(t *testing.T, ids []string) {
 	}
 }
 
-// seedFixtureExercises writes this package's catalog rows and removes them
-// again. Called from newTestRepo, so it runs before any test body and — since
-// t.Cleanup is LIFO — its cleanup runs after every cleanup the test registers
-// later. The rows therefore outlive the sessions referencing them, which is the
-// ordering `seedDraftExercise` below documents having to get right.
-//
-// The removal is deliberately order-INDEPENDENT rather than relying on that.
-// `session_sets.exercise_id` and `workout_items.exercise_id` are both NO
-// ACTION, so a bare `DELETE FROM exercises` fails the foreign key; discard that
-// error and the fixture survives into the database every other package shares.
-// `feed` and `share` both shipped exactly that leak — `share` at nine rows per
-// clean run. So whatever still references the row goes first, and a failure is
-// logged rather than swallowed.
-func seedFixtureExercises(t *testing.T, pool *pgxpool.Pool) {
-	t.Helper()
-	ctx := context.Background()
-
+func fixtureExerciseIDs() []string {
 	ids := make([]string, 0, len(fixtureExercises))
 	for _, e := range fixtureExercises {
 		ids = append(ids, e.id)
 	}
+	return ids
+}
 
-	t.Cleanup(func() {
-		// Parents first: both child tables cascade from their own parent
-		// (session_sets from sessions, workout_items from workouts), so
-		// removing the parent clears the reference.
-		if _, err := pool.Exec(ctx, `
-			DELETE FROM sessions WHERE id IN (
-				SELECT session_id FROM session_sets WHERE exercise_id = ANY($1))`, ids); err != nil {
-			t.Logf("cleanup sessions referencing fixture exercises: %v", err)
-		}
-		if _, err := pool.Exec(ctx, `
-			DELETE FROM workouts WHERE id IN (
-				SELECT workout_id FROM workout_items WHERE exercise_id = ANY($1))`, ids); err != nil {
-			t.Logf("cleanup workouts referencing fixture exercises: %v", err)
-		}
-		if _, err := pool.Exec(ctx, `DELETE FROM exercises WHERE id = ANY($1)`, ids); err != nil {
-			t.Logf("cleanup fixture exercises: %v", err)
-		}
-	})
+// --- the fixture rows belong to the PROCESS, not to a test -----------------
+//
+// They carry FIXED ids and every Postgres test in this package reads them, so
+// TestMain seeds them once before anything runs and removes them once after
+// everything has.
+//
+// It used to be per test: `newTestRepo` seeded them and registered a
+// `t.Cleanup` that deleted them again, 34 times a run — so every test destroyed
+// rows every other test depends on. Run sequentially that is merely wasteful,
+// which is why this package has always passed on its own. It stops working the
+// moment a SECOND copy of this binary is running against the same database, and
+// that is the normal state of affairs here rather than an exotic one: CLAUDE.md
+// names `vola_test` as the default target and a dozen worktrees share it. The
+// other process's per-test cleanup then deletes the rows this process's
+// in-flight test is using, and the test reports `unknown exercise
+// "ses_fx_squat"` for a row it seeded itself milliseconds earlier — which is
+// #426, and reads as a bug in whatever PR happened to be running.
+//
+// Measured, on one database (`-count` used throughout, because `go test`
+// otherwise serves the whole suite from its cache and the measurement is of
+// nothing at all — that mistake was made first here):
+//
+//   - ONE binary alone, 20 consecutive uncached runs of this package: green.
+//     This is the control — the failure needs a NEIGHBOUR, not load.
+//   - TWO concurrent binaries, each lane launching a fresh `-count=1` binary
+//     the way the suite is really invoked: 60 of 60 lane-runs red before,
+//     0 of 60 after. With exactly the reported symptoms — `unknown exercise
+//     "ses_fx_squat"`, and `index out of range [0] with length 0` where a
+//     LoadHistory returned no points because the session under test had been
+//     deleted along with them.
+//     (A first, cruder version of this arm used two `-count=10` lanes and
+//     scored 10 of 10 red. Same experiment, smaller sample and a less faithful
+//     shape — one binary then holds the lock for ten whole package runs. The
+//     60/60 figure is the one to quote; both are recorded so the two numbers
+//     in the history entry and here are not read as a contradiction.)
+//   - FOUR concurrent full suites: this package failed 16 of 24 runs before,
+//     0 of 24 after.
+//
+// Seeding once per process removes the churn. The advisory lock is what removes
+// the race, because two processes still cannot share one set of fixed ids.
+//
+// #454 GENERALISED THAT LOCK and this package now uses the shared one in
+// internal/platform/testdb rather than a key of its own. Nothing here changes
+// behaviourally — one binary at a time still owns these ids — but the key is now
+// per DATABASE rather than per package, because the same measurement across the
+// other twelve packages found two more failure mechanisms a per-package key
+// cannot see: unscoped count assertions broken by a neighbouring *package*'s
+// rows, and two packages writing the same real catalog ids. See that package's
+// doc comment for the reasoning and the wall-clock cost.
 
+// seedFixtureExercises writes this package's catalog rows. Every column is
+// reconciled on conflict, not just inserted: a row left behind by an interrupted
+// run must be repaired rather than trusted, and a partial SET is how a stale
+// value survives into a green suite.
+func seedFixtureExercises(ctx context.Context, conn testdb.Conn) error {
 	for _, e := range fixtureExercises {
-		// Every column is reconciled on conflict, not just inserted. A row left
-		// behind by an interrupted run must be repaired rather than trusted —
-		// and a partial SET is how a stale value survives into a green suite.
-		if _, err := pool.Exec(ctx, `
+		if _, err := conn.Exec(ctx, `
 			INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status, load_mode, implements, is_unilateral)
 			VALUES ($1, $1, $2, $3, $4, 'published', $5, $6, $7)
 			ON CONFLICT (id) DO UPDATE SET
@@ -176,9 +197,60 @@ func seedFixtureExercises(t *testing.T, pool *pgxpool.Pool) {
 				implements = EXCLUDED.implements,
 				is_unilateral = EXCLUDED.is_unilateral`,
 			e.id, e.sport, e.pattern, e.loadType, e.loadMode, e.implements, e.unilateral); err != nil {
-			t.Fatalf("seed fixture exercise %s: %v", e.id, err)
+			return fmt.Errorf("seed fixture exercise %s: %w", e.id, err)
 		}
 	}
+	return nil
+}
+
+// removeFixtureExercises takes them out again, order-INDEPENDENTLY rather than
+// relying on anything having run first. `session_sets.exercise_id` and
+// `workout_items.exercise_id` are both NO ACTION, so a bare
+// `DELETE FROM exercises` fails the foreign key; discard that error and the
+// fixture survives into the database every other package shares. `feed` and
+// `share` both shipped exactly that leak — `share` at nine rows per clean run.
+// So whatever still references the row goes first, and the delete is VERIFIED:
+// a cleanup that quietly failed would restore the pollution this exists to
+// prevent, with nothing going red.
+func removeFixtureExercises(ctx context.Context, conn testdb.Conn) error {
+	ids := fixtureExerciseIDs()
+	// Parents first: both child tables cascade from their own parent
+	// (session_sets from sessions, workout_items from workouts), so removing
+	// the parent clears the reference.
+	if _, err := conn.Exec(ctx, `
+		DELETE FROM sessions WHERE id IN (
+			SELECT session_id FROM session_sets WHERE exercise_id = ANY($1))`, ids); err != nil {
+		return fmt.Errorf("remove sessions referencing the fixture exercises: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `
+		DELETE FROM workouts WHERE id IN (
+			SELECT workout_id FROM workout_items WHERE exercise_id = ANY($1))`, ids); err != nil {
+		return fmt.Errorf("remove workouts referencing the fixture exercises: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `DELETE FROM exercises WHERE id = ANY($1)`, ids); err != nil {
+		return fmt.Errorf("remove the fixture exercises: %w", err)
+	}
+	var left int
+	if err := conn.QueryRow(ctx,
+		`SELECT count(*) FROM exercises WHERE id = ANY($1)`, ids).Scan(&left); err != nil {
+		return fmt.Errorf("confirm the fixture exercises were removed: %w", err)
+	}
+	if left != 0 {
+		return fmt.Errorf("%d of %d fixture exercises survived cleanup, polluting the "+
+			"database this suite shares", left, len(ids))
+	}
+	return nil
+}
+
+// TestMain holds the shared fixture lock for the lifetime of this binary and
+// seeds/removes the catalog rows above once inside it. With TEST_DATABASE_URL
+// unset every Postgres test skips, so there is nothing to own and nothing to
+// lock, and testdb.MainWithFixtures runs m untouched.
+func TestMain(m *testing.M) {
+	os.Exit(testdb.MainWithFixtures(m, testdb.Fixtures{
+		Seed:   seedFixtureExercises,
+		Remove: removeFixtureExercises,
+	}))
 }
 
 func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
@@ -193,8 +265,76 @@ func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 	}
 	// Registered first so it closes last under LIFO cleanup.
 	t.Cleanup(pool.Close)
-	seedFixtureExercises(t, pool)
+
+	// The SESSION and WORKOUT sweeps stay per test, exactly as they were. They
+	// are the net for rows whose ids a test did not hand to its own cleanup, and
+	// they have to stay per-test: moved to package teardown they would let one
+	// test's rows survive into the next, which is a different behaviour and not
+	// one this change is trying to make. Only the EXERCISE rows — the fixed ids
+	// two processes were fighting over — moved to the process.
+	t.Cleanup(func() {
+		ids := fixtureExerciseIDs()
+		if _, err := pool.Exec(context.Background(), `
+			DELETE FROM sessions WHERE id IN (
+				SELECT session_id FROM session_sets WHERE exercise_id = ANY($1))`,
+			ids); err != nil {
+			t.Logf("cleanup sessions referencing fixture exercises: %v", err)
+		}
+		if _, err := pool.Exec(context.Background(), `
+			DELETE FROM workouts WHERE id IN (
+				SELECT workout_id FROM workout_items WHERE exercise_id = ANY($1))`,
+			ids); err != nil {
+			t.Logf("cleanup workouts referencing fixture exercises: %v", err)
+		}
+	})
 	return NewPostgresRepository(pool), pool
+}
+
+// The lock IS the fix, so it gets an assertion rather than a comment. Delete
+// the `testdb.MainWithFixtures` call from TestMain and this test is the thing
+// that goes red — without it the removal is silent, and the package goes back to
+// passing alone and failing in a fleet, which is the exact shape of #426.
+//
+// It asks `pg_locks` who the holder IS, rather than asking whether the lock can
+// be taken — the distinction #457 established on this test, and it is preserved
+// exactly, just moved into `testdb.AssertHeld` along with the lock itself. A
+// `pg_try_advisory_lock` probe only proves SOMEBODY holds the key, so with the
+// lock removed it still passes whenever a neighbouring binary happens to hold
+// it: vacuously green in the very fleet conditions the lock exists for.
+func TestTheFixtureLockIsHeldForTheWholeProcess(t *testing.T) {
+	testdb.AssertHeld(t) // skips when TEST_DATABASE_URL is unset
+}
+
+// And the other half: that TestMain actually SEEDED, with the values the rest of
+// the package reads off these rows. Every other test would fail loudly on a
+// missing row, but not on a wrong `implements` — that one goes quiet, and it is
+// the mistake `feed` shipped, where an omitted `load_mode` let the per-side CASE
+// be deleted with the suite still green.
+func TestMainSeededTheFixtureExercises(t *testing.T) {
+	_, pool := newTestRepo(t)
+	ctx := context.Background()
+
+	for _, want := range fixtureExercises {
+		var sport, pattern, loadType, loadMode, status string
+		var implements int
+		var unilateral bool
+		err := pool.QueryRow(ctx, `
+			SELECT sport, movement_pattern, load_type, load_mode, status, implements, is_unilateral
+			FROM exercises WHERE id = $1`, want.id).
+			Scan(&sport, &pattern, &loadType, &loadMode, &status, &implements, &unilateral)
+		if err != nil {
+			t.Fatalf("fixture %s is not in the database: %v", want.id, err)
+		}
+		if sport != want.sport || pattern != want.pattern || loadType != want.loadType ||
+			loadMode != want.loadMode || status != "published" ||
+			implements != want.implements || unilateral != want.unilateral {
+			t.Errorf("fixture %s was seeded as {%s %s %s %s %s implements=%d unilateral=%v}, "+
+				"want {%s %s %s %s published implements=%d unilateral=%v}",
+				want.id, sport, pattern, loadType, loadMode, status, implements, unilateral,
+				want.sport, want.pattern, want.loadType, want.loadMode,
+				want.implements, want.unilateral)
+		}
+	}
 }
 
 func cleanup(t *testing.T, pool *pgxpool.Pool, id string) {

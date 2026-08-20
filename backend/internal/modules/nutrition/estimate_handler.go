@@ -26,10 +26,16 @@ type EstimateHandler struct {
 	usage     EstimateUsageRepository
 	// now is injectable so the quota window is testable without waiting a day.
 	now func() time.Time
+	// timeout is injectable for the same reason `now` is: the deadline it
+	// bounds is 35 seconds, and a test that waited for it would be a test
+	// nobody runs. Set from `estimateTimeout` by the constructor, so the
+	// shipped value is the one every caller gets and the seam exists only for
+	// the suite.
+	timeout time.Duration
 }
 
 func NewEstimateHandler(est Estimator, usage EstimateUsageRepository) *EstimateHandler {
-	return &EstimateHandler{estimator: est, usage: usage, now: time.Now}
+	return &EstimateHandler{estimator: est, usage: usage, now: time.Now, timeout: estimateTimeout}
 }
 
 // maxEstimateBody bounds the whole request.
@@ -38,6 +44,52 @@ func NewEstimateHandler(est Estimator, usage EstimateUsageRepository) *EstimateH
 // applied with MaxBytesReader so an oversized upload is refused as it arrives
 // rather than after it has all been buffered.
 const maxEstimateBody = 8 << 20
+
+// estimateTimeout bounds the provider call, so this endpoint ALWAYS answers.
+//
+// # The failure it removes
+//
+// There was no deadline anywhere on this path: not on the request context, not
+// on the provider's HTTP client, and `cmd/api` runs `http.ListenAndServe` with
+// no `WriteTimeout`. So a provider that took five minutes got five minutes,
+// and the phone — which does have a request timeout, inherited from the OS and
+// not configurable through `fetch` — gave up first. A client that gives up
+// receives **no status and no body**, which leaves it nothing to say beyond
+// "could not reach the server". That is N92 (#433): a failure the athlete
+// reads as their own connection, on a request that was working fine.
+//
+// It is also the reason such a failure leaves no trace an operator can find. A
+// 429 and a 503 are both in the log with a status on them; a request the
+// client abandoned is a 200 several minutes later, indistinguishable from a
+// success nobody was there to receive.
+//
+// # The number is DERIVED FROM THE CLIENT'S, not chosen freely
+//
+// N55 (#448) gave the app its own deadline while this was in flight, and the
+// estimate route gets `SLOW_REQUEST_TIMEOUT_MS` — **45 seconds**, in
+// `apps/mobile/lib/authedFetch.ts`. A server deadline equal to the client's is
+// no better than none: the two race, the phone may abort first, and the
+// athlete gets a generic client-side timeout instead of the status this whole
+// change exists to deliver. The first draft of this constant was 45s for
+// exactly that reason — it was picked before N55 landed, and the rebase turned
+// a safe margin into a tie.
+//
+// So it is **35s, ten seconds under the client**, and the margin has to be
+// that wide rather than nominal because **the two clocks do not start
+// together**. The client's starts when it begins writing the request; ours
+// starts when the handler runs, which is after the body has arrived. A photo
+// upload on gym wifi shifts us several seconds later, and a one- or two-second
+// nominal gap is spent entirely on that shift. Ten seconds survives it.
+//
+// It is still ~4.5x the working case: a live staging estimate on 2026-08-20
+// took **7.7s** end to end. Past that, an answer at a supermarket shelf has
+// little value even when it arrives.
+//
+// **If either number moves, both move.** `scripts/check-timeout-parity.py`
+// fails the build when this stops being strictly less than the client's, which
+// is the only thing standing between a future edit and the silent return of
+// the failure N92 was reported for.
+const estimateTimeout = 35 * time.Second
 
 type estimateResponse struct {
 	// Estimate is the DRAFT. The field is named for what it is so no client
@@ -108,13 +160,97 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	est, meta, estErr := h.estimator.Estimate(r.Context(), in)
+	// BOUNDED, so this endpoint always answers with a status — see
+	// `estimateTimeout`.
+	callCtx, cancel := context.WithTimeout(r.Context(), h.timeout)
+	defer cancel()
 
-	// RECORDED WHETHER OR NOT IT WORKED, and deliberately not gated on estErr.
-	// A refusal and an upstream error both cost tokens, so a meter that counted
+	est, meta, estErr := h.estimator.Estimate(callCtx, in)
+
+	// OUR deadline, told apart from the caller hanging up.
+	//
+	// **`callCtx.Err()`, and the DeadlineExceeded value specifically — not
+	// `estErr`, and not `!= nil`.** All three of the readings that look
+	// equivalent here are wrong in a different way:
+	//
+	//   - `estErr` is whatever the provider SDK chose to return. Both causes
+	//     arrive through it as a context error and `translateLLMError` maps
+	//     both to the generic unavailable case, so it cannot separate them.
+	//   - `callCtx.Err() != nil` catches the caller disconnecting as well,
+	//     and answering a client that hung up with "we gave up waiting" states
+	//     something false in the log an operator would act on.
+	//   - the request context's own error is not needed as a second half.
+	//     A `context.WithTimeout` child whose PARENT is cancelled reports
+	//     `context.Canceled`, not `context.DeadlineExceeded` — the two causes
+	//     are already distinct in this one value. A first draft ANDed
+	//     `r.Context().Err() == nil` onto this and it was measured to change
+	//     nothing: the disconnect test passed identically with it removed. It
+	//     is left out rather than kept as reassurance, because in the one race
+	//     where it does differ — our deadline fires first and the caller
+	//     disappears immediately after — it would relabel a genuine timeout as
+	//     a generic fault.
+	//
+	// Checked before the unreachable branch below so the ordering is stated
+	// rather than emergent. `ErrEstimateTimeout` wraps ErrEstimateUnavailable,
+	// not ErrEstimateUnreachable, so this call stays metered.
+	//
+	// **The `!errors.Is(estErr, ErrEstimateUnreachable)` guard protects F16
+	// against a race, and it is not theoretical enough to leave out.** The
+	// rewrap uses `%v`, which flattens whatever it wraps — so if a genuine
+	// no-spend failure (a provider 5xx, a dial failure, a revoked key) lands in
+	// the window between the provider answering and this line reading the
+	// clock, the rewrap would strip its unreachable match and the athlete would
+	// be charged for our supplier's outage under a 504. That is precisely the
+	// thing F16 (#367) exists to prevent, arrived at sideways.
+	//
+	// It cannot fire on the ordinary path — `llm.neverReachedProvider` checks
+	// the context errors FIRST and answers false, so a deadline-caused failure
+	// is never `Unreachable` to begin with. Which is exactly why it needs
+	// saying: the guard is invisible in every normal run, and the mutation that
+	// removes it survives a suite that does not have this case in it. Raised in
+	// review, and pinned by
+	// `TestAnOutageThatRacesTheDeadlineIsStillNotMetered`.
+	if estErr != nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) &&
+		!errors.Is(estErr, ErrEstimateUnreachable) {
+		estErr = fmt.Errorf("%w after %s: %v", ErrEstimateTimeout, h.timeout, estErr)
+	}
+
+	// RECORDED WHETHER OR NOT IT WORKED — with ONE exception, below.
+	//
+	// Not gated on estErr, because a refusal costs tokens: a meter that counted
 	// only successes would let a caller loop on input the model keeps declining
 	// and pay for every attempt.
 	//
+	// **The exception is a provider that never answered** (F16, #367). A
+	// refused connection, a DNS failure, a revoked key or an upstream 5xx spend
+	// nothing, and charging the athlete a slice of their 25 for them meant a
+	// provider outage locked them out of the feature for up to a day AFTER
+	// service returned — the 503's implicit "try again" quietly eating the
+	// allowance one retry at a time. The athlete did everything right, got
+	// nothing, and paid for it.
+	//
+	// The loop this metering exists to close is NOT reopened: a refusal is
+	// still metered, and a refusal is the input-determined failure a caller
+	// could otherwise sit in. An outage is not something a caller induces with
+	// its input, and it is over when it is over.
+	//
+	// That argument covers a 5xx and a dead connection cleanly and a provider
+	// **4xx** only mostly — see `llm.ErrUnreachable`, which states the
+	// loosening and what bounds it rather than leaving it implied here.
+	//
+	// Nothing is written at all on this path, rather than a row flagged
+	// unmetered. `nutrition_estimates` is a SPEND dataset — every column on it
+	// is a token count or an attribution for one — and a call that spent
+	// nothing has nothing to contribute to it. The operational fact that an
+	// outage happened is in the log line below, which is where an outage
+	// belongs. The cost: outage RATE is no longer derivable from this table.
+	if errors.Is(estErr, ErrEstimateUnreachable) {
+		httplog.FromContext(r.Context()).Error("nutrition: estimate not metered, provider never answered",
+			"user_id", userID, "source", src, "err", estErr)
+		writeEstimateError(w, estErr)
+		return
+	}
+
 	// **`WithoutCancel`, not the request context.** The tokens are already
 	// spent by this line, so a caller who disconnects mid-call would otherwise
 	// escape the meter entirely — and a cancel-loop is exactly the
@@ -205,7 +341,52 @@ func writeEstimateError(w http.ResponseWriter, err error) {
 		// refusal, because a garbled response is not deterministic.
 		apihttp.WriteError(w, http.StatusBadGateway, apihttp.CodeInternal,
 			"estimation returned something unusable — try again")
+	case errors.Is(err, ErrEstimateUnreachable):
+		// BEFORE the ErrEstimateUnavailable arm, which this one wraps — the
+		// other order silently renders every outage as the generic case and
+		// loses the distinction the client needs.
+		//
+		// **503 with `unavailable`, not 502 with `internal`**, and the code is
+		// the half that matters. `internal` means WE are broken; `unavailable`
+		// means somebody we depend on is, and only the second tells a client to
+		// retry the identical request later. Before this the athlete's app
+		// could not tell a provider outage from a bug in the endpoint — both
+		// arrived as `internal` — and could not tell either from the 429 that
+		// means their allowance is gone, except by reading a prose message the
+		// conventions forbid it from matching on.
+		//
+		// The message says the estimate was not charged because that is the
+		// thing the athlete would otherwise assume it was, and assuming it is
+		// what stops them retrying when service returns.
+		apihttp.WriteError(w, http.StatusServiceUnavailable, apihttp.CodeUnavailable,
+			"estimation is temporarily unavailable — this one did not use any of your daily estimates")
+	case errors.Is(err, ErrEstimateTimeout):
+		// BEFORE the ErrEstimateUnavailable arm, which this one wraps — same
+		// most-specific-first ordering the unreachable arm above needs, and
+		// with the same consequence if it is got wrong: the distinction
+		// silently disappears into the generic case.
+		//
+		// **504, not 502 or 503.** It is the one status that says the delay
+		// itself was the failure, which is the fact the client needs: a retry
+		// is worth making, and there is nothing in the request to fix. 503
+		// would be a lie of a specific kind here — `CodeUnavailable`'s
+		// neighbouring message promises the call did not use any of the
+		// athlete's daily estimates, and a timed-out call is metered because
+		// the tokens were probably bought.
+		//
+		// The message names slowness and offers the text path, which costs a
+		// fraction of this one and is the thing that will actually work. It
+		// says nothing about a connection: an athlete reading "check your
+		// signal" on a working connection is the entire defect this endpoint
+		// was reported for.
+		apihttp.WriteError(w, http.StatusGatewayTimeout, apihttp.CodeUnavailable,
+			"that took too long to come back — try again, or describe the meal in words instead")
 	case errors.Is(err, ErrEstimateUnavailable):
+		// The provider ANSWERED and the answer was unusable, which is a
+		// different fault from never answering: 502 says the upstream is
+		// misbehaving rather than absent, and this one WAS metered because it
+		// may well have been billed.
+		//
 		// The wrapped upstream text is deliberately NOT forwarded: it can carry
 		// request ids and prompt fragments, and no raw internal error reaches a
 		// client here.
@@ -318,11 +499,31 @@ func humaniseWait(d time.Duration) string {
 	return fmt.Sprintf("about %d hours", h)
 }
 
-// retryAfterSeconds is the header value: whole seconds, never below one, since
-// a Retry-After of 0 invites the immediate retry the quota just refused.
+// retryAfterSeconds is the header value: whole seconds, never below one.
+//
+// **ROUNDED UP, and that is the contract rather than a preference.**
+// `docs/architecture/api-conventions.md` promises a `Retry-After` "rounded up
+// so that obeying it exactly succeeds", and `internal/platform/ratelimit`
+// honours it with `roundUpSecond`. Truncating instead is a real bug and not a
+// cosmetic one: the window is `created_at > since`, so a client that waits
+// exactly the advertised number of seconds is still INSIDE the window by the
+// fractional part that was dropped, gets a second 429, and learns that obeying
+// the header does not work. The polite client is the one punished; an
+// impatient one that overshoots succeeds.
+//
+// Never below one for the same family of reason — a `Retry-After: 0` invites
+// the immediate retry the quota just refused.
+//
+// (F15. `bjj.draftRetryAfterSeconds` copied this function before the rounding
+// rule was checked, was fixed first, and is pinned by its own test; the two
+// now agree.)
 func retryAfterSeconds(d time.Duration) int {
-	if s := int(d.Seconds()); s > 0 {
-		return s
+	if d <= 0 {
+		return 1
 	}
-	return 1
+	s := int((d + time.Second - 1) / time.Second)
+	if s < 1 {
+		return 1
+	}
+	return s
 }

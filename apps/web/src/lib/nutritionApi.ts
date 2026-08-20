@@ -196,6 +196,21 @@ export type Suggested = {
   suggestion: Suggestion | null;
   missing: string[];
   activities: string[];
+  /**
+   * The level this derivation actually ran at, and whether the athlete chose
+   * it rather than it being assumed.
+   *
+   * Top level rather than read off `suggestion.basis`, which carries the same
+   * value: `basis` is null for an incomplete profile, and that athlete still
+   * has a level to show and change. Reading it off the basis leaves the chips
+   * unrenderable in exactly the state the rest of the page is telling them to
+   * go and fix.
+   *
+   * Optional on the TYPE only, so a response from a server predating N93 still
+   * parses.
+   */
+  activity?: string | null;
+  activity_chosen?: boolean | null;
 };
 
 export type AdjustmentBasis = {
@@ -392,13 +407,28 @@ export async function listTargets(
   return b.targets ?? [];
 }
 
+/**
+ * Derive a target for `on`.
+ *
+ * **`activity` is an OVERRIDE and omitting it is the normal case.** With no
+ * parameter the server derives at whatever the athlete has stored on their
+ * profile, falling back to the documented default, and reports both back — so
+ * a level chosen on the phone is what this page derives at too. Sending one
+ * pins this request to it without writing anything, which is what a chip click
+ * does before the PATCH lands.
+ */
 export function suggestedTarget(
   getToken: Token,
   on: string,
-  activity: string,
+  activity: string | undefined,
   signal?: AbortSignal,
 ): Promise<Suggested> {
-  const q = new URLSearchParams({ on, activity });
+  const q = new URLSearchParams({ on });
+  // Appended conditionally. `new URLSearchParams({ on, activity })` with an
+  // undefined activity serialises the STRING "undefined", which the server
+  // rejects as an unknown level — a 400 on every request, from a value nobody
+  // typed.
+  if (activity) q.set("activity", activity);
   return apiRequest<Suggested>(
     getToken,
     `/nutrition/targets/suggested?${q}`,

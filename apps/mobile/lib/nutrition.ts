@@ -64,6 +64,16 @@ export type Food = Macros & {
   serving_grams: number | null;
 };
 
+/**
+ * Where a target's number came from, and it is not decoration.
+ *
+ * A derived target carries an explanation and a typed one does not, so the
+ * screen has to know which it is holding before it offers to show the
+ * arithmetic. Getting this wrong renders a "why this number" affordance over a
+ * number that has no why.
+ */
+export type TargetSource = 'derived' | 'manual' | 'adjustment';
+
 export type Target = {
   effective_on: string;
   kcal: number;
@@ -71,6 +81,15 @@ export type Target = {
   carb_g: number;
   fat_g: number;
   fibre_g: number | null;
+  /**
+   * **Optional because the local cache does not store it**, not because the
+   * server sometimes omits it. `nutrition_targets` in `db.ts` has no `source`
+   * column, so a target read back offline genuinely does not know — and
+   * `undefined` is the honest answer there. Anything rendering a provenance
+   * label has to handle its absence rather than defaulting to `derived`, which
+   * would put an explanation next to a number that never had one.
+   */
+  source?: TargetSource;
 };
 
 /**

@@ -241,6 +241,88 @@ export function enabledSports(modules: Module[]): Module[] {
 }
 
 /**
+ * A discipline this server HAS whose catalog is `catalog`, which this athlete
+ * has turned OFF.
+ *
+ * The counterpart to every `enabled && capabilities.X` gate in the app, and it
+ * exists because those gates were producing silence. N61: with BJJ off, the
+ * belt roadmaps, the Plan tab's Roadmaps strip and the position map all
+ * rendered nothing at all — and an athlete cannot tell *not enabled* from *not
+ * built* from *broken*. The user went looking for the roadmaps on a real phone
+ * and reported them missing; they exist and work.
+ *
+ * **Three states, not two, and the third is why this is a function rather than
+ * a `!` on the existing gate.** A surface is either on, off-but-available, or
+ * genuinely absent from this deployment — and only the middle one should offer
+ * to turn something on. Promising a feature a server does not have is the same
+ * lie as hiding one it does, pointing the other way.
+ *
+ * A helper rather than three inline copies, for the reason `hasFoodLog` gives:
+ * two copies of a two-part condition is how one of them ends up checking only
+ * half. Three call sites had already been written by hand before this existed.
+ */
+export function moduleOffWithCatalog(modules: Module[], catalog: string): Module | undefined {
+  return modules.find((m) => !m.enabled && m.capabilities.catalog === catalog);
+}
+
+/**
+ * The enabled discipline whose catalog is `catalog` — the positive half of
+ * {@link moduleOffWithCatalog}, and the gate every technique-shaped surface
+ * asks before it draws anything.
+ *
+ * A function for the reason `hasFoodLog` gives, except that this one had
+ * already rotted into **three** hand-written copies of the same two-part
+ * condition — `app/library.tsx`, the Plan tab's Roadmaps strip, and
+ * `lib/__tests__/moduleGating.test.ts` — before Today needed a fourth. Two
+ * copies is how one ends up checking only half; three is how one of them keeps
+ * checking a capability name the server has renamed.
+ *
+ * The two screens now call this. **The test deliberately still spells the
+ * condition out**, and should stay that way: a test that called this function
+ * would be asserting it against itself.
+ *
+ * Gated on the CAPABILITY, never on `key === 'bjj'`. A discipline gaining or
+ * losing a technique catalog should be one row on the server rather than an
+ * edit in four screens.
+ */
+export function moduleWithCatalog(modules: Module[], catalog: string): Module | undefined {
+  return modules.find((m) => m.enabled && m.capabilities.catalog === catalog);
+}
+
+/**
+ * A module this server HAS that carries the food log, which this athlete has
+ * turned OFF.
+ *
+ * The mirror of `hasFoodLog`, and the same three-state reasoning as
+ * `moduleOffWithCatalog`: on, off-but-available, or genuinely absent from this
+ * deployment. Only the middle one may offer to turn something on.
+ *
+ * Returns the MODULE rather than a boolean, because the prompt names it — "1
+ * discipline is off" does not tell an athlete it is the one they were looking
+ * for, and the label carries the registry's spelling rather than a
+ * capitalised key.
+ *
+ * A `find`, not a `some`, for that reason; and a helper rather than an inline
+ * `!m.enabled && m.capabilities.has_food_log`, for the one `hasFoodLog` itself
+ * gives — two copies of a two-part condition is how one ends up checking only
+ * half.
+ */
+export function moduleOffWithFoodLog(modules: Module[]): Module | undefined {
+  return modules.find((m) => !m.enabled && m.capabilities.has_food_log);
+}
+
+/**
+ * Disciplines that could hold a session and are turned off.
+ *
+ * The mirror of `enabledSports`, and `is_sport` filtered for the same reason:
+ * nutrition is a module you can turn off, and "log a nutrition session" is
+ * nonsense — so offering to turn it on from a session picker would be too.
+ */
+export function offSports(modules: Module[]): Module[] {
+  return modules.filter((m) => !m.enabled && m.is_sport);
+}
+
+/**
  * Look up one module. Returns undefined for a key this build doesn't know —
  * the house rule for every lookup table here, because a server can ship a
  * discipline before the app that renders it does.

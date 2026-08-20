@@ -123,6 +123,22 @@ export type Suggested = {
   suggestion: Suggestion | null;
   missing: string[];
   activities: string[];
+  /**
+   * The level this derivation actually ran at, and whether the athlete chose
+   * it — see `lib/activityLevel.ts`.
+   *
+   * Top level rather than read off `suggestion.basis`, which carries the same
+   * value: `basis` is null for an incomplete profile, and that athlete still
+   * has a level to show and change. Reading it off the basis leaves the pills
+   * unrenderable in exactly the state the rest of the screen is telling them to
+   * go and fix.
+   *
+   * Optional on the TYPE only, so a response from a server predating N93 still
+   * parses — `adoptServerActivity` treats an absent or unrecognised value as
+   * "learned nothing" rather than as a choice.
+   */
+  activity?: string | null;
+  activity_chosen?: boolean | null;
 };
 
 export type Suggestion = {
@@ -192,13 +208,102 @@ export type Projection = {
   days_late?: number;
 };
 
+/**
+ * Derive a target for `on`.
+ *
+ * **`activity` is an OVERRIDE and omitting it is the normal case.** With no
+ * parameter the server derives at whatever the athlete has stored on their
+ * profile, falling back to the documented default, and reports both back — which
+ * is the only path by which a level chosen in the browser reaches this phone.
+ * Sending one pins the derivation to it without writing anything.
+ *
+ * It used to be required, defaulting to a `useState('light')` the screen reset
+ * on every navigation. That is N93: the parameter was the ONLY place the level
+ * existed, so it could not survive leaving the tab, and the target moved with
+ * it.
+ */
 export function suggestedTarget(
   getToken: TokenGetter,
   on: string,
-  activity: string,
+  activity?: string,
 ): Promise<Suggested> {
-  const q = new URLSearchParams({ on, activity });
+  const q = new URLSearchParams({ on });
+  // Appended conditionally: `new URLSearchParams({ on, activity })` with an
+  // undefined activity serialises the STRING "undefined", which the server
+  // rejects as an unknown level — a 400 on every request, from a value nobody
+  // typed.
+  if (activity) q.set('activity', activity);
   return apiRequest<Suggested>(getToken, `/nutrition/targets/suggested?${q}`);
+}
+
+/** Every line the weekly proposal shows its working with. */
+export type AdjustmentBasis = {
+  observed_kg_per_week: number;
+  observed_pct_per_week: number;
+  target_kg_per_week: number;
+  target_pct_per_week: number;
+  trend_weight_kg: number;
+  earlier_trend_weight_kg: number;
+  weighins_recent_half: number;
+  weighins_earlier_half: number;
+  days_logged: number;
+  days_considered: number;
+  days_on_current_target: number;
+  kcal_per_kg: number;
+  /** What the arithmetic asked for BEFORE the step cap and the resting floor.
+   *  Shown when it was capped, so the last line reads as "we stopped here"
+   *  rather than as arithmetic that does not follow. */
+  raw_delta_kcal: number;
+  capped: boolean;
+  cap_reason?: string;
+  relaxed?: string;
+  protein_g_per_kg: number;
+  fat_g_per_kg: number;
+};
+
+export type Adjustment = {
+  from_kcal: number;
+  to_kcal: number;
+  delta_kcal: number;
+  protein_g: number;
+  carb_g: number;
+  fat_g: number;
+  fibre_g: number;
+  /** TOMORROW, never today — a target applied retroactively would judge a day
+   *  already mostly eaten, and the remaining figure would jump under you. */
+  effective_on: string;
+  basis: AdjustmentBasis | null;
+};
+
+/**
+ * A withheld proposal is the ORDINARY outcome, and a 200.
+ *
+ * Each of these is a normal state rather than an error, so the client's job is
+ * to say what would unblock it — never to retry, and never to apologise.
+ */
+export type BlockedBy =
+  | 'no_target'
+  | 'no_phase'
+  | 'too_soon'
+  | 'not_logging'
+  | 'not_weighing'
+  | 'on_track';
+
+export type AdjustmentResponse = {
+  adjustment: Adjustment | null;
+  blocked_by: BlockedBy[];
+};
+
+/**
+ * The weekly adjustment proposal, or the reasons it was withheld.
+ *
+ * Never an error and never a write. Accepting is an ordinary {@link saveTarget}
+ * with `source: 'adjustment'` against the proposal's own `effective_on`;
+ * declining is sending nothing, because no dismissal is stored.
+ */
+export function fetchAdjustment(getToken: TokenGetter, on: string): Promise<AdjustmentResponse> {
+  const q = new URLSearchParams({ on });
+  return apiRequest<AdjustmentResponse>(getToken, `/nutrition/targets/adjustment?${q}`);
 }
 
 /**

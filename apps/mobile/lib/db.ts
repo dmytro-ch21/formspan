@@ -394,6 +394,68 @@ const CREATE_NUTRITION_TARGETS = `
 `;
 
 /**
+ * Daily trackers: the DEFINITIONS, pulled from the server and pushed back.
+ *
+ * `dirty 0 / remote 1` by default, the `workout_cache`/`foods` direction, and
+ * that is deliberate. The server provisions water on first list, so a definition
+ * this device has never heard of is one it should adopt, not one it owes.
+ * Editing the target flips `dirty` and the outbox pushes it — so changing a
+ * target works with no signal, which is the mobile-first half of this feature.
+ *
+ * The ENTRIES table below is the opposite direction and the offline-critical
+ * one: a tap is written locally and owed to the server from the first moment.
+ */
+const CREATE_DAILY_TRACKERS = `
+  CREATE TABLE IF NOT EXISTS daily_trackers (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    preset TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    icon TEXT NOT NULL DEFAULT '',
+    color_key TEXT NOT NULL,
+    unit TEXT NOT NULL DEFAULT '',
+    increment REAL NOT NULL,
+    -- NULL is a real state: a count with no goal. Not 0, which would render as
+    -- "0 of 0" at somebody who asked for no target at all.
+    target REAL,
+    render_style TEXT NOT NULL DEFAULT 'auto',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    archived_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT '',
+    dirty INTEGER NOT NULL DEFAULT 0,
+    remote INTEGER NOT NULL DEFAULT 1,
+    last_error TEXT
+  );
+`;
+
+/**
+ * Every tap, one row.
+ *
+ * `logged_on` is the LOCAL calendar day written by dayString -- never
+ * toISOString().slice(0,10), which for anyone west of Greenwich files an
+ * evening glass of water under tomorrow. The jest suite runs under
+ * TZ=America/Los_Angeles so that bug is visible rather than invisible.
+ *
+ * `amount` is the tracker's increment AS IT WAS at the moment of the tap, so
+ * moving from a 250 ml glass to a 500 ml bottle does not rewrite last week.
+ */
+const CREATE_TRACKER_ENTRIES = `
+  CREATE TABLE IF NOT EXISTS tracker_entries (
+    id TEXT PRIMARY KEY NOT NULL,
+    tracker_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    logged_on TEXT NOT NULL,
+    logged_at TEXT NOT NULL,
+    amount REAL NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT '',
+    dirty INTEGER NOT NULL DEFAULT 1,
+    remote INTEGER NOT NULL DEFAULT 0,
+    deleted_at TEXT,
+    last_error TEXT
+  );
+`;
+
+/**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
  *
@@ -422,7 +484,7 @@ const CREATE_NUTRITION_TARGETS = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -436,7 +498,9 @@ type LocalTable =
   | 'sequences'
   | 'food_entries'
   | 'foods'
-  | 'barcode_cache';
+  | 'barcode_cache'
+  | 'daily_trackers'
+  | 'tracker_entries';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -515,6 +579,8 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_FOODS);
   await db.execAsync(CREATE_NUTRITION_TARGETS);
   await db.execAsync(CREATE_BARCODE_CACHE);
+  await db.execAsync(CREATE_DAILY_TRACKERS);
+  await db.execAsync(CREATE_TRACKER_ENTRIES);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -829,6 +895,23 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // already stamped 19 reach the CREATE at all.
     await db.execAsync(CREATE_BARCODE_CACHE);
   }
+
+  if (current < 21) {
+    // Daily trackers and their entries.
+    //
+    // No-ops against the unconditional CREATEs above, same as 18/19/20's were;
+    // they are here so the version the tables arrived in is readable from
+    // `migrate()` rather than only from git. The BUMP is what makes a device
+    // already stamped 20 reach the CREATEs at all.
+    await db.execAsync(CREATE_DAILY_TRACKERS);
+    await db.execAsync(CREATE_TRACKER_ENTRIES);
+  }
+
+  // The day query the card runs on every render of Today.
+  await db.execAsync(
+    `CREATE INDEX IF NOT EXISTS tracker_entries_user_day_idx
+       ON tracker_entries (user_id, logged_on);`,
+  );
 
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
 }

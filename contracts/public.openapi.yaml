@@ -1424,9 +1424,17 @@ components:
                 - unavailable
                 - internal
               description: >
-                `unavailable` accompanies `503` and means the request was fine
-                and the server could not answer it — an upstream lookup that
-                timed out, refused, or is not configured on this deploy. It is
+                `unavailable` accompanies `503` **and `504`**, and means the
+                request was fine and the server could not answer it — an
+                upstream lookup that timed out, refused, or is not configured on
+                this deploy. The two statuses split that on WHOSE clock ran out:
+                `503` is the upstream declining or absent, `504` is this service
+                giving up waiting on one that was still working. The code is
+                shared because the client's move is the same either way.
+                **What is not shared is the cost** — a `503`/`unavailable` on
+                `/nutrition/estimate` promises the athlete's daily allowance is
+                untouched, and a `504` makes no such promise, because the
+                provider was reached and its tokens were probably bought. It is
                 deliberately NOT `not_found`: "this barcode is not in the
                 database" and "I could not reach the database" look identical to
                 a client that only sees an empty result, and they are opposite
@@ -1590,6 +1598,10 @@ components:
             row numbers said three.
         tonnage_kg:
           type: number
+          description: >
+            `reps × weight_kg × load_factor` over the same sets, under the one
+            tonnage rule — implements folded in, drops counted. See
+            `Set.weight_kg`.
         detail:
           type: array
           description: >
@@ -1621,7 +1633,10 @@ components:
         name: { type: string }
         figure:
           type: string
-          description: Strength only — the top working set, e.g. "140 kg × 5".
+          description: >
+            Strength only — the top working set, e.g. "140 kg × 5". The weight
+            is **per implement**, like every load this API publishes: a pair of
+            30 kg dumbbells reads "30 kg × 5". See `Set.weight_kg`.
         outcome:
           type: string
           description: >
@@ -1720,7 +1735,10 @@ components:
         name: { type: string }
         figure:
           type: string
-          description: Strength only — the top working set, e.g. "140 kg × 5".
+          description: >
+            Strength only — the top working set, e.g. "140 kg × 5". The weight
+            is **per implement**, like every load this API publishes: a pair of
+            30 kg dumbbells reads "30 kg × 5". See `Set.weight_kg`.
         outcome:
           type: string
           description: >
@@ -1788,6 +1806,7 @@ components:
         - track_effort
         - share_training_with_friends
         - share_training_details
+        - activity_level
         - created_at
         - updated_at
       properties:
@@ -1885,6 +1904,24 @@ components:
 
             Read LIVE too, so turning it off strips the detail from every past
             row immediately — and turning it ON is retroactive in the same way.
+        activity_level:
+          type: string
+          enum: [sedentary, light, active]
+          nullable: true
+          description: >
+            Daily movement OUTSIDE logged training — the NEAT term in the
+            calorie derivation. The vocabulary stops at `active` (an
+            on-your-feet job) on purpose: textbook multipliers run to 1.9 with
+            exercise already folded in, and adding logged sessions on top of one
+            of those counts every mat class twice.
+
+
+            Null means the athlete has never chosen, which is a DIFFERENT fact
+            from having chosen `light`. A derivation with null assumes `light`
+            and reports `activity_chosen: false`, so a client can render the
+            assumption as an assumption instead of showing a filled control for
+            a decision nobody made. Kept nullable for exactly that reason rather
+            than defaulted in the column.
         created_at:
           type: string
           format: date-time
@@ -1974,6 +2011,23 @@ components:
           description: >
             Opt in or out of publishing the exercise/technique list alongside
             the numbers. Absent means "leave alone", for the same reason.
+        activity_level:
+          type: string
+          enum: [sedentary, light, active]
+          nullable: true
+          description: >
+            The athlete's daily-movement choice. Absent — or an explicit
+            `null` — means "leave unchanged", the same contract as every other
+            field here, so a client that has never heard of this field cannot
+            clear it. Going back to "never chosen" is therefore not expressible
+            through this path; nothing needs it, and the target screens PATCH
+            this one key on its own.
+
+
+            An out-of-vocabulary value is a 400 rather than a silent fall back
+            to the default: substituting `light` for a typo would return a 200
+            naming a level the caller never asked for, and the client would
+            cache it as the athlete's own choice.
 
     Flag:
       type: object
@@ -2658,7 +2712,14 @@ components:
         position: { type: integer }
         target_sets: { type: integer, nullable: true }
         target_reps: { type: integer, nullable: true }
-        target_weight_kg: { type: number, nullable: true }
+        target_weight_kg:
+          type: number
+          nullable: true
+          description: >
+            **Per implement**, the same reading as the `weight_kg` it will be
+            logged as — what to put on ONE dumbbell, not the pair. A template
+            authored in total kilograms would double every dumbbell session's
+            tonnage the moment it was performed. See `Set.weight_kg`.
         target_seconds: { type: integer, nullable: true }
         target_distance_m: { type: integer, nullable: true }
         notes: { type: string }
@@ -2912,7 +2973,42 @@ components:
             Warm-ups count toward neither working sets nor tonnage — counting
             them would make a light day look like a hard one.
         reps: { type: integer, nullable: true }
-        weight_kg: { type: number, nullable: true }
+        weight_kg:
+          type: number
+          nullable: true
+          description: >
+            **WHAT IS STAMPED ON THE IMPLEMENT — not the total moved.** For a
+            barbell or a machine those are the same number. For a PAIR of
+            dumbbells this is ONE of them, and the total is
+            `weight_kg × load_factor`.
+
+
+            This is the unit the athlete is asked for at every capture surface
+            ("Weight is per hand — what one hand holds, not the pair"), so it is
+            the unit stored, and **every load figure this API publishes is in it
+            too**: `top_weight_kg`, the `heaviest_weight` record, both 1RM
+            estimates and their evidence, and the weights a suggestion or a
+            workout item targets. A client renders any of them as logged.
+
+
+            **`tonnage_kg` is the ONE exception**, because it is the only figure
+            that asks how much work was moved rather than how heavy the lift
+            was. It, and only it, multiplies by `load_factor`.
+
+
+            So the two readings a client needs, stated once:
+
+
+            | quantity | rule |
+            |---|---|
+            | any load | `weight_kg`, as logged |
+            | tonnage | `reps × weight_kg × load_factor` |
+
+
+            Worked example — a pair of 30 kg dumbbells, 5 reps, 2 RIR: the
+            tonnage is `5 × 30 × 2` = **300 kg** and the estimated 1RM is
+            `30 × 36/(37−7)` = **36 kg**. Both come off this one field, and
+            neither is wrong.
         seconds: { type: integer, nullable: true }
         distance_m: { type: integer, nullable: true }
         rir:
@@ -3026,7 +3122,12 @@ components:
           type: number
           nullable: true
           description: >
-            What to load. Equal to `last_weight_kg` whenever the answer is to
+            What to load, **per implement** — the number to put on ONE dumbbell,
+            not the pair, matching the unit `weight_kg` is logged in so a client
+            can prefill the input with it unchanged. See `Set.weight_kg`.
+
+
+            Equal to `last_weight_kg` whenever the answer is to
             repeat, about 10% below it on a deload; null when there's nothing
             to say (no history, or not measured in weight).
 
@@ -3060,7 +3161,13 @@ components:
           format: date-time
           nullable: true
           description: When the most recent session containing it started.
-        last_weight_kg: { type: number, nullable: true, description: The top set's load. }
+        last_weight_kg:
+          type: number
+          nullable: true
+          description: >
+            The top set's load, **as logged — per implement**, so it renders
+            beside `target_weight_kg` in the same unit the athlete will type
+            back in. See `Set.weight_kg`.
         last_reps:
           type: integer
           nullable: true
@@ -3128,6 +3235,36 @@ components:
             one rep rather than inflating a true single.
 
 
+            **`w` is `weight_kg` AS LOGGED — per implement, `load_factor` NOT
+            applied**, and this is the one place the difference is worth
+            spelling out because the same screen also shows a tonnage that DOES
+            apply it. A 1RM is what a lifter quotes, and nobody quotes a
+            dumbbell press as the pair: a set of 5 with 2 RIR at 30 kg per hand
+            estimates **36 kg**, not 72. See `Set.weight_kg` for the full rule.
+
+
+            **`r` is EFFECTIVE reps, not logged reps** — stated in symbols so it
+            need not be inferred from the examples:
+
+
+            - `rir` present: `r = reps + rir`. RIR **wins** whenever both it and
+              `rpe` are given; it is the directly observed quantity where RPE
+              has to be converted.
+            - `rpe` only: `r = reps + max(0, 10 − min(rpe, 10))`. Kept
+              **fractional, never rounded** — the scale is used in half steps,
+              and rounding makes 8.5 and 8 give the same answer.
+            - neither: `r = reps`, which under-states a submaximal set. The
+              honest direction to be wrong in.
+            - assisted sets are the exception, and it inverts the rule: `r` is
+              the SOLO count and effort is **discarded**, because an RIR on an
+              assisted set describes the set including the help. See
+              `last_assisted_reps`.
+
+
+            `r > 12` returns null rather than a fiction, and `r ≤ 1` returns `w`
+            unchanged — a true single is its own maximum.
+
+
             Null when the set can't support an estimate: no weight recorded,
             or more than 12 effective reps, past which every rep-max curve is
             fiction.
@@ -3139,6 +3276,9 @@ components:
             exercise, so the current one reads as progress rather than as a
             bare number. Not simply the heaviest set — 5×100 estimates above a
             110 single.
+
+
+            Per implement, on the same rule as `estimated_1rm_kg` above.
         code:
           type: string
           enum: [add_reps, add_load, deload, hold, no_history, not_applicable,
@@ -3204,7 +3344,15 @@ components:
         total_reps: { type: integer }
         tonnage_kg:
           type: number
-          description: Sum of reps × weight over completed, non-warm-up sets.
+          description: >
+            Sum of `reps × weight_kg × load_factor` over completed, non-warm-up
+            sets — **total work moved**, so a pair of dumbbells counts twice.
+
+
+            The factor is the reason this is not simply `reps × weight_kg`:
+            `weight_kg` is per implement (see `Set.weight_kg`), and this is the
+            one published figure that converts it to a total. Every OTHER load
+            this API returns — top set, records, 1RM — stays per implement.
         hardest_rpe:
           type: number
           description: >
@@ -3267,8 +3415,25 @@ components:
             In storage units — kilograms, reps, seconds or metres, according
             to `kind` — so a client formats it the way it formats everything
             else.
+
+
+            For the two weight kinds (`heaviest_weight`, `estimated_1rm`) that
+            is kilograms **per implement, `load_factor` not applied**, like
+            every other load this API publishes. A pair of 30 kg dumbbells sets
+            a `heaviest_weight` of 30, never 60 — records are claims about a
+            lift, and only `tonnage_kg` asks about total work. See
+            `Set.weight_kg`.
         reps: { type: integer, nullable: true }
-        weight_kg: { type: number, nullable: true }
+        weight_kg:
+          type: number
+          nullable: true
+          description: >
+            The evidence set's load, per implement — the same reading as
+            `value`, so the two are directly comparable. Recomputing an
+            `estimated_1rm` from it uses the documented rule rather than bare
+            Brzycki on `reps`: that count is the FULL one, and the estimate
+            derives from the solo count with effort folded in (see
+            `assisted_reps`).
         seconds: { type: integer, nullable: true }
         distance_m: { type: integer, nullable: true }
         rir: { type: integer, nullable: true }
@@ -3313,7 +3478,15 @@ components:
         top_weight_kg:
           type: number
           nullable: true
-          description: Heaviest working set. Null for bodyweight, timed or distance work.
+          description: >
+            Heaviest working set, **as logged — per implement, `load_factor`
+            not applied**. Null for bodyweight, timed or distance work.
+
+
+            A pair of 30 kg dumbbells reports 30 here while the same set's
+            `tonnage_kg` counts 60 per rep. That is deliberate and is the whole
+            of `Set.weight_kg`: a top set is a load, and a load is quoted as
+            what one hand holds.
         best_1rm_kg:
           type: number
           nullable: true
@@ -3323,6 +3496,13 @@ components:
             done unaided and the two surfaces cannot publish different bests
             for one set. Null when no set supports one, including when every
             rep of the only candidate was assisted.
+
+
+            Per implement, like every load this API publishes. **This object is
+            the one that carries both readings at once** — `best_1rm_kg` does
+            not apply `load_factor` and `tonnage_kg` below does — so a client
+            rendering them together is showing two correct numbers computed
+            from the same column two ways. See `Set.weight_kg`.
         best_1rm_reps:
           type: integer
           nullable: true
@@ -3332,7 +3512,19 @@ components:
             `best_1rm_assisted_reps` alongside, matching how `/records` reports
             evidence; the estimate itself derives from the solo count, so the
             two only reconcile when both are shown.
-        best_1rm_weight_kg: { type: number, nullable: true }
+        best_1rm_weight_kg:
+          type: number
+          nullable: true
+          description: >
+            The weight the estimate was taken from, in the SAME per-implement
+            unit as the estimate. Doubling it first for a pair of dumbbells
+            gives twice the published number.
+
+
+            **Recomputing `best_1rm_kg` takes the documented rule, not bare
+            Brzycki on `best_1rm_reps`** — that count is the FULL one, and the
+            estimate uses the solo count with effort folded in. See
+            `best_1rm_reps` and `best_1rm_rir`, which carry the two corrections.
         best_1rm_assisted_reps: { type: integer, nullable: true }
         best_1rm_rir:
           type: integer
@@ -3376,7 +3568,10 @@ components:
         total_reps: { type: integer }
         tonnage_kg:
           type: number
-          description: Sum of reps × weight over completed, non-warm-up sets.
+          description: >
+            Sum of `reps × weight_kg × load_factor` over completed, non-warm-up
+            sets, under the one tonnage rule — implements folded in, drops
+            counted, warm-ups excluded. See `Set.weight_kg`.
         duration_seconds:
           type: integer
           description: Total logged duration. Sessions still in progress contribute 0.
@@ -3402,7 +3597,11 @@ components:
         sessions: { type: integer }
         working_sets: { type: integer }
         total_reps: { type: integer }
-        tonnage_kg: { type: number }
+        tonnage_kg:
+          type: number
+          description: >
+            That day's `reps × weight_kg × load_factor`, the same rule as
+            `HistoryTotals.tonnage_kg`. See `Set.weight_kg`.
         duration_seconds: { type: integer }
         sports:
           type: array
@@ -4806,6 +5005,153 @@ components:
           type: string
           description: Must be one of GET /admin/techniques/positions, or empty.
 
+    DailyTracker:
+      type: object
+      description: >
+        One athlete's daily tracker. Water, coffee and "creatine, 5 g, once a
+        day" are all this object with different values — there is no per-tracker
+        type, and nothing branches on `preset`.
+
+
+        Amounts are stored in `unit`, always, whatever the athlete's display
+        preference says — the same rule weights follow by being kilograms on the
+        wire and pounds on the screen.
+      required:
+        [id, user_id, preset, name, icon, color_key, unit, increment,
+         render_style, sort_order, created_at, updated_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        preset:
+          type: string
+          description: >
+            The seeded preset this row came from, or empty for one the athlete
+            authored. A provisioning key only: a preset row is an ordinary
+            tracker, fully editable and archivable like any other.
+        name: { type: string }
+        icon: { type: string, description: "An emoji, or empty." }
+        color_key:
+          type: string
+          description: >
+            A key into the client palette, never a hex. A free colour can fail
+            contrast on the card and nothing could check it at authoring time,
+            so the client offers a validated set and stores the name of one. An
+            unrecognised key renders as the client default.
+        unit:
+          type: string
+          enum: ["", ml, g, mg, cup, dose, count]
+          description: The canonical unit amounts are recorded in.
+        increment:
+          type: number
+          description: How much one tap adds, in `unit`.
+        target:
+          type: number
+          nullable: true
+          description: >
+            The daily target, in `unit`. **Null is a real state**, meaning the
+            athlete wants a count with no goal — not a missing value. Crossing a
+            target is never blocked.
+        render_style:
+          type: string
+          enum: [auto, glyphs, bar, dose]
+          description: >
+            `auto` lets the client pick from the target and increment: a glyph
+            row up to twelve, a bar beyond that, one large glyph for a single
+            dose. A stored value overrides it.
+        sort_order: { type: integer }
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            Set by DELETE. Archived trackers are excluded from the list and keep
+            every entry they ever recorded.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    DailyTrackerInput:
+      type: object
+      description: >
+        A new athlete-authored tracker. `preset` is not accepted — presets are
+        assigned by the server, and a caller who could claim one would collide
+        with provisioning and make somebody's water card unreachable.
+      required: [id, name, color_key, increment]
+      properties:
+        id:
+          type: string
+          description: >
+            Client-generated, so a retry after a lost response is idempotent
+            rather than a second tracker.
+        name: { type: string, maxLength: 60 }
+        icon: { type: string, maxLength: 16 }
+        color_key: { type: string }
+        unit: { type: string, enum: ["", ml, g, mg, cup, dose, count] }
+        increment: { type: number }
+        target: { type: number, nullable: true }
+        render_style: { type: string, enum: [auto, glyphs, bar, dose] }
+        sort_order: { type: integer }
+
+    DailyTrackerPatch:
+      type: object
+      description: >
+        A PARTIAL update. **A field absent from the body is not written**, and
+        that is the contract, not an implementation detail: the phone's target
+        screen sends `{"target": 2500}` and must not thereby blank the name,
+        icon, colour or unit.
+
+
+        `target` distinguishes three states, which is why it is the one nullable
+        field here: absent means leave it alone, `null` means the athlete wants
+        no target, and a number sets one. Every other field is non-nullable —
+        sending `null` for one is rejected rather than silently coerced.
+      properties:
+        name: { type: string, maxLength: 60 }
+        icon: { type: string, maxLength: 16 }
+        color_key: { type: string }
+        unit: { type: string, enum: ["", ml, g, mg, cup, dose, count] }
+        increment: { type: number }
+        target: { type: number, nullable: true }
+        render_style: { type: string, enum: [auto, glyphs, bar, dose] }
+        sort_order: { type: integer }
+
+    TrackerEntry:
+      type: object
+      description: One tap.
+      required: [id, tracker_id, user_id, logged_on, logged_at, amount, created_at]
+      properties:
+        id: { type: string }
+        tracker_id: { type: string }
+        user_id: { type: string }
+        logged_on:
+          type: string
+          format: date
+          description: >
+            The athlete's LOCAL calendar day, supplied by the client and never
+            derived from `logged_at`. West of Greenwich a 23:58 glass of water
+            belongs to the day that is ending, and a UTC-derived date files it
+            under tomorrow.
+        logged_at:
+          type: string
+          format: date-time
+          description: >
+            The moment, for "last at 16:40". Defaulted to the server's now when
+            omitted — unlike `logged_on`, which cannot be defaulted because the
+            server does not know the athlete's timezone.
+        amount:
+          type: number
+          description: >
+            The tracker's increment AS IT WAS when this was logged, so changing
+            the increment later does not rewrite last week.
+        created_at: { type: string, format: date-time }
+
+    TrackerEntryInput:
+      type: object
+      required: [logged_on, amount]
+      properties:
+        logged_on: { type: string, format: date }
+        logged_at: { type: string, format: date-time }
+        amount: { type: number }
+
   headers:
     ETag:
       description: >
@@ -5818,10 +6164,19 @@ paths:
 
 
         **Capped at 20 per athlete per rolling 24 hours**, persisted, so the
-        limit survives a restart. Failed and refused calls count too — they
-        spend tokens, and a quota counting only successes would let a client
+        limit survives a restart. Refused calls count too — a refusal is a
+        billed answer, and a quota counting only successes would let a client
         loop on a photo the model keeps declining and pay for every attempt. See
         the 429 below for how this differs from the shared burst limit.
+
+
+        **A call the provider never answered does NOT count.** A refused
+        connection, a DNS failure, a revoked key or an upstream error status
+        spends no tokens, so it spends none of the 20 — an outage would
+        otherwise empty the allowance during exactly the unfamiliar-gym session
+        this feature exists for, and the quota is persisted, so unlike the burst
+        limiter it does not recover on restart. Those arrive as `503` with the
+        code `unavailable`.
       requestBody:
         required: true
         content:
@@ -5943,7 +6298,11 @@ paths:
             reconnaissance.
           headers:
             Retry-After:
-              description: Whole seconds, never below 1.
+              description: >
+                Whole seconds, never below 1, and ROUNDED UP so that waiting
+                exactly this long succeeds — the same promise
+                `components/responses/RateLimited` and the other metered
+                endpoints make. Both limits behind this status answer with it.
               schema: { type: integer, minimum: 1 }
           content:
             application/json:
@@ -5960,8 +6319,17 @@ paths:
                 $ref: "#/components/schemas/Error"
         "503":
           description: >
-            The provider is unreachable, or this deploy has no API key
-            configured. A retry is reasonable.
+            The provider never answered — a refused connection, a DNS failure,
+            a revoked key, an upstream error status — or it answered with
+            something unusable, or this deploy has no API key configured.
+
+
+            **Read the `code` to tell them apart, and only the code** — the
+            message is not part of this contract. `unavailable` means the
+            provider never answered: nothing was spent and **this call did not
+            use one of the athlete's 20**, so a client may say so and may retry
+            the identical request once service returns. `internal` means the
+            call completed and was charged, or that this deploy has no key.
           content:
             application/json:
               schema:
@@ -6681,9 +7049,20 @@ paths:
         fact about the athlete, and a roadmap that vanishes on abandonment
         cannot later say "you did three quarters of this". It does NOT mean
         completed — completion is derived from the evidence.
+
+
+        It ALSO withdraws this curriculum's claim on the caller's BJJ focus list,
+        removing the techniques it put there — and only those. Anything the
+        athlete chose by hand stays, as does anything another roadmap they are
+        still working also wants. Entries written before focus recorded its
+        provenance are left alone, since there is no way to tell which they were.
+
+
+        Idempotent as a whole: a retry after a failure converges, and the release
+        happens before the archive so a repeated call cannot strand focus rows.
       responses:
         "204":
-          description: Archived.
+          description: Archived, and its focus techniques released.
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -6729,6 +7108,25 @@ paths:
         ranking and is preserved. An empty array clears the list, which is a
         normal thing to do at the end of a block. At most 5 techniques, no
         repeats; every id must exist in the library.
+
+
+        Each entry also records WHY it is in the list, which is what makes
+        leaving a roadmap able to remove its techniques without touching the
+        athlete's own. Send `roadmap` when applying a curriculum; omit it for a
+        hand edit, and the new entries become the athlete's, which no roadmap can
+        ever remove.
+
+
+        Two different things are recorded, and only one of them is fixed.
+        OWNERSHIP — the athlete's, a roadmap's, or unknown for entries predating
+        this — is set when an entry first appears and is never rewritten by a
+        later save, so a technique picked by hand and later also named by a
+        roadmap stays the athlete's and survives that roadmap's deactivation.
+        CLAIMS are additive: a roadmap-owned entry accumulates a claim from every
+        roadmap that names it, and is removed only when the last of them lets go.
+        That is what stops one roadmap's deactivation taking a technique another
+        active roadmap is still working. A claim is never added to an entry the
+        athlete owns, so naming one costs nothing and protects nothing away.
       requestBody:
         required: true
         content:
@@ -6742,6 +7140,30 @@ paths:
                   maxItems: 5
                   items: { type: string }
                   example: [armbar-from-guard, triangle-from-guard]
+                roadmap:
+                  type: object
+                  description: >
+                    The curriculum this write is applying, when it is one.
+                    Absent on a hand edit.
+
+
+                    `technique_ids` here is a SUBSET of the write's own
+                    `technique_ids` — the roadmap's techniques only. Applying a
+                    roadmap re-sends whatever the athlete already had alongside
+                    it, and naming those here would let deactivating the roadmap
+                    delete them. A member not present in the outer list is a 400.
+                  required: [curriculum_id, technique_ids]
+                  properties:
+                    curriculum_id:
+                      type: string
+                      description: >
+                        Must name an existing curriculum. Attribution only ever
+                        affects the caller's own focus rows.
+                    technique_ids:
+                      type: array
+                      maxItems: 5
+                      items: { type: string }
+                      example: [armbar-from-guard]
       responses:
         "200":
           description: >
@@ -6916,10 +7338,21 @@ paths:
 
 
         **Quota: 10 per athlete over a rolling 24 hours**, checked BEFORE the
-        model is called. Failed and refused calls count, because they cost
-        tokens too. Exhaustion is `429` with `rate_limited` and a `Retry-After`
+        model is called. Refused calls count, because a refusal is a billed
+        answer and a caller could otherwise loop on a dictation the model keeps
+        declining. Exhaustion is `429` with `rate_limited` and a `Retry-After`
         header in seconds; the reset is also stated in the message as a
         relative duration, never as a timestamp.
+
+
+        **A call the provider never answered does NOT count.** A refused
+        connection, a DNS failure, a revoked key or an upstream error status
+        spends no tokens, so it spends none of the ten — before this an outage
+        emptied the day's allowance one retry at a time and left the athlete
+        locked out for up to 24 hours after service returned. Those arrive as
+        `503` with the code `unavailable`, which is what separates them from
+        every other failure here: `unavailable` means our provider is broken
+        and the identical request will work later.
       security:
         - ClerkBearerAuth: []
       requestBody:
@@ -6979,7 +7412,11 @@ paths:
             something this endpoint knows.
           headers:
             Retry-After:
-              description: Whole seconds until one more draft is available. Never zero.
+              description: >
+                Whole seconds until one more draft is available, ROUNDED UP so
+                that waiting exactly this long succeeds — same promise the
+                estimate endpoint and `components/responses/RateLimited` make.
+                Never zero.
               schema: { type: integer, minimum: 1 }
           content:
             application/json:
@@ -6990,6 +7427,15 @@ paths:
             or drafting is not configured on this deploy (no API key). All
             three are retryable and none is the client's fault; every other bjj
             route is unaffected.
+
+
+            **Read the `code` to tell them apart, and only the code** — the
+            message is not part of this contract. `unavailable` means the
+            provider never answered: nothing was spent and **this call did not
+            use one of the athlete's ten**, so a client may say so and may
+            retry the identical request once service returns. `internal` means
+            the call did complete and was charged, or that this deploy has no
+            API key.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -9416,10 +9862,20 @@ paths:
         of it.
 
 
-        Failed and refused calls count, because they cost tokens too.
-        Exhaustion is `429` with `rate_limited`, carrying a `Retry-After`
-        header in seconds; the reset is also stated in the message as a
-        relative duration, never as a timestamp.
+        Refused calls count, because a refusal is a billed answer and a caller
+        could otherwise loop on input the model keeps declining. Exhaustion is
+        `429` with `rate_limited`, carrying a `Retry-After` header in seconds;
+        the reset is also stated in the message as a relative duration, never
+        as a timestamp.
+
+
+        **A call the provider never answered does NOT count.** A refused
+        connection, a DNS failure, a revoked key or an upstream error status
+        spends no tokens, so it spends none of the 25 — before this an outage
+        emptied the day's allowance one retry at a time and left the athlete
+        locked out for up to 24 hours after service returned. Those arrive as
+        `503` with the code `unavailable`, distinct from the `502` below, which
+        is a provider that DID answer and answered with something unusable.
       tags: [Nutrition]
       security:
         - ClerkBearerAuth: []
@@ -9490,32 +9946,82 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '429':
           description: >
-            The daily cap for this path is used up. `Retry-After` gives the
-            wait in whole seconds; the message repeats it as a relative
-            duration. Neither is ever an absolute timestamp — the athlete's
-            timezone is not something this endpoint knows.
+            The daily cap is used up — one budget across both paths, not one
+            per path. `Retry-After` gives the wait in whole seconds; the
+            message repeats it as a relative duration. Neither is ever an
+            absolute timestamp — the athlete's timezone is not something this
+            endpoint knows.
           headers:
             Retry-After:
-              description: Whole seconds until one more estimate is available. Never zero.
+              description: >
+                Whole seconds until one more estimate is available, ROUNDED UP
+                so that waiting exactly this long succeeds — consistent with
+                `components/responses/RateLimited`. The window is a rolling 24
+                hours from the oldest call still counted, so a truncated value
+                would land a client back inside it and earn a second 429 for
+                obeying the header. Never zero.
               schema: { type: integer, minimum: 1 }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '502':
           description: >
-            The model provider is unreachable, OR it answered with something
-            unusable — an absurd magnitude, a NaN, an item with no name. Both
-            are retryable and neither is the client's fault, which is why a
-            bad response is not reported as `400`: the request was already
-            validated before a token was spent, so there is nothing in it to
-            correct.
+            The provider ANSWERED and the answer was unusable — an absurd
+            magnitude, a NaN, an item with no name, an empty body. Retryable
+            and not the client's fault, which is why it is not reported as
+            `400`: the request was validated before a token was spent, so
+            there is nothing in it to correct.
+
+
+            **This one DID cost an estimate.** The provider produced a
+            response and billed for it, so the call is metered. A provider that
+            never answered at all is `503`/`unavailable` instead, and that one
+            costs nothing.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '503':
           description: >
-            Estimation is not configured on this deploy (no key for the
-            selected provider). Every other nutrition route is unaffected.
+            Either the provider never answered — refused connection, DNS
+            failure, revoked key, upstream error status — or estimation is not
+            configured on this deploy (no key for the selected provider).
+            Every other nutrition route is unaffected.
+
+
+            **Read the `code` to tell them apart, and only the code** — the
+            message is not part of this contract. `unavailable` means the
+            provider never answered: nothing was spent and **this call did not
+            use one of the athlete's 25**, so a client may say so and may
+            retry the identical request once service returns. `internal` means
+            this deploy has no API key, which no retry will fix.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '504':
+          description: >
+            The provider was still working when THIS SERVICE stopped waiting.
+            The deadline is ours — 35 seconds — and it exists so that this
+            endpoint always answers with a status.
+
+
+            **Why that matters more than it sounds.** There used to be no
+            deadline anywhere on this path, so a slow provider ran until the
+            CLIENT's own request timeout fired instead. A client that times out
+            receives no status and no body, and has nothing left to say except
+            that it could not reach the server — which is what an athlete was
+            shown, on a working connection, while photographing a food label
+            (N92). Every other outcome here carries copy the client can render
+            as itself; silence is the one that cannot.
+
+
+            The code is `unavailable`, same as the `503`, because a client's
+            correct move is identical: retry the same request later, and there
+            is nothing in it to fix. **But unlike the `503`, this one DID cost
+            an estimate.** The request reached the provider and the tokens were
+            very likely bought; exempting it would also make the daily cap
+            trivially avoidable by abandoning every call. So a client must not
+            tell the athlete their allowance is untouched here — that promise
+            belongs to `503`/`unavailable` alone.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -10076,7 +10582,21 @@ paths:
           description: >
             NEAT only — everything that is NOT logged training. The ladder stops
             at `active` (an on-your-feet job) on purpose.
-          schema: { type: string, enum: [sedentary, light, active], default: light }
+
+
+            **Omit it to derive at whatever the athlete has stored** on
+            `profile.activity_level`, falling back to `light` when they have
+            never chosen. Sending it OVERRIDES the stored value for this request
+            without writing anything, which is what lets a client preview "what
+            if I had a desk job" before committing to it — committing is a
+            PATCH to /profile.
+
+
+            The response always echoes back the level it actually used, so the
+            control and the number come out of one payload and cannot disagree.
+            No default is applied to the parameter itself: an absent parameter
+            and `light` are genuinely different requests now.
+          schema: { type: string, enum: [sedentary, light, active] }
       responses:
         "200":
           description: A suggestion, or null with the fields that are missing.
@@ -10084,7 +10604,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [suggestion, missing, activities]
+                required: [suggestion, missing, activities, activity, activity_chosen]
                 properties:
                   suggestion:
                     type: object
@@ -10098,6 +10618,34 @@ paths:
                   activities:
                     type: array
                     items: { type: string, enum: [sedentary, light, active] }
+                  activity:
+                    type: string
+                    enum: [sedentary, light, active]
+                    description: >
+                      The level this derivation actually ran at — the `activity`
+                      parameter if one was sent, else the stored
+                      `profile.activity_level`, else `light`.
+
+
+                      Top level rather than inside `suggestion`, and that
+                      placement is load-bearing: `basis.activity` carries the
+                      same value but `basis` is null for an incomplete profile,
+                      and an athlete who cannot be given a number yet still has
+                      a level to display and change. Reading it off the basis
+                      leaves the control unrenderable in exactly the state the
+                      rest of the screen is asking them to fix.
+                  activity_chosen:
+                    type: boolean
+                    description: >
+                      Whether `activity` came from the athlete rather than from
+                      the default. False means nobody has ever chosen and
+                      `light` was assumed.
+
+
+                      Clients MUST NOT render a chosen-looking control on false:
+                      a filled pill attributes a decision to somebody who never
+                      made one. Show the assumption, named, and let them confirm
+                      or change it.
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
@@ -10441,4 +10989,191 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/Accomplishment" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /trackers:
+    get:
+      operationId: listTrackers
+      summary: The athlete's daily trackers
+      description: >
+        Returns every live tracker, archived ones excluded.
+
+
+        **This call provisions the default presets**, which makes it a write on
+        a read and is worth stating rather than hiding. It is idempotent and
+        safe to race — provisioning is keyed on (athlete, preset) — and the
+        alternative, a separate "set up my trackers" call, is a step that gets
+        skipped and leaves Today empty. An edited target survives it, and a
+        tracker the athlete archived is not handed back.
+      tags: [Trackers]
+      responses:
+        "200":
+          description: The live trackers, in display order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trackers]
+                properties:
+                  trackers:
+                    type: array
+                    items: { $ref: "#/components/schemas/DailyTracker" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createTracker
+      summary: Create a tracker
+      description: >
+        Idempotent on the client-supplied `id`: sending it twice returns the
+        original row rather than creating a second. An id that belongs to
+        another athlete is reported as a conflict and never returned.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DailyTrackerInput" }
+      responses:
+        "201":
+          description: The stored tracker.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DailyTracker" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /trackers/entries:
+    get:
+      operationId: listTrackerEntries
+      summary: A window of taps across every tracker
+      description: >
+        One request serves a whole screen of cards; there is deliberately no
+        per-tracker variant, which would be an N+1 on the one screen that
+        renders several.
+
+
+        `from` and `to` are LOCAL calendar days and are both required. They have
+        no default because the server does not know the athlete's timezone, so
+        any default it picked would be wrong for much of the world for part of
+        every day.
+      tags: [Trackers]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: The entries, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/TrackerEntry" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /trackers/{trackerID}:
+    parameters:
+      - name: trackerID
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      operationId: updateTracker
+      summary: Change part of a tracker
+      description: >
+        **Partial, and strictly so: a field the body does not name is not
+        written.** The phone's target screen sends `{"target": 2500}` and
+        everything else about the tracker is left exactly as it was.
+
+
+        This is a contract promise rather than an implementation detail because
+        the failure it prevents has shipped in this codebase three times — a
+        full-row SET clause grew a column and blanked an authored value — and a
+        client cannot tell the difference until real data is lost.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DailyTrackerPatch" }
+      responses:
+        "200":
+          description: The tracker after the patch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DailyTracker" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: archiveTracker
+      summary: Archive a tracker
+      description: >
+        **Archives; does not destroy.** The tracker leaves the list and every
+        entry it recorded survives. Archiving twice is not an error, and an
+        archived preset is not re-provisioned on the next list.
+      tags: [Trackers]
+      responses:
+        "204": { description: Archived. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /trackers/{trackerID}/entries/{entryID}:
+    parameters:
+      - name: trackerID
+        in: path
+        required: true
+        schema: { type: string }
+      - name: entryID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: logTrackerEntry
+      summary: Record one tap
+      description: >
+        PUT, keyed on the entry id the client generated, so sending it twice is
+        the same as sending it once — which is what makes a cup logged in a
+        kitchen with no signal safe to retry. The id in the path wins over any
+        id in the body.
+
+
+        Crossing the target is never refused: an athlete who drinks ten of eight
+        logs ten.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrackerEntryInput" }
+      responses:
+        "200":
+          description: The stored entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerEntry" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteTrackerEntry
+      summary: Remove one tap
+      description: >
+        The tap-a-filled-cup correction. Deleting something already gone is not
+        an error — a retried delete over a flaky connection is the common case,
+        and a 404 on the second attempt would put a failure on the sync screen
+        for a correction that landed.
+      tags: [Trackers]
+      responses:
+        "204": { description: "Removed, or already absent." }
         "401": { $ref: "#/components/responses/Unauthorized" }

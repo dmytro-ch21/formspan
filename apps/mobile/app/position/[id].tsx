@@ -6,6 +6,7 @@ import { categoryBadge, positionBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { transportDiagnosis } from '@/lib/apiError';
 import { fetchPosition, techniquesInPosition, type Position } from '@/lib/positions';
 import { FUNCTION_ORDER, groupByFunction } from '@/lib/techniqueGraph';
 import { fetchTechniques, type TechniqueSummary } from '@/lib/techniques';
@@ -49,16 +50,27 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * says nothing — so without this the screen spins for a minute with no error
  * and nothing to retry.
  *
- * The abort REASON is half of it, and leaving it out is worse than having no
- * deadline at all. Both an unmount and a timeout abort the same controller, and
- * they need opposite handling: an unmount must set no state, a timeout must set
- * an error. Treating them alike — returning early on `signal.aborted` — leaves
- * `loading` true forever, replacing a slow screen that eventually errors with a
- * spinner that never resolves and has no retry on it. `library.tsx` carries the
- * same pair for the same reason.
+ * **It is now handed to the transport instead of being armed here, and that is
+ * a bug fix, not a tidy-up (N55).** The deadline used to abort this screen's
+ * own controller with the reason `'timed-out'`, and the difference between
+ * that and an unmount was read back off `signal.reason` — the two need opposite
+ * handling, since an unmount must set no state and a timeout must set an error.
+ *
+ * `signal.reason` does not exist on a phone. React Native replaces the global
+ * `AbortController` with `abort-controller@3.0.0`, which has no `reason`, no
+ * `throwIfAborted`, no `AbortSignal.timeout` and no `AbortSignal.any` —
+ * measured against the installed module. Jest runs on Node, which has all
+ * four, so the check passed every test and was dead in the athlete's hand:
+ * `timedOut` was permanently false, a timeout took the unmount path, and
+ * `loading` stayed true forever. **The exact permanent spinner the comment
+ * above says this exists to prevent, shipped behind a green suite.**
+ *
+ * So the deadline moves to `netFetch`, which owns it in a local it can trust
+ * and reports it as a `TimeoutError`. This screen's controller now aborts for
+ * one reason only — the screen is gone — so `signal.aborted` answers on its
+ * own and no reason is needed anywhere.
  */
 const REQUEST_TIMEOUT_MS = 10_000;
-const TIMED_OUT = 'timed-out';
 
 /** A row is either a verb heading or a technique under it. */
 type ListRow =
@@ -96,25 +108,33 @@ export default function PositionScreen() {
       // Independent requests, so they run together — a cold-start deep link
       // otherwise pays two serialized round trips. allSettled rather than all
       // because their failures mean different things, handled separately below.
+      const deadline = { timeoutMs: REQUEST_TIMEOUT_MS };
       const [p, list] = await Promise.allSettled([
-        fetchPosition(id, getToken, signal),
-        fetchTechniques(getToken, signal),
+        fetchPosition(id, getToken, signal, deadline),
+        fetchTechniques(getToken, signal, deadline),
       ]);
 
-      const timedOut = signal?.aborted && signal.reason === TIMED_OUT;
-      // An abort that is NOT the deadline is an unmount or a supersede: the
-      // screen is gone, so setting state would be pointless at best. The
-      // deadline falls through deliberately and is reported below.
-      if (signal?.aborted && !timedOut) return;
+      // An abort now means one thing — the screen is gone — because the
+      // deadline no longer touches this controller. Setting state would be
+      // pointless at best.
+      if (signal?.aborted) return;
 
       if (p.status === 'rejected') {
         // A missing position, a dead network and a timeout are three different
         // problems, and only two of them are worth retrying. Telling someone to
         // check their connection because they followed a dead link is a wrong
         // answer delivered confidently.
+        //
+        // The transport half of that distinction is no longer this screen's to
+        // draw: a dead request arrives already saying which kind it was, so its
+        // own sentence is shown rather than a fourth guess at one. The
+        // DIAGNOSIS alone, with no action appended — a "Try again" button
+        // renders directly under this text, and the sentinel's own "Try again."
+        // would print it twice.
+        const diagnosis = transportDiagnosis(p.reason);
         setError(
-          timedOut
-            ? 'This is taking too long. Check your connection and try again.'
+          diagnosis
+            ? diagnosis
             : /\(404\)/.test(String((p.reason as Error)?.message))
               ? 'That position is not in the library.'
               : 'Could not load this position. Check your connection and try again.',
@@ -136,18 +156,15 @@ export default function PositionScreen() {
     [id, getToken],
   );
 
-  // One place that arms a deadline, so the retry below gets the same treatment
-  // as the initial load. Without it a retry after a captive-portal hang — the
-  // single likeliest moment for one — runs with no deadline at all.
+  // The deadline itself now lives in the transport (see REQUEST_TIMEOUT_MS);
+  // what is left here is the screen's own lifetime, which is what the
+  // controller was always for. Kept as one place so the retry below and the
+  // initial load stay identical.
   const loadWithDeadline = useCallback(
     (external?: AbortController) => {
       const ac = external ?? new AbortController();
-      const deadline = setTimeout(() => ac.abort(TIMED_OUT), REQUEST_TIMEOUT_MS);
-      void load(ac.signal).finally(() => clearTimeout(deadline));
-      return () => {
-        clearTimeout(deadline);
-        ac.abort();
-      };
+      void load(ac.signal);
+      return () => ac.abort();
     },
     [load],
   );

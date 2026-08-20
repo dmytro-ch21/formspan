@@ -124,6 +124,30 @@ func (h *IdentifyHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, err := h.identifier.Identify(r.Context(), in)
+
+	// ONE return path skips the meter, and only one: a provider that never
+	// answered (F16, #367). A refused connection, a DNS failure, a revoked key
+	// or an upstream 5xx spend no tokens, and charging one of the athlete's 20
+	// for them meant an outage locked them out for up to a day after service
+	// returned. Nothing was spent, so nothing is charged.
+	//
+	// The loop this meter exists to close is untouched: a REFUSAL still meters,
+	// and a refusal is the input-determined failure a caller could sit in. That
+	// argument covers a 5xx and a dead connection cleanly and a provider 4xx only
+	// mostly; `llm.ErrUnreachable` states the loosening and what bounds it.
+	//
+	// This route was outside F16's stated scope, which said the identify path
+	// "uses an in-memory limiter, so it recovers on restart". That was true
+	// when the issue was filed and stopped being true with N48 — `exercise_identifications`
+	// is persisted, with the same rolling 24-hour window as the other two, so
+	// this endpoint had the same bug and none of the stated mitigation.
+	if errors.Is(err, ErrIdentifyUnreachable) {
+		httplog.FromContext(r.Context()).Error("exercise: identification not metered, provider never answered",
+			"user_id", userID, "err", err)
+		writeIdentifyError(w, err)
+		return
+	}
+
 	// RECORDED whether or not it worked, and BEFORE the error is written, so no
 	// return path can skip the meter. A refusal and an outage both spent
 	// tokens; a quota that counted only successes would let a caller loop on a
@@ -168,6 +192,14 @@ func writeIdentifyError(w http.ResponseWriter, err error) {
 			"could not tell which machine that is — try a straighter shot of the whole machine")
 	case errors.Is(err, ErrInvalidInput):
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, identifyValidationMessage(err))
+	case errors.Is(err, ErrIdentifyUnreachable):
+		// Same 503 as the default arm, DIFFERENT code. `internal` says we are
+		// broken; `unavailable` says our provider is, and only the second is a
+		// retry instruction a client can act on without matching a message the
+		// conventions forbid it from matching. And the message says the call
+		// was not charged, because the athlete would otherwise assume it was.
+		apihttp.WriteError(w, http.StatusServiceUnavailable, apihttp.CodeUnavailable,
+			"machine identification is unavailable right now — this one did not use any of your daily identifications")
 	default:
 		// Everything else, including ErrIdentifyUnavailable. 503 rather than
 		// 500 because a retry is the right advice, and the message is fixed —
@@ -268,14 +300,33 @@ func humaniseIdentifyWait(d time.Duration) string {
 	return fmt.Sprintf("about %d hours", h)
 }
 
-// identifyRetryAfterSeconds is the header value: whole seconds, never below
-// one, since a Retry-After of 0 invites the immediate retry the quota just
-// refused.
+// identifyRetryAfterSeconds is the header value: whole seconds, never below one.
+//
+// **ROUNDED UP, and that is the contract rather than a preference.**
+// `docs/architecture/api-conventions.md` promises a `Retry-After` "rounded up
+// so that obeying it exactly succeeds", and `internal/platform/ratelimit`
+// honours it with `roundUpSecond`. Truncating instead is a real bug: this
+// quota's window is `created_at > since`, so a client that waits exactly the
+// advertised number of seconds is still INSIDE it by the fractional part that
+// was dropped, gets a second 429, and learns that obeying the header does not
+// work. The polite client is punished and an impatient one is not.
+//
+// Never below one for the same family of reason — a `Retry-After: 0` invites
+// the immediate retry the quota just refused.
+//
+// (F15 fixed this in all three places at once. It was the third copy of one
+// truncation: `bjj` inherited it from `nutrition`, this inherited it alongside
+// `humaniseIdentifyWait`, and the docstring above already says a change to
+// either should change both.)
 func identifyRetryAfterSeconds(d time.Duration) int {
-	if s := int(d.Seconds()); s > 0 {
-		return s
+	if d <= 0 {
+		return 1
 	}
-	return 1
+	s := int((d + time.Second - 1) / time.Second)
+	if s < 1 {
+		return 1
+	}
+	return s
 }
 
 // identifyCallerID reads the authenticated athlete from the request.

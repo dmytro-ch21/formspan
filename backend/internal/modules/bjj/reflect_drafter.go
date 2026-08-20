@@ -299,6 +299,12 @@ func translateDraftError(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, llm.ErrUnreachable):
+		// Before the default arm, and before anything that could match
+		// ErrDraftUnavailable, because ErrDraftUnreachable wraps it: the other
+		// order collapses an outage back into the metered branch and undoes
+		// F16 without changing a single test's expectation of the STATUS.
+		return fmt.Errorf("%w: %v", ErrDraftUnreachable, err)
 	case errors.Is(err, llm.ErrRefused):
 		return fmt.Errorf("%w: %v", ErrDraftRefused, err)
 	default:

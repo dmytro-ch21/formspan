@@ -25,7 +25,7 @@ import { formatWeight, type UnitSystem } from '@/lib/units';
  * shows is in service of that.
  *
  * The full history and the analytical views live on web. **The weight trend no
- * longer does** — it is one tap away at `app/checkin/trend.tsx`, under the
+ * longer does** — it is one tap away at `app/goals/trend.tsx`, under the
  * amendment to the platform rule recorded in CLAUDE.md: a chart read in three
  * seconds to decide what to eat is decision support, and that decision is made
  * in a supermarket. It stayed OFF this card for the reason above; a chart here
@@ -183,7 +183,9 @@ export function CheckinCard({
         {/* The trend, one tap away rather than on the card. Secondary
             styling on purpose: the card's job is today's decision, and a
             chart competing with "Check in" for the thumb would invert that.
-            See `app/checkin/trend.tsx` for why it is a screen at all. */}
+            See `app/goals/trend.tsx` for why it is a screen at all. The
+            path below still points at `checkin/trend`, which redirects there —
+            keeping this door open is deliberate (N56). */}
         <Pressable
           onPress={() => router.push('/checkin/trend')}
           style={styles.secondary}

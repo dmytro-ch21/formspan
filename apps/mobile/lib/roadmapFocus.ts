@@ -41,6 +41,23 @@ import type { CurriculumItem } from './curriculum';
 export type FocusProposal = {
   /** The list to send, in order. Never longer than `MAX_FOCUS`. */
   next: string[];
+  /**
+   * Which of `next` this roadmap is a reason for — its own techniques, and
+   * nothing else.
+   *
+   * **A strict subset of `next`, and that is the entire point.** Rule 3 keeps
+   * the athlete's own entries in the list, so `next` is a mix of two
+   * provenances; sending it as though the roadmap owned all of it would give
+   * the roadmap the power to delete hand-picked techniques when it is
+   * deactivated. The server attributes exactly these ids and no others.
+   *
+   * Every roadmap technique in `next`, not just the newly added ones: a
+   * technique a SECOND roadmap also wants must gain that roadmap's claim too,
+   * or deactivating the first one takes it away from the second. The server's
+   * own rule protects hand-picked rows from being claimed, so naming them here
+   * is safe and naming too few is not.
+   */
+  fromRoadmap: string[];
   /** Roadmap techniques entering focus that were not in it before. */
   added: CurriculumItem[];
   /**
@@ -98,6 +115,7 @@ export function proposeFocus(
 
   return {
     next,
+    fromRoadmap: next.filter((id) => inRoadmap.has(id)),
     added: wanted.filter((w) => after.has(w.technique_id) && !before.has(w.technique_id)),
     dropped: current
       .filter((f) => !after.has(f.technique_id))

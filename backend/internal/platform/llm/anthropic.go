@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -27,9 +28,15 @@ type anthropicCompleter struct {
 	model  string
 }
 
-func newAnthropic(apiKey, model string) *anthropicCompleter {
+// newAnthropic builds the backend.
+//
+// `opts` exists for the same reason the OpenAI constructor's does — see the
+// comment there. It is how a test drives a genuine transport failure through
+// the real SDK instead of asserting against a fake that returns whatever its
+// author assumed.
+func newAnthropic(apiKey, model string, opts ...option.RequestOption) *anthropicCompleter {
 	return &anthropicCompleter{
-		client: anthropic.NewClient(option.WithAPIKey(apiKey)),
+		client: anthropic.NewClient(append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)...),
 		model:  model,
 	}
 }
@@ -64,9 +71,19 @@ func (a *anthropicCompleter) Complete(ctx context.Context, req Request) (Respons
 		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(blocks...)},
 	})
 	if err != nil {
-		// The upstream text is never forwarded: it carries request ids and
-		// prompt fragments.
-		return Response{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		// The upstream text is never forwarded to a CLIENT: it carries request
+		// ids and prompt fragments. It reaches the caller's log only.
+		//
+		// `*anthropic.Error` is returned if and only if the API answered with a
+		// status — this SDK carries the same guarantee as the other, in the
+		// same words ("Other errors are not wrapped by this SDK"), so the
+		// classification below is the same on both backends rather than two
+		// hand-written opinions. See ErrUnreachable.
+		var apiErr *anthropic.Error
+		if errors.As(err, &apiErr) {
+			return Response{}, callFailure(err, apiErr.StatusCode)
+		}
+		return Response{}, callFailure(err, 0)
 	}
 
 	// CHECK stop_reason BEFORE READING CONTENT. A refusal is a successful HTTP

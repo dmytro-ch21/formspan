@@ -6,11 +6,16 @@ VOLA is a unified training and nutrition platform for BJJ athletes who also stre
 
 ## Repo map
 
-- `backend/` — Go modular monolith, stdlib `net/http` (no web framework, deliberately). `cmd/api`, `cmd/migrate`, `cmd/seed`. `internal/modules/*` per domain, `internal/platform/*` for cross-cutting concerns (`auth`, `database`, `apihttp`, `llm`). **`llm` is the transport half of talking to a language model** — provider selection, the two SDK calls, structured-output plumbing, and one pair of sentinels (`ErrRefused`/`ErrUnavailable`) both backends map onto. It deliberately holds no prompt, schema, parse or validation: those stay with the feature, and so do model DEFAULTS, because N26 and N33 want different defaults on the same provider. It was extracted from `nutrition` once there was a second consumer and before that consumer wrote any provider code — see N36.
+- `backend/` — Go modular monolith, stdlib `net/http` (no web framework, deliberately). `cmd/api`, `cmd/migrate`, `cmd/seed`. `internal/modules/*` per domain, `internal/platform/*` for cross-cutting concerns (`auth`, `database`, `apihttp`, `llm`). **`llm` is the transport half of talking to a language model** — provider selection, the two SDK calls, structured-output plumbing, and one set of three sentinels both backends map onto: `ErrRefused` (the model declined — a billed HTTP 200), `ErrUnavailable` (it answered and the answer was unusable — also billed), and `ErrUnreachable` (it produced no answer at all: no HTTP response, or an HTTP error status — so nothing was billed and callers must not meter it). That third one is F16; **a cancelled call is deliberately NOT unreachable**, since the tokens may already be spent. It deliberately holds no prompt, schema, parse or validation: those stay with the feature, and so do model DEFAULTS, because N26 and N33 want different defaults on the same provider. It was extracted from `nutrition` once there was a second consumer and before that consumer wrote any provider code — see N36.
 - `apps/web/` — Next.js customer app, Clerk auth. **Web (and admin) use Clerk's _prebuilt_ `<SignInButton mode="modal">`; only `apps/mobile` hand-builds auth on the headless hooks.** That split is deliberate — mobile needed the flows designed (offline-tolerant errors, a resumable sign-up), web does not — so **don't port mobile's auth screens here.** VOLA styling comes from `src/app/clerkAppearance.ts`, whose `appearance.variables` are `var(--c-*)` references and never hex, so the modal follows the light/dark toggle with no theme detection; a literal colour there silently gives dark-mode users a white modal. Its `localization` block also overrides Clerk's titles, because the **Clerk dashboard application is still named "Formspan dev"** and composes titles from it — Clerk's server-side emails still say Formspan until that's renamed. `/dashboard(.*)` is server-side gated by `proxy.ts` (Clerk middleware `auth.protect()`); `app/dashboard/` holds the sidebar shell (`layout.tsx`) + destinations (only `Dashboard` wired so far, matching the mobile shell's single-tab scope). Root `/` is the public entry — redirects signed-in users to `/dashboard`, shows sign-in otherwise. Tailwind CSS v4 for styling.
 - `apps/mobile/` — Expo + Expo Router (file-based, `app/(tabs)/` for the tab navigator). **Runs on a development build (`expo-dev-client`), not Expo Go, since 2026-08-09** — CNG/prebuild, so `ios/` and `android/` are generated and gitignored and the app config is the source of truth. `pnpm run dev:mobile` starts Metro for the dev client; `pnpm --dir apps/mobile run ios` builds and launches it. **The first run after pulling a new native dependency has to be `run:ios`, not `start`** — Metro cannot deliver a native module, so a new dep in JS against an old binary fails at runtime module load, not at build. This unblocks everything Expo Go could not host: HealthKit, widgets, Live Activities, App Intents, and OAuth's `vola://` callback. **Clerk auth** (same instance as web/admin) via `@clerk/clerk-expo`, session token cached in the OS keychain (`lib/tokenCache.ts` → `expo-secure-store`, not AsyncStorage). `app/_layout.tsx` routes signed-out users to `app/sign-in.tsx`, which handles email+password plus a second factor (TOTP / SMS / **email code** / backup code — this Clerk instance uses email codes). `app/sign-up.tsx` is the account-creation path (email+password → emailed code → `setActive`) and `app/forgot-password.tsx` the reset path (emailed code → new password → `setActive`); all three link to each other and hand the typed address across as an `email` route param. **The layout's signed-out guard is keyed on the `AUTH_ROUTES` array, not on one route** — keyed on one route it replaces every other path with `/sign-in`, which silently makes any second auth screen unreachable. **Every new auth screen must be added to `AUTH_ROUTES` or it renders for one frame and vanishes.** Shared auth plumbing lives in `lib/clerkErrors.ts` (routes a Clerk error to the field its `meta.paramName` names; a failure with no `errors` array is form-level, never blamed on an input) and `lib/secondFactor.ts` (picks and prepares the 2FA factor — sign-in and password reset both land there). Note `forgot-password` sets the new password *before* reporting `needs_second_factor`, so on a 2FA account the password is already live while the user is not yet signed in; the copy has to say so. No OAuth yet. **Offline-first activity logging**: `lib/db.ts` (expo-sqlite) writes locally first with a `synced` outbox flag; `lib/activities.ts` pushes pending rows to `POST /v1/activities`. The activity ID is generated *client-side*, which is what makes sync retries idempotent — see the backend's `ON CONFLICT DO NOTHING`. `EXPO_PUBLIC_*` env var convention (RN equivalent of Next's `NEXT_PUBLIC_*`).
 - `apps/admin/` — Next.js admin console, fully separate from `apps/web` (not athlete-facing). Reuses the **same Clerk instance** as `apps/web`; `/users(.*)` is gated two ways — `proxy.ts` requires sign-in, `app/users/layout.tsx` additionally checks the signed-in Clerk user ID against the `ADMIN_USER_IDS` allowlist env var (**same var name and value the backend uses** — one admin-identity convention across the stack; the backend's own `RequireAdmin` is the real security boundary, this gate is defence in depth for the UI). `User Lookup` (`/users`), `User Detail` (`/users/[id]`), `Health` (`/health`) and `Content` (`/content`) exist so far, matching what's actually been designed. **`/content` is the only screen that writes** — creating and editing techniques without a deploy. It **lists** what the console authored and **searches** the whole catalog (`?q=`), because every row is editable since the spreadsheet was retired; the default is the authored set only because 542 full rows is ~570 KB of prose to render a list. **A PATCH takes ownership**: it sets `source='admin'`, which the seeder's `WHERE source = 'seed'` then skips — drop that from the SET clause and the next deploy silently reverts every console edit. **Ownership on the authored list is membership, never a `source` field read off a technique**: `GET /v1/techniques/{id}` does not select `source` and the contract does not promise it there, so reading it marks everything deploy-owned including the row you just wrote. (`/v1/admin/techniques` does return it, which is what the search results' Owner column shows.) Writes go through **server actions**, which call `assertAdmin` themselves — a server action is a POST endpoint the router exposes independently of the page it was declared beside, so neither `proxy.ts` nor the layout protects it. The allowlist lives in `lib/admin.ts` and all three share it. **Runs on real backend data** — `lib/api.ts` server-fetches `/v1/admin/users`, `/v1/admin/users/{userID}/activities` and `/v1/admin/techniques`; there is no mock data anywhere in this app. Fields the design mocked up but that have no real system behind them yet (subscriptions, device/platform, integration sync, support tickets) are simply **not shown** rather than faked. Visual design (colors, Barlow/Barlow Condensed fonts, component styles) comes from a shared hi-fi design file — tokens live in `app/globals.css`'s `@theme` block. **Note:** `apps/web`'s current visual style predates this design system and does not yet follow it — reconciling that is a separate, not-yet-started piece of work. **`/content/exercises` is the second write surface**, and now on fully equal terms — search, drafts and revisions all mirror the technique screens: media is never authored (it lives in `exercise_media` with no upload path, and leaving it out of the request is what stops an edit clearing assets a deploy attached), and the export carries both catalogs into their seed files.
-- `apps/mobile/lib/__tests__/` — jest (`jest-expo` preset). `support/sqlite.ts` gives tests a **real** database: `expo-sqlite` can't run here (jest-expo stubs the native module), so it is a thin async shim over Node's built-in `node:sqlite` — same engine, no new dependency — and `migratedFixture()` runs the app's own `migrate()`, so the schema under test is the schema that ships. **Anything about SQL behaviour belongs in a fixture test, never a regex over the query string**: a text assertion proves a clause is present, not that SQLite honours it, and an array mock can silently *supply* the behaviour under test. Both mistakes shipped here before the fixture existed. The rest is pure-logic coverage: the set transforms, the Clerk token broker, the sync orchestrator. Deliberately not component tests — what breaks in this app is concurrency and state reconciliation, not rendering. **Every assertion here should fail when the code it covers is deleted**; the suite was started because two throwaway harness tests passed for the wrong reason (a 300s token that never reached the offline path, and a backoff ladder already at 300s so a 5s wait proved nothing). Run `pnpm run test:mobile`; when adding a test, mutate the guard it covers and check it goes red. **`apps/mobile` is also linted now** (`pnpm run lint:mobile`, `eslint-config-expo`), which it was not for a long time — and that gap shipped a crash: a `useMemo` below an early return made every BJJ session opened from Today a black screen, and `react-hooks/rules-of-hooks` is the only thing that catches it, since hook order is a runtime property the typechecker cannot see. That rule is an **error**; the 55 findings the first run surfaced on never-linted screens (24 `react-hooks/refs`, 15 `set-state-in-effect`) are **warnings**, held by `--max-warnings` — **now 54**, lowered once a finding was cleared. That ratchet is the enforcement — this app's own PR added two warnings unnoticed before it existed, which is how a soft limit rots. Clearing findings means lowering the number; adding one fails the gate. **The suite runs under `TZ=America/Los_Angeles`** (set on the `test` script, at process launch) — a date bug that renders as the previous day west of Greenwich is invisible in UTC, so a UTC suite passes against the exact thing it covers. Note `process.env.TZ = ...` inside a test **does not work**: jest hands the sandbox a copied `process`, the runtime is never notified, and the zone silently stays UTC. That shipped once and passed. **If another session is running a suite, pass `--maxWorkers=3`.** No `maxWorkers` is configured, so every jest instance claims `cores - 1` (9 here) and three concurrent instances fight over 27 workers for 10 cores: suite wall time goes 6.5s → 33.7s and `sharedScreen.test.tsx` runs out of time, failing "drops the accepted row locally". **Which timeout that is was wrong here until F13**: five component suites set `asyncUtilTimeout: 10_000`, but jest's own `testTimeout` was unset and defaulting to 5000ms, so jest killed the test first and the configured ten seconds was unreachable — measured, a `waitFor` at 10s died at 5003ms. `jest.config.js` sets `testTimeout: 15_000` now, so the budget those files ask for is the budget they get. Measured over 74 runs — **and it is not a load problem**: one instance under deliberate CPU saturation at load 89 never failed (0/12), while three instances at load 69 failed 8%. Capping to 3 workers each is 0/18 **and nearly twice as fast** (15.9s), because the oversubscription was costing throughput, not buying it. Deliberately not set in `jest.config.js`: CI runs one instance, where 9 workers is right, and this is purely an artefact of several sessions sharing one machine.
+- `apps/mobile/lib/__tests__/` — jest (`jest-expo` preset). `support/sqlite.ts` gives tests a **real** database: `expo-sqlite` can't run here (jest-expo stubs the native module), so it is a thin async shim over Node's built-in `node:sqlite` — same engine, no new dependency — and `migratedFixture()` runs the app's own `migrate()`, so the schema under test is the schema that ships. **Anything about SQL behaviour belongs in a fixture test, never a regex over the query string**: a text assertion proves a clause is present, not that SQLite honours it, and an array mock can silently *supply* the behaviour under test. Both mistakes shipped here before the fixture existed. The rest is pure-logic coverage: the set transforms, the Clerk token broker, the sync orchestrator. Deliberately not component tests — what breaks in this app is concurrency and state reconciliation, not rendering. **Every assertion here should fail when the code it covers is deleted**; the suite was started because two throwaway harness tests passed for the wrong reason (a 300s token that never reached the offline path, and a backoff ladder already at 300s so a 5s wait proved nothing). Run `pnpm run test:mobile`; when adding a test, mutate the guard it covers and check it goes red. **`apps/mobile` is also linted now** (`pnpm run lint:mobile`, `eslint-config-expo`), which it was not for a long time — and that gap shipped a crash: a `useMemo` below an early return made every BJJ session opened from Today a black screen, and `react-hooks/rules-of-hooks` is the only thing that catches it, since hook order is a runtime property the typechecker cannot see. That rule is an **error**; the 55 findings the first run surfaced on never-linted screens (24 `react-hooks/refs`, 15 `set-state-in-effect`) are **warnings**, held by `--max-warnings` — **now 54**, lowered once a finding was cleared. That ratchet is the enforcement — this app's own PR added two warnings unnoticed before it existed, which is how a soft limit rots. Clearing findings means lowering the number; adding one fails the gate. **The suite runs under `TZ=America/Los_Angeles`** (set on the `test` script, at process launch) — a date bug that renders as the previous day west of Greenwich is invisible in UTC, so a UTC suite passes against the exact thing it covers. Note `process.env.TZ = ...` inside a test **does not work**: jest hands the sandbox a copied `process`, the runtime is never notified, and the zone silently stays UTC. That shipped once and passed. **The suite is CPU-bound, and jest sizes its worker pool from a number that overstates the machine.** It takes `os.availableParallelism() - 1` (falling back to `os.cpus().length`; the two agree on both machines here), which counts *threads*, so on any SMT machine it books more workers than there are cores to run them. Under-scheduled renders make a `waitFor` expire before the thing it is waiting for is drawn — so the failure is always **a missing element, never a wrong value**. That signature is how you recognise it. **Do not read it as a list of fragile files.** Which suite loses is arbitrary — whichever one is mid-`waitFor` when the machine is most oversubscribed. This file used to name `sharedScreen.test.tsx` and its "drops the accepted row locally" test, and that was actively misleading: `dictateScreen` and `bjjSessionScreen` have since failed the same way, and anyone hitting a red `dictateScreen` grepped this file, found only `sharedScreen`, and concluded they had found a new bug. The mechanism is the invariant; the filename is a coin toss. **Which timeout that is was wrong here until F13**: five component suites set `asyncUtilTimeout: 10_000`, but jest's own `testTimeout` was unset and defaulting to 5000ms, so jest killed the test first and the configured ten seconds was unreachable — measured, a `waitFor` at 10s died at 5003ms. `jest.config.js` sets `testTimeout: 15_000` now, so the budget those files ask for is the budget they get. **Two machines, two settings, and they are complements rather than rivals.** The CLI overrides the config, so they never collide:
+
+- **CI** — `jest.config.js` sets `maxWorkers: 2`, guarded on `process.env.CI`. Measured from a real run (#409), not from a spec sheet: `ubuntu-latest` reports `nproc` 4 and `os.cpus().length` 4, so jest picks **3** — but `lscpu` on that same runner reports **2 cores per socket, 2 threads per core**. The four are hyperthreads on two physical cores, and the gap between those two numbers is the whole bug. Full suite (119 files) at the default: **6 failures / 35 runs**, 311–330% CPU against a 400% ceiling. At `maxWorkers: 2`: **0 failures / 30 runs**, 240–251% CPU, and **no wall-time cost** (24–32s either way). **`workerIdleMemoryLimit` was the rival hypothesis and it was run, not argued away**: `'512MB'` with workers left at the default still failed **3 of 10**, identical signature — which is what peak RSS of 785–910 MB against 15,989 MB of RAM already predicted. Memory was never the scarce resource. Pooling the two 3-worker arms against the 2-worker arm, Fisher's exact one-sided: **p = 0.007**. The `Runner capacity` step in the Mobile job prints all three numbers on every run, so the next person to touch this reads the machine instead of inferring it.
+- **Locally** — the config leaves jest's default alone, because a 10-core Mac has no SMT and 9 workers really is right for a solo run (6.5s). **If another session is running a suite, pass `--maxWorkers=3`**: three instances at the default fight over 27 workers for 10 cores, wall time goes 6.5s → 33.7s, and a suite times out. Measured over 74 runs, **and it is not ambient load**: one instance under deliberate CPU saturation at load 89 never failed (0/12), while three instances at load 69 failed 8%. It is the worker count specifically. Capping each to 3 is 0/18 **and nearly twice as fast** (15.9s) — the same finding CI reached independently: the oversubscription was costing throughput, not buying it. **But a per-instance cap has a ceiling, and you will meet it.** Observed 2026-08-20 across several sessions: `--maxWorkers=3` rescues the suite reliably at ambient load 26–40 and *not* at 156–171. That is not evidence against the CPU story — a cap controls **your** contribution to oversubscription, not the machine's total, so at load 160 the cores are gone no matter what one instance asks for. When the machine is that busy, the honest options are to wait or to run the one suite you care about, not to hunt for a flag.
+
+**This used to read "Deliberately not set in `jest.config.js`: CI runs one instance, where 9 workers is right."** That number was measured on the 10-core Mac and asserted about a machine the job has never run on — every CI job is `ubuntu-latest`, where jest got 3 workers on 2 physical cores and flaked for it. If CI ever moves to a different runner, **re-measure**; do not scale the number by a published vCPU count, because that inference is the defect itself.
 - `tests/functional/` — Playwright functional test suite (user-authored, in progress — evolving, don't assume its current shape without checking).
 - `docs/testing/functional-scenarios.md` — recommended functional test scenarios per feature, meant to be translated into `tests/functional/` (or mobile's equivalent). A living doc, not `tests/functional/` itself — safe to update even when the test suite's own shape is uncertain.
 - `contracts/public.openapi.yaml` — hand-maintained OpenAPI spec (not generated).
@@ -262,89 +267,245 @@ needs no `setup-python`.
 
 Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch <run-id> --exit-status`.
 
-**Never merge a PR without the user's explicit go-ahead, even if CI is green.** This has been the rule for every PR in this project — don't treat a passing CI run as implicit merge permission.
+### CI can run ZERO checks, and that looks exactly like passing (hard rule)
+
+**Count the check runs. Never read the absence of failures.**
+
+```bash
+pnpm run ci:checks          # the current branch's PR; --pr <n> or --sha <sha> also work
+```
+
+It must report 5 and exit 0 — 5 being however many jobs the workflows declare
+today, which the script derives rather than assumes: it cross-checks the derived
+set against `EXPECTED_CHECK_RUNS` in `scripts/check-ci-checks.py` and **fails
+loudly if the two disagree**, so adding a CI job means changing that constant in
+the same commit rather than discovering later that the bar quietly moved.
+A count of **0** satisfies "no failures"
+trivially: `gh pr view` shows nothing red because there is nothing at all,
+`statusCheckRollup` is an empty list, and `mergeStateStatus` does not
+distinguish the two either. This is the absence-reads-as-answer failure landing
+in the one place that decides whether code ships, so it gets its own command
+rather than a habit.
+
+**The cause is known, as of 2026-08-20 (N65, #368).** A `pull_request` workflow
+does not run on your branch — it runs on `refs/pull/N/merge`, the commit GitHub
+builds by merging your head into the base. **If the PR conflicts with its base,
+that merge commit cannot be built, so no NEW workflow run is created**, with no
+failure, no annotation and nothing anywhere saying so. Your branch is not broken
+and CI is not down; the pull request is simply unmergeable and GitHub declines
+silently.
+
+**"No NEW run", not "no runs" — and the difference is a trap of its own.**
+Existing check runs are never withdrawn, so a PR can show a **full set of green
+checks while conflicting**. Measured on #395: six runs started `14:40:33Z`, the
+merge that created its conflict landed `14:40:52Z` — nineteen seconds. Those
+checks are real and they passed, but they describe a merge commit that **no
+longer exists**; GitHub will refuse the merge, and rebasing re-runs all of them.
+Every GitHub surface calls that state ready to merge. `ci:checks` exits **5**
+on it (`GREEN, BUT STALE`), which is the only thing that will tell you.
+
+So **if a PR shows zero checks, this is the first thing to do, not the last**:
+
+```bash
+git fetch origin && git rebase origin/main && git push --force-with-lease
+```
+
+It costs nothing when CI is healthy and it is the fix when it is not. Note the
+trap in the shape of it: a long-lived branch is *fine* until `main` happens to
+touch a line it also touches, and then it goes quiet — so the branches this
+bites are the ones that have been open longest and had the most pushed to them.
+`docs/decisions/history.md`, `docs/testing/functional-scenarios.md` and
+`package.json`'s `verify` line are the files every task edits, which is why this
+recurs. (`docs/TASKS.md` was a fourth until 2026-08-20 archived it — and it was
+the one that wedged the branch in #368, so moving the open list to Issues
+removes one source of this, not the mechanism.)
+
+Measured, both directions, on one throwaway PR with the same one-line diff and
+only the base changed: conflicting head → **0** check runs, `mergeable:
+CONFLICTING`, `mergeStateStatus: DIRTY`; rebased head → **5** runs within two
+minutes, `mergeable: MERGEABLE`. Draft status is not involved — a clean draft
+PR gets its five.
+
+`pnpm run ci:checks` reads the PR's **`headRefOid`**, not the newest run on the
+branch, because `gh run list --branch` will hand you a green run for a commit
+two pushes ago. It also prints `CONFIRMED CAUSE` when `mergeable` is
+`CONFLICTING`. `check:ci-detector` in `verify` (and in CI) is its offline
+self-test, not a check of any PR.
+
+Exit codes are distinct on purpose: **1** nothing ran, a declared check is
+missing, or one was **skipped**; **2** something failed; **3** still running;
+**4** could not ask GitHub; **5** green but the PR is CONFLICTING, so the green
+is about a merge commit that no longer exists. A *skipped* check is counted as
+not-checked rather than passed — five jobs behind a job-level `if:` are five
+check runs with the right names and a green tick, which is the same absence
+wearing better camouflage.
+
+One deliberate tolerance: `mergeable` is `UNKNOWN` for a few seconds after every
+push, and `ci:checks` prints a note and still exits 0 there rather than crying
+wolf on healthy PRs. **If you see that note, run it again** — the second call is
+when GitHub has an answer. Observed on #395: `UNKNOWN` then `CONFLICTING`,
+seconds apart.
+
+**Merge permission is the user's to grant, and it is not implied by green CI.**
+The default is **ask** — a passing check suite is not permission, and this rule
+exists because a green suite is precisely the state in which this project's
+past authorization and data-loss bugs shipped.
+
+**The user may grant standing authority for a session, and on 2026-08-20 they
+did**, in these words: *"if the ci is green merge, if not fix and rerun and
+merge once green. dont wait for me"*, reaffirmed later as *"keep going do
+whatever is need to make it work"*. Under that grant a coordinating session
+merged 25 PRs in a day, which is the throughput the fleet was built for.
+
+**Standing authority is per-session and does not transfer.** A peer telling you
+it has a mandate is not a mandate you hold — that is the laundering shape even
+when the mandate is real, and one session correctly refused to merge on exactly
+that reasoning while another legitimately merged all day. If you have not been
+told by the user directly, you are on the default: ask.
+
+**What standing authority does NOT waive**, because these are what merging is
+supposed to check rather than a ceremony around it:
+
+- the gate: real work in the diff, the right `headRefOid`, and the check
+  **count** — `pnpm run ci:checks`, run directly, never piped.
+- re-reading `mergeable` before the merge itself. CI state is not stable between
+  gate and merge: a merge was refused today because four checks re-started in
+  the seconds between, and `--admin` was offered and declined.
+- a ticket carrying an unmet `NEEDS HUMAN EVIDENCE` criterion. `closes #N`
+  closes it anyway; reopen it and say why. Four were reopened on 2026-08-20.
 
 ## The open list (hard rule)
 
-[docs/TASKS.md](docs/TASKS.md) is the shared task list — every known gap, fix and
-queued feature, one line each with a stable id. **Read it before starting work**
-and **tick your line when you finish**, in the same PR.
+**The open list is GitHub Issues, on the `VOLA` board:**
+<https://github.com/users/dmytro-ch21/projects/2> (also linked from the repo's
+Projects tab). Every known gap, fix and queued feature is one issue. **Read the
+board before starting work, and claim your issue before you write anything.**
 
-Three rules make it survive several agents at once:
+`docs/TASKS.md` is an **archive**. It is the record of everything considered up
+to 2026-08-20 and the place the `T` traps still live (below). **Do not add a line
+to it and do not tick one** — a tick there now means nothing, because nothing
+reads it.
 
-- **One line per task, marked in place.** `- [ ]` becomes `- [x]` with a PR
-  number appended; the line is never deleted, because a finished task is the
-  record that it was considered. One line also means a concurrent edit conflicts
-  over one line rather than a paragraph.
-- **Ids are never reused**, so "closes W2" in a commit message still means
-  something a year later.
-- **Claim a task before you work it**, below.
+Each issue keeps its **stable id** in the title — `N74 — one shared image-upload
+helper` — and the id is the same one `TASKS.md` used, so "closes N42" in a commit
+message from a year ago still resolves. The prefix is the section:
+
+| Prefix | Means |
+|---|---|
+| **W** | Wrong on screen right now — contradicts itself or overstates what the athlete did |
+| **T** | A trap: compiles, passes its tests, and is wrong |
+| **F** | Worth fixing |
+| **N** | New work |
+| **L** | Recorded, low |
+| **H** | Housekeeping |
+
+Labels carry the same thing (`section: N`, `priority: high`, `area: mobile`) so
+the list is readable from `gh issue list` without the `project` scope. The board
+adds `Status`, `Priority` and `Section` columns on top.
+
+**Ids are never reused.** Allocate the next one by scanning **all** issues, open
+and closed, **and open PR titles** — a claim PR can hold an id whose issue does
+not exist yet:
+
+```bash
+gh issue list --state all  --limit 500 --json title -q '.[].title'
+gh pr list    --state open --limit 100 --json title -q '.[].title'
+```
+
+Take the highest number for that prefix and add one. **Never fill a gap below
+it** — a gap records an id that was allocated and abandoned, not free space.
+
+**Detail belongs in `docs/decisions/history.md`.** An issue is an index entry
+with acceptance criteria, not a narrative.
+
+**The `T` section of `docs/TASKS.md` is still live and still load-bearing.** Those
+are traps — changes that compile, pass their tests, and are wrong. They are not
+tickets: nobody claims one, nobody closes one, and they are read *before* you
+touch the area they describe. They stayed in the repo deliberately, because their
+value is that a `grep` in your working tree finds them. If your work touches one,
+read it first — every entry there was found by review after the check suite went
+green.
 
 ### Claiming (hard rule)
 
-This list is ordered by what an athlete would notice, so every session that
-opens it independently picks the same top line. Two full rounds of work were
-lost that way in a single afternoon — W2, then W4 — both times with the checks
-genuinely run, because **a check cannot see work that has not been pushed.**
+The board is ordered by what an athlete would notice, so every session that opens
+it independently picks the same top line. Two full rounds of work were lost that
+way in a single afternoon — W2, then W4 — both times with the checks genuinely
+run.
 
-So, before writing anything:
-
-```bash
-gh pr list --state open        # includes drafts; a draft IS a claim
-```
-
-and if the task is free, claim it before you start:
+**A claim is one server-side write, and it is visible the moment you make it:**
 
 ```bash
-git commit --allow-empty -m "Claim <ID> — <task>"
-git push -u origin <branch>
-gh pr create --draft --title "[claim] <ID> — <task>" --body "Claiming <ID>."
+gh issue list --state open --json number,title,assignees \
+  -q '.[] | select(.assignees|length==0) | "\(.number) \(.title)"'   # what is free
+
+gh issue edit <n> --add-assignee @me                                 # claim it
+gh project item-edit ...                                             # Status -> In Progress
 ```
 
-Then do the work on that branch and mark the PR ready when it is reviewable:
+Assigned, or `Status` past `Todo`, means taken. Unassigned and `Todo` means free.
 
-```bash
-gh pr ready <n>
-gh api -X PATCH repos/dmytro-ch21/formspan/pulls/<n> -f title="..." -F body=@body.md
-```
+**`In Progress` means DISPATCHED — a session is actually on it. Nothing else.**
+Set it at the moment work starts, together with the assignee, and never earlier.
 
-The claim PR becomes the real one; nothing is thrown away. **Use `gh api`, not
-`gh pr edit`** — the latter fails outright in this repo on a deprecated
-Projects-classic GraphQL query (`repository.pullRequest.projectCards`) and
-silently changes nothing, so a title still reading `[claim] …` after an apparent
-success is that, not a typo. `gh pr ready` and `gh pr create` are unaffected.
+Two different facts live on the board and collapsing them breaks it:
 
-**Why a draft PR rather than a field in this file.** TASKS.md is itself the
-contended resource — a claim written here is one more edit to the file two
-sessions are already fighting over, and it still needs a push to be visible, so
-it costs the same and conflicts more. `gh pr list` is the one channel every
-session can already see without pulling anything.
+- **Board position is PRIORITY** — what we believe is most valuable next.
+- **`Status` is WHAT IS HAPPENING** — who is on it, right now.
 
-**What it does not fix.** The window between deciding and claiming is still
-invisible, so claim *early* — the empty commit exists precisely so you can claim
-before there is anything to show. And nothing enforces any of this; it is a
-convention, and it works only if the check half is done too.
+Prioritising a ticket is not claiming it. Marking something `In Progress` because
+it is important next tells every other session to skip a ticket nobody is
+working, which is **a claim with nothing behind it** — the exact failure the move
+off `docs/TASKS.md` was meant to end. It happened within an hour of the move, to
+the session that did the move, on two tickets, because a user asked for them to
+be prioritised and prioritising felt like claiming.
 
-**And an id is only claimed if it is in a PR TITLE.** `gh pr list` shows titles,
-not diffs — so a new id you file inside an open PR's `TASKS.md` is invisible to
-every other session until that PR merges. Two sessions allocated **N19** the same
-afternoon that way, both correctly: one had it in a draft PR's title, the other
-had written the line into a branch nobody could see. The one in the title wins,
-because that is the channel the convention is built on. If you file forward-looking
-ids for follow-up work, either claim them immediately with their own draft PR, or
-expect to renumber.
+To raise something's priority, move it up the board and leave `Status` alone. If
+you cannot staff a ticket you have claimed, **un-claim it** — `Todo`, unassigned,
+position untouched — rather than leaving the board asserting something untrue.
 
-It does work when it is. This convention was written after a session picked up
-**H1**, ran `gh pr list` first, found #216 already open with the work complete
-but a week stale, and rebased and landed that instead of writing a second copy
-of it.
+Then open your PR with **`closes #<issue>`** in the body, so merging closes the
+issue and moves it to `Done` without anyone remembering to.
 
-Detail belongs in `docs/decisions/history.md`. TASKS.md is an index, and it stops
-being useful the moment it becomes prose.
+**And note `docs/TASKS.md` is an ARCHIVE**, not the list — do not tick a line
+there to record any of this. The full account is in *The open list* above; it is
+restated here because this is the section somebody jumps straight to, and three
+sessions in one afternoon learned it from a colleague rather than from the repo.
 
-**The `T` section is load-bearing.** Those are traps: changes that compile, pass
-their tests, and are wrong. If your work touches one, read it first — every entry
-there was found by review after the check suite went green.
+**Why this replaced the empty-commit-plus-draft-PR convention.** That convention
+existed for one reason: *a check cannot see work that has not been pushed*, so a
+claim had to be pushed to exist. It worked, and it cost an empty commit, a
+branch and a draft PR before any thinking had happened — and **it still lost W2
+and W4**, because the window between deciding and pushing stayed invisible.
+Assigning an issue closes that window: there is nothing local about it, so there
+is no unpushed state to be blind to.
+
+Three things it also fixes, all of which bit:
+
+- **A claim is no longer a `[claim] …` PR title that has to be edited later.**
+  `gh pr edit` fails outright in this repo on a deprecated Projects-classic
+  GraphQL query and silently changes nothing, so a title still reading
+  `[claim] …` after an apparent success was that, not a typo. Use `gh api -X
+  PATCH repos/dmytro-ch21/formspan/pulls/<n>` if you must retitle a PR;
+  `gh pr ready` and `gh pr create` are unaffected.
+- **A new id is visible immediately.** `gh pr list` shows titles, not diffs, so a
+  new id filed inside an open PR's `TASKS.md` used to be invisible to every other
+  session until that PR merged — two sessions allocated **N19** the same
+  afternoon that way. An issue exists the moment it is created.
+- **A tick can no longer lag its fix.** Migrating the list on 2026-08-20 found
+  **three** tasks marked open whose work had already merged — N68 (fixed in #353,
+  ticked a day later in #362), N73 and N70. Each was a separate file edit that a
+  feature PR had not made. `closes #<issue>` is not a separate edit.
+
+**What it does not fix.** Nothing enforces any of this. Claim *early* — an issue
+can be assigned before there is anything to show, which is the whole point.
+
+**And treat silence as ambiguous.** An unassigned issue is not proof nobody is
+working on it, only that nobody has said so; an empty query result is not an
+empty world. That is the same rule as *Verify that a check can fail* below, and
+it applies to the board exactly as it applies to CI — see **absence is not
+evidence** there.
+
 
 ## Keep the history log current (hard rule)
 
@@ -365,8 +526,21 @@ exactly that, and it has been repaired three times. One side, always: before. Sk
 ## Review before every PR (hard rule)
 
 **Run `/pre-merge` before opening or updating any PR.** It is one gate that
-runs both the CI-equivalent check suite *and* the review subagents in
-`.claude/agents/`:
+runs the CI-equivalent check suite, the **acceptance-criteria check**, and the
+review subagents in `.claude/agents/`:
+
+- **`ac-verifier`** — the branch against the acceptance criteria of the issue
+  it closes. **Every criterion must be `MET`, or carry a stated reason, before
+  the PR goes ready-for-review** — that is exactly what moving the issue to
+  `In Review` on the board asserts. It returns four verdicts, and
+  `NEEDS HUMAN EVIDENCE` is the one that matters: a criterion saying *seen on a
+  device*, *verified against the live provider*, or *mutation-check the suite
+  and confirm it goes red* **cannot be upgraded to met by code that looks
+  right** — reading the code is the thing those criteria exist because it
+  fails. Produce what evidence you can yourself, then **hand the remainder to
+  the user as a numbered checklist and wait** — they run these deliberately, to
+  catch bugs early, and the issue does not move to `In Review` until they
+  report back.
 
 - **`backend-reviewer`** — for `backend/**` or `contracts/**`. Security
   (authorization gaps/IDOR, information disclosure, secrets/PII in logs),
@@ -377,9 +551,40 @@ runs both the CI-equivalent check suite *and* the review subagents in
   Components, `useEffect` deps, error states), performance, accessibility,
   and design-token/convention adherence.
 
-Both are **read-only diagnostics** — they report, they don't fix. Resolve or
-explicitly justify every `[blocking]` finding *before* opening the PR;
+All three are **read-only diagnostics** — they report, they don't fix. Resolve
+or explicitly justify every `[blocking]` finding *before* opening the PR;
 `[suggestion]` items are judgment calls.
+
+**"Read-only" means they will not FIX anything. It does not mean they never
+write to your working tree — and the difference cost a pushed commit on 2026-08-20
+(N91, #432).** A criterion like *mutation-check the suite and confirm it goes
+red* can only be answered by mutating the code and running it, so a reviewer
+edits a file and restores it. That is correct behaviour. What it makes unsafe is
+**`git add -A` while a reviewer is running**: `ac-verifier` had removed the
+`try`/`catch` under test and had not yet restored it when a `commit --amend`
+swept the tree, so the branch was force-pushed carrying **the mutation instead
+of the fix** — the crash the PR existed to prevent, shipped by the machinery
+built to prevent it. Nothing failed loudly: the amend succeeded, the rebase
+carried it forward, and the push was clean.
+
+Two rules follow, and the second is the general one:
+
+- **Do not stage or commit while a review subagent is working in your worktree.**
+  Launch them, wait for every one to report, *then* touch git. If you must
+  commit first, commit before you launch.
+- **A restore is confirmed by re-running the thing that fails — never by
+  grepping the file.** A `grep -c "try {"` returned the right answer here, at a
+  moment when the file really was fine, and the file changed afterwards. That is
+  the apparatus trap from *Verify that a check can fail* pointed at your own
+  undo: the check was real, it was just answering about the past.
+
+What did work, and is the reason this is a story rather than a defect on `main`:
+the branch's own regression test went red on it in `verify`, in CI, and in both
+reviews independently.
+
+**Hand the acceptance criteria to the reviewers too, not just to
+`ac-verifier`.** They already ask for design intent, and the criteria are that
+intent already written down — it is the cheapest handover available.
 
 **Why one command and not two rules:** it used to be two, and the check
 suite got run while the reviewers got skipped — repeatedly, over several
@@ -419,6 +624,42 @@ was tried and abandoned — there are seven in one file alone, and every future
 one would have to remember. If you add a test that seeds shared reference data,
 `-p 1` is what is keeping it from breaking somebody else's package.
 
+**`-p 1` only orders the packages inside ONE `go test` invocation, and this repo
+routinely runs several at once.** A dozen worktrees share `vola_test`, so two
+agents running the backend suite is the ordinary state here — and across two
+invocations `-p 1` guarantees nothing at all. Measured 2026-08-20, four
+concurrent suites on one database, `-count=1` throughout: nine packages failed,
+`workout` 20 of 22 runs. Three distinct mechanisms, all of them the same shape —
+somebody else's binary writing rows yours is reading:
+
+- **Fixture deletion.** Every package seeds shared rows with fixed ids and
+  deletes them on the way out. The neighbour's cleanup lands mid-test and you get
+  `unknown exercise "wk_fx_bench_press"` for a row you seeded yourself
+  milliseconds ago. This is #426, which fixed `session` and named twelve more.
+- **Unscoped counts.** `technique`'s `seeded N but listed M`, `activity`'s and
+  `workout`'s list-ceiling assertions — the same global-count problem `-p 1`
+  exists for, arriving from another invocation where `-p 1` cannot see it.
+- **Fixed-id collisions.** Two binaries INSERTing the same id: `already exists`,
+  `duplicate key value violates "workouts_pkey"`, and a genuine `deadlock
+  detected` in `bjj`.
+
+**So every Postgres-backed test package now takes one database-scoped advisory
+lock in `TestMain`** — `internal/platform/testdb`, one line per package (#454).
+One binary at a time owns the database; the lock dies with the connection, so a
+crashed run cannot wedge the next one, and the key is hashed against
+`current_database()` so a per-branch `vola_test_<branch>` and CI's throwaway
+database never queue at all. Same four-lane measurement after: **0 failures in
+24 runs**, for **+17% wall clock** (387s → 453s for the 24 runs; per-run median
+57s → 72s, and the spread *narrows*, 39–105s → 63–93s). That is the price and it
+is worth naming: serialising is not free, it is cheaper than nine packages of
+spurious red. **`-p 1` stays** — it is the right thing inside one invocation and
+CI runs exactly one.
+
+The rule for a new package: **if it reads `TEST_DATABASE_URL`, it gets a
+`main_test.go`**. Both halves are asserted in place, so neither can be quietly
+dropped — `TestTheFixtureLockIsHeldForThisBinary` goes red without the TestMain
+(verified by mutation: remove the `Lock` call and all 24 go red).
+
 **It used to be doing a second, undocumented job — ordering — and that one is
 retired as of 2026-08-16.** It is recorded here because the shape recurs, and
 because the fix is a rule you can break by accident.
@@ -447,6 +688,17 @@ The rule that keeps it that way is **own the library rows you depend on**.
 `workout/postgres_test.go` and `profile/postgres_test.go` all seed their own
 catalog rows for exactly this reason. **`workout` is the one to copy**, because
 it learned from `session`'s mistake:
+
+> **`workout` was also the worst offender in #454 — 20 failures in 22 concurrent
+> runs — and that is not a contradiction, it is the point.** Owning your rows is
+> about the rows you **read**: it makes a package independent of what any *other*
+> package seeded, which is exactly the ordering crutch the section above retired,
+> and `workout` does it better than anyone. It says nothing about the rows you
+> **write** while a second copy of your own binary is reading them. Doing the
+> fixture discipline well makes a package seed more, own more and clean up more
+> — so the better a package follows this list, the more damage its cleanup does
+> to a neighbour. The two rules are orthogonal and you need both: own your rows,
+> **and** take the lock. Copy this list; add the `main_test.go`.
 
 - **Namespaced ids that KEEP the original name as the suffix** — `wk_fx_bench_press`,
   not `wk_fx_bench`. Some tests depend on the ids' relative LEXICAL ORDER (a
@@ -557,8 +809,28 @@ gap between those two is only how subtests are counted, and the drift from 1092
 is #329 adding `health/handler_test.go`. A test total is a magnitude check that
 every PR moves, so it cannot be a tripwire; the skip count is. Count with
 `go test -p 1 -timeout 3m -json ./...` rather than grepping `-v` output, since
-the grep is exactly the apparatus that silently counts something else. And note
-`./...` reports **37** packages — the other three have no test files.
+the grep is exactly the apparatus that silently counts something else. **Measured
+again 2026-08-20 after #454: 39 packages, 37 of them with tests, 1155 top-level
+tests, and still exactly one skip — `TestLiveComplete`.** #454 itself added 26
+(one lock assertion per Postgres package, plus three on the lock), so a count
+taken before it will not match one taken after; the skip count is the tripwire,
+and it did not move.
+
+The rule that keeps the lock coverage complete is one command, and it is worth
+running if you add a test package: every package that reads `TEST_DATABASE_URL`
+must also take the lock.
+
+```bash
+cd backend
+comm -23 <(grep -rl --include='*_test.go' TEST_DATABASE_URL internal/ | xargs -n1 dirname | sort -u) \
+         <(grep -rl --include='*_test.go' 'testdb.Main'        internal/ | xargs -n1 dirname | sort -u)
+```
+
+`internal/platform/testdb` is the one legitimate name that appears there — it is
+the apparatus, holds no fixtures, and its own tests need the lock free. Anything
+else is a package a second test binary can trample. **Note the `--include`:
+without it the second grep also matches `testdb.go`'s own doc comment, which
+names the call, and the check then reports every package as covered.**
 
 **This paragraph used to say "zero skips: 28 packages, 583 tests"** and told you
 any skip meant a regression. That was true when written and stopped being true
@@ -696,6 +968,10 @@ a piece of apparatus returning a confident result while measuring nothing.
 - Two check-digit guards validating arithmetic the code had just performed
   itself, so they were true by construction.
 - CI silently skipping pushes, so an absent run read exactly like a passing one.
+  **Diagnosed 2026-08-20 (N65) — the cause is a merge conflict with the base,
+  and the detector is `pnpm run ci:checks`. See "CI can run ZERO checks" in
+  the Git/PR workflow section; this bullet is the symptom, that is the
+  mechanism.**
 - A build failing with `PluginError` and **exiting 0** while printing it.
 
 **A stub built from an assumption cannot falsify it.** The sharpest instance:
@@ -707,21 +983,52 @@ each other. Only a live call could. **Verify an external contract against the
 real service at least once**, and record the measurement next to the code that
 depends on it.
 
-Two corollaries worth stating separately, because both were arrived at the hard
+Three corollaries worth stating separately, because each was arrived at the hard
 way:
 
 - **Absence is not evidence.** No checks is not passing; no output is not
   silence; a grep that finds nothing has found nothing, not proven nothing is
   there. (`gh run list --branch` will hand you a green run for a stale commit —
-  compare `headSha` against the PR's `headRefOid`.)
+  compare `headSha` against the PR's `headRefOid`.) **The sharpest instance is
+  CI itself: count the check runs, never the failures — `pnpm run ci:checks`.**
 - **A guard whose outcome is redundant still needs a test**, on its *message*
   if not its effect — otherwise a surviving mutation reads as dead code, and
   "the tests still pass without it" is a very persuasive argument for deleting
   something load-bearing.
+- **A watcher pinned to a SHA must check the SHA still exists**, and this is the
+  MIRROR of everything above: not a check that could not fail, but **a check
+  that could not succeed, because its subject had ceased to exist.** Measured
+  2026-08-20 on #400: a background poller was armed on `e3d148d` to wait for its
+  check runs; the branch was then rebased and force-pushed, leaving that commit
+  on no branch at all. The poller kept asking about it for fifteen minutes,
+  found zero checks — correctly, there were none and never would be — and
+  **exited 1 with "N65 reproduced"**.
+
+  **A false red is worse than a false green here, for two reasons.** It is
+  *self-corroborating*: it names a real bug that was really happening an hour
+  earlier, so it reads as confirmation rather than as an error. And the timing
+  is the trap — had it landed *before* the rebase finished it would have read as
+  fresh evidence of a problem already fixed, sending you back to re-diagnose
+  something solved. The same discipline as `gh run list --branch` above
+  (`git branch --contains <sha>` returning nothing means your subject is gone),
+  applied to anything that watches, polls or retries against an identifier that
+  a rebase, a force-push or a cleanup can invalidate underneath it.
 
 ## Known gotchas
 
 - **A new native dependency is DECLARED by a merge and INSTALLED by nobody.** #320 added `expo-camera` to `apps/mobile/package.json` and a plugin entry to `app.json`; pulling that `main` onto a machine with an existing `node_modules` fails at config resolution with `PluginError: Failed to resolve plugin for module "expo-camera"`, **and the process exits 0 while printing it.** It reads like a broken checkout and is nothing of the sort — run `pnpm install`. CI never sees this because CI installs from the lockfile on every run, so the gap exists only for people who already have the repo. This sits one step *earlier* in the chain than the existing "first run after a new native dep must be `run:ios`, not `start`" trap: that one is a stale native binary, this one is a missing package.
+
+  **And there is a THIRD step, which is the one that reached a device (N91, #432).** The package can be installed and the JS bundled while the **iOS project never learns about it** — `pod install` has not been re-run, so `ios/Podfile.lock` and the generated `Pods/Target Support Files/Pods-VOLA/ExpoModulesProvider.swift` simply do not mention it. Nothing warns. The build succeeds. Measured 2026-08-20: of the twenty native dependencies in `apps/mobile/package.json`, **nineteen were in `Podfile.lock` and `expo-camera` was not**, and the `VOLA.app` built from that project contained no `ExpoCamera` symbol while its `main.jsbundle` contained the whole scan screen.
+
+  **The symptom is the app dying instantly with no error at all**, which reads as a crash in the feature and is nothing of the sort. `expo-camera` — like most `expo-*` packages — calls `requireNativeModule('X')` at **module scope**, and that *throws* when the module is absent. An ESM import cannot be caught, so the throw lands while the route module is being evaluated, i.e. on navigation, and in a **Release** build an unhandled JS error is fatal: no red box, no dialog, no JS stack. Debug would have shown a red box, which is why this class survives every simulator session and only appears on the build somebody carries around.
+
+  Diagnose it in one command, from the primary checkout:
+
+  ```bash
+  grep -c ExpoCamera apps/mobile/ios/Podfile.lock   # 0 = the project never learned about it
+  ```
+
+  and generally: compare `package.json`'s packages carrying an `expo-module.config.json` with an iOS section against `Podfile.lock`. The fix is `pnpm install` → `pod install` → **native rebuild**; re-bundling does nothing, because the missing half is native. `apps/mobile/lib/cameraModule.ts` now contains the blast radius for the camera specifically — a mismatch renders an explained screen instead of killing the process — but that is a guard on one package, not a fix for the class.
 - **`apps/mobile/app.json` has THREE silent permission traps, and nothing in the pipeline can see any of them** — they exist only in a built binary, so no test, no lint, no typecheck and no CI job will ever fail on them. (1) `expo-image-picker`'s plugin adds `NSMicrophoneUsageDescription` and Android `RECORD_AUDIO` unless you pass `microphonePermission: false`. (2) `expo-camera`'s plugin does **the same thing** — `withCamera.js` passes it into `createPermissionsPlugin` unless `microphonePermission: false` **and** `recordAudioAndroid: false`. Both matter because `lib/sounds.ts` sets `allowsRecording: false` and its test calls asking for the microphone "indefensible": the runtime guard was honoured while the binary declared the capability anyway, which is what App Store review and the privacy label read. (3) **Both plugins declare `cameraPermission`, and `applyPermissions` resolves that as _last explicit string wins_** — plugins run in order, so whichever sorts later silently replaces the other's justification. They are deliberately given the **same** string rather than ordered, because order-dependence is the hazard: the next plugin added between them moves the answer again. **A permission change only takes effect after a native rebuild**, so merging the fix does not fix an installed binary.
 - **`secrets.txt`** may show up untracked in the repo root containing what looks like a live API key. Never stage or commit it — flag it to the user instead.
 - This Next.js version renamed the `middleware.ts` file convention to `proxy.ts` (same `clerkMiddleware()` export, just a renamed file). Separately: `next dev --hostname 127.0.0.1` breaks when a `proxy.ts`/`clerkMiddleware()` is present — Next's Proxy runtime tries to self-fetch via `localhost` internally and fails (`ECONNRESET`, surfaces as a 500). Use `--port` alone when running concurrent dev instances; never pass `--hostname`.
@@ -799,4 +1106,6 @@ way:
 - [docs/architecture/api-conventions.md](docs/architecture/api-conventions.md) — full REST/OpenAPI conventions
 - [contracts/public.openapi.yaml](contracts/public.openapi.yaml) — the wire contract
 - [docs/testing/functional-scenarios.md](docs/testing/functional-scenarios.md) — recommended functional test scenarios per feature
-- [docs/TASKS.md](docs/TASKS.md) — the open list: every known gap, fix and queued feature
+- [docs/testing/device-checks.md](docs/testing/device-checks.md) — the ranked script for what **no test can reach**: camera, microphone, keyboard, speaker, permission prompts, safe areas, a gym with no signal. Measured, not guessed — 44 of 93 mobile screens/components execute zero statements under the suite, and 0 of 40 web/admin pages have a test that renders them.
+- **The open list — GitHub Issues on the [`VOLA` board](https://github.com/users/dmytro-ch21/projects/2)**: every known gap, fix and queued feature
+- [docs/TASKS.md](docs/TASKS.md) — the archive of that list up to 2026-08-20, and the live home of the `T` traps

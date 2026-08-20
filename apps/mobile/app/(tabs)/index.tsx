@@ -25,9 +25,11 @@ import { sportColor } from '@/components/ui/sport';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { RoadmapLine } from '@/components/RoadmapLine';
+import { RoadmapOffer } from '@/components/RoadmapOffer';
 import { SectionHeader } from '@/components/ui/Section';
 import { TrendStrip } from '@/components/ui/TrendStrip';
 import { SessionCard, type Metric } from '@/components/ui/SessionCard';
+import { TrackerList } from '@/components/TrackerList';
 import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { WeekReview } from '@/components/WeekReview';
 import { vola } from '@/constants/Colors';
@@ -61,7 +63,13 @@ import {
 } from '@/lib/prefs';
 import { restLine, weeklyDays } from '@/lib/trend';
 import { formatVolume, type UnitSystem } from '@/lib/units';
-import { enabledSports, labelFor, usesBelt, type Module } from '@/lib/modules';
+import {
+  enabledSports,
+  labelFor,
+  moduleWithCatalog,
+  usesBelt,
+  type Module,
+} from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
@@ -74,7 +82,7 @@ import {
   logFood,
   recentsFor,
 } from '@/lib/foodLog';
-import { hasFoodLog } from '@/lib/modules';
+import { hasFoodLog, moduleOffWithFoodLog } from '@/lib/modules';
 import {
   rankRecents,
   scale,
@@ -89,6 +97,7 @@ import {
 import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { accentGlow } from '@/lib/palette';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { useTrackerDay } from '@/lib/useTrackerDay';
 import { useUnits } from '@/lib/useUnits';
 import { totalWeightKg, contributesVolume, countsAsSet } from '@/lib/sessions';
 
@@ -576,6 +585,23 @@ export default function TodayScreen() {
   const [foodView, setFoodView] = useState<TargetView>({ state: 'checking' });
   const [foodQuick, setFoodQuick] = useState<Food[]>([]);
   const foodEnabled = hasFoodLog(modules);
+  // The module that WOULD carry the Fuel card, turned off. See the card's
+  // render below — N61.
+  const foodOff = moduleOffWithFoodLog(modules);
+
+  /**
+   * The daily trackers, and the day they describe.
+   *
+   * `todayKey` is recomputed on every render rather than held in state: this
+   * screen stays mounted for the life of the process, so a value captured once
+   * would still say yesterday after midnight — and a cup tapped at 00:05 would
+   * land on the day that just ended. `dayString`, never
+   * `toISOString().slice(0,10)`, which is the UTC date and files an evening tap
+   * under tomorrow west of Greenwich.
+   */
+  const trackerDay = useTrackerDay();
+  const { refresh: refreshTrackers } = trackerDay;
+  const todayKey = dayString(new Date());
 
   const refreshFood = useCallback(() => {
     let live = true;
@@ -713,6 +739,10 @@ export default function TodayScreen() {
       // again immediately after logging — so a slow read started at focus could
       // otherwise resolve last and paint over the row just added.
       const stopFood = refreshFood();
+      // Same treatment as food, and for the same reason: this screen writes to
+      // it (every tap re-reads the day), so a slow read started at focus could
+      // otherwise resolve last and paint over a cup just added.
+      const stopTrackers = refreshTrackers(todayKey);
       // On focus only, not on every day-step: the funnel is an aggregate over
       // every session ever logged and does not change because you looked at
       // Thursday.
@@ -724,9 +754,10 @@ export default function TodayScreen() {
       const stop = readSuggestionPrefs();
       return () => {
         stopFood?.();
+        stopTrackers?.();
         stop?.();
       };
-    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins, refreshFood]),
+    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins, refreshFood, refreshTrackers, todayKey]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -1134,9 +1165,33 @@ export default function TodayScreen() {
 
               Only on today. A roadmap is not a fact about the Thursday you
               stepped back to.
+
+              TWO STATES, ONE SLOT — N96. On a roadmap, this is where the
+              progress line goes; on none, it is where the offer goes. That is
+              the fix: the only surface that ever offered an un-enrolled
+              roadmap was a horizontal strip below the week grid on the Plan
+              tab, so an athlete who had never taken one on saw nothing about
+              roadmaps anywhere they actually looked. See `lib/roadmapEntry.ts`
+              for the full diagnosis.
+
+              `roadmaps === null` renders NEITHER, and that is the whole reason
+              `refreshRoadmaps` refuses to `setRoadmaps([])` on a failed read:
+              an unknown list is not "you are on no roadmap", and offering one
+              on the strength of an offline read would quietly retract
+              something the athlete committed to.
+
+              Gated on a discipline whose catalog is TECHNIQUES, never on
+              `key === 'bjj'` — the same predicate the Plan tab and the Library
+              ask. With it off there is nothing to offer, and `CurriculaStrip`
+              already owns the "turn it back on" case (N61).
             */}
             {isToday &&
-              roadmaps?.map((c) => <RoadmapLine key={c.id} curriculum={c} />)}
+              roadmaps !== null &&
+              (roadmaps.length > 0 ? (
+                roadmaps.map((c) => <RoadmapLine key={c.id} curriculum={c} />)
+              ) : moduleWithCatalog(modules, 'techniques') ? (
+                <RoadmapOffer />
+              ) : null)}
 
             {owed.length > 0 ? (
               owed.map((p) => (
@@ -1475,7 +1530,7 @@ export default function TodayScreen() {
             than reporting, and the two belong together above the blocks that
             only report. Two numbers and nothing else: remaining calories and
             remaining protein. */}
-        {foodEnabled && (
+        {foodEnabled ? (
           <NutritionCard
             eaten={foodEaten}
             logged={foodLogged}
@@ -1485,7 +1540,70 @@ export default function TodayScreen() {
             onOpenDay={() => router.push('/food')}
             onQuickAdd={(f) => void quickLog(f)}
           />
+        ) : (
+          /* N61's last surface, and the one the first audit missed — it fell
+             between two rows that each looked like they covered it: the tabs
+             row is about the tab BAR, and the Today row said a disabled SPORT,
+             which nutrition is not (`is_sport: false`).
+
+             DASHED, not a card, and that is the point rather than decoration.
+             The other N61 placeholders (Library, the Plan strip) are solid
+             cards; the rule is the POSITION rather than the screen — a
+             placeholder standing where content would stand is dashed, one
+             standing beside content is a card.
+             Today's own precedent for "this is off, go turn it on" is the
+             dashed "Choose what you train" button below, and a solid card in
+             the Fuel slot would read as content — an athlete would take it for
+             the thing rather than for its absence. A placeholder should look
+             like a placeholder.
+
+             Only when the module EXISTS and is off; a deployment without a
+             food log shows nothing, because promising a feature the server
+             does not have is the same lie as hiding one it does. */
+          foodOff !== undefined && (
+            <Pressable
+              style={({ pressed }) => [styles.fuelOff, pressed && styles.fuelOffPressed]}
+              onPress={() => router.push('/profile/edit')}
+              accessibilityRole="button"
+              accessibilityLabel={`${foodOff.label} is turned off. Turn it on to track calories and protein here`}
+              testID="today-fuel-off"
+            >
+              <Text style={styles.fuelOffTitle}>{foodOff.label} is turned off</Text>
+              <Text style={styles.fuelOffNote}>
+                Turn it on to track calories and protein here.
+              </Text>
+            </Pressable>
+          )
         )}
+
+        {/*
+          The daily trackers — water today, coffee and whatever the athlete
+          names later.
+
+          Above WeekReview and below NutritionCard, in the band of cards that
+          ASK for something rather than the band that only reports. Being on
+          Today is the whole feature: a tracker you have to go and find is a
+          tracker you forget, which is the sentence the ticket opens with.
+
+          Pinned to `todayKey` rather than the day stepper's `date`: a tap logs
+          a cup NOW, and offering the row on a day the athlete is merely reading
+          would make it possible to log water into last Tuesday by accident.
+          Reading a past day's trackers is a Food-screen job, where the day is
+          the subject rather than a lens.
+        */}
+        <TrackerList
+          day={trackerDay}
+          // Read at the MOMENT of the tap, not at render. `todayKey` is computed
+          // during render and this screen never unmounts, so a phone left open
+          // across midnight still holds yesterday's key until something
+          // re-renders — and the first tap at 00:05 would file a cup under the
+          // day that just ended. Found in review; the 23:58 case was covered and
+          // this, its mirror, was not.
+          dayAtTap={() => dayString(new Date())}
+          units={units}
+          unitsReady={unitsReady}
+          testID="today-trackers"
+        />
 
         {/*
           The week, summed up — what happened, against what was meant to, and
@@ -1838,6 +1956,25 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   startText: { color: vola.text, fontWeight: '600', fontSize: 16 },
+
+  // The Fuel slot when nutrition is off. Dashed and unfilled, matching
+  // `startButton` above rather than NutritionCard — it marks an absence, and
+  // a solid card here would read as the thing itself.
+  fuelOff: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderStyle: 'dashed',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 2,
+  },
+  fuelOffPressed: { opacity: 0.6 },
+  fuelOffTitle: { color: vola.text, fontWeight: '600', fontSize: 14 },
+  // textMuted, not textDim: at 12pt this is small text, and textDim measures
+  // 3.96:1 on `bg` — below AA's 4.5:1. This sits on `bg` rather than a card, so
+  // textMuted here is 7.38:1.
+  fuelOffNote: { color: vola.textMuted, fontSize: 12 },
 
   // The cards space themselves; the header sits a touch closer to the first
   // one than the gap between cards, so the label reads as belonging to them.

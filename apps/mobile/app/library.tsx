@@ -21,7 +21,9 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { transportDiagnosis } from '@/lib/apiError';
 import { getStanding } from '@/lib/bjj';
+import { stillWanted } from '@/lib/inflight';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -46,7 +48,14 @@ import { fetchPositions, type Position } from '@/lib/positions';
 import { listCurricula, type Curriculum } from '@/lib/curriculum';
 import { beltLabel, beltSyllabuses } from '@/lib/syllabuses';
 import { useModules } from '@/lib/ModulesProvider';
-import { enabledSports, moduleFor, type Module, usesBelt } from '@/lib/modules';
+import {
+  enabledSports,
+  moduleFor,
+  moduleOffWithCatalog,
+  moduleWithCatalog,
+  type Module,
+  usesBelt,
+} from '@/lib/modules';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -72,16 +81,42 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * search box drives both.
  */
 
-// Abort reasons, so a superseded request (silent) and a timeout (a real
-// error the user must see) don't both collapse into `signal.aborted`.
-const SUPERSEDED = 'superseded';
-const TIMED_OUT = 'timed-out';
+/**
+ * How long this screen is willing to wait, handed to the transport.
+ *
+ * **This used to be armed here, and the mechanism was dead on a phone (N55).**
+ * A superseded request (silent) and a timeout (a real error) both abort the
+ * same controller, so they were told apart by an abort *reason* —
+ * `abort(TIMED_OUT)` and `abort(SUPERSEDED)`, read back off `signal.reason`.
+ *
+ * React Native replaces the global `AbortController` with
+ * `abort-controller@3.0.0`, which has no `reason` at all: `abort(x)` takes the
+ * argument and drops it, and `signal.reason` is `undefined` forever. Measured
+ * against the installed module. Jest runs on Node, where `reason` works, so
+ * every test of this agreed with the code and none of them were about a phone.
+ *
+ * What that cost on a device: `reason === SUPERSEDED` never matched, so a
+ * request abandoned mid-typing fell through to `setError` and printed
+ * **"Aborted"**; `reason === TIMED_OUT` never matched, so a real timeout got
+ * the generic message instead of its own; and the `finally` guard never
+ * matched either, so a superseded request cleared the *newer* request's
+ * spinner.
+ *
+ * Both distinctions are gone rather than repaired. The deadline belongs to
+ * `netFetch`, which owns it in a local and reports a `TimeoutError`; this
+ * controller is aborted for exactly one reason now — a newer search or an
+ * unmount — so `signal.aborted` answers on its own.
+ */
+const REQUEST_TIMEOUT_MS = 10_000;
 
 function describeError(err: unknown): string {
+  // A dead request already says what it was — offline, too slow, or dropped
+  // with VOLA reachable. This screen adds its own action because it has a
+  // better one than "try again": pull down.
+  const diagnosis = transportDiagnosis(err);
+  if (diagnosis) return `${diagnosis} Pull down to try again.`;
+
   const msg = err instanceof Error ? err.message : String(err);
-  // React Native's fetch says "Network request failed", which tells a user
-  // nothing actionable.
-  if (/network request failed/i.test(msg)) return "You're offline.";
   if (/\(401\)/.test(msg)) return 'Your session expired. Sign in again.';
   return msg;
 }
@@ -235,7 +270,24 @@ export default function LibraryScreen() {
    * should cut the request: the technique list is ~197 KB and was pulled on
    * every Library visit regardless of whether the user does BJJ.
    */
-  const techniqueSport = modules.find((m) => m.enabled && m.capabilities.catalog === 'techniques');
+  const techniqueSport = moduleWithCatalog(modules, 'techniques');
+  /**
+   * A technique discipline this server HAS, which this athlete has turned off.
+   *
+   * The distinction from `techniqueSport` is the whole point of N61. With BJJ
+   * off, `techniqueSport` is undefined and every technique surface on this
+   * screen — the round map, the belt roadmaps, the position glossary —
+   * rendered NOTHING. An athlete cannot tell that from *not built* or from
+   * *broken*, and the user proved it: they went looking for the belt roadmaps
+   * on a real phone and reported them missing. They exist and work.
+   *
+   * Deliberately NOT `modules.some(m => !m.enabled)` and not a `key === 'bjj'`
+   * comparison. It asks whether this SERVER offers a technique catalog at all,
+   * so a build talking to a deployment that genuinely has no such discipline
+   * still shows nothing — promising a feature that does not exist would be the
+   * same lie pointing the other way.
+   */
+  const techniqueSportOff = moduleOffWithCatalog(modules, 'techniques');
   const { userId } = useAuth();
   const router = useRouter();
 
@@ -496,11 +548,16 @@ export default function LibraryScreen() {
     techniqueAbortRef.current?.abort();
     const ac = new AbortController();
     techniqueAbortRef.current = ac;
-    const deadline = setTimeout(() => ac.abort(), 10_000);
+    const deadline = { timeoutMs: REQUEST_TIMEOUT_MS };
+
+    // Superseded OR unmounted, both of which must set nothing — see
+    // `lib/inflight.ts` for why the ref check alone is not enough, and why
+    // this is a tested function rather than an inline comparison.
+    const wanted = () => stillWanted(techniqueAbortRef.current, ac);
     try {
       const [list, rs] = await Promise.all([
-        fetchTechniques(getToken, ac.signal),
-        fetchRulesets(getToken, ac.signal),
+        fetchTechniques(getToken, ac.signal, deadline),
+        fetchRulesets(getToken, ac.signal, deadline),
       ]);
       setTechniques(list);
       setRulesets(rs);
@@ -527,12 +584,12 @@ export default function LibraryScreen() {
           // premise that this function took no signal was simply wrong.
           listCurricula(getToken, ac.signal).catch(() => [] as Curriculum[]),
         ]);
-        if (techniqueAbortRef.current === ac) {
+        if (wanted()) {
           setPositions(list);
           setSyllabuses(beltSyllabuses(curricula));
         }
       } catch {
-        if (techniqueAbortRef.current === ac) {
+        if (wanted()) {
           setPositions([]);
           // Cleared together: they are fetched together, so leaving one
           // populated after the pair failed shows a reference block that is
@@ -540,13 +597,12 @@ export default function LibraryScreen() {
           setSyllabuses([]);
         }
       }
-    } catch (err) {
-      // A supersede is not a failure; a timeout is. `fetchTechniques` rejects
-      // with AbortError for both, so the only way to tell them apart is
-      // whether this controller is still the current one.
-      if (techniqueAbortRef.current === ac) setTechniquesFailed(true);
-    } finally {
-      clearTimeout(deadline);
+    } catch {
+      // A supersede is not a failure, and neither is an unmount; a timeout is.
+      // A timeout no longer aborts THIS controller — the deadline lives in the
+      // transport and arrives as a `TimeoutError` — so `stillWanted()` is true
+      // for one and false for the other two, which is the whole distinction.
+      if (wanted()) setTechniquesFailed(true);
     }
   }, [getToken, techniqueSport]);
 
@@ -557,14 +613,9 @@ export default function LibraryScreen() {
 
   const load = useCallback(
     async (opts: { silent?: boolean } = {}) => {
-      abortRef.current?.abort(SUPERSEDED);
+      abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-
-      // Without a deadline the initial spinner can spin forever on a captive
-      // or dead network — and the RefreshControl isn't mounted in the
-      // spinner branch, so there'd be no way to recover.
-      const timeout = setTimeout(() => controller.abort(TIMED_OUT), 10_000);
 
       if (!opts.silent) setLoading(true);
       setError(null);
@@ -596,6 +647,10 @@ export default function LibraryScreen() {
           getToken,
           { sport: sport || undefined, q: query.trim() || undefined },
           controller.signal,
+          // Without a deadline the initial spinner can spin forever on a
+          // captive or dead network — and the RefreshControl isn't mounted in
+          // the spinner branch, so there'd be no way to recover.
+          { timeoutMs: REQUEST_TIMEOUT_MS },
         );
         if (!controller.signal.aborted) {
           setExercises(list);
@@ -606,23 +661,19 @@ export default function LibraryScreen() {
           setEverLoaded(true);
         }
       } catch (err) {
-        // Superseding our own request is not a failure — showing an error
-        // for it would make fast typing look broken. A timeout is, though,
-        // so the two aborts have to be distinguishable rather than lumped
-        // together under `signal.aborted`.
-        if (controller.signal.reason === SUPERSEDED) return;
+        // Superseding our own request is not a failure — showing an error for
+        // it would make fast typing look broken. This controller is aborted
+        // for that reason only now that the deadline lives in the transport,
+        // so `aborted` says it without needing a reason the runtime drops.
+        if (controller.signal.aborted) return;
         // With a cached catalog on screen, failing to refresh is an ordinary
         // offline state, not an error worth covering it with.
         if (showedCache) return;
-        setError(
-          controller.signal.reason === TIMED_OUT
-            ? "Couldn't reach the server. Pull down to try again."
-            : describeError(err),
-        );
+        // Including a timeout, which arrives as a `TimeoutError` and says so.
+        setError(describeError(err));
         setEverLoaded(true); // so the empty state stops claiming to be authoritative
       } finally {
-        clearTimeout(timeout);
-        if (controller.signal.reason !== SUPERSEDED) {
+        if (!controller.signal.aborted) {
           setLoading(false);
           setRefreshing(false);
         }
@@ -637,7 +688,7 @@ export default function LibraryScreen() {
     return () => clearTimeout(t);
   }, [load]);
 
-  useEffect(() => () => abortRef.current?.abort(SUPERSEDED), []);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // Symmetric to the stored-filter guard on load: if the discipline currently
   // filtering the list gets turned off while the user is standing here, the
@@ -856,6 +907,41 @@ export default function LibraryScreen() {
             is not for them, when a purple belt looking up Leg Entanglement is exactly
             who it serves. It also greets a returning athlete as a beginner
             every time they open the tab. An instruction addresses everyone. */}
+        {/* What the block below says when the discipline that owns it is off.
+            NOT an empty state for "no positions loaded" — that is a different
+            failure with a different cause, and conflating them is how "we
+            could not reach the server" starts reading as "you do not train
+            this". This branch fires only when the module is off, which is a
+            fact the app is certain of.
+
+            `techniqueSport === undefined` as well, so an on-and-off PAIR — BJJ
+            enabled, a second technique discipline not — cannot render "Judo is
+            turned off" directly above the roadmaps it claims are missing.
+            Impossible with today's single-technique registry, but the predicate
+            matches on the CAPABILITY precisely so a second one can arrive
+            server-side without an app change. Raised in review. */}
+        {techniqueSport === undefined && techniqueSportOff !== undefined && sport === '' && (
+          <View style={styles.glossary} testID="library-techniques-off">
+            <Text style={styles.glossaryLabel} accessibilityRole="header">
+              {techniqueSportOff.label} is turned off
+            </Text>
+            <Pressable
+              onPress={() => router.push('/profile/edit')}
+              accessibilityRole="button"
+              accessibilityLabel={`Turn ${techniqueSportOff.label} on to see the belt roadmaps, the position map and the technique library`}
+              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+              testID="library-techniques-off-link"
+            >
+              <Text style={styles.mapLinkTitle}>
+                Turn it on to see the belt roadmaps
+              </Text>
+              <Text style={styles.mapLinkNote}>
+                The position map and {techniqueSportOff.label} techniques come back too.
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         {usesPosition(sport, modules) && positions.length > 0 && (
           <View style={styles.glossary}>
             <Text style={styles.glossaryLabel} accessibilityRole="header">

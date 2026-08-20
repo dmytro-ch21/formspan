@@ -1,4 +1,6 @@
+import { transportDiagnosis } from './apiError';
 import { apiRequest } from './apiRequest';
+import { SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
 import type { Macros, Meal } from './nutrition';
 import type { TokenGetter } from './useAuthToken';
 
@@ -74,10 +76,18 @@ export function describeMeal(
   getToken: TokenGetter,
   input: { description: string; meal?: Meal },
 ): Promise<EstimateResponse> {
-  return apiRequest<EstimateResponse>(getToken, '/nutrition/estimate', {
-    method: 'POST',
-    body: JSON.stringify({ description: input.description, meal: input.meal ?? null }),
-  });
+  return apiRequest<EstimateResponse>(
+    getToken,
+    '/nutrition/estimate',
+    {
+      method: 'POST',
+      body: JSON.stringify({ description: input.description, meal: input.meal ?? null }),
+    },
+    // No photo, and it still gets the slow budget: this waits on the same
+    // provider as the photo path, and the default deadline is sized for a
+    // JSON read that nothing is thinking about.
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
+  );
 }
 
 /**
@@ -105,10 +115,59 @@ export function photographMeal(
   if (input.description) form.append('description', input.description);
   if (input.meal) form.append('meal', input.meal);
 
-  return apiRequest<EstimateResponse>(getToken, '/nutrition/estimate', {
-    method: 'POST',
-    body: form,
-  });
+  return apiRequest<EstimateResponse>(
+    getToken,
+    '/nutrition/estimate',
+    { method: 'POST', body: form },
+    // A photo plus a provider round trip is the slowest thing the app asks
+    // for; the default deadline is sized for a JSON read.
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
+  );
+}
+
+/**
+ * The copy for a failed estimate.
+ *
+ * ## Why this exists at all (N55)
+ *
+ * The screen used to render `err.message` directly, with a fallback of *"Could
+ * not reach the server. Try again when you have signal."* Two things went
+ * wrong with that, and only one of them was the fallback:
+ *
+ * - **The 503.** The route answers 503 when the deploy has no provider key —
+ *   a deliberate "this is not switched on here", by the handler's own comment.
+ *   Passing the server's message through showed the athlete *"meal estimation
+ *   is not available"* with no explanation and no route forward, and left them
+ *   to work out that typing the meal in still works. It is not an outage and
+ *   it is emphatically not a connection problem.
+ * - **The transport.** A dead request has no status and no server message, so
+ *   it took the network-flavoured fallback whatever had actually happened.
+ *
+ * ## What it deliberately does not map
+ *
+ * Only those two. Everything else the server answers keeps **its own**
+ * message, because those messages are written for the athlete and several
+ * carry information this file cannot reconstruct: the 429 says *"you have used
+ * all 25 estimates for today — one more in 20 minutes"*, and a mapped
+ * "you're out of estimates" would throw the reset away. Substituting copy for
+ * a server that already answered well is a loss, not a fix.
+ *
+ * A message is never pattern-matched, per the API conventions — the two
+ * branches that exist turn on the status and on the error's own class.
+ */
+export function estimateErrorMessage(err: unknown): string {
+  const diagnosis = transportDiagnosis(err);
+  if (diagnosis) return `${diagnosis} Enter the food by hand instead.`;
+
+  const status = (err as { status?: number } | null)?.status;
+  if (status === 503) {
+    return "Estimating meals isn't switched on here yet. Enter the food by hand.";
+  }
+
+  // The server answered. Show what it said — and NOT a network fallback,
+  // which is what this screen used to reach for when it had no message.
+  const message = err instanceof Error ? err.message : '';
+  return message || 'That did not work. Enter the food by hand instead.';
 }
 
 /**

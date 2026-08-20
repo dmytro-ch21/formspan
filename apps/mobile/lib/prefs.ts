@@ -185,6 +185,23 @@ export const PREF_SOUNDS = 'sounds_enabled';
  */
 export const PREF_VOICE = 'voice_cues';
 
+/**
+ * The athlete's daily-movement level — `sedentary` | `light` | `active`.
+ *
+ * A CACHE of `profile.activity_level`, not the source of truth, and one of only
+ * three keys here that are ever marked owed (the others being the unit system
+ * and effort tracking). The reasoning for putting it on the account rather than
+ * on the device is in `lib/activityLevel.ts` and is worth reading before
+ * changing anything here: it feeds a calorie target that web derives too, so a
+ * device-local answer makes two surfaces compute different numbers for the same
+ * athlete.
+ *
+ * Absent means this device has never seen a choice — which is NOT the same as
+ * the athlete having chosen `light`, and the Goals screen renders the two
+ * differently.
+ */
+export const PREF_ACTIVITY_LEVEL = 'activity_level';
+
 export const PREF_AUTO_REST = 'auto_rest';
 export const PREF_TRACK_EFFORT = 'track_effort';
 /**

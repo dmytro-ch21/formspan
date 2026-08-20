@@ -48,8 +48,13 @@ jest.mock('@/lib/friends', () => ({
   getPendingCounts: (...a: unknown[]) => mockCounts(...a),
 }));
 
+// Mutable so a test can turn a discipline ON. The factory is evaluated once,
+// at first require, so the arrow has to READ the variable rather than close
+// over its value — and `beforeEach` puts it back to the bare account every
+// other test in this file assumes.
+let mockModules: { key: string; enabled: boolean }[] = [];
 jest.mock('@/lib/ModulesProvider', () => ({
-  useModules: () => ({ modules: [], ready: true }),
+  useModules: () => ({ modules: mockModules, ready: true }),
 }));
 jest.mock('@/lib/sync', () => ({
   request: jest.fn(),
@@ -104,6 +109,9 @@ beforeEach(() => {
   // its `toHaveBeenCalledWith` with somebody else's chime. No test can fire the
   // cue today, which is exactly when this is cheap to add.
   mockPlay.mockReset();
+  // Back to the bare account. Every test in this file that predates the
+  // mutable mock assumes nothing is enabled.
+  mockModules = [];
 });
 
 describe('what a count renders as', () => {
@@ -306,6 +314,30 @@ describe('the Library row (N70)', () => {
   });
 });
 
+describe('the Sequences row (N80)', () => {
+  // Same risk as the Library row above, and the reason #414 exists: accepting
+  // a shared sequence now navigates straight to the copy, which answers the
+  // athlete who just tapped Accept — and nobody else. Without this row a chain
+  // is reachable only by having just arrived at it, which is the same
+  // phone-impossible gap in a smaller form.
+  it('is present for a BJJ account, and goes to the chain list', async () => {
+    mockModules = [{ key: 'bjj', enabled: true }];
+    render(<YouScreen />);
+
+    fireEvent.press(await screen.findByTestId('you-sequences'));
+    expect(mockPush).toHaveBeenCalledWith('/sequence');
+  });
+
+  it('is absent when BJJ is off', async () => {
+    // The arm that makes the previous one mean anything — and the gate itself:
+    // a strength-only account has no use for a list that can only be empty.
+    // `beforeEach` has already cleared the modules.
+    render(<YouScreen />);
+    await screen.findByTestId('you-library');
+    expect(screen.queryByTestId('you-sequences')).toBeNull();
+  });
+});
+
 it('does not let a blurred count land on top of a newer one', async () => {
   /**
    * The abort the code advertises and nothing was checking.
@@ -339,4 +371,26 @@ it('does not let a blurred count land on top of a newer one', async () => {
 
   expect(screen.getByLabelText('Social, 1 waiting')).toBeTruthy();
   expect(screen.queryByLabelText('Social, 9 waiting')).toBeNull();
+});
+
+/**
+ * N61 — the Sports row was the answer to every silent absence, and was inert.
+ *
+ * Every module gate in this app renders NOTHING when its discipline is off:
+ * the belt roadmaps, the Plan tab's Roadmaps strip, BJJ in the session picker,
+ * and the Food and Goals TABS. This row already displayed which disciplines
+ * were on — so it named the cause of all of them — while offering no way to
+ * act on it. The user reported the roadmaps as missing from a real phone; they
+ * exist and work.
+ */
+describe('the Sports row', () => {
+  it('leads to the toggles rather than only naming them', async () => {
+    render(<YouScreen />);
+    const row = await screen.findByTestId('you-sports');
+    fireEvent.press(row);
+    // The destination screens explain themselves ("BJJ tracking is off, turn
+    // it back on under Sports"). Nothing linked to them while they were off,
+    // which is why the athlete never reached the screen that would say so.
+    expect(mockPush).toHaveBeenCalledWith('/profile/edit');
+  });
 });

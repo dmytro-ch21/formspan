@@ -2,6 +2,8 @@ package nutrition
 
 import (
 	"context"
+	"net/http"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -137,6 +139,85 @@ func TestTheGateRefusesAtTheLimitAndReportsWhy(t *testing.T) {
 	// must not be told otherwise.
 	if _, err := CheckQuota(ctx, usage, "est_cap", now); err == nil {
 		t.Fatal("a second path was allowed past an exhausted combined budget")
+	}
+}
+
+// **The loop the header exists for: exhaust the quota, read `Retry-After`, wait
+// exactly that long, retry — and be ADMITTED rather than refused a second
+// time.** (F15.)
+//
+// The table beside `retryAfterSeconds` pins the arithmetic; this pins what the
+// arithmetic is FOR, against the real `created_at > since` window executed by
+// Postgres rather than against a restatement of it in Go. Nothing here derives
+// its expectation from the function under test.
+//
+// Nothing sleeps, either. Both the handler's clock and the quota's `now` are
+// parameters, so "the client waited N seconds" is expressed by moving `now`
+// forward by N — which is also the only way to test a 24-hour window at all.
+func TestObeyingRetryAfterExactlyIsAdmitted(t *testing.T) {
+	const userID = "est_retry_after"
+	usage := usageFor(t, userID)
+	ctx := context.Background()
+
+	for i := 0; i < DailyEstimates; i++ {
+		mustRecord(t, usage, EstimateRecord{UserID: userID, Source: SourceText, Succeeded: true})
+	}
+
+	// The reset instant comes from the DATABASE — `MIN(created_at)` plus the
+	// window — so the remainder constructed below straddles the real row that
+	// has to age out, not a timestamp this test invented.
+	seed, err := usage.Quota(ctx, userID, time.Now())
+	if err != nil {
+		t.Fatalf("quota: %v", err)
+	}
+	if seed.ResetsAt == nil {
+		t.Fatal("no resets_at at the cap — nothing to advertise")
+	}
+
+	// **A FRACTIONAL remainder is the only input that discriminates.** 1.5
+	// seconds floors to 1 and ceils to 2; at any whole number of seconds the
+	// two roundings agree and this test would pass against the exact bug it
+	// exists to catch.
+	const remainder = 1500 * time.Millisecond
+	// Asserted rather than trusted to the comment above. The apparatus check
+	// further down catches this constant drifting DOWN to a whole second, but
+	// not up: at 2.0s exactly, truncation and the ceiling agree and every
+	// assertion below passes against the bug. This is the guard for that half.
+	if remainder%time.Second == 0 {
+		t.Fatalf("remainder %s is a whole number of seconds — flooring and ceiling agree there, so this test no longer discriminates", remainder)
+	}
+	now := seed.ResetsAt.Add(-remainder)
+
+	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, usage)
+	h.now = func() time.Time { return now }
+
+	w := callAs(t, h, userID, `{"description":"two eggs"}`)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status %d at the cap, want 429", w.Code)
+	}
+	advertised, err := strconv.Atoi(w.Header().Get("Retry-After"))
+	if err != nil {
+		t.Fatalf("Retry-After = %q, want a whole number of seconds: %v", w.Header().Get("Retry-After"), err)
+	}
+	if advertised != 2 {
+		t.Fatalf("Retry-After = %d with %s left in the window, want 2 — the ceiling, not the floor", advertised, remainder)
+	}
+
+	// **Apparatus check, and it has to come first.** One second is what the
+	// truncating version advertised, and it must still be refused. If this ever
+	// starts passing, the remainder has lost its fractional part and the
+	// assertion below has stopped straddling the boundary — at which point it
+	// would go green against truncation and prove nothing.
+	h.now = func() time.Time { return now.Add(time.Second) }
+	if short := callAs(t, h, userID, `{"description":"two eggs"}`); short.Code != http.StatusTooManyRequests {
+		t.Fatalf("status %d one second short of the reset, want 429 — this test is no longer on the boundary", short.Code)
+	}
+
+	// The claim: the athlete waited exactly as long as they were told to.
+	h.now = func() time.Time { return now.Add(time.Duration(advertised) * time.Second) }
+	if obeyed := callAs(t, h, userID, `{"description":"two eggs"}`); obeyed.Code != http.StatusOK {
+		t.Fatalf("status %d after waiting the advertised %ds, want 200 — the header sent a well-behaved client straight back into a refusal: %s",
+			obeyed.Code, advertised, obeyed.Body.String())
 	}
 }
 

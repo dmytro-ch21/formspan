@@ -47,9 +47,15 @@ import {
  * nowhere to send you, and `landedMessage` is what stops that reading as
  * nothing having happened.
  *
- * `sequence` is deliberately absent rather than forgotten: this app has no
- * sequence route yet. Sequences live in the Library, which is where the
- * fallback message points.
+ * **`sequence` used to be absent here, and the fallback said "your copy is in
+ * the Library"** — which was false twice over: this app had no sequence route
+ * at all, and the Library tab is the technique and exercise catalog, not
+ * anywhere a chain of yours has ever lived. An athlete would accept a share
+ * and go and look for it. That was issue #414, filed above every other
+ * phone-impossible gap because it was the only one where the app made a claim
+ * rather than merely omitting a surface. `app/sequence/[id].tsx` is the answer:
+ * accepting a sequence now lands on the copy itself, so nothing has to be said
+ * about where it went.
  *
  * **`Href`, not `string`**, and that is not decoration. Expo Router's typed
  * routes reject a bare string — but this shipped as `=> string` and CI stayed
@@ -60,14 +66,20 @@ import {
  */
 const DESTINATION: Record<string, (id: string) => Href> = {
   workout: (id) => `/workout/${id}` as Href,
+  sequence: (id) => `/sequence/${id}` as Href,
 };
 
-/** Said when an accept succeeded but there is nowhere to navigate. Without it
- *  the row simply vanishes and nothing tells you where the copy went. */
-function landedMessage(resourceType: string): string {
-  if (resourceType === 'sequence') return 'Accepted — your copy is in the Library.';
-  return 'Accepted — the copy is yours now.';
-}
+/**
+ * Said when an accept succeeded but there is nowhere to navigate. Without it
+ * the row simply vanishes and nothing tells you where the copy went.
+ *
+ * **It no longer names a destination, and that is the fix.** It used to have a
+ * `sequence` arm pointing at the Library — a screen that has never held a
+ * sequence — so the one case it fired on was the one case it got wrong. A
+ * message that only says what HAPPENED cannot go stale when a route lands or
+ * moves; a message that says where to LOOK can, and did.
+ */
+const LANDED_MESSAGE = 'Accepted — the copy is yours now.';
 
 const KIND_LABEL: Record<string, string> = {
   sequence: 'Sequence',
@@ -159,7 +171,7 @@ export default function SharedScreen() {
           // No route for this kind. The accept WORKED, so say so — otherwise
           // the row just disappears and the only signal is its absence, which
           // reads as the tap having failed.
-          setLanded(landedMessage(copy.resource_type));
+          setLanded(LANDED_MESSAGE);
           await reload();
         }
       } catch (err) {

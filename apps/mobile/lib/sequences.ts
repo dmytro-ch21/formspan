@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 
 import { apiRequest } from './apiRequest';
 import { getDb } from './db';
-import { isOffline, isPermanentRejection } from './apiError';
+import { isPermanentRejection, isTransportFailure } from './apiError';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -171,10 +171,15 @@ export async function listSequences(
     const body = await apiRequest<{ sequences: Sequence[] }>(getToken, '/sequences', { signal });
     remote = body.sequences ?? [];
   } catch (err) {
-    // Offline is not an error here — the outbox is the answer. Anything else
-    // is worth propagating, or a server fault reads as "you have no
-    // sequences", which is the failure this codebase keeps re-learning.
-    if (!isOffline(err)) throw err;
+    // A request that got no answer is not an error here — the outbox is the
+    // answer. Anything else is worth propagating, or a server fault reads as
+    // "you have no sequences", which is the failure this codebase keeps
+    // re-learning.
+    //
+    // `isTransportFailure`, not `isOffline`: since N55 a dead request may be a
+    // timeout or a dropped connection as well as no route, and all three mean
+    // the same thing here — we could not ask, so fall back to what is local.
+    if (!isTransportFailure(err)) throw err;
   }
   const localIDs = new Set(local.map((s) => s.id));
   return [...local, ...remote.filter((s) => !localIDs.has(s.id))];
@@ -191,7 +196,9 @@ export async function getSequence(
   try {
     return await apiRequest<Sequence>(getToken, `/sequences/${encodeURIComponent(id)}`, { signal });
   } catch (err) {
-    if (isOffline(err)) return null;
+    // Same reading as the list above: no answer means "I could not ask", not
+    // "it is not there".
+    if (isTransportFailure(err)) return null;
     throw err;
   }
 }
@@ -207,7 +214,7 @@ export type SequenceSyncResult = {
 };
 
 function classify(err: unknown): 'offline' | 'permanent' | 'transient' {
-  if (isOffline(err)) return 'offline';
+  if (isTransportFailure(err)) return 'offline';
   if (isPermanentRejection(err)) return 'permanent';
   return 'transient';
 }
@@ -303,6 +310,42 @@ async function push(userId: string, getToken: TokenGetter): Promise<SequenceSync
     }
   }
   return result;
+}
+
+/**
+ * The one-line meta a list row shows under a chain's name.
+ *
+ * Here rather than inline in the screen so a test can pin the exact words to a
+ * LITERAL. Re-deriving the string from this same expression inside the test
+ * would be true by construction — it would still pass with the pluralisation
+ * inverted and the separator changed, which is the class of assertion review
+ * caught on this repo the day before this landed.
+ */
+export function stepSummary(s: Sequence): string {
+  const steps = `${s.step_count} step${s.step_count === 1 ? '' : 's'}`;
+  return s.start_position_name ? `${steps} · from ${s.start_position_name}` : steps;
+}
+
+/**
+ * The library's name for a step, the locally-resolved one, or nothing.
+ *
+ * **Returning `undefined` rather than the id is the point.** The server
+ * resolves `name` on read; a chain still in this device's outbox carries only
+ * the technique ids the reflection wizard tagged, and rendering
+ * `half-guard-knee-shield` where a name belongs is a false claim dressed as a
+ * fallback. The caller says "name unavailable" instead, which is true.
+ */
+export function stepName(
+  step: SequenceStep,
+  names: Record<string, string>,
+): string | undefined {
+  return step.name || names[step.technique_id] || undefined;
+}
+
+/** `position · category`, skipping whichever the server did not resolve. Empty
+ *  for a local capture, which has neither. */
+export function stepMeta(step: SequenceStep): string {
+  return [step.position, step.category].filter((v) => v).join(' · ');
 }
 
 /** How many captures this device still owes the server. */
