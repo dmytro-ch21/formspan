@@ -624,6 +624,42 @@ was tried and abandoned — there are seven in one file alone, and every future
 one would have to remember. If you add a test that seeds shared reference data,
 `-p 1` is what is keeping it from breaking somebody else's package.
 
+**`-p 1` only orders the packages inside ONE `go test` invocation, and this repo
+routinely runs several at once.** A dozen worktrees share `vola_test`, so two
+agents running the backend suite is the ordinary state here — and across two
+invocations `-p 1` guarantees nothing at all. Measured 2026-08-20, four
+concurrent suites on one database, `-count=1` throughout: nine packages failed,
+`workout` 20 of 22 runs. Three distinct mechanisms, all of them the same shape —
+somebody else's binary writing rows yours is reading:
+
+- **Fixture deletion.** Every package seeds shared rows with fixed ids and
+  deletes them on the way out. The neighbour's cleanup lands mid-test and you get
+  `unknown exercise "wk_fx_bench_press"` for a row you seeded yourself
+  milliseconds ago. This is #426, which fixed `session` and named twelve more.
+- **Unscoped counts.** `technique`'s `seeded N but listed M`, `activity`'s and
+  `workout`'s list-ceiling assertions — the same global-count problem `-p 1`
+  exists for, arriving from another invocation where `-p 1` cannot see it.
+- **Fixed-id collisions.** Two binaries INSERTing the same id: `already exists`,
+  `duplicate key value violates "workouts_pkey"`, and a genuine `deadlock
+  detected` in `bjj`.
+
+**So every Postgres-backed test package now takes one database-scoped advisory
+lock in `TestMain`** — `internal/platform/testdb`, one line per package (#454).
+One binary at a time owns the database; the lock dies with the connection, so a
+crashed run cannot wedge the next one, and the key is hashed against
+`current_database()` so a per-branch `vola_test_<branch>` and CI's throwaway
+database never queue at all. Same four-lane measurement after: **0 failures in
+24 runs**, for **+17% wall clock** (387s → 453s for the 24 runs; per-run median
+57s → 72s, and the spread *narrows*, 39–105s → 63–93s). That is the price and it
+is worth naming: serialising is not free, it is cheaper than nine packages of
+spurious red. **`-p 1` stays** — it is the right thing inside one invocation and
+CI runs exactly one.
+
+The rule for a new package: **if it reads `TEST_DATABASE_URL`, it gets a
+`main_test.go`**. Both halves are asserted in place, so neither can be quietly
+dropped — `TestTheFixtureLockIsHeldForThisBinary` goes red without the TestMain
+(verified by mutation: remove the `Lock` call and all 24 go red).
+
 **It used to be doing a second, undocumented job — ordering — and that one is
 retired as of 2026-08-16.** It is recorded here because the shape recurs, and
 because the fix is a rule you can break by accident.
@@ -652,6 +688,17 @@ The rule that keeps it that way is **own the library rows you depend on**.
 `workout/postgres_test.go` and `profile/postgres_test.go` all seed their own
 catalog rows for exactly this reason. **`workout` is the one to copy**, because
 it learned from `session`'s mistake:
+
+> **`workout` was also the worst offender in #454 — 20 failures in 22 concurrent
+> runs — and that is not a contradiction, it is the point.** Owning your rows is
+> about the rows you **read**: it makes a package independent of what any *other*
+> package seeded, which is exactly the ordering crutch the section above retired,
+> and `workout` does it better than anyone. It says nothing about the rows you
+> **write** while a second copy of your own binary is reading them. Doing the
+> fixture discipline well makes a package seed more, own more and clean up more
+> — so the better a package follows this list, the more damage its cleanup does
+> to a neighbour. The two rules are orthogonal and you need both: own your rows,
+> **and** take the lock. Copy this list; add the `main_test.go`.
 
 - **Namespaced ids that KEEP the original name as the suffix** — `wk_fx_bench_press`,
   not `wk_fx_bench`. Some tests depend on the ids' relative LEXICAL ORDER (a
@@ -762,8 +809,28 @@ gap between those two is only how subtests are counted, and the drift from 1092
 is #329 adding `health/handler_test.go`. A test total is a magnitude check that
 every PR moves, so it cannot be a tripwire; the skip count is. Count with
 `go test -p 1 -timeout 3m -json ./...` rather than grepping `-v` output, since
-the grep is exactly the apparatus that silently counts something else. And note
-`./...` reports **37** packages — the other three have no test files.
+the grep is exactly the apparatus that silently counts something else. **Measured
+again 2026-08-20 after #454: 39 packages, 37 of them with tests, 1155 top-level
+tests, and still exactly one skip — `TestLiveComplete`.** #454 itself added 26
+(one lock assertion per Postgres package, plus three on the lock), so a count
+taken before it will not match one taken after; the skip count is the tripwire,
+and it did not move.
+
+The rule that keeps the lock coverage complete is one command, and it is worth
+running if you add a test package: every package that reads `TEST_DATABASE_URL`
+must also take the lock.
+
+```bash
+cd backend
+comm -23 <(grep -rl --include='*_test.go' TEST_DATABASE_URL internal/ | xargs -n1 dirname | sort -u) \
+         <(grep -rl --include='*_test.go' 'testdb.Main'        internal/ | xargs -n1 dirname | sort -u)
+```
+
+`internal/platform/testdb` is the one legitimate name that appears there — it is
+the apparatus, holds no fixtures, and its own tests need the lock free. Anything
+else is a package a second test binary can trample. **Note the `--include`:
+without it the second grep also matches `testdb.go`'s own doc comment, which
+names the call, and the check then reports every package as covered.**
 
 **This paragraph used to say "zero skips: 28 packages, 583 tests"** and told you
 any skip meant a regression. That was true when written and stopped being true

@@ -35257,6 +35257,213 @@ build time from a gitignored `.env.local` no worktree has, and the build
 *succeeds* while shipping an app with no keys). The device check is three steps
 and is written out in the PR body and in `docs/testing/functional-scenarios.md`.
 It is not argued up to met.
+## 2026-08-20 — One test binary at a time owns a test database (#454)
+
+**#426 fixed one package; the same measurement across the rest of the suite
+found nine more, and two failure mechanisms that the #426 fix could not have
+covered.** The shape is the one that file already describes: a Postgres test
+package seeds shared rows with fixed ids and deletes them again, which is merely
+wasteful when it runs alone and fatal the moment a second copy of a test binary
+is running against the same database. `vola_test` is the documented default
+target and a dozen worktrees share it, so two agents running the backend suite is
+the ordinary state of this repo rather than an exotic one — and the failure reads
+as *"your PR broke the backend"* to whoever hits it, which is what cost the time
+in #426.
+
+**Reproduced first, in the same conditions as the green.** Four concurrent full
+suites against one database, 24 runs, `-count=1` on every arm — without it
+`go test` serves the whole suite from its cache and the run measures nothing,
+which is the mistake #426's own baseline made. Nine packages failed:
+
+| Package | before | after |
+|---|---|---|
+| `workout` | 20/22 | 0/24 |
+| `technique` | 10/24 | 0/24 |
+| `nutrition` | 8/24 | 0/24 |
+| `bjj` | 7/24 | 0/24 |
+| `sequence` | 7/24 | 0/24 |
+| `activity` | 6/24 | 0/24 |
+| `exercise` | 6/24 | 0/24 |
+| `feed` | 2/24 | 0/24 |
+| `food` | 1/24 | 0/24 |
+
+(`workout` shows 22 rather than 24 because two of its runs died before emitting a
+package result at all. The remaining four packages the issue listed — `health`,
+`profile`, `friend`, `theme` — were reported at 1–5 failures in 24, and this
+sample simply did not catch them; at those rates 24 runs is not enough to
+distinguish them from zero, which is stated rather than glossed. They are fixed
+by the same change and are green here.)
+
+**The mechanism was read off the failures, not assumed from the list, and there
+turned out to be three of them.** This matters, because only the first is what
+#426 fixed:
+
+1. **Fixture deletion** — the #426 mechanism. `workout` reporting
+   `unknown exercise "wk_fx_bench_press"` for a row it seeded itself
+   milliseconds earlier; `bjj` reporting `unknown technique`; `sequence`
+   violating `bjj_sequence_steps_technique_id_fkey`; `exercise` reporting
+   `not found` for a row it had just written; `nutrition`'s search returning
+   `0 rows [], want 1`. It also arrives *as* a count — `activity`'s
+   `got 108 activities, want the ceiling of 500` and `workout`'s
+   `got 169 workouts, want the ceiling of 500` are list-cap assertions
+   deflated by a neighbour's cleanup, not by anything about caps. `feed`'s
+   `want bob's session in the feed, got []` is the same thing.
+2. **Unscoped assertions disturbed by another writer's rows** — `technique`'s
+   `seeded 542 but listed 544`, and `food`'s
+   `'chicken breast' ranked "chicken-breast" first, want the plain breast row`,
+   a relevance-ordering assertion over a catalog a second binary was seeding and
+   deleting underneath it. The `technique` case is precisely the problem `-p 1`
+   exists for, arriving from a *second invocation* where `-p 1` has no
+   jurisdiction — and it is the one mechanism a per-package key cannot see at
+   all, because the extra rows come from `sequence`, `share`, `feed` and friends
+   rather than from `technique` itself.
+3. **Fixed-id collisions between the two writers** — `already exists`,
+   `duplicate key value violates "workouts_pkey"`, a real `deadlock detected` in
+   `bjj`, and `feed`'s `send request: friend: already connected or pending`,
+   where the neighbour had already written the `friendships` row this run's
+   fixture was about to create. (That last one is a `feed` failure carrying a
+   `friend`-domain error message; the `friend` *package* did not fail in this
+   sample at all, and an earlier draft of this entry misfiled it as one. Review
+   caught it.)
+
+All nine reproduced packages are accounted for by one of the three; none was
+left as "presumably the same thing".
+
+**So the lock is keyed per DATABASE rather than per package**, which is the one
+design decision here worth arguing about. #426 keyed its lock to `session`, and
+that is right for `session`, whose fixture ids are namespaced `ses_fx_*` and
+touched by nothing else. It does not generalise: mechanisms 2 and 3 are
+*between* packages. `exercise` seeds and deletes the whole shipped catalog by the
+ids `SeedData()` names while `workout`'s seeder tests insert 45 of those same
+real ids; `technique` counts rows that `sequence`, `share`, `feed`,
+`curriculum`, `contest`, `accomplishment` and `bjj` all insert. A per-package key
+lets every one of those pairs run at once. Twelve keys would also be a list
+somebody has to maintain, and the answer to *"which packages can safely
+overlap?"* changes every time a fixture is added.
+
+One key turns that into **"one test binary at a time"**, which needs no
+maintenance — the same rule `-p 1` already applies inside one invocation,
+extended to the several invocations a fleet runs at once.
+
+**What it cost, measured rather than asserted:** 24 runs across four lanes went
+from 387s to 453s, **+17% wall clock**. Per-run median 57s → 72s. Worth noting
+alongside the median: the *spread* narrows, 39–105s → 63–93s, so a run's
+duration stops depending on who else happens to be running. It is cheaper than
+"serialise everything" sounds because the suite is not all database work — the
+pure-logic packages still overlap freely. And it is zero in every case that is
+not two agents sharing one database: CI runs one binary against a throwaway
+database, and the key is hashed against `current_database()`, so a per-branch
+`vola_test_<branch>` never queues. `createdb -U vola vola_test_<branch>` is
+still the right first move; this is the net for when nobody makes it.
+
+**The wait budget was re-derived rather than copied, and it moved from 120s to
+300s.** #426's 120s covered a per-package key, contested by at most the same
+package in another lane, and its own first attempt at 60s shipped a replacement
+flake — the *waiter* failed 2 of 10 lane-runs. With one key, every Postgres
+package queues on it, so the budget has to cover a queue rather than a single
+holder. Two things bound it: queue **depth** — the lock dies with the package's
+binary, so a waiter is behind at most one package per competing lane, not one
+whole suite — and `-count=N` **amplification**, where a neighbour lives N times
+as long and holds it throughout.
+
+The budget can afford to be generous because the wait is now **fair**. #426
+polled `pg_try_advisory_lock` every 100ms, which re-races every waiter on every
+release: fine for the two contenders a per-package key can have, not fine for
+twelve, where the unlucky one loses repeatedly and eventually fails in a way that
+looks exactly like the bug being fixed. This uses Postgres's own queue —
+`pg_advisory_lock` bounded by `lock_timeout` — after one non-blocking attempt for
+the common case. That `lock_timeout` applies to advisory locks was verified
+against Postgres 16 before being relied on, with the holder's grip confirmed
+first so the check could actually fail: `pg_try_advisory_lock` → `f`, the wait
+ending at the budget with SQLSTATE 55P03.
+
+**So the budget was sized against a measurement rather than a feeling: a
+twelve-lane arm** — twelve concurrent suites on one database, 2 runs each, 24
+runs, `-count=1`. **Zero failures, and the 30s heartbeat never fired once**, so
+no single wait reached half a minute even with twelve binaries queueing. The
+longest package *binary* in that arm was `workout` at 31.2s wall, and that
+includes its own ~7s of work, which bounds the wait itself at roughly 25s. 300s
+is therefore about an order of magnitude of headroom. Nothing hit the deadline in
+any arm.
+
+A side observation from that arm, since it is the kind of number that gets
+assumed rather than checked: twelve lanes were *better* throughput than four —
+255s for 24 runs against 453s — because the non-database packages still overlap
+freely and only the database work queues. The lock does not turn the machine into
+a single-file queue; it turns the *database* into one.
+
+**The irony CLAUDE.md carried is resolved rather than deleted.** That file names
+`workout` as *the one to copy* for fixture discipline, and `workout` was the
+worst offender here — 20 failures in 22 runs. Both are true and they are not in
+tension: owning your rows is about the rows you **read**, and it is what retired
+the alphabetical-ordering crutch in 2026-08-16. It says nothing about the rows
+you **write** while a second copy of your own binary is reading them — and doing
+it well means seeding more, owning more and cleaning up more, so the better a
+package follows that list, the more damage its cleanup does to a neighbour. The
+two rules are orthogonal and both are needed. CLAUDE.md now says so in place,
+next to the list.
+
+**What is in the diff.** `backend/internal/platform/testdb` holds the whole
+mechanism and the reasoning; every Postgres-backed package gets a five-line
+`main_test.go` — 22 modules plus `internal/platform/database`. **No fixture ids
+were renamed and no `t.Cleanup` moved**, which is deliberate: once a binary is
+the sole writer, per-test seed/delete churn is harmless again, so the packages
+keep their fixtures exactly where they were. That also means `workout`'s and
+`session`'s `requireUnsorted` guards — the ones that catch a rename inverting a
+lexical order some test depends on invisibly — are untouched and still hold.
+`session` moves onto the shared key and loses its own; the per-process seeding
+#426 gave it stays, because that was a separate and worthwhile churn fix.
+
+**Every guard here was mutation-tested.** Removing the `Lock` call from
+`TestMain` turns all 24 lock assertions red. `testdb`'s own three tests were each
+mutated too — and two of them failed to fail on the first attempt, which is the
+reason to do it: the message mutation produced a *compile* error rather than a
+test failure (a non-zero exit proving nothing), and `TestTheLockKeyIsScopedToThe
+Database` **passed** its mutation, because it compared the scope expression
+against the hash of an invented name and was therefore asserting only that two
+different strings hash differently. It connects to a second real database now.
+A fourth mutation, deleting the `lock_timeout` itself, fails by hanging to the
+test timeout — which is exactly the failure the deadline exists to prevent.
+
+**And the guard itself was wrong in a way only a fleet exposes — found twice,
+independently, on the same afternoon.** `AssertHeld` originally asked
+`pg_try_advisory_lock` and failed if it succeeded. That proves somebody holds the
+key. It does not prove *this binary* does — so delete the `TestMain`, run while a
+colleague's suite is up, and the probe still cannot take the lock and the guard
+still goes green. **Vacuously passing in precisely the conditions the lock exists
+for**, which is the sharpest version of "verify that a check can fail": the
+mutation test that cleared it was run on an idle database, where the hole cannot
+appear.
+
+A parallel session reviewing #426's own guard hit it first and fixed it there
+(#457, which landed on `main` while this branch was open); this branch's reviewer
+reached the same finding independently, an hour later, on a different copy of the
+same mistake. Rebasing then put the two in direct conflict — #457 hardening
+`session`'s own lock, this branch deleting that lock in favour of the shared one
+— and the resolution keeps the *idea* and drops the duplicated plumbing. The fix
+is theirs and is adopted here: `Lock` records
+`pg_backend_pid()` on the connection it succeeded on, and `AssertHeld` reads
+`pg_locks` and requires **exactly one** holder whose pid is that one. Demonstrated
+rather than argued — with the `Lock` call deleted **and an unrelated psql session
+holding the key**, the old probe passes and the new guard fails; unmutated, with
+the same neighbour holding, the package waits 81s for its turn and then passes.
+
+Two smaller things came out of the same review and are in: `TryLock`/`Unlock`
+take a concrete `*pgx.Conn` rather than the `Conn` interface, so locking through
+a *pool* — which would park the lock on an arbitrary pooled session nothing ever
+releases, wedging every other lane — is a type error instead of a warning in
+prose; and `testdb`'s own contention tests shorten the budget **before** the
+holder acquires, because unlike every consumer they wait inside a *test*, under
+Go's `-timeout` alarm, where a five-minute budget could panic the package instead
+of producing the message.
+
+**Left open.** `-p 1` is now doing less than it used to: the shared lock would
+serialise packages within one invocation as well. It stays, because it is the
+right thing inside one invocation, CI runs exactly one, and removing it is a
+separate change with its own measurement. And the four low-rate packages above
+are fixed by construction rather than by a measurement that could distinguish
+them from zero — at a 1-in-24 base rate, telling "fixed" from "unlucky" needs
+hundreds of runs, and 48 is what was run.
 
 ## 2026-08-20 — Merge authority is a grant, not a default, and the file said otherwise
 
@@ -35289,7 +35496,7 @@ device-reported ticket.
 
 ## Open items / known gaps as of this entry
 
-- **Twelve backend packages still delete each other's fixtures across concurrent test binaries — filed as #454.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.
+- **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
