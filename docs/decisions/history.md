@@ -33571,9 +33571,10 @@ Three sentinels under one `TransportError` base:
 - **`OfflineError`** — no route to the API. Now the case with evidence behind
   it rather than the fallback, which is the whole inversion.
 - **`TimeoutError`** — we stopped waiting. `netFetch` now imposes a deadline
-  (30s, 45s for the two photo-upload routes); nothing in the app had one before
-  except two screens that wrote their own, so a request ran to whatever iOS
-  allowed and then failed with a message about signal.
+  (30s; 45s for the three requests that carry a photo — the two estimate routes
+  and the direct PUT of a check-in photo to object storage); nothing in the app
+  had one before except two screens that wrote their own, so a request ran to
+  whatever iOS allowed and then failed with a message about signal.
 - **`RequestDroppedError`** — the request failed while VOLA answered a probe.
   The likeliest real producer is an upload: the backend's `MaxBytesReader`
   closes the connection after answering, so a client still writing may never
