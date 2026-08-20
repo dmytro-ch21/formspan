@@ -153,17 +153,46 @@ it('accepts a kind it has never heard of, and simply does not navigate', async (
   expect(await screen.findByTestId('shared-landed')).toBeTruthy();
 });
 
-it('points a sequence at the Library, which is where its copy lands', async () => {
-  // No `app/sequence/` route exists yet, so there is nowhere to navigate — but
-  // "somewhere" is still knowable, and vaguer copy would be a worse answer
-  // than the specific one.
+it('opens an accepted sequence, rather than describing where it went', async () => {
+  // **This test used to assert the opposite**, and it passed: it pinned the
+  // copy "your copy is in the Library", which was false in two directions —
+  // this app had no sequence route at all, and the Library tab is the
+  // technique and exercise catalog, which has never held a chain. Issue #414
+  // was filed above every other phone-impossible gap for that reason: the
+  // others omit a surface, that one made a claim an athlete would act on.
+  //
+  // `seq-copy` is the RECIPIENT'S id, same rule as the workout case above.
   mockInbox.mockResolvedValue([card({ id: 's8', resource_type: 'sequence' })]);
   mockAccept.mockResolvedValue({ resource_type: 'sequence', resource_id: 'seq-copy' });
 
   render(<SharedScreen />);
   fireEvent.press(await screen.findByTestId('share-accept-s8'));
 
-  expect(await screen.findByText(/in the Library/)).toBeTruthy();
+  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/sequence/seq-copy'));
+  // And nothing is said about where it went, because it went there.
+  expect(screen.queryByTestId('shared-landed')).toBeNull();
+});
+
+it('never names the Library as where an accepted thing lands', async () => {
+  // The fallback message is the surviving half of #414, and it is the half
+  // that can rot silently: a `sequence` arm pointing at a screen that never
+  // held one sat here for months without a test that could see it. Pinned to
+  // the LITERAL word rather than to the message constant — asserting the
+  // component renders `LANDED_MESSAGE` would be true however that constant
+  // read, which is the true-by-construction shape review caught elsewhere in
+  // this repo the day before this landed.
+  //
+  // Run against the unknown kind, because that is the only arm that still
+  // reaches the message at all now that sequences navigate.
+  mockInbox.mockResolvedValue([card({ id: 's7', resource_type: 'spaceship' })]);
+  mockAccept.mockResolvedValue({ resource_type: 'spaceship', resource_id: 'x' });
+
+  render(<SharedScreen />);
+  fireEvent.press(await screen.findByTestId('share-accept-s7'));
+
+  const landed = await screen.findByTestId('shared-landed');
+  expect(landed).toHaveTextContent('Accepted — the copy is yours now.');
+  expect(screen.queryByText(/Library/)).toBeNull();
 });
 
 it('says the load failed rather than showing an empty inbox', async () => {
