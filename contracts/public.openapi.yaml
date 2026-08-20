@@ -1798,6 +1798,7 @@ components:
         - track_effort
         - share_training_with_friends
         - share_training_details
+        - activity_level
         - created_at
         - updated_at
       properties:
@@ -1895,6 +1896,24 @@ components:
 
             Read LIVE too, so turning it off strips the detail from every past
             row immediately — and turning it ON is retroactive in the same way.
+        activity_level:
+          type: string
+          enum: [sedentary, light, active]
+          nullable: true
+          description: >
+            Daily movement OUTSIDE logged training — the NEAT term in the
+            calorie derivation. The vocabulary stops at `active` (an
+            on-your-feet job) on purpose: textbook multipliers run to 1.9 with
+            exercise already folded in, and adding logged sessions on top of one
+            of those counts every mat class twice.
+
+
+            Null means the athlete has never chosen, which is a DIFFERENT fact
+            from having chosen `light`. A derivation with null assumes `light`
+            and reports `activity_chosen: false`, so a client can render the
+            assumption as an assumption instead of showing a filled control for
+            a decision nobody made. Kept nullable for exactly that reason rather
+            than defaulted in the column.
         created_at:
           type: string
           format: date-time
@@ -1984,6 +2003,23 @@ components:
           description: >
             Opt in or out of publishing the exercise/technique list alongside
             the numbers. Absent means "leave alone", for the same reason.
+        activity_level:
+          type: string
+          enum: [sedentary, light, active]
+          nullable: true
+          description: >
+            The athlete's daily-movement choice. Absent — or an explicit
+            `null` — means "leave unchanged", the same contract as every other
+            field here, so a client that has never heard of this field cannot
+            clear it. Going back to "never chosen" is therefore not expressible
+            through this path; nothing needs it, and the target screens PATCH
+            this one key on its own.
+
+
+            An out-of-vocabulary value is a 400 rather than a silent fall back
+            to the default: substituting `light` for a typo would return a 200
+            naming a level the caller never asked for, and the client would
+            cache it as the athlete's own choice.
 
     Flag:
       type: object
@@ -10309,7 +10345,21 @@ paths:
           description: >
             NEAT only — everything that is NOT logged training. The ladder stops
             at `active` (an on-your-feet job) on purpose.
-          schema: { type: string, enum: [sedentary, light, active], default: light }
+
+
+            **Omit it to derive at whatever the athlete has stored** on
+            `profile.activity_level`, falling back to `light` when they have
+            never chosen. Sending it OVERRIDES the stored value for this request
+            without writing anything, which is what lets a client preview "what
+            if I had a desk job" before committing to it — committing is a
+            PATCH to /profile.
+
+
+            The response always echoes back the level it actually used, so the
+            control and the number come out of one payload and cannot disagree.
+            No default is applied to the parameter itself: an absent parameter
+            and `light` are genuinely different requests now.
+          schema: { type: string, enum: [sedentary, light, active] }
       responses:
         "200":
           description: A suggestion, or null with the fields that are missing.
@@ -10317,7 +10367,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [suggestion, missing, activities]
+                required: [suggestion, missing, activities, activity, activity_chosen]
                 properties:
                   suggestion:
                     type: object
@@ -10331,6 +10381,34 @@ paths:
                   activities:
                     type: array
                     items: { type: string, enum: [sedentary, light, active] }
+                  activity:
+                    type: string
+                    enum: [sedentary, light, active]
+                    description: >
+                      The level this derivation actually ran at — the `activity`
+                      parameter if one was sent, else the stored
+                      `profile.activity_level`, else `light`.
+
+
+                      Top level rather than inside `suggestion`, and that
+                      placement is load-bearing: `basis.activity` carries the
+                      same value but `basis` is null for an incomplete profile,
+                      and an athlete who cannot be given a number yet still has
+                      a level to display and change. Reading it off the basis
+                      leaves the control unrenderable in exactly the state the
+                      rest of the screen is asking them to fix.
+                  activity_chosen:
+                    type: boolean
+                    description: >
+                      Whether `activity` came from the athlete rather than from
+                      the default. False means nobody has ever chosen and
+                      `light` was assumed.
+
+
+                      Clients MUST NOT render a chosen-looking control on false:
+                      a filled pill attributes a decision to somebody who never
+                      made one. Show the assumption, named, and let them confirm
+                      or change it.
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
