@@ -32159,6 +32159,85 @@ not the work.
   that `TASKS.md` records as fixed. Added to the board as `Todo`; it is probably
   closeable, but that is the user's call, not a migration decision.
 
+
+## 2026-08-20 — The polite client was the one being punished (F15)
+
+`nutrition`'s `Retry-After` truncated. `retryAfterSeconds` was
+`int(d.Seconds())`, so a quota with 1.5 seconds left in its window advertised
+`1` — and the window is `created_at > since`, meaning a client that waited
+exactly the one second it was told to wait was still inside the window by the
+half-second that had been dropped, and got a second 429 for doing precisely
+what the server asked. An impatient client that overshot succeeded. The
+incentive was backwards, and the header that exists to replace prose was
+telling a machine something a machine could not act on.
+
+It is now `(d + time.Second - 1) / time.Second`, which is what
+`internal/platform/ratelimit.roundUpSecond` and `bjj.draftRetryAfterSeconds`
+already did and what `docs/architecture/api-conventions.md` has promised all
+along: "rounded up so that obeying it exactly succeeds". Three implementations,
+one rule, and now no exception. `bjj`'s docstring — which named this endpoint as
+still-broken and pointed at the open task — is corrected rather than left as a
+stale accusation.
+
+### The only test that could have caught it
+
+The fix is one line. The interesting half is that **the obvious test passes
+against the bug**. "The quota resets in 30 seconds, so `Retry-After` is 30" is
+true under truncation and under rounding alike; a table of whole seconds
+measures nothing. The only inputs that discriminate are remainders with a
+fractional part, where flooring and ceiling differ — so every case in
+`TestRetryAfterRoundsUpSoObeyingItWorks` has one, with two exact-second cases
+kept for the opposite reason (a ceiling must not push a client a second further
+out than the window needs).
+
+The arithmetic table is not the claim, though. It restates the formula, and a
+test that restates the formula is the "true by construction" shape this repo has
+hit twice. So the claim is asserted end to end instead, in
+`TestObeyingRetryAfterExactlyIsAdmitted`: fill the quota against real Postgres,
+ask the handler at an instant chosen so the window has **1.5 seconds** left,
+read the header off the 429, move the injectable clock forward by exactly that
+many seconds, call again, and require a 200. The window that decides is the real
+`created_at > since` executed by Postgres, not a restatement of it in Go, and the
+reset instant is read back from `MIN(created_at)` rather than invented. Nothing
+sleeps; `now` is a parameter on both the handler and the repository, which is the
+only way to test a 24-hour window at all.
+
+One assertion in that test exists purely to keep the rest honest: **before**
+checking that the advertised wait is admitted, it checks that one second — what
+truncation used to advertise — is still refused. If that ever passes, the fixture
+has drifted off the boundary and the test below it would go green against the
+bug without anyone noticing.
+
+Measured rather than assumed, per the standing rule: with the truncation
+restored, the table fails on four of its eight cases and the integration test
+fails on the header value; with the header assertion temporarily relaxed so the
+round trip could be observed directly, it fails at the end instead — `status 429
+after waiting the advertised 1s`. Both files restored, both packages green
+afterwards in the same session.
+
+### The server half is only half — filed as F17
+
+Searched the clients before calling this done, and the answer is worth more than
+the fix: **nothing reads the header.** Not one line in `apps/mobile`,
+`apps/web` or `apps/admin` touches a response header at all. All three fetch
+wrappers keep `res.status` and the JSON envelope and drop the `Response`, and
+`ApiError` has no field that could carry a delay, so honouring it is a type
+change and not a call-site change.
+
+What that costs today: `identifyApi.ts` invents its own wait in copy — "Give it
+a few minutes" — while the true figure was on the wire; `sync.ts` retries a 429
+on a hard-coded `[5s, 15s, 60s, 300s]` ladder blind to what the server asked,
+so a 300-second limit is hit three more times before the ladder reaches a
+minute; and `describe.tsx` never locks its send button on an exhausted quota, so
+the athlete can keep firing requests that cannot succeed. `identify.tsx` also
+derives its hint from `isRetryable`, which classifies 429 as non-retryable, and
+therefore tells a rate-limited athlete to *retake the photo* — advice for a
+failure a new photo cannot fix.
+
+None of that is this fix's scope, and all of it means an athlete notices nothing
+from this PR on its own. It is F17, and it is the half with the user-visible
+behaviour in it.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

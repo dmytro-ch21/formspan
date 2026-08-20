@@ -5554,6 +5554,10 @@ number would describe something still happening.
 - **Obeying `Retry-After` exactly must succeed.** Wait the advertised seconds
   and retry; a second 429 means the header rounds down and is lying.
 - Waiting less than advertised still fails.
+- **Both halves of that need a fractional remainder to mean anything.** A window
+  with a whole number of seconds left rounds the same way either direction, so
+  the scenario has to land mid-second — otherwise it passes against the exact
+  bug it is written for (F15, fixed for `/v1/nutrition/estimate` in #391).
 - One athlete exhausting their budget must not affect another's. Test with two
   accounts, not one — an IP-keyed limiter passes a single-account test and
   throttles a whole gym in production.
@@ -5565,6 +5569,20 @@ number would describe something still happening.
   unaffected (separate buckets), and that ordinary reads still work.
 - Re-requesting after a decline is still possible but now bounded — that was
   the residual this closes.
+
+### Known gap: no client reads the header (F17)
+
+- Server-side scenarios above are all reachable today. **Client-side ones are
+  not yet**: nothing in `apps/mobile`, `apps/web` or `apps/admin` reads a
+  response header at all, so no app can honour `Retry-After` regardless of what
+  the server sends. Anyone writing a client scenario for it is writing a test
+  for F17, not a regression test for existing behaviour.
+- What to assert once it lands: the identify screen stops inventing "a few
+  minutes" and says the real wait; the outbox in `sync.ts` respects a delay
+  longer than its `[5s, 15s, 60s, 300s]` ladder rather than burning retries
+  under it; an exhausted estimate quota disables the send button instead of
+  letting the athlete re-fire a doomed request; and a rate-limited identify says
+  *wait*, not *retake the photo*.
 
 ### What must NOT break
 
@@ -7272,8 +7290,11 @@ this section.
 - **The quota is checked BEFORE the model is called.** At the cap, the response
   is 429 and the upstream is never reached. A test that only checks the status
   passes against a handler that spent the money first.
-- **The two paths have separate caps.** Exhausting photos must leave the text
-  path working, and vice versa — the scenario needs both halves.
+- **ONE budget across both paths, not one per path.** This bullet used to say
+  the opposite, and a scenario asserting it would now be asserting removed
+  behaviour: exhausting the cap with photos must ALSO close the text path.
+  Filling it from a single path passes against an implementation that still
+  meters per source, so the scenario needs a mix.
 - **Failed and refused calls count toward the quota.** They cost tokens.
 - **The window rolls.** A call ages out 24 hours later and one more becomes
   available; `resets_at` names when.
@@ -7292,6 +7313,17 @@ this section.
   — a scenario should assert there is no timestamp in it, because a UTC instant
   passes a "does it say when" check while naming the wrong day for anyone west
   of Greenwich.
+- **`Retry-After` is rounded UP, and obeying it exactly must be admitted (F15).**
+  Exhaust the quota, read the header, wait precisely that many seconds, retry —
+  a second 429 means the header is lying and the polite client is the one being
+  punished. **The scenario only tests anything if the remaining window has a
+  FRACTIONAL part**: at a whole number of seconds flooring and ceiling agree, so
+  "wait 30 seconds" passes against the truncating bug. Pair it with the negative
+  half — the truncated value (one second less) must still be refused — or the
+  fixture can silently drift off the boundary and the test goes green for the
+  wrong reason.
+- **A sub-second remainder never advertises `0`.** A `Retry-After: 0` invites the
+  immediate retry the quota just refused.
 - **No upstream error text ever reaches the client** — it can carry request ids
   and prompt fragments.
 - **A deploy with no key for the selected provider serves 503 on this route only.** Every
