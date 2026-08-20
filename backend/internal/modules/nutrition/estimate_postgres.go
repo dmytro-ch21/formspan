@@ -31,7 +31,7 @@ func NewPostgresEstimateUsage(pool *pgxpool.Pool) *PostgresEstimateUsage {
 // every call. The `MIN(created_at)` is what `resets_at` is derived from: the
 // oldest call in the window is the next one to age out.
 //
-// Served by `nutrition_estimates_user_window_idx`, added in migration 000064.
+// Served by `nutrition_estimates_user_window_idx`, added in migration 000065.
 // The original index leads `(user_id, source, created_at)`, and dropping the
 // source predicate makes it unusable as a range scan — `source` sits between
 // the two columns still being filtered, so this query would degrade to
