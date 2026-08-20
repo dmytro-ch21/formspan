@@ -23,6 +23,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { transportDiagnosis } from '@/lib/apiError';
 import { getStanding } from '@/lib/bjj';
+import { stillWanted } from '@/lib/inflight';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -541,6 +542,11 @@ export default function LibraryScreen() {
     const ac = new AbortController();
     techniqueAbortRef.current = ac;
     const deadline = { timeoutMs: REQUEST_TIMEOUT_MS };
+
+    // Superseded OR unmounted, both of which must set nothing — see
+    // `lib/inflight.ts` for why the ref check alone is not enough, and why
+    // this is a tested function rather than an inline comparison.
+    const wanted = () => stillWanted(techniqueAbortRef.current, ac);
     try {
       const [list, rs] = await Promise.all([
         fetchTechniques(getToken, ac.signal, deadline),
@@ -571,12 +577,12 @@ export default function LibraryScreen() {
           // premise that this function took no signal was simply wrong.
           listCurricula(getToken, ac.signal).catch(() => [] as Curriculum[]),
         ]);
-        if (techniqueAbortRef.current === ac) {
+        if (wanted()) {
           setPositions(list);
           setSyllabuses(beltSyllabuses(curricula));
         }
       } catch {
-        if (techniqueAbortRef.current === ac) {
+        if (wanted()) {
           setPositions([]);
           // Cleared together: they are fetched together, so leaving one
           // populated after the pair failed shows a reference block that is
@@ -585,12 +591,11 @@ export default function LibraryScreen() {
         }
       }
     } catch {
-      // A supersede is not a failure; a timeout is. They no longer arrive as
-      // the same kind of rejection — a timeout is a `TimeoutError` now — but
-      // this check is kept as the primary one because it also covers an
-      // unmount, and because a superseded request must not touch state that
-      // the newer one has already set.
-      if (techniqueAbortRef.current === ac) setTechniquesFailed(true);
+      // A supersede is not a failure, and neither is an unmount; a timeout is.
+      // A timeout no longer aborts THIS controller — the deadline lives in the
+      // transport and arrives as a `TimeoutError` — so `stillWanted()` is true
+      // for one and false for the other two, which is the whole distinction.
+      if (wanted()) setTechniquesFailed(true);
     }
   }, [getToken, techniqueSport]);
 

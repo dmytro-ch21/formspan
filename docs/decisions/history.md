@@ -33671,6 +33671,47 @@ branch in particular is confirmed only by a device with its radio off, and the
 TLS branch by pointing the app at a host that refuses one. Both are listed under
 *Needs a device* in `functional-scenarios.md` rather than claimed.
 
+### What review added
+
+Four things, and two of them were defects rather than polish.
+
+**`library.tsx`'s remaining guard was wrong for an unmount.**
+`techniqueAbortRef.current === ac` looks like it covers both supersede and
+unmount; it does not, because the cleanup calls `abort()` and **leaves the ref
+pointing at the same controller**, so the identity check passes and the state
+set runs on a component that is gone. React 19 no longer warns about that, so
+the only symptom is nothing — with a comment above it claiming the case was
+handled. Same class as the `signal.reason` bug: a guarantee asserted in prose
+that the runtime does not provide. It is now `lib/inflight.ts`'s `stillWanted`,
+**a function rather than an inline comparison specifically so it can be
+tested** — the unmount case is unobservable from a component test, and a
+mutation removing `!run.signal.aborted` survived until the helper existed.
+
+**`scan.tsx` was the one site where this PR's own rule was not applied.** It
+still tested `isOffline` alone, so once a timeout and a dropped lookup stopped
+being `OfflineError` they fell through to the raw message — losing the thing
+that screen knows and the transport does not, which is that a barcode already
+scanned on this phone still resolves. Migrated. (That screen is also the subject
+of #432, an app-terminating crash reported from a device; this change is
+confined to one copy function and touches nothing on the scan path.)
+
+**`describeMeal` had no deadline decision, only an inherited one.** The constant
+was called `UPLOAD_TIMEOUT_MS`, and the text path uploads nothing — so a name
+argued a request out of a budget it needs. It is the same route waiting on the
+same provider, and a slow provider day does not care whether the prompt had an
+image in it; left on the 30s default it would have surfaced as a mystery timeout
+on the text path only. Renamed `SLOW_REQUEST_TIMEOUT_MS`, which now states both
+reasons a request is legitimately slow — a multi-megabyte body, or a model at
+the other end — and covers the check-in photo PUT as well.
+
+**And one finding was declined.** The reviewer raised, as blocking, that N55's
+line in `docs/TASKS.md` was unticked. That file became an archive earlier the
+same day; `CLAUDE.md` now says a tick there means nothing, and the close is
+`closes #365` in the PR body. Recorded because the reviewer produced a confident
+blocking finding **from its own stale knowledge of a convention that was a hard
+rule that morning** — a gate arguing persuasively for a regression, which is a
+thing to expect on the day a convention changes.
+
 ### Left open
 
 - **The two AI routes answer 503 with the error code `internal`.** The contract

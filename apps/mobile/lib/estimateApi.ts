@@ -1,6 +1,6 @@
 import { transportDiagnosis } from './apiError';
 import { apiRequest } from './apiRequest';
-import { UPLOAD_TIMEOUT_MS } from './authedFetch';
+import { SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
 import type { Macros, Meal } from './nutrition';
 import type { TokenGetter } from './useAuthToken';
 
@@ -76,10 +76,18 @@ export function describeMeal(
   getToken: TokenGetter,
   input: { description: string; meal?: Meal },
 ): Promise<EstimateResponse> {
-  return apiRequest<EstimateResponse>(getToken, '/nutrition/estimate', {
-    method: 'POST',
-    body: JSON.stringify({ description: input.description, meal: input.meal ?? null }),
-  });
+  return apiRequest<EstimateResponse>(
+    getToken,
+    '/nutrition/estimate',
+    {
+      method: 'POST',
+      body: JSON.stringify({ description: input.description, meal: input.meal ?? null }),
+    },
+    // No photo, and it still gets the slow budget: this waits on the same
+    // provider as the photo path, and the default deadline is sized for a
+    // JSON read that nothing is thinking about.
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
+  );
 }
 
 /**
@@ -113,7 +121,7 @@ export function photographMeal(
     { method: 'POST', body: form },
     // A photo plus a provider round trip is the slowest thing the app asks
     // for; the default deadline is sized for a JSON read.
-    { timeoutMs: UPLOAD_TIMEOUT_MS },
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
   );
 }
 

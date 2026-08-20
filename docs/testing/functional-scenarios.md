@@ -10138,6 +10138,12 @@ not a guess**: on an unclassifiable failure the phone sends one bodyless GET to
   lands in `OfflineError` — *"Can't reach VOLA"*, which is true. What must
   never happen is a **per-request** failure over a working network reading as
   no connection.
+- **A captive portal that answers everything with its own 200 reads as
+  reachable**, so a genuinely blocked request says *"That didn't get through"*
+  rather than *"Can't reach VOLA"*. Wrong in detail, right in advice, and
+  neither sends the athlete to sign in again or to hunt for a signal they
+  already have. **Test it as the accepted limit, not as a bug** — a fix that
+  narrows it must not widen `OfflineError` back into a catch-all.
 - **A request killed mid-body while the API is up → `RequestDroppedError`.**
   Reproduce by making the request fail against a reachable API; the message
   must not contain the word "signal". The likeliest real producer is the
@@ -10160,8 +10166,14 @@ not a guess**: on an unclassifiable failure the phone sends one bodyless GET to
   a plate.
 - A screen with a better action than "try again" composes its own message from
   `transportDiagnosis()` — the camera says *search for the exercise instead*,
-  the meal screen *enter the food by hand*. **The diagnosis stays central;
-  only the action is local.** Assert that the action is not printed twice.
+  the meal screen *enter the food by hand*, the barcode scanner *a barcode
+  you've scanned before still works*. **The diagnosis stays central; only the
+  action is local.** Assert that the action is not printed twice.
+- **Every screen that degrades to a local cache offers it for all three
+  outcomes, not only for `OfflineError`.** The barcode scanner is the case:
+  narrowing it back to `isOffline` drops the cache hint on a timeout and on a
+  dropped lookup, which is the same "one branch quietly stopped matching" that
+  the taxonomy was introduced to end.
 - **A 503 from the estimate route reads as a feature that is not switched on**,
   names manual entry, and never mentions the connection. The route answers 503
   when the deploy has no provider key.
@@ -10181,6 +10193,20 @@ not a guess**: on an unclassifiable failure the phone sends one bodyless GET to
   tests. `lib/__tests__/rnGlobals.test.ts` is a source scan that fails on any
   reintroduction; a runtime test cannot see this, because these APIs work
   perfectly in the runner.
+
+### The deadline
+
+- **Every request has one now** — 30s by default, 45s for anything carrying a
+  photo *or waiting on a language model*. The text estimate path is in the
+  second group even though it uploads nothing: same route, same provider, and a
+  constant named `UPLOAD_TIMEOUT_MS` nearly argued it out of a budget it needs.
+- **A screen that wants to give up sooner passes its own** — the library and
+  the position screen both ask for 10s. Assert the screen ASKS: if the option
+  stops being passed, the request silently runs to the 30s default and nothing
+  goes red, because it still completes and still renders.
+- **A timeout does not abort the caller's controller**, so a screen must not
+  treat it as an unmount. That confusion is what left the position screen
+  spinning forever.
 
 ### Needs a device
 

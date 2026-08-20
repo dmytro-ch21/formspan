@@ -1,6 +1,6 @@
 import { transportDiagnosis } from './apiError';
 import { apiRequest } from './apiRequest';
-import { UPLOAD_TIMEOUT_MS } from './authedFetch';
+import { SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -75,7 +75,7 @@ export function identifyMachine(
     { method: 'POST', body: form },
     // A photo plus a provider round trip is the slowest thing the app asks
     // for; the default deadline is sized for a JSON read.
-    { timeoutMs: UPLOAD_TIMEOUT_MS },
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
   );
 }
 

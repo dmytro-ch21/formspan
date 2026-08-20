@@ -57,16 +57,29 @@ export const API_BASE = `${API_URL}/v1`;
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * The budget for a photo upload plus the model round trip behind it.
+ * The budget for the requests that are legitimately slow.
  *
- * The estimate and identify routes hold the connection open while a provider
- * looks at the image, and the backend puts no ceiling of its own on that call.
- * 45s keeps them inside a deadline we can name while leaving the slow-but-fine
- * case alone — a plate of food over gym wifi is the request most likely to be
- * legitimately slow, and cutting it off would be a new bug wearing the fix's
- * clothes.
+ * Two reasons a request is slow and fine, and this covers both rather than
+ * pretending they are one:
+ *
+ * - **It carries a multi-megabyte body.** The check-in photo goes straight to
+ *   object storage over whatever the changing room has.
+ * - **It waits on a language model.** The estimate and identify routes hold the
+ *   connection open while a provider thinks, and the backend puts no ceiling of
+ *   its own on that call.
+ *
+ * **`describeMeal` gets this too, and that is a decision rather than an
+ * oversight.** It sends no photo, so the name of the old constant
+ * (`UPLOAD_TIMEOUT_MS`) argued it out of a budget it needs: it is the same
+ * route, waiting on the same provider, and a slow provider day does not care
+ * whether the prompt had an image in it. Left on the default it would have
+ * surfaced as a mystery timeout on the text path only. Raised in review.
+ *
+ * 45s keeps all of them inside a deadline we can name while leaving the
+ * slow-but-fine case alone — cutting one off would be a new bug wearing the
+ * fix's clothes.
  */
-export const UPLOAD_TIMEOUT_MS = 45_000;
+export const SLOW_REQUEST_TIMEOUT_MS = 45_000;
 
 /** Long enough for a healthy API on a bad link, short enough to be invisible. */
 const PROBE_TIMEOUT_MS = 2_500;
@@ -81,7 +94,7 @@ const PROBE_TIMEOUT_MS = 2_500;
 const PROBE_TTL_MS = 2_000;
 
 export interface NetFetchOptions {
-  /** Override the deadline. `UPLOAD_TIMEOUT_MS` for anything carrying a photo. */
+  /** Override the deadline. `SLOW_REQUEST_TIMEOUT_MS` for a big body or a model. */
   timeoutMs?: number;
 }
 

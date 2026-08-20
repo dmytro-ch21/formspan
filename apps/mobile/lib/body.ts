@@ -1,5 +1,5 @@
 import { apiRequest } from './apiRequest';
-import { netFetch, UPLOAD_TIMEOUT_MS } from './authedFetch';
+import { netFetch, SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
 import type { PhaseKind } from './anthropometry';
 import type { TokenGetter } from './useAuthToken';
 
@@ -218,10 +218,10 @@ export async function uploadCheckinPhoto(
       headers: { 'Content-Type': ticket.content_type },
       body: blob,
     },
-    // The upload budget, not the default: this is a multi-megabyte PUT to
+    // The slow budget, not the default: this is a multi-megabyte PUT to
     // object storage over whatever the changing room has, and it is the one
-    // request in the app most likely to be slow and fine.
-    { timeoutMs: UPLOAD_TIMEOUT_MS },
+    // request in the app most likely to be slow for reasons of size alone.
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
   );
   if (!res.ok) {
     throw new Error(`Couldn't upload that photo (${res.status}).`);

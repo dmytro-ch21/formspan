@@ -10,6 +10,7 @@
  */
 
 import { describeMeal, itemToEntry, photographMeal, type EstimatedItem } from '../estimateApi';
+import { DEFAULT_TIMEOUT_MS, SLOW_REQUEST_TIMEOUT_MS } from '../authedFetch';
 
 const mockFetch = jest.fn();
 // Spread over the real module rather than replacing it: `authedFetch` also
@@ -152,5 +153,34 @@ describe('itemToEntry', () => {
       // of the module holds.
       fibre_g: null,
     });
+  });
+});
+
+/**
+ * Both estimate paths wait on a provider, so both need the slow budget (N55).
+ *
+ * The text path is the one that nearly missed it: it sends no photo, and the
+ * constant used to be called `UPLOAD_TIMEOUT_MS`, which argued a request out of
+ * a budget it needs on the grounds of a name. Same route, same provider, and a
+ * slow provider day does not care whether the prompt had an image in it —
+ * left on the default this would have surfaced as a mystery timeout on the text
+ * path only. Raised in review.
+ */
+describe('the deadline each estimate path asks for', () => {
+  const deadlineOf = () => {
+    const opts = mockFetch.mock.calls[0][2] as { timeoutMs?: number } | undefined;
+    return opts?.timeoutMs;
+  };
+
+  it('gives the text path the slow budget, not the default', async () => {
+    await describeMeal(token, { description: 'two eggs' });
+    expect(deadlineOf()).toBe(SLOW_REQUEST_TIMEOUT_MS);
+    // Stated as a difference, so a mutation making them equal cannot pass.
+    expect(deadlineOf()).not.toBe(DEFAULT_TIMEOUT_MS);
+  });
+
+  it('gives the photo path the slow budget too', async () => {
+    await photographMeal(token, { uri: 'file:///m.jpg', mimeType: 'image/jpeg' });
+    expect(deadlineOf()).toBe(SLOW_REQUEST_TIMEOUT_MS);
   });
 });
