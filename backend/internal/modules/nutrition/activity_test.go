@@ -1,6 +1,8 @@
 package nutrition
 
-import "testing"
+import (
+	"testing"
+)
 
 // The daily-movement level had no home until N93: both clients held it in
 // component state, so it reset on every navigation and took the derived calorie
