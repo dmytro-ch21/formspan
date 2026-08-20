@@ -7078,10 +7078,19 @@ paths:
         leaving a roadmap able to remove its techniques without touching the
         athlete's own. Send `roadmap` when applying a curriculum; omit it for a
         hand edit, and the new entries become the athlete's, which no roadmap can
-        ever remove. Provenance is fixed when an entry first appears and is never
-        rewritten by a later save — so a technique picked by hand and later also
-        named by a roadmap stays the athlete's, and survives that roadmap's
-        deactivation.
+        ever remove.
+
+
+        Two different things are recorded, and only one of them is fixed.
+        OWNERSHIP — the athlete's, a roadmap's, or unknown for entries predating
+        this — is set when an entry first appears and is never rewritten by a
+        later save, so a technique picked by hand and later also named by a
+        roadmap stays the athlete's and survives that roadmap's deactivation.
+        CLAIMS are additive: a roadmap-owned entry accumulates a claim from every
+        roadmap that names it, and is removed only when the last of them lets go.
+        That is what stops one roadmap's deactivation taking a technique another
+        active roadmap is still working. A claim is never added to an entry the
+        athlete owns, so naming one costs nothing and protects nothing away.
       requestBody:
         required: true
         content:

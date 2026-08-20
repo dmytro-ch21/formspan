@@ -34655,6 +34655,31 @@ the snapshot does not provide.
 
 ### Open questions this leaves
 
+- **A second roadmap that adds nothing to the list can never register its claim,
+  and the repository test cannot see it.** Found by the frontend reviewer, not by
+  the suite, and it is a genuine residual on the "two roadmaps active" criterion.
+  Both panels hide the apply control when `proposal.unchanged`, which is true
+  when the roadmap's techniques are ALREADY all in focus in the same order —
+  exactly the case where a second overlapping syllabus needs to claim them. So:
+  apply roadmap A, enrol in roadmap B wanting the same techniques, and B is
+  offered no button; deactivating A then takes them while B is active. The
+  backend handles this correctly and `TestDeactivatingOneRoadmapLeavesAnother
+  RoadmapsTechniquesAlone` proves it — because that test drives the repository
+  directly and never passes through the gate that suppresses the write. **A
+  repository test cannot fail on a UI that declines to call it.**
+
+  Not fixed here because the honest fix changes a shared read: `unchanged` is
+  computed from the list alone, and the client would need to know which roadmaps
+  already claim each entry to compute it correctly — i.e. `GET /v1/bjj/focus`
+  exposing the claim set, which is also what would make provenance legible on the
+  read side rather than only in storage. That is a contract change arriving after
+  review, on the endpoint every BJJ surface depends on. Filed as **N100
+  (#458)**.
+
+  The failure it leaves is the mild one in this ticket's pair: a technique
+  disappears from focus and is one tap to re-add, versus the destructive failure
+  — deleting something hand-picked — which is closed and tested from several
+  directions.
 - **Not verified on a device**, which is where it was reported. The acceptance
   criteria say so explicitly, and reading the code is the thing those criteria
   exist because it fails.

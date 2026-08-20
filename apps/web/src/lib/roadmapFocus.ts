@@ -51,7 +51,9 @@ export type FocusProposal = {
    *
    * Every roadmap technique in `next`, not just the newly added ones: a
    * technique a SECOND roadmap also wants must gain that roadmap's claim too,
-   * or deactivating the first one takes it away from the second.
+   * or deactivating the first one takes it away from the second. The server's
+   * own rule protects hand-picked rows from being claimed, so naming them here
+   * is safe and naming too few is not.
    */
   fromRoadmap: string[];
   /** Roadmap techniques entering focus that were not in it before. */

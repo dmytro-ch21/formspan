@@ -325,8 +325,19 @@ func (h *FocusHandler) Set(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, ErrInvalidInput) {
 			// Covers both foreign keys — the technique library and, when a
 			// roadmap is attached, curricula. One message rather than two,
-			// because distinguishing them would let a caller probe which
-			// curriculum ids exist, including private ones they cannot read.
+			// which keeps the response from NAMING which side failed.
+			//
+			// **It does not make the endpoint non-probing, and an earlier
+			// version of this comment claimed it did.** The caller controls
+			// whether the technique ids are valid, so a 400 against ids they
+			// know are good can only mean the curriculum — the merged message
+			// costs an attacker one extra request, not the answer. What
+			// actually bounds this is that curricula ids are
+			// gen_random_uuid(), so the oracle only confirms the continued
+			// existence of an id the caller has already seen, and attribution
+			// touches nothing but their own rows. Recorded rather than fixed:
+			// checking visibility here would mean bjj resolving curriculum
+			// permissions, which is the coupling this design exists to avoid.
 			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 				"technique_ids must all name a technique in the library, "+
 					"and roadmap.curriculum_id an existing curriculum")

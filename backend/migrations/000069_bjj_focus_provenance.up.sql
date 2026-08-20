@@ -63,11 +63,18 @@ CREATE TABLE IF NOT EXISTS bjj_focus_sources
     technique_id  TEXT NOT NULL,
 
     -- CASCADE: if the curriculum itself is deleted, its claim dies with it and
-    -- the focus row is left with one fewer reason to be there. It cannot strand
-    -- a row in practice -- curriculum_enrollments' ON DELETE RESTRICT means a
-    -- curriculum anybody is enrolled in cannot be deleted at all, and only an
-    -- enrolment can have placed these rows -- but a dangling id would be worse
-    -- than an over-cautious constraint.
+    -- the focus row is left with one fewer reason to be there. A dangling id
+    -- would be worse than an over-cautious constraint.
+    --
+    -- It can strand a row, and the earlier version of this comment argued that
+    -- it could not. The argument was that curriculum_enrollments' ON DELETE
+    -- RESTRICT stops anybody deleting a curriculum somebody is enrolled in, and
+    -- only an enrolment places these rows -- but NOTHING ENFORCES THE SECOND
+    -- HALF. Attribution requires only that the curriculum exist, so a client
+    -- could claim without enrolling, and the owner deleting it afterwards would
+    -- leave an origin='roadmap' row with no claim that no release can reach.
+    -- Self-inflicted, recoverable by editing the list by hand, and the prune
+    -- ignores origin -- but it is a real state, not an impossible one.
     curriculum_id TEXT NOT NULL REFERENCES curricula (id) ON DELETE CASCADE,
 
     PRIMARY KEY (user_id, technique_id, curriculum_id),
