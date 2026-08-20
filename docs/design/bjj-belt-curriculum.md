@@ -17,10 +17,17 @@ in the belt's own colour, each milestone an expandable card showing `N lessons`,
 with a progress card above and a completion card below. Those images are not in
 the repo; the description in the roadmap redesign ticket is.
 
-> **Known discrepancy — needs a ruling.** The white-belt mockup shows **10**
-> milestones and omits *Turtle* as a milestone of its own; the written
-> curriculum below has **11** and includes it. Blue belt agrees exactly at 10 in
-> both. Treat the written list as authoritative unless the user says otherwise.
+> **RULED by the user, 2026-08-20: the images are a DESIGN reference, not a
+> source of truth. The content comes from this text.**
+>
+> That settles the one discrepancy between them. The white-belt mockup showed
+> **10** milestones and dropped *Turtle*; the written list below has **11** and
+> keeps it — **11 is correct**. Blue belt agreed at 10 in both either way.
+>
+> The distinction generalises and is worth holding on to: take *layout* from the
+> mockups — the numbered timeline, the belt-coloured rule, one-at-a-time
+> expansion, the progress and completion cards — and take *every milestone,
+> every lesson and every ordering* from here. Where they disagree, this wins.
 
 ---
 

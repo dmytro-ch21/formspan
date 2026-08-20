@@ -33481,12 +33481,13 @@ Two structural phases in the seed — *How this belt works* and *The graduation
 standard* — have no counterpart in the supplied ordering. Whether they stay is
 an open question, not an omission to be quietly resolved.
 
-**One discrepancy is recorded rather than resolved.** The white-belt mockup shows
-**10** milestones and drops *Turtle* as a milestone of its own; the written
-curriculum has **11** and keeps it. Blue belt agrees exactly at 10 in both. The
-document says to treat the written list as authoritative and to ask — inventing
-an answer here would put a guess into the one artefact everything else measures
-against.
+**The one discrepancy was put to the user and ruled the same day.** The
+white-belt mockup showed **10** milestones and dropped *Turtle*; the written
+curriculum has **11** and keeps it. The ruling: **the images are a design
+reference, not a source of truth — the content comes from the text.** So 11 is
+correct, and the distinction generalises: layout from the mockups, every
+milestone and ordering from the document. Asking cost one message and avoided
+putting a guess into the artefact everything else measures against.
 
 ### Open questions this leaves
 
