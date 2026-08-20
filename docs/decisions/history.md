@@ -34369,6 +34369,168 @@ at exactly 53/53 with zero errors. A ratchet with no headroom is a number that
 is only true as of a commit, which is worth saying out loud in a repo where
 several branches are in flight at once.
 
+## 2026-08-20 — Where the activity level lives, and what that cost (N93, #434)
+
+Reported from a real device as *"Target doesn't save previously added type of
+activity"*. The three daily-movement pills — `Desk job` / `On your feet` /
+`Physical job` — reset to the default every time the athlete left the Goals tab.
+`apps/mobile/app/(tabs)/goals.tsx` held them as `useState<string>('light')`, the
+server took activity as a query parameter with a default, and **no migration
+anywhere added a column**. So the value existed nowhere except a React hook, and
+leaving the tab was enough to lose it.
+
+**It is worse than losing a preference, and that is the reason this got a
+schema change rather than a one-liner.** Pick "Physical job", watch the target
+recalculate, leave, come back: the pill has reverted *and so has the number it
+derived*. The target an athlete read and the target they came back to were
+different, with nothing saying so — the same class as W2 and W4, one screen
+giving two answers under two rules.
+
+### The decision, and the two options it beat
+
+**Chosen: on the profile, server-side** — `profiles.activity_level`, nullable,
+migration `000069`. (It was written as `000068`; `000068_create_daily_trackers`
+landed on `main` mid-branch, and a duplicate version is something golang-migrate
+refuses to start on at all — invisible in a three-dot diff, which uses the merge
+base. Re-checked at rebase time, which is the only time that check means
+anything.)
+
+- **Device-local storage** (`useState` → a local write) fixes the reported bug
+  completely, costs one line, and needs no migration, no contract change and no
+  server work. It was rejected on one consequence: the level is an input to a
+  **calorie target**, and `apps/web` derives that target too. Held per-device, a
+  phone set to `active` and a browser defaulting to `light` compute different
+  numbers for the same athlete on the same day, and *neither surface can tell it
+  is disagreeing*. That is #425 — web and mobile disagreeing about whether a
+  dumbbell weight is per-hand — arriving in the one place the app claims to be
+  auditable. The N16 `offered_grips` lesson says the same thing: agree by
+  construction, not by a parity script.
+- **Derived from logged training** is the wrong question, and worth a sentence
+  because it sounds like the sophisticated answer. This term is NEAT —
+  everything that is *not* logged training. The derivation already adds training
+  as its own auditable line, so inferring this from sessions would count every
+  mat class twice, which is the exact double-count the truncated 1.20/1.30/1.45
+  ladder exists to prevent (see the `Activity` type doc). And no amount of
+  session logging tells you whether somebody stands up all day at work.
+
+**What was given up.** A migration, a contract change, and — the real price —
+the level is now **part of the athlete's record rather than a calculator
+input**. It is one more field to export, to delete on request, and to reason
+about on a shared device. That was accepted because a target that changes
+depending on which screen you asked is worse than a field that has to be
+governed.
+
+### Nullable, and why that is the substantive half
+
+`NULL` means *never chosen*, which is a different fact from *chose light*. A
+`NOT NULL DEFAULT 'light'` would have made them indistinguishable and the screen
+would then show a filled pill attributing a decision to somebody who never made
+one. So the derivation applies the default **at read time, where it can be
+labelled**: the response carries `activity` (the level actually used) and
+`activity_chosen` (whether the athlete picked it). With `activity_chosen: false`
+no pill is selected, the assumed one is drawn dashed, and a line names it.
+
+`activity` and `activity_chosen` are **top level, not inside `suggestion`**.
+`basis.activity` already carried the same value, but `basis` is null for an
+incomplete profile — and that athlete still has a level to display and change.
+Reading it off the basis leaves the control unrenderable in exactly the state
+the rest of the screen is telling them to go and fix.
+
+No CHECK constraint, per the convention `000021` set and `000040` restates: an
+enumerated vocabulary is validated in Go, where changing it is a code change
+rather than a migration. `nutrition.TargetInputs` consequently **drops a stored
+level the vocabulary no longer knows** rather than carrying it — carried, it
+would fall through `ActivityFactors` to a zero multiplier while the response
+still claimed the athlete had chosen.
+
+### The rule that makes the two surfaces agree
+
+`?activity=` is now an **override**, not a defaulted parameter, and omitting it
+is the normal case. Precedence is parameter → stored → `light`.
+
+- **Nothing owed** — send no parameter, adopt what comes back. This is the only
+  path by which a level chosen in a browser reaches the handset.
+- **A local choice the account has not heard** — send it, and retry the push.
+  The server holds the stale copy, so adopting its answer would silently revert
+  a choice made offline. That is not hypothetical: it is the exact failure
+  `useTrackEffort` shipped once, where the switch turned itself back on minutes
+  later with nothing said.
+
+Both directions are needed and they are not symmetric.
+
+### Offline, and the mobile plumbing
+
+`lib/activityLevel.ts` is a device-local cache in front of the profile, riding
+the `prefs` table's existing `dirty` column — the same outbox `unit_system` and
+`track_effort` already use, so **no new mobile schema**. A choice is written
+locally and marked owed *before* the push is attempted; recording the debt only
+in a `catch` loses the change to a crash between the two. The debt is cleared by
+compare-and-swap against the value actually pushed, so a change made while a
+push was in flight stays owed rather than being marked as sent.
+
+### Re-focus, not mount — the thing that would have shipped broken
+
+**A tab mounts once and stays mounted for the life of the process.** The
+resolution runs in the screen's own `useFocusEffect`, not a `useEffect`. This is
+the same bug Today had with its suggestion preferences: the write half worked
+perfectly, Settings always read back what it had just written because a pushed
+screen remounts, and only the *return* was broken. A mutation replacing the
+focus effect with a mount effect fails exactly one test — *"is read back on
+every focus, not only on mount"* — and passes all 37 others in the file.
+
+Three fields rather than the two the cache returns: `pinned` drives the query
+parameter and is cleared only by a later focus, `unsynced` is what the athlete
+is told. Collapsing them makes a successful push change the request and refetch
+the whole ladder for an answer that cannot have moved.
+
+### What the tests found rather than confirmed
+
+- **`adoptServerActivity` correctly drops a cached level the server says nobody
+  chose.** The first fixture paired a stored `active` with
+  `activity_chosen: false`, which is not a stale cache but an incoherent world.
+  The behaviour now has a test of its own, in both directions.
+- **`openManualForm` always depended on the derivation having landed and never
+  said so.** It passed because `mockResolvedValue` settled within one microtask;
+  putting a cache read in front of the fetch flipped the race, and the same code
+  with the same intent went red. The dependency is now explicit — the typed
+  form seeds at mount and never again, so a form opened early seeds on nothing.
+- **`new URLSearchParams({ on, activity })` with an undefined activity
+  serialises the string `"undefined"`**, which the server rejects as an unknown
+  level. Every derivation on the screen would 400, not just the pills, and
+  nothing above that line can see it: the caller passed `undefined` correctly,
+  the rule returned `undefined` correctly, and the screen tests mock the
+  function away. It has a test at the wire level on both clients' behalf.
+
+### Measurement
+
+Twenty mutations, ten backend and ten mobile, **each scored on failing tests
+with the test count checked — never on exit codes**. The first attempt at the
+mount-vs-focus mutation replaced only the head of
+`useFocusEffect(useCallback(...))` and left its tail: a parse error, 17 tests
+running instead of 55, and failures reported. An exit-code harness scores that a
+kill; it is the opposite, and it was rescored `INCONCLUSIVE` and redone
+properly.
+
+Defaults are pinned to **literals** rather than to the constants that define
+them — `"light"`, not `ActivityLight`. A constant asserted against itself is
+true by construction and survives the constant moving, which is precisely the
+trap #398 found on this same screen.
+
+### Open, and deliberately not done here
+
+- **The two surfaces still use different labels** for the same three keys —
+  mobile says `Desk job` / `On your feet` / `Physical job`, web says
+  `Sedentary` / `Lightly active` / `Active`. They now derive identical numbers,
+  which was the ticket; the wording predates it and unifying it is a copy
+  decision rather than a bug fix.
+- **Un-choosing is not expressible.** `null` in a PATCH means "leave unchanged"
+  by the profile-wide COALESCE contract, so an athlete cannot return to "never
+  chosen" once they have picked. Same call already made for `username`; nothing
+  needs it yet.
+- **Not verified on a device.** The pills, the dashed assumed state and the
+  offline path are all claims a simulator or a handset has to confirm, and a
+  worktree cannot produce a build with `EXPO_PUBLIC_*` in it.
+
 ## Open items / known gaps as of this entry
 
 - **Twelve backend packages still delete each other's fixtures across concurrent test binaries — filed as #454.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.
