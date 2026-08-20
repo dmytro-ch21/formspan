@@ -42,14 +42,20 @@ permissions:
   # Reopen, label, comment, and edit the body to tick the criteria.
   issues: write
 
-# An issue can receive a close and a comment within a second of each other. Two
-# runs deciding against the same ticket concurrently could reopen and close it
-# in either order, so they are serialised PER ISSUE. Not cancel-in-progress: a
-# superseded run here has usually already performed a write, and cancelling it
-# half way is how a ticket ends up labelled but not reopened.
-concurrency:
-  group: evidence-latch-${{ github.event.issue.number }}
-  cancel-in-progress: false
+# **Deliberately NO `concurrency` group**, and that is a correction rather than
+# an omission. Serialising per issue looks obviously right, and it silently
+# breaks the primary exit gesture: when a run is queued into a busy group,
+# GitHub cancels any run already PENDING in it — `cancel-in-progress: false`
+# governs the running one, not the queued one. So `/evidence <observation>`
+# followed by any second event loses the attestation entirely, with nothing
+# reported. That is the "gate that never opens" failure landing on the one
+# gesture the whole design depends on.
+#
+# Without a group, runs may overlap instead. That is the cheaper failure: every
+# decision is made against a FRESH read of the issue (`from_event` re-reads
+# rather than trusting the payload), the writes are idempotent, and the worst
+# outcome is a duplicated comment rather than a swallowed release. Found in
+# review.
 
 jobs:
   latch:
@@ -83,6 +89,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: python3 scripts/evidence-latch.py --event-file "$GITHUB_EVENT_PATH"
 
+      # Note the loop defence this depends on, since it is invisible here:
+      # writes made with GITHUB_TOKEN do not trigger further workflow runs, so
+      # the bot's own comment and its body edit cannot re-enter this workflow.
+      # The comment path is additionally guarded in the script (`actor_is_bot`);
+      # the `edited` path relies on the token property alone, so **swapping in a
+      # PAT would need that second guard extended** before it was safe.
+      #
       # Runs regardless of the verdict above, so the apparatus is exercised on
       # every event rather than only when it acts. If this ever goes red, the
       # step above cannot be trusted whatever it just did — and unlike a PR

@@ -36647,13 +36647,21 @@ The trigger is the repo's own existing convention, so no new authoring habit was
 invented: across all 88 issues, **28 real evidence criteria**, in four
 punctuation forms, every one of them a checkbox *opening* with the marker.
 
-The subtlety is the three occurrences that are **not** criteria — one in prose,
-**two inside checkboxes** — where a ticket refers to the concept while asking for
-something a diff can settle. A naive substring match latches all three forever.
-One of them is in **#456 itself**, the ticket that asked for this mechanism, so
-the naive rule would have reopened every future ticket that merely *discusses*
-the feature: the never-opens-gate failure arriving through the front door. All
-three live lines are `--self-test` vectors now, as must-not-match cases.
+The subtlety is that the phrase appears in two grammatical roles, and only one of
+them is a criterion. As a **label** — opening the checkbox, or followed by a
+colon or dash mid-line — it marks a device check. As a **noun** it is a mention:
+#456's own criterion 1 reads "a ticket whose `NEEDS HUMAN EVIDENCE` criteria are
+outstanding", and what it asks for is something a diff settles.
+
+**Both possible errors are real, and each was measured against the live corpus.**
+A naive substring match latches every mention forever — and one of them is in
+#456, the ticket that asked for this, so every future ticket *discussing* the
+feature would be reopened permanently. But the first fix over-corrected to a
+purely **positional** rule, which then missed #410, whose criterion appends
+`**NEEDS HUMAN EVIDENCE:**` to the end of a sentence — a genuine device check
+that would close on merge unrun, which is the original bug with the sign
+flipped. Review caught the second one. Live lines of all three kinds are
+`--self-test` vectors now.
 
 Worth recording how that surfaced: the first measurement was reported as a clean
 "30 of 30", the coordinator **re-ran a claim that was already convincing**, and
@@ -36695,6 +36703,35 @@ The general form is in `CLAUDE.md` beside its twin: **when a gate has a release
 condition, ask whether that gesture has ever happened here.** The issue corpus,
 `git log` and the PR history all answer it, and the answer is occasionally zero.
 
+### The trust boundary, which the first version did not have
+
+**This repository is public.** `issue_comment` fires for anyone with a GitHub
+account, and the workflow lends its `issues: write` token to whatever that
+comment says. The first version reasoned carefully about *what* was said and not
+at all about *who* said it — so a drive-by `/evidence xxxxxxxx` would have made
+the repo's own token tick a maintainer's criteria, **rewrite the issue body** and
+close the ticket as completed. The body edit is the worst part: this mechanism's
+entire premise is that those checkboxes are an honest record.
+
+Releasing the latch now requires write access, checked against the collaborator
+permission API and failing closed. `author_association` is a fast path only for
+`OWNER`/`MEMBER`/`COLLABORATOR` — notably **not** `CONTRIBUTOR`, which means
+"has had a PR merged" and is not write access. The same check guards the
+`edited` path, because an issue's author may edit their own body and on a public
+repo that is anyone. Unauthorised attempts are ignored **silently** rather than
+answered, so the bot cannot be turned into a comment amplifier.
+
+Two more found in the same review, both of the shape this repo keeps writing
+down. `remove_label` passed `check=False`, so a 403 or a network failure
+returned normally while the log printed the success line and the step exited 0 —
+a board that lies with the apparatus arguing it does not. And the `concurrency`
+group, added to serialise per issue, was **actively harmful**: GitHub cancels
+runs already *pending* in a group when a new one queues, so `/evidence` followed
+by any second event would have silently dropped the attestation — the
+never-opens-gate failure landing on the one gesture the design depends on. The
+group is gone; overlapping runs are the cheaper failure, since every decision is
+made against a fresh read and the worst outcome is a duplicated comment.
+
 ### What it deliberately does not do
 
 - **It never chirps on an ordinary ticket.** An issue closing with no unticked
@@ -36728,8 +36765,11 @@ and labelled (re-read to confirm, not assumed) → an ordinary comment stayed
 silent → `/done` refused and the latch held → `/evidence <observation>` ticked
 **only** the evidence box, left the ordinary criterion and the mid-sentence
 mention untouched, removed the label and closed it as completed. Scratch deleted
-afterwards. Nine mutations of the script were each confirmed to turn the
-self-test red, with the baseline green in the same session — and the tenth
+afterwards, then repeated end to end after the security hardening because the
+code had changed materially. Fourteen mutations of the script were each
+confirmed to turn the self-test red, with the baseline green in the same
+session — including two that initially **survived**, because a single vector
+tripped both halves of the observation floor and so isolated neither — and the tenth
 attempt failed to apply and reported itself as such rather than as a pass, which
 is the escaping trap that section warns about.
 

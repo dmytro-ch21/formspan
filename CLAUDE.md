@@ -497,7 +497,11 @@ above the keyboard
 ```
 
 That ticks the evidence criteria, drops the label and closes the ticket. Ticking
-the boxes by hand works too.
+the boxes by hand works too. The observation has to read like a sentence — at
+least three words — because `/evidence xxxxxxxx` is the tick-box again.
+
+**If a ticket is not going to happen, close it as `not planned`.** That is left
+alone. Closing it as *completed* with evidence outstanding is what reopens it.
 
 **The observation is required, and a bare `/done` is refused on purpose.** Do not
 add one later as a convenience: a ticket asserting that evidence exists without
@@ -505,11 +509,20 @@ saying what was seen is exactly the tick-box this replaced.
 
 Two things about how it decides, because both are easy to get wrong:
 
-- **Only a checkbox OPENING with the marker is a criterion.** Measured across all
-  88 issues: 28 real criteria, in four punctuation forms, all of them leading —
-  plus **three mentions** that a naive substring search would latch forever, two
-  of them inside checkboxes. One is in #456, the ticket that asked for this, so
-  the naive rule would reopen every future ticket that *discusses* the feature.
+- **The marker has to be a LABEL, not a noun.** It counts when it opens the
+  checkbox (the common form) or when a `:`/dash follows it mid-line. It does not
+  count when the phrase is the *subject* of a sentence — "a ticket whose
+  `NEEDS HUMAN EVIDENCE` criteria are outstanding" is a mention. Both errors are
+  real and both were measured: a naive substring rule reopens every ticket that
+  merely discusses this feature (#456 is one), and a purely positional rule
+  misses #410's genuine device check, which is the original bug with the sign
+  flipped. `--self-test` holds live lines of each kind.
+- **Only someone with write access can release the latch.** This repo is public,
+  and the workflow lends its `issues: write` token to whatever a comment says —
+  so without that check a stranger's `/evidence` would tick the maintainer's
+  criteria, rewrite the issue body and close the ticket. Unauthorised attempts
+  are ignored silently rather than answered, so the bot cannot be used as a
+  comment amplifier.
 - **The silent majority stays silent.** An issue closing with no unticked
   evidence criterion is not touched, not labelled and not commented on. Closing
   as `not planned` is likewise left alone — that is a decision, not a slip.

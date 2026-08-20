@@ -26,27 +26,38 @@ issue closed by somebody clicking — the #380 / #423 shape — at no extra cost
 
 ### 1. Only a CHECKBOX is a criterion. A mention is not.
 
-Measured across all 88 issues: 30 issue bodies contain the phrase, in 31 places.
-**28 of them are criteria** — a checkbox whose text OPENS with the marker, in one
-of four punctuation forms all present in the corpus:
+Measured across the whole issue corpus on 2026-08-20. **The counts move every
+time a ticket is filed, so they are a dated observation and not an invariant** —
+the invariant is the label-versus-noun rule below, and `--self-test` holds real
+lines of each kind. (At the time: 28 criteria, 3 non-criteria.)
+
+A criterion carries the marker as a LABEL, in one of four punctuation forms all
+present in the corpus:
 
     - [ ] **NEEDS HUMAN EVIDENCE** — exercised on a real device
     - [ ] **NEEDS HUMAN EVIDENCE:** seen on a device, both belts
     - [ ] **NEEDS HUMAN EVIDENCE — demonstrated firing on a REAL PR**
     - [ ] NEEDS HUMAN EVIDENCE: `/_search` returns the row
 
-The other three are **mentions**, and a naive substring search latches all three
-wrongly:
+...and the marker may sit mid-line, provided it is still a label:
+
+    - [ ] The staleness boundary is established. **NEEDS HUMAN EVIDENCE:** ...
+
+What is excluded is the marker used as a **noun**, which a naive substring search
+latches wrongly:
 
   * #456 in prose — "It is wrong for every ticket carrying a `NEEDS HUMAN
     EVIDENCE` criterion";
-  * #456 and #410 mid-checkbox — a criterion that *refers* to the concept while
-    asking for something a diff can settle.
+  * #456 mid-checkbox — a criterion whose subject is the concept, while what it
+    asks for is something a diff can settle.
 
-Both live vectors are in `--self-test` as must-not-match cases. This matters more
-than it looks: #456 is the ticket that asked for this mechanism, so **every future
-ticket that merely discusses the feature would be reopened forever** under the
-naive rule — the never-opens-gate failure arriving through the front door.
+Both live vectors are in `--self-test` as must-not-match cases, and #410's label
+form is there as a must-match. **This matters in both directions.** #456 is the
+ticket that asked for this mechanism, so under a naive substring rule every
+future ticket that merely discusses the feature would be reopened forever — the
+never-opens-gate failure arriving through the front door. And under a purely
+positional rule #410's genuine device check is missed entirely, which is the
+original bug wearing the opposite sign.
 
 ### 2. The gate has to be SATISFIABLE, and the obvious exit gesture is not.
 
@@ -113,6 +124,10 @@ DEFAULT_REPO = "dmytro-ch21/formspan"
 # A markdown task list item. GitHub accepts `-` and `*` and any indentation.
 CHECKBOX_RE = re.compile(r"^[ \t]*[-*][ \t]+\[([ xX])\][ \t]*(.*)$", re.MULTILINE)
 
+# What turns the marker into a LABEL rather than a noun: a colon or a dash
+# directly after it. Both dash characters appear in the corpus.
+LABEL_SEPARATOR_RE = re.compile(r"^\s*[:\u2014\u2013-]")
+
 # `/evidence <observation>`, at the start of a line so it cannot be triggered by
 # somebody quoting the instruction mid-paragraph.
 ATTEST_RE = re.compile(r"^[ \t]*/evidence\b[ \t:]*(.*)$", re.MULTILINE)
@@ -120,8 +135,20 @@ ATTEST_RE = re.compile(r"^[ \t]*/evidence\b[ \t:]*(.*)$", re.MULTILINE)
 # Forms deliberately NOT accepted, answered with guidance instead of silence.
 REJECTED_RE = re.compile(r"^[ \t]*/(done|verified|evidence-done|ok)\b.*$", re.MULTILINE)
 
-# An observation shorter than this is not an observation.
-MIN_OBSERVATION = 8
+# An observation has to look like one. Eight arbitrary characters was the first
+# floor and it was the tick-box in a costume with a longer hem: `/evidence
+# xxxxxxxx` resolved a ticket. A real report of what someone saw is a sentence.
+MIN_OBSERVATION_CHARS = 15
+MIN_OBSERVATION_WORDS = 3
+
+# Who may release the latch. Anyone can comment on a PUBLIC repo, and this
+# workflow lends its `issues: write` token to whatever that comment says — so
+# without this the drive-by case is: a stranger posts `/evidence xxxxxxxx`, and
+# the repo's own token ticks the maintainer's criteria, edits the issue BODY and
+# closes the ticket as completed. The body edit is the worst of it: this whole
+# mechanism rests on those checkboxes being an honest record.
+WRITE_PERMISSIONS = {"admin", "write", "maintain"}
+PRIVILEGED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
 # --------------------------------------------------------------------------
@@ -150,12 +177,34 @@ def _strip_emphasis(text: str) -> str:
 def is_evidence_criterion(checkbox_text: str) -> bool:
     """True when this checkbox IS an evidence criterion, not one that mentions one.
 
-    The distinction is positional and that is the entire rule: the marker OPENS
-    the criterion. A checkbox that refers to `NEEDS HUMAN EVIDENCE` while asking
-    for something else is a mention, and latching on it is how this mechanism
-    would reopen every ticket that discusses it.
+    **The marker has to be used as a LABEL, not as a noun.** Two accepted shapes,
+    both drawn from the corpus rather than invented:
+
+    1. it OPENS the checkbox — the overwhelmingly common form; or
+    2. it is followed by a separator (`:` or a dash), which is what a label looks
+       like wherever it sits in the line.
+
+    Shape 2 exists because the first version of this rule was purely positional
+    and produced a **false negative** on a real criterion — #410 writes a
+    sentence and then appends `**NEEDS HUMAN EVIDENCE:** demonstrated in ...`.
+    That is unmistakably a criterion, and missing it means the ticket closes on
+    merge with its device check unrun, which is the exact bug this file exists
+    to end. Found in review.
+
+    What both shapes exclude is the marker used as a NOUN — #456's own criterion
+    reads "a ticket whose `NEEDS HUMAN EVIDENCE` criteria are outstanding", where
+    the phrase is the subject and what the ticket asks for is something a diff
+    can settle. Latching on that is how this mechanism would reopen every future
+    ticket that merely discusses it.
     """
-    return _strip_emphasis(checkbox_text).upper().startswith(MARKER)
+    text = _strip_emphasis(checkbox_text)
+    upper = text.upper()
+    if upper.startswith(MARKER):
+        return True
+    at = upper.find(MARKER)
+    if at < 0:
+        return False
+    return bool(LABEL_SEPARATOR_RE.match(text[at + len(MARKER):]))
 
 
 def evidence_criteria(body: str | None) -> list[Criterion]:
@@ -206,7 +255,8 @@ def parse_attestation(comment: str | None) -> Attestation | None:
     m = ATTEST_RE.search(text)
     if m:
         observation = m.group(1).strip().strip("`\"'")
-        if len(observation) < MIN_OBSERVATION:
+        if (len(observation) < MIN_OBSERVATION_CHARS
+                or len(observation.split()) < MIN_OBSERVATION_WORDS):
             return Attestation("empty")
         return Attestation("evidence", observation)
     if REJECTED_RE.search(text):
@@ -231,6 +281,7 @@ def decide(
     labelled: bool,
     comment: str | None = None,
     actor_is_bot: bool = False,
+    actor_authorized: bool = False,
     is_pull_request: bool = False,
 ) -> Action:
     """The whole state machine, as one pure function.
@@ -246,6 +297,11 @@ def decide(
     unmet = tuple(outstanding(body))
 
     if event == "closed":
+        # Already open — a duplicate or replayed event. Reopening an open issue
+        # is a no-op at the API but would re-comment, so stop here. This is the
+        # guard the `state` parameter was declared for and did not implement.
+        if state == "open":
+            return Action("noop", "already open")
         # `not_planned` is a deliberate decision that the work is not happening.
         # Outstanding evidence is irrelevant to it, and reopening would overrule
         # a human on purpose.
@@ -262,6 +318,10 @@ def decide(
         att = parse_attestation(comment)
         if att is None:
             return Action("noop", "ordinary comment")
+        if not actor_authorized:
+            # Silently, not with guidance. Answering would let anyone on the
+            # internet make the repo's bot post a comment on demand.
+            return Action("noop", "commenter cannot write to this repository")
         if att.kind == "evidence":
             return Action("resolve", "attested", unmet, att.observation)
         if att.kind == "empty":
@@ -271,6 +331,11 @@ def decide(
     if event == "edited":
         if not labelled:
             return Action("noop", "not awaiting evidence")
+        if not actor_authorized:
+            # An issue's AUTHOR may edit their own body, and on a public repo
+            # that is anyone. Ticking your own evidence boxes must not close a
+            # maintainer's ticket.
+            return Action("noop", "editor cannot write to this repository")
         if unmet:
             return Action("noop", "evidence criteria still outstanding")
         if not evidence_criteria(body):
@@ -295,7 +360,8 @@ def render_latch_comment(criteria: tuple[Criterion, ...], *, again: bool) -> str
     return (
         f"**Reopened: the code merged, the evidence has not been produced.**\n\n"
         f"This ticket closed automatically, and it carries "
-        f"{len(lines)} criterion that a diff cannot settle:\n\n"
+        f"{len(lines)} {'criterion' if len(lines) == 1 else 'criteria'} "
+        f"that a diff cannot settle:\n\n"
         f"{checklist}\n\n"
         f"---\n\n"
         f"It is now labelled `{LABEL}` — merged, awaiting evidence — and will show "
@@ -305,7 +371,10 @@ def render_latch_comment(criteria: tuple[Criterion, ...], *, again: bool) -> str
         f"That ticks the criteria above, drops the label and closes this ticket. "
         f"The observation is required: a bare `/done` is rejected on purpose, "
         f"because a ticket saying evidence exists without saying what was seen is "
-        f"the tick-box this mechanism replaced.\n"
+        f"the tick-box this mechanism replaced.\n\n"
+        f"If this ticket is not going to happen at all, close it as **not "
+        f"planned** — that is left alone. Closing it as completed will reopen it "
+        f"again, which is the point.\n"
     )
 
 
@@ -350,9 +419,10 @@ def gh_json(*args: str):
 
 
 class Client:
-    def __init__(self, repo: str, dry_run: bool):
+    def __init__(self, repo: str, dry_run: bool, execute: bool = False):
         self.repo = repo
         self.dry_run = dry_run
+        self.execute = execute
         self.performed: list[str] = []
 
     def _do(self, description: str, fn) -> None:
@@ -366,6 +436,31 @@ class Client:
 
     def issue(self, number: int) -> dict:
         return gh_json("api", f"repos/{self.repo}/issues/{number}")
+
+    def can_write(self, login: str, association: str = "") -> bool:
+        """Whether this actor may release the latch.
+
+        `author_association` is the fast path and is enough on its own for
+        OWNER / MEMBER / COLLABORATOR. Anything else is checked against the
+        collaborator permission API rather than believed, because the
+        association field describes a relationship to the ISSUE, not repository
+        permission — `CONTRIBUTOR` means "has had a PR merged", which is not
+        write access.
+
+        Fails CLOSED: any error answers no.
+        """
+        if not login:
+            return False
+        if association.upper() in PRIVILEGED_ASSOCIATIONS:
+            return True
+        proc = subprocess.run(
+            ["gh", "api", f"repos/{self.repo}/collaborators/{login}/permission",
+             "--jq", ".permission"],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            return False
+        return proc.stdout.strip() in WRITE_PERMISSIONS
 
     def ensure_label(self) -> None:
         proc = subprocess.run(
@@ -408,13 +503,29 @@ class Client:
         )
 
     def remove_label(self, n: int) -> None:
-        self._do(
-            f"remove `{LABEL}` from #{n}",
-            lambda: gh(
-                "api", "-X", "DELETE", f"repos/{self.repo}/issues/{n}/labels/{LABEL}",
-                check=False,
-            ),
-        )
+        """Drop the label, tolerating ONLY "it was not there" (404).
+
+        This used to pass `check=False`, which returned normally on a 403, a 500
+        or a network failure — while `_do` printed the success line afterwards
+        and the step exited 0. The visible result was a closed issue still
+        carrying `evidence-outstanding`, a green run, and a run log actively
+        asserting the removal happened. A board that lies, with the apparatus
+        arguing it does not. Found in review.
+        """
+
+        def call() -> None:
+            proc = subprocess.run(
+                ["gh", "api", "-X", "DELETE",
+                 f"repos/{self.repo}/issues/{n}/labels/{LABEL}"],
+                capture_output=True, text=True,
+            )
+            if proc.returncode == 0:
+                return
+            if "404" in proc.stderr or "Label does not exist" in proc.stderr:
+                return  # already absent, which is the state we wanted
+            raise RuntimeError(f"could not remove `{LABEL}` from #{n}: {proc.stderr.strip()}")
+
+        self._do(f"remove `{LABEL}` from #{n}", call)
 
     def comment(self, n: int, body: str) -> None:
         self._do(
@@ -436,8 +547,12 @@ def apply(client: Client, number: int, issue: dict, action: Action) -> int:
     if action.kind == "noop":
         return 0
     if action.kind in ("latch", "relatch"):
-        client.ensure_label()
+        # Reopen FIRST. `ensure_label` used to run ahead of it, so a transient
+        # failure there killed the run before the one write that actually
+        # matters — the ticket stayed closed, which is the whole bug. Losing the
+        # label is recoverable; losing the reopen is the failure itself.
         client.reopen(number)
+        client.ensure_label()
         if action.kind == "latch":
             client.add_label(number)
         client.comment(number, render_latch_comment(action.criteria, again=action.kind == "relatch"))
@@ -483,8 +598,26 @@ def from_event(client: Client, path: str) -> int:
         print(f"event {name}/{action_name} is not one this latch acts on")
         return 0
 
-    comment = (payload.get("comment") or {}).get("body")
-    actor = ((payload.get("comment") or {}).get("user") or {}).get("type", "")
+    comment_obj = payload.get("comment") or {}
+    comment = comment_obj.get("body")
+
+    # WHO acted, which differs by event type and is easy to get wrong:
+    #   * `issue_comment` -> the commenter (`comment.user`);
+    #   * `issues` (edited/closed) -> the actor (`sender`), NOT `issue.user`,
+    #     which is whoever opened it however long ago.
+    if name == "issue_comment":
+        actor = comment_obj.get("user") or {}
+        association = comment_obj.get("author_association", "")
+    else:
+        actor = payload.get("sender") or {}
+        association = ""
+    login = actor.get("login", "")
+
+    # Only the paths that RELEASE the latch need authorisation, so the lookup is
+    # skipped for the common close event. Latching is safe from anyone.
+    actor_authorized = False
+    if event in ("comment", "edited"):
+        actor_authorized = client.can_write(login, association)
 
     # Re-read the issue rather than trusting the payload: an `edited` payload is
     # a snapshot, and two edits in quick succession would otherwise be decided
@@ -497,13 +630,24 @@ def from_event(client: Client, path: str) -> int:
         body=issue.get("body"),
         labelled=any(l["name"] == LABEL for l in issue.get("labels", [])),
         comment=comment,
-        actor_is_bot=actor == "Bot",
+        actor_is_bot=actor.get("type", "") == "Bot",
+        actor_authorized=actor_authorized,
         is_pull_request="pull_request" in raw_issue,
     )
+    if act.kind == "noop" and not actor_authorized and event in ("comment", "edited"):
+        print(f"  (actor {login or '<unknown>'} has no write access to {client.repo})")
     return apply(client, number, issue, act)
 
 
 def simulate(client: Client, number: int, event: str, comment: str | None) -> int:
+    """Drive one event by hand against the live API.
+
+    Authorisation is resolved for the *authenticated* `gh` user, so running this
+    locally exercises the real permission check rather than bypassing it — a
+    driver that assumed authorisation would be testing a different program than
+    the one the workflow runs.
+    """
+    me = gh("api", "user", "--jq", ".login").strip()
     issue = client.issue(number)
     act = decide(
         event=event,
@@ -512,6 +656,7 @@ def simulate(client: Client, number: int, event: str, comment: str | None) -> in
         body=issue.get("body"),
         labelled=any(l["name"] == LABEL for l in issue.get("labels", [])),
         comment=comment,
+        actor_authorized=client.can_write(me),
         is_pull_request="pull_request" in issue,
     )
     return apply(client, number, issue, act)
@@ -520,9 +665,11 @@ def simulate(client: Client, number: int, event: str, comment: str | None) -> in
 def backfill(client: Client) -> int:
     """List (and optionally reopen) issues already closed with evidence outstanding.
 
-    Always run `--dry-run` first and get the list approved. Reopening several
-    tickets is a bulk board move, and this repo's `ticket-manager` convention
-    says bulk moves get confirmed.
+    Listing is the default and reopening needs `--execute`, because a docstring
+    saying "run --dry-run first" is not a safeguard — a bare `--backfill` used to
+    mass-reopen and mass-comment on every hit. Reopening several tickets is a
+    bulk board move, and this repo's `ticket-manager` convention says those get
+    confirmed.
     """
     raw = gh("api", "--paginate", f"repos/{client.repo}/issues?state=closed&per_page=100")
     decoder, items, i = json.JSONDecoder(), [], 0
@@ -550,6 +697,11 @@ def backfill(client: Client) -> int:
     if client.dry_run:
         print("\n(dry run — nothing changed)")
         return 0
+    if not client.execute:
+        print("\nRefusing to reopen without `--execute`.")
+        print("Reopening several tickets is a bulk board move, and this repo's")
+        print("`ticket-manager` convention says those get confirmed first.")
+        return 2
     for x in hits:
         apply(client, x["number"], x,
               Action("latch", "backfill: closed with evidence outstanding",
@@ -571,12 +723,23 @@ REAL_CRITERIA = [
     "- [ ] **NEEDS HUMAN EVIDENCE — the decisive experiment is run: all 20 tests active.**",
 ]
 
-# Every real occurrence in the corpus that is NOT a criterion. A naive substring
-# search matches all three, and reopens every ticket that discusses the feature.
+# A real criterion that does NOT open its checkbox — #410 writes a sentence and
+# appends the marker as a label. A purely positional rule MISSES this, so the
+# ticket closes on merge with its device check unrun: the exact bug this file
+# exists to end. Found in review, against the live corpus.
+REAL_LABEL_FORM = (
+    "- [ ] The staleness boundary is established — what makes a session pick up a new "
+    "agent definition and what does not. **NEEDS HUMAN EVIDENCE:** demonstrated in a "
+    "second session."
+)
+
+# Real occurrences in the corpus that are NOT criteria: the marker as a NOUN, and
+# the same phrase in prose. A naive substring search matches both and reopens
+# every ticket that merely discusses this feature — #456 included, which is the
+# ticket that asked for it.
 REAL_MENTIONS = [
     "**It is wrong for every ticket carrying a `NEEDS HUMAN EVIDENCE` criterion** — where the code has landed and the evidence has not.",
     "- [ ] A PR can land its code without closing a ticket whose `NEEDS HUMAN EVIDENCE` criteria are outstanding — without relying on anyone remembering to omit `closes`.",
-    "- [ ] The staleness boundary is established — what makes a session pick up a `NEEDS HUMAN EVIDENCE` agent definition.",
 ]
 
 
@@ -593,6 +756,12 @@ def self_test() -> int:
         check(f"criterion outstanding: {line[:44]}", len(outstanding(line)), 1)
     for line in REAL_MENTIONS:
         check(f"mention must NOT match: {line[:44]}", evidence_criteria(line), [])
+    check("LABEL FORM: marker mid-line but used as a label IS a criterion",
+          len(outstanding(REAL_LABEL_FORM)), 1)
+    check("a dash separator is a label too",
+          len(outstanding("- [ ] The boundary is set. NEEDS HUMAN EVIDENCE - run it twice.")), 1)
+    check("marker as a NOUN mid-line is not a criterion",
+          evidence_criteria("- [ ] Tickets whose NEEDS HUMAN EVIDENCE criteria are unmet stay open."), [])
 
     check("ticked criterion is not outstanding",
           outstanding("- [x] **NEEDS HUMAN EVIDENCE** — seen on a device."), [])
@@ -626,6 +795,17 @@ def self_test() -> int:
           "evidence")
     check("bare /evidence carries no observation", parse_attestation("/evidence").kind, "empty")
     check("too-short observation rejected", parse_attestation("/evidence ok").kind, "empty")
+    # These two ISOLATE the char floor and the word floor. The vector above
+    # trips both at once, so it passed while either guard alone was deleted —
+    # found by mutation testing, and it is the "testing the guards you wrote
+    # says nothing about the one you did not" shape.
+    check("long enough but not a sentence is rejected (word floor)",
+          parse_attestation("/evidence xxxxxxxxxxxxxxxxxxxx").kind, "empty")
+    check("three words but far too short is rejected (char floor)",
+          parse_attestation("/evidence a b c").kind, "empty")
+    check("a real one-line report is accepted",
+          parse_attestation("/evidence ran it on the 15 Pro, labels stayed put").kind,
+          "evidence")
     check("/done is rejected, not silently ignored", parse_attestation("/done").kind, "rejected")
     check("/verified is rejected", parse_attestation("/verified").kind, "rejected")
     check("ordinary comment is not an attestation", parse_attestation("looks good to me"), None)
@@ -638,8 +818,12 @@ def self_test() -> int:
     plain = "- [ ] The audit row is updated."
 
     def d(**kw):
+        # `actor_authorized=True` is the DEFAULT here so the vectors below read
+        # as "what happens for a maintainer". Every unauthorized case is spelled
+        # out explicitly instead, because that is the security boundary and it
+        # should be impossible to weaken by editing a default.
         base = dict(event="closed", state="closed", state_reason="completed",
-                    body=unmet, labelled=False)
+                    body=unmet, labelled=False, actor_authorized=True)
         base.update(kw)
         return decide(**base).kind
 
@@ -660,6 +844,19 @@ def self_test() -> int:
           d(event="comment", labelled=True, comment="/done"), "guidance")
     check("ordinary comment on a latched issue is silent",
           d(event="comment", labelled=True, comment="nice one"), "noop")
+    check("already-open issue is not re-latched (duplicate event)",
+          d(state="open"), "noop")
+
+    # --- the trust boundary. This repo is PUBLIC: anyone may comment, and
+    # anyone may edit an issue they authored. Neither may release the latch.
+    check("SECURITY: a stranger cannot attest a ticket closed",
+          d(event="comment", labelled=True, actor_authorized=False,
+            comment="/evidence saw it on the device myself"), "noop")
+    check("SECURITY: a stranger gets no bot reply either (no spam amplifier)",
+          d(event="comment", labelled=True, actor_authorized=False,
+            comment="/done"), "noop")
+    check("SECURITY: an issue author ticking their own boxes does not close it",
+          d(event="edited", labelled=True, actor_authorized=False, body=met), "noop")
     check("the latch never answers its own comment",
           d(event="comment", labelled=True, comment="/evidence saw it on the device",
             actor_is_bot=True), "noop")
@@ -679,6 +876,12 @@ def self_test() -> int:
           "seen on a device" in latch_text, True)
     check("latch comment gives the exit gesture", "/evidence" in latch_text, True)
     check("latch comment says a bare /done is refused", "`/done`" in latch_text, True)
+    check("latch comment says how to abandon a ticket instead", "not\n**planned**" in latch_text or "not **planned**" in latch_text or "**not\nplanned**" in latch_text or "not planned" in latch_text.replace("**",""), True)
+    check("one criterion reads as singular",
+          "1 criterion that" in render_latch_comment(crit, again=False), True)
+    two = crit + (Criterion(False, "second one", 9),)
+    check("two criteria read as plural",
+          "2 criteria that" in render_latch_comment(two, again=False), True)
     check("resolve comment quotes the observation",
           "> ran it twice" in render_resolve_comment("ran it twice"), True)
 
@@ -700,7 +903,9 @@ def main() -> int:
                    help="which event to decide as, with --issue")
     p.add_argument("--comment", help="comment body, with --simulate comment")
     p.add_argument("--backfill", action="store_true",
-                   help="issues already closed with evidence outstanding")
+                   help="issues already closed with evidence outstanding (lists only)")
+    p.add_argument("--execute", action="store_true",
+                   help="with --backfill, actually reopen them (bulk board move)")
     p.add_argument("--dry-run", action="store_true", help="decide and print, change nothing")
     p.add_argument("--repo", default=os.environ.get("GH_REPO", DEFAULT_REPO))
     args = p.parse_args()
@@ -708,7 +913,7 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    client = Client(args.repo, args.dry_run)
+    client = Client(args.repo, args.dry_run, args.execute)
     if args.backfill:
         return backfill(client)
     if args.event_file:
