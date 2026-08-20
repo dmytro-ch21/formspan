@@ -1,0 +1,86 @@
+name: PR has work
+
+# A SEPARATE workflow rather than a sixth job in `ci.yml`, for one reason that
+# is not stylistic: the trigger has to include `ready_for_review`, and
+# **`ready_for_review` is not in the `pull_request` default set**
+# (`opened`, `synchronize`, `reopened`). `ci.yml` uses a bare `pull_request:`,
+# so it gets the defaults — which means marking a draft ready re-runs nothing,
+# and the last run on a claim PR is the one taken on the draft. That is
+# precisely how #355 reached MERGEABLE at 5/5 green with an empty diff.
+#
+# Listing types on `ci.yml`'s own trigger would change when all five of its
+# jobs run, for every PR in the repo, to fix one check. This is the smaller
+# change.
+#
+# **This adds a SIXTH check run to every PR.** N65 (#368) documents "the count
+# must be 5" as the way to spot a branch that received no checks at all; that
+# number becomes 6 when this lands, and #368's detector needs to know. Flagged
+# on #368 rather than fixed here — the two tasks are adjacent and deliberately
+# not sharing a file.
+on:
+  pull_request:
+    types:
+      # `opened` and `reopened`: a PR that is born non-draft.
+      - opened
+      - reopened
+      # `synchronize`: pushing work to a ready PR must not be able to empty it.
+      - synchronize
+      # `ready_for_review`: the whole point. This is the transition nothing
+      # marked — the moment a PR stops saying "I am working on this" and starts
+      # saying "this is finished".
+      - ready_for_review
+      # `converted_to_draft`: so going back to draft clears a red rather than
+      # leaving the last ready-state result standing as the visible verdict.
+      - converted_to_draft
+
+permissions:
+  contents: read
+
+jobs:
+  diff:
+    name: Ready PRs contain work
+    runs-on: ubuntu-latest
+    # Every job in this repo is bounded; GitHub's default is six hours. This
+    # one is a clone and a `git diff`, so 10 is already generous.
+    timeout-minutes: 10
+    steps:
+      # `fetch-depth: 0`, and it has to be — same reasoning as the `scripts`
+      # job in `ci.yml`. The check compares `base.sha...head.sha`, and a
+      # shallow clone has neither commit, so it could not compute a merge base.
+      # The script REFUSES rather than reporting "no diff" when a commit is
+      # missing, which is what stops a misconfigured fetch here from quietly
+      # turning this gate into a permanent pass.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Belt and braces, exactly as `ci.yml`'s TASKS.md job does it. A PR
+      # checkout lands detached on `refs/pull/N/merge` and `actions/checkout`
+      # promises no named base ref, so fetch the two commits by sha. `|| true`
+      # is safe here ONLY because the script fails loudly on a missing commit —
+      # if it swallowed one, this would be the line that disarmed everything.
+      - name: Make the base and head commits available
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags origin "$BASE_SHA" || true
+          git fetch --no-tags origin "$HEAD_SHA" || true
+
+      # No `setup-python`, matching the `Scripts (Python)` job: the check is
+      # stdlib-only, the runner image ships python3, and every extra action is
+      # one more thing that can fail to download before any of this repo's own
+      # code runs.
+      #
+      # Note there is no pipe and no grep on this line. `grep -c` exits 1 on no
+      # match and `gofmt -l` exits 0 while printing offenders; both have bitten
+      # this repo. The script's exit status IS the step's exit status.
+      - name: Ready-for-review PRs must contain work
+        run: python3 scripts/check-pr-has-work.py
+
+      # Runs regardless of the verdict above, so the apparatus is exercised on
+      # every PR rather than only on the ones that fail. If the self-test ever
+      # goes red the check above cannot be trusted, whatever it just said.
+      - name: The check can still fail (self-test)
+        if: always()
+        run: python3 scripts/check-pr-has-work.py --self-test
