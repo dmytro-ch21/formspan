@@ -42,7 +42,6 @@
  */
 
 import { useAuth } from '@clerk/clerk-expo';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Stack, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -63,6 +62,8 @@ import { FOOD_BARCODE_TYPES, normaliseBarcode } from '@/lib/barcode';
 import { lookupBarcode, type CachedSource, type ScannedFood } from '@/lib/barcodeApi';
 import { cachedBarcode, rememberBarcode } from '@/lib/barcodeCache';
 import { ApiError, transportDiagnosis } from '@/lib/apiError';
+// Never `expo-camera` directly — it throws at module scope. See there (N91).
+import { CameraView, useCameraPermissions } from '@/lib/cameraModule';
 import { parseOr } from '@/lib/draftNumber';
 import { logFood } from '@/lib/foodLog';
 import { MEALS, scale, slotForClock, todayString, type Food, type Meal } from '@/lib/nutrition';
@@ -312,6 +313,50 @@ export default function ScanBarcodeScreen() {
   // and `react-hooks/rules-of-hooks` is the only check that sees it.
 
   const title = 'Scan a barcode';
+
+  /*
+   * No camera in this binary at all.
+   *
+   * Checked BEFORE the permission branches, and the order is the point: with
+   * no native module there is no permission to grant, so falling through would
+   * tell the athlete to go and enable something in Settings that Settings does
+   * not list. This says the honest thing instead, and offers the path that
+   * still works.
+   *
+   * Written as a null check on the component rather than against a separate
+   * boolean, so that TypeScript — not a comment — is what stops the camera
+   * being rendered when there is none. It also narrows `CameraView` to
+   * non-null for the `scanning` branch below.
+   *
+   * On a correctly built app this is unreachable. It exists because the
+   * alternative to rendering it was the process being killed — see
+   * `lib/cameraModule.ts`.
+   */
+  if (!CameraView) {
+    return (
+      <Shell title={title}>
+        <Text style={styles.lead} testID="scan-unavailable">
+          Scanning isn&apos;t available in this build.
+        </Text>
+        <Text style={styles.body}>
+          The camera can&apos;t be reached, so a barcode can&apos;t be read. Describing the food
+          works, and gives you the same entry to check.
+        </Text>
+        <Pressable
+          onPress={() => router.replace(describeHref(meal, date))}
+          style={[styles.primary, { backgroundColor: accent.accent }]}
+          accessibilityRole="button"
+          // No `accessibilityLabel`: the visible text IS the label. An override
+          // reading "Describe the food instead" over a button that says
+          // "Describe it instead" is a label-in-name mismatch (WCAG 2.5.3) —
+          // Voice Control users say what they can see, and it would not match.
+          testID="scan-unavailable-describe"
+        >
+          <Text style={[styles.primaryText, { color: accent.on }]}>Describe it instead</Text>
+        </Pressable>
+      </Shell>
+    );
+  }
 
   if (!permission) {
     return (

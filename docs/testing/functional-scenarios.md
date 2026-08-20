@@ -9220,6 +9220,34 @@ is the code #319 measured as a real 404.
   its EU twin resolves is this feature's one silent failure, and it surfaces as
   an ordinary "we do not have this".
 
+### No native camera in the binary (N91 — `lib/cameraModule.ts`)
+
+The scan screen must survive a build whose JS knows about `expo-camera` and
+whose **binary does not**. This is not a hypothetical device configuration: it
+is what a merge adding a native dependency produces on every machine that does
+not then re-run `pod install`, and it shipped once (N91). `expo-camera` throws
+from module scope in that state, so the failure is at *import* — meaning it
+fires on navigating to the route, and in a Release build it terminates the
+process with no dialog and no JS error anywhere.
+
+- **Importing the screen must not throw** when `expo-camera` is unavailable.
+  Simulate it with a **throwing module factory**, not a stubbed component — a
+  stub that returns a working fake can only ever exercise the case where the
+  module loads, which is precisely why a green scan suite coexisted with a
+  screen that killed the app.
+- **The screen renders an explained dead end** naming the build, and offers the
+  describe path — which needs no camera and still works.
+- **It must NOT render the permission screen.** There is no camera to grant
+  access to, so sending the athlete to Settings is a false instruction. Assert
+  on an element present in *both* variants of the permission screen: the
+  "allow" button is absent from the `canAskAgain: false` variant anyway, so an
+  assertion on it passes in both worlds and proves nothing.
+- **The camera preview must never mount**, since the component genuinely does
+  not exist.
+
+Applies to any future screen that uses the camera. They import from
+`lib/cameraModule.ts`, never from `expo-camera`.
+
 ### Manual, on a device (nothing above covers these)
 
 - A real packet, in a shop, one-handed: does the reticle frame a barcode at a
@@ -9227,6 +9255,15 @@ is the code #319 measured as a real 404.
 - A curved packet (a tin, a bottle) and a creased one — do they read, and when
   they do not, is the "didn't read cleanly" hint what actually appears?
 - The keyboard must not cover the servings field when it focuses.
+- **Twenty codes in a row, and one code held under the camera for a full
+  minute.** `onBarcodeScanned` fires on every decodable frame — tens per second
+  — so the `handling` ref is the only thing between a single packet and a
+  stack of concurrent lookups. Nothing in the suite can drive a camera at frame
+  rate; this is the only way that guard is ever exercised.
+- **The build's own provenance, before trusting any of the above.** A scan
+  screen that says "scanning isn't available in this build" is not a missing
+  feature — it is the binary reporting that it lacks `expo-camera`. Confirm the
+  app was *rebuilt* since the dependency landed, not just re-bundled.
 
 ## Client telemetry (N43, `apps/mobile` — `lib/telemetry.ts`, `lib/telemetryClient.ts`, `POST /v1/client-errors`)
 

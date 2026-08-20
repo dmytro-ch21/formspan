@@ -245,6 +245,16 @@ of those three outcomes should be — absence reading as an answer. And offline:
 "not in our catalog" when the truth is "no signal", which is a false statement
 about the catalog.
 
+**If the screen says "scanning isn't available in this build", stop and check
+the build, not the code.** That sentence means the binary has no `expo-camera`
+native module — the JS is there, the native half is not. It is the N91 state,
+and before that guard existed it was not a sentence at all: the app terminated
+instantly, with no dialog, the moment the screen was opened. `pnpm install`,
+`pod install` in `apps/mobile/ios`, then a **native rebuild**; re-bundling does
+nothing. Confirm with
+`grep -c ExpoCamera apps/mobile/ios/Podfile.lock` — zero means the project has
+never been told about it.
+
 **Also check the permission prompt itself.** If it asks for the **microphone**,
 that is a real bug and only a built binary can show it: both the camera and the
 image-picker plugins add a microphone permission unless explicitly switched off,

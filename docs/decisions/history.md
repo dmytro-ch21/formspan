@@ -34935,6 +34935,187 @@ the snapshot does not provide.
   design preserves. The blast radius is the caller's own rows only, and ids are
   `gen_random_uuid()`, so the residual is a existence-probe against unguessable
   ids.
+## 2026-08-20 — The barcode crash was an import, not a camera (N91, #432)
+
+**Reported from a device: opening the barcode scanner kills the app instantly.**
+No dialog, no red box, nothing in the log. That is the whole difficulty of the
+ticket — an instant termination with no error is a *native* crash, so a
+`try/catch` audit of the scan screen finds nothing wrong and concludes the code
+is fine. It is fine. The fault was never in the scan path.
+
+### What was measured
+
+No crash report was recovered — see the gap at the end — so the diagnosis rests
+entirely on the artefacts, and those turned out to be conclusive on their own:
+
+- `apps/mobile/ios/Podfile.lock` and `ios/Pods/Manifest.lock` are both dated
+  **2026-08-09 23:39**. `expo-camera` landed in **#320**, well after that.
+- Comparing `package.json`'s dependencies against that lockfile: of the **twenty**
+  packages carrying an `expo-module.config.json` with an iOS section,
+  **`expo-camera` is the only one missing**. Nineteen present, one absent. That
+  is not a stale lockfile in general; it is precisely the one dependency added
+  since the last `pod install`.
+- The generated autolinking manifest,
+  `ios/Pods/Target Support Files/Pods-VOLA/ExpoModulesProvider.swift`, lists
+  thirty-odd modules and no camera module at all.
+- The only VOLA build in DerivedData — `Release-iphoneos/VOLA.app`, built
+  **2026-08-20 09:35** — contains no `ExpoCamera` framework, no `ExpoCamera`
+  symbol, and not even the string `ExpoCameraZXingProvider`.
+- That same app's `main.jsbundle`, same mtime, **does** contain the scan screen:
+  `Scan a barcode`, `onBarcodeScanned`, `barcodeScannerSettings`, `itf14`,
+  `upc_e` are all present (checked in both UTF-8 and UTF-16LE, per the Hermes
+  trap in CLAUDE.md).
+
+So the shipped app has `expo-camera`'s **JavaScript** and none of its **native**
+half. This is CLAUDE.md's own documented trap — *a native dependency is declared
+by a merge and installed by nobody* — reaching a device.
+
+### Why that ends the process rather than showing an error
+
+`expo-camera`'s entry point is `export default requireNativeModule('ExpoCamera')`
+**at module scope**, and `requireNativeModule` throws
+`Cannot find native module 'ExpoCamera'` when the module is absent (verified in
+the installed `expo-modules-core` source; the optional variant that returns null
+is a different function the package does not use).
+
+An ESM import cannot be caught, so the throw happens while
+`app/food/scan.tsx` is being *evaluated* — which for an Expo Router route is the
+moment the athlete navigates to it. In a **Release** build an unhandled JS error
+is fatal and RN terminates the process. Debug would have shown a red box; Release
+shows nothing.
+
+**One thing did not fit, it was put to the reporter rather than smoothed over,
+and the answer confirmed the mechanism.** Under this diagnosis there is no
+camera preview at all — the app dies on *opening* the screen, before any frame
+is decoded. But the report said "pointing the camera at a barcode", which
+describes a running preview. Either the phrasing was loose or the phone was
+running a build other than the one measured, and those are very different
+tickets.
+
+Asked, the reporter said: *"no the moment i click scan barcode the app closes
+and i see the home screen of the app."* **No preview. It dies as the route is
+evaluated** — exactly what a module-scope throw predicts, and not what any
+per-frame decode fault could produce.
+
+Worth keeping as a method note rather than a footnote: the discrepancy was the
+single most useful thing in the whole investigation, because it was the one
+observation the diagnosis could not accommodate. The temptation was to read
+"pointing the camera at a barcode" as loose phrasing and move on — which would
+have been *right*, by luck, while discarding the only cheap falsification test
+available. One question settled it.
+
+### What is in this PR, and what is not
+
+**Not the repair.** The repair is `pnpm install`, `pod install`, a native
+rebuild. No code change makes a binary contain a module it was not built with.
+
+What is here is the **blast radius**. `apps/mobile/lib/cameraModule.ts` is now
+the only file allowed to touch `expo-camera`: it `require`s it inside a `try`,
+exports `CameraView` typed **`ComponentType | null`**, and exports a
+`useCameraPermissions` stub so the hook call stays unconditional (a hook behind
+`if (CameraView)` is the same conditional-hook shape that made every BJJ session
+a black screen). `scan.tsx` imports from there and renders an explained dead end
+— "scanning isn't available in this build", plus the describe path, which still
+works — when the module is missing.
+
+That branch sits **above** the permission branches deliberately. With no native
+module there is no permission to grant, so falling through tells the athlete to
+enable something in Settings that Settings does not list.
+
+**The nullable type is the guard, and the first draft got this wrong.** It
+exported `CameraView` asserted to a component type alongside a `cameraAvailable`
+boolean, and review named the consequence exactly: a caller who skipped the
+boolean would render `undefined`, React would throw "Element type is invalid",
+and in Release that is another fatal unhandled error — **the identical crash,
+moved from import time to render time.** A PR that exists because a
+crash-by-default shape shipped should not introduce a second one. Typed `| null`
+and branched on with `if (!CameraView)`, forgetting the check is a compile
+error, and TypeScript narrows the binding for the rest of the component.
+
+It is deliberately two exports rather than one discriminated union: narrowing is
+the right shape for the component and the wrong one for the hook, which must
+stay unconditionally callable.
+
+**The guard makes the underlying problem quieter, and that is a real cost.** A
+crash is at least unmistakable. A "scanning isn't available" screen on a build
+that should have a camera is a build bug reporting itself politely, and could be
+mistaken for an unfinished feature. The copy says *in this build* for that
+reason, and the fleet-rebuild problem is filed separately as **H9** rather than
+being closed quietly here.
+
+### The test, and why it needed its own file
+
+`app/__tests__/scanNoCamera.test.tsx` mocks `expo-camera` with a **throwing
+module factory** — the real message, verbatim — and then renders the real
+screen. Mutation-checked both ways: remove the `try`/`catch` and it fails at
+import with `Cannot find native module 'ExpoCamera'`, propagating through
+`app/food/scan.tsx` exactly as production did; remove the `!CameraView`
+branch and it renders the permission screen instead.
+
+**And then it caught the mutation for real, which is worth more than the drill.**
+A review subagent mutation-tested the `try`/`catch` and restored it with
+`git checkout --`; that restore raced a `git add -A && git commit --amend` in
+the same worktree, so the *mutation* was committed and force-pushed. The branch
+shipped, briefly, with the crash unmitigated — and this test went red on it in
+`verify`, in CI, and independently in two reviews. Two process lessons, both
+recorded in CLAUDE.md: **a "read-only" reviewer is not read-only** — mutation
+testing writes to the tree, so never stage while one is running — and **a
+restore is confirmed by re-running the thing that fails, never by grepping the
+file.** The grep here returned the right answer at a moment when the file was
+fine, and the file changed afterwards.
+
+It is a separate file because `scanScreen.test.tsx` replaces `expo-camera` with
+a *working* fake, and a module factory is registered per file. That existing
+mock is a clean instance of the shape CLAUDE.md warns about — **a stub built
+from an assumption cannot falsify it**. It can only ever test the case where the
+module loads, which is why a thorough, green, mutation-tested scan suite sat
+alongside a screen that killed the app.
+
+One assertion in the new file needed a second pass for the same reason. "Never
+the permission screen" was first written against `scan-request-permission`,
+which the stub's `canAskAgain: false` means is absent in *both* worlds — a guard
+that passes either way. It is `scan-permission-describe` now, which is on the
+permission screen in both its variants. Found by mutating, not by reading.
+
+### What would have caught the actual cause
+
+Nothing in JS could have, and that is worth being precise about rather than
+promising a test that cannot exist. The fault lives in `ios/Podfile.lock`, which
+is gitignored, generated, and read by no test, lint, typecheck or CI job. CI
+would never see it either: CI installs from the lockfile every run and never
+builds the iOS project.
+
+What *would* have caught it is a check comparing `package.json`'s autolinkable
+native dependencies against `ios/Podfile.lock` whenever `ios/` exists — the
+twenty-versus-nineteen comparison above, which took about fifteen lines to run
+by hand. That belongs with the rebuild in **H9**, not here.
+
+### What this entry leaves open
+
+- **No crash log was recovered for N91, so the mechanism above is inferred from
+  artefacts rather than read off a stack.** It was not for want of trying:
+  `~/Library/Logs/CrashReporter/MobileDevice/` does not exist on this Mac (Xcode's
+  device-logs window has never been opened), and `xcrun devicectl device copy
+  from --domain-type systemCrashLogs` aborts partway through on a permanently
+  unreadable `Retired/Analytics-*.ips.ca.synced` — it returned eleven root-level
+  reports, none of them VOLA, but an aborted transfer cannot support "there is no
+  VOLA crash report". Launching the installed app deep-linked to `vola://food/scan`
+  under `devicectl --console` would settle it in one step and was refused with
+  `Locked` — the phone needs unlocking. **The reporter's account has since
+  corroborated the mechanism from the outside** (no preview; dies on opening the
+  screen), and `pod install` has since taken `Podfile.lock` from **0 references
+  to `ExpoCamera` to 11**, which is the same fault measured from the other end.
+  Two independent confirmations and no stack. Anyone re-opening this should know
+  the `.ips` was never read — and that the window to read it closed with the
+  rebuild, since a repaired binary cannot reproduce the crash.
+- **The class is not fixed, only this instance and its blast radius.** A native
+  dependency can still be declared in `package.json`, reach the JS bundle, and
+  never enter the iOS project, and **nothing in CI can see it** — CI installs
+  from the lockfile and never builds the native app. #441 carries the check:
+  compare the dependency set *declared* by `package.json` and the config plugins
+  against what `Podfile.lock` actually *resolves*, with no build required. That
+  comparison would have gone red the moment #320 merged, eleven days before a
+  phone found it.
 
 ## 2026-08-20 — Roadmaps were not hard to see, they were only offered in one place (N96, #444)
 
