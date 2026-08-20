@@ -842,7 +842,7 @@ each other. Only a live call could. **Verify an external contract against the
 real service at least once**, and record the measurement next to the code that
 depends on it.
 
-Two corollaries worth stating separately, because both were arrived at the hard
+Three corollaries worth stating separately, because each was arrived at the hard
 way:
 
 - **Absence is not evidence.** No checks is not passing; no output is not
@@ -854,6 +854,24 @@ way:
   if not its effect — otherwise a surviving mutation reads as dead code, and
   "the tests still pass without it" is a very persuasive argument for deleting
   something load-bearing.
+- **A watcher pinned to a SHA must check the SHA still exists**, and this is the
+  MIRROR of everything above: not a check that could not fail, but **a check
+  that could not succeed, because its subject had ceased to exist.** Measured
+  2026-08-20 on #400: a background poller was armed on `e3d148d` to wait for its
+  check runs; the branch was then rebased and force-pushed, leaving that commit
+  on no branch at all. The poller kept asking about it for fifteen minutes,
+  found zero checks — correctly, there were none and never would be — and
+  **exited 1 with "N65 reproduced"**.
+
+  **A false red is worse than a false green here, for two reasons.** It is
+  *self-corroborating*: it names a real bug that was really happening an hour
+  earlier, so it reads as confirmation rather than as an error. And the timing
+  is the trap — had it landed *before* the rebase finished it would have read as
+  fresh evidence of a problem already fixed, sending you back to re-diagnose
+  something solved. The same discipline as `gh run list --branch` above
+  (`git branch --contains <sha>` returning nothing means your subject is gone),
+  applied to anything that watches, polls or retries against an identifier that
+  a rebase, a force-push or a cleanup can invalidate underneath it.
 
 ## Known gotchas
 
