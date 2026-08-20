@@ -145,10 +145,18 @@ func TestSearchRankIsDeterministic(t *testing.T) {
 	if !strings.Contains(order, "similarity(f.name") {
 		t.Fatalf("rank dropped the similarity tiebreak: %q", order)
 	}
-	// Lead position is the PRIMARY signal, and it must come first in the
-	// ORDER BY or it is not doing the job — see the lunchmeat case.
-	if !strings.HasPrefix(order, "COALESCE(LEAST(") {
-		t.Fatalf("lead position is not the primary sort key: %q", order)
+	// rank_tier is the PRIMARY signal since N88, and it must come first in the
+	// ORDER BY or it is not doing the job: 803 catalog rows contain "chicken",
+	// and both signals below tie between the curated "Chicken breast" and
+	// FNDDS's "Chicken breast, fried, coated, ...".
+	if !strings.HasPrefix(order, "f.rank_tier ASC, ") {
+		t.Fatalf("rank_tier is not the primary sort key: %q", order)
+	}
+	// Lead position stays the primary signal AMONG rows of equal tier — it is
+	// what decides the order across the 12,474 bulk rows, where no curated row
+	// matches at all. See the lunchmeat case.
+	if !strings.Contains(order, "f.rank_tier ASC, COALESCE(LEAST(") {
+		t.Fatalf("lead position does not follow rank_tier: %q", order)
 	}
 	if len(args) == 0 || args[len(args)-1] != "chicken" {
 		t.Fatalf("rank args = %v, want the expanded query last", args)

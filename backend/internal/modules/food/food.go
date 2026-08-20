@@ -136,6 +136,20 @@ type Food struct {
 	// migration — see Outcome below.
 	Market string `json:"market"`
 
+	// RankTier is search precedence, lowest first: 0 is the hand-curated set,
+	// 1 is the bulk USDA import. It is the PRIMARY sort key of a catalog
+	// search — see SearchRank — and it exists because 803 catalog rows contain
+	// the word "chicken" and neither lead position nor trigram similarity can
+	// tell the curated "Chicken breast" from FNDDS's "Chicken breast, fried,
+	// coated, skin / coating eaten, from pre-cooked".
+	//
+	// Served on the wire so a client can say WHY a row is where it is, and so
+	// that a future "generic foods only" filter needs no new field. Clients
+	// must treat unseen values as bulk rather than curated — the server owns
+	// this vocabulary and may extend it, and guessing in the confident
+	// direction is the trap N41 and N51 both hit.
+	RankTier int `json:"rank_tier"`
+
 	Source Source `json:"source"`
 	// ExternalID and ExternalSource record which upstream row the numbers came
 	// from, so any figure in this catalog can be checked against its origin.
