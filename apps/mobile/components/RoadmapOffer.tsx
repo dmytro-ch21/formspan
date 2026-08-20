@@ -44,23 +44,38 @@ export function RoadmapOffer() {
   const accent = useAccent();
   const [offer, setOffer] = useState<Curriculum | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setOffer(roadmapToOffer(await listCurricula(getToken)));
-    } catch {
-      // Silent, like every other block on this screen: an error banner over an
-      // offer nobody asked for would make an offline Today look broken. Left
-      // as it was, so nothing is claimed either way.
-    }
-  }, [getToken]);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        setOffer(roadmapToOffer(await listCurricula(getToken, signal)));
+      } catch {
+        // Silent, like every other block on this screen: an error banner over
+        // an offer nobody asked for would make an offline Today look broken.
+        // Left as it was, so nothing is claimed either way — and an abort
+        // lands here too, which is exactly the "change nothing" this wants.
+      }
+    },
+    [getToken],
+  );
 
   // ON FOCUS, not on mount. A tab screen stays mounted for the life of the
   // process, and enrolling happens on the roadmap screen pushed over it — read
   // once, this would keep offering a roadmap the athlete had already started.
   // The same bug `CurriculaStrip` documents, in the same place.
+  //
+  // The abort is the OTHER half of that, and it is the same stale-read shape
+  // Today's own `planSeq` and the Plan tab's `readSeq` both guard. Blur this
+  // tab mid-request on a slow connection, enrol, come back: two reads are in
+  // flight and the FIRST one — built from a list where nothing was enrolled —
+  // can land last and put the offer back on top of a roadmap the athlete just
+  // started. Cancelling on blur means the losing read never reaches `setOffer`
+  // at all, which is cheaper than sequencing and also stops a response
+  // resolving into an unmounted card.
   useFocusEffect(
     useCallback(() => {
-      void load();
+      const inflight = new AbortController();
+      void load(inflight.signal);
+      return () => inflight.abort();
     }, [load]),
   );
 
@@ -76,20 +91,33 @@ export function RoadmapOffer() {
         testID="today-roadmap-offer"
       >
         <RNView style={styles.head}>
-          <Icon name="goal" size={14} color={accent.ink} />
+          {/* `route`, NOT `goal` — and this is a real collision rather than a
+              preference. `goal` is the GOALS TAB's icon, which is in the tab
+              bar at the bottom of this very screen, so the same glyph would
+              be pointing at two unrelated destinations eight hundred points
+              apart. `route` is a path through somewhere, which is what a
+              roadmap is, and nothing else in the app claims it. */}
+          <Icon name="route" size={14} color={accent.ink} />
           <Text style={[styles.eyebrow, { color: accent.ink }]}>ROADMAPS</Text>
         </RNView>
 
         <Text style={styles.title}>Start a roadmap</Text>
         <Text style={styles.body}>
-          {/* The name first, because the offer is for a specific one and
-              "a roadmap" alone is the abstraction that failed. */}
-          <Text style={styles.name}>{offer.name}</Text> — {offer.countable_items}{' '}
-          techniques, in the order they are usually learned. Your logged sessions
-          {/* Never "you have earned": mastery is recomputed on every read and
-              can go back down, the same honesty the roadmap screen keeps. */}
-          {' '}decide how far along it says you are — there is nothing to tick off by
-          hand.
+          {/* The name first, because the offer is for a specific one and "a
+              roadmap" alone is the abstraction that failed.
+
+              One interpolated string rather than JSX text spanning four
+              source lines: JSX collapses a line break into a space and drops
+              a whitespace-only one, so where the spaces land in the rendered
+              sentence depends on how this block happens to be wrapped. That
+              is a formatter away from reading "sessionsdecide", with nothing
+              red — and the test asserts this sentence verbatim. */}
+          <Text style={styles.name}>{offer.name}</Text>
+          {` — ${offer.countable_items} techniques, in the order they are usually ` +
+            // Never "you have earned": mastery is recomputed on every read and
+            // can go back down, the same honesty the roadmap screen keeps.
+            `learned. Your logged sessions decide how far along it says you are — ` +
+            `there is nothing to tick off by hand.`}
         </Text>
         <Text style={styles.note}>
           {/* Plain text, no second destination. It names where the rest live,

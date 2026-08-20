@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { act, configure, render, screen, waitFor } from '@testing-library/react-native';
 
 import { RoadmapLine } from '@/components/RoadmapLine';
@@ -45,24 +45,55 @@ jest.mock('@/lib/curriculum', () => ({
   listCurricula: (...a: unknown[]) => mockListCurricula(...a),
 }));
 
+/*
+  ONE getter, returned by every call — because that is what the real hook
+  guarantees, and the difference is not cosmetic here.
+
+  `lib/useAuthToken.ts` opens with "A token getter whose identity never
+  changes", and everything downstream is built on it: `load` is
+  `useCallback([getToken])`, the focus callback is `useCallback([load])`, so a
+  stable getter means the effect runs on mount and on a real refocus, and
+  nothing else.
+
+  Returning `async () => 'token'` inline instead — which is what this mock did
+  first — hands out a NEW function on every render, so `load` changes identity,
+  the effect re-runs, and the component refetches after every `setState`. That
+  is a refetch loop the real app does not have, and it silently REPAIRS the bug
+  under test: `setOffer(stale)` is immediately overwritten by a fresh read, so
+  the stale-read test below passed with the abort guard deleted. Measured, not
+  reasoned — both abort mutations survived until this line changed.
+*/
+const mockGetToken = async () => 'token';
 jest.mock('@/lib/useAuthToken', () => ({
-  useAuthToken: () => async () => 'token',
+  useAuthToken: () => mockGetToken,
 }));
 
 // `mock`-prefixed so jest's out-of-scope rule allows them inside the factory,
 // and so the factory needs no `require('react')` — each one of those costs a
 // lint warning against the mobile ratchet.
 const mockUseCallback = useCallback;
+const mockUseEffect = useEffect;
 const mockUseRef = useRef;
 /** Fires the focus effect again, as returning to the tab would. */
 let refocus: () => void = () => {};
 const mockHrefs: string[] = [];
 
 jest.mock('expo-router', () => ({
-  // Fires on mount like the real one, and keeps the callback so a test can
-  // fire it a second time — which is the only way the read-on-focus rule is
-  // observable at all. Mocked to fire once, an implementation that reads on
-  // mount looks identical to one that reads on focus.
+  /*
+    Fires on MOUNT and on an explicit `refocus()`, and on nothing else.
+
+    Two properties, both learned the hard way. It has to fire more than once,
+    or "reads on focus" is indistinguishable from "reads on mount" and the
+    stale-offer bug is invisible. And it must **not** re-fire on every render:
+    the first version of this mock called `run()` in the render body, so any
+    `setOffer` triggered an immediate refetch that overwrote the value under
+    test — which made two mutations of the abort guard pass. Measured, not
+    reasoned: remove the abort from `RoadmapOffer` and the render-time version
+    of this mock stays green.
+
+    `mockUseEffect` with `[run]` is the faithful shape — after mount, once,
+    since `run` is memoised on a `cb` that never changes identity.
+  */
   useFocusEffect: (cb: () => void | (() => void)) => {
     const cleanup = mockUseRef<(() => void) | void>(undefined);
     const run = mockUseCallback(() => {
@@ -70,7 +101,7 @@ jest.mock('expo-router', () => ({
       cleanup.current = cb();
     }, [cb]);
     refocus = run;
-    run();
+    mockUseEffect(run, [run]);
   },
   // Records where the card points, so "reachable in a tap" is asserted rather
   // than assumed. `asChild` renders the child as-is, like the real one.
@@ -209,6 +240,17 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
     // The name, because "a roadmap" is the abstraction the athlete had no
     // model for — the diagnosis behind this whole change.
     expect(screen.getByText('Novice fundamentals')).toBeTruthy();
+    // The sentence VERBATIM, spaces included. It is assembled from an
+    // interpolated string precisely because JSX text across several source
+    // lines silently re-spaces itself when the block is re-wrapped, and
+    // "sessionsdecide" would go out with nothing red anywhere.
+    expect(
+      screen.getByText(
+        'Novice fundamentals — 10 techniques, in the order they are usually ' +
+          'learned. Your logged sessions decide how far along it says you are — ' +
+          'there is nothing to tick off by hand.',
+      ),
+    ).toBeTruthy();
     // One tap away. The ticket asks for "reachable in a tap or two", which is
     // a fact about the destination rather than about the copy.
     expect(mockHrefs).toContain('/curriculum/novice-fundamentals');
@@ -240,5 +282,52 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
     });
 
     await waitFor(() => expect(screen.queryByTestId('today-roadmap-offer')).toBeNull());
+  });
+
+  it('drops a read that was still in flight when the tab lost focus', async () => {
+    /*
+      The stale-read race, and the reason it is not covered by the test above:
+      there both reads resolve in order. Blur Today mid-request on a slow
+      connection, enrol, come back, and TWO reads are alive — if the first one,
+      built from a list where nothing was enrolled, lands last, it puts the
+      offer back on top of a roadmap the athlete just started. This is the same
+      shape Today's own `planSeq` and the Plan tab's `readSeq` guard, and here
+      it is solved by cancelling on blur instead of sequencing.
+
+      The stub rejects when its signal aborts because that is what `fetch`
+      does — the contract `app/library.tsx` already relies on in production.
+      Note React Native swaps in `abort-controller@3.0.0`, which has no
+      `reason`; nothing here reads one, so `signal.aborted` is the whole
+      mechanism on both runtimes.
+
+      `signal?.` is deliberate: an implementation that stopped passing the
+      signal at all must fail this test rather than crash the stub into a
+      rejection that looks like the guard working.
+    */
+    let landStale: (c: Curriculum[]) => void = () => {};
+    mockListCurricula.mockImplementationOnce(
+      (...a: unknown[]) =>
+        new Promise<Curriculum[]>((resolve, reject) => {
+          landStale = resolve;
+          (a[1] as AbortSignal | undefined)?.addEventListener('abort', () => {
+            reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+          });
+        }),
+    );
+    render(<RoadmapOffer />);
+
+    // Away and back — and in between, the athlete enrolled.
+    mockListCurricula.mockResolvedValue([{ ...offerable, enrolled: true }]);
+    await act(async () => {
+      refocus();
+    });
+
+    // Only now does the abandoned first read come back, carrying the world as
+    // it was before they enrolled.
+    await act(async () => {
+      landStale([offerable]);
+    });
+
+    expect(screen.queryByTestId('today-roadmap-offer')).toBeNull();
   });
 });
