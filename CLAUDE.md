@@ -783,11 +783,12 @@ gap between those two is only how subtests are counted, and the drift from 1092
 is #329 adding `health/handler_test.go`. A test total is a magnitude check that
 every PR moves, so it cannot be a tripwire; the skip count is. Count with
 `go test -p 1 -timeout 3m -json ./...` rather than grepping `-v` output, since
-the grep is exactly the apparatus that silently counts something else. And note
-`./...` reports **38** packages as of #454 — the four with no test files being
-the three that always had none plus `internal/platform/testdb`, which is
-apparatus rather than a subject. #454 also added 23 tests (one lock assertion per
-Postgres package), so a count taken before it will not match one taken after.
+the grep is exactly the apparatus that silently counts something else. **Measured
+again 2026-08-20 after #454: 39 packages, 36 of them with tests, 1113 top-level
+tests, and still exactly one skip — `TestLiveComplete`.** #454 itself added 26
+(one lock assertion per Postgres package, plus three on the lock), so a count
+taken before it will not match one taken after; the skip count is the tripwire,
+and it did not move.
 
 **This paragraph used to say "zero skips: 28 packages, 583 tests"** and told you
 any skip meant a regression. That was true when written and stopped being true
