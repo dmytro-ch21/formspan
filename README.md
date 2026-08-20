@@ -100,6 +100,15 @@ pnpm run verify
 
 It chains every check with `&&` deliberately — run as separate lines, a failing typecheck scrolls past and the commit happens anyway. It covers the palette and icon guards, Python syntax, gofmt/vet/build, the OpenAPI spec, and lint/typecheck/test for mobile, web and admin. Everything is stdlib or already-installed tooling, so there is nothing extra to set up.
 
+One check in there is about pull requests rather than code. `check:pr-work` runs
+the self-test for the `PR has work` workflow, which **refuses a PR that is marked
+ready for review while its three-dot diff is empty** — a state that is otherwise
+fully green and mergeable, because there is nothing in it to fail. A **draft** is
+exempt: an empty draft is a branch pushed early, which is fine. If it fires on
+you, either push the work or put the PR back to draft with
+`gh pr ready --undo <n>`.
+
+
 Deliberately **not** in it — each is slow or needs setup, and CI runs them:
 
 ```bash
