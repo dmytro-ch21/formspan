@@ -151,11 +151,20 @@ func fixtureExerciseIDs() []string {
 // nothing at all — that mistake was made first here):
 //
 //   - ONE binary alone, 20 consecutive uncached runs of this package: green.
-//   - TWO concurrent binaries: 10 of 10 lane-runs red, with exactly the
-//     reported symptoms — `unknown exercise "ses_fx_squat"`, and
-//     `index out of range [0] with length 0` where a LoadHistory returned no
-//     points because the session under test had been deleted with them.
-//   - FOUR concurrent full suites: this package failed 16 of 24 runs.
+//     This is the control — the failure needs a NEIGHBOUR, not load.
+//   - TWO concurrent binaries, each lane launching a fresh `-count=1` binary
+//     the way the suite is really invoked: 60 of 60 lane-runs red before,
+//     0 of 60 after. With exactly the reported symptoms — `unknown exercise
+//     "ses_fx_squat"`, and `index out of range [0] with length 0` where a
+//     LoadHistory returned no points because the session under test had been
+//     deleted along with them.
+//     (A first, cruder version of this arm used two `-count=10` lanes and
+//     scored 10 of 10 red. Same experiment, smaller sample and a less faithful
+//     shape — one binary then holds the lock for ten whole package runs. The
+//     60/60 figure is the one to quote; both are recorded so the two numbers
+//     in the history entry and here are not read as a contradiction.)
+//   - FOUR concurrent full suites: this package failed 16 of 24 runs before,
+//     0 of 24 after.
 //
 // Seeding once per process removes the churn. The advisory lock is what removes
 // the race, because two processes still cannot share one set of fixed ids.

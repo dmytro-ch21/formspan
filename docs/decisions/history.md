@@ -33510,6 +33510,21 @@ The single-binary arm is the control: the failure needs a neighbour, not load.
 40% rate, P(0 in 24) = 0.6²⁴ ≈ 5×10⁻⁶; the one-sided 95% upper bound on the true
 post-fix rate from that arm alone is 12%, and 5% from the 60-run arm.
 
+(The two-binary arm was run twice: an early, cruder version used two `-count=10`
+lanes and scored 10/10 red, which is where that figure comes from if you find it
+quoted. The 60/60 arm replaced it because `-count=10` makes one binary hold the
+lock for ten whole package runs, which is not how anything actually invokes the
+suite.)
+
+**Verified independently before merge**, on a private database and without
+taking the above on trust: two concurrent copies of `origin/main`'s binary went
+8/8 red with the reported symptoms, one alone was green, and the fixed binary
+went 0/8 — with **4 of those 8 runs printing the "waiting for another `session`
+test binary…" notice.** That last detail is what makes the green non-vacuous: it
+proves the lock actually contended, rather than the runs happening to fall
+serially and prove nothing. A green that could not distinguish itself from "they
+never overlapped" would be the same class of mistake as the cached baseline.
+
 ### The fix
 
 `TestMain` seeds the fixtures once per process and removes them once, under a
@@ -33560,7 +33575,7 @@ and it is now the worst offender — which means the pattern this repo teaches i
 itself the carrier. **This is left as its own follow-up rather than folded in
 silently**: generalising the lock touches twenty-odd packages and would serialise
 concurrent suites wholesale, which is a design decision with a wall-clock cost
-and deserves its own review, not a drive-by in a bugfix PR.
+and deserves its own review, not a drive-by in a bugfix PR. Filed as #454.
 
 The honest one-line summary of the mechanism: *the rows vanished because another
 process deleted them, and no amount of reading the package's own sequential
@@ -33568,7 +33583,7 @@ control flow could have found that.*
 
 ## Open items / known gaps as of this entry
 
-- **Twelve backend packages still delete each other's fixtures across concurrent test binaries.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.
+- **Twelve backend packages still delete each other's fixtures across concurrent test binaries — filed as #454.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
