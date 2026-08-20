@@ -3,7 +3,15 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 import BjjSessionScreen from '../bjj/session/[id]';
 import type { SessionDetail } from '@/lib/bjjSession';
 import { readLocalSession, type LocalSession } from '@/lib/sessionStore';
-import { addDays, fetchHistory, startOfWeek, today, type HistoryDay } from '@/lib/history';
+import {
+  addDays,
+  carriedTheStreak,
+  fetchHistory,
+  startOfWeek,
+  today,
+  weekStreak,
+  type HistoryDay,
+} from '@/lib/history';
 import { fetchAccomplishments, type Accomplishment } from '@/lib/accomplishments';
 import { playSound } from '@/lib/sounds';
 
@@ -364,7 +372,36 @@ async function finishTheClass() {
 it('shows the rung when the class on the mat is what carried the streak', async () => {
   // Four consecutive weeks, and exactly ONE session in the current one — which
   // is what `carriedTheStreak` reads to decide that THIS session carried it.
-  (fetchHistory as jest.Mock).mockResolvedValue(historyWithStreak(4, 1));
+  const fixture = historyWithStreak(4, 1);
+  (fetchHistory as jest.Mock).mockResolvedValue(fixture);
+
+  // ---------------------------------------------------------------------
+  // TEMPORARY DIAGNOSTIC — N67. REVERT WITH THIS TEST.
+  //
+  // This assertion fails 3/3 in CI and passes 35+ times locally across seven
+  // configurations, so the discriminating state exists only on the runner.
+  // Printed unconditionally so a PASSING run is comparable with a failing one
+  // — a probe that only fires on failure gives you one sample and nothing to
+  // difference it against.
+  // ---------------------------------------------------------------------
+  console.log(
+    'N67-DIAG ' +
+      JSON.stringify({
+        tz: process.env.TZ ?? null,
+        resolvedZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        now: new Date().toISOString(),
+        nowLocal: new Date().toString(),
+        today: today(),
+        weekOfToday: startOfWeek(today()),
+        fixtureDays: fixture.days.map((d) => ({
+          date: d.date,
+          week: startOfWeek(d.date),
+          sessions: d.sessions,
+        })),
+        carried: carriedTheStreak(fixture.days),
+        streak: weekStreak(fixture.days),
+      }),
+  );
 
   await finishTheClass();
 
