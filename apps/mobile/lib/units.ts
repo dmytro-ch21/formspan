@@ -11,9 +11,30 @@
  * across sessions. So conversion happens at the last possible moment on the
  * way out, and the first possible moment on the way in.
  *
- * Duplicated in `apps/web/src/lib/units.ts` rather than shared, matching the
- * existing convention for `measuresFor` and friends: there is no cross-app
- * package yet, and inventing one for two functions costs more than it saves.
+ * ## This file is the SOURCE. `apps/web/src/lib/units.ts` is GENERATED from it
+ *
+ * Edit this one. Then run `python3 scripts/sync-units.py --write` and commit
+ * both; `pnpm run check:units` fails if they disagree, in `verify` and in CI.
+ *
+ * It used to say the two were "duplicated rather than shared" because there
+ * was no cross-app package. They duplicated, and then they drifted: web was
+ * missing all four fluid functions, so mobile could render a volume in the
+ * athlete's units and web could not. Nobody decided that — it is what two
+ * hand-maintained copies do.
+ *
+ * **A shared workspace package was the obvious answer and is not the one**, on
+ * evidence rather than taste. N50 built `packages/telemetry` for exactly this
+ * shape and abandoned it two bundlers down of five, with the tree restored;
+ * `packages/*` is still declared in `pnpm-workspace.yaml` and still empty.
+ * `check-brand-copies.mjs` says in its own words that a parity check is "a
+ * stopgap" and that "the real fix is generating both files from source". So
+ * generation it is: one authored file, one generated one, zero bundler
+ * configuration, because both files stay exactly where they already were and
+ * jest, Metro, turbopack and vitest all resolve them unchanged.
+ *
+ * Mobile is the source rather than web because it is the superset, because
+ * mobile-first is this repo's rule, and because this file is already covered
+ * by four gates web's copy is not.
  */
 
 export type UnitSystem = 'metric' | 'imperial';
@@ -34,8 +55,8 @@ export function weightUnit(u: UnitSystem): string {
 /**
  * The unit's name in words, for a screen reader.
  *
- * `weightUnit` returns the written abbreviation, and VoiceOver reads `lb` as
- * the two letters "L B". An `accessibilityLabel` needs the spoken form, so it
+ * `weightUnit` returns the written abbreviation, and a screen reader says `lb`
+ * as the two letters "L B". An accessible label needs the spoken form, so it
  * gets its own function rather than a second literal at each call site — which
  * is exactly how "Target weight in kilograms" came to sit on a field that was
  * about to ask for pounds.
@@ -133,6 +154,107 @@ export function toDisplayDistance(metres: number, u: UnitSystem): number {
 
 export function fromDisplayDistance(v: number, u: UnitSystem): number {
   return u === 'imperial' ? round(v * M_PER_YARD, 2) : v;
+}
+
+/**
+ * Body length — height, and the girth sites that share its arithmetic.
+ *
+ * Stored in **centimetres**, always, same rule as everything above:
+ * `profiles.height_cm` is `NUMERIC(5, 1)` with `CHECK (height_cm > 50 AND
+ * height_cm < 260)`, and the check-in girths are centimetres too.
+ *
+ * **Imperial height is not one number, and that is the whole design.** Nobody
+ * says "70.9 inches" — they say 5'11". So the display side is feet-and-inches
+ * and the input side is two fields, which is why this section exports a pair
+ * (`toFeetInches` / `fromFeetInches`) alongside the single-number functions
+ * the other quantities have. A single inches box would be a faithful unit
+ * conversion and an unusable control.
+ *
+ * ## The round trip, stated precisely
+ *
+ * Two directions exist and only one of them can hold:
+ *
+ * - **display → storage → display is EXACT** — the number the athlete typed
+ *   comes back unchanged. Measured over the whole valid range: 0 failures for
+ *   all 83 whole-inch heights from 1'8" to 8'6", and 0 for all 2,099
+ *   one-decimal centimetre values.
+ * - **storage → display → storage is NOT exact**, and cannot be, because a
+ *   display value is rounded. This is not a defect and it is the same
+ *   asymmetry `toDisplayWeight` has: 16,627 of 17,001 kilogram values differ
+ *   by up to 0.001 kg after a round trip through pounds.
+ *
+ * The first is the property worth having, because it is the one an athlete can
+ * observe. The second is what would force storing display units, which is the
+ * thing this whole file exists to avoid.
+ *
+ * `fromFeetInches` rounds to **one decimal on purpose**: that is the column's
+ * own precision, so the client and Postgres agree about what was stored rather
+ * than the database silently rounding a value the app still believes.
+ */
+const CM_PER_INCH = 2.54;
+
+export function heightUnit(u: UnitSystem): string {
+  return u === 'imperial' ? 'ft/in' : 'cm';
+}
+
+/** Storage (cm) → feet and whole inches, for a two-field imperial input. */
+export function toFeetInches(cm: number): { feet: number; inches: number } {
+  const total = Math.round(cm / CM_PER_INCH);
+  return { feet: Math.floor(total / 12), inches: total % 12 };
+}
+
+/** Feet and inches → storage (cm), at the column's own precision. */
+export function fromFeetInches(feet: number, inches: number): number {
+  return round((feet * 12 + inches) * CM_PER_INCH, 1);
+}
+
+/**
+ * Storage (cm) → the single number a metric input shows.
+ *
+ * Imperial callers want `toFeetInches` instead; this returns total inches so
+ * that a caller which genuinely needs one number (a chart axis, say) has one.
+ */
+export function toDisplayHeight(cm: number, u: UnitSystem): number {
+  return u === 'imperial' ? round(cm / CM_PER_INCH, 1) : round(cm, 1);
+}
+
+/** What was typed → storage (cm). */
+export function fromDisplayHeight(v: number, u: UnitSystem): number {
+  return u === 'imperial' ? round(v * CM_PER_INCH, 1) : round(v, 1);
+}
+
+export function formatHeight(cm: number | null | undefined, u: UnitSystem): string {
+  if (cm == null) return '—';
+  if (u === 'imperial') {
+    const { feet, inches } = toFeetInches(cm);
+    return `${feet}'${inches}"`;
+  }
+  return `${trim(round(cm, 1))} cm`;
+}
+
+/**
+ * A girth — waist, hips, a limb — which is a length but not a height.
+ *
+ * Same storage (cm) and same conversion, but rendered as a decimal number in
+ * one unit rather than feet-and-inches: a waist is "32.5 in", never 2'8½".
+ * Kept separate from `formatHeight` so that distinction cannot be lost by
+ * somebody reusing the wrong one.
+ */
+export function girthUnit(u: UnitSystem): string {
+  return u === 'imperial' ? 'in' : 'cm';
+}
+
+export function toDisplayGirth(cm: number, u: UnitSystem): number {
+  return u === 'imperial' ? round(cm / CM_PER_INCH, 1) : round(cm, 1);
+}
+
+export function fromDisplayGirth(v: number, u: UnitSystem): number {
+  return u === 'imperial' ? round(v * CM_PER_INCH, 1) : round(v, 1);
+}
+
+export function formatGirth(cm: number | null | undefined, u: UnitSystem): string {
+  if (cm == null) return '—';
+  return `${trim(toDisplayGirth(cm, u))} ${girthUnit(u)}`;
 }
 
 /**

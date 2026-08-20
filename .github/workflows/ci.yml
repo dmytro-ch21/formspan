@@ -280,6 +280,22 @@ jobs:
       - name: Request timeout parity
         run: python3 scripts/check-timeout-parity.py
 
+      # `apps/web`'s units module is GENERATED from `apps/mobile`'s, and this is
+      # what makes that a guarantee rather than a comment. Units are read on
+      # nearly every screen in both apps, and the two hand-maintained copies
+      # this replaced had already drifted — web was missing all four fluid
+      # functions, so mobile could render a volume in the athlete's own units
+      # and web could not. Nobody decided that; it is what two copies do.
+      #
+      # Unlike its four siblings above, this one can also FIX what it reports:
+      # `pnpm run units:write`. It is still a check here, because a generator
+      # nobody runs is a source of truth nobody has.
+      #
+      # `python3` directly, like the rest of this job — no Node or pnpm is
+      # installed here, so a `pnpm run` would fail with `command not found`.
+      - name: Web units module is generated and current
+        run: python3 scripts/sync-units.py
+
       # The dictation eval corpus (N33/N34) is hand-authored, and a hand-authored
       # expectation is exactly as capable of being wrong as the model it grades.
       # An expected tag naming a technique id that does not exist — or writing a

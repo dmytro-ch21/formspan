@@ -1,0 +1,247 @@
+import {
+  formatDistance,
+  formatFluid,
+  formatGirth,
+  formatHeight,
+  formatWeight,
+  fromDisplayDistance,
+  fromDisplayFluid,
+  fromDisplayGirth,
+  fromDisplayHeight,
+  fromDisplayWeight,
+  fromFeetInches,
+  girthUnit,
+  heightUnit,
+  toDisplayDistance,
+  toDisplayFluid,
+  toDisplayGirth,
+  toDisplayHeight,
+  toDisplayWeight,
+  toFeetInches,
+  weightUnit,
+  weightUnitName,
+  type UnitSystem,
+} from '../units';
+
+/**
+ * The units module, which had **no tests at all** until N105 — 16 exports of
+ * conversion arithmetic that every screen in both apps reads, covered by
+ * nothing on either platform.
+ *
+ * This file covers the source. `apps/web/src/lib/units.ts` is GENERATED from
+ * it byte-for-byte and `check:units` fails if it is not, so re-running the same
+ * arithmetic there would test the same code twice; web keeps a small smoke test
+ * that the generated module imports and works, and no more.
+ *
+ * ## The round trip, and why only one direction is asserted
+ *
+ * **display → storage → display is exact.** The number the athlete typed comes
+ * back unchanged. That is the property they can observe and the one that would
+ * be a bug to lose.
+ *
+ * **storage → display → storage is NOT exact, and cannot be.** A display value
+ * is rounded — `toDisplayWeight` to 1 dp in pounds — so information is
+ * deliberately discarded on the way out. Measured before writing these tests:
+ * 0 failures in 9,990 for the first direction, 16,627 failures of 17,001 for
+ * the second, every one of them inside 0.001 kg.
+ *
+ * Asserting the second direction would be asserting a falsehood, and "fixing"
+ * it would mean storing display units — which is the thing this module's own
+ * header explains at length must never happen, because it makes every
+ * historical row ambiguous the moment somebody changes the setting.
+ *
+ * So the loops below sweep the whole plausible range in BOTH systems rather
+ * than spot-checking a value or two, because a conversion bug that only shows
+ * up at one magnitude is exactly the kind a handful of examples misses.
+ */
+
+const BOTH: UnitSystem[] = ['metric', 'imperial'];
+
+/** Rounds like the module does, so a test expectation cannot drift from it. */
+const r = (v: number, p: number) => Math.round(v * 10 ** p) / 10 ** p;
+
+describe('weight', () => {
+  it('labels the unit in each system', () => {
+    expect(weightUnit('metric')).toBe('kg');
+    expect(weightUnit('imperial')).toBe('lb');
+    expect(weightUnitName('metric')).toBe('kilograms');
+    expect(weightUnitName('imperial')).toBe('pounds');
+  });
+
+  it('converts a known value in both directions', () => {
+    // 100 kg is 220.46 lb; the display side rounds to 1 dp.
+    expect(toDisplayWeight(100, 'imperial')).toBe(220.5);
+    expect(toDisplayWeight(100, 'metric')).toBe(100);
+    expect(fromDisplayWeight(220.5, 'imperial')).toBeCloseTo(100.017, 3);
+    expect(fromDisplayWeight(100, 'metric')).toBe(100);
+  });
+
+  it('does not convert in the wrong direction', () => {
+    // The single most likely bug in any of this, and the one a "did it change?"
+    // assertion cannot see: multiplying where it should divide.
+    expect(toDisplayWeight(100, 'imperial')).toBeGreaterThan(100);
+    expect(fromDisplayWeight(100, 'imperial')).toBeLessThan(100);
+  });
+
+  it.each(BOTH)('round-trips every displayed value exactly (%s)', (u) => {
+    const step = u === 'imperial' ? 0.1 : 0.01;
+    const places = u === 'imperial' ? 1 : 2;
+    let checked = 0;
+    for (let v = 1; v <= 1000; v = r(v + step, places)) {
+      const display = r(v, places);
+      expect(toDisplayWeight(fromDisplayWeight(display, u), u)).toBe(display);
+      checked += 1;
+    }
+    // The loop is the assertion; this proves the loop RAN. An off-by-one in the
+    // bounds would otherwise make a vacuous pass indistinguishable from a real
+    // one — nothing inside a zero-iteration loop can fail.
+    expect(checked).toBeGreaterThan(900);
+  });
+
+  it('formats null as an em dash rather than throwing', () => {
+    expect(formatWeight(null, 'metric')).toBe('—');
+    expect(formatWeight(undefined, 'imperial')).toBe('—');
+  });
+
+  it('formats with the right unit attached', () => {
+    expect(formatWeight(100, 'metric')).toBe('100kg');
+    expect(formatWeight(100, 'imperial')).toBe('220.5lb');
+  });
+});
+
+describe('height', () => {
+  it('labels the unit in each system', () => {
+    expect(heightUnit('metric')).toBe('cm');
+    expect(heightUnit('imperial')).toBe('ft/in');
+  });
+
+  it('splits a known height into feet and inches', () => {
+    // 180.3 cm is 71 inches, which is 5'11".
+    expect(toFeetInches(180.3)).toEqual({ feet: 5, inches: 11 });
+    expect(fromFeetInches(5, 11)).toBe(180.3);
+  });
+
+  it('formats feet and inches rather than decimal inches', () => {
+    // "70.9 inches" is a faithful conversion nobody says out loud.
+    expect(formatHeight(180.3, 'imperial')).toBe(`5'11"`);
+    expect(formatHeight(180, 'metric')).toBe('180 cm');
+    expect(formatHeight(null, 'imperial')).toBe('—');
+  });
+
+  it('round-trips every whole-inch height in the column’s valid range', () => {
+    // The CHECK is (height_cm > 50 AND height_cm < 260): 20in = 50.8cm and
+    // 102in = 259.1cm are the extreme heights that fit inside it.
+    let checked = 0;
+    for (let totalInches = 20; totalInches <= 102; totalInches++) {
+      const feet = Math.floor(totalInches / 12);
+      const inches = totalInches % 12;
+      const cm = fromFeetInches(feet, inches);
+      expect(cm).toBeGreaterThan(50);
+      expect(cm).toBeLessThan(260);
+      expect(toFeetInches(cm)).toEqual({ feet, inches });
+      checked += 1;
+    }
+    expect(checked).toBe(83);
+  });
+
+  it('round-trips every one-decimal centimetre value', () => {
+    let checked = 0;
+    for (let cm = 50.1; cm <= 259.9; cm = r(cm + 0.1, 1)) {
+      expect(fromDisplayHeight(toDisplayHeight(cm, 'metric'), 'metric')).toBe(cm);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(2000);
+  });
+
+  it('round-trips imperial single-number heights too', () => {
+    let checked = 0;
+    for (let inches = 20; inches <= 102; inches = r(inches + 0.1, 1)) {
+      const display = r(inches, 1);
+      expect(toDisplayHeight(fromDisplayHeight(display, 'imperial'), 'imperial')).toBe(display);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(800);
+  });
+
+  it('does not convert in the wrong direction', () => {
+    expect(toDisplayHeight(180, 'imperial')).toBeLessThan(180);
+    expect(fromDisplayHeight(71, 'imperial')).toBeGreaterThan(71);
+  });
+});
+
+describe('girth', () => {
+  it('is a decimal number in one unit, never feet and inches', () => {
+    // A waist is "32.5 in", never 2'8½" — which is why this is separate from
+    // formatHeight despite sharing the arithmetic.
+    expect(girthUnit('metric')).toBe('cm');
+    expect(girthUnit('imperial')).toBe('in');
+    expect(formatGirth(82.6, 'imperial')).toBe('32.5 in');
+    expect(formatGirth(82.6, 'metric')).toBe('82.6 cm');
+    expect(formatGirth(null, 'metric')).toBe('—');
+  });
+
+  it.each(BOTH)('round-trips every displayed girth exactly (%s)', (u) => {
+    let checked = 0;
+    for (let v = 10; v <= 200; v = r(v + 0.1, 1)) {
+      const display = r(v, 1);
+      expect(toDisplayGirth(fromDisplayGirth(display, u), u)).toBe(display);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(1800);
+  });
+});
+
+describe('distance', () => {
+  it('switches unit by magnitude in both systems', () => {
+    expect(formatDistance(5000, 'metric')).toBe('5 km');
+    expect(formatDistance(400, 'metric')).toBe('400 m');
+    expect(formatDistance(5000, 'imperial')).toBe('3.11 mi');
+    expect(formatDistance(400, 'imperial')).toBe('437 yd');
+    expect(formatDistance(null, 'metric')).toBe('—');
+  });
+
+  it.each(BOTH)('round-trips every displayed distance exactly (%s)', (u) => {
+    let checked = 0;
+    for (let v = 1; v <= 2000; v++) {
+      expect(toDisplayDistance(fromDisplayDistance(v, u), u)).toBe(v);
+      checked += 1;
+    }
+    expect(checked).toBe(2000);
+  });
+});
+
+describe('fluid', () => {
+  it('exists on both platforms now', () => {
+    // These four are the drift that motivated N105: apps/web's hand-copy
+    // lacked all of them, so mobile could render a volume in the athlete's
+    // units and web could not.
+    expect(typeof toDisplayFluid).toBe('function');
+    expect(typeof fromDisplayFluid).toBe('function');
+    expect(typeof formatFluid).toBe('function');
+  });
+
+  it('promotes to litres in metric and stays in fl oz in imperial', () => {
+    expect(formatFluid(2000, 'metric')).toBe('2 L');
+    expect(formatFluid(500, 'metric')).toBe('500 ml');
+    expect(formatFluid(2000, 'imperial')).toBe('67.6 fl oz');
+    expect(formatFluid(null, 'metric')).toBe('—');
+  });
+
+  it('uses the US fluid ounce, not the imperial one', () => {
+    // 29.5735 ml, not 28.4131. Mixing them puts a 4% error into a number
+    // nobody would think to question.
+    expect(fromDisplayFluid(1, 'imperial')).toBeCloseTo(29.57, 2);
+  });
+
+  it.each(BOTH)('round-trips every displayed volume exactly (%s)', (u) => {
+    const step = u === 'imperial' ? 0.1 : 1;
+    const places = u === 'imperial' ? 1 : 0;
+    let checked = 0;
+    for (let v = 1; v <= 200; v = r(v + step, places)) {
+      const display = r(v, places);
+      expect(toDisplayFluid(fromDisplayFluid(display, u), u)).toBe(display);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(150);
+  });
+});
