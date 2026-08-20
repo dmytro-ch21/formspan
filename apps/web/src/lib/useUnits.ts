@@ -1,41 +1,18 @@
-"use client";
-
-import { useCallback, useEffect, useState } from "react";
-import { useAuth } from "@clerk/nextjs";
-
-import { getProfile, updateUnitSystem } from "@/lib/api";
-import type { UnitSystem } from "@/lib/units";
-
 /**
- * The athlete's display units, read from their profile.
+ * `useUnits` moved to `lib/UnitsProvider.tsx`.
  *
- * An account preference rather than a browser one: someone who thinks in
- * pounds thinks in pounds on their phone too, so it follows them rather than
- * living in localStorage. Defaults to metric until the profile loads, which
- * is also what a new account gets.
+ * It used to be a hook that each of ten surfaces instantiated separately — ten
+ * copies of one account-level enum, ten `GET /v1/profile` calls (one per
+ * *session rendered* on the sessions list), each starting at `metric` and
+ * correcting itself a frame later. Worse, `setUnits` updated only the calling
+ * component, so changing the preference in Settings left every other mounted
+ * surface on the old units until a reload.
+ *
+ * Re-exported from here so the existing call sites keep working; the state now
+ * lives once, in the provider mounted in `app/dashboard/layout.tsx`, seeded
+ * server-side so nothing is ever painted in units we have not established.
+ *
+ * This mirrors `apps/mobile/lib/useUnits.ts`, which did the same thing first
+ * and for the same reason.
  */
-export function useUnits(): { units: UnitSystem; setUnits: (u: UnitSystem) => Promise<void> } {
-  const { getToken } = useAuth();
-  const [units, setLocal] = useState<UnitSystem>("metric");
-
-  useEffect(() => {
-    const controller = new AbortController();
-    getProfile(getToken, controller.signal)
-      .then((p) => {
-        if (!controller.signal.aborted) setLocal(p.unit_system);
-      })
-      .catch(() => {});
-    return () => controller.abort();
-  }, [getToken]);
-
-  const setUnits = useCallback(
-    async (u: UnitSystem) => {
-      // Applied locally first so the page switches instantly.
-      setLocal(u);
-      await updateUnitSystem(getToken, u);
-    },
-    [getToken],
-  );
-
-  return { units, setUnits };
-}
+export { useUnits, UnitsProvider } from "./UnitsProvider";
