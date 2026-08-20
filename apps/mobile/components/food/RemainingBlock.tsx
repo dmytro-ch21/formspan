@@ -25,15 +25,22 @@ import { StyleSheet, View } from 'react-native';
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { remaining as computeRemaining, viewTarget, type Macros, type TargetView } from '@/lib/nutrition';
+import {
+  remaining as computeRemaining,
+  viewTarget,
+  viewTotals,
+  type EatenView,
+  type TargetView,
+} from '@/lib/nutrition';
 
 export function RemainingBlock({
-  totals,
+  eaten,
   view,
   compact = false,
   testID,
 }: {
-  totals: Macros;
+  /** Everything this device knows about what was eaten. See {@link EatenView}. */
+  eaten: EatenView;
   /** Everything this device knows about the target. See {@link TargetView}. */
   view: TargetView;
   /** The card is compact; the day screen is not. */
@@ -46,23 +53,41 @@ export function RemainingBlock({
   // this component but each computing the figure themselves is the same drift
   // the component exists to prevent, one level down.
   const target = viewTarget(view);
-  const remaining = computeRemaining(totals, target);
+  const totals = viewTotals(eaten);
+  const remaining = totals ? computeRemaining(totals, target) : null;
 
-  // Four states, deliberately distinguished. "Could not check", "you have no
-  // target", "you have not logged anything" and the ordinary line are four
-  // different sentences, and the first two are the pair that matters: asserting
-  // "set a target" at somebody who set one on web, because this phone happens
-  // to be in a basement, is the app being wrong rather than uninformed.
-  const caption =
+  // **The eaten line renders in EVERY target state**, which is the N54 bug.
+  // It used to live only in the caption of the `set` branch, so an athlete with
+  // no target saw per-meal subtotals and no day total anywhere — the number
+  // they reported as "not adding up" was simply never drawn. What you ate does
+  // not depend on whether you have a goal, so nothing about it belongs inside
+  // the has-a-goal branch.
+  const eatenText =
+    eaten.state === 'loading'
+      ? 'Loading your day…'
+      : eaten.state === 'unavailable'
+        ? // NOT "0 eaten". A read that failed is not a day nobody ate on, and
+          // an empty list means both — the exact misreading N28's reviewer
+          // found rendering forty-two "Nothing logged" rows under an error.
+          'Could not read today’s food from this device'
+        : eaten.rows.length === 0
+          ? 'nothing logged yet'
+          : // Labelled with how many entries it came from — N28's honesty rule,
+            // which applies to a total exactly as it applies to an average.
+            `${fmt(eaten.totals.kcal)} eaten · ${eaten.rows.length} ${eaten.rows.length === 1 ? 'entry' : 'entries'}`;
+
+  // The target's own four states stay exactly as they were. "Could not check"
+  // and "you have no target" are the pair that matters: asserting "set a
+  // target" at somebody who set one on web, because this phone happens to be
+  // in a basement, is the app being wrong rather than uninformed.
+  const targetText =
     view.state === 'checking'
-      ? 'Checking…'
+      ? 'Checking your target…'
       : view.state === 'unknown'
         ? 'Cannot check your target from here — logging still works'
         : view.state === 'none'
           ? 'Set a target to see what is left'
-          : totals.kcal === 0
-            ? 'nothing logged yet'
-            : `${fmt(view.target.kcal)} target · ${fmt(totals.kcal)} eaten`;
+          : `${fmt(view.target.kcal)} target`;
 
   const kcalText = remaining ? fmt(Math.abs(remaining.kcal)) : '—';
   const proteinText = remaining ? `${fmt(Math.abs(remaining.protein_g))} g` : '—';
@@ -86,9 +111,19 @@ export function RemainingBlock({
         />
       </View>
 
-      <Text style={styles.caption}>{caption}</Text>
+      {/* Two lines, not one. They answer different questions and they fail
+          independently: the food read is local and the target read is a
+          network call, so a basement can break one while the other is fine.
+          Merging them into a single sentence is what let the eaten figure
+          disappear whenever the target was missing. */}
+      <Text style={styles.caption} testID="fuel-eaten">
+        {eatenText}
+      </Text>
+      <Text style={styles.caption} testID="fuel-target">
+        {targetText}
+      </Text>
 
-      {target ? (
+      {target && totals ? (
         <View
           style={styles.track}
           accessible
@@ -156,7 +191,7 @@ const styles = StyleSheet.create({
   figure: { flex: 1 },
   value: { fontWeight: '800', fontVariant: ['tabular-nums'] },
   unit: { fontSize: 12, color: vola.textMuted, marginTop: 1 },
-  caption: { fontSize: 12, color: vola.textMuted, marginTop: 8 },
+  caption: { fontSize: 12, color: vola.textMuted, marginTop: 6 },
   track: {
     height: 4,
     borderRadius: 2,

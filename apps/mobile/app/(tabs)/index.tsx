@@ -75,6 +75,8 @@ import {
   type Entry,
   type Food,
   type TargetView,
+  eatenFrom,
+  type EatenView,
 } from '@/lib/nutrition';
 import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { accentGlow } from '@/lib/palette';
@@ -553,7 +555,7 @@ export default function TodayScreen() {
 
   // Fuel. Read locally first, exactly like the day screen: the card must be
   // right with no signal, because the log it reports is written offline.
-  const [foodEntries, setFoodEntries] = useState<Entry[]>([]);
+  const [foodEaten, setFoodEaten] = useState<EatenView>({ state: 'loading' });
   const [foodView, setFoodView] = useState<TargetView>({ state: 'checking' });
   const [foodQuick, setFoodQuick] = useState<Food[]>([]);
   const foodEnabled = hasFoodLog(modules);
@@ -565,9 +567,14 @@ export default function TodayScreen() {
 
     (userId ? localEntries(userId, today) : Promise.resolve<Entry[]>([]))
       .then((rows) => {
-        if (live) setFoodEntries(rows);
+        if (live) setFoodEaten(eatenFrom(rows));
       })
-      .catch(() => {});
+      .catch(() => {
+        // Was `.catch(() => {})`, which left the list empty and rendered a
+        // failed read as "nothing logged" — a claim the athlete ate nothing.
+        // See `EatenView`.
+        if (live) setFoodEaten({ state: 'unavailable' });
+      });
 
     // Ranked for the CURRENT slot, so the chips are porridge at breakfast and
     // something else at dinner.
@@ -1435,7 +1442,7 @@ export default function TodayScreen() {
             remaining protein. */}
         {foodEnabled && (
           <NutritionCard
-            entries={foodEntries}
+            eaten={foodEaten}
             view={foodView}
             quickAdd={foodQuick}
             onLog={() => router.push('/food/add')}

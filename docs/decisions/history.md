@@ -31315,6 +31315,119 @@ estimator inventing an item and doubling a quantity while flagging only the
 invention, so the principle #319 landed for the barcode `'ai'` source needs
 applying one level down — per-field provenance, not per-row. That is not in this
 change and should be its own task rather than a silent gap.
+## 2026-08-19 — What you ate does not depend on whether you have a goal (N54)
+
+Reported from a real device: entries log, the day total does not add up. The
+task line said diagnose before designing, and the diagnosis moved the fix a long
+way from where the report pointed.
+
+**`dayTotals()` was correct.** The arithmetic was never wrong. The eaten figure
+was only ever rendered inside `RemainingBlock`'s has-a-target branch, in the
+caption `2,400 target · 180 eaten` — so an athlete who had not set a target got
+no caption, and therefore **no day total anywhere on the screen**. Per-meal
+subtotals were visible; the number they were being asked to add up to was not
+drawn at all.
+
+The fix is to stop nesting it: what you ate does not depend on whether you have
+a goal, so nothing about it belongs inside the has-a-goal branch. The eaten line
+and the target line are now two separate captions, which is also honest about
+how they fail — the food read is local and the target read is a network call, so
+a basement breaks one and not the other.
+
+### The instance nobody reported, found in the same read
+
+Both callers loaded entries like this:
+
+```
+(userId ? localEntries(userId, on) : Promise.resolve([]))
+  .then((rows) => { if (live) setEntries(rows); })
+  .catch(() => {});
+```
+
+A failed local read left the list at `[]`, which renders as **"nothing logged"**
+— a claim that the athlete ate nothing, made from a read that never happened.
+That is exactly the failure N28's reviewer caught on web, where a failed fetch
+printed forty-two "Nothing logged" rows under an error banner, and it is the
+third place today the same shape has turned up: **an empty collection means both
+"none" and "we could not ask", and every screen reads it as the first.**
+
+Swallowing the error is right — nothing here may throw at the screen. Reporting
+it as a zero is not.
+
+### `EatenView`, mirroring the union that already got this right
+
+`TargetView` has distinguished `checking` / `unknown` / `none` / `set` since
+N25, with a comment arguing that telling somebody to set a target they set on
+web is "the app being wrong rather than uninformed". The entries had no such
+union, so the same care was applied to one half of the screen and not the other.
+
+`EatenView` is `loading` / `unavailable` / `ready`, and its ready state carries
+the **rows** with the totals derived from them rather than a separate count
+stored alongside — a second field for the same fact is the drift this module's
+own package doc is about.
+
+`viewTotals()` returns **null** rather than a zeroed `Macros` in the two absent
+states, deliberately: a zero fallback there would push the misreading one level
+down, where every caller inherits it without being able to see it, which is
+precisely how the bare `Entry[]` behaved.
+
+### A third bug, from keying
+
+The Food screen keyed its TARGET to the day (`dated.on === on`) and its entries
+to nothing. Stepping a day therefore left the previous day's rows standing under
+the new date until the read resolved — a total belonging to a day you are no
+longer looking at, which is its own way for calories to "not add up" and is
+invisible unless you step days quickly. Both are keyed now.
+
+### Verification
+
+Three mutations, each seen red and restored: moving the eaten line back inside
+the has-a-target branch (the original bug, 3 tests red), reporting a failed read
+as "nothing logged" (2 red), and dropping the entry count from the total (5
+red). Eight new tests on `NutritionCard`, covering the day total in all four
+target states, the three eaten states, and — the case that must NOT be swept up
+by the other two — a genuine zero still reporting as a zero.
+
+### What review then found, and it is the same shape one level out
+
+No blocking findings, but the sharpest suggestion was this: the fix stopped
+`RemainingBlock` lying, and left the **meal sections** doing it. While the read
+was `loading` or `unavailable`, the screen still rendered all four meal headers
+with no rows and an Add button each — visually indistinguishable from a
+genuinely empty day, sitting directly under a banner saying the read failed.
+
+No *number* lied: the subtotals are suppressed at zero and the headline figure
+is a dash. But the dominant surface of the screen still asserted "your meals are
+empty" from a read that never happened, which is the N28 web failure in
+miniature and the same one this task exists to fix. The sections now render only
+on a real answer.
+
+Also fixed: the delete path re-read and wrote `loaded` with no day guard, so
+deleting and then stepping days raced — the delete's read resolves last and
+writes the OLD day back, stranding the new day on "Loading" until the next focus
+or sync. It failed honest rather than wrong, which is why it was a suggestion
+and not a blocker, but a functional update that bails when the day has moved
+closes it.
+
+One thing review noted and I have left: `ready` carries `rows` and `totals` as
+independent fields, so nothing but discipline stops a caller building a
+mismatched pair by literal. `eatenFrom` is "the one place a total is derived"
+by convention rather than by construction, and both construction sites go
+through it.
+
+### What this leaves open
+
+- **Not verified on a device**, which is where it was reported. The states are
+  covered by component tests against the real component, but nobody has watched
+  the fix on the phone that produced the report.
+- **The screens themselves have no tests.** `RemainingBlock` is covered
+  thoroughly; nothing proves `food.tsx` and `index.tsx` feed it correctly — and
+  the keying, the `.catch → unavailable` paths and the delete race are exactly
+  the subtle parts. Review named a screen-level test in `app/__tests__/` as the
+  highest-value addition and it is not done here.
+- The `unavailable` copy says the read failed and offers no retry. There is no
+  retry affordance on this screen and adding one is a bigger change than the
+  bug warrants; a pull-to-refresh or a re-focus already re-reads.
 
 ## Open items / known gaps as of this entry
 

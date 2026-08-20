@@ -9488,3 +9488,49 @@ tables. Schema and ingestion only — display is N53 and N59.
   data, so it is derivable; storing it creates two numbers that can disagree.
 - `nutrition_targets` deliberately has none of these. A target is a goal, and
   adding goal columns nothing sets would invent an intention.
+## The day total on the phone (N54, `components/food/RemainingBlock.tsx`)
+
+Shared by Today's Fuel card and the Food tab, so every scenario below applies to
+**both** surfaces — and the fact that they share one component is itself the
+thing to protect: two copies of "remaining" would let the two screens disagree
+about the single number the feature exists to show.
+
+### The reported bug
+
+- **With no target set, the day total is still shown.** Log two entries, do not
+  set a target, and assert the eaten figure and its entry count are on screen.
+  This is the reported failure: the total lived only in the has-a-target
+  branch's caption, so an athlete without one saw per-meal subtotals and no day
+  total anywhere.
+- Same with the target `unknown` (offline, never fetched) and `checking`. **What
+  you ate does not depend on whether you have a goal**, so assert it in all four
+  target states, not just the one that used to work.
+
+### Three states that used to be one zero
+
+- **`loading`** says so, and does **not** say "nothing logged".
+- **`unavailable`** (the local read failed) says the read failed. Assert it does
+  **not** say "nothing logged" and that the remaining figures are dashes, not
+  zeros — a zero reads as "your whole target is left", a confident claim built
+  on a read that never happened.
+- **`ready` with no rows** says "nothing logged yet". This is the case that must
+  not be swept up by the other two: an athlete who logged nothing did log
+  nothing, and saying so is correct.
+- The total is **labelled with how many entries it came from** (`180 eaten · 1
+  entry`), N28's honesty rule applied to a total rather than an average.
+
+### Keying to the day
+
+- **Step to yesterday and back quickly.** Assert the total never shows one day's
+  rows under another day's date. The target was keyed to the day and the entries
+  were not, so the previous day's total stood under the new date until the read
+  resolved — its own way for calories to "not add up", and invisible unless you
+  step days faster than the read.
+
+### Regression trap
+
+- **Do not re-nest the eaten line inside the target branch.** It is the single
+  edit that reintroduces the reported bug, it looks like tidying (one caption
+  instead of two), and it is green against any test that only exercises the
+  has-a-target path. The two captions fail independently — the food read is
+  local, the target read is a network call — which is why they are two.
