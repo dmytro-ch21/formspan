@@ -34936,6 +34936,122 @@ the snapshot does not provide.
   `gen_random_uuid()`, so the residual is a existence-probe against unguessable
   ids.
 
+## 2026-08-20 — Roadmaps were not hard to see, they were only offered in one place (N96, #444)
+
+The user's report was three words long — *"its very hidden and not noticable"* —
+and the ticket recorded that three surfaces already point at roadmaps, so a
+fourth link was explicitly not the ask. The first job was to work out **which**
+of the four candidate diagnoses was true: a strip below the fold, a summary that
+reads as decoration, a label that does not say what it leads to, or "it was
+invisible for months so nobody learned it exists".
+
+**It was mostly none of those. Two of the three surfaces do not exist for the
+person complaining.**
+
+- Today's `RoadmapLine` renders `listWorkingCurricula`, which is **enrolled-only**.
+  On no roadmap it drew nothing at all.
+- You's `RoadmapSummary` returns `null` when there is no working roadmap and no
+  focus, with a comment deliberately declining to prompt ("would be a nag").
+- Plan's `CurriculaStrip` is the **only** surface that has ever shown an
+  un-enrolled roadmap.
+
+So "three entry points" was **one offer and two progress read-outs**, and an
+athlete who had never enrolled — which is the state the report was made from —
+could only meet roadmaps by scrolling past a seven-day week grid on the tab you
+open to pick a template. Add #370 landing this morning (before it, all of this
+vanished whenever the BJJ module was off) and the honest summary is: the offer
+existed, in one place, below the fold, on the wrong screen, and had been
+unreachable for most of its life.
+
+That changes the fix. Nothing here adds a fourth link.
+
+**Today's roadmap slot now has two states instead of one.** The row
+`RoadmapLine` already owned inside *Upcoming* renders the progress line when the
+athlete is on a roadmap and a new `RoadmapOffer` when they are on none. It is a
+permanent surface with two states rather than a prompt that appears out of
+nowhere, which is what keeps it from being the nag `RoadmapSummary` correctly
+refuses to be — and it self-limits structurally, because enrolling replaces it
+with the progress line and it never comes back. There is no dismiss control
+because there is nothing left to dismiss once it has done its job.
+
+Three properties of that slot are load-bearing and each has a test:
+
+- **`roadmaps === null` renders neither.** That is the whole reason
+  `refreshRoadmaps` refuses to `setRoadmaps([])` on a failed read: an unreadable
+  answer is not "you are on no roadmap", and offering one on the strength of an
+  offline read quietly retracts something the athlete committed to.
+- **`roadmapToOffer` re-uses `roadmapCurricula` rather than re-deriving
+  eligibility.** That function is the one that knows a roadmap is `official`,
+  which is the F7 fix — a stranger publishing with `track: "belt"` and
+  `belt: "white"` appeared wearing a belt word once already, and an offer card is
+  a *stronger* endorsement than a strip tile.
+- **It reads on focus, not on mount.** Enrolling happens on a screen pushed over
+  the tabs, and a tab screen stays mounted for the life of the process. Read
+  once, Today would keep offering a roadmap the athlete had already started —
+  the exact bug `CurriculaStrip` documents having had.
+
+**The second half is that "3 of 25 mastered" is not a position.** The ticket asks
+for progress in words a glance can read rather than a bare fraction, and the
+authored curricula already carry the structure for it: eleven or twelve named
+phases each. `roadmapMilestone` reports the phase holding the **next step** —
+`Milestone 3 of 11 · Mount: get out, then hold` — on Today and on each roadmap
+row on You. It is keyed on `nextStep`, never on the first unmastered *item*: a
+phase's reading items carry no criteria and nothing can ever complete them, so
+counting those pins an athlete to a milestone they had finished. That is
+`countable_items` versus `item_count` again, one level up.
+
+It returns `null` in three genuinely different situations — no phases, nothing
+left to work, a next step that is unphased or points outside the array — and all
+three fall back to the line the component had before, rather than being papered
+into a number. **The roadmap screen's own phase headers are numbered to match**,
+because a number that names nothing you can find when you arrive is worse than
+no number.
+
+"Milestone" was checked against the existing vocabulary rather than assumed
+free: `lib/milestones.ts` is streak congratulations and never says the word on
+screen (its labels are "A month, unbroken" and friends), while the seeded
+curricula's own descriptions already say *"Milestones complete from what you log
+live"*.
+
+**One deletion worth recording, because the mutation harness found it rather than
+a reviewer.** `roadmapMilestone` was written with a `phases.length === 0`
+early-out *and* a range check. The early-out survived deletion — on a curriculum
+with no phases every index is already out of range — which is the definition of
+dead code and exactly the reading a redundant guard invites. It is gone; the
+range check does both jobs and is mutation-covered from both ends (`i >= length`
+and `i < 0` separately).
+
+**Sixteen mutations, all red, baseline and restore green in the same session** —
+ten against `lib/roadmapEntry.ts` (off-by-one, denominator, `nextStep` versus
+first-unmastered-item, both range bounds, the null-list guard, the enrolled
+filter, the countable filter, the eligibility filter) and six against the two
+components (the milestone line never rendering, the next step dropped, a
+milestone claimed when there is none, the offer rendering before anything was
+read, the offer reading on mount instead of on focus, the card pointing at the
+wrong destination). The component six exist because the lib ten structurally
+cannot see the thing the ticket is about: a component that computes the right
+milestone and never renders it passes every assertion in the lib file, and
+"hidden" is a render-path property.
+
+**Small cleanup carried along.** `moduleWithCatalog` joins `moduleOffWithCatalog`
+in `lib/modules.ts`. The enabled half of that predicate had already rotted into
+three hand-written copies — the Library, the Plan tab's Roadmaps strip and a
+gating test — before Today needed a fourth, which is the same "two copies is how
+one ends up checking only half" that produced `hasFoodLog`.
+
+**What is NOT here.** The redesign of the roadmap screen itself is #446, blocked
+on #445 re-authoring the curricula, and deliberately untouched: this half makes
+anyone arrive at that screen, and shipping the redesign alone would be a
+beautiful screen nobody opens.
+
+**NEEDS HUMAN EVIDENCE, and it is the central claim.** "An athlete can now find
+this" is a claim about a person, not about a diff — and this branch is a
+worktree, which cannot build the mobile app at all (`EXPO_PUBLIC_*` is inlined at
+build time from a gitignored `.env.local` no worktree has, and the build
+*succeeds* while shipping an app with no keys). The device check is three steps
+and is written out in the PR body and in `docs/testing/functional-scenarios.md`.
+It is not argued up to met.
+
 ## Open items / known gaps as of this entry
 
 - **Twelve backend packages still delete each other's fixtures across concurrent test binaries — filed as #454.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.

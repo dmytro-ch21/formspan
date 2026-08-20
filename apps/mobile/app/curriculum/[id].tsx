@@ -268,6 +268,19 @@ export default function CurriculumScreen() {
  * not stops on it, and numbering them would shift every milestone's number by
  * how much prose came before it. Unphased items lead, labelled only when
  * phases exist — see `groupByPhase` for why they must not sink.
+ *
+ * **The phase headers are numbered as of N96, and that is not decoration.**
+ * Today and You now say "Milestone 3 of 11 · Mount: get out, then hold", and a
+ * number that names nothing you can find when you arrive is worse than no
+ * number. The count is the phase's position in `phases`, which is the array
+ * `CurriculumItem.phase` indexes by contract and the order this function
+ * renders them in — the same arithmetic `roadmapMilestone` does, reached from
+ * the other end.
+ *
+ * `indexOf` rather than the map's own counter, because `groupByPhase` puts the
+ * UNPHASED group first: counting rendered groups would make phase one
+ * "Milestone 2" on any mixed curriculum. A phase that somehow is not in the
+ * array gets no number rather than "Milestone 0".
  */
 function renderGroups(curriculum: Curriculum, tone: string) {
   const items = curriculum.items ?? [];
@@ -277,6 +290,11 @@ function renderGroups(curriculum: Curriculum, tone: string) {
     <RNView key={group.phase ? `p${group.phase.order}` : 'unphased'} style={styles.group}>
       {group.phase ? (
         <RNView style={styles.phaseHeader}>
+          {phases.indexOf(group.phase) >= 0 && (
+            <Text style={[styles.phaseCount, { color: tone }]}>
+              MILESTONE {phases.indexOf(group.phase) + 1} OF {phases.length}
+            </Text>
+          )}
           <Text style={styles.phaseTitle}>{group.phase.title}</Text>
           {group.phase.description !== '' && (
             <Text style={styles.note}>{group.phase.description}</Text>
@@ -460,6 +478,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   group: { gap: 12 },
   phaseHeader: { gap: 4, marginTop: 8 },
+  phaseCount: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   phaseTitle: { color: vola.text, fontSize: 16, fontWeight: '800' },
   unassigned: {
     color: vola.textDim,

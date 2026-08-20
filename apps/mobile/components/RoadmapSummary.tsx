@@ -8,6 +8,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { fetchFocus, type Focus } from '@/lib/bjjFocus';
 import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
+import { roadmapMilestone } from '@/lib/roadmapEntry';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -98,23 +99,41 @@ export function RoadmapSummary() {
         </View>
       )}
 
-      {(roadmaps ?? []).map((c) => (
-        <Link key={c.id} href={`/curriculum/${c.id}`} asChild>
-          <Pressable
-            style={({ pressed }) => [styles.link, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel={`${c.name}, ${c.mastered_items} of ${c.countable_items} mastered`}
-            testID={`you-roadmap-${c.id}`}
-          >
-            <Text style={styles.linkText} numberOfLines={1}>
-              {c.name}
-            </Text>
-            <Text style={styles.linkMeta}>
-              {c.mastered_items}/{c.countable_items}
-            </Text>
-          </Pressable>
-        </Link>
-      ))}
+      {(roadmaps ?? []).map((c) => {
+        // N96: the row said the name and a fraction, which is where you are in
+        // a total and not where you are in the SYLLABUS. Null on an unphased
+        // or finished roadmap — see `roadmapMilestone` for why those are
+        // different situations, and why neither may be faked into a number.
+        const milestone = roadmapMilestone(c);
+        return (
+          <Link key={c.id} href={`/curriculum/${c.id}`} asChild>
+            <Pressable
+              style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel={
+                milestone
+                  ? `${c.name}, milestone ${milestone.number} of ${milestone.of}, ${milestone.title}, ${c.mastered_items} of ${c.countable_items} mastered`
+                  : `${c.name}, ${c.mastered_items} of ${c.countable_items} mastered`
+              }
+              testID={`you-roadmap-${c.id}`}
+            >
+              <RNView style={styles.linkMain}>
+                <Text style={styles.linkText} numberOfLines={1}>
+                  {c.name}
+                </Text>
+                {milestone && (
+                  <Text style={styles.linkSub} numberOfLines={1}>
+                    Milestone {milestone.number} of {milestone.of} · {milestone.title}
+                  </Text>
+                )}
+              </RNView>
+              <Text style={styles.linkMeta}>
+                {c.mastered_items}/{c.countable_items}
+              </Text>
+            </Pressable>
+          </Link>
+        );
+      })}
     </View>
   );
 }
@@ -155,6 +174,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   pressed: { opacity: 0.7 },
-  linkText: { color: vola.text, fontSize: 14, fontWeight: '600', flex: 1 },
+  linkMain: { flex: 1, gap: 2 },
+  linkText: { color: vola.text, fontSize: 14, fontWeight: '600' },
+  linkSub: { color: vola.textMuted, fontSize: 12 },
   linkMeta: { color: vola.textMuted, fontSize: 13, fontVariant: ['tabular-nums'] },
 });

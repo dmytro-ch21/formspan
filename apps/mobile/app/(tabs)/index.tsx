@@ -25,6 +25,7 @@ import { sportColor } from '@/components/ui/sport';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { RoadmapLine } from '@/components/RoadmapLine';
+import { RoadmapOffer } from '@/components/RoadmapOffer';
 import { SectionHeader } from '@/components/ui/Section';
 import { TrendStrip } from '@/components/ui/TrendStrip';
 import { SessionCard, type Metric } from '@/components/ui/SessionCard';
@@ -62,7 +63,13 @@ import {
 } from '@/lib/prefs';
 import { restLine, weeklyDays } from '@/lib/trend';
 import { formatVolume, type UnitSystem } from '@/lib/units';
-import { enabledSports, labelFor, usesBelt, type Module } from '@/lib/modules';
+import {
+  enabledSports,
+  labelFor,
+  moduleWithCatalog,
+  usesBelt,
+  type Module,
+} from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
@@ -1155,9 +1162,33 @@ export default function TodayScreen() {
 
               Only on today. A roadmap is not a fact about the Thursday you
               stepped back to.
+
+              TWO STATES, ONE SLOT — N96. On a roadmap, this is where the
+              progress line goes; on none, it is where the offer goes. That is
+              the fix: the only surface that ever offered an un-enrolled
+              roadmap was a horizontal strip below the week grid on the Plan
+              tab, so an athlete who had never taken one on saw nothing about
+              roadmaps anywhere they actually looked. See `lib/roadmapEntry.ts`
+              for the full diagnosis.
+
+              `roadmaps === null` renders NEITHER, and that is the whole reason
+              `refreshRoadmaps` refuses to `setRoadmaps([])` on a failed read:
+              an unknown list is not "you are on no roadmap", and offering one
+              on the strength of an offline read would quietly retract
+              something the athlete committed to.
+
+              Gated on a discipline whose catalog is TECHNIQUES, never on
+              `key === 'bjj'` — the same predicate the Plan tab and the Library
+              ask. With it off there is nothing to offer, and `CurriculaStrip`
+              already owns the "turn it back on" case (N61).
             */}
             {isToday &&
-              roadmaps?.map((c) => <RoadmapLine key={c.id} curriculum={c} />)}
+              roadmaps !== null &&
+              (roadmaps.length > 0 ? (
+                roadmaps.map((c) => <RoadmapLine key={c.id} curriculum={c} />)
+              ) : moduleWithCatalog(modules, 'techniques') ? (
+                <RoadmapOffer />
+              ) : null)}
 
             {owed.length > 0 ? (
               owed.map((p) => (
