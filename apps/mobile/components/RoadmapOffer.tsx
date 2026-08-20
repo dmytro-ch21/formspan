@@ -53,6 +53,14 @@ export function RoadmapOffer() {
         // an offer nobody asked for would make an offline Today look broken.
         // Left as it was, so nothing is claimed either way — and an abort
         // lands here too, which is exactly the "change nothing" this wants.
+        //
+        // ONE residual stale window this does NOT close, and the abort below
+        // should not be read as having closed it: enrol, lose signal, come
+        // back to Today. The refocus read fails, "change nothing" keeps the
+        // previous offer, and the card sits over a roadmap the athlete has
+        // already started until some read succeeds. That is the same tradeoff
+        // `refreshRoadmaps` makes one level up — retracting on an unreadable
+        // answer is the worse failure — so it is deliberate, not unnoticed.
       }
     },
     [getToken],

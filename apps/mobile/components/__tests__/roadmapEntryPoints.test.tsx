@@ -93,6 +93,14 @@ jest.mock('expo-router', () => ({
 
     `mockUseEffect` with `[run]` is the faithful shape — after mount, once,
     since `run` is memoised on a `cb` that never changes identity.
+
+    **Two things it still cannot model, stated so nothing here is read as
+    covering them.** It never runs the cleanup on UNMOUNT — the destructor is
+    stowed in a ref rather than returned to React — so a regression in unmount
+    cancellation is invisible to this file, even though the real hook does
+    abort there. And `refocus()` collapses blur and refocus into one atomic
+    step, so "blurred, the response arrives while blurred, then refocus" is not
+    an ordering any test here can express.
   */
   useFocusEffect: (cb: () => void | (() => void)) => {
     const cleanup = mockUseRef<(() => void) | void>(undefined);
@@ -169,6 +177,13 @@ beforeEach(() => {
   mockListCurricula.mockReset();
   mockListCurricula.mockResolvedValue([]);
   mockHrefs.length = 0;
+  // Back to the no-op, so calling `refocus()` without having rendered fails
+  // loudly instead of quietly driving the PREVIOUS test's unmounted component.
+  // Only `RoadmapOffer` uses `useFocusEffect` today, which is the only reason
+  // this has never bitten.
+  refocus = () => {
+    throw new Error('refocus() before any render — nothing is focused');
+  };
 });
 
 describe('RoadmapLine — where you are, on Today', () => {
@@ -321,6 +336,22 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
     await act(async () => {
       refocus();
     });
+
+    /*
+      Both reads actually happened — WITHOUT this the test can pass for the
+      wrong reason, and the reason is worth spelling out because it is the
+      failure mode this whole file was rewritten over.
+
+      If the mount read ever stopped happening, `landStale` would still be its
+      no-op default, nothing would ever resolve, and the `toBeNull()` below
+      would pass having measured nothing at all. The sibling tests happen to
+      catch that mutation today; a test whose subject is "a stale read must not
+      win" should not depend on a neighbour to know a read occurred.
+
+      It also proves the stub's `signal?.addEventListener` branch was reached,
+      which is the half that makes the abort observable.
+    */
+    expect(mockListCurricula).toHaveBeenCalledTimes(2);
 
     // Only now does the abandoned first read come back, carrying the world as
     // it was before they enrolled.
