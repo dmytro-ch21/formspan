@@ -164,7 +164,31 @@ So, every time:
    passing. If you genuinely must (a temporary preview entry, say), restore it
    and *verify* the restore rather than assuming it.
 5. **Claim your migration number against `origin/main` at REBASE time, not
-   when you write it.** Two branches picking `000043` is not something
+   when you write it — and claim one STRICTLY ABOVE the highest there. Never
+   fill a gap below it.**
+
+   **A migration numbered below the database's current version is SILENTLY
+   SKIPPED, and `migrate up` prints `done` and exits 0.** golang-migrate tracks
+   one integer and applies only what is strictly above it; the filenames look
+   like a list, the tool sees a number. Measured 2026-08-19 on a database
+   migrated from `main`: version 66, add a `000065`, run `up` → `"migrate: up:
+   done"`, exit 0, **version still 66, the new columns absent**. No error, no
+   warning, no dirty flag — the one output a deploy checks says it ran.
+
+   **CI cannot catch this.** The `Backend (Go)` job migrates a throwaway
+   database that starts at zero and applies everything in order, so a gap is
+   invisible there and stays green forever. Staging and every developer machine
+   that has pulled `main` are already past the number, so the columns simply
+   never exist on any of them. The symptom surfaces much later and somewhere
+   else — every call failing on `column "…" does not exist` — which reads as a
+   code bug and is a numbering one.
+
+   **A gap in the sequence is not free space.** It is a number only a database
+   that has not yet reached it can ever apply. `main` currently has a permanent
+   harmless hole at `000065` for exactly this reason; leave it there. This rule
+   exists because the coordinating session told somebody to fill it, which is
+   the natural thing to suggest when a list has a hole in it.
+ Two branches picking `000043` is not something
    golang-migrate resolves — it refuses to start at all, breaking CI, local
    dev and every deploy. And the collision is **invisible in
    `git diff origin/main...HEAD`**, because a three-dot diff uses the merge
