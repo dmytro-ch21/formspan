@@ -48,8 +48,13 @@ jest.mock('@/lib/friends', () => ({
   getPendingCounts: (...a: unknown[]) => mockCounts(...a),
 }));
 
+// Mutable so a test can turn a discipline ON. The factory is evaluated once,
+// at first require, so the arrow has to READ the variable rather than close
+// over its value — and `beforeEach` puts it back to the bare account every
+// other test in this file assumes.
+let mockModules: { key: string; enabled: boolean }[] = [];
 jest.mock('@/lib/ModulesProvider', () => ({
-  useModules: () => ({ modules: [], ready: true }),
+  useModules: () => ({ modules: mockModules, ready: true }),
 }));
 jest.mock('@/lib/sync', () => ({
   request: jest.fn(),
@@ -104,6 +109,9 @@ beforeEach(() => {
   // its `toHaveBeenCalledWith` with somebody else's chime. No test can fire the
   // cue today, which is exactly when this is cheap to add.
   mockPlay.mockReset();
+  // Back to the bare account. Every test in this file that predates the
+  // mutable mock assumes nothing is enabled.
+  mockModules = [];
 });
 
 describe('what a count renders as', () => {
@@ -303,6 +311,30 @@ describe('the Library row (N70)', () => {
     mockCounts.mockResolvedValue({});
     render(<YouScreen />);
     expect(await screen.findByTestId('you-library')).toBeTruthy();
+  });
+});
+
+describe('the Sequences row (N80)', () => {
+  // Same risk as the Library row above, and the reason #414 exists: accepting
+  // a shared sequence now navigates straight to the copy, which answers the
+  // athlete who just tapped Accept — and nobody else. Without this row a chain
+  // is reachable only by having just arrived at it, which is the same
+  // phone-impossible gap in a smaller form.
+  it('is present for a BJJ account, and goes to the chain list', async () => {
+    mockModules = [{ key: 'bjj', enabled: true }];
+    render(<YouScreen />);
+
+    fireEvent.press(await screen.findByTestId('you-sequences'));
+    expect(mockPush).toHaveBeenCalledWith('/sequence');
+  });
+
+  it('is absent when BJJ is off', async () => {
+    // The arm that makes the previous one mean anything — and the gate itself:
+    // a strength-only account has no use for a list that can only be empty.
+    // `beforeEach` has already cleared the modules.
+    render(<YouScreen />);
+    await screen.findByTestId('you-library');
+    expect(screen.queryByTestId('you-sequences')).toBeNull();
   });
 });
 

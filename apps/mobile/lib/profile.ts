@@ -46,6 +46,12 @@ export type Profile = {
    * the safe reading either way — a privacy switch that fails open is not one.
    */
   share_training_details?: boolean;
+  /**
+   * Daily movement outside logged training, or null when the athlete has never
+   * chosen. Optional on the TYPE only so a response from an older server still
+   * parses; read it as `?? null` rather than assuming it is present.
+   */
+  activity_level?: string | null;
 };
 
 /** The fields the edit screen can change. Omitted keys are left alone. */
@@ -62,6 +68,10 @@ export type ProfilePatch = Partial<{
   sex: string | null;
   /** Centimetres. What waist-to-height and the body-fat estimate need. */
   height_cm: number | null;
+  /** Never null — the server's COALESCE contract reads null as "leave
+   *  unchanged", so going back to "never chosen" cannot be expressed and the
+   *  save path must OMIT the key rather than null it. Same rule as username. */
+  activity_level: string;
 }>;
 
 /**
@@ -153,6 +163,21 @@ export function setTrackEffort(
   on: boolean,
 ): Promise<Profile> {
   return updateProfile(getToken, { track_effort: on } as never);
+}
+
+/**
+ * Stores the daily-movement level, creating the profile if there is not one.
+ *
+ * Goes through `updateProfile` for its 404-then-POST recovery: the Goals tab is
+ * a tab, so an athlete can reach it without ever having been through
+ * onboarding, and "pick how much you move" failing on a row that does not exist
+ * yet is a dead end with no explanation.
+ */
+export function setActivityLevel(
+  getToken: TokenGetter,
+  level: string,
+): Promise<Profile> {
+  return updateProfile(getToken, { activity_level: level });
 }
 
 export function getProfile(getToken: TokenGetter): Promise<Profile> {

@@ -197,6 +197,30 @@ the quantities specifically, not just the names.
 trends downstream, and a wrong number there is invisible forever after. A real
 plate has, as far as anyone can tell, never been through it.
 
+**Also: photograph a product LABEL, which is the reported failure (N92, #433).**
+Scan a barcode the catalog does not have, take the "Describe it instead" path
+it offers, and photograph the nutrition panel on the packet. This is the third
+rung of the scan ladder and it is the exact journey the report came from — a
+phone answering **"can't reach server"** on a connection that was working.
+
+Two mechanisms that could produce that sentence are now closed: the endpoint
+had no deadline at all, so a slow provider ran until the phone gave up and
+received no status to render; and a failure re-encoding the frame — which
+happens on the device with the radio idle — fell through to a message about
+signal. **What has NOT been established is which one the reporter hit**, so
+this check is evidence, not a regression test.
+
+**Should:** A draft comes back with the label's own figures in it, and you
+confirm it. If it fails instead, the sentence must name what failed — a
+timeout, an outage, or the allowance being spent and when it returns — and must
+not mention signal, a connection, or being offline.
+
+**Capture the status, whatever happens.** That is the acceptance criterion the
+ticket cannot close without: a proxy, the device console, or the server's own
+log by `request_id`. Note that a **504** is the new answer for "we stopped
+waiting", and unlike the 503 it *does* spend one of the day's 25 — so check the
+remaining count before concluding a quota was burned by something else (#367).
+
 ---
 
 ## D5 — Scan a barcode on a real packet
@@ -220,6 +244,16 @@ fires repeatedly and stacks up duplicate lookups. An **empty screen** where one
 of those three outcomes should be — absence reading as an answer. And offline:
 "not in our catalog" when the truth is "no signal", which is a false statement
 about the catalog.
+
+**If the screen says "scanning isn't available in this build", stop and check
+the build, not the code.** That sentence means the binary has no `expo-camera`
+native module — the JS is there, the native half is not. It is the N91 state,
+and before that guard existed it was not a sentence at all: the app terminated
+instantly, with no dialog, the moment the screen was opened. `pnpm install`,
+`pod install` in `apps/mobile/ios`, then a **native rebuild**; re-bundling does
+nothing. Confirm with
+`grep -c ExpoCamera apps/mobile/ios/Podfile.lock` — zero means the project has
+never been told about it.
 
 **Also check the permission prompt itself.** If it asks for the **microphone**,
 that is a real bug and only a built binary can show it: both the camera and the
@@ -393,6 +427,61 @@ indistinguishable from the app being broken. Tracked as
 claimed; listed here because it is the archetype of a failure that is silent by
 construction, and because the same shape exists on **web**, where the sidebar
 can drop destinations with no error.
+
+### D15b — Accept a shared chain with the web app closed (N80)
+
+**Do:** On a second account, on **web**, share a sequence to yourself. On the
+phone — **with the web app closed and not touched again** — open You → Sharing,
+accept it, and follow where the app takes you. Then leave that screen entirely,
+go You → **Sequences**, and find the same chain again from cold. Tap a step.
+Finally, in a changing room or with airplane mode on, capture a new chain from a
+session reflection and open it from that list.
+
+**Should:** Accepting opens the chain itself. Every step is there, in the order
+the sender recorded it, with its technique name and the position it leaves you
+in; tapping one opens the technique. The chain is still findable from the
+Sequences row afterwards. The chain you captured offline appears immediately,
+marked *"On this phone only — not synced yet"*, and opens.
+
+**Failure looks like:** Being told the copy is *"in the Library"* — the exact
+sentence #414 was filed for, and the Library tab is the technique catalog, so
+following it finds nothing. Or a step rendering a raw id (`knee-cut`) where a
+name belongs, which is the offline capture path with no library cached: the
+honest answer is *"Name unavailable offline"*. Or an outage rendering as *"No
+chains yet"*, which tells someone with forty chains that they have none.
+
+**Why it needs a device:** the whole point of the ticket is an athlete who only
+has a phone. Run it with the web app genuinely closed — every part of this was
+verified in jest against mocked transport, so what no test here reached is the
+real accept, the real sync, and a real dead-spot.
+
+### D15c — Find a roadmap without being told where it is (N96)
+
+**Do:** On an account with the BJJ module **on** and **no roadmap started**,
+open the app cold and go no further than Today. Then start whatever it offers,
+come back to Today, and look again. Finally, from You, tap through to the
+roadmap and find the milestone the entry point named.
+
+**Should:** Today offers one specific roadmap, by name, saying what moves it —
+and opening it is one tap. After enrolling, that offer is **gone**, replaced by
+a line reading `Milestone 1 of 11 · <phase title>` with the next technique under
+it. The same milestone appears on the You row, and the roadmap screen's own
+phase headers are numbered so the number you were shown resolves to a heading
+you can see.
+
+**Failure looks like:** Nothing about roadmaps anywhere on Today — which is the
+state this ticket was filed from, and which reads as the feature not existing.
+Or the offer still sitting there after enrolling, which is the read-on-mount bug
+and looks like the app not noticing what you did. Or a milestone number with no
+matching heading on the roadmap screen, which is worse than no number. Or an
+offer card with an empty name in it — that is the offline read rendering
+anyway, and silence is the correct answer there.
+
+**Why it needs a device:** the claim is *"an athlete can now find this"*, which
+is a claim about a person rather than about a diff. Every property above is
+covered by jest and none of that evidence bears on whether the row is noticed on
+a real screen, above the fold, before the athlete scrolls past it. Do the first
+step **without** knowing in advance where to look.
 
 ## Rendering that has never executed
 

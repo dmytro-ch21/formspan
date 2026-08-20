@@ -37,6 +37,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/share"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/technique"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/theme"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/tracker"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -261,6 +262,7 @@ func main() {
 	}
 	bodyHandler := body.NewHandler(body.NewPostgresRepository(pool), photoStore)
 	nutritionHandler := nutrition.NewHandler(nutrition.NewPostgresRepository(pool))
+	trackerHandler := tracker.NewHandler(tracker.NewPostgresRepository(pool))
 	// The AI estimate endpoint. `NewEstimator` returns nil on an empty key and
 	// the handler serves 503 for that, so a deploy without the selected
 	// provider's key runs every other nutrition route normally rather than
@@ -471,6 +473,20 @@ func main() {
 	mux.Handle("GET /v1/nutrition/foods", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.ListFoods)))
 	mux.Handle("PUT /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.SaveFood)))
 	mux.Handle("DELETE /v1/nutrition/foods/{id}", verifier.RequireAuth(http.HandlerFunc(nutritionHandler.DeleteFood)))
+
+	// Daily trackers. One generic model — water is a seeded preset of it, not a
+	// route of its own, and coffee (N77) and an athlete's own tracker (N78) are
+	// the same endpoints with different rows.
+	//
+	// `/entries` is declared before `/{trackerID}` for readability only; Go's
+	// mux resolves by specificity, not by registration order.
+	mux.Handle("GET /v1/trackers", verifier.RequireAuth(http.HandlerFunc(trackerHandler.List)))
+	mux.Handle("POST /v1/trackers", verifier.RequireAuth(http.HandlerFunc(trackerHandler.Create)))
+	mux.Handle("GET /v1/trackers/entries", verifier.RequireAuth(http.HandlerFunc(trackerHandler.ListEntries)))
+	mux.Handle("PATCH /v1/trackers/{trackerID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.Update)))
+	mux.Handle("DELETE /v1/trackers/{trackerID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.Archive)))
+	mux.Handle("PUT /v1/trackers/{trackerID}/entries/{entryID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.LogEntry)))
+	mux.Handle("DELETE /v1/trackers/{trackerID}/entries/{entryID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.DeleteEntry)))
 	// Literal before wildcard, which Go 1.22's mux resolves by specificity
 	// rather than declaration order — the same shape /v1/sessions/suggestions
 	// and /v1/curricula/working already rely on. Ordered this way for readers.
@@ -569,7 +585,11 @@ func main() {
 	mux.Handle("PATCH /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Update)))
 	mux.Handle("DELETE /v1/curricula/{curriculumID}", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Delete)))
 	mux.Handle("PUT /v1/curricula/{curriculumID}/enrollment", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Enroll)))
-	mux.Handle("DELETE /v1/curricula/{curriculumID}/enrollment", verifier.RequireAuth(http.HandlerFunc(curriculumHandler.Archive)))
+	// Leaving a roadmap also withdraws its claim on the focus list. The wrapper
+	// is the only place that knows those two facts belong together — see
+	// enrollment.go for why it is here and not inside either module.
+	mux.Handle("DELETE /v1/curricula/{curriculumID}/enrollment",
+		verifier.RequireAuth(releaseRoadmapFocus(bjjRepo, http.HandlerFunc(curriculumHandler.Archive))))
 
 	// Sequences: the chain a class actually taught, in the order it flows.
 	//

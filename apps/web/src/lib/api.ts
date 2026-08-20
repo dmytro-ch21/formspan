@@ -809,6 +809,14 @@ export type Profile = {
   display_name: string | null;
   unit_system: UnitSystemPref;
   track_effort: boolean;
+  /**
+   * Daily movement outside logged training, or null when never chosen.
+   *
+   * Optional on the TYPE only, so a response from a server predating N93 still
+   * parses. Null is a real answer and not a missing one: it means the athlete
+   * has never said, which the target screen renders differently from a choice.
+   */
+  activity_level?: string | null;
 };
 
 export type Token = () => Promise<string | null>;
@@ -1102,6 +1110,39 @@ export function getProfile(
 }
 
 /**
+ * Stores the daily-movement level, creating the profile if there isn't one.
+ *
+ * The SAME field the phone writes, which is the entire point of the change
+ * this belongs to. Held in each client's component state instead, a browser
+ * defaulting to `light` and a phone set to `active` derive different calorie
+ * targets for one athlete on one day, and neither surface can tell it is
+ * disagreeing — the failure #425 records for per-hand dumbbell weights,
+ * arriving in the one place the app claims to be auditable.
+ */
+export async function updateActivityLevel(
+  getToken: Token,
+  level: string,
+): Promise<Profile> {
+  const patch = () =>
+    request<Profile>(getToken, "/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ activity_level: level }),
+    });
+  try {
+    return await patch();
+  } catch (err) {
+    // Status, not message: messages are explicitly not part of the contract.
+    // Someone can reach the target screen without ever having onboarded.
+    if (!(err instanceof ApiError) || err.status !== 404) throw err;
+    await request<Profile>(getToken, "/profile", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    return patch();
+  }
+}
+
+/**
  * Sets the unit preference, creating the profile if there isn't one yet.
  * PATCH on a missing profile is a 404 — the right answer for the API, but a
  * dead end for someone who reaches Settings without having onboarded.
@@ -1243,10 +1284,27 @@ export function getBjjFocus(getToken: Token, signal?: AbortSignal): Promise<BjjF
 }
 
 /** Replaces the list wholesale; array order is the athlete's own ranking. */
-export function setBjjFocus(getToken: Token, techniqueIDs: string[]): Promise<BjjFocus[]> {
+export function setBjjFocus(
+  getToken: Token,
+  techniqueIDs: string[],
+  /**
+   * The roadmap this write is applying, when it is one.
+   *
+   * Omit it for a hand edit — the proficiency screen's focus picker — and the
+   * new entries are recorded as the athlete's own, which makes them sovereign:
+   * no roadmap deactivation can ever remove them.
+   *
+   * Pass it when applying a roadmap, with `technique_ids` set to
+   * `proposal.fromRoadmap` and NOT `proposal.next`. The two differ by the
+   * athlete's own entries, which a roadmap re-sends but does not own — see
+   * roadmapFocus.ts rule 3. Sending `next` here would hand the roadmap the
+   * right to delete hand-picked techniques when it is switched off.
+   */
+  roadmap?: { curriculum_id: string; technique_ids: string[] },
+): Promise<BjjFocus[]> {
   return request<{ focus: BjjFocus[] }>(getToken, "/bjj/focus", {
     method: "PUT",
-    body: JSON.stringify({ technique_ids: techniqueIDs }),
+    body: JSON.stringify({ technique_ids: techniqueIDs, roadmap }),
   }).then((r) => r.focus ?? []);
 }
 

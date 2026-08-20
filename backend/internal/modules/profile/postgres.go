@@ -25,7 +25,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 func (r *PostgresRepository) Get(ctx context.Context, userID string) (*Profile, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, track_effort, share_training_with_friends, share_training_details, created_at, updated_at
+		SELECT user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
 		FROM profiles WHERE user_id = $1`, userID)
 	return scanProfile(row)
 }
@@ -56,7 +56,7 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewPr
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO profiles (user_id, display_name, date_of_birth, sex, height_cm)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, track_effort, share_training_with_friends, share_training_details, created_at, updated_at
+		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
 	`, userID, in.DisplayName, dob, in.Sex, in.HeightCM)
 	p, err := scanProfile(row)
 	if err != nil {
@@ -81,10 +81,15 @@ func (r *PostgresRepository) Update(ctx context.Context, userID string, in Profi
 			track_effort = COALESCE($8, track_effort),
 			share_training_with_friends = COALESCE($9, share_training_with_friends),
 			share_training_details = COALESCE($10, share_training_details),
+			-- COALESCE, like every column here: nil means unchanged. A bare
+			-- assignment would blank an athlete's chosen level on any PATCH
+			-- that did not mention it, and the exercise module's updateWithin
+			-- has silently wiped authored data three times exactly that way.
+			activity_level = COALESCE($11, activity_level),
 			updated_at = now()
 		WHERE user_id = $1
-		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, track_effort, share_training_with_friends, share_training_details, created_at, updated_at
-	`, userID, in.Username, in.DisplayName, dob, in.Sex, in.HeightCM, in.UnitSystem, in.TrackEffort, in.ShareTrainingWithFriends, in.ShareTrainingDetails)
+		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
+	`, userID, in.Username, in.DisplayName, dob, in.Sex, in.HeightCM, in.UnitSystem, in.TrackEffort, in.ShareTrainingWithFriends, in.ShareTrainingDetails, in.ActivityLevel)
 	p, err := scanProfile(row)
 	if err != nil {
 		return nil, translatePgError(err)
@@ -148,7 +153,7 @@ func scanProfile(row pgx.Row) (*Profile, error) {
 	var dob *time.Time
 	err := row.Scan(&p.UserID, &p.Username, &p.DisplayName, &dob, &p.Sex, &p.HeightCM,
 		&p.UnitSystem, &p.TrackEffort, &p.ShareTrainingWithFriends, &p.ShareTrainingDetails,
-		&p.CreatedAt, &p.UpdatedAt)
+		&p.ActivityLevel, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound

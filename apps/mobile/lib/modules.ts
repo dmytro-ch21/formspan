@@ -266,6 +266,52 @@ export function moduleOffWithCatalog(modules: Module[], catalog: string): Module
 }
 
 /**
+ * The enabled discipline whose catalog is `catalog` — the positive half of
+ * {@link moduleOffWithCatalog}, and the gate every technique-shaped surface
+ * asks before it draws anything.
+ *
+ * A function for the reason `hasFoodLog` gives, except that this one had
+ * already rotted into **three** hand-written copies of the same two-part
+ * condition — `app/library.tsx`, the Plan tab's Roadmaps strip, and
+ * `lib/__tests__/moduleGating.test.ts` — before Today needed a fourth. Two
+ * copies is how one ends up checking only half; three is how one of them keeps
+ * checking a capability name the server has renamed.
+ *
+ * The two screens now call this. **The test deliberately still spells the
+ * condition out**, and should stay that way: a test that called this function
+ * would be asserting it against itself.
+ *
+ * Gated on the CAPABILITY, never on `key === 'bjj'`. A discipline gaining or
+ * losing a technique catalog should be one row on the server rather than an
+ * edit in four screens.
+ */
+export function moduleWithCatalog(modules: Module[], catalog: string): Module | undefined {
+  return modules.find((m) => m.enabled && m.capabilities.catalog === catalog);
+}
+
+/**
+ * A module this server HAS that carries the food log, which this athlete has
+ * turned OFF.
+ *
+ * The mirror of `hasFoodLog`, and the same three-state reasoning as
+ * `moduleOffWithCatalog`: on, off-but-available, or genuinely absent from this
+ * deployment. Only the middle one may offer to turn something on.
+ *
+ * Returns the MODULE rather than a boolean, because the prompt names it — "1
+ * discipline is off" does not tell an athlete it is the one they were looking
+ * for, and the label carries the registry's spelling rather than a
+ * capitalised key.
+ *
+ * A `find`, not a `some`, for that reason; and a helper rather than an inline
+ * `!m.enabled && m.capabilities.has_food_log`, for the one `hasFoodLog` itself
+ * gives — two copies of a two-part condition is how one ends up checking only
+ * half.
+ */
+export function moduleOffWithFoodLog(modules: Module[]): Module | undefined {
+  return modules.find((m) => !m.enabled && m.capabilities.has_food_log);
+}
+
+/**
  * Disciplines that could hold a session and are turned off.
  *
  * The mirror of `enabledSports`, and `is_sport` filtered for the same reason:

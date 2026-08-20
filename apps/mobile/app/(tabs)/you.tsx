@@ -251,6 +251,27 @@ export default function YouScreen() {
               />
             )}
 
+            {/* The chains you have captured, and the ones partners sent you.
+
+                Gated on the module, like the position map above it — a
+                strength-only account has no use for a BJJ chain list.
+
+                This row is the discoverable half of #414. Accepting a shared
+                sequence now navigates straight to the copy, which answers the
+                athlete who just tapped Accept; it does not answer the one who
+                accepted last week and wants to find it again. A destination
+                reachable only by having just arrived at it is the same gap in
+                a smaller form, which is why the entry point ships with the
+                screen rather than after it. */}
+            {bjjEnabled && (
+              <NavRow
+                label="Sequences"
+                detail="Chains you captured, step by step"
+                onPress={() => router.push('/sequence')}
+                testID="you-sequences"
+              />
+            )}
+
             {/* The catalog, which used to be a tab of its own.
 
                 Moved here on the user's own call — "library is what we dont

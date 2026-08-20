@@ -60,6 +60,46 @@ func (a Activity) valid() bool {
 	return ok
 }
 
+// ResolveActivity picks the level a derivation runs at, and says whether the
+// athlete actually chose it.
+//
+// Three inputs collapse to one answer, in this order:
+//
+//  1. `asked` — an explicit `?activity=` on the request. A client previewing
+//     "what if I had a desk job" must get that derivation without first writing
+//     the choice to the account, so the parameter wins.
+//  2. `stored` — the athlete's saved `profiles.activity_level`.
+//  3. ActivityLight — the documented default.
+//
+// The second return is the whole reason this is a function rather than three
+// lines inline. Without it the response cannot distinguish a derivation the
+// athlete's own choice produced from one an assumption produced, and every
+// client then has to render a filled pill for a decision nobody made. That is
+// the half of N93 a plain persistence fix would have missed.
+//
+// **Every input is validated HERE as well as at the caller, and that
+// redundancy is deliberate.** The handler already rejects an unknown `asked`
+// with a 400, which is the right answer for a request nobody should be making;
+// but this function is exported, and a second caller that forgot the guard
+// would otherwise echo an out-of-vocabulary level back with
+// `activity_chosen: true`.
+//
+// That failure is quiet in the worst way. `Suggest` coerces an invalid activity
+// to ActivityLight on its own, so nothing looks broken: the athlete gets a
+// perfectly plausible number derived at `light`, while the response tells their
+// client they chose a level it cannot even render. A guard one call site away
+// from the thing it protects is a guard waiting to be bypassed — raised in
+// review, and worth the four lines.
+func ResolveActivity(asked string, stored *Activity) (Activity, bool) {
+	if a := Activity(asked); a.valid() {
+		return a, true
+	}
+	if stored != nil && stored.valid() {
+		return *stored, true
+	}
+	return ActivityLight, false
+}
+
 // PhaseKind mirrors body_phases.kind.
 //
 // Declared here rather than imported: a module never imports a sibling in this
@@ -190,6 +230,15 @@ type Inputs struct {
 	HeightCM         *float64
 	DateOfBirth      *string
 	Sex              *string
+
+	// ActivityLevel is the athlete's stored daily-movement choice, or nil when
+	// they have never made one.
+	//
+	// Nil is not "sedentary" and not "light" — it is the absence of an answer,
+	// and the handler turns it into the documented default while telling the
+	// client that is what happened. Collapsing the two here would take away the
+	// clients' only way to render an assumption as an assumption.
+	ActivityLevel *Activity
 
 	// Phase is the live body_phases row, empty when none is running.
 	PhaseKind           PhaseKind

@@ -41,6 +41,7 @@ import { rememberBarcode } from '@/lib/barcodeCache';
 import { parseOr } from '@/lib/draftNumber';
 import {
   describeMeal,
+  estimateErrorMessage,
   itemToEntry,
   photographMeal,
   type EstimateQuota,
@@ -160,10 +161,10 @@ export default function DescribeMealScreen() {
           ? await ImagePicker.launchCameraAsync({ quality: 1 })
           : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
       } catch {
-        // NOT messageFor: both of its branches are network-flavoured, and its
-        // fallback says "Could not reach the server. Try again when you have
-        // signal." — the wrong diagnosis entirely for a camera that would not
-        // open, and one that sends the athlete to check their signal.
+        // NOT messageFor: nothing here has been near the network. It classifies
+        // an endpoint's failures, and the camera refusing to open is not one —
+        // it would fall through to the "the server answered" branch and show
+        // whatever the OS put in the exception.
         setError(
           fromCamera
             ? 'The camera would not open. Try again, or describe the meal instead.'
@@ -180,11 +181,54 @@ export default function DescribeMealScreen() {
         // much as a bandwidth one: image tokens scale with resolution, and a
         // plate of food is legible at 1080px. A raw 4-5MB frame would also
         // exceed the endpoint's own 5MB cap.
-        const shrunk = await ImageManipulator.manipulateAsync(
-          picked.assets[0].uri,
-          [{ resize: { width: 1080 } }],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-        );
+        //
+        // **Caught separately from the request below**, and that separation is
+        // the whole of N92's mobile half. A manipulator failure is
+        // DETERMINISTIC — an unreadable file, no disk, a frame in a format the
+        // encoder will not take — and without this the outer handler hands it
+        // to `messageFor`, which classifies an ENDPOINT's failures. At the time
+        // N92 was reported its no-message fallback read "Could not reach the
+        // server. Try again when you have signal.", so a failure that never
+        // touched the network was reported as a network one, on the screen an
+        // athlete reaches by tapping "Photograph the label".
+        //
+        // **N55 (#448) rewrote that fallback and does not remove the need for
+        // this**, which is the distinction to keep. N55 classifies *dead
+        // requests* — it makes the transport say which kind of failure it was
+        // rather than calling all of them a signal problem. A frame that could
+        // not be re-encoded is not a dead request; it is not a request at all,
+        // and it arrives here by falling past the network call entirely, so no
+        // transport taxonomy can see it. Today it would land on N55's "the
+        // server answered" branch and show whatever the encoder put in the
+        // exception, or its generic fallback — better than the old copy, still
+        // describing the wrong layer.
+        //
+        // `identify.tsx` already had this guard, added by #361 with a comment
+        // saying in as many words that without it the false diagnosis is "the
+        // same N73 was reported for, just moved one line up". That is exactly
+        // what was still true here. Same bug, second path — which is the
+        // pattern #392 (N74) exists for.
+        let shrunk: ImageManipulator.ImageResult;
+        try {
+          shrunk = await ImageManipulator.manipulateAsync(
+            picked.assets[0].uri,
+            [{ resize: { width: 1080 } }],
+            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+          );
+        } catch {
+          // Branched on `fromCamera` for the same reason the picker's own catch
+          // fifteen lines up is: "try taking another" cannot be followed by
+          // somebody who chose an existing photo, and advice that cannot be
+          // acted on is the smaller version of the defect this whole guard is
+          // for. `identify.tsx` shares the camera wording and is camera-only,
+          // so it has no second case to get wrong.
+          setError(
+            fromCamera
+              ? 'That photo could not be read. Try taking another, or describe the meal instead.'
+              : 'That photo could not be read. Try a different one, or describe the meal instead.',
+          );
+          return;
+        }
         receive(
           await photographMeal(getToken, {
             uri: shrunk.uri,
@@ -641,16 +685,18 @@ function perServing(it: EstimatedItem): Macros {
 }
 
 /**
- * The server's message, which is written for the athlete.
+ * The copy for a failed estimate.
  *
- * Codes are contract and messages are not, so this shows the message rather
- * than mapping the code to copy of its own — the one thing worth saying here
- * that the server cannot is what to do about a network failure.
+ * **This used to live here**, as `messageFor`: the server's message when there
+ * was one, and *"Could not reach the server. Try again when you have signal."*
+ * when there was not. It moved to `estimateApi.ts` with N55, for two reasons —
+ * a dead request now carries its own diagnosis from the transport instead of
+ * every one of them being called a signal problem, and the 503 that means
+ * "this deploy has no provider key" needed to stop reading as an outage. Both
+ * are properties of the endpoint, not of this screen, so they are testable
+ * without rendering it.
  */
-function messageFor(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  return 'Could not reach the server. Try again when you have signal.';
-}
+const messageFor = estimateErrorMessage;
 
 function mealLabel(m: Meal): string {
   return m === 'snack' ? 'Snacks' : m[0].toUpperCase() + m.slice(1);

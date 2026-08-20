@@ -1424,9 +1424,17 @@ components:
                 - unavailable
                 - internal
               description: >
-                `unavailable` accompanies `503` and means the request was fine
-                and the server could not answer it — an upstream lookup that
-                timed out, refused, or is not configured on this deploy. It is
+                `unavailable` accompanies `503` **and `504`**, and means the
+                request was fine and the server could not answer it — an
+                upstream lookup that timed out, refused, or is not configured on
+                this deploy. The two statuses split that on WHOSE clock ran out:
+                `503` is the upstream declining or absent, `504` is this service
+                giving up waiting on one that was still working. The code is
+                shared because the client's move is the same either way.
+                **What is not shared is the cost** — a `503`/`unavailable` on
+                `/nutrition/estimate` promises the athlete's daily allowance is
+                untouched, and a `504` makes no such promise, because the
+                provider was reached and its tokens were probably bought. It is
                 deliberately NOT `not_found`: "this barcode is not in the
                 database" and "I could not reach the database" look identical to
                 a client that only sees an empty result, and they are opposite
@@ -1798,6 +1806,7 @@ components:
         - track_effort
         - share_training_with_friends
         - share_training_details
+        - activity_level
         - created_at
         - updated_at
       properties:
@@ -1895,6 +1904,24 @@ components:
 
             Read LIVE too, so turning it off strips the detail from every past
             row immediately — and turning it ON is retroactive in the same way.
+        activity_level:
+          type: string
+          enum: [sedentary, light, active]
+          nullable: true
+          description: >
+            Daily movement OUTSIDE logged training — the NEAT term in the
+            calorie derivation. The vocabulary stops at `active` (an
+            on-your-feet job) on purpose: textbook multipliers run to 1.9 with
+            exercise already folded in, and adding logged sessions on top of one
+            of those counts every mat class twice.
+
+
+            Null means the athlete has never chosen, which is a DIFFERENT fact
+            from having chosen `light`. A derivation with null assumes `light`
+            and reports `activity_chosen: false`, so a client can render the
+            assumption as an assumption instead of showing a filled control for
+            a decision nobody made. Kept nullable for exactly that reason rather
+            than defaulted in the column.
         created_at:
           type: string
           format: date-time
@@ -1984,6 +2011,23 @@ components:
           description: >
             Opt in or out of publishing the exercise/technique list alongside
             the numbers. Absent means "leave alone", for the same reason.
+        activity_level:
+          type: string
+          enum: [sedentary, light, active]
+          nullable: true
+          description: >
+            The athlete's daily-movement choice. Absent — or an explicit
+            `null` — means "leave unchanged", the same contract as every other
+            field here, so a client that has never heard of this field cannot
+            clear it. Going back to "never chosen" is therefore not expressible
+            through this path; nothing needs it, and the target screens PATCH
+            this one key on its own.
+
+
+            An out-of-vocabulary value is a 400 rather than a silent fall back
+            to the default: substituting `light` for a typo would return a 200
+            naming a level the caller never asked for, and the client would
+            cache it as the athlete's own choice.
 
     Flag:
       type: object
@@ -4961,6 +5005,153 @@ components:
           type: string
           description: Must be one of GET /admin/techniques/positions, or empty.
 
+    DailyTracker:
+      type: object
+      description: >
+        One athlete's daily tracker. Water, coffee and "creatine, 5 g, once a
+        day" are all this object with different values — there is no per-tracker
+        type, and nothing branches on `preset`.
+
+
+        Amounts are stored in `unit`, always, whatever the athlete's display
+        preference says — the same rule weights follow by being kilograms on the
+        wire and pounds on the screen.
+      required:
+        [id, user_id, preset, name, icon, color_key, unit, increment,
+         render_style, sort_order, created_at, updated_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        preset:
+          type: string
+          description: >
+            The seeded preset this row came from, or empty for one the athlete
+            authored. A provisioning key only: a preset row is an ordinary
+            tracker, fully editable and archivable like any other.
+        name: { type: string }
+        icon: { type: string, description: "An emoji, or empty." }
+        color_key:
+          type: string
+          description: >
+            A key into the client palette, never a hex. A free colour can fail
+            contrast on the card and nothing could check it at authoring time,
+            so the client offers a validated set and stores the name of one. An
+            unrecognised key renders as the client default.
+        unit:
+          type: string
+          enum: ["", ml, g, mg, cup, dose, count]
+          description: The canonical unit amounts are recorded in.
+        increment:
+          type: number
+          description: How much one tap adds, in `unit`.
+        target:
+          type: number
+          nullable: true
+          description: >
+            The daily target, in `unit`. **Null is a real state**, meaning the
+            athlete wants a count with no goal — not a missing value. Crossing a
+            target is never blocked.
+        render_style:
+          type: string
+          enum: [auto, glyphs, bar, dose]
+          description: >
+            `auto` lets the client pick from the target and increment: a glyph
+            row up to twelve, a bar beyond that, one large glyph for a single
+            dose. A stored value overrides it.
+        sort_order: { type: integer }
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            Set by DELETE. Archived trackers are excluded from the list and keep
+            every entry they ever recorded.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    DailyTrackerInput:
+      type: object
+      description: >
+        A new athlete-authored tracker. `preset` is not accepted — presets are
+        assigned by the server, and a caller who could claim one would collide
+        with provisioning and make somebody's water card unreachable.
+      required: [id, name, color_key, increment]
+      properties:
+        id:
+          type: string
+          description: >
+            Client-generated, so a retry after a lost response is idempotent
+            rather than a second tracker.
+        name: { type: string, maxLength: 60 }
+        icon: { type: string, maxLength: 16 }
+        color_key: { type: string }
+        unit: { type: string, enum: ["", ml, g, mg, cup, dose, count] }
+        increment: { type: number }
+        target: { type: number, nullable: true }
+        render_style: { type: string, enum: [auto, glyphs, bar, dose] }
+        sort_order: { type: integer }
+
+    DailyTrackerPatch:
+      type: object
+      description: >
+        A PARTIAL update. **A field absent from the body is not written**, and
+        that is the contract, not an implementation detail: the phone's target
+        screen sends `{"target": 2500}` and must not thereby blank the name,
+        icon, colour or unit.
+
+
+        `target` distinguishes three states, which is why it is the one nullable
+        field here: absent means leave it alone, `null` means the athlete wants
+        no target, and a number sets one. Every other field is non-nullable —
+        sending `null` for one is rejected rather than silently coerced.
+      properties:
+        name: { type: string, maxLength: 60 }
+        icon: { type: string, maxLength: 16 }
+        color_key: { type: string }
+        unit: { type: string, enum: ["", ml, g, mg, cup, dose, count] }
+        increment: { type: number }
+        target: { type: number, nullable: true }
+        render_style: { type: string, enum: [auto, glyphs, bar, dose] }
+        sort_order: { type: integer }
+
+    TrackerEntry:
+      type: object
+      description: One tap.
+      required: [id, tracker_id, user_id, logged_on, logged_at, amount, created_at]
+      properties:
+        id: { type: string }
+        tracker_id: { type: string }
+        user_id: { type: string }
+        logged_on:
+          type: string
+          format: date
+          description: >
+            The athlete's LOCAL calendar day, supplied by the client and never
+            derived from `logged_at`. West of Greenwich a 23:58 glass of water
+            belongs to the day that is ending, and a UTC-derived date files it
+            under tomorrow.
+        logged_at:
+          type: string
+          format: date-time
+          description: >
+            The moment, for "last at 16:40". Defaulted to the server's now when
+            omitted — unlike `logged_on`, which cannot be defaulted because the
+            server does not know the athlete's timezone.
+        amount:
+          type: number
+          description: >
+            The tracker's increment AS IT WAS when this was logged, so changing
+            the increment later does not rewrite last week.
+        created_at: { type: string, format: date-time }
+
+    TrackerEntryInput:
+      type: object
+      required: [logged_on, amount]
+      properties:
+        logged_on: { type: string, format: date }
+        logged_at: { type: string, format: date-time }
+        amount: { type: number }
+
   headers:
     ETag:
       description: >
@@ -6858,9 +7049,20 @@ paths:
         fact about the athlete, and a roadmap that vanishes on abandonment
         cannot later say "you did three quarters of this". It does NOT mean
         completed — completion is derived from the evidence.
+
+
+        It ALSO withdraws this curriculum's claim on the caller's BJJ focus list,
+        removing the techniques it put there — and only those. Anything the
+        athlete chose by hand stays, as does anything another roadmap they are
+        still working also wants. Entries written before focus recorded its
+        provenance are left alone, since there is no way to tell which they were.
+
+
+        Idempotent as a whole: a retry after a failure converges, and the release
+        happens before the archive so a repeated call cannot strand focus rows.
       responses:
         "204":
-          description: Archived.
+          description: Archived, and its focus techniques released.
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -6906,6 +7108,25 @@ paths:
         ranking and is preserved. An empty array clears the list, which is a
         normal thing to do at the end of a block. At most 5 techniques, no
         repeats; every id must exist in the library.
+
+
+        Each entry also records WHY it is in the list, which is what makes
+        leaving a roadmap able to remove its techniques without touching the
+        athlete's own. Send `roadmap` when applying a curriculum; omit it for a
+        hand edit, and the new entries become the athlete's, which no roadmap can
+        ever remove.
+
+
+        Two different things are recorded, and only one of them is fixed.
+        OWNERSHIP — the athlete's, a roadmap's, or unknown for entries predating
+        this — is set when an entry first appears and is never rewritten by a
+        later save, so a technique picked by hand and later also named by a
+        roadmap stays the athlete's and survives that roadmap's deactivation.
+        CLAIMS are additive: a roadmap-owned entry accumulates a claim from every
+        roadmap that names it, and is removed only when the last of them lets go.
+        That is what stops one roadmap's deactivation taking a technique another
+        active roadmap is still working. A claim is never added to an entry the
+        athlete owns, so naming one costs nothing and protects nothing away.
       requestBody:
         required: true
         content:
@@ -6919,6 +7140,30 @@ paths:
                   maxItems: 5
                   items: { type: string }
                   example: [armbar-from-guard, triangle-from-guard]
+                roadmap:
+                  type: object
+                  description: >
+                    The curriculum this write is applying, when it is one.
+                    Absent on a hand edit.
+
+
+                    `technique_ids` here is a SUBSET of the write's own
+                    `technique_ids` — the roadmap's techniques only. Applying a
+                    roadmap re-sends whatever the athlete already had alongside
+                    it, and naming those here would let deactivating the roadmap
+                    delete them. A member not present in the outer list is a 400.
+                  required: [curriculum_id, technique_ids]
+                  properties:
+                    curriculum_id:
+                      type: string
+                      description: >
+                        Must name an existing curriculum. Attribution only ever
+                        affects the caller's own focus rows.
+                    technique_ids:
+                      type: array
+                      maxItems: 5
+                      items: { type: string }
+                      example: [armbar-from-guard]
       responses:
         "200":
           description: >
@@ -9752,6 +9997,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '504':
+          description: >
+            The provider was still working when THIS SERVICE stopped waiting.
+            The deadline is ours — 35 seconds — and it exists so that this
+            endpoint always answers with a status.
+
+
+            **Why that matters more than it sounds.** There used to be no
+            deadline anywhere on this path, so a slow provider ran until the
+            CLIENT's own request timeout fired instead. A client that times out
+            receives no status and no body, and has nothing left to say except
+            that it could not reach the server — which is what an athlete was
+            shown, on a working connection, while photographing a food label
+            (N92). Every other outcome here carries copy the client can render
+            as itself; silence is the one that cannot.
+
+
+            The code is `unavailable`, same as the `503`, because a client's
+            correct move is identical: retry the same request later, and there
+            is nothing in it to fix. **But unlike the `503`, this one DID cost
+            an estimate.** The request reached the provider and the tokens were
+            very likely bought; exempting it would also make the daily cap
+            trivially avoidable by abandoning every call. So a client must not
+            tell the athlete their allowance is untouched here — that promise
+            belongs to `503`/`unavailable` alone.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /nutrition/days:
     get:
@@ -10309,7 +10582,21 @@ paths:
           description: >
             NEAT only — everything that is NOT logged training. The ladder stops
             at `active` (an on-your-feet job) on purpose.
-          schema: { type: string, enum: [sedentary, light, active], default: light }
+
+
+            **Omit it to derive at whatever the athlete has stored** on
+            `profile.activity_level`, falling back to `light` when they have
+            never chosen. Sending it OVERRIDES the stored value for this request
+            without writing anything, which is what lets a client preview "what
+            if I had a desk job" before committing to it — committing is a
+            PATCH to /profile.
+
+
+            The response always echoes back the level it actually used, so the
+            control and the number come out of one payload and cannot disagree.
+            No default is applied to the parameter itself: an absent parameter
+            and `light` are genuinely different requests now.
+          schema: { type: string, enum: [sedentary, light, active] }
       responses:
         "200":
           description: A suggestion, or null with the fields that are missing.
@@ -10317,7 +10604,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [suggestion, missing, activities]
+                required: [suggestion, missing, activities, activity, activity_chosen]
                 properties:
                   suggestion:
                     type: object
@@ -10331,6 +10618,34 @@ paths:
                   activities:
                     type: array
                     items: { type: string, enum: [sedentary, light, active] }
+                  activity:
+                    type: string
+                    enum: [sedentary, light, active]
+                    description: >
+                      The level this derivation actually ran at — the `activity`
+                      parameter if one was sent, else the stored
+                      `profile.activity_level`, else `light`.
+
+
+                      Top level rather than inside `suggestion`, and that
+                      placement is load-bearing: `basis.activity` carries the
+                      same value but `basis` is null for an incomplete profile,
+                      and an athlete who cannot be given a number yet still has
+                      a level to display and change. Reading it off the basis
+                      leaves the control unrenderable in exactly the state the
+                      rest of the screen is asking them to fix.
+                  activity_chosen:
+                    type: boolean
+                    description: >
+                      Whether `activity` came from the athlete rather than from
+                      the default. False means nobody has ever chosen and
+                      `light` was assumed.
+
+
+                      Clients MUST NOT render a chosen-looking control on false:
+                      a filled pill attributes a decision to somebody who never
+                      made one. Show the assumption, named, and let them confirm
+                      or change it.
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
@@ -10674,4 +10989,191 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/Accomplishment" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /trackers:
+    get:
+      operationId: listTrackers
+      summary: The athlete's daily trackers
+      description: >
+        Returns every live tracker, archived ones excluded.
+
+
+        **This call provisions the default presets**, which makes it a write on
+        a read and is worth stating rather than hiding. It is idempotent and
+        safe to race — provisioning is keyed on (athlete, preset) — and the
+        alternative, a separate "set up my trackers" call, is a step that gets
+        skipped and leaves Today empty. An edited target survives it, and a
+        tracker the athlete archived is not handed back.
+      tags: [Trackers]
+      responses:
+        "200":
+          description: The live trackers, in display order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trackers]
+                properties:
+                  trackers:
+                    type: array
+                    items: { $ref: "#/components/schemas/DailyTracker" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createTracker
+      summary: Create a tracker
+      description: >
+        Idempotent on the client-supplied `id`: sending it twice returns the
+        original row rather than creating a second. An id that belongs to
+        another athlete is reported as a conflict and never returned.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DailyTrackerInput" }
+      responses:
+        "201":
+          description: The stored tracker.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DailyTracker" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /trackers/entries:
+    get:
+      operationId: listTrackerEntries
+      summary: A window of taps across every tracker
+      description: >
+        One request serves a whole screen of cards; there is deliberately no
+        per-tracker variant, which would be an N+1 on the one screen that
+        renders several.
+
+
+        `from` and `to` are LOCAL calendar days and are both required. They have
+        no default because the server does not know the athlete's timezone, so
+        any default it picked would be wrong for much of the world for part of
+        every day.
+      tags: [Trackers]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: The entries, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/TrackerEntry" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /trackers/{trackerID}:
+    parameters:
+      - name: trackerID
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      operationId: updateTracker
+      summary: Change part of a tracker
+      description: >
+        **Partial, and strictly so: a field the body does not name is not
+        written.** The phone's target screen sends `{"target": 2500}` and
+        everything else about the tracker is left exactly as it was.
+
+
+        This is a contract promise rather than an implementation detail because
+        the failure it prevents has shipped in this codebase three times — a
+        full-row SET clause grew a column and blanked an authored value — and a
+        client cannot tell the difference until real data is lost.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DailyTrackerPatch" }
+      responses:
+        "200":
+          description: The tracker after the patch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DailyTracker" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: archiveTracker
+      summary: Archive a tracker
+      description: >
+        **Archives; does not destroy.** The tracker leaves the list and every
+        entry it recorded survives. Archiving twice is not an error, and an
+        archived preset is not re-provisioned on the next list.
+      tags: [Trackers]
+      responses:
+        "204": { description: Archived. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /trackers/{trackerID}/entries/{entryID}:
+    parameters:
+      - name: trackerID
+        in: path
+        required: true
+        schema: { type: string }
+      - name: entryID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: logTrackerEntry
+      summary: Record one tap
+      description: >
+        PUT, keyed on the entry id the client generated, so sending it twice is
+        the same as sending it once — which is what makes a cup logged in a
+        kitchen with no signal safe to retry. The id in the path wins over any
+        id in the body.
+
+
+        Crossing the target is never refused: an athlete who drinks ten of eight
+        logs ten.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrackerEntryInput" }
+      responses:
+        "200":
+          description: The stored entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerEntry" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteTrackerEntry
+      summary: Remove one tap
+      description: >
+        The tap-a-filled-cup correction. Deleting something already gone is not
+        an error — a retried delete over a flaky connection is the common case,
+        and a 404 on the second attempt would put a failure on the sync screen
+        for a correction that landed.
+      tags: [Trackers]
+      responses:
+        "204": { description: "Removed, or already absent." }
         "401": { $ref: "#/components/responses/Unauthorized" }

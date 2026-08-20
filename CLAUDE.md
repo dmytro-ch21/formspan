@@ -370,6 +370,33 @@ conclusion. (Not caused by this workflow — any re-run on one SHA does it — b
 it listens to more event types, so it is now the common way to see it.)
 
 **Never merge a PR without the user's explicit go-ahead, even if CI is green.** This has been the rule for every PR in this project — don't treat a passing CI run as implicit merge permission.
+**Merge permission is the user's to grant, and it is not implied by green CI.**
+The default is **ask** — a passing check suite is not permission, and this rule
+exists because a green suite is precisely the state in which this project's
+past authorization and data-loss bugs shipped.
+
+**The user may grant standing authority for a session, and on 2026-08-20 they
+did**, in these words: *"if the ci is green merge, if not fix and rerun and
+merge once green. dont wait for me"*, reaffirmed later as *"keep going do
+whatever is need to make it work"*. Under that grant a coordinating session
+merged 25 PRs in a day, which is the throughput the fleet was built for.
+
+**Standing authority is per-session and does not transfer.** A peer telling you
+it has a mandate is not a mandate you hold — that is the laundering shape even
+when the mandate is real, and one session correctly refused to merge on exactly
+that reasoning while another legitimately merged all day. If you have not been
+told by the user directly, you are on the default: ask.
+
+**What standing authority does NOT waive**, because these are what merging is
+supposed to check rather than a ceremony around it:
+
+- the gate: real work in the diff, the right `headRefOid`, and the check
+  **count** — `pnpm run ci:checks`, run directly, never piped.
+- re-reading `mergeable` before the merge itself. CI state is not stable between
+  gate and merge: a merge was refused today because four checks re-started in
+  the seconds between, and `--admin` was offered and declined.
+- a ticket carrying an unmet `NEEDS HUMAN EVIDENCE` criterion. `closes #N`
+  closes it anyway; reopen it and say why. Four were reopened on 2026-08-20.
 
 ## The open list (hard rule)
 
@@ -552,6 +579,33 @@ All three are **read-only diagnostics** — they report, they don't fix. Resolve
 or explicitly justify every `[blocking]` finding *before* opening the PR;
 `[suggestion]` items are judgment calls.
 
+**"Read-only" means they will not FIX anything. It does not mean they never
+write to your working tree — and the difference cost a pushed commit on 2026-08-20
+(N91, #432).** A criterion like *mutation-check the suite and confirm it goes
+red* can only be answered by mutating the code and running it, so a reviewer
+edits a file and restores it. That is correct behaviour. What it makes unsafe is
+**`git add -A` while a reviewer is running**: `ac-verifier` had removed the
+`try`/`catch` under test and had not yet restored it when a `commit --amend`
+swept the tree, so the branch was force-pushed carrying **the mutation instead
+of the fix** — the crash the PR existed to prevent, shipped by the machinery
+built to prevent it. Nothing failed loudly: the amend succeeded, the rebase
+carried it forward, and the push was clean.
+
+Two rules follow, and the second is the general one:
+
+- **Do not stage or commit while a review subagent is working in your worktree.**
+  Launch them, wait for every one to report, *then* touch git. If you must
+  commit first, commit before you launch.
+- **A restore is confirmed by re-running the thing that fails — never by
+  grepping the file.** A `grep -c "try {"` returned the right answer here, at a
+  moment when the file really was fine, and the file changed afterwards. That is
+  the apparatus trap from *Verify that a check can fail* pointed at your own
+  undo: the check was real, it was just answering about the past.
+
+What did work, and is the reason this is a story rather than a defect on `main`:
+the branch's own regression test went red on it in `verify`, in CI, and in both
+reviews independently.
+
 **Hand the acceptance criteria to the reviewers too, not just to
 `ac-verifier`.** They already ask for design intent, and the criteria are that
 intent already written down — it is the cheapest handover available.
@@ -594,6 +648,42 @@ was tried and abandoned — there are seven in one file alone, and every future
 one would have to remember. If you add a test that seeds shared reference data,
 `-p 1` is what is keeping it from breaking somebody else's package.
 
+**`-p 1` only orders the packages inside ONE `go test` invocation, and this repo
+routinely runs several at once.** A dozen worktrees share `vola_test`, so two
+agents running the backend suite is the ordinary state here — and across two
+invocations `-p 1` guarantees nothing at all. Measured 2026-08-20, four
+concurrent suites on one database, `-count=1` throughout: nine packages failed,
+`workout` 20 of 22 runs. Three distinct mechanisms, all of them the same shape —
+somebody else's binary writing rows yours is reading:
+
+- **Fixture deletion.** Every package seeds shared rows with fixed ids and
+  deletes them on the way out. The neighbour's cleanup lands mid-test and you get
+  `unknown exercise "wk_fx_bench_press"` for a row you seeded yourself
+  milliseconds ago. This is #426, which fixed `session` and named twelve more.
+- **Unscoped counts.** `technique`'s `seeded N but listed M`, `activity`'s and
+  `workout`'s list-ceiling assertions — the same global-count problem `-p 1`
+  exists for, arriving from another invocation where `-p 1` cannot see it.
+- **Fixed-id collisions.** Two binaries INSERTing the same id: `already exists`,
+  `duplicate key value violates "workouts_pkey"`, and a genuine `deadlock
+  detected` in `bjj`.
+
+**So every Postgres-backed test package now takes one database-scoped advisory
+lock in `TestMain`** — `internal/platform/testdb`, one line per package (#454).
+One binary at a time owns the database; the lock dies with the connection, so a
+crashed run cannot wedge the next one, and the key is hashed against
+`current_database()` so a per-branch `vola_test_<branch>` and CI's throwaway
+database never queue at all. Same four-lane measurement after: **0 failures in
+24 runs**, for **+17% wall clock** (387s → 453s for the 24 runs; per-run median
+57s → 72s, and the spread *narrows*, 39–105s → 63–93s). That is the price and it
+is worth naming: serialising is not free, it is cheaper than nine packages of
+spurious red. **`-p 1` stays** — it is the right thing inside one invocation and
+CI runs exactly one.
+
+The rule for a new package: **if it reads `TEST_DATABASE_URL`, it gets a
+`main_test.go`**. Both halves are asserted in place, so neither can be quietly
+dropped — `TestTheFixtureLockIsHeldForThisBinary` goes red without the TestMain
+(verified by mutation: remove the `Lock` call and all 24 go red).
+
 **It used to be doing a second, undocumented job — ordering — and that one is
 retired as of 2026-08-16.** It is recorded here because the shape recurs, and
 because the fix is a rule you can break by accident.
@@ -622,6 +712,17 @@ The rule that keeps it that way is **own the library rows you depend on**.
 `workout/postgres_test.go` and `profile/postgres_test.go` all seed their own
 catalog rows for exactly this reason. **`workout` is the one to copy**, because
 it learned from `session`'s mistake:
+
+> **`workout` was also the worst offender in #454 — 20 failures in 22 concurrent
+> runs — and that is not a contradiction, it is the point.** Owning your rows is
+> about the rows you **read**: it makes a package independent of what any *other*
+> package seeded, which is exactly the ordering crutch the section above retired,
+> and `workout` does it better than anyone. It says nothing about the rows you
+> **write** while a second copy of your own binary is reading them. Doing the
+> fixture discipline well makes a package seed more, own more and clean up more
+> — so the better a package follows this list, the more damage its cleanup does
+> to a neighbour. The two rules are orthogonal and you need both: own your rows,
+> **and** take the lock. Copy this list; add the `main_test.go`.
 
 - **Namespaced ids that KEEP the original name as the suffix** — `wk_fx_bench_press`,
   not `wk_fx_bench`. Some tests depend on the ids' relative LEXICAL ORDER (a
@@ -732,8 +833,28 @@ gap between those two is only how subtests are counted, and the drift from 1092
 is #329 adding `health/handler_test.go`. A test total is a magnitude check that
 every PR moves, so it cannot be a tripwire; the skip count is. Count with
 `go test -p 1 -timeout 3m -json ./...` rather than grepping `-v` output, since
-the grep is exactly the apparatus that silently counts something else. And note
-`./...` reports **37** packages — the other three have no test files.
+the grep is exactly the apparatus that silently counts something else. **Measured
+again 2026-08-20 after #454: 39 packages, 37 of them with tests, 1155 top-level
+tests, and still exactly one skip — `TestLiveComplete`.** #454 itself added 26
+(one lock assertion per Postgres package, plus three on the lock), so a count
+taken before it will not match one taken after; the skip count is the tripwire,
+and it did not move.
+
+The rule that keeps the lock coverage complete is one command, and it is worth
+running if you add a test package: every package that reads `TEST_DATABASE_URL`
+must also take the lock.
+
+```bash
+cd backend
+comm -23 <(grep -rl --include='*_test.go' TEST_DATABASE_URL internal/ | xargs -n1 dirname | sort -u) \
+         <(grep -rl --include='*_test.go' 'testdb.Main'        internal/ | xargs -n1 dirname | sort -u)
+```
+
+`internal/platform/testdb` is the one legitimate name that appears there — it is
+the apparatus, holds no fixtures, and its own tests need the lock free. Anything
+else is a package a second test binary can trample. **Note the `--include`:
+without it the second grep also matches `testdb.go`'s own doc comment, which
+names the call, and the check then reports every package as covered.**
 
 **This paragraph used to say "zero skips: 28 packages, 583 tests"** and told you
 any skip meant a regression. That was true when written and stopped being true
@@ -920,6 +1041,18 @@ way:
 ## Known gotchas
 
 - **A new native dependency is DECLARED by a merge and INSTALLED by nobody.** #320 added `expo-camera` to `apps/mobile/package.json` and a plugin entry to `app.json`; pulling that `main` onto a machine with an existing `node_modules` fails at config resolution with `PluginError: Failed to resolve plugin for module "expo-camera"`, **and the process exits 0 while printing it.** It reads like a broken checkout and is nothing of the sort — run `pnpm install`. CI never sees this because CI installs from the lockfile on every run, so the gap exists only for people who already have the repo. This sits one step *earlier* in the chain than the existing "first run after a new native dep must be `run:ios`, not `start`" trap: that one is a stale native binary, this one is a missing package.
+
+  **And there is a THIRD step, which is the one that reached a device (N91, #432).** The package can be installed and the JS bundled while the **iOS project never learns about it** — `pod install` has not been re-run, so `ios/Podfile.lock` and the generated `Pods/Target Support Files/Pods-VOLA/ExpoModulesProvider.swift` simply do not mention it. Nothing warns. The build succeeds. Measured 2026-08-20: of the twenty native dependencies in `apps/mobile/package.json`, **nineteen were in `Podfile.lock` and `expo-camera` was not**, and the `VOLA.app` built from that project contained no `ExpoCamera` symbol while its `main.jsbundle` contained the whole scan screen.
+
+  **The symptom is the app dying instantly with no error at all**, which reads as a crash in the feature and is nothing of the sort. `expo-camera` — like most `expo-*` packages — calls `requireNativeModule('X')` at **module scope**, and that *throws* when the module is absent. An ESM import cannot be caught, so the throw lands while the route module is being evaluated, i.e. on navigation, and in a **Release** build an unhandled JS error is fatal: no red box, no dialog, no JS stack. Debug would have shown a red box, which is why this class survives every simulator session and only appears on the build somebody carries around.
+
+  Diagnose it in one command, from the primary checkout:
+
+  ```bash
+  grep -c ExpoCamera apps/mobile/ios/Podfile.lock   # 0 = the project never learned about it
+  ```
+
+  and generally: compare `package.json`'s packages carrying an `expo-module.config.json` with an iOS section against `Podfile.lock`. The fix is `pnpm install` → `pod install` → **native rebuild**; re-bundling does nothing, because the missing half is native. `apps/mobile/lib/cameraModule.ts` now contains the blast radius for the camera specifically — a mismatch renders an explained screen instead of killing the process — but that is a guard on one package, not a fix for the class.
 - **`apps/mobile/app.json` has THREE silent permission traps, and nothing in the pipeline can see any of them** — they exist only in a built binary, so no test, no lint, no typecheck and no CI job will ever fail on them. (1) `expo-image-picker`'s plugin adds `NSMicrophoneUsageDescription` and Android `RECORD_AUDIO` unless you pass `microphonePermission: false`. (2) `expo-camera`'s plugin does **the same thing** — `withCamera.js` passes it into `createPermissionsPlugin` unless `microphonePermission: false` **and** `recordAudioAndroid: false`. Both matter because `lib/sounds.ts` sets `allowsRecording: false` and its test calls asking for the microphone "indefensible": the runtime guard was honoured while the binary declared the capability anyway, which is what App Store review and the privacy label read. (3) **Both plugins declare `cameraPermission`, and `applyPermissions` resolves that as _last explicit string wins_** — plugins run in order, so whichever sorts later silently replaces the other's justification. They are deliberately given the **same** string rather than ordered, because order-dependence is the hazard: the next plugin added between them moves the answer again. **A permission change only takes effect after a native rebuild**, so merging the fix does not fix an installed binary.
 - **`secrets.txt`** may show up untracked in the repo root containing what looks like a live API key. Never stage or commit it — flag it to the user instead.
 - This Next.js version renamed the `middleware.ts` file convention to `proxy.ts` (same `clerkMiddleware()` export, just a renamed file). Separately: `next dev --hostname 127.0.0.1` breaks when a `proxy.ts`/`clerkMiddleware()` is present — Next's Proxy runtime tries to self-fetch via `localhost` internally and fails (`ECONNRESET`, surfaces as a 500). Use `--port` alone when running concurrent dev instances; never pass `--hostname`.

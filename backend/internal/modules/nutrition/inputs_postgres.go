@@ -29,10 +29,17 @@ func (r *PostgresRepository) TargetInputs(ctx context.Context, userID, on string
 	// misses for an athlete with no weigh-ins, and that is the whole of the
 	// special case.
 	var measuredOn *string
+	// `activity_level` rides this query rather than getting one of its own: it
+	// comes off the same `profiles` row the height, DOB and sex already come
+	// from, so reading it costs nothing extra. Scanned as a plain nullable
+	// string and converted below — NULL is an athlete who has never chosen, and
+	// the handler is where that becomes the documented default.
+	var activityLevel *string
 	err := r.pool.QueryRow(ctx, `
 		SELECT p.height_cm,
 		       to_char(p.date_of_birth, 'YYYY-MM-DD'),
 		       p.sex,
+		       p.activity_level,
 		       c.weight_kg,
 		       c.measured_on::text
 		FROM profiles p
@@ -42,7 +49,7 @@ func (r *PostgresRepository) TargetInputs(ctx context.Context, userID, on string
 			ORDER BY measured_on DESC LIMIT 1
 		) c ON true
 		WHERE p.user_id = $1`, userID, on).
-		Scan(&in.HeightCM, &in.DateOfBirth, &in.Sex, &in.WeightKG, &measuredOn)
+		Scan(&in.HeightCM, &in.DateOfBirth, &in.Sex, &activityLevel, &in.WeightKG, &measuredOn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// No profile at all is a legitimate state, not an error: a brand-new
 		// athlete asking what they should eat gets told which fields to fill
@@ -54,6 +61,19 @@ func (r *PostgresRepository) TargetInputs(ctx context.Context, userID, on string
 	}
 	if measuredOn != nil {
 		in.WeightMeasuredOn = *measuredOn
+	}
+	if activityLevel != nil {
+		a := Activity(*activityLevel)
+		// A value the vocabulary no longer knows is dropped rather than
+		// carried. The column has no CHECK by house convention, so an older
+		// spelling could outlive a rename here — and a stored `moderate`
+		// reaching Suggest would silently fall through to `light` while the
+		// response still claimed the athlete had chosen. Dropping it says
+		// "never chosen", which is the truthful answer for a level this
+		// version cannot honour.
+		if a.valid() {
+			in.ActivityLevel = &a
+		}
 	}
 
 	// The live phase. At most one by construction — body_phases carries a

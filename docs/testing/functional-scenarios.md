@@ -3057,6 +3057,69 @@ differ here — deliberately, and stated rather than implied.
   drop a `user_id` and the easiest to not notice.
 - Unauthenticated → 401.
 
+### Focus provenance, and leaving a roadmap (`PUT /v1/bjj/focus` `roadmap`, `DELETE /v1/curricula/{id}/enrollment`)
+
+A focus row records WHY it is there, so un-enrolling can take back what a roadmap
+put in the list without touching what the athlete chose. **Every scenario below is
+about a deletion, so each one is either the reported bug or a data-loss bug — there
+is no cosmetic case here.**
+
+**Happy path**
+
+- Enrol in a roadmap, apply its focus, deactivate it → **its techniques are gone
+  from the list and from the reflection wizard's chips.** This is N95 itself.
+- Hand-pick two techniques first, then enrol and deactivate → **both hand-picked
+  ones survive.** Assert them by name, not by count: a fix that deleted the wrong
+  row still leaves two.
+- Two roadmaps active, deactivate one → the other's techniques stay. **Make them
+  OVERLAP on at least one technique**, which is the case a single-valued
+  provenance column gets wrong and a set gets right. Non-overlapping roadmaps
+  pass either implementation.
+- A technique in focus from **both** a roadmap and the athlete's own choice
+  survives deactivation. Test it in the order hand-first-then-roadmap; that is
+  the order provenance is designed around.
+
+**Edge cases and errors**
+
+- **An ordinary reorder must not rewrite provenance.** Apply a roadmap, then
+  reorder by hand (a `PUT` with no `roadmap` block), then deactivate. The
+  roadmap's techniques must still go. If provenance is rewritten on re-save,
+  every roadmap row launders itself into hand-picked on the most ordinary edit
+  there is — and the bug returns, silently and permanently.
+- **Rows created before provenance existed are never deleted by a deactivation.**
+  The migration records them `unknown` rather than guessing, so they behave as
+  hand-picked. The visible consequence, which is intended: an athlete already
+  carrying stale roadmap techniques keeps them until they clear them by hand.
+- **A roadmap may not take ownership of a row the athlete owns**, even when the
+  roadmap lists that technique. Assert on the stored claim, not only on what a
+  later deactivation deletes — the attribution guard and the release guard cover
+  for each other, so an outcome-only assertion passes with either one removed.
+- Deactivating twice changes nothing the second time; deactivating a roadmap
+  never enrolled in changes nothing at all.
+- `roadmap.technique_ids` containing an id absent from `technique_ids` → 400,
+  and nothing is written.
+- `roadmap` present with no `curriculum_id` → 400.
+- `roadmap.curriculum_id` naming no curriculum → 400 (not 500), whole save rolls
+  back.
+- An **empty** `roadmap.technique_ids` is accepted, not refused — a roadmap whose
+  every technique is mastered proposes a list made entirely of the athlete's own
+  entries, and refusing it would make "apply" fail exactly when the roadmap is
+  finished.
+- **A failed focus release must not archive the enrolment.** Otherwise the
+  athlete is un-enrolled from a roadmap whose techniques no future call can
+  reach — the reported bug, made permanent by the fix for it.
+
+**Auth and security**
+
+- **One athlete leaving a shared public syllabus must not disturb another's.**
+  Two athletes enrolled in the same curriculum, both with focus rows from it; one
+  deactivates. Assert the other's row survives **and that their own deactivation
+  still works afterwards** — the second half is the one that matters. Dropping
+  the user scope from the claim delete leaves every row count green while
+  silently stranding the other athlete's row with nothing able to release it.
+- Un-enrolment is self-scoped: no request can name another athlete.
+- Unauthenticated → 401, and no focus rows are released.
+
 ### The technique funnel, read back (`GET /v1/bjj/proficiency`, `/dashboard/proficiency`)
 
 **Happy path**
@@ -4836,7 +4899,9 @@ are still what proves the behaviour.
 ## Capturing a sequence on the phone (reflection wizard, `lib/sequences.ts`)
 
 The mobile half of sequences: tag a chain you already have, or capture the one
-your class just taught. Building and refining stay on web.
+your class just taught. **Building and refining stay on web; READING does not,
+as of N80** — see "Reading a chain back on the phone" below. This section's
+title used to be the whole mobile story for sequences and is now half of it.
 
 **Every scenario here should be run with the network OFF at least once.** The
 capture moment is a changing room after class, which is a dead-spot more often
@@ -4893,9 +4958,84 @@ pass proves the least interesting half.
 
 ### Not covered yet
 
-- **No browse or detail screen on mobile.** Chains are reachable only from
-  inside the reflection wizard; reading one back is unbuilt.
-- A captured chain has no step destinations until someone opens it on web.
+- **Editing a chain on the phone.** Reordering, renaming, adding or removing a
+  step, copying a reference chain and deleting are all still web-only. That is
+  *reduced-on-mobile*, not phone-impossible — reading is now on both — but it is
+  the half a follow-up ticket has to close.
+
+## Reading a chain back on the phone (`app/sequence/`, N80)
+
+The half that used to be missing, and the reason it was filed above every other
+phone-impossible gap: `shared/index.tsx` told an athlete who accepted a shared
+sequence that "your copy is in the Library", and **there was no sequence route
+in the app at all** — and the Library tab is the technique and exercise catalog,
+which has never held a chain. Every other audit finding omitted a surface; this
+one made a claim the athlete would act on.
+
+**Two screens**: `/sequence` (the list) and `/sequence/[id]` (the chain). Reached
+from the You tab's *Sequences* row, and directly by accepting a shared sequence.
+
+### Happy path
+
+- You tab → **Sequences** lists every chain you own, newest-updated first, each
+  showing its name and `N steps · from <start position>`.
+- Opening one shows the steps **in the order they were recorded**, numbered, with
+  the library's own name, `position · category` and any note on each — and the
+  position each step leaves you in shown *between* the steps.
+- Tapping a step opens that technique in the library, and its `Set up from` rows
+  are walkable from there.
+- A chain with a start position says so; one without says nothing rather than
+  "from ".
+- **Accepting a shared sequence opens the copy**, not a message about where it
+  went. The id opened is the RECIPIENT'S — the sender's is in the card and is
+  the natural thing to reach for, and it 404s.
+
+### Offline and the outbox
+
+**Run every one of these with the network off at least once.** Capture happens in
+a changing room; reading it back happens there too.
+
+- A chain captured in airplane mode appears in the list immediately, marked
+  **"On this phone only — not synced yet"**, and opens.
+- That marker is absent on a chain the server has seen. A marker on everything
+  says nothing.
+- Opening a not-yet-synced chain resolves its step names from the technique
+  library. On a **cold launch with no signal** the library is memory-only, so the
+  names cannot be resolved: the step must say **"Name unavailable offline"** and
+  must **not** render the raw technique id as if it were a name.
+- Opening a chain that lives only on the server when the request gets no answer
+  says **"Can't reach VOLA… nothing has been lost"**, and never reads as deleted.
+- **It must not say "offline" or "signal."** Since N55 (#365) `getSequence`
+  returns `null` for a **timeout** and a **dropped connection** as well as for
+  no route, so this card is what an athlete on four bars sees when a request
+  times out. Run it that way — throttle rather than airplane-mode — and check
+  the copy does not send them looking for signal they already have.
+- A **500** while listing shows the error AND still lists what this device is
+  holding. It must never render as "no chains yet". Being offline shows your
+  captures; an outage hiding them would be the wrong way round.
+- The empty state appears only for a genuinely empty answer.
+
+### Edge cases & errors
+
+- A chain whose steps were cleared on web lists as `0 steps` and opens to "No
+  steps recorded on this chain."
+- A VOLA reference chain (`editable: false`) says it is one and points at the web
+  app to copy it. Nothing seeds an ownerless sequence today, so this arm is
+  currently unreachable in practice — check it when one lands.
+- A repeated technique in one chain renders twice, in both places. Sweep, get
+  passed, sweep again is a legal chain.
+- Capture two chains offline, open each: neither shows the other's steps.
+- The **Sequences** row is gated on the BJJ module — a strength-only account does
+  not get a list that can only be empty. The Library row above it is
+  deliberately not gated; these two are different on purpose.
+
+### Auth / security
+
+- Another athlete's sequence id in `/sequence/{id}` is a **404**, indistinguish-
+  able from an id that never existed. The screen must not render a 403 as
+  "reference chain".
+- Signing out and in as a different athlete shows none of the previous account's
+  chains, including its unsynced captures.
 ## Linked cross-references in the technique library (web + mobile)
 
 `setup_from` and `common_next_moves` rows navigate where they name a real
@@ -6080,8 +6220,10 @@ yet.
 
 ## Sequences (`/v1/sequences`)
 
-A sequence is a chain: what a class taught, in the order it flows. Backend only
-so far — no client renders one yet, so these are API-level scenarios.
+A sequence is a chain: what a class taught, in the order it flows. These are
+API-level scenarios; both clients render one now — web at
+`/dashboard/sequences`, mobile at `/sequence` (see the two mobile sections
+above).
 
 ### Happy path — recording the class that motivated the feature
 
@@ -6569,6 +6711,59 @@ the schema rather than from taste:
 - **The strip fails silently** when the endpoint is unreachable — it renders
   nothing rather than an error. Deliberate; test that an offline Plan tab still
   shows its templates.
+
+Finding a roadmap in the first place (N96, 2026-08-20):
+
+The half of this feature that had no scenarios, because until now there was
+nothing to write: the only surface that ever offered an un-enrolled roadmap was
+the Plan tab's strip, and Today and You were both enrolled-only. Today's roadmap
+slot now has **two states** — the progress line when you are on one, the offer
+when you are on none — and both entry points state a position in the syllabus
+rather than a bare fraction.
+
+- **A fresh account with BJJ on and no roadmap is offered one on Today**, inside
+  Upcoming, above the plan cards. It names a specific roadmap (foundations
+  leads), says what moves it, and opens that roadmap in one tap. The old
+  behaviour — nothing at all — is what the ticket was filed about.
+- **Enrolling replaces the offer with the progress line, and the offer never
+  comes back.** This is the self-limiting property that keeps it from being a
+  nag, and it is the one that needs a SECOND visit to observe: enrol, come back
+  to Today, and confirm the offer is gone rather than sitting under the line.
+  Read on mount instead of on focus, the offer survives enrolment for the life
+  of the process, which looks like nothing at all in a single-visit test.
+- **An unreadable roadmap list offers nothing**, and this is distinct from
+  offering nothing because the athlete has one. Airplane mode on a fresh
+  account: Today shows no roadmap row at all, no empty card, no error banner.
+  An offer rendered from a failed read is a claim that they are on no roadmap.
+- **BJJ off → no offer**, and the Plan tab's existing "turn it on" prompt is
+  still the only thing that says so. Today must not grow a second one.
+- **Nobody else's curriculum is ever offered.** Publish a curriculum from another
+  account with `track: "belt"` and `belt: "white"` and confirm it appears
+  nowhere on Today. This is F7 pointed at a stronger surface: an offer card
+  endorses a roadmap far harder than a strip tile does.
+- **A curriculum with no criteria-bearing items is never offered**, for the same
+  reason a reading list shows no progress bar — the card promises that logged
+  sessions move it.
+- **The entry point states the milestone in words**: `Milestone 3 of 11 · Mount:
+  get out, then hold`, on Today and on each roadmap row on You. Never a bare
+  percentage, and never only a title.
+- **The milestone follows the next STEP, not the next item.** Master every
+  criteria-bearing technique in a phase that also contains concept items, and
+  the milestone must advance — a concept can never complete, so counting one
+  pins the athlete to a phase they finished. Same shape as `countable_items`
+  versus `item_count`, one level up.
+- **The milestone number resolves when you arrive.** Tap through and the phase
+  headers on the roadmap screen are numbered the same way — a number naming
+  something you cannot find is worse than no number. Note the unphased group
+  renders FIRST and carries no number, so on a mixed curriculum "Milestone 1" is
+  the second block on screen.
+- **An unphased roadmap says no milestone at all**, and falls back to the next
+  step. So does a finished one, which says every technique on it is done. Three
+  different situations, three different sentences, and none of them a zero.
+- **The milestone is announced.** With VoiceOver on, the Today row should read
+  the roadmap name, then the milestone number and its title, then the next
+  step, then the mastered count — and the progress bar must stay silent, since
+  it repeats numbers already spoken.
 
 The round map (2026-08-18):
 
@@ -7345,6 +7540,48 @@ this section.
   declared one.
 - **A meter write that fails does not cost the athlete their draft.** They have
   already paid for it.
+- **This endpoint always answers with a STATUS (N92).** The one outcome no
+  client can render is silence, because a client that receives no response has
+  nothing left to say except that it could not reach the server — which is the
+  sentence N92 was reported with, on a working connection. The scenario is a
+  provider that never returns: the response must be **504** with
+  `unavailable`, not a hung request. **It only tests anything if the fake
+  provider actually blocks on its context** — one that returns an error
+  immediately passes against a handler with no deadline at all, which is the
+  state this was reported from.
+- **A 504 must not promise the allowance is untouched.** That promise belongs
+  to `503`/`unavailable` alone. A timed-out call reached the provider and its
+  tokens were very likely bought, so it IS metered — assert the usage row
+  exists, and assert it beside the F16 case that must NOT have one, or the two
+  drift into agreeing.
+- **A caller that hangs up is not answered 504.** Both a disconnect and our own
+  deadline arrive at the estimator as a context error, so a scenario that only
+  covers the timeout passes against a handler that reads `ctx.Err() != nil` and
+  mislabels every abandoned request.
+- **No error message on this route talks about signal, connection or being
+  offline.** Grep the copy for those words rather than eyeballing one status:
+  the defect is a *class*, and it only shows up on whichever status nobody
+  thought to look at.
+
+**On the phone (mobile `/food/describe`)**
+
+- **The DOWNSCALED frame is what is uploaded, not the one the camera returned.**
+  Assert the uri handed to `photographMeal`. A scenario asserting the
+  manipulator was *called* passes against a screen that shrinks the frame and
+  then sends the original anyway — which is exactly the 4–12MB upload N73 was,
+  and that mutation survives a call-count check.
+- **A failure before the request never mentions the network.** Make the
+  re-encode reject: the radio has been idle throughout, so any message about
+  signal is false by construction. Assert nothing was uploaded either, which is
+  the other half of the claim.
+- **A permission denial names Settings, not a retry.** There is no camera to
+  retry with.
+- **A server failure shows the SERVER's sentence.** A 503, a 429 and a 422 each
+  arrive with copy written for this screen; substituting our own is how a spent
+  quota and a provider outage became one indistinguishable message.
+- **The fallback for a failure carrying no message diagnoses nothing.** It fires
+  precisely when nothing is known about the cause, and it used to assert the one
+  an athlete cannot act on.
 
 **Privacy**
 
@@ -8819,11 +9056,12 @@ while the bug is present.
 
 - **A request that fails for any reason other than a dead radio must not tell
   the athlete to go find signal.** This is the device-reported symptom: the
-  no-status default reads "Try again when you have signal" and was shown to
-  someone with four bars. Currently unfixable at this screen — `netFetch`
-  collapses timeout, TLS, DNS and body-too-large into one `OfflineError` (N55),
-  so the test belongs at the transport, and this line is here to record that
-  the screen is not where it can be satisfied.
+  no-status default read "Try again when you have signal" and was shown to
+  someone with four bars. **Satisfiable at this screen as of N55** — the
+  transport now names which kind of dead request it was and
+  `identifyErrorMessage` composes that diagnosis with the search fallback, so
+  assert the three transport outcomes give three different sentences here. The
+  transport half is under *Transport error taxonomy* at the end of this file.
 - **A genuinely offline phone still gets the offline message.** The pair matters:
   fixing the above by deleting the network wording would break the one case it
   is right for.
@@ -8982,6 +9220,34 @@ is the code #319 measured as a real 404.
   its EU twin resolves is this feature's one silent failure, and it surfaces as
   an ordinary "we do not have this".
 
+### No native camera in the binary (N91 — `lib/cameraModule.ts`)
+
+The scan screen must survive a build whose JS knows about `expo-camera` and
+whose **binary does not**. This is not a hypothetical device configuration: it
+is what a merge adding a native dependency produces on every machine that does
+not then re-run `pod install`, and it shipped once (N91). `expo-camera` throws
+from module scope in that state, so the failure is at *import* — meaning it
+fires on navigating to the route, and in a Release build it terminates the
+process with no dialog and no JS error anywhere.
+
+- **Importing the screen must not throw** when `expo-camera` is unavailable.
+  Simulate it with a **throwing module factory**, not a stubbed component — a
+  stub that returns a working fake can only ever exercise the case where the
+  module loads, which is precisely why a green scan suite coexisted with a
+  screen that killed the app.
+- **The screen renders an explained dead end** naming the build, and offers the
+  describe path — which needs no camera and still works.
+- **It must NOT render the permission screen.** There is no camera to grant
+  access to, so sending the athlete to Settings is a false instruction. Assert
+  on an element present in *both* variants of the permission screen: the
+  "allow" button is absent from the `canAskAgain: false` variant anyway, so an
+  assertion on it passes in both worlds and proves nothing.
+- **The camera preview must never mount**, since the component genuinely does
+  not exist.
+
+Applies to any future screen that uses the camera. They import from
+`lib/cameraModule.ts`, never from `expo-camera`.
+
 ### Manual, on a device (nothing above covers these)
 
 - A real packet, in a shop, one-handed: does the reticle frame a barcode at a
@@ -8989,6 +9255,15 @@ is the code #319 measured as a real 404.
 - A curved packet (a tin, a bottle) and a creased one — do they read, and when
   they do not, is the "didn't read cleanly" hint what actually appears?
 - The keyboard must not cover the servings field when it focuses.
+- **Twenty codes in a row, and one code held under the camera for a full
+  minute.** `onBarcodeScanned` fires on every decodable frame — tens per second
+  — so the `handling` ref is the only thing between a single packet and a
+  stack of concurrent lookups. Nothing in the suite can drive a camera at frame
+  rate; this is the only way that guard is ever exercised.
+- **The build's own provenance, before trusting any of the above.** A scan
+  screen that says "scanning isn't available in this build" is not a missing
+  feature — it is the binary reporting that it lacks `expo-camera`. Confirm the
+  app was *rebuilt* since the dependency landed, not just re-bundled.
 
 ## Client telemetry (N43, `apps/mobile` — `lib/telemetry.ts`, `lib/telemetryClient.ts`, `POST /v1/client-errors`)
 
@@ -10008,6 +10283,116 @@ The scenarios that matter are the ones distinguishing three states, not two.
   into "you do not train this".
 
 
+## The activity level, and where it lives (N93 — `profiles.activity_level`, `app/(tabs)/goals.tsx`, web `nutrition/targets`)
+
+Reported from a device as *"Target doesn't save previously added type of
+activity"*. The three daily-movement pills were component state on both clients,
+so they reset on every navigation — and the derived calorie target reset with
+them. It is stored on the profile now, nullable, with `NULL` meaning *never
+chosen*.
+
+### Happy path
+
+- **A chosen level survives leaving the tab.** Goals → `Physical job`, note the
+  target, switch to another tab, come back. **Both** the pill and the number are
+  unchanged. This is the whole ticket, and it needs a *return to the tab* rather
+  than a fresh launch — a tab mounts once and stays mounted, so a screen that
+  re-reads only on mount passes every other check here.
+- **It survives a force-quit and relaunch**, and a cold launch with no network.
+- **The web app agrees.** Set `Physical job` on the phone, open
+  `/dashboard/nutrition/targets` in a browser signed in as the same athlete: the
+  same chip is active and the derivation runs at the same factor. Set it on web,
+  return to the phone's Goals tab, and the phone follows. Agreement is by
+  construction — one column, both clients omit the `activity` parameter and
+  adopt what the server reports — not by a parity script.
+- **A level chosen in airplane mode reaches the account by itself.** Pick one
+  with no signal, see the "saved on this phone" line, restore the network,
+  revisit the tab. It syncs once, the line goes away, and it does not revert —
+  then check web and confirm the browser derives at the new level too.
+
+  **Both halves matter and only one is obvious.** "Not lost" is satisfied by
+  any local write; "reaches the account" needs a retry, and the first draft of
+  this feature had none — the PATCH fired only on a pill press, so the debt
+  stood forever unless the athlete tapped again while online, and web derived
+  at the stale level indefinitely. Three places in the diff *said* it retried.
+  A scenario that stops at "the phone still shows it" passes against that bug.
+
+### Edge cases & errors
+
+- **Never-chosen is not the same as chose-`light`.** A brand-new athlete gets
+  the documented default in the arithmetic and **no selected pill** — the
+  assumed one is dashed and a line names it. A filled pill would attribute a
+  decision to somebody who never made one, and the next request would then send
+  it as truth, making the assumption permanent and invisible. `activity_chosen`
+  is in the contract for exactly this.
+- **A pending offline choice beats the server, not the other way round.** With a
+  local change not yet pushed, a successful profile read must NOT adopt the
+  server's older value. That failure shipped once in `useTrackEffort`: the
+  switch turned itself back on minutes later with nothing said.
+- **A cached level the account no longer holds is dropped.** Nothing owed means
+  the server is authoritative, including when it says nobody has chosen.
+- **A stored level the vocabulary no longer knows is treated as never chosen**,
+  on both the server (`TargetInputs`) and the device. Carried through it does
+  NOT break visibly — `Suggest` coerces an invalid activity to `light` on its
+  own — which is exactly why it matters: the athlete gets a plausible number
+  derived at `light` while the response claims they chose a level their client
+  cannot render.
+- **`?activity=` must be OMITTED, never sent empty or as the string
+  `"undefined"`.** `new URLSearchParams({ on, activity })` with an undefined
+  activity serialises the literal text `undefined`, which the server rejects as
+  an unknown level — so **every** derivation 400s, not just the pills.
+- **An out-of-vocabulary PATCH is a 400, not a silent coercion.** Storing
+  `light` for a typo'd `moderate` would return 200 naming a level the caller
+  never asked for, and the client would cache it as the athlete's own choice.
+- **A PATCH that does not mention `activity_level` leaves it alone.** Changing
+  units from Settings must not blank it — the `updateWithin` failure mode that
+  has silently wiped authored data three times.
+- **A failed save says so, and says WHAT failed.** A chip that visibly moves
+  reads as a successful save; "changed" and "changed on this phone only" are
+  different outcomes. On web, check the message is attributed — a bare
+  "Failed to fetch" in a shared error slot reads as a failed derivation, not a
+  failed save, while the chip sits filled for a level nothing stored.
+- **An offline pill change leaves the arithmetic behind, and must say so.** The
+  ladder is fetched from the server, so with no signal the new pill sits above
+  the previous level's working out. Silence there is the "pill shows one level,
+  arithmetic used another" failure in its persistent form.
+- **A cache read in flight must not revert a pill pressed while it was
+  running.** Narrow, but not closed: the read's snapshot predates the tap, and
+  applying it puts the pill back under the athlete's thumb for the rest of the
+  visit.
+
+### Auth / correctness
+
+- **The level is per-athlete and per-account.** The device cache is scoped by
+  user id: a shared phone must not hand one account's level — and therefore
+  one account's calorie target — to whoever signs in next.
+- **Choosing the default level still records a choice.** Picking `On your feet`
+  when `light` was already being assumed must store something, or the screen
+  goes on claiming it assumed.
+- **The vocabulary stops at `active` (1.45) deliberately.** Textbook multipliers
+  run to 1.9 with exercise already folded in; the derivation adds logged
+  training as its own line, so admitting `moderate` double-counts every mat
+  class — a few hundred kcal a day, in the direction that makes a cut silently
+  not happen.
+
+### Regression trap
+
+- **Re-focus, not mount.** Every case here has to be exercised by returning to
+  the tab. A test that renders the screen twice is testing a lifecycle this
+  screen does not have and passes against the bug.
+- **Do not drive the query parameter off the "unsynced" flag.** It clears the
+  instant a push succeeds, which changes the request and refetches the entire
+  derivation for an answer that cannot have moved. The pin and the sync notice
+  are separate on purpose.
+- **The pills must still not refetch the target history or the weekly
+  proposal.** A chip cannot change either; web made that mistake once already.
+- **Assert defaults against LITERALS, not against the constant that defines
+  them.** `"light"`, not `ACTIVITY_DEFAULT`. Two tests on this same screen
+  asserted a constant against itself and both stayed green when the constant
+  moved (#398).
+- **Needs a device.** The dashed assumed pill, the offline write, and the
+  keyboard-free tap targets are all runtime claims the suite cannot reach.
+
 ## A provider outage must not spend the athlete's allowance (F16, #367)
 
 Three endpoints meter LLM calls against a persisted rolling-24-hour quota:
@@ -10102,3 +10487,401 @@ the status passes against either regression. Assert the quota, not the status.
   recovers on restart" — true when filed, and untrue since N48 gave it a
   persisted quota. Any scenario list that treats identify as unaffected is
   reading a stale premise.
+---
+
+## Transport error taxonomy (N55, `apps/mobile/lib/authedFetch.ts`, `lib/apiError.ts`)
+
+Every request the app makes goes through `netFetch`, which used to convert
+**every** `fetch` rejection except an abort into `OfflineError`. A timeout, a
+TLS failure, a DNS failure and a phone in a lift were the same object by the
+time a screen saw them, so an athlete with four bars was told *"Could not reach
+the server. Try again when you have signal"* while a photo upload was being
+dropped for its size.
+
+There are now three sentinels under one base — `OfflineError` (no route to the
+API), `TimeoutError` (we stopped waiting), `RequestDroppedError` (the request
+failed while VOLA answered a probe) — and the discriminator is a **measurement,
+not a guess**: on an unclassifiable failure the phone sends one bodyless GET to
+`/v1/healthz` and classifies on whether anything comes back.
+
+### Happy path
+
+- A request that gets any HTTP status resolves normally and **no probe is
+  made**. Classifying a status is the caller's job.
+- A slow-but-successful request inside its deadline still succeeds — including
+  a photo estimate, which gets a longer deadline than a JSON read.
+
+### Edge cases & errors
+
+- **Airplane mode → `OfflineError`, and only there.** The message says the
+  athlete is still signed in and never suggests signing in again. This is the
+  case the whole family exists to keep true, so a fix that broadens any other
+  branch has to be checked against it.
+- **A host that resolves and refuses TLS → not "offline".** From the app's
+  vantage point a host-wide TLS or DNS failure fails the probe too, so it
+  lands in `OfflineError` — *"Can't reach VOLA"*, which is true. What must
+  never happen is a **per-request** failure over a working network reading as
+  no connection.
+- **A captive portal that answers everything with its own 200 reads as
+  reachable**, so a genuinely blocked request says *"That didn't get through"*
+  rather than *"Can't reach VOLA"*. Wrong in detail, right in advice, and
+  neither sends the athlete to sign in again or to hunt for a signal they
+  already have. **Test it as the accepted limit, not as a bug** — a fix that
+  narrows it must not widen `OfflineError` back into a catch-all.
+- **A request killed mid-body while the API is up → `RequestDroppedError`.**
+  Reproduce by making the request fail against a reachable API; the message
+  must not contain the word "signal". The likeliest real producer is the
+  server's `MaxBytesReader` closing the connection after answering an
+  oversized upload, so the client never reads its 400.
+- **A request that outruns its deadline → `TimeoutError`**, with no probe: the
+  app caused this and knows it.
+- **A superseded or unmounted request → the `AbortError` passes through
+  untouched**, and is never reported to the athlete at all.
+- **Two failures close together make one probe**, not one per failure — an
+  outbox drain against a dead network would otherwise probe once per pending
+  row.
+- **A probe that never answers still classifies** within its own deadline. A
+  classification that can hang leaves a dead request unreported on screen.
+
+### The copy
+
+- One line then an action, on all three. The athlete's verdict on the old
+  three-sentence version was *"the error itself is ugly"*, read one-handed over
+  a plate.
+- A screen with a better action than "try again" composes its own message from
+  `transportDiagnosis()` — the camera says *search for the exercise instead*,
+  the meal screen *enter the food by hand*, the barcode scanner *a barcode
+  you've scanned before still works*. **The diagnosis stays central; only the
+  action is local.** Assert that the action is not printed twice.
+- **Every screen that degrades to a local cache offers it for all three
+  outcomes, not only for `OfflineError`.** The barcode scanner is the case:
+  narrowing it back to `isOffline` drops the cache hint on a timeout and on a
+  dropped lookup, which is the same "one branch quietly stopped matching" that
+  the taxonomy was introduced to end.
+- **A 503 from the estimate route reads as a feature that is not switched on**,
+  names manual entry, and never mentions the connection. The route answers 503
+  when the deploy has no provider key.
+- **The 429 keeps the server's own wording**, reset time included. Mapping it
+  to copy of our own throws away the one number the athlete can act on.
+
+### Regression trap
+
+- **`signal.reason` does not exist on a phone, and jest has it.** React Native
+  replaces the global `AbortController` with `abort-controller@3.0.0`: no
+  `reason`, no `throwIfAborted`, no `AbortSignal.timeout`, no
+  `AbortSignal.any`. Two screens told a timeout apart from a supersede by
+  reading `signal.reason`, and neither comparison could ever match — the
+  library search rendered **"Aborted"** for a request abandoned mid-typing, and
+  the position screen's spinner never resolved on a timeout, which is the exact
+  failure its own comment said the reason existed to prevent. Both had passing
+  tests. `lib/__tests__/rnGlobals.test.ts` is a source scan that fails on any
+  reintroduction; a runtime test cannot see this, because these APIs work
+  perfectly in the runner.
+
+### The deadline
+
+- **Every request has one now** — 30s by default, 45s for anything carrying a
+  photo *or waiting on a language model*. The text estimate path is in the
+  second group even though it uploads nothing: same route, same provider, and a
+  constant named `UPLOAD_TIMEOUT_MS` nearly argued it out of a budget it needs.
+- **A screen that wants to give up sooner passes its own** — the library and
+  the position screen both ask for 10s. Assert the screen ASKS: if the option
+  stops being passed, the request silently runs to the 30s default and nothing
+  goes red, because it still completes and still renders.
+- **A timeout does not abort the caller's controller**, so a screen must not
+  treat it as an unmount. That confusion is what left the position screen
+  spinning forever.
+
+### Needs a device
+
+- **Airplane mode, on a real phone.** The offline branch is the one no stub can
+  confirm: what a stub proves is that `netFetch` classifies a rejection, not
+  that iOS produces one for a radio that is off.
+- **A host that resolves but refuses TLS**, pointing `EXPO_PUBLIC_API_URL` at
+  it — to confirm the app does not claim the athlete is offline.
+- **A deploy with no provider key**, to read the 503 copy in place.
+
+## Daily trackers — water first, and the model the next two need (N76)
+
+Backend `internal/modules/tracker` (`/v1/trackers`), mobile `lib/trackerModel.ts`,
+`lib/trackers.ts`, `components/TrackerCard.tsx`, `app/trackers/[id].tsx`, rendered
+on Today and in Food.
+
+**Read the scope before writing a test here.** Water is a *seeded preset* of a
+generic model, not a feature. Most of what is worth testing is the model: N77
+(coffee) and N78 (custom trackers) are meant to land as configuration, and a test
+that only exercises water cannot tell whether that is true.
+
+### Happy path
+
+- Open Today signed in for the first time. The Water card is there with no setup:
+  `0 of 8 cups`, `0 ml`, an empty row of eight glyphs and a leading `+`.
+- Tap `+` four times. Four glyphs fill left to right; the value line reads
+  `4 of 8 cups · 1 L`.
+- Tap the third filled glyph. It empties, the count drops to 3, and the entry
+  removed is the third one — not "some cup".
+- Open Food. The same card is there, showing the same day, and the day stepper
+  moves it: stepping back a day shows that day's cups.
+- Open the card's settings from the phone, change the target to 10, save. The row
+  re-renders with ten slots. **No web screen is involved at any point** — that is
+  the criterion, not a detail.
+- Clear the target field entirely and save. The card becomes a plain count with
+  no "N to go" line and no implied goal.
+
+### Edge cases & errors
+
+- **Ten of eight logs.** Log ten cups against an eight-cup target: all ten log,
+  ten glyphs draw, the line reads `10 of 8 cups`, nothing is blocked and nothing
+  changes tone. Read every string on the card and find no praise and no scolding
+  — `trackerModel.test.ts` asserts this over an enumerated word list, and a
+  functional test should confirm it on screen.
+- **Thirteen of eight becomes a bar.** Past twelve glyphs the row must not wrap
+  into an uncountable block; it switches to a bar with the number stated.
+- **A single-dose tracker draws one large glyph**, not a one-item row.
+- **Units.** Switch the profile between metric and imperial. The volume line
+  follows (`1 L` ↔ `33.8 fl oz`), the cup *count* does not change, and no stored
+  number moves. Nothing unit-bearing renders before `unitsReady`.
+- **A failed read never renders as zero.** With no network and nothing cached,
+  the card is absent rather than claiming "you have no trackers" — the same
+  `unknown` vs `none` distinction the nutrition target already makes.
+
+### Offline
+
+- Airplane mode: tap three cups. They stick, the card is correct, and nothing
+  spins. Restore the network; they sync once and do not double-count.
+- Airplane mode: change the target. It applies immediately and pushes later.
+- Airplane mode: tap a cup then untap it. Both survive a relaunch, and the sync
+  screen's pending count includes them (a tap that is owed but reported as
+  nothing owed reads as "it saved", which is the reassurance that must not be
+  false).
+
+### The local day
+
+- Set the device clock to 23:58 local, log a cup, cross midnight. The cup belongs
+  to the earlier day and the new day starts empty. **West of Greenwich this is
+  the failing case** — a UTC-derived date files a 23:58 glass under tomorrow, and
+  the mobile suite runs under `TZ=America/Los_Angeles` for exactly this.
+
+### VoiceOver
+
+- Turn VoiceOver on and add and remove a cup without looking at the screen.
+- Each glyph announces its position, total, state and tracker: `Water, cup 3 of
+  8, filled`. A row of eight identically-labelled shapes is unusable even though
+  every shape is technically labelled — the hazard is sameness, not silence.
+- Each glyph is a checkbox to the system as well as in its label, and its hint
+  says what a double-tap will do.
+- The settings control announces what it opens, not "more": it is the only route
+  to the target on a phone.
+
+### Auth & security
+
+- Every `/v1/trackers` route 401s without a bearer token.
+- Ids are client-generated, so every read and write is scoped to the caller:
+  another athlete's tracker id 404s on PATCH and DELETE, does not appear in the
+  list, cannot be logged against, and re-creating it returns `already_exists`
+  rather than handing the row over.
+- A client cannot claim a `preset` on create — that would collide with
+  provisioning and make somebody's water card unreachable.
+- The entries window is bounded; an unbounded `from`/`to` is a way to ask for
+  every row an athlete has ever written in one request.
+
+### Regression trap
+
+- **A partial PATCH must never blank a field it did not name.** This is the bug
+  `exercise.updateWithin` shipped three times (migrations 000052, 000057,
+  000061), each time caught in review and never by the suite. The guard here is
+  structural: `patch_test.go` enumerates `Patch`'s fields by reflection and fails
+  if one is unwired in either direction, and `postgres_test.go` patches each
+  field alone and asserts the other seven are unchanged. **If you add a column,
+  write the restore-path case before the migration** — `oneOf` in that file
+  fatals on a field it has no case for, so the omission is loud.
+- **`target` is nullable and three-state.** Absent means leave it alone, `null`
+  means the athlete wants no ceiling, a number sets one. A client that builds its
+  patch with `{ target: x ?? null }` silently turns the first into the second and
+  clears targets nobody asked to clear.
+- **Provisioning is a write on a read.** `GET /v1/trackers` creates the default
+  presets. It must stay idempotent under concurrency (the `(user_id, preset)`
+  unique index, not a flag), must not overwrite an edited target, and must not
+  re-provision a tracker the athlete archived.
+- **The preset id is derived from `(user_id, preset)`, not random.** With a
+  random id, two devices provisioning at once each believe a different id is "the
+  water tracker" and one device's cups reference a tracker the server never
+  stored.
+- **A tracker colour is a KEY, never a hex.** `scripts/validate_palette.mjs`
+  measures every entry in `trackerColors` for contrast on `surface`/`raised` and
+  CIEDE2000 separation from `info` and from each other under three CVD
+  simulations. A free colour picker cannot be checked at authoring time. Adding
+  one means bumping the expected count in that script, which is what forces the
+  measurement.
+- **The suite's timezone is set on the `test` script, at process launch.**
+  Running `jest` directly loses it, and the local-day assertions then pass in the
+  wrong zone — measured here: `formatClock` returned `19:40` under the machine's
+  zone and `16:40` under `America/Los_Angeles`.
+- **`lint:mobile` has zero headroom at 54 warnings.** `useRef(new
+  Animated.Value(...)).current` is a `react-hooks/refs` warning; a lazy
+  `useState` initialiser is the same value with no ref read during render.
+
+### Added after review — the cases the first pass missed
+
+These are not extra coverage; each is a defect review found in the original
+branch, written down so the next glyph row does not repeat it.
+
+- **The midnight case has TWO directions and the first pass wrote one.** 23:58
+  must land on the day that is ending *and* 00:05 must land on the day that has
+  started. A screen that never unmounts computes its day key during render, so
+  the second one fails while the first passes. The two are also caught by
+  different mutations: swapping `dayString` for `toISOString().slice(0,10)`
+  reddens only the 23:58 test; freezing the day at module load reddens only the
+  mirror. Neither substitutes for the other.
+- **Two quick taps on the same filled glyph must remove one cup, not two.** The
+  re-render that empties the glyph lands after the second tap, so anything that
+  resolves a *position* at tap time can resolve two taps against two different
+  snapshots.
+- **A tap target is a number, and 30pt is not 44.** Measure the effective target
+  (drawn size + `hitSlop`), not the drawn size. Horizontal slop above half the
+  row gap makes adjacent targets overlap, which on a row of identical glyphs
+  makes mis-taps *worse* — so a bigger number is not automatically better here.
+- **An `accessibilityLabel` on a plain `View` is inert on iOS.** It is not an
+  accessibility element without `accessible`, and adding `accessible` collapses
+  the row into one element and swallows the per-glyph labels. Check a label is
+  reachable before trusting it exists.
+- **`accessibilityState={{checked}}` is ignored on `role="button"` in iOS.** The
+  state has to be in the label text. A row of glyphs that announces position but
+  not filled/empty is the failure this looks like it prevents and does not.
+- **A name rendered through `.toUpperCase()` is spelled out letter by letter.**
+  Uppercase with `textTransform` so the accessible string keeps its original
+  casing.
+- **A text field is not labelled by the `Text` above it.** Without an explicit
+  `accessibilityLabel`, VoiceOver reads the placeholder — so the target field
+  announced itself as "No target".
+- **The derived preset id is a namespace somebody can squat.** It is
+  `sha256(userID + preset)` and a Clerk user id is not a secret, so a foreign
+  athlete can compute it, create a tracker on it, and collide the victim's
+  provisioning on the PRIMARY KEY — which the `(user_id, preset)` arbiter does
+  not cover. That was a permanent 409 on every `GET /v1/trackers` with no way to
+  free the id. Two independent guards now: the create path refuses the reserved
+  prefix, and provisioning uses a bare `ON CONFLICT DO NOTHING` so a taken id
+  costs one card rather than the whole list. **Test both; either alone leaves a
+  hole.**
+- **Run every check from the worktree, not the primary checkout.** Two real
+  typecheck errors passed a `tsc --noEmit` issued from the wrong directory,
+  because it checked a tree without the changes in it. No output from the wrong
+  place is indistinguishable from success.
+
+### For the user to check on a device
+
+Reading the diff cannot settle any of these. They need a build.
+
+1. **The row.** Open Today. Tap `+` four times — four cups fill left to right,
+   animated, and the line reads `4 of 8 cups · 1 L`.
+2. **Correction.** Tap the third filled cup. It empties, the count drops to 3,
+   and the cup that empties is the third one.
+3. **Double-tap.** Tap one filled cup twice, fast. Exactly one cup should go.
+4. **Over target.** Log 10 of 8. All ten log, ten cups draw, nothing scolds,
+   nothing blocks, nothing changes colour.
+5. **Thirteen.** Keep going past twelve. The row must become a bar with the
+   number stated, never a wrapped block of identical glyphs.
+6. **Units.** Settings → switch metric/imperial. The volume follows
+   (`1 L` ↔ `33.8 fl oz`); the cup count does not move.
+7. **The target, from the phone.** Open the card's settings, set the target to
+   10, save. The row re-renders with ten slots. Then clear the field entirely —
+   the card becomes a plain count with no goal line.
+8. **Offline.** Airplane mode: tap three cups, force-quit, reopen. They are
+   still there. Restore the network and confirm they sync once — the count must
+   not double.
+9. **Midnight.** Set the device clock to 23:58, log a cup, wait past midnight
+   *with the app still open*, log another. The first belongs to the earlier day,
+   the second to the new one, and the row resets. **This is the one that has
+   already gone wrong twice in this repo today.**
+10. **VoiceOver.** Turn it on and add and remove a cup without looking. Each cup
+    should announce like `Water, cup 3 of 8, filled` — check the *name* is read
+    as a word and not spelled out, that empty cups offer to add, and that the
+    settings button says what it opens rather than "button".
+11. **Tap targets.** With VoiceOver off, try the row one-handed with a thumb.
+    The `+` and the settings button are 44pt; the cups are 34 × 44. If the cups
+    still feel unhittable, that is a real finding and the row idiom needs
+    rethinking rather than the numbers nudging.
+### Today's Fuel card (added after the first audit missed it)
+
+- **Nutrition off**: the Fuel slot shows a **dashed** placeholder naming the
+  module and leading to the toggles — not a solid card. The distinction is
+  deliberate: a card there reads as content, and an athlete would take it for
+  the thing rather than for its absence.
+- **Nutrition on**: the real `NutritionCard`, and **no** placeholder. Assert
+  both — they are a ternary, and rendering both at once, or neither, is the
+  failure mode.
+- **A disabled module that is not the food log** (Running off, nutrition on)
+  must NOT produce the placeholder. This is the case that let a mutation live:
+  a bare `!enabled` check passes every test whose only disabled module happens
+  to be the food-log one.
+- **A deployment with no food-log module at all**: nothing is offered.
+
+## Weight trend — the card and the full page (N56)
+
+`components/TrendCard` + `WeightTrendCard` (top of Goals), `app/goals/trend.tsx`
+(the full page), `components/TrendChart` (the drawing). Mobile only.
+
+### Happy path
+
+1. **The card opens Goals.** With a year of weigh-ins and a live phase carrying
+   a target, the Goals tab shows the weight card above "Daily movement": title,
+   a delta reading `↓ 13.3 kg past year`, the line, `TODAY` with the latest
+   value, and `Record Weight`.
+2. **`TODAY` is what the scale said.** Log a weigh-in that differs sharply from
+   the seven-day mean and confirm the card shows the READING, not the mean.
+   This is the number an athlete checks against the scale in front of them.
+3. **Tapping the chart opens `/goals/trend`.** `Record Weight` opens today's
+   check-in instead.
+4. **All seven ranges draw** — `1W 1M 3M 6M 1Y All Plan` — and switching is
+   instant, with no refetch (the screen fetches wide once and slices locally).
+5. **`Plan` reaches back to the live phase's start**, and falls back to a real
+   window rather than collapsing when no phase is live.
+6. **The entries list** shows every reading newest-first with its date.
+7. **The old path still works.** `/checkin/trend` redirects to `/goals/trend` —
+   this is what an installed build predating the move will push.
+
+### The absences — each is a distinct sentence, and this is the section worth
+### spending time on
+
+8. **Offline / failed load never says "no readings".** Kill the network and
+   open the card. It must say it could not load them. "Record your weight and
+   the trend appears here" is a claim about the athlete and is FALSE here.
+9. **Never recorded** says exactly that, and invites the first reading.
+10. **Readings outside the window.** With weigh-ins only from a year ago,
+    select `1W`. It must say nothing is in this range and how many exist
+    further back — not that there are none.
+11. **Too few to smooth** reports the counts, and the dots still draw.
+12. **No goal set** (a maintenance phase, `target_weight_kg` null): no goal
+    line, no projection sentence, and the card still works.
+13. **Every projection refusal gets a sentence.** Reachable states: already
+    there; a plan that moves away from the goal; a stalled rate; and not enough
+    to say yet. None may render as blank space, and **none may read as "on
+    track"** — we did not check is not the same as it checks out.
+
+### Correctness traps
+
+14. **A gap is a gap.** Leave a fortnight unweighed and confirm the line
+    BREAKS rather than running straight through it. A single line across the
+    hole is the app inventing a fortnight of data and it looks entirely normal.
+15. **The projection date matches Goals.** The sentence on `/goals/trend` and
+    the feasibility line in Goals must show the SAME date — both read the
+    server's `reached_on`. If they differ, something has started computing it
+    locally again.
+16. **A projection beyond the drawn window exits the right edge** still
+    travelling, rather than bending to meet the goal line inside the box. A
+    line that visibly lands is a claim that it lands within the period shown.
+17. **Timezone.** Run west of Greenwich in the evening and east of it in the
+    morning: today's weigh-in must appear, and the chart's right edge must be
+    the local day. A UTC date drops a morning reading as "future" on the day it
+    was logged.
+18. **Units.** Switch kg/lbs and confirm the callouts, the goal-line label,
+    `TODAY`, the delta and the entries all move together.
+
+### Accessibility
+
+19. The chart carries a text alternative naming the direction, the amount, the
+    period and the reading count. Chart text itself is invisible to a screen
+    reader — and note `getByText` cannot see it in tests either, since
+    `react-native-svg` mounts an `RNSVGText` host node.
+20. The selected range chip announces itself as selected, and its label reads
+    as a period rather than as "1W".

@@ -23,7 +23,13 @@ import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { CurriculaStrip } from '@/components/CurriculaStrip';
 import { WeekPlanner } from '@/components/WeekPlanner';
-import { enabledSports, labelFor, moduleFor, moduleOffWithCatalog } from '@/lib/modules';
+import {
+  enabledSports,
+  labelFor,
+  moduleFor,
+  moduleOffWithCatalog,
+  moduleWithCatalog,
+} from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
@@ -384,9 +390,7 @@ export default function WorkoutsScreen() {
                     discipline whose catalog is TECHNIQUES rather than on
                     `key === 'bjj'` — the same predicate the web nav uses, and
                     the check this codebase avoids everywhere else. */}
-                {modules.some(
-                  (m) => m.enabled && m.capabilities.catalog === 'techniques',
-                ) ? (
+                {moduleWithCatalog(modules, 'techniques') !== undefined ? (
                   <CurriculaStrip />
                 ) : (
                   /* N61: this rendered NOTHING when the discipline was off, and

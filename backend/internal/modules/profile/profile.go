@@ -75,9 +75,24 @@ type Profile struct {
 	// numbers say you trained hard, the detail says what you are working on,
 	// and a competitor may reasonably want to share the first and not the
 	// second. Off by default; does nothing while the switch above is off.
-	ShareTrainingDetails bool      `json:"share_training_details"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ShareTrainingDetails bool `json:"share_training_details"`
+	// ActivityLevel is daily movement OUTSIDE logged training — the NEAT term
+	// in the calorie derivation. "sedentary" | "light" | "active", or nil.
+	//
+	// **Nil is a real answer and not a missing one.** It means the athlete has
+	// never said, which is a different fact from having chosen "light", and the
+	// clients depend on the distinction: with nil they render the assumption as
+	// an assumption rather than showing a filled pill for a choice nobody made.
+	// The derivation applies the documented default at read time, where it can
+	// be labelled.
+	//
+	// On the profile rather than in each client's component state because it is
+	// a fact about the athlete's life, not about one screen's session — and
+	// because with it held per-client, a phone and a browser derived different
+	// targets for the same person on the same day. See N93.
+	ActivityLevel *string   `json:"activity_level"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // NewProfile is the input for onboarding. Module enablement isn't set here —
@@ -108,6 +123,12 @@ type ProfileUpdate struct {
 	TrackEffort              *bool
 	ShareTrainingWithFriends *bool
 	ShareTrainingDetails     *bool
+	// ActivityLevel follows the nil-means-unchanged rule like everything else
+	// here, which means it cannot be un-set through this path once chosen —
+	// only changed. Deliberate, and the same call made for Username: there is
+	// no consumer for "I take it back, go back to assuming", and expressing it
+	// would need a Set flag the whole struct does not have.
+	ActivityLevel *string
 }
 
 // Module is one discipline as a client sees it: the registry's definition
@@ -136,6 +157,27 @@ func ModulesFor(stored map[string]bool) []Module {
 
 // ValidUnitSystem guards the only two the clients can render.
 func ValidUnitSystem(v string) bool { return v == "metric" || v == "imperial" }
+
+// ValidActivityLevel guards the daily-movement vocabulary.
+//
+// **A second copy of a list that also lives in `nutrition.Activities`, and that
+// is deliberate rather than sloppy.** A module in this codebase never imports a
+// sibling — nutrition reads `profiles` by SQL for exactly this reason — so the
+// alternative to duplicating three strings is a shared package existing solely
+// to hold them. `ValidUnitSystem` above is the same trade already taken.
+//
+// What keeps the two honest is not discipline: it is that BOTH lists are pinned
+// to string literals by their own package's tests. Asserting one against the
+// other would be true by construction and would go green the day somebody moved
+// both; pinning each to `"sedentary"`, `"light"`, `"active"` fails whichever
+// side drifts.
+//
+// No CHECK constraint backs this, per the convention migration 000021
+// established and 000040 restates: an enumerated vocabulary is validated in Go,
+// where changing it is a code change rather than a migration.
+func ValidActivityLevel(v string) bool {
+	return v == "sedentary" || v == "light" || v == "active"
+}
 
 type Repository interface {
 	Get(ctx context.Context, userID string) (*Profile, error)
