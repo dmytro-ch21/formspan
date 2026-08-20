@@ -34403,11 +34403,21 @@ giving two answers under two rules.
 ### The decision, and the two options it beat
 
 **Chosen: on the profile, server-side** — `profiles.activity_level`, nullable,
-migration `000069`. (It was written as `000068`; `000068_create_daily_trackers`
-landed on `main` mid-branch, and a duplicate version is something golang-migrate
-refuses to start on at all — invisible in a three-dot diff, which uses the merge
-base. Re-checked at rebase time, which is the only time that check means
-anything.)
+migration `000070`. **It was renumbered twice**, and the second time is the one
+worth recording. Written as `000068`, moved to `000069` when
+`000068_create_daily_trackers` landed mid-branch, and moved again to `000070`
+when `000069_bjj_focus_provenance` landed while the PR was open.
+
+The second collision is the instructive one because **re-checking against
+`origin/main` by hand did not catch it** — the check had already been done, and
+`main` moved afterwards. What caught it was CI: the `Backend (Go)` job died on
+`duplicate migration file`, because a `pull_request` workflow builds
+`refs/pull/N/merge` — this branch merged into CURRENT `main` — while
+`git diff origin/main...HEAD` locally showed nothing at all. That is exactly the
+property CLAUDE.md warns about: a three-dot diff uses the merge base, so the
+collision exists only in the merged tree and is invisible from the branch. A
+local check is a snapshot; the merge ref is the truth, and on a long-lived
+branch the two drift apart every time somebody else lands a migration.
 
 - **Device-local storage** (`useState` → a local write) fixes the reported bug
   completely, costs one line, and needs no migration, no contract change and no
