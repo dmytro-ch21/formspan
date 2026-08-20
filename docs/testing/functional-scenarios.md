@@ -595,7 +595,7 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - **Warm-ups count toward neither working sets nor tonnage** (`TestSummarise_ExcludesWarmups`). Counting them inflates every number and makes a light day look like a hard one, which would poison anything built on top.
 - `hardest_rpe` covers **working sets only** — a hard warm-up single mustn't set the session's headline difficulty. (It originally counted warm-ups, contradicting the schema's own wording; caught in review.)
 - `exercise_ids` is the one field that *does* count warm-ups — it answers "what did I train", not "how hard did I train".
-- Tonnage is `reps × weight` summed over non-warm-up sets; a set with reps but no weight adds reps and no tonnage.
+- Tonnage is `reps × weight_kg × load_factor` summed over non-warm-up sets; a set with reps but no weight adds reps and no tonnage. **The factor is not optional and this line omitted it until #383** — `weight_kg` is what is stamped on the implement, so a pair of dumbbells counts twice and a formula without the factor under-reports every dumbbell session by half.
 
 **Auth & security**
 - **A session is never shared, so someone else's is indistinguishable from a nonexistent one** — `GET`, `PUT .../sets`, `POST .../finish` and `DELETE` all return `404 not_found`, never `403` (`TestSession_OtherUsersSession_IsIndistinguishableFromMissing`). IDs are client-generated and therefore guessable; a 403-vs-404 split would confirm one exists. Same property regression-tested on workouts.
@@ -1080,9 +1080,17 @@ most prominent thing.
 - Warm-ups, sets never marked done, and other athletes' sets are all excluded.
 - An exercise with no qualifying history is absent from the map, not zero.
 
+**Two readings of one column (#383)**
+- **A 1RM does NOT apply `load_factor`; tonnage does.** Both are correct and both come off `weight_kg`. The check that distinguishes them is one dumbbell set: a PAIR of 30 kg dumbbells for 5 reps at 2 RIR must report `estimated_1rm_kg` **36** (`30 × 36/(37−7)`) and a tonnage of **300** (`5 × 30 × 2`) — never 72, never 150.
+- **Predict both from the published contract before looking at the response.** That is the acceptance test: if `contracts/public.openapi.yaml` alone does not let a client arrive at 36 and 300, the documentation is still wrong. Pinned server-side by `TestLoadHistory_DocumentedRulesPredictBothNumbers`.
+- **The fixture must use an exercise whose `implements` is 2.** At factor 1 the two readings are the same number and the check passes under either while measuring nothing.
+- Every OTHER load is per implement too — `top_weight_kg`, the `heaviest_weight` record and its evidence, `best_1rm_weight_kg`, `target_weight_kg`, `last_weight_kg`. A dumbbell-bench PR reads 30 kg, not 60.
+- **A suggestion's `target_weight_kg` must prefill the weight input unchanged.** Both are per implement, so a client that converts either way puts the wrong number in front of the athlete.
+
 **Display**
 - Estimates render at whole-unit precision (`144kg`, not `143.88kg`) — they're modelled, not measured.
 - Exercises with no weight (BJJ, timed work) show no estimate rather than a dash-filled row.
+- **A screen showing a 1RM and a tonnage together must not read as a contradiction.** Mobile's session screen shows Volume (doubled), the progression hint's Est. 1RM (not doubled) and set rows reading `30kg (60kg total)` on one scroll. Web's session detail shows the same pair but its set rows print the bare `weight_kg` — the "(60kg total)" annotation is mobile-only, which is a gap rather than a decision.
 
 ## Search escaping, set ownership, and theme hydration
 

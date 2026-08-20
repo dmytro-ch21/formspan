@@ -32615,6 +32615,121 @@ second copy is how two copies drift.
   tree behind it. Not built; worth it only if this recurs.
 - **The un-claim path is manual.** A session that dies mid-task leaves a claim
   standing, and nobody notices until somebody wonders why a ticket has not moved.
+## 2026-08-20 — Two readings of `weight_kg`, and which one the contract now names (L4, #383)
+
+`1RM` and `tonnage` read `session_sets.weight_kg` differently. That was known and
+deliberate. What was not settled is the question this ticket forced first:
+**which reading is the one actually stored** — because if the answer had been
+"both, depending on who logged it", the fix would have been a migration and not
+a paragraph.
+
+### The reading is PER IMPLEMENT, and the evidence is in the rows
+
+Not from the code's intent, which cannot settle it — both readings look
+deliberate from inside their own function, and the tonnage rule and the 1RM
+formula each carry a confident comment explaining why they are right.
+
+The staging database (Railway `staging`, real athlete data, 441 weighted sets
+across 21 sessions) answers it:
+
+| population | sets | median | max |
+|---|---|---|---|
+| `load_mode = per_side`, `implements = 2` (a PAIR) | 50 | 22.7 kg | 54.4 kg |
+| `load_mode = per_side`, `implements = 1` (one implement) | 1 | 20.0 kg | 20.0 kg |
+| `load_mode = total` (barbell, machine) | 390 | 54.4 kg | 285.8 kg |
+
+A pair logged as a TOTAL would sit at roughly twice the one-implement per-side
+rows. It sits in the same place. And the distribution is **unimodal** — bucketed
+in 5 kg steps it peaks at 20–25 kg and tails off smoothly, with no second
+cluster at double.
+
+**The sharpest cut is chronological.** The "per hand" input hint shipped
+2026-08-16 (#241, W3); the staging data starts 2026-08-01. So there are 28 sets
+logged by an athlete who was never told which number to type, and 22 logged by
+one who was:
+
+| era | sets | median |
+|---|---|---|
+| before the hint (< 2026-08-16) | 28 | **22.7 kg** |
+| after the hint | 22 | **22.7 kg** |
+
+Identical. Athletes were already entering what was stamped on the dumbbell
+before anything asked them to. **Live data carries ONE convention, and it is the
+per-implement one** — so this is a documentation defect and not a data one, and
+no migration is owed.
+
+Two honest limits on that: n=50 across 3 athletes, and nobody independently
+recorded which dumbbells were picked up, so this is convergent evidence rather
+than a labelled ground truth. It is corroborated by the thing that decides what
+gets stored in the first place — **every capture surface asks per hand**
+(mobile `session/[id].tsx` and `workout/[id].tsx`, web's session and workout
+editors), so the unit the athlete is asked for is the unit the column holds.
+
+### Both numbers were already right. The contract was wrong.
+
+Every read path was checked, and they agree: `top_weight_kg`, the
+`heaviest_weight` record, both 1RM estimates and their evidence, and the
+suggestion and template targets all read `ss.weight_kg` unmultiplied.
+`SQLTonnage` alone multiplies, by `COALESCE(e.implements, 1)`. `load_factor` is
+**derived at read time and never stored**, so per-row drift between a set and its
+exercise is not a state the schema can reach.
+
+The defect was that a client could not know any of this. Two descriptions were
+**actively wrong** — `Volume.tonnage_kg` and `HistoryTotals.tonnage_kg` both said
+"Sum of reps × weight over completed, non-warm-up sets", which omits the factor,
+so a client implementing the documented formula computes **half** the tonnage for
+every dumbbell session and cannot tell. And `Set.weight_kg`, the column the whole
+ambiguity lives in, had **no description at all**.
+
+Fixed on every field that carries a load: the canonical rule on `Set.weight_kg`
+with a worked example, the two wrong formulas corrected, and a one-line reading
+stated on `tonnage_kg` (×4 schemas), `estimated_1rm_kg`, `best_1rm_kg`,
+`best_1rm_weight_kg`, `top_weight_kg`, `PersonalRecord.value`/`weight_kg`,
+`target_weight_kg` and `last_weight_kg`. `LoadPoint` gets the sharpest note,
+because it is the one object that carries a 1RM and a tonnage side by side.
+
+### The test is the worked example, executed
+
+`TestLoadHistory_DocumentedRulesPredictBothNumbers` logs a pair of 30 kg
+dumbbells for 5 at 2 RIR and asserts `tonnage_kg == 300` and
+`best_1rm_kg == 36` — **both hand-computed from the spec text**, not recomputed
+with the functions under test. That distinction is the point: the neighbouring
+`TestLoadHistory_AnAssistedSetIsEstimatedFromSoloReps` feeds the published
+evidence back through `EstimateOneRM`, which proves the two reconcile and cannot
+catch a formula wrong the same way twice.
+
+The fixture **distinguishes** the readings, which is what makes either assertion
+worth anything — each wrong reading lands on its own wrong number. Mutation-
+tested three ways, and each produced exactly the number the doc comment
+predicted:
+
+- drop `COALESCE(e.implements, 1)` from `SQLTonnage` → `tonnage_kg = 150`, red;
+- fold the factor into the 1RM → `best_1rm_kg = 72`, red;
+- reclassify the `exDBBench` fixture to `implements = 1` → the guard that reads
+  the factor back from the database fires, red. That guard exists because at
+  factor 1 all four numbers collapse into two and the test would pass under
+  either reading while measuring nothing — the silent disarm `requireUnsorted`
+  guards against elsewhere in this package.
+
+### Open questions this leaves
+
+- **The clients were audited but not changed**, and two gaps are worth an id.
+  Mobile's `describeSet` renders `"30kg (60kg total)"` on a pair; **web's does
+  not** — same set, two surfaces, one of which never mentions the doubling.
+  And mobile's `Exercise` type does not carry `implements` at all (it survives
+  only inside `payload_json`), so mobile cannot render the `implements`-aware
+  copy web has on its session-group header.
+- **Mobile computes tonnage locally** (`lib/sessions.ts` `totalWeightKg`) from
+  the set's `load_factor`, which matches the server — except after an offline
+  exercise swap, where `load_factor` is deliberately reset to `undefined` until
+  the server re-answers. A pair-of-dumbbells set created by an offline swap
+  therefore reports **half** its eventual tonnage until it syncs. Correct by
+  construction rather than wrong, but it is a number that changes under the
+  athlete with nothing saying why.
+- **Verified at the repository layer, not over HTTP.** The test drives the same
+  code the handler serves, but nobody has logged a real dumbbell set on a device
+  and read the two numbers off one screen. That is the issue's own "Steps to
+  test" and it remains unrun.
 
 ## Open items / known gaps as of this entry
 

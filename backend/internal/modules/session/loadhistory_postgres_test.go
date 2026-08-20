@@ -603,3 +603,109 @@ func TestLoadHistory_EffortTravelsWithTheEstimate(t *testing.T) {
 			again, p.BestOneRMKg)
 	}
 }
+
+// TestLoadHistory_DocumentedRulesPredictBothNumbers is the contract's worked
+// example, executed.
+//
+// `weight_kg` is what is stamped on the implement, and TWO published numbers
+// read it differently, on purpose:
+//
+//   - a 1RM estimate is a claim about a lift, and a lifter quotes the dumbbell
+//     rather than the pair — so it reads `weight_kg` as logged, unmultiplied;
+//   - tonnage is total work moved, so it multiplies by `load_factor`.
+//
+// Whichever of the two an athlete distrusted, nothing on the wire told them
+// which reading applied — issue #383. The contract states it now, on every
+// field that carries a load, and this is the check that the words and the
+// server agree.
+//
+// EVERY EXPECTATION BELOW IS HAND-COMPUTED FROM THE DOCUMENTED RULES, not from
+// the functions under test. `TestLoadHistory_AnAssistedSetIsEstimatedFromSoloReps`
+// above deliberately does the opposite — it feeds the published evidence back
+// through `EstimateOneRM` to prove they reconcile — and that shape cannot catch
+// a formula that is wrong in the same way twice. These numbers were worked out
+// from the spec text and only then compared against the server:
+//
+//	set:      a PAIR of 30 kg dumbbells, 5 reps, 2 in reserve
+//	tonnage = reps x weight_kg x load_factor = 5 x 30 x 2      = 300 kg
+//	1RM     = Brzycki on the per-implement weight, effort folded in,
+//	          effective reps = 5 reps + 2 RIR = 7,
+//	          30 x 36/(37-7) = 30 x 1.2                        =  36 kg
+//
+// Both are exact in binary — 36/30 is 1.2 and 30 x 1.2 is 36 — so these are
+// equality assertions rather than tolerances, and a drift of any size fails.
+//
+// The fixture DISTINGUISHES the two readings, which is the property that makes
+// asserting either one worth anything: each wrong reading lands on its own
+// wrong number. A 1RM taken off the pair is 72, not 36. A tonnage that ignored
+// the pair is 150, not 300. At load factor 1 all four collapse into two, the
+// test passes under either reading, and it measures nothing — which is why the
+// factor is read back from the database below rather than assumed.
+func TestLoadHistory_DocumentedRulesPredictBothNumbers(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_lh_l4"
+
+	f := histAt("ses-lh-l4", user, "strength", time.Date(2024, 8, 3, 12, 0, 0, 0, time.UTC), time.Hour, []Set{
+		{ExerciseID: exDBBench, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(30),
+			RIR: ptrInt(2), Completed: true},
+	})
+	cleanup(t, pool, f.ID)
+	if _, err := repo.Create(ctx, f); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Read the factor back rather than trusting the fixture's own declaration.
+	// `exDBBench` is a PAIR today; if it is ever reclassified to one implement,
+	// the two readings coincide and every assertion below passes under both —
+	// the silent disarm `requireUnsorted` exists to prevent elsewhere in this
+	// package. Fail loudly instead of going quietly trivial.
+	stored, err := repo.Get(ctx, user, f.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(stored.Sets) != 1 {
+		t.Fatalf("want 1 set back, got %d", len(stored.Sets))
+	}
+	if stored.Sets[0].LoadFactor != 2 {
+		t.Fatalf("load factor = %d, want 2 — at factor 1 the per-implement and "+
+			"total readings are the same number and this test cannot fail. "+
+			"Point it at an exercise whose `implements` is 2.",
+			stored.Sets[0].LoadFactor)
+	}
+
+	got, err := repo.LoadHistory(ctx, user, exDBBench, LoadHistoryFilter{})
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(got.Points) != 1 {
+		t.Fatalf("want 1 point, got %d", len(got.Points))
+	}
+	pt := got.Points[0]
+
+	// Tonnage is total work moved, so the pair counts twice.
+	if pt.TonnageKg != 300 {
+		t.Errorf("tonnage_kg = %v, want 300 (5 x 30 x 2). 150 would mean the "+
+			"documented `load_factor` was not applied", pt.TonnageKg)
+	}
+	// The 1RM is the lift as a lifter would quote it, so the pair counts once.
+	if pt.BestOneRMKg == nil {
+		t.Fatalf("best_1rm_kg is null, want 36 — 5 reps at 2 RIR is 7 effective, " +
+			"well inside the 12-rep ceiling")
+	}
+	if *pt.BestOneRMKg != 36 {
+		t.Errorf("best_1rm_kg = %v, want 36 (30 x 36/(37-7)). 72 would mean the "+
+			"estimate had folded in `load_factor`, which the contract says it "+
+			"does not", *pt.BestOneRMKg)
+	}
+	// The evidence beside the estimate is in the same per-implement unit, or a
+	// client recomputing the documented formula from it arrives at 72.
+	if pt.BestOneRMWeightKg == nil || *pt.BestOneRMWeightKg != 30 {
+		t.Errorf("best_1rm_weight_kg = %v, want 30 — the evidence must be the "+
+			"weight the estimate was taken from", pt.BestOneRMWeightKg)
+	}
+	if pt.TopWeightKg == nil || *pt.TopWeightKg != 30 {
+		t.Errorf("top_weight_kg = %v, want 30 — a top set is reported as logged",
+			pt.TopWeightKg)
+	}
+}
