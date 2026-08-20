@@ -174,8 +174,20 @@ export function UnitsProvider({ children }: { children: React.ReactNode }) {
         // Same three-way reconciliation for the food unit, and the same reason
         // for it: a choice made offline must not be reverted by the first
         // successful profile read.
-        if (foodOwed && localFood && localFood !== p.food_unit) {
-          await updateFoodUnit(getToken, localFood);
+        if (foodOwed && localFood) {
+          // Pushed only when the server actually disagrees, but the debt is
+          // cleared EITHER WAY — and that difference is load-bearing. Clearing
+          // only after a push leaves a permanent debt in the state you reach
+          // when the app dies between a successful PATCH and clearPrefOwed, or
+          // when clearPrefOwed's own catch swallows a failure: the values then
+          // already match, no push is needed, and the flag is never cleared.
+          // The `else if (!foodOwed)` adoption branch below would be dead on
+          // that device forever, so a change made on another device could never
+          // be adopted here. Raised in review; mirrors the unit_system shape
+          // directly above.
+          if (localFood !== p.food_unit) {
+            await updateFoodUnit(getToken, localFood);
+          }
           await clearPrefOwed(userId, PREF_FOOD_UNIT, localFood);
         } else if (!foodOwed) {
           // A null from the server is meaningful — nobody has chosen — so it is

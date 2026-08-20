@@ -368,6 +368,10 @@ export default function AddFoodScreen() {
     async (food: CatalogFood, grams: number) => {
       if (!userId) return;
       setPickBusy(true);
+      // try/finally, so a throw cannot strand the Log button disabled with
+      // nothing said. `logFood` is a local SQLite write and rarely fails, which
+      // is exactly why the failure path would never be exercised by hand.
+      // Raised in review.
       // GRAMS are what the athlete chose; `servings` is how this food's own
       // reference serving divides into them, and the macros are scaled to
       // match. Nothing here points at a portion row — correcting a catalog
@@ -381,8 +385,12 @@ export default function AddFoodScreen() {
         ...macrosForGrams(food, grams),
         source_food_id: null,
       });
-      request('catalog food logged');
-      router.back();
+      try {
+        request('catalog food logged');
+        router.back();
+      } finally {
+        setPickBusy(false);
+      }
     },
     [userId, date, meal, router],
   );

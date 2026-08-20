@@ -1,4 +1,4 @@
--- Reverses 000068.
+-- Reverses 000071.
 --
 -- **The name constraint is restored FIRST and rows are truncated to fit**,
 -- because 72 imported rows are longer than the 120-character limit this puts
