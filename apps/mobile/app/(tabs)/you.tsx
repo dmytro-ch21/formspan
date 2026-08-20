@@ -309,7 +309,7 @@ export default function YouScreen() {
 
             <Text style={styles.sectionLabel}>Profile</Text>
             <View style={styles.card}>
-              <Row
+              <NavValueRow
                 label="Sports"
                 value={
                   enabledLabels === null
@@ -318,6 +318,8 @@ export default function YouScreen() {
                       ? enabledLabels.join(' · ')
                       : 'None chosen yet'
                 }
+                onPress={() => router.push('/profile/edit')}
+                testID="you-sports"
               />
               <Row
                 label="Units"
@@ -367,6 +369,57 @@ function Row({ label, value }: { label: string; value: string }) {
       <Text style={styles.rowLabel}>{label}</Text>
       <Text style={styles.rowValue}>{value}</Text>
     </View>
+  );
+}
+
+/**
+ * A Row that is also a destination.
+ *
+ * Exists for exactly one row — Sports — and the reason is N61. Every
+ * module-gated surface in this app disappears silently when its discipline is
+ * off: the belt roadmaps, the Plan tab's curricula strip, BJJ in the session
+ * picker, and the Food and Goals TABS. The destination screens explain
+ * themselves properly ("BJJ tracking is off, turn it back on under Sports")
+ * — but nothing links to them while they are off, so the athlete never reaches
+ * the screen that would say so. The user went looking for the belt roadmaps on
+ * a real phone and reported them missing; they exist and work.
+ *
+ * This row already showed the answer — "Strength · Nutrition" — and was inert,
+ * so it named the cause of every one of those absences while offering no way
+ * to act on it. Making it navigate is the cheapest thing that turns "the app
+ * does not have this" into "this is turned off", because it is the one place
+ * that already tells you which disciplines are on.
+ *
+ * Deliberately NOT a `NavRow`: those are section destinations with a detail
+ * line, and this belongs in the Profile card beside Units and Born. It keeps
+ * the row's shape and gains a hit target.
+ */
+function NavValueRow({
+  label,
+  value,
+  onPress,
+  testID,
+}: {
+  label: string;
+  value: string;
+  onPress: () => void;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={styles.row}
+      accessibilityRole="button"
+      // The value spoken as a HINT rather than folded into the label, matching
+      // NavRow: an accessibilityLabel REPLACES child text, so without this the
+      // enabled disciplines would simply never be spoken.
+      accessibilityLabel={label}
+      accessibilityHint={value}
+      testID={testID}
+    >
+      <Text style={styles.rowLabel}>{label}</Text>
+      <Text style={styles.rowValue}>{value}</Text>
+    </Pressable>
   );
 }
 

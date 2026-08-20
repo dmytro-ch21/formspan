@@ -1,4 +1,4 @@
-import { Link, useFocusEffect } from 'expo-router';
+import { Link, useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { cachedWorkouts, cacheWorkouts, createLocalWorkout } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
@@ -23,7 +23,7 @@ import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { CurriculaStrip } from '@/components/CurriculaStrip';
 import { WeekPlanner } from '@/components/WeekPlanner';
-import { enabledSports, labelFor, moduleFor } from '@/lib/modules';
+import { enabledSports, labelFor, moduleFor, moduleOffWithCatalog } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
@@ -82,7 +82,12 @@ export default function WorkoutsScreen() {
   const accent = useAccent();
   // For the sport label on each card — the registry carries the acronym, so
   // this renders "BJJ" rather than the "Bjj" that capitalising a key gives.
+  const router = useRouter();
   const { modules } = useModules();
+  // A technique discipline this server HAS, which this athlete has turned off.
+  // Distinct from "no such discipline exists" — see the Roadmaps strip below,
+  // and N61 for why the difference is the whole bug.
+  const offTechniqueSport = moduleOffWithCatalog(modules, 'techniques');
   const getToken = useAuthToken();
   const { userId } = useAuth();
 
@@ -381,7 +386,34 @@ export default function WorkoutsScreen() {
                     the check this codebase avoids everywhere else. */}
                 {modules.some(
                   (m) => m.enabled && m.capabilities.catalog === 'techniques',
-                ) && <CurriculaStrip />}
+                ) ? (
+                  <CurriculaStrip />
+                ) : (
+                  /* N61: this rendered NOTHING when the discipline was off, and
+                     the user reported "roadmaps curricula are not there" from a
+                     real phone. They exist and work.
+
+                     Only when the discipline EXISTS and is off — a server with
+                     no technique catalog at all shows nothing, because
+                     promising a feature that is not there is the same lie in
+                     the other direction. */
+                  offTechniqueSport !== undefined && (
+                    <Pressable
+                      onPress={() => router.push('/profile/edit')}
+                      style={styles.curriculaOff}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${offTechniqueSport.label} is turned off. Turn it on to see the roadmaps`}
+                      testID="plan-curricula-off"
+                    >
+                      <Text style={styles.curriculaOffTitle}>
+                        {offTechniqueSport.label} is turned off
+                      </Text>
+                      <Text style={styles.curriculaOffNote}>
+                        Turn it on to see your belt roadmaps here.
+                      </Text>
+                    </Pressable>
+                  )
+                )}
                 <SectionHeader label="Templates" />
               </View>
             ) : null
@@ -777,6 +809,21 @@ export function Chip({
 }
 
 const styles = StyleSheet.create({
+  // The Roadmaps strip's off-state. Shaped like a card rather than a bare
+  // line so it reads as the thing that would be there, not as an error.
+  curriculaOff: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+  },
+  curriculaOffTitle: { fontSize: 14, fontWeight: '600', color: vola.text },
+  // textMuted, not textDim: at 12pt this is small text and textDim measures
+  // 3.96:1 on the card, below AA.
+  curriculaOffNote: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
   container: { flex: 1 },
   // A tab strip: a hairline under the whole row, and a 2pt accent bar under
   // whichever segment is selected. No fill on either.

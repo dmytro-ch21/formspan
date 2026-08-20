@@ -340,3 +340,25 @@ it('does not let a blurred count land on top of a newer one', async () => {
   expect(screen.getByLabelText('Social, 1 waiting')).toBeTruthy();
   expect(screen.queryByLabelText('Social, 9 waiting')).toBeNull();
 });
+
+/**
+ * N61 — the Sports row was the answer to every silent absence, and was inert.
+ *
+ * Every module gate in this app renders NOTHING when its discipline is off:
+ * the belt roadmaps, the Plan tab's Roadmaps strip, BJJ in the session picker,
+ * and the Food and Goals TABS. This row already displayed which disciplines
+ * were on — so it named the cause of all of them — while offering no way to
+ * act on it. The user reported the roadmaps as missing from a real phone; they
+ * exist and work.
+ */
+describe('the Sports row', () => {
+  it('leads to the toggles rather than only naming them', async () => {
+    render(<YouScreen />);
+    const row = await screen.findByTestId('you-sports');
+    fireEvent.press(row);
+    // The destination screens explain themselves ("BJJ tracking is off, turn
+    // it back on under Sports"). Nothing linked to them while they were off,
+    // which is why the athlete never reached the screen that would say so.
+    expect(mockPush).toHaveBeenCalledWith('/profile/edit');
+  });
+});

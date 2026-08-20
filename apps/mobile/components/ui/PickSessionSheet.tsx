@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
@@ -5,7 +6,7 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { enabledSports } from '@/lib/modules';
+import { enabledSports, offSports } from '@/lib/modules';
 import type { Module } from '@/lib/modules';
 import { cachedWorkouts } from '@/lib/sessionStore';
 import type { Workout } from '@/lib/workouts';
@@ -51,7 +52,22 @@ export function PickSessionSheet({
   onClose: () => void;
 }) {
   const accent = useAccent();
+  const router = useRouter();
   const sports = enabledSports(modules);
+  /**
+   * Disciplines this athlete could log and has turned off.
+   *
+   * N61: with BJJ off it was simply absent from this list, and the user
+   * reported "bjj logging is not there" from a real phone. This sheet is the
+   * ONLY ad-hoc route to it — `/bjj/log` is linked from exactly one other
+   * place, a planned session on Today — so an absent row here is the whole
+   * feature gone, with nothing saying why.
+   *
+   * `is_sport` filtered, matching `enabledSports`: nutrition is a module you
+   * can turn off and "log a nutrition session" is nonsense, so offering to
+   * turn it on from here would be too.
+   */
+  const offSportList = offSports(modules);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
 
   // Re-read on each open rather than once on mount: a template created on the
@@ -151,6 +167,33 @@ export function PickSessionSheet({
               </RNView>
             );
           })}
+          {/* What is missing, and why — the other half of N61.
+              Only when something IS on: with nothing on, the message above
+              already says it, and two prompts saying the same thing is worse
+              than one. Listed rather than counted, because "1 discipline is
+              off" does not tell you it is the one you were looking for. */}
+          {offSportList.length > 0 && sports.length > 0 && (
+            <Pressable
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              onPress={() => {
+                // Closed BEFORE navigating: a push under a presented modal
+                // lands on a screen the athlete cannot see.
+                onClose();
+                router.push('/profile/edit');
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`${offSportList.map((m) => m.label).join(' and ')} turned off. Turn on to log`}
+              testID="pick-disabled-sports"
+            >
+              <RNView style={styles.rowMain}>
+                <Text style={styles.rowTitle}>
+                  {offSportList.map((m) => m.label).join(' · ')} turned off
+                </Text>
+                <Text style={styles.rowMeta}>Turn on to log these here</Text>
+              </RNView>
+              <Icon name="chevron" size={14} color={vola.textDim} />
+            </Pressable>
+          )}
         </ScrollView>
       </View>
     </Modal>

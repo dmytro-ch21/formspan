@@ -46,7 +46,7 @@ import { fetchPositions, type Position } from '@/lib/positions';
 import { listCurricula, type Curriculum } from '@/lib/curriculum';
 import { beltLabel, beltSyllabuses } from '@/lib/syllabuses';
 import { useModules } from '@/lib/ModulesProvider';
-import { enabledSports, moduleFor, type Module, usesBelt } from '@/lib/modules';
+import { enabledSports, moduleFor, moduleOffWithCatalog, type Module, usesBelt } from '@/lib/modules';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -236,6 +236,23 @@ export default function LibraryScreen() {
    * every Library visit regardless of whether the user does BJJ.
    */
   const techniqueSport = modules.find((m) => m.enabled && m.capabilities.catalog === 'techniques');
+  /**
+   * A technique discipline this server HAS, which this athlete has turned off.
+   *
+   * The distinction from `techniqueSport` is the whole point of N61. With BJJ
+   * off, `techniqueSport` is undefined and every technique surface on this
+   * screen — the round map, the belt roadmaps, the position glossary —
+   * rendered NOTHING. An athlete cannot tell that from *not built* or from
+   * *broken*, and the user proved it: they went looking for the belt roadmaps
+   * on a real phone and reported them missing. They exist and work.
+   *
+   * Deliberately NOT `modules.some(m => !m.enabled)` and not a `key === 'bjj'`
+   * comparison. It asks whether this SERVER offers a technique catalog at all,
+   * so a build talking to a deployment that genuinely has no such discipline
+   * still shows nothing — promising a feature that does not exist would be the
+   * same lie pointing the other way.
+   */
+  const techniqueSportOff = moduleOffWithCatalog(modules, 'techniques');
   const { userId } = useAuth();
   const router = useRouter();
 
@@ -856,6 +873,34 @@ export default function LibraryScreen() {
             is not for them, when a purple belt looking up Leg Entanglement is exactly
             who it serves. It also greets a returning athlete as a beginner
             every time they open the tab. An instruction addresses everyone. */}
+        {/* What the block below says when the discipline that owns it is off.
+            NOT an empty state for "no positions loaded" — that is a different
+            failure with a different cause, and conflating them is how "we
+            could not reach the server" starts reading as "you do not train
+            this". This branch fires only when the module is off, which is a
+            fact the app is certain of. */}
+        {techniqueSportOff !== undefined && sport === '' && (
+          <View style={styles.glossary} testID="library-techniques-off">
+            <Text style={styles.glossaryLabel} accessibilityRole="header">
+              {techniqueSportOff.label} is turned off
+            </Text>
+            <Pressable
+              onPress={() => router.push('/profile/edit')}
+              accessibilityRole="button"
+              accessibilityLabel={`Turn ${techniqueSportOff.label} on to see the belt roadmaps, the position map and the technique library`}
+              style={styles.mapLink}
+              testID="library-techniques-off-link"
+            >
+              <Text style={styles.mapLinkTitle}>
+                Turn it on to see the belt roadmaps
+              </Text>
+              <Text style={styles.mapLinkNote}>
+                The position map and {techniqueSportOff.label} techniques come back too.
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         {usesPosition(sport, modules) && positions.length > 0 && (
           <View style={styles.glossary}>
             <Text style={styles.glossaryLabel} accessibilityRole="header">

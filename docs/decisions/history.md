@@ -32981,6 +32981,111 @@ And one that is a rule rather than a design: `system-design.md` already says
 are nutrition, which is daily. The mobile-first rule did not introduce that
 constraint; it made somebody go and check it.
 
+## 2026-08-20 — A surface that hides itself is indistinguishable from one that was never built
+
+The user reported, from a real phone, that *"bjj logging is not there and
+roadmaps curricula are not there"*. Both exist and work. They were gated on an
+enabled-module check that renders nothing and explains nothing, so from the
+athlete's side the app simply did not have them.
+
+That is worse than a missing feature, because it cannot be reported accurately.
+The report we got was "not built"; the truth was "turned off". Nothing on the
+screen could have told them apart, and the same absence would also be produced
+by a broken fetch or a failed deploy.
+
+### The audit, and why the obvious method would have missed the worst instance
+
+Every gate in the app is `enabled && capabilities.X`, so the tempting audit is
+`grep -rn '\.enabled'`. That returns 11 files and **misses the tab bar**, where
+two of five tabs disappear — because `_layout.tsx` asks through the
+`hasFoodLog` helper and never writes `.enabled` at all.
+
+So the audit was done the other way round: read `lib/modules.ts`, enumerate its
+consumers by import, and only then cross-check with grep. Three methods,
+deliberately disagreeing:
+
+| method | finds | misses |
+|---|---|---|
+| import-following | 19 files | — |
+| `grep .enabled` | 11 files | the tab bar, the session picker, suggestions |
+| `modules:` prop | 6 files | everything using the hook |
+
+**A grep returning zero is not evidence of absence**, and here a grep returning
+*eleven* was not evidence of eleven.
+
+### What it found
+
+**Four destinations already explain themselves**, and they are good — `bjj/index`,
+`bjj/log`, `bjj/positions` and `PromotionForm` all render *"BJJ tracking is off.
+Turn it back on under Sports in your profile."*
+
+**So the destinations were never the problem. The entry points were.** Nothing
+linked to those screens while the module was off, so the athlete never reached
+the page that would have explained itself:
+
+- the belt roadmaps and the whole "Start with positions" block in Library
+- the Roadmaps strip on Plan
+- BJJ in the session picker — **the only ad-hoc route to `/bjj/log`**, which is
+  linked from exactly one other place in the app, a planned BJJ session on
+  Today. Discipline off and nothing planned, and the feature has no entry point
+  at all. That is "bjj logging is not there", precisely.
+- the belt header and Position map rows in You
+- the **Food and Goals tabs**, when nutrition is off — the same failure in a
+  different module, and the largest one
+
+One case was already handled well and became the model: with *every* discipline
+off, Today shows "Choose what you train". The gap was the **partial** case,
+which is the common one.
+
+### Three states, not two
+
+The fix is one predicate: `moduleOffWithCatalog(modules, catalog)`, plus
+`offSports`. A surface is **on**, **off-but-available**, or **genuinely absent
+from this deployment** — and only the middle one may offer to turn something on.
+
+That third state is why this is a function rather than a `!` on the existing
+gate. A build talking to a server with no technique catalog must still show
+nothing: promising a feature that does not exist is the same lie as hiding one
+that does, pointing the other way.
+
+A helper rather than three hand-written copies, for the reason `hasFoodLog`
+already gives in that file — two copies of a two-part condition is how one ends
+up checking only half. Three copies had been written by hand before it existed.
+
+### What changed
+
+- **The Sports row in You now navigates.** It already displayed the answer —
+  "Strength · Nutrition" — and was inert, naming the cause of every silent
+  absence while offering no way to act on it. This is the escape hatch that
+  makes every gated surface explicable, including the tabs.
+- **Library** says which discipline is off where the roadmaps would be, and
+  offers to turn it on. Distinct from "no positions loaded", which is a
+  different failure with a different cause; conflating them is how "we could
+  not reach the server" starts reading as "you do not train this".
+- **Plan's Roadmaps strip** does the same.
+- **The session picker** names the disabled disciplines rather than omitting
+  them, and leads to the toggles. Listed rather than counted: "1 discipline is
+  off" does not tell you it is the one you were looking for.
+
+Deliberately unchanged: `TrainingCalendar`, `WeekPlanner` and `WeekReview` use
+modules only for LABELS, and `settings/suggestions` lists progression settings
+for enabled sports, which is defensible — a discipline with no progression has
+nothing to configure.
+
+### Known gaps
+
+- **The Food and Goals tabs still vanish silently** when nutrition is off. It is
+  the same defect and the largest instance, and it is left because the tab bar
+  landed hours ago in N70 and a second opinion on its shape belongs with that
+  work rather than smuggled in here. The Sports row now at least makes it
+  *findable*; it does not make it self-explaining.
+- **Today still does not hint** that a disabled sport exists. The all-off case
+  is handled; the partial case relies on the picker, one tap away.
+- **Five sites compare `m.key === 'bjj'`** — the pattern this codebase bans in
+  favour of a capability predicate, and the ban is right: a discipline gaining
+  or losing a surface should be one row on the server. Left alone because
+  changing them is a refactor with no user-visible effect, and this change is
+  already wide.
 
 ## Open items / known gaps as of this entry
 

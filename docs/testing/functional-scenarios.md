@@ -9965,3 +9965,44 @@ to answer it. Both are now on the phone.
   test it had. The five fields here sit inside the screen's existing
   `KeyboardAwareScrollView`; that it lifts them clear of the number pad is a
   device claim, not a suite claim.
+## Module gating — "turned off" vs "not built" (N61)
+
+Every module-gated surface used to render nothing when its discipline was off.
+The scenarios that matter are the ones distinguishing three states, not two.
+
+### Happy path
+
+- With BJJ enabled, the belt roadmaps, the Roadmaps strip on Plan and BJJ in
+  the session picker all appear, and no "turned off" prompt is shown anywhere.
+- The Sports row in You navigates to the toggles.
+
+### Edge cases & errors
+
+- **Turn BJJ off**: Library says which discipline is off where the roadmaps
+  would be; Plan's strip does the same; the session picker lists BJJ as turned
+  off and leads to the toggles. **Assert the discipline is NAMED** — "1
+  discipline is off" does not tell an athlete it is the one they wanted.
+- **Turn every discipline off**: Today's existing "Choose what you train"
+  shows, and the picker's existing empty state shows — assert the new prompt
+  does NOT also appear. Two prompts saying the same thing is worse than one.
+- **A server with no technique discipline at all**: nothing is offered. This is
+  the third state, and the one a plain `!enabled` check gets wrong — promising
+  a feature the deployment does not have is the same lie as hiding one it does.
+- **Nutrition off**: the picker must NOT offer to turn it on. "Log a nutrition
+  session" is nonsense, so `is_sport` filtering is load-bearing.
+- Reaching `/bjj/log` or `/bjj/positions` directly with BJJ off still shows the
+  screen's own explanation — that behaviour predates this and must not regress.
+
+### Regression trap
+
+- **`grep -rn '\.enabled'` is NOT a complete audit of module gating.** It
+  returns 11 files and misses `app/(tabs)/_layout.tsx`, where two of five tabs
+  disappear, because that file asks through the `hasFoodLog` helper. Enumerate
+  consumers of `lib/modules.ts` by import instead, then cross-check.
+- **`/bjj/log` has exactly two entry points**, one of them a planned session on
+  Today. Anything that removes the picker's route to it makes BJJ logging
+  unreachable for an athlete with nothing planned, and no test on the screen
+  itself would notice.
+- **"Off" and "empty" are different failures.** A prompt that fires on an empty
+  list rather than on a disabled module turns "we could not reach the server"
+  into "you do not train this".
