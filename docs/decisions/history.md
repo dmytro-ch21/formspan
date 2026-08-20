@@ -34218,6 +34218,25 @@ mocked transport. `docs/testing/device-checks.md` gains **D15b**, which is the
 check that matters: accept a shared chain on the phone with the web app genuinely
 closed, find it again from cold a screen later, and capture one in a dead-spot.
 
+**This branch rebased three times and conflicted three times, always on the same
+line of this file.** #440, #448 and #452 landed while it was open; each had
+appended an entry immediately before `## Open items`, and so had this one, so
+the merge base saw two blocks growing into the same seam. The resolution is
+mechanical every time — keep both entries, in landing order, heading and list
+untouched below — and the convention that produces it is right: the alternative,
+appending *after* the heading, strands the gap list under whatever landed last,
+which this file has already been repaired for three times.
+
+Worth knowing rather than fixing: with five or six agents landing on one day,
+`history.md` is a **guaranteed** conflict between any two PRs open at once, and
+`strict: false` on the branch protection does not help because the conflict is
+real rather than a staleness policy. Budget a rebase per PR that lands ahead of
+yours, and check `pnpm run ci:checks` **twice** — GitHub computes `mergeable`
+lazily, so the first call reported `UNKNOWN` and the second reported
+`CONFLICTING` on an otherwise all-green PR, twice on this branch. A green that
+has not been re-checked for staleness is the same class of false green as the
+suite run against the wrong tree above.
+
 **The one number this entry should not be trusted on is the lint ratchet.** It
 was measured at 54 against `origin/main`, reported as such, and was **53** by
 the time the branch rebased — another PR lowered it in between. The branch holds
