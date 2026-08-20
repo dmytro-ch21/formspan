@@ -4940,9 +4940,13 @@ a changing room; reading it back happens there too.
   library. On a **cold launch with no signal** the library is memory-only, so the
   names cannot be resolved: the step must say **"Name unavailable offline"** and
   must **not** render the raw technique id as if it were a name.
-- Opening a chain that lives only on the server while offline says so — *"you're
-  offline, so it can't be opened right now… nothing has been lost"* — and never
-  reads as deleted.
+- Opening a chain that lives only on the server when the request gets no answer
+  says **"Can't reach VOLA… nothing has been lost"**, and never reads as deleted.
+- **It must not say "offline" or "signal."** Since N55 (#365) `getSequence`
+  returns `null` for a **timeout** and a **dropped connection** as well as for
+  no route, so this card is what an athlete on four bars sees when a request
+  times out. Run it that way — throttle rather than airplane-mode — and check
+  the copy does not send them looking for signal they already have.
 - A **500** while listing shows the error AND still lists what this device is
   holding. It must never render as "no chains yet". Being offline shows your
   captures; an outage hiding them would be the wrong way round.

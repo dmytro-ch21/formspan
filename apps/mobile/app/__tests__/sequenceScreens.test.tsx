@@ -291,19 +291,39 @@ describe('the detail', () => {
     expect(await screen.findByTestId('sequence-screen')).toBeTruthy();
   });
 
-  it('distinguishes offline from a chain that is gone', async () => {
-    // `getSequence` resolves to `null` offline for a chain this device has
-    // never held. Rendering that as a 404 tells the athlete their chain was
-    // deleted, which is a different and much worse claim.
+  it('distinguishes a dead request from a chain that is gone', async () => {
+    // `getSequence` resolves to `null` when the request got no answer, for a
+    // chain this device has never held. Rendering that as a 404 tells the
+    // athlete their chain was deleted — a different and much worse claim.
     mockGet.mockResolvedValue(null);
 
     render(<SequenceScreen />);
 
-    expect(await screen.findByTestId('sequence-offline')).toHaveTextContent(/offline/);
+    expect(await screen.findByTestId('sequence-unreachable')).toBeTruthy();
     expect(screen.queryByTestId('sequence-error')).toBeNull();
   });
 
-  it('keeps a chain already on screen when a refocus lands offline', async () => {
+  it('does not blame the athlete\u2019s signal for a dead request', async () => {
+    // **The N55 (#365) regression this screen could have shipped.** Since that
+    // ticket `getSequence` returns `null` for ANY `isTransportFailure` — no
+    // route, a timeout, or a dropped connection — so an athlete on four bars
+    // whose request timed out lands here. "You're offline" is false for them,
+    // and sending them to look for signal is the exact complaint N55 fixed.
+    //
+    // Asserted as the ABSENCE of a word, against the literal, because the
+    // failure mode is copy drifting back to naming a cause nothing observed.
+    // Note even `OfflineError` says "Can't reach VOLA" rather than "offline".
+    mockGet.mockResolvedValue(null);
+
+    render(<SequenceScreen />);
+
+    const card = await screen.findByTestId('sequence-unreachable');
+    expect(card).toHaveTextContent(/Can't reach VOLA/);
+    expect(card).not.toHaveTextContent(/offline/i);
+    expect(card).not.toHaveTextContent(/signal/i);
+  });
+
+  it('keeps a chain already on screen when a refocus gets no answer', async () => {
     // The common path, not an exotic one: read a chain, background the app,
     // lose signal, come back. This screen reloads on FOCUS, `getSequence`
     // resolves `null` offline for a chain this device does not hold, and
@@ -323,10 +343,10 @@ describe('the detail', () => {
 
     await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId('sequence-step-1')).toHaveTextContent(/Knee cut pass/);
-    expect(screen.queryByTestId('sequence-offline')).toBeNull();
+    expect(screen.queryByTestId('sequence-unreachable')).toBeNull();
   });
 
-  it('surfaces a real failure as an error, not as offline', async () => {
+  it('surfaces a real failure as an error, not as an unreachable server', async () => {
     // The arm that makes the previous test mean anything.
     mockGet.mockRejectedValue(new Error('Request failed (500).'));
 
@@ -335,7 +355,7 @@ describe('the detail', () => {
     const err = await screen.findByTestId('sequence-error');
     expect(err).toHaveTextContent('Request failed (500).');
     expect(err.props.accessibilityLiveRegion).toBe('polite');
-    expect(screen.queryByTestId('sequence-offline')).toBeNull();
+    expect(screen.queryByTestId('sequence-unreachable')).toBeNull();
   });
 
   it('does not fetch the whole library when the server resolved the names', async () => {

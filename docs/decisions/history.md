@@ -34090,7 +34090,30 @@ when wrong:**
   false claim dressed as a fallback, which is the same bug as the one at the top
   of this entry, one layer down.
 
-**Eighteen mutations, eighteen reds**, run against a baseline that was green in
+**A rebase caught the sharpest defect in this branch, which no test of mine
+could have.** N55 (#365, #448) landed while this was in review and changed
+`getSequence` from `isOffline` to `isTransportFailure`: it now returns `null`
+for a timeout and a dropped connection as well as for no route. This screen's
+card said *"you're offline… try again when you have signal"* — which is false
+for the athlete on four bars whose request timed out, and sending that person to
+go and find signal is **the exact complaint N55 exists to fix**. This branch
+would have reintroduced it, in a ticket about the app saying untrue things, one
+day later and one screen over.
+
+Two things follow that are worth more than the fix. **A merge that applies
+cleanly can still be semantically wrong**: `lib/sequences.ts` auto-merged, the
+suite stayed green, and nothing in `verify` can see that a *comment about
+behaviour* two files away has become a lie. Only reading the other branch's diff
+found it. And **the vocabulary was already there to copy**: `OfflineError` is
+itself worded *"Can't reach VOLA"* rather than "you are offline", precisely
+because a reachable phone and a down API are indistinguishable from the client.
+The card now says the same, and the state is `unreachable` rather than
+`offline`, so the next person to read it is not invited back into the claim. Its
+test asserts the **absence** of the words "offline" and "signal" against
+literals, because copy drifting back toward naming an unobservable cause is the
+failure mode.
+
+**Nineteen mutations, nineteen reds**, run against a baseline that was green in
 the same session. Including: inverting the pluralisation in `stepSummary`; making
 `stepName` fall back to the technique id; removing `sequence` from `DESTINATION`
 again; **restoring the old "in the Library" sentence**; rounding a failed list
@@ -34194,6 +34217,13 @@ real data.
 mocked transport. `docs/testing/device-checks.md` gains **D15b**, which is the
 check that matters: accept a shared chain on the phone with the web app genuinely
 closed, find it again from cold a screen later, and capture one in a dead-spot.
+
+**The one number this entry should not be trusted on is the lint ratchet.** It
+was measured at 54 against `origin/main`, reported as such, and was **53** by
+the time the branch rebased — another PR lowered it in between. The branch holds
+at exactly 53/53 with zero errors. A ratchet with no headroom is a number that
+is only true as of a commit, which is worth saying out loud in a repo where
+several branches are in flight at once.
 
 ## Open items / known gaps as of this entry
 

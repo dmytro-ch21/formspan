@@ -47,10 +47,20 @@ export default function SequenceScreen() {
 
   const [sequence, setSequence] = useState<Sequence | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Distinct from `error`: `getSequence` resolves to `null` offline for a chain
-  // this device has never held, which is not a failure and not a 404. Rounding
-  // it to either would tell the athlete their chain is gone.
-  const [offline, setOffline] = useState(false);
+  // Distinct from `error`: `getSequence` resolves to `null` when the request
+  // got no answer at all, for a chain this device has never held. That is not
+  // a failure and not a 404 — rounding it to either would tell the athlete
+  // their chain is gone.
+  //
+  // **It is NOT specifically "offline", and the copy must not say so.** Since
+  // N55 (#365) `getSequence` returns `null` for any `isTransportFailure` — no
+  // route, a timeout, or a dropped connection — and the athlete who timed out
+  // on four bars is exactly the person that ticket exists for. Note even
+  // `OfflineError` itself says "Can't reach VOLA" rather than "you are
+  // offline", because a reachable phone and a down API are indistinguishable
+  // from here. Naming a cause we cannot observe is the same mistake as the one
+  // this whole screen was built to remove, one layer down.
+  const [unreachable, setUnreachable] = useState(false);
   /** technique_id → name, for steps the server has not resolved yet. */
   const [names, setNames] = useState<Record<string, string>>({});
 
@@ -68,13 +78,13 @@ export default function SequenceScreen() {
       // common path is: read a chain online, background the app, lose signal,
       // come back. `getSequence` resolves `null` there, and assigning it would
       // replace steps the athlete is looking at with a full-screen "you're
-      // offline" — honest, and strictly worse than the chain that was already
-      // on the page. Keeping what we hold makes the offline branch below what
+      // couldn't reach" — honest, and strictly worse than the chain that was
+      // already on the page. Keeping what we hold makes the branch below what
       // it says it is: the case where there is nothing to show. Found by
       // review; the equivalent path on the list screen is deliberately
       // different, because there the outbox fallback IS the better answer.
       setSequence((prev) => found ?? prev);
-      setOffline(found === null);
+      setUnreachable(found === null);
       setError(null);
       // Only when something actually needs it. The whole summary list is
       // ~197 KB on a cold cache, and a server-resolved chain needs none of it.
@@ -117,13 +127,13 @@ export default function SequenceScreen() {
     );
   }
 
-  if (offline && !sequence) {
+  if (unreachable && !sequence) {
     return (
       <View style={styles.screen}>
         <Stack.Screen options={{ title: 'Sequence' }} />
-        <Text style={styles.note} testID="sequence-offline">
-          This chain lives on the server and you&apos;re offline, so it can&apos;t be opened right
-          now. Nothing has been lost — try again when you have signal.
+        <Text style={styles.note} testID="sequence-unreachable">
+          Can&apos;t reach VOLA, so this chain can&apos;t be opened right now. It lives on the
+          server rather than on this phone — nothing has been lost. Try again in a moment.
         </Text>
       </View>
     );
@@ -205,7 +215,7 @@ export default function SequenceScreen() {
                   // Never the raw id dressed up as a name. This is the cold-
                   // launch-with-no-signal case for a chain still in the outbox.
                   <Text style={styles.unresolved} testID={`sequence-step-unresolved-${i}`}>
-                    Name unavailable offline
+                    Name unavailable right now
                   </Text>
                 )}
                 {stepMeta(step) !== '' && <Text style={styles.muted}>{stepMeta(step)}</Text>}
