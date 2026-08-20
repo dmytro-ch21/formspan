@@ -312,6 +312,64 @@ export function moduleOffWithFoodLog(modules: Module[]): Module | undefined {
 }
 
 /**
+ * Does this DEPLOYMENT have a food log at all — on, off, doesn't matter?
+ *
+ * The tab bar's question, and it is deliberately not `hasFoodLog`. Every other
+ * gate in this file asks whether a surface should be DRAWN; this one asks
+ * whether a surface should be REACHABLE, and those come apart precisely in the
+ * off-but-available state that N61 is about.
+ *
+ * The Food and Goals tabs used to be hidden on `!hasFoodLog`, which erased 40%
+ * of the primary navigation with nothing left behind to say why — and the two
+ * screens behind them are the ones that would have explained it. A tab is a
+ * LINK, and #370's finding was that the destinations were never the problem:
+ * they already explain themselves, and nothing linked to them. So the link
+ * stays wherever the destination has something to say, and it is the screen
+ * that distinguishes off from absent.
+ *
+ * Which leaves exactly one case where hiding is still right, and it is the
+ * third state: a deployment with no food-log module at all. There is nothing to
+ * turn on, so a tab leading to "turn it on" would promise a feature the server
+ * does not have — the same lie as hiding one it does, pointing the other way.
+ *
+ * Equal by construction to `hasFoodLog(m) || moduleOffWithFoodLog(m) !== undefined`,
+ * and written as the single `some` rather than that disjunction because the
+ * union of the two is just "the capability exists". The equivalence is pinned
+ * in `moduleGating.test.ts` so the three predicates cannot drift apart.
+ */
+export function serverHasFoodLog(modules: Module[]): boolean {
+  return modules.some((m) => m.capabilities.has_food_log);
+}
+
+/**
+ * What a food-log SCREEN needs to know: should it draw its off-state, and which
+ * module should that off-state name?
+ *
+ * One function because `(tabs)/food.tsx` and `(tabs)/goals.tsx` ask exactly
+ * this, and a two-part condition written twice is how one copy ends up checking
+ * only half — the reason `hasFoodLog` itself exists.
+ *
+ * **`ready` is the load-bearing half and it is easy to drop.** The module list
+ * is empty until the cache has been read, and an empty list is an *unanswered
+ * question*, not a "no". Without `ready` both screens assert "Nutrition is
+ * turned off" for the first frames of every cold start — the same flash the tab
+ * bar holds a frame to avoid, relocated one level down, and worse here because
+ * it is a sentence rather than a missing button.
+ *
+ * `off` is computed regardless of `ready` and is simply `undefined` while the
+ * list is empty, which is correct: nothing is drawn from it until `disabled`.
+ */
+export function foodLogGate(
+  modules: Module[],
+  ready: boolean,
+): { disabled: boolean; off: Module | undefined } {
+  return {
+    disabled: ready && !hasFoodLog(modules),
+    off: moduleOffWithFoodLog(modules),
+  };
+}
+
+/**
  * Disciplines that could hold a session and are turned off.
  *
  * The mirror of `enabledSports`, and `is_sport` filtered for the same reason:

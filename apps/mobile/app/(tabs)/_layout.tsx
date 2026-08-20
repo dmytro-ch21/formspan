@@ -5,7 +5,7 @@ import { Icon, type IconName } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { useModules } from '@/lib/ModulesProvider';
-import { hasFoodLog } from '@/lib/modules';
+import { tabHidden } from '@/lib/tabs';
 
 /**
  * The tab bar: an icon, a label, and an underline on the active one.
@@ -36,52 +36,67 @@ import { hasFoodLog } from '@/lib/modules';
  * A hairline is the only separator, and it is the one seam worth keeping:
  * without it the labels read as content when a list scrolls behind them.
  */
+/**
+ * Which tabs are hidden right now — and N61's answer for the tab bar.
+ *
+ * **This used to hide Food and Goals whenever nutrition was OFF**, on
+ * `!hasFoodLog(modules)`. That erased two of five tabs — 40% of the primary
+ * navigation — and left nothing behind saying why, so an athlete with
+ * nutrition switched off did not see a reduced app, they saw a different,
+ * smaller one. A surface that hides itself with no explanation is
+ * indistinguishable from one that was never built, and it cannot even be
+ * reported accurately, because the person reporting has no idea there is
+ * anything to report. That is exactly what the user hit on a device with BJJ:
+ * "bjj logging is not there and roadmaps curricula are not there". It was
+ * there.
+ *
+ * **The answer is #370's, applied to chrome instead of content.** That fix
+ * found the destinations were never the problem — `bjj/log` and friends
+ * already say "BJJ tracking is off, turn it back on under Sports in your
+ * profile" — and that NOTHING LINKED TO THEM while the module was off, so the
+ * athlete never reached the screen that would explain itself. A tab IS the
+ * link. So the link stays, and `food.tsx` and `goals.tsx` now explain
+ * themselves the way the BJJ screens do.
+ *
+ * That is why this is not a placeholder tab, and why #468's dashed-versus-
+ * card rule does not decide anything here: nothing is standing in for
+ * anything. The real tab is present and leads to the real route; the route
+ * says what state it is in.
+ *
+ * **The third state is the one case where hiding is still right.** A
+ * deployment with no food-log module at all has nothing to turn on, so a tab
+ * leading to "turn it on" would promise a feature the server does not have —
+ * the same lie as hiding one it does. That is the whole of what `tabHidden`
+ * asks, and the full reasoning lives on it in `lib/tabs.ts` — a route file
+ * is not importable from a test, and this predicate was inline, untested and
+ * wrong, which are not three unrelated facts.
+ *
+ * The Library used to be gated here too, on whether any enabled discipline
+ * had a catalog. It is a row in You now, and deliberately NOT gated there —
+ * see the comment on that row for why hiding it was the worse of the two
+ * failures.
+ *
+ * `href: null` rather than omitting the <Tabs.Screen>. Omitting one does NOT
+ * hide it — expo-router auto-injects every route file in this folder whether
+ * declared or not, so the tab would come back with a filename-derived title.
+ * `href: null` hides the button and keeps the route resolvable, which matters
+ * for an in-flight router.push and for deep links — and which is why both
+ * screens still need their own off-state even now the tab usually stays.
+ */
 export default function TabLayout() {
   const { modules, ready } = useModules();
   const accent = useAccent();
 
-  /**
-   * Goals is gated with Food, on the same predicate, because today it holds
-   * one thing: the daily intake target. An athlete with no food logging would
-   * get a tab that can only ever be empty — and the Food tab beside it is
-   * already absent for exactly that reason, so gating one and not the other
-   * would be the inconsistency, not the gate.
-   *
-   * Gated on the CAPABILITY, never on a module key. `key === 'nutrition'` is
-   * the pattern this codebase bans: a discipline gaining or losing a surface
-   * should be one row on the server rather than an edit in three apps.
-   *
-   * The Library used to be gated here too, on whether any enabled discipline
-   * had a catalog. It is a row in You now, and deliberately NOT gated there —
-   * see the comment on that row for why hiding it was the worse of the two
-   * failures.
-   *
-   * `href: null` rather than omitting the <Tabs.Screen>. Omitting one does NOT
-   * hide it — expo-router auto-injects every route file in this folder whether
-   * declared or not, so the tab would come back with a filename-derived title.
-   * `href: null` hides the button and keeps the route resolvable, which matters
-   * for an in-flight router.push and for deep links.
-   */
-  const anyFoodLog = hasFoodLog(modules);
-
-  /**
-   * Which tabs are hidden right now.
-   *
-   * A helper rather than a longer ternary, because there are two conditions
-   * now and a third would make the inline form unreadable. Gated on
-   * CAPABILITIES, never on a module key — comparing `key === 'nutrition'` is
-   * the pattern this codebase bans, since a discipline gaining or losing a
-   * surface should be one row on the server rather than an edit in three apps.
-   */
-  const hiddenFor = (name: string): boolean =>
-    (name === 'food' || name === 'goals') && !anyFoodLog;
-
   // Hold the frame until the cached module set has been read. This is the
   // whole reason the cache exists: without it the first frames compute
-  // `anyFoodLog` from an empty list, so Food and Goals are ABSENT and then pop
-  // in — the tab bar visibly rearranging on every cold start, which is exactly
-  // what the provider's docstring says it prevents. `RootLayoutNav` already
-  // holds a frame this way for Clerk.
+  // `tabHidden` from an empty list, so Food and Goals are ABSENT and
+  // then pop in — the tab bar visibly rearranging on every cold start, which is
+  // exactly what the provider's docstring says it prevents. `RootLayoutNav`
+  // already holds a frame this way for Clerk.
+  //
+  // Still load-bearing after N61, and for the same reason: an empty list has no
+  // food-log capability in it either, so the pre-cache answer is still "hide
+  // both" and still wrong. Widening the gate did not remove the flash.
   //
   // (This used to name `anyCatalog` and the Library tab, which N70 moved into
   // You. Same failure, different tabs.)
@@ -106,7 +121,7 @@ export default function TabLayout() {
           name={name}
           options={{
             title,
-            href: hiddenFor(name) ? null : undefined,
+            href: tabHidden(name, modules) ? null : undefined,
             tabBarIcon: ({ focused }) => (
               <Icon
                 name={icon}

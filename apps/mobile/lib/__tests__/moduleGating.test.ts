@@ -1,11 +1,14 @@
 import {
+  foodLogGate,
   moduleOffWithCatalog,
   moduleOffWithFoodLog,
   offSports,
   enabledSports,
   hasFoodLog,
+  serverHasFoodLog,
   type Module,
 } from '../modules';
+import { tabHidden } from '../tabs';
 
 /**
  * N61 — telling "turned off" apart from "does not exist".
@@ -204,5 +207,189 @@ describe('moduleOffWithFoodLog', () => {
     // And when the module exists, one of them is always true.
     expect(hasFoodLog([nutritionOn]) || moduleOffWithFoodLog([nutritionOn]) !== undefined).toBe(true);
     expect(hasFoodLog([nutritionIsOff]) || moduleOffWithFoodLog([nutritionIsOff]) !== undefined).toBe(true);
+  });
+});
+
+/**
+ * The tab bar — N61's largest instance, and its answer.
+ *
+ * Food and Goals used to disappear outright when nutrition was off: two of five
+ * tabs, 40% of the primary navigation, gone with nothing saying why. #370's
+ * finding on the BJJ surfaces was that the DESTINATIONS were never the problem
+ * — they already explain themselves — and that nothing LINKED to them while the
+ * module was off. A tab is that link, so the tab stays and the screen explains.
+ *
+ * Which leaves the third state as the only remaining reason to hide: a
+ * deployment with no food-log module at all, where there is nothing to turn on
+ * and a tab offering to turn it on would promise a feature the server does not
+ * have.
+ *
+ * **Every vector below is chosen to distinguish a correct implementation from a
+ * broken one, not merely to exercise the correct one.** #468's guard survived
+ * its own mutation test because every vector it had contained exactly one
+ * disabled module and that module was always the food-log module — so a bare
+ * `!enabled` was indistinguishable from the real predicate. The two that matter
+ * here are the mirror of that miss: a module that carries the food log and is
+ * OFF (must not hide), and a disabled module that does NOT carry it (must not
+ * un-hide).
+ */
+describe('serverHasFoodLog', () => {
+  const nutritionOn = mod({
+    key: 'nutrition', label: 'Nutrition', is_sport: false,
+    capabilities: { has_food_log: true } as Module['capabilities'],
+  });
+  const nutritionIsOff = { ...nutritionOn, enabled: false };
+  const runningOff = mod({ key: 'running', label: 'Running', enabled: false });
+
+  it('is true when the food log is on', () => {
+    expect(serverHasFoodLog([strength, nutritionOn])).toBe(true);
+  });
+
+  // **The state the whole ticket is about.** `hasFoodLog` is false here, which
+  // is what used to erase the two tabs; this predicate is deliberately not that
+  // one, and a mutation collapsing it back into `hasFoodLog` dies on this line.
+  it('is STILL true when the food log exists but is turned off', () => {
+    expect(hasFoodLog([strength, nutritionIsOff])).toBe(false);
+    expect(serverHasFoodLog([strength, nutritionIsOff])).toBe(true);
+  });
+
+  // The third state: nothing to turn on, so nothing to link to.
+  it('is false when this deployment has no food log at all', () => {
+    expect(serverHasFoodLog([strength])).toBe(false);
+  });
+
+  // **The vector that kills the mutation #468 warned about.** Drop the
+  // capability half and this becomes "any disabled module exists", which is
+  // true here — putting the Food and Goals tabs in front of an athlete on a
+  // deployment with no food log, merely because they turned Running off.
+  it('is false for a disabled module that does not carry the food log', () => {
+    expect(serverHasFoodLog([strength, runningOff])).toBe(false);
+  });
+
+  // Matched on the CAPABILITY, never on `key === 'nutrition'` — the pattern
+  // this codebase bans, and the one the tab layout's own comment calls out.
+  it('matches on the capability rather than the key', () => {
+    expect(serverHasFoodLog([{ ...nutritionIsOff, key: 'fuel', label: 'Fuel' }])).toBe(true);
+  });
+
+  // The three predicates are one partition and must stay one: `hasFoodLog` and
+  // `moduleOffWithFoodLog` are the two halves, and this is their union. Written
+  // independently in `modules.ts` — as a single `some` rather than as that
+  // disjunction — so this is a real check rather than a restatement of it.
+  it('is exactly the union of hasFoodLog and moduleOffWithFoodLog', () => {
+    const sets = [
+      [strength, nutritionOn],
+      [strength, nutritionIsOff],
+      [strength],
+      [strength, runningOff],
+      [nutritionOn, { ...nutritionIsOff, key: 'fuel' }],
+      [],
+    ];
+    for (const set of sets) {
+      const union = hasFoodLog(set) || moduleOffWithFoodLog(set) !== undefined;
+      expect(serverHasFoodLog(set)).toBe(union);
+    }
+  });
+});
+
+describe('tabHidden', () => {
+  const nutritionOn = mod({
+    key: 'nutrition', label: 'Nutrition', is_sport: false,
+    capabilities: { has_food_log: true } as Module['capabilities'],
+  });
+  const nutritionIsOff = { ...nutritionOn, enabled: false };
+  const runningOff = mod({ key: 'running', label: 'Running', enabled: false });
+
+  // **The regression, stated as plainly as it can be.** This is the ticket:
+  // nutrition off, two tabs gone. Both of these were `true` before.
+  it('keeps Food and Goals in the bar when nutrition is merely turned off', () => {
+    expect(tabHidden('food', [strength, nutritionIsOff])).toBe(false);
+    expect(tabHidden('goals', [strength, nutritionIsOff])).toBe(false);
+  });
+
+  it('keeps them when nutrition is on', () => {
+    expect(tabHidden('food', [strength, nutritionOn])).toBe(false);
+    expect(tabHidden('goals', [strength, nutritionOn])).toBe(false);
+  });
+
+  // The one case where hiding survives. BOTH tabs, because Goals holds only the
+  // daily target and could never be anything but empty on a deployment with no
+  // food log — leaving one and hiding the other would be the inconsistency.
+  it('hides both when this deployment has no food log at all', () => {
+    expect(tabHidden('food', [strength])).toBe(true);
+    expect(tabHidden('goals', [strength])).toBe(true);
+  });
+
+  // The trap vector again, one level up: turning Running off must not be what
+  // decides whether the Food tab exists.
+  it('is not moved by a disabled module that does not carry the food log', () => {
+    expect(tabHidden('food', [strength, runningOff])).toBe(true);
+    expect(tabHidden('food', [strength, runningOff, nutritionIsOff])).toBe(false);
+  });
+
+  // The other three tabs are never gated on nutrition — a mutation widening the
+  // name list would take Today away from an athlete on a deployment that has no
+  // food log, which is the original bug with a bigger blast radius.
+  it('never hides Today, Plan or You', () => {
+    for (const name of ['index', 'workouts', 'you']) {
+      expect(tabHidden(name, [strength])).toBe(false);
+      expect(tabHidden(name, [strength, nutritionIsOff])).toBe(false);
+      expect(tabHidden(name, [])).toBe(false);
+    }
+  });
+
+  // Before the cache is read the list is empty, which is why the layout holds a
+  // frame rather than rendering this answer. Pinned so the frame-hold cannot be
+  // deleted as redundant: widening the gate did NOT make an empty list safe.
+  it('still hides both for an unread module list, which is why the layout waits', () => {
+    expect(tabHidden('food', [])).toBe(true);
+    expect(tabHidden('goals', [])).toBe(true);
+  });
+});
+
+/**
+ * What a food-log SCREEN asks — the same question in two places, so one
+ * function.
+ */
+describe('foodLogGate', () => {
+  const nutritionOn = mod({
+    key: 'nutrition', label: 'Nutrition', is_sport: false,
+    capabilities: { has_food_log: true } as Module['capabilities'],
+  });
+  const nutritionIsOff = { ...nutritionOn, enabled: false };
+  const runningOff = mod({ key: 'running', label: 'Running', enabled: false });
+
+  it('draws the off-state, naming the module, when the food log is off', () => {
+    const g = foodLogGate([strength, nutritionIsOff], true);
+    expect(g.disabled).toBe(true);
+    expect(g.off?.label).toBe('Nutrition');
+  });
+
+  it('draws nothing when the food log is on', () => {
+    expect(foodLogGate([strength, nutritionOn], true).disabled).toBe(false);
+  });
+
+  // The third state reaches the screen too — the route stays resolvable with
+  // the tab hidden — and there it must not name a module, because there is
+  // none to name.
+  it('draws the off-state with no module to name when the deployment has no food log', () => {
+    const g = foodLogGate([strength], true);
+    expect(g.disabled).toBe(true);
+    expect(g.off).toBeUndefined();
+  });
+
+  // The trap vector: Running being off is not the food log being off, and the
+  // screen must not offer to turn Running on to get food logging back.
+  it('does not name a disabled module that does not carry the food log', () => {
+    expect(foodLogGate([strength, runningOff, nutritionOn], true).off).toBeUndefined();
+  });
+
+  // **`ready` is the half most likely to be dropped as noise.** Without it an
+  // unread module list — empty, on every cold start — reads as "turned off",
+  // and the screen says so in words for a frame or two. An unanswered question
+  // is not a no; the same rule as the third state, one axis over.
+  it('says nothing at all until the module set has been read', () => {
+    expect(foodLogGate([], false).disabled).toBe(false);
+    expect(foodLogGate([strength, nutritionIsOff], false).disabled).toBe(false);
   });
 });

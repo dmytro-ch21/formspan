@@ -57,6 +57,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { ModuleOffNotice } from '@/components/ModuleOffNotice';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { WeightTrendCard } from '@/components/WeightTrendCard';
 import { Text } from '@/components/Themed';
@@ -77,6 +78,8 @@ import {
   type ActivityLevel,
 } from '@/lib/activityLevel';
 import { ApiError } from '@/lib/apiError';
+import { useModules } from '@/lib/ModulesProvider';
+import { foodLogGate } from '@/lib/modules';
 import { setActivityLevel } from '@/lib/profile';
 import { addDays } from '@/lib/history';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -181,6 +184,14 @@ export default function TargetScreen() {
   const accent = useAccent();
   const getToken = useAuthToken();
   const { units } = useUnits();
+
+  // N61: this tab stays in the bar with nutrition off — see `(tabs)/_layout.tsx`
+  // — so the screen has to say which module is off rather than deriving a
+  // target for a feature the athlete has turned off. Shared with Food through
+  // `foodLogGate`, whose `ready` half is what stops a cold start claiming
+  // "turned off" from a module list nobody has read yet.
+  const { modules, ready: modulesReady } = useModules();
+  const { disabled: foodDisabled, off: foodOff } = foodLogGate(modules, modulesReady);
 
   /**
    * The daily-movement level, and how much authority this device has over it.
@@ -398,6 +409,11 @@ export default function TargetScreen() {
     : undefined;
 
   const load = useCallback(() => {
+    // Nothing to derive for a module that is off, and this is a server round
+    // trip on every focus of a screen that is showing an explanation instead.
+    // Same shape as `bjj/positions`, which guards the fetch rather than letting
+    // the early return merely hide the answer.
+    if (foodDisabled) return;
     // Nothing until the cache has answered. Asking first would send no
     // parameter, adopt whatever the server said, and overwrite a choice made
     // offline a moment before the read landed.
@@ -435,7 +451,7 @@ export default function TargetScreen() {
     return () => {
       live = false;
     };
-  }, [getToken, on, activityQuery, activityReady]);
+  }, [foodDisabled, getToken, on, activityQuery, activityReady]);
 
   /**
    * FOCUS is the only trigger, and it is deliberately the only one.
@@ -480,6 +496,10 @@ export default function TargetScreen() {
    * is why the state is a nullable rather than an empty array.
    */
   const loadLive = useCallback(() => {
+    // Same guard as `load` above, and it needs saying twice because these are
+    // two focus effects on purpose — see the comment above: folding them into
+    // one refetches a year of history on every activity pill press.
+    if (foodDisabled) return;
     let live = true;
     listTargets(getToken, { from: addDays(on, -HISTORY_DAYS), to: on })
       .then((t) => {
@@ -501,7 +521,7 @@ export default function TargetScreen() {
     return () => {
       live = false;
     };
-  }, [getToken, on]);
+  }, [foodDisabled, getToken, on]);
 
   useFocusEffect(loadLive);
 
@@ -688,6 +708,15 @@ export default function TargetScreen() {
   // screen that has nothing left to fix.
   const gap = profileGap(data?.missing ?? []);
   const b = s?.basis ?? null;
+
+  // BELOW every hook, and that placement is the rule rather than a preference:
+  // an early return above one changes hook ORDER between renders, which the
+  // typechecker cannot see and which shipped a black screen on every BJJ
+  // session opened from Today. `react-hooks/rules-of-hooks` is an error here
+  // for exactly that reason.
+  if (foodDisabled) {
+    return <ModuleOffNotice module={foodOff} action="set a daily target" testID="goals-disabled" />;
+  }
 
   return (
     <View style={styles.screen}>
