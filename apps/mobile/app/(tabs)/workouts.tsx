@@ -400,7 +400,7 @@ export default function WorkoutsScreen() {
                   offTechniqueSport !== undefined && (
                     <Pressable
                       onPress={() => router.push('/profile/edit')}
-                      style={styles.curriculaOff}
+                      style={({ pressed }) => [styles.curriculaOff, pressed && styles.curriculaOffPressed]}
                       accessibilityRole="button"
                       accessibilityLabel={`${offTechniqueSport.label} is turned off. Turn it on to see the roadmaps`}
                       testID="plan-curricula-off"
@@ -820,6 +820,7 @@ const styles = StyleSheet.create({
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
+  curriculaOffPressed: { opacity: 0.6 },
   curriculaOffTitle: { fontSize: 14, fontWeight: '600', color: vola.text },
   // textMuted, not textDim: at 12pt this is small text and textDim measures
   // 3.96:1 on the card, below AA.

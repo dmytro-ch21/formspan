@@ -878,8 +878,15 @@ export default function LibraryScreen() {
             failure with a different cause, and conflating them is how "we
             could not reach the server" starts reading as "you do not train
             this". This branch fires only when the module is off, which is a
-            fact the app is certain of. */}
-        {techniqueSportOff !== undefined && sport === '' && (
+            fact the app is certain of.
+
+            `techniqueSport === undefined` as well, so an on-and-off PAIR — BJJ
+            enabled, a second technique discipline not — cannot render "Judo is
+            turned off" directly above the roadmaps it claims are missing.
+            Impossible with today's single-technique registry, but the predicate
+            matches on the CAPABILITY precisely so a second one can arrive
+            server-side without an app change. Raised in review. */}
+        {techniqueSport === undefined && techniqueSportOff !== undefined && sport === '' && (
           <View style={styles.glossary} testID="library-techniques-off">
             <Text style={styles.glossaryLabel} accessibilityRole="header">
               {techniqueSportOff.label} is turned off
@@ -888,7 +895,7 @@ export default function LibraryScreen() {
               onPress={() => router.push('/profile/edit')}
               accessibilityRole="button"
               accessibilityLabel={`Turn ${techniqueSportOff.label} on to see the belt roadmaps, the position map and the technique library`}
-              style={styles.mapLink}
+              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
               testID="library-techniques-off-link"
             >
               <Text style={styles.mapLinkTitle}>

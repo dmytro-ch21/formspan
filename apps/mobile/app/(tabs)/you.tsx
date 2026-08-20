@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { BjjRankHeader } from '@/components/BjjRankHeader';
@@ -8,6 +8,7 @@ import { RecordsCard } from '@/components/RecordsCard';
 import { RoadmapSummary } from '@/components/RoadmapSummary';
 import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
+import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
@@ -408,17 +409,29 @@ function NavValueRow({
   return (
     <Pressable
       onPress={onPress}
-      style={styles.row}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       accessibilityRole="button"
-      // The value spoken as a HINT rather than folded into the label, matching
-      // NavRow: an accessibilityLabel REPLACES child text, so without this the
-      // enabled disciplines would simply never be spoken.
+      // `accessibilityValue`, NOT a hint. An accessibilityLabel replaces child
+      // text, so the disciplines have to be spoken some other way — and a hint
+      // is the wrong slot for them: hints are spoken last, after a pause, and
+      // a VoiceOver user can switch them off entirely. What is on and off is
+      // the ANSWER this row exists to give, which is precisely what
+      // accessibilityValue means. NavRow's hint carries supplementary
+      // description, so the analogy does not transfer. Raised in review.
       accessibilityLabel={label}
-      accessibilityHint={value}
+      accessibilityValue={{ text: value }}
+      accessibilityHint="Opens your sport toggles"
       testID={testID}
     >
       <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
+      {/* A chevron and a pressed state, because the fix for a discoverability
+          bug produced a control nothing marked as tappable: this row sits
+          between Units and Born, which are inert, and looked identical to
+          them. Raised in review. */}
+      <RNView style={styles.rowValueGroup}>
+        <Text style={styles.rowValue}>{value}</Text>
+        <Icon name="chevron" size={13} color={vola.textDim} />
+      </RNView>
     </Pressable>
   );
 }
@@ -551,6 +564,10 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 14,
   },
+  // The pressed state and the chevron group belong to the one row in this
+  // card that is a control — see NavValueRow.
+  rowPressed: { opacity: 0.6 },
+  rowValueGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   rowLabel: { color: vola.textMuted, fontSize: 14 },
   rowValue: { fontWeight: '600', fontSize: 14, flexShrink: 1, textAlign: 'right' },
   muted: { color: vola.textMuted, fontSize: 13 },

@@ -96,3 +96,40 @@ describe('offSports', () => {
     expect(on.filter((k) => off.includes(k))).toEqual([]);
   });
 });
+
+/**
+ * The on-and-off PAIR, and why a screen needs both predicates.
+ *
+ * `moduleOffWithCatalog` answers "is there a disabled discipline with this
+ * catalog", which is not the same as "should I offer to enable one". With two
+ * technique disciplines — one on, one off — it correctly returns the off one,
+ * and a screen that renders a prompt from that alone would print "Judo is
+ * turned off / turn it on to see the belt roadmaps" directly above the
+ * roadmaps it claims are missing.
+ *
+ * Impossible with today's single-technique registry, which is exactly why it is
+ * pinned here: the predicate matches on the CAPABILITY precisely so a second
+ * technique discipline can arrive server-side without an app change, and the
+ * screen-level guard would then be the only thing standing between an athlete
+ * and a self-contradicting screen. Raised in review.
+ */
+describe('an on-and-off pair', () => {
+  const judoOff = {
+    ...bjjOn, key: 'judo', label: 'Judo', enabled: false,
+  };
+
+  it('still reports the disabled one', () => {
+    expect(moduleOffWithCatalog([bjjOn, judoOff], 'techniques')?.key).toBe('judo');
+  });
+
+  // The composite a screen must use: offer only when NOTHING with that catalog
+  // is enabled. Both halves, or the prompt contradicts the content beside it.
+  it('is not on its own a reason to prompt', () => {
+    const on = [bjjOn, judoOff].find((m) => m.enabled && m.capabilities.catalog === 'techniques');
+    const off = moduleOffWithCatalog([bjjOn, judoOff], 'techniques');
+    expect(off).toBeDefined();
+    expect(on).toBeDefined();
+    // The guard the screens apply.
+    expect(on === undefined && off !== undefined).toBe(false);
+  });
+});
