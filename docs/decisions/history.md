@@ -32519,7 +32519,8 @@ Two entries earn their rank on evidence rather than reasoning:
 
 Three methods, because one grep has burned this repo repeatedly:
 
-1. A filesystem walk of the route trees — 55 mobile routes, 43 web/admin pages.
+1. A filesystem walk of the route trees — 48 mobile route files, 40 web/admin
+   routed pages.
 2. Static import analysis of every test file, minus what it `jest.mock`s.
 3. A measured `jest --coverage` run, as an independent check on (2).
 
@@ -32531,8 +32532,8 @@ static pass flagged appears in the measured zero-coverage set.
 
 - Mobile statement coverage across `app/` + `components/`: **33.1%**.
 - **44 of 93** mobile screen/component files execute **zero** statements under
-  the whole suite; **31 of 55** routes have no test that renders them.
-- **0 of 43** web and admin pages have a test that renders them. Both suites are
+  the whole suite; **31 of 48** routes have no test that renders them.
+- **0 of 40** web and admin pages have a test that renders them. Both suites are
   `environment: "node"` with no jsdom, so nothing in either app has ever been
   clicked by anything.
 
@@ -32557,7 +32558,7 @@ manufacturing a red rather than a green.
 - **`tests/functional/` is not in this repo.** CLAUDE.md describes a Playwright
   suite; there is no `playwright.config.*`, no `@playwright/test` dependency,
   and not one `page.goto` anywhere tracked. It may exist untracked in the
-  primary checkout. Either way, the "0 of 43" figure above is what the
+  primary checkout. Either way, the "0 of 40" figure above is what the
   repository can demonstrate about itself.
 - **The list is mobile-weighted**, which follows the mobile-first rule but means
   web's 31 unwalked pages get four entries between them rather than one each.

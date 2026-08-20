@@ -911,6 +911,6 @@ way:
 - [docs/architecture/api-conventions.md](docs/architecture/api-conventions.md) — full REST/OpenAPI conventions
 - [contracts/public.openapi.yaml](contracts/public.openapi.yaml) — the wire contract
 - [docs/testing/functional-scenarios.md](docs/testing/functional-scenarios.md) — recommended functional test scenarios per feature
-- [docs/testing/device-checks.md](docs/testing/device-checks.md) — the ranked script for what **no test can reach**: camera, microphone, keyboard, speaker, permission prompts, safe areas, a gym with no signal. Measured, not guessed — 44 of 93 mobile screens/components execute zero statements under the suite, and 0 of 43 web/admin pages have a test that renders them.
+- [docs/testing/device-checks.md](docs/testing/device-checks.md) — the ranked script for what **no test can reach**: camera, microphone, keyboard, speaker, permission prompts, safe areas, a gym with no signal. Measured, not guessed — 44 of 93 mobile screens/components execute zero statements under the suite, and 0 of 40 web/admin pages have a test that renders them.
 - **The open list — GitHub Issues on the [`VOLA` board](https://github.com/users/dmytro-ch21/projects/2)**: every known gap, fix and queued feature
 - [docs/TASKS.md](docs/TASKS.md) — the archive of that list up to 2026-08-20, and the live home of the `T` traps

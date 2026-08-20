@@ -38,9 +38,10 @@ method for shrinking it.
 Three methods, deliberately, because one grep has burned this repo repeatedly —
 including on this ticket.
 
-1. **Filesystem walk of the route tree** (`app/**`) — 55 mobile route files, plus
-   the subagent's walk of `apps/web/src/app/**` and `apps/admin/src/app/**` (43
-   pages). This is the only method that can see a screen nothing references.
+1. **Filesystem walk of the route trees** — 48 mobile route files under `app/`
+   (45 addressable, plus three layout/scaffolding files), and 40 routed pages
+   across `apps/web/src/app/**` (29) and `apps/admin/src/app/**` (11). This is
+   the only method that can see a screen nothing references.
 
 2. **Static import analysis of every test file** — which module does each test
    actually import, minus what it `jest.mock`s. **This method was wrong on its
@@ -65,8 +66,8 @@ apparatus, not the code. Do not go chasing them.
 |---|---|
 | Mobile statement coverage, `app/` + `components/` | **33.1%** |
 | Mobile screens/components executing **zero** statements | **44 of 93** |
-| Mobile routes with no test that renders them | **31 of 55** |
-| Web + admin pages with a test that renders them | **0 of 43** |
+| Mobile routes with no test that renders them | **31 of 48** |
+| Web + admin pages with a test that renders them | **0 of 40** |
 | Web + admin tests that run in a browser-like DOM | **0** (both suites are `environment: "node"`; no jsdom) |
 | Playwright specs committed to this repo | **0** (`tests/functional/` is not tracked here) |
 
@@ -484,7 +485,7 @@ accessibility labelling. Rework is tracked as
 
 ## Web and admin
 
-**Zero of the 43 web and admin pages has a test that renders it.** Both suites
+**Zero of the 40 web and admin pages has a test that renders it.** Both suites
 run in Node with no DOM, so nothing in either app has ever been clicked by
 anything. What follows is the short list of places where that is most likely to
 bite; the rest is simply unwalked.
