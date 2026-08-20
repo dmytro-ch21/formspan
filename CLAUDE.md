@@ -784,11 +784,27 @@ is #329 adding `health/handler_test.go`. A test total is a magnitude check that
 every PR moves, so it cannot be a tripwire; the skip count is. Count with
 `go test -p 1 -timeout 3m -json ./...` rather than grepping `-v` output, since
 the grep is exactly the apparatus that silently counts something else. **Measured
-again 2026-08-20 after #454: 39 packages, 36 of them with tests, 1113 top-level
+again 2026-08-20 after #454: 39 packages, 37 of them with tests, 1155 top-level
 tests, and still exactly one skip — `TestLiveComplete`.** #454 itself added 26
 (one lock assertion per Postgres package, plus three on the lock), so a count
 taken before it will not match one taken after; the skip count is the tripwire,
 and it did not move.
+
+The rule that keeps the lock coverage complete is one command, and it is worth
+running if you add a test package: every package that reads `TEST_DATABASE_URL`
+must also take the lock.
+
+```bash
+cd backend
+comm -23 <(grep -rl --include='*_test.go' TEST_DATABASE_URL internal/ | xargs -n1 dirname | sort -u) \
+         <(grep -rl --include='*_test.go' 'testdb.Main'        internal/ | xargs -n1 dirname | sort -u)
+```
+
+`internal/platform/testdb` is the one legitimate name that appears there — it is
+the apparatus, holds no fixtures, and its own tests need the lock free. Anything
+else is a package a second test binary can trample. **Note the `--include`:
+without it the second grep also matches `testdb.go`'s own doc comment, which
+names the call, and the check then reports every package as covered.**
 
 **This paragraph used to say "zero skips: 28 packages, 583 tests"** and told you
 any skip meant a regression. That was true when written and stopped being true

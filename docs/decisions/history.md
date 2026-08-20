@@ -35411,8 +35411,12 @@ mutation test that cleared it was run on an idle database, where the hole cannot
 appear.
 
 A parallel session reviewing #426's own guard hit it first and fixed it there
-(`claude/n426-lock-guard-followup`); this branch's reviewer reached the same
-finding independently. The fix is theirs and is adopted here: `Lock` records
+(#457, which landed on `main` while this branch was open); this branch's reviewer
+reached the same finding independently, an hour later, on a different copy of the
+same mistake. Rebasing then put the two in direct conflict — #457 hardening
+`session`'s own lock, this branch deleting that lock in favour of the shared one
+— and the resolution keeps the *idea* and drops the duplicated plumbing. The fix
+is theirs and is adopted here: `Lock` records
 `pg_backend_pid()` on the connection it succeeded on, and `AssertHeld` reads
 `pg_locks` and requires **exactly one** holder whose pid is that one. Demonstrated
 rather than argued — with the `Lock` call deleted **and an unrelated psql session
