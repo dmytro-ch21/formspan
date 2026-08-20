@@ -570,6 +570,81 @@ components:
         relaxed: { type: string, description: "Which macro rule gave way, if any." }
         protein_g_per_kg: { type: number }
         fat_g_per_kg: { type: number }
+        projection:
+          type: object
+          nullable: true
+          description: >
+            **"Does this look right?"** — when the phase's goal weight arrives at
+            this phase's own rate, and whether that is before its deadline.
+
+
+            **Null is the ordinary case** and means there is nothing to say: no
+            goal weight, or no live phase. A client must render **nothing** for
+            null rather than an all-clear — "we did not check" and "it checks
+            out" are different answers and only one of them is reassuring.
+
+
+            Computed server-side so both clients agree by construction. It is
+            the INVERSE of the making-weight rate: that asks what rate a fixed
+            deadline demands and clamps at the safe ceiling, this asks when the
+            rate you were given actually arrives, which is the right question
+            when the deadline is the soft thing.
+          allOf:
+            - $ref: "#/components/schemas/NutritionProjection"
+
+    NutritionProjection:
+      type: object
+      required: [target_weight_kg, kg_to_go, reached_on, weeks_to_go, already, unreachable, meets_deadline]
+      properties:
+        target_weight_kg: { type: number }
+        kg_to_go:
+          type: number
+          description: >
+            UNSIGNED — how far there is left to travel, in whichever direction
+            the phase is going.
+        reached_on:
+          type: string
+          description: >
+            The day the goal weight arrives at this rate, `YYYY-MM-DD`. **Empty
+            when `unreachable`** — deliberately not a date, because a computed
+            date in the past reads as an answer rather than a contradiction.
+        weeks_to_go:
+          type: number
+          description: >
+            The same figure before it became a date. A span is what an athlete
+            reasons with ("that is five months"); a date is what they diary.
+        already:
+          type: boolean
+          description: >
+            The goal weight is already met, within 0.1 kg — a scale does not
+            resolve better than that, so exactness would leave somebody
+            permanently "0.02 kg away". The plan is not wrong, it is finished.
+        unreachable:
+          type: boolean
+          description: >
+            The rate never closes the gap: it is zero, or it points away from
+            the goal. The real case is a bulk with a goal weight BELOW current —
+            two settings that each look fine on their own screen.
+        unreachable_reason:
+          type: string
+          description: Present when `unreachable`; says what to change.
+        deadline_on:
+          type: string
+          description: The phase's target date, when it set one.
+        meets_deadline:
+          type: boolean
+          nullable: true
+          description: >
+            **Null when there is no deadline to meet** — absent, not false,
+            because "no deadline" and "misses it" must not render alike.
+        shortfall_kg:
+          type: number
+          description: >
+            How much would still be left on the deadline day. This is the number
+            that says HOW wrong the plan is, where the date says only that it is.
+        days_late:
+          type: integer
+          description: How far past the deadline the goal actually arrives.
 
     NutritionSuggestion:
       type: object

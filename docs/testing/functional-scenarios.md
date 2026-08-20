@@ -9649,3 +9649,52 @@ row" is the drift they exist to catch.
   card's new height nor the repetition of the meal line across four sections has
   been seen on a real screen. Those are the two judgement calls to look at
   first.
+## "Does this look right?" — the feasibility check (N69)
+
+When the phase's goal weight is reached at its own rate, and whether that beats
+its deadline. Served on the derivation `basis`; rendered on **both** the mobile
+target screen and the web derivation panel.
+
+### Happy path
+
+- A cut from 90 kg to an 82 kg goal at 0.675 kg/week says "8 kg to go" and names
+  the arrival date, roughly twelve weeks out.
+- With a deadline comfortably after that date, it says so and reads as ordinary
+  text.
+- The phone and web show the same verdict, because the arithmetic is the
+  server's — not two implementations that happen to agree today.
+
+### Edge cases & errors
+
+- **No goal weight, or no live phase → nothing renders at all.** Not an
+  all-clear, not an empty card. Null means we did not check.
+- **No deadline set → no verdict about a deadline.** `meets_deadline` is null,
+  and the copy must not imply one was met or missed.
+- **A deadline that cannot be met** is marked visually as well as worded, and
+  carries both how many days late and **how many kilos short on the day** — the
+  date says the plan is wrong, the shortfall says how wrong.
+- **A deadline already in the past** reports the whole remaining gap as the
+  shortfall; no time remains to move any of it.
+- **A contradictory plan** — a bulk whose goal weight is *below* current — is
+  reported as unreachable **with a reason**, and gets **no arrival date**. A
+  computed negative span would render as a day in the past and read as an answer.
+- **A holding phase** (zero rate) is unreachable, not a division by zero and not
+  an infinite date.
+- **Already there**, within 0.1 kg, reads as finished rather than as a problem —
+  a scale does not resolve better than that.
+
+### Regression trap
+
+- **Null must render nothing.** The single most important assertion: a
+  component is free to render a null as a reassuring blank and every server-side
+  test stays green. Assert the markup does not contain the block at all.
+- **`meets_deadline: null` and `false` must not render alike.**
+- **The rate is SIGNED** — negative on a cut. The sign is what makes a
+  contradictory plan detectable; comparing magnitudes instead silently produces
+  a plausible date for an impossible plan.
+- **This is the inverse of `makingWeightRate`, not a duplicate of it.** That one
+  asks what rate a fixed deadline demands and clamps at the safe ceiling. Do not
+  collapse them: one is for a competition date, the other for a soft goal.
+- **The arithmetic must stay server-side.** Reimplementing it per client is the
+  `offered_grips` mistake N16 records; a parity script standing in for one
+  source of truth is what that lesson rejects.

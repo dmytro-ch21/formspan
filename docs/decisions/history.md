@@ -31762,6 +31762,109 @@ the range exclusive at the start, and dropping `DISTINCT`.
 - `daysLogged` counts a rolling seven days rather than a calendar week, so
   "this week" is loose. A Monday reset would make Monday morning always read
   "0 of 7", which is the discouraging shape the no-shame rule avoids.
+## 2026-08-19 — Does this look right? (N69)
+
+The athlete's words were *"app should smartly build my plan or allow me to set
+my goals myself"* and *"it counted for me to eat 2700 which is pretty a lot."*
+
+**2700 may be perfectly correct. The complaint was that nothing let them find
+that out or disagree.** So the task was framed as building a goals screen.
+
+### Looking first changed the task
+
+The brief said to look at the existing screen before designing a replacement,
+and that was the right instruction: **most of it already existed.** Measured
+against `nutrition-design.md` §5's three sections:
+
+```
+                                          web    mobile
+computed target, inputs editable           yes    yes
+protein stated in g/kg                     yes    yes
+"does this look right?" feasibility        NO     NO
+---
+manual target entry                        yes    NO
+N27 adjustment client                      yes    NO
+```
+
+**One item in the brief was wrong, and it was load-bearing: "N27's adjustment
+rule has never had a client."** It has a good one —
+`apps/web/src/app/dashboard/nutrition/targets/AdjustmentCard.tsx` fetches the
+proposal, renders the delta and its arithmetic, and gives every blocked state
+real estate and plain-English copy, including a paragraph explaining the 0.25%
+deadband as the noise floor of a 7-day trend. It was taken from a task line
+written before that client existed and repeated without reading the code.
+
+So **exactly one of §5's three sections was missing, and it was missing
+everywhere**: the check showing when the phase's goal weight is reached at its
+own rate. That is what this change builds.
+
+### What it does
+
+`body_phases` already carried the goal weight, the rate and the deadline, and
+`Inputs` already carried all three into the derivation. **Nothing compared
+them.** An athlete could set "lose eight kilos by Christmas", be handed a
+perfectly safe rate that arrives in April, and find out in April — §5's own
+words, it "catches an impossible goal before six weeks of failing at it".
+
+It is the **inverse of `makingWeightRate`, deliberately.** That function asks
+"what rate does this deadline demand?" and clamps at the cut ceiling, because a
+competition date is fixed and physiology is not. This asks "when does the rate
+I was given actually arrive?" — the right question for every other phase, where
+the deadline is the soft thing and the rate was chosen to be safe. Answering
+only the first would tell someone on an ordinary cut to eat faster than is safe;
+answering only the second would tell someone with a weigh-in that their date is
+wrong. Both questions are real.
+
+### Computed once, on the server
+
+The arithmetic lives in `project` and is served on the derivation's `basis`, so
+the phone and web agree by construction. That is the lesson N16 records for
+`offered_grips`: the same rule was previously reimplemented in two apps with a
+parity script standing in for a shared package, and serving it is cheaper than
+policing it. It matters more here than usual, because under the new mobile-first
+rule this had to reach both surfaces rather than one.
+
+### The absences are the design
+
+- **Null renders as nothing, never an all-clear.** No goal weight or no live
+  phase means we did not check, and "we did not check" and "it checks out" are
+  different answers — only one of them is reassuring. A test asserts the
+  component emits no markup at all for null.
+- **`meets_deadline` is null, not false, when no deadline was set.** "No
+  deadline" and "misses the deadline" must not render alike.
+- **A contradictory plan does not get a date.** A bulk with a goal weight BELOW
+  current is two settings that each look fine on their own screen; the signed
+  rate makes it detectable, and the projection reports it as unreachable with a
+  reason rather than computing a negative span that would render as a day in the
+  past.
+- **Arrival is within 0.1 kg.** A scale does not resolve better than that, so
+  exactness would leave somebody permanently "0.02 kg away".
+- **A missed deadline carries a shortfall in kilos**, because the date says only
+  that the plan is wrong and the shortfall says how wrong.
+
+### Verified
+
+Seven mutations, each confirmed applied by counting the marker before and after,
+and each producing a **test** failure rather than a compile error against a
+baseline green in the same session: dropping the sign check; dropping the
+zero-rate guard; reporting `false` instead of null for an unset deadline;
+clamping the shortfall to zero; rendering an all-clear for a null projection;
+colouring a missed deadline like a met one; and dropping the shortfall from the
+sentence.
+
+`addDays` uses `AddDate` rather than adding hours, so a projection months out
+stays on the right calendar day across a DST boundary.
+
+### Left open
+
+**The rest of the phone gap is N72**, and it is the larger half of what the
+athlete actually asked for: **manual target entry and the N27 adjustment client
+are both web-only.** They looked at 2700 on a phone and had no way to disagree
+with it — N68 made the reasoning reachable, this makes the plan checkable, and
+neither lets them set their own number from the device they were holding.
+
+**No device run.** The mobile line is a conditional `<Text>`; the risk is
+cosmetic rather than behavioural, but it has not been seen on a phone.
 
 ## Open items / known gaps as of this entry
 

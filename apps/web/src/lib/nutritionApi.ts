@@ -124,6 +124,36 @@ export type Basis = {
   relaxed?: string;
   protein_g_per_kg: number;
   fat_g_per_kg: number;
+
+  /**
+   * "Does this look right?" — when the phase's goal weight arrives at this
+   * rate, and whether that beats its deadline.
+   *
+   * **Null is the ordinary case** (no goal weight, no live phase) and must
+   * render as NOTHING, never an all-clear: "we did not check" and "it checks
+   * out" are different answers.
+   *
+   * Computed server-side, so this and the phone agree by construction rather
+   * than by a parity script.
+   */
+  projection: Projection | null;
+};
+
+export type Projection = {
+  target_weight_kg: number;
+  /** Unsigned — how far is left, whichever way the phase is going. */
+  kg_to_go: number;
+  /** `YYYY-MM-DD`, or "" when `unreachable`. Never a date in the past. */
+  reached_on: string;
+  weeks_to_go: number;
+  already: boolean;
+  unreachable: boolean;
+  unreachable_reason?: string;
+  deadline_on?: string;
+  /** **Null when no deadline was set** — absent, not false. */
+  meets_deadline: boolean | null;
+  shortfall_kg?: number;
+  days_late?: number;
 };
 
 export type Target = {

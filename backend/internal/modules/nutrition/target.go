@@ -251,6 +251,15 @@ type Basis struct {
 
 	ProteinGPerKG float64 `json:"protein_g_per_kg"`
 	FatGPerKG     float64 `json:"fat_g_per_kg"`
+
+	// Projection is "does this look right?" — when the phase's goal weight
+	// arrives at this rate, and whether that is before its deadline.
+	//
+	// NULL is the ordinary case and means there is nothing to say: no goal
+	// weight, or no phase. A client must render nothing rather than an
+	// all-clear, because "we did not check" and "it checks out" are different
+	// answers and only one of them is reassuring.
+	Projection *Projection `json:"projection"`
 }
 
 // Suggestion is a proposal. Nothing here is stored until the athlete accepts
@@ -351,6 +360,13 @@ func Suggest(in Inputs, activity Activity, restingPerDay func() (float64, bool),
 		Clamped:             clamped,
 		ClampReason:         reason,
 	}
+	// Computed here, on the server, rather than in each client. The rule then
+	// lives in ONE place and both apps agree by construction — the lesson N16
+	// records for `offered_grips`, where the same arithmetic was reimplemented
+	// in two apps and a parity script stood in for a shared package. Serving it
+	// is cheaper than policing it, and this one has to reach the phone as well
+	// as web under the mobile-first rule.
+	basis.Projection = project(in, weight, rateKGPerWeek)
 
 	s := macros(kcal, weight, isDeficit(ratePerWeek), basis)
 	return &s, nil
@@ -557,4 +573,147 @@ func daysBetween(a, b string) int {
 
 func parseDay(s string) (time.Time, error) {
 	return time.Parse("2006-01-02", s)
+}
+
+// addDays returns a calendar day n days after s, "YYYY-MM-DD".
+//
+// AddDate rather than adding hours, so the answer stays a calendar day across a
+// DST boundary — adding 24h*n to a wall clock silently lands on the previous day
+// twice a year, which on a projection months out is exactly the kind of quiet
+// off-by-one nobody would trace back to here.
+func addDays(s string, n int) string {
+	t, err := parseDay(s)
+	if err != nil {
+		return ""
+	}
+	return t.AddDate(0, 0, n).Format("2006-01-02")
+}
+
+// Projection answers "does this look right?" — the third section
+// `nutrition-design.md` §5 asked for and the one nothing had built.
+//
+// # What it is for
+//
+// A phase carries a goal weight, a deadline and a rate. Nothing compared them,
+// so an athlete could set "lose eight kilos by Christmas", be handed a
+// perfectly safe rate that reaches it in April, and find out in April. §5's
+// words: it "catches an impossible goal before six weeks of failing at it".
+//
+// # It is the INVERSE of makingWeightRate, deliberately
+//
+// `makingWeightRate` asks "what rate does this deadline demand?" and clamps at
+// the cut ceiling, because a competition date is fixed and physiology is not.
+// This asks "when does the rate I was given actually arrive?" — which is the
+// right question for every other phase, where the DEADLINE is the soft thing
+// and the rate was chosen to be safe.
+//
+// Both exist because both questions are real. Answering only the first would
+// tell an athlete on an ordinary cut to eat faster than is safe; answering only
+// the second would tell someone with a weigh-in that their date is wrong.
+//
+// # Nil is the normal case
+//
+// No goal weight, no live phase, or a rate of zero all mean there is nothing to
+// project, and a maintenance phase never "arrives" anywhere. Nil renders as
+// nothing rather than as a reassuring absence of warning.
+type Projection struct {
+	// TargetWeightKG is the phase's goal, repeated so a client rendering this
+	// block needs nothing else.
+	TargetWeightKG float64 `json:"target_weight_kg"`
+	// KGToGo is unsigned — how far there is left to travel, in whichever
+	// direction the phase is going.
+	KGToGo float64 `json:"kg_to_go"`
+	// ReachedOn is the day the goal weight arrives at the phase's own rate,
+	// "YYYY-MM-DD". Empty when Unreachable.
+	ReachedOn string `json:"reached_on"`
+	// WeeksToGo is the same figure before it was turned into a date, because a
+	// span is what an athlete reasons with ("that is five months") and a date
+	// is what they diary.
+	WeeksToGo float64 `json:"weeks_to_go"`
+
+	// Already reports that the goal weight is already met. The plan is not
+	// wrong; it is finished, which is a different thing to say.
+	Already bool `json:"already"`
+	// Unreachable means the rate never closes the gap — it is zero, or it
+	// points away from the goal. A bulk with a goal weight BELOW current is the
+	// real case: two settings that each look fine and contradict each other.
+	Unreachable       bool   `json:"unreachable"`
+	UnreachableReason string `json:"unreachable_reason,omitempty"`
+
+	// DeadlineOn is the phase's target date, when it set one.
+	DeadlineOn string `json:"deadline_on,omitempty"`
+	// MeetsDeadline is nil when there is no deadline to meet — absent, not
+	// false, because "no deadline" and "misses it" must not render alike.
+	MeetsDeadline *bool `json:"meets_deadline"`
+	// ShortfallKG is how much would still be left on the deadline, when it is
+	// missed. Zero otherwise.
+	ShortfallKG float64 `json:"shortfall_kg,omitempty"`
+	// DaysLate is how far past the deadline the goal actually arrives.
+	DaysLate int `json:"days_late,omitempty"`
+}
+
+// project builds the feasibility answer, or nil when there is nothing to say.
+//
+// `rateKGPerWeek` is SIGNED — negative on a cut — and that sign is what makes a
+// contradictory plan detectable rather than silently producing a date in the
+// past.
+func project(in Inputs, weight, rateKGPerWeek float64) *Projection {
+	if in.PhaseTargetWeightKG == nil || weight <= 0 {
+		return nil
+	}
+	goal := *in.PhaseTargetWeightKG
+	p := &Projection{TargetWeightKG: round2(goal)}
+	if in.PhaseTargetOn != nil {
+		p.DeadlineOn = *in.PhaseTargetOn
+	}
+
+	delta := goal - weight // negative when the goal is below: a cut
+	p.KGToGo = round2(math.Abs(delta))
+
+	// Within a tenth of a kilo is arrived. Scales do not resolve better than
+	// that day to day, so demanding exactness would leave someone "0.02 kg
+	// away" forever.
+	if math.Abs(delta) < 0.1 {
+		p.Already = true
+		return p
+	}
+	if rateKGPerWeek == 0 {
+		p.Unreachable = true
+		p.UnreachableReason = "this phase holds your weight where it is"
+		return p
+	}
+	// Signs disagree: the rate moves away from the goal. Two settings that each
+	// look reasonable on their own screen and cannot both be meant.
+	if (delta > 0) != (rateKGPerWeek > 0) {
+		p.Unreachable = true
+		p.UnreachableReason = "this phase moves your weight away from that goal"
+		return p
+	}
+
+	weeks := delta / rateKGPerWeek // same sign both sides, so positive
+	p.WeeksToGo = round2(weeks)
+	p.ReachedOn = addDays(in.On, int(math.Ceil(weeks*7)))
+
+	if p.DeadlineOn != "" {
+		daysLate := daysBetween(p.DeadlineOn, p.ReachedOn)
+		meets := daysLate <= 0
+		p.MeetsDeadline = &meets
+		if !meets {
+			p.DaysLate = daysLate
+			// What is still left to travel on the deadline itself — the number
+			// that says how far off the plan is, where the date says only that
+			// it is off.
+			daysLeft := daysBetween(in.On, p.DeadlineOn)
+			if daysLeft < 0 {
+				daysLeft = 0
+			}
+			moved := math.Abs(rateKGPerWeek) * (float64(daysLeft) / 7)
+			short := math.Abs(delta) - moved
+			if short < 0 {
+				short = 0
+			}
+			p.ShortfallKG = round2(short)
+		}
+	}
+	return p
 }
