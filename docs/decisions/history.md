@@ -32191,11 +32191,24 @@ still wrong. `identifyRetryAfterSeconds`'s own neighbouring docstring already
 says a change to one of these should change both. Doing otherwise would have
 meant filing a fresh ticket for a one-line typo somebody had just read.
 
-`ratelimit.Reject` also writes `int(retryAfter.Seconds())` and is deliberately
-left alone: every caller reaches it through `Allow`, which already returns a
-whole-second duration from `roundUpSecond`, so the conversion is exact rather
-than truncating. It is a latent trap only if some future caller passes a raw
-duration — worth knowing, not worth changing blind.
+`ratelimit.Reject` also wrote `int(retryAfter.Seconds())`, and that one was
+harmless — every caller reaches it through `Allow`, which already returns a
+whole-second duration from `roundUpSecond`, so the conversion was exact rather
+than truncating. Review's counter-argument won on the second reading: `Reject`
+is **exported**, so the correctness of its header depends on a contract between
+two packages rather than on anything local, and the next caller to pass a raw
+duration reintroduces the bug in the one place that answers for every
+authenticated route. It rounds up itself now. Behaviour for existing callers is
+unchanged by construction.
+
+Testing that guard has a wrinkle worth stating, because it is the same "the
+apparatus cannot fail" shape: **through the middleware it is untestable.**
+`Allow` hands over whole seconds, where truncating and ceiling agree, so an
+end-to-end assertion passes with the ceiling deleted. The test therefore calls
+`Reject` directly with a fractional duration — which is precisely the future
+caller the guard exists for. Mutating it back is how the old code's other latent
+failure surfaced: handed `0` it emitted `Retry-After: 0`, and handed a negative
+duration, `Retry-After: -3600`.
 
 ### The only test that could have caught it
 
@@ -32220,11 +32233,16 @@ reset instant is read back from `MIN(created_at)` rather than invented. Nothing
 sleeps; `now` is a parameter on both the handler and the repository, which is the
 only way to test a 24-hour window at all.
 
-One assertion in that test exists purely to keep the rest honest: **before**
+Two assertions in that test exist purely to keep the rest honest. **Before**
 checking that the advertised wait is admitted, it checks that one second — what
-truncation used to advertise — is still refused. If that ever passes, the fixture
+truncation used to advertise — is still refused; if that ever passes, the fixture
 has drifted off the boundary and the test below it would go green against the
-bug without anyone noticing.
+bug without anyone noticing. Review pointed out that this catches drift in one
+direction only: a remainder that drifted *up* to exactly 2.0s would satisfy all
+three assertions under truncation too, because at a whole second the two
+roundings agree. So the constant is asserted fractional as well. Both guards were
+fired deliberately — set the remainder to `2 * time.Second` and the test fatals
+on its own tripwire rather than passing.
 
 Measured rather than assumed, per the standing rule: with the truncation
 restored, the table fails on four of its eight cases and the integration test

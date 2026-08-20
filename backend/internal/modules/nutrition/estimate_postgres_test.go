@@ -179,6 +179,13 @@ func TestObeyingRetryAfterExactlyIsAdmitted(t *testing.T) {
 	// two roundings agree and this test would pass against the exact bug it
 	// exists to catch.
 	const remainder = 1500 * time.Millisecond
+	// Asserted rather than trusted to the comment above. The apparatus check
+	// further down catches this constant drifting DOWN to a whole second, but
+	// not up: at 2.0s exactly, truncation and the ceiling agree and every
+	// assertion below passes against the bug. This is the guard for that half.
+	if remainder%time.Second == 0 {
+		t.Fatalf("remainder %s is a whole number of seconds — flooring and ceiling agree there, so this test no longer discriminates", remainder)
+	}
 	now := seed.ResetsAt.Add(-remainder)
 
 	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, usage)

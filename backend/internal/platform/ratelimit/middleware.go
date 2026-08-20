@@ -49,14 +49,22 @@ func Middleware(l *Limiter, key KeyFunc) func(http.Handler) http.Handler {
 // response — which limit you tripped is not something a caller needs, and
 // telling them is free reconnaissance.
 func Reject(w http.ResponseWriter, r *http.Request, policy string, retryAfter time.Duration) {
+	// **Rounded up HERE as well as in Allow**, so the invariant is local rather
+	// than a contract between two packages. `Allow` already hands over a
+	// whole-second duration, which makes this a no-op for every caller today —
+	// but `Reject` is exported, and a future caller passing a raw duration would
+	// otherwise reintroduce the truncation F15 fixed in three other places: a
+	// header that rounds DOWN sends a client back inside the window it was told
+	// it had left, and it is refused for obeying exactly.
+	secs := int(roundUpSecond(retryAfter) / time.Second)
 	httplog.FromContext(r.Context()).Warn("ratelimit: rejected",
 		"policy", policy,
 		"path", r.URL.Path,
-		"retry_after_s", int(retryAfter.Seconds()),
+		"retry_after_s", secs,
 	)
 	// Set BEFORE WriteError: it writes the status line, and headers added
 	// after that are silently dropped.
-	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
 	apihttp.WriteError(w, http.StatusTooManyRequests, apihttp.CodeRateLimited,
 		"Too many requests just now. Try again in a moment.")
 }
