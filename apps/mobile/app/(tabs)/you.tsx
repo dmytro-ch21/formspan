@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { BjjRankHeader } from '@/components/BjjRankHeader';
@@ -8,6 +8,7 @@ import { RecordsCard } from '@/components/RecordsCard';
 import { RoadmapSummary } from '@/components/RoadmapSummary';
 import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
+import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
@@ -309,7 +310,7 @@ export default function YouScreen() {
 
             <Text style={styles.sectionLabel}>Profile</Text>
             <View style={styles.card}>
-              <Row
+              <NavValueRow
                 label="Sports"
                 value={
                   enabledLabels === null
@@ -318,6 +319,8 @@ export default function YouScreen() {
                       ? enabledLabels.join(' · ')
                       : 'None chosen yet'
                 }
+                onPress={() => router.push('/profile/edit')}
+                testID="you-sports"
               />
               <Row
                 label="Units"
@@ -367,6 +370,69 @@ function Row({ label, value }: { label: string; value: string }) {
       <Text style={styles.rowLabel}>{label}</Text>
       <Text style={styles.rowValue}>{value}</Text>
     </View>
+  );
+}
+
+/**
+ * A Row that is also a destination.
+ *
+ * Exists for exactly one row — Sports — and the reason is N61. Every
+ * module-gated surface in this app disappears silently when its discipline is
+ * off: the belt roadmaps, the Plan tab's curricula strip, BJJ in the session
+ * picker, and the Food and Goals TABS. The destination screens explain
+ * themselves properly ("BJJ tracking is off, turn it back on under Sports")
+ * — but nothing links to them while they are off, so the athlete never reaches
+ * the screen that would say so. The user went looking for the belt roadmaps on
+ * a real phone and reported them missing; they exist and work.
+ *
+ * This row already showed the answer — "Strength · Nutrition" — and was inert,
+ * so it named the cause of every one of those absences while offering no way
+ * to act on it. Making it navigate is the cheapest thing that turns "the app
+ * does not have this" into "this is turned off", because it is the one place
+ * that already tells you which disciplines are on.
+ *
+ * Deliberately NOT a `NavRow`: those are section destinations with a detail
+ * line, and this belongs in the Profile card beside Units and Born. It keeps
+ * the row's shape and gains a hit target.
+ */
+function NavValueRow({
+  label,
+  value,
+  onPress,
+  testID,
+}: {
+  label: string;
+  value: string;
+  onPress: () => void;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      accessibilityRole="button"
+      // `accessibilityValue`, NOT a hint. An accessibilityLabel replaces child
+      // text, so the disciplines have to be spoken some other way — and a hint
+      // is the wrong slot for them: hints are spoken last, after a pause, and
+      // a VoiceOver user can switch them off entirely. What is on and off is
+      // the ANSWER this row exists to give, which is precisely what
+      // accessibilityValue means. NavRow's hint carries supplementary
+      // description, so the analogy does not transfer. Raised in review.
+      accessibilityLabel={label}
+      accessibilityValue={{ text: value }}
+      accessibilityHint="Opens your sport toggles"
+      testID={testID}
+    >
+      <Text style={styles.rowLabel}>{label}</Text>
+      {/* A chevron and a pressed state, because the fix for a discoverability
+          bug produced a control nothing marked as tappable: this row sits
+          between Units and Born, which are inert, and looked identical to
+          them. Raised in review. */}
+      <RNView style={styles.rowValueGroup}>
+        <Text style={styles.rowValue}>{value}</Text>
+        <Icon name="chevron" size={13} color={vola.textDim} />
+      </RNView>
+    </Pressable>
   );
 }
 
@@ -498,6 +564,10 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 14,
   },
+  // The pressed state and the chevron group belong to the one row in this
+  // card that is a control — see NavValueRow.
+  rowPressed: { opacity: 0.6 },
+  rowValueGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   rowLabel: { color: vola.textMuted, fontSize: 14 },
   rowValue: { fontWeight: '600', fontSize: 14, flexShrink: 1, textAlign: 'right' },
   muted: { color: vola.textMuted, fontSize: 13 },
