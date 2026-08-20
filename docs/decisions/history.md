@@ -34090,26 +34090,70 @@ when wrong:**
   false claim dressed as a fallback, which is the same bug as the one at the top
   of this entry, one layer down.
 
-**Twelve mutations, twelve reds**, run against a baseline that was green in the
-same session. Including: inverting the pluralisation in `stepSummary`; making
+**Eighteen mutations, eighteen reds**, run against a baseline that was green in
+the same session. Including: inverting the pluralisation in `stepSummary`; making
 `stepName` fall back to the technique id; removing `sequence` from `DESTINATION`
 again; **restoring the old "in the Library" sentence**; rounding a failed list
 down to `[]`; making a real failure read as offline; reversing the step order;
-fetching the library unconditionally; and both arms of the You-tab gate. Two
-notes on the apparatus, because both are the failure mode `CLAUDE.md` warns
-about: the harness required jest to report failing *tests* rather than merely
-exiting non-zero, since a type error also exits non-zero and proves nothing
-about the test — and every expectation in `sequenceRow.test.ts` is pinned to a
-**literal**, never rebuilt from the template the function uses, which would be
-true by construction.
+fetching the library unconditionally; both arms of the You-tab gate; and both
+arms of the empty-state gate.
 
-And one near-miss worth recording, because it cost nothing here and could cost a
-whole session elsewhere: the first test run was issued from `apps/mobile` in the
-**primary checkout** rather than the worktree. It passed, reported nine green
-tests, and printed the *old* test names — proving that the unmodified tree still
-worked. A `pwd` in the same command is the cheap fix, and the general form is the
-one already in `CLAUDE.md`: a green result from apparatus pointed at the wrong
-subject is not evidence.
+**Score a mutation on FAILING TESTS, never on a non-zero exit.** This is the
+harness-level form of a rule `CLAUDE.md` already states about a single mutation
+— *"a mutation that produced a compile error rather than a test failure is also
+a non-zero exit, and also proves nothing"* — and it is worth stating separately
+because a harness inverts it silently. Two of those mutants were first written
+as `error ? null : (` → `true ? (`, which is a malformed ternary rather than a
+behaviour change. jest reported `Tests: 0 total`, exit non-zero. A harness
+scoring on the exit code would have counted both as **caught**, adding two
+fabricated reds to the tally; one scoring on "did jest report failing tests"
+counts them as **survived**, which is the safe direction and sent them back to
+be rewritten. `false ? null :` / `true ? null :` both go red for real.
+
+**`Tests: 0 total` and a real red are indistinguishable by exit code**, so the
+harness asserts the run happened before reading its verdict. Another session hit
+the same shape this morning mutating a `try/catch` and leaving the braces
+unbalanced, and caught it only because the total said `0` rather than `10`.
+
+Every expectation in `sequenceRow.test.ts` is likewise pinned to a **literal**
+rather than rebuilt from the template the function uses, which would be true by
+construction.
+
+**And the sharper of the two: a green suite run against the wrong tree.** The
+first test run here was issued from `apps/mobile` in the **primary checkout**
+rather than the worktree. It *passed* — nine green tests — and the only thing
+that gave it away was that it printed the **old test names**. Nothing about the
+result was suspicious; a false green is invisible to any amount of care about
+the verdict, because the verdict was true. It just answered a question nobody
+asked: does the unmodified tree still work.
+
+This is worse than the mutation case, which at least fails loudly enough to
+inspect. The fixes are cheap and both are worth the habit: **absolute paths**,
+and a `pwd` in the same command so the transcript records which tree answered.
+`cd A || cd B` fallbacks are the same hazard with a coin toss in front of it —
+another session hit exactly that today. And in a repo where several worktrees
+hold different branches of the same files, "I ran the tests" is not a claim
+about a branch until you can say which directory produced it.
+
+**Review took three of its four suggestions, and one of them is the better
+version of this ticket's own lesson.** `frontend-reviewer` found no blocking
+issues and noticed that the detail screen reloads on **focus**, so the ordinary
+path — read a chain, background the app, lose signal, come back — replaced the
+steps on screen with the full-page *"you're offline"* card. Every word of that
+card is true, and it is still worse than the chain that was already there:
+"nothing to show" is a different claim from "here is what I have". `setSequence`
+now keeps what it holds (`(prev) => found ?? prev`), so the offline branch means
+what it says. The list screen deliberately does **not** match — there the outbox
+fallback is the better answer, and the error is shown beside it.
+
+Also taken: `accessibilityLiveRegion="polite"` on both error texts (an error
+that appears without moving focus is silent to a screen reader), and clearing
+`refreshing` on the signed-out early return so a pull cannot spin forever.
+**The live-region change initially had no test and its mutation came back
+green**, which is the whole reason to mutate a change you are confident in; it
+is asserted on the prop now, against the literal `'polite'`. Declined: keying
+the step rows on `technique_id` alone — a chain may legally repeat a technique,
+so the index is load-bearing, and it is now commented as such.
 
 **What was deliberately not built.** Editing, reordering, renaming, adding or
 removing a step, copying a reference chain, and deleting are all still web-only.
@@ -34117,6 +34161,18 @@ That is *reduced-on-mobile*, which the mobile-first rule permits — web may be
 richer — rather than phone-impossible, which it forbids. The audit row is
 updated to say exactly that rather than being marked closed, and whoever closes
 the writing half should file it as its own id.
+
+**One narrow case is knowingly left, and it is a judgement rather than an
+oversight.** The `Sequences` row is gated on the BJJ module, matching every
+other BJJ surface on that tab — so a *strength-only* athlete who is sent a chain
+reaches the copy once, through the accept navigation, and then has no row to
+re-find it from. That is the "reachable only by having just arrived" gap
+surviving in one configuration. Ungating was considered and not taken: the row
+would then appear, permanently, on accounts that can never populate it, and the
+inconsistency with `Position map` immediately above it would need its own
+justification. It is the same shape as #370 (N61) — *every BJJ surface with the
+module switched off* — which is already filed and claimed, and that is where it
+belongs rather than being solved twice.
 
 **Also unbuilt, and smaller:** the mobile `Sequence` type still has no
 `official` field, so a VOLA reference chain is detected as `editable === false`.

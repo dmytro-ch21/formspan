@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { configure, fireEvent, render, screen } from '@testing-library/react-native';
+import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import SequenceScreen from '../sequence/[id]';
 import SequencesScreen from '../sequence/index';
@@ -60,10 +60,19 @@ const mockPush = jest.fn();
 // `require('react')` inside the factory: the require costs a lint warning
 // against the mobile ratchet, and the ratchet has no headroom.
 const mockUseEffect = useEffect;
+// The focus callback is captured as well as run, so a test can fire it a
+// SECOND time. Nothing else can: `load`'s deps are all stable by design (that
+// stability is what stops the screen refetch-looping), so a re-render does not
+// re-run the effect — which means the refocus path, the one an athlete hits
+// every time they come back to a screen, is otherwise unreachable from here.
+let refocus: (() => void) | null = null;
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush, back: jest.fn(), replace: jest.fn() }),
   useLocalSearchParams: () => ({ id: 'seq-1' }),
-  useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
+  useFocusEffect: (cb: () => void) => {
+    refocus = cb;
+    mockUseEffect(() => cb(), [cb]);
+  },
   Stack: { Screen: () => null },
 }));
 
@@ -104,6 +113,7 @@ beforeEach(() => {
   mockGet.mockReset().mockResolvedValue(null);
   mockFetchTechniques.mockReset().mockResolvedValue([]);
   mockPush.mockReset();
+  refocus = null;
 });
 
 describe('the list', () => {
@@ -142,9 +152,30 @@ describe('the list', () => {
 
     render(<SequencesScreen />);
 
-    expect(await screen.findByTestId('sequences-error')).toHaveTextContent('Request failed (500).');
+    const err = await screen.findByTestId('sequences-error');
+    expect(err).toHaveTextContent('Request failed (500).');
+    // An error that appears without moving focus is silent to a screen reader
+    // unless it announces itself. Asserted on the prop and pinned to the
+    // literal 'polite', which is this app's convention — reading it back off a
+    // constant would pass whatever the constant said.
+    expect(err.props.accessibilityLiveRegion).toBe('polite');
     expect(await screen.findByTestId('sequence-row-local-1')).toBeTruthy();
     // The claim that must not be made: "you have none".
+    expect(screen.queryByTestId('sequences-empty')).toBeNull();
+  });
+
+  it('does not say "no chains" when it could not ask and is holding none', async () => {
+    // The nastier half of the previous test. The outbox fallback covers the
+    // athlete who has unsynced captures; someone whose captures are all synced
+    // gets an EMPTY fallback, and then the list is empty for two completely
+    // different reasons — you have none, or we could not ask. "No chains yet"
+    // is a claim about their training, and it is false in the second.
+    mockList.mockRejectedValue(new Error('Request failed (500).'));
+    mockPending.mockResolvedValue([]);
+
+    render(<SequencesScreen />);
+
+    expect(await screen.findByTestId('sequences-error')).toBeTruthy();
     expect(screen.queryByTestId('sequences-empty')).toBeNull();
   });
 
@@ -272,13 +303,38 @@ describe('the detail', () => {
     expect(screen.queryByTestId('sequence-error')).toBeNull();
   });
 
+  it('keeps a chain already on screen when a refocus lands offline', async () => {
+    // The common path, not an exotic one: read a chain, background the app,
+    // lose signal, come back. This screen reloads on FOCUS, `getSequence`
+    // resolves `null` offline for a chain this device does not hold, and
+    // assigning that would replace the steps the athlete is reading with a
+    // full-screen "you're offline". Honest, and strictly worse than what was
+    // already on the page.
+    mockGet.mockResolvedValueOnce(serverChain()).mockResolvedValue(null);
+
+    render(<SequenceScreen />);
+    await screen.findByTestId('sequence-step-1');
+
+    // Fire the focus callback again — see the `expo-router` mock for why a
+    // re-render cannot do this.
+    await act(async () => {
+      refocus?.();
+    });
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('sequence-step-1')).toHaveTextContent(/Knee cut pass/);
+    expect(screen.queryByTestId('sequence-offline')).toBeNull();
+  });
+
   it('surfaces a real failure as an error, not as offline', async () => {
     // The arm that makes the previous test mean anything.
     mockGet.mockRejectedValue(new Error('Request failed (500).'));
 
     render(<SequenceScreen />);
 
-    expect(await screen.findByTestId('sequence-error')).toHaveTextContent('Request failed (500).');
+    const err = await screen.findByTestId('sequence-error');
+    expect(err).toHaveTextContent('Request failed (500).');
+    expect(err.props.accessibilityLiveRegion).toBe('polite');
     expect(screen.queryByTestId('sequence-offline')).toBeNull();
   });
 
