@@ -236,7 +236,24 @@ describe('the saved receipt', () => {
  * most easily got wrong.
  */
 
+/**
+ * Open the typed-target form, AFTER the derivation has landed.
+ *
+ * The wait is not politeness. The form seeds itself at mount and never again —
+ * that is what stops a late fetch overwriting digits somebody is typing — so a
+ * form opened before the suggestion arrives seeds on nothing, and the prefill
+ * assertions below are then testing an empty form.
+ *
+ * This used to press the toggle the instant it existed and pass anyway, purely
+ * because `mockResolvedValue` settled within one microtask. N93 put a local
+ * cache read in front of the fetch and the race flipped: same code, same
+ * intent, suddenly red. The dependency was always there and was never stated.
+ *
+ * Keyed on the loading note rather than on a suggestion, so it works equally
+ * for the case where nothing can be derived — `data` is set either way.
+ */
 async function openManualForm() {
+  await waitFor(() => expect(screen.queryByText('Working it out…')).toBeNull());
   fireEvent.press(await screen.findByTestId('manual-toggle'));
   return screen.findByTestId('manual-form');
 }

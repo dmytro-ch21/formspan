@@ -123,6 +123,22 @@ export type Suggested = {
   suggestion: Suggestion | null;
   missing: string[];
   activities: string[];
+  /**
+   * The level this derivation actually ran at, and whether the athlete chose
+   * it — see `lib/activityLevel.ts`.
+   *
+   * Top level rather than read off `suggestion.basis`, which carries the same
+   * value: `basis` is null for an incomplete profile, and that athlete still
+   * has a level to show and change. Reading it off the basis leaves the pills
+   * unrenderable in exactly the state the rest of the screen is telling them to
+   * go and fix.
+   *
+   * Optional on the TYPE only, so a response from a server predating N93 still
+   * parses — `adoptServerActivity` treats an absent or unrecognised value as
+   * "learned nothing" rather than as a choice.
+   */
+  activity?: string | null;
+  activity_chosen?: boolean | null;
 };
 
 export type Suggestion = {
@@ -192,12 +208,31 @@ export type Projection = {
   days_late?: number;
 };
 
+/**
+ * Derive a target for `on`.
+ *
+ * **`activity` is an OVERRIDE and omitting it is the normal case.** With no
+ * parameter the server derives at whatever the athlete has stored on their
+ * profile, falling back to the documented default, and reports both back — which
+ * is the only path by which a level chosen in the browser reaches this phone.
+ * Sending one pins the derivation to it without writing anything.
+ *
+ * It used to be required, defaulting to a `useState('light')` the screen reset
+ * on every navigation. That is N93: the parameter was the ONLY place the level
+ * existed, so it could not survive leaving the tab, and the target moved with
+ * it.
+ */
 export function suggestedTarget(
   getToken: TokenGetter,
   on: string,
-  activity: string,
+  activity?: string,
 ): Promise<Suggested> {
-  const q = new URLSearchParams({ on, activity });
+  const q = new URLSearchParams({ on });
+  // Appended conditionally: `new URLSearchParams({ on, activity })` with an
+  // undefined activity serialises the STRING "undefined", which the server
+  // rejects as an unknown level — a 400 on every request, from a value nobody
+  // typed.
+  if (activity) q.set('activity', activity);
   return apiRequest<Suggested>(getToken, `/nutrition/targets/suggested?${q}`);
 }
 
