@@ -33455,6 +33455,131 @@ worktree of its own.
   carries it in prose, which is the weaker channel. That is a client change and
   is not in this PR.
 
+## 2026-08-20 — `session`'s tests deleted each other's fixtures, and the second binary was never in the room we were looking at (#426)
+
+`internal/modules/session`'s Postgres tests failed roughly 40% of the time at
+full-suite scope under load, with the package's own fixtures missing mid-run —
+`invalid input: unknown exercise "ses_fx_squat"`, then
+`panic: index out of range [0] with length 0` where a `LoadHistory` returned no
+points. Run alone the package passed 8/8. `Backend (Go)` is a required check, so
+this was a merge blocker for every backend PR and read as *"your PR broke the
+backend"* to whoever hit it.
+
+**The ticket deliberately did not guess the mechanism, and that was the right
+call, because the obvious story is false.** `seedFixtureExercises` ran per test
+via `newTestRepo` — 34 call sites — seeding shared ids with
+`ON CONFLICT DO UPDATE` and registering a `t.Cleanup` that deleted those same
+shared ids. Every test created and destroyed rows every other test depends on.
+But Go runs a package's tests sequentially without `t.Parallel()`, there is none
+in the package, no subtests, no goroutines — so *within one binary that is merely
+wasteful and always works*. Nothing else in the repo deletes a `ses_fx_*` row:
+grepped every `DELETE FROM exercises` and every fixture id across all 37
+packages, and `session`'s own cleanup is the only writer.
+
+**The second writer is a second copy of the test binary**, and it is the ordinary
+state of this repo rather than an exotic one: `vola_test` is the documented
+default target and twelve worktrees currently share it. The other process's
+per-test cleanup deletes the rows this process's in-flight test is using. That
+also explains the observation that killed the intra-package theory — the checking
+agent sampled `pg_stat_activity` once per run and saw three connections from one
+binary, because the neighbour is only connected for the ~2s its `session` package
+takes.
+
+### The measurement, and the apparatus that measured nothing
+
+**The first baseline was worthless and saying so is the point.** Twelve
+"sequential full-suite runs, 0 failures" and eighteen "concurrent runs, 0
+failures" were both **entirely served from Go's test cache** — 34 of 34 packages
+reported `(cached)`, zero tests executed. `go test` caches on inputs, and nothing
+in the inputs changes between runs; `pnpm run test:api` and CI pass no `-count`,
+so this is the normal local behaviour, not a mistake unique to the harness. Every
+number below carries `-count=1`, and the harness fails loudly if any log contains
+`(cached)`. This is the *Verify that a check can fail* rule landing on the
+measurement rather than on the code.
+
+Uncached, one database, before → after:
+
+| Arm | Before | After |
+|---|---|---|
+| One binary alone, 20 consecutive package runs | green | green |
+| Two concurrent `session` binaries (`-count=1` lanes) | **60 / 60 red** | **0 / 60** |
+| Four concurrent full suites, `session` package | **16 / 24 runs failed** | **0 / 24** |
+
+The single-binary arm is the control: the failure needs a neighbour, not load.
+0/24 against a 16/24 baseline is not a lucky streak — against the ticket's stated
+40% rate, P(0 in 24) = 0.6²⁴ ≈ 5×10⁻⁶; the one-sided 95% upper bound on the true
+post-fix rate from that arm alone is 12%, and 5% from the 60-run arm.
+
+(The two-binary arm was run twice: an early, cruder version used two `-count=10`
+lanes and scored 10/10 red, which is where that figure comes from if you find it
+quoted. The 60/60 arm replaced it because `-count=10` makes one binary hold the
+lock for ten whole package runs, which is not how anything actually invokes the
+suite.)
+
+**Verified independently before merge**, on a private database and without
+taking the above on trust: two concurrent copies of `origin/main`'s binary went
+8/8 red with the reported symptoms, one alone was green, and the fixed binary
+went 0/8 — with **4 of those 8 runs printing the "waiting for another `session`
+test binary…" notice.** That last detail is what makes the green non-vacuous: it
+proves the lock actually contended, rather than the runs happening to fall
+serially and prove nothing. A green that could not distinguish itself from "they
+never overlapped" would be the same class of mistake as the cached baseline.
+
+### The fix
+
+`TestMain` seeds the fixtures once per process and removes them once, under a
+Postgres **advisory lock** that makes one process the sole owner of the fixed ids
+in that database. Seeding once removes the churn; the lock removes the race,
+because two processes still cannot share one set of fixed ids. Three details that
+are load-bearing:
+
+- **The lock's second key is a hash of the database name.** Advisory lock keys
+  are cluster-wide, not per-database, so without it two branches on their own
+  `vola_test_<branch>` databases would serialise on each other — and per-branch
+  databases are exactly what CLAUDE.md tells you to use. CI, on a throwaway
+  database, never contends at all.
+- **The per-test sweep of *sessions* stayed exactly where it was.** Only the
+  exercise rows moved to the process. That sweep is the net for session rows
+  whose ids a test did not hand to `cleanup`; moved to package teardown it would
+  let one test's rows survive into the next, which is a different behaviour and
+  not one this change was entitled to make.
+- **No fixture id was renamed**, so `requireUnsorted` and the two order-dependent
+  tests behind it are untouched. That was the trap flagged on this package — its
+  previous rename inverted `bench`/`squat` and silently disarmed both.
+
+Both new guards were mutation-tested rather than trusted: delete the
+`lockFixtures` call and `TestTheFixtureLockIsHeldForTheWholeProcess` goes red;
+seed `implements` as a constant and `TestMainSeededTheFixtureExercises` names
+`ses_fx_db_bench` as wrong. A guard that cannot fail would have restored the
+silence this exists to end.
+
+**The lock budget was measured, not chosen.** At 60s, two lanes each running
+`-count=10` — a 20-40s hold, since the lock lives for the process — put the
+waiter within seconds of the budget every time, and 2 of 10 lane-runs then failed
+*on the wait*, which is a new flake wearing the old one's clothes. It is 120s
+now, and a waiting process says so on stderr rather than looking hung.
+
+### The part that is bigger than the ticket
+
+**`session` is not special.** At four concurrent full suites on one database, the
+same delete-your-neighbour's-fixtures mechanism fails **twelve other packages** —
+`workout` (21 of 24 runs), `nutrition` (17), `sequence` (16), `exercise` (15),
+`bjj` (13), `technique` (11), `feed` (9), `activity` (8), `health` (5), `food`
+(4), `profile` (2), `friend` and `theme` (1 each). After this change `session` is
+the only package in that list that no longer appears; the other twelve are
+untouched and still fail.
+
+So the ticket's scope was right about the symptom and too narrow about the cause.
+`workout` is the one CLAUDE.md names as *the one to copy* for fixture discipline,
+and it is now the worst offender — which means the pattern this repo teaches is
+itself the carrier. **This is left as its own follow-up rather than folded in
+silently**: generalising the lock touches twenty-odd packages and would serialise
+concurrent suites wholesale, which is a design decision with a wall-clock cost
+and deserves its own review, not a drive-by in a bugfix PR. Filed as #454.
+
+The honest one-line summary of the mechanism: *the rows vanished because another
+process deleted them, and no amount of reading the package's own sequential
+control flow could have found that.*
 
 ## 2026-08-20 — The belt curricula have an authoritative ordering, and it is not the one in the seed
 
@@ -34246,6 +34371,7 @@ several branches are in flight at once.
 
 ## Open items / known gaps as of this entry
 
+- **Twelve backend packages still delete each other's fixtures across concurrent test binaries — filed as #454.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
