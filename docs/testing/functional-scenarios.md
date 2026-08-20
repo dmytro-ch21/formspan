@@ -10326,6 +10326,54 @@ The scenarios that matter are the ones distinguishing three states, not two.
   list rather than on a disabled module turns "we could not reach the server"
   into "you do not train this".
 
+## The tab bar with nutrition off (#423 — `app/(tabs)/_layout.tsx`, `food.tsx`, `goals.tsx`)
+
+N61's largest instance, fixed separately: the Food and Goals tabs used to
+disappear outright when nutrition was off — two of five, 40% of the primary
+navigation, with nothing to say why. The answer matches #370's: **a tab is a
+link, so the tab stays and the screen behind it explains itself.**
+
+### Happy path
+
+- With nutrition **on**, all five tabs are present and Food and Goals behave
+  exactly as before. No "turned off" copy appears anywhere.
+
+### Edge cases & errors
+
+- **Turn nutrition off from You → Sports.** Food and Goals are **still in the
+  bar**. Opening either shows "Nutrition is turned off" and names where to turn
+  it back on. This is the ticket; before the fix both tabs were simply gone.
+- **Turn it back on.** Both screens return to their normal content without a
+  relaunch — the toggle's PATCH response is adopted by `ModulesProvider`, so a
+  screen that needs a restart to notice is a regression.
+- **Cold start with nutrition off.** No flash: the bar must not render five tabs
+  and then settle, and neither screen may say "turned off" for a frame before
+  the cached module set is read. Both halves come from the same rule — an unread
+  module list is an unanswered question, not a "no".
+- **Deep-link `vola://food` and `vola://goals`.** The routes stay resolvable
+  with the tab hidden, so both must still explain themselves rather than
+  rendering an empty day or deriving a target.
+- **A deployment with no food-log module at all**: both tabs ARE hidden, and the
+  screens — still reachable by deep link — say "Not available" and make **no
+  offer to turn anything on**. This is the third state, and the one case where
+  hiding is still right.
+
+### Regression trap
+
+- **Turning a DIFFERENT module off must change nothing here.** With Running
+  switched off and nutrition on, the Food tab, the Goals tab and both screens
+  are untouched. This is the vector that distinguishes a correct gate from
+  `!enabled`, and its absence is exactly why #468's guard survived its own
+  mutation test — every vector it had contained one disabled module and it was
+  always the food-log one.
+- **Restoring the tab is only half the fix.** A tab that leads to a target
+  screen deriving a number for a feature the athlete turned off trades a silent
+  absence for a confusing presence. Assert the screen's copy, not just the tab's
+  presence.
+- **The off-state must not fetch.** Both screens are guarded at the fetch, not
+  merely at the render — a screen showing an explanation while asking the server
+  for a target on every focus looks identical and is not.
+
 
 ## The activity level, and where it lives (N93 — `profiles.activity_level`, `app/(tabs)/goals.tsx`, web `nutrition/targets`)
 

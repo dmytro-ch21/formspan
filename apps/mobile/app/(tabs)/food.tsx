@@ -29,6 +29,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
+import { ModuleOffNotice } from '@/components/ModuleOffNotice';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
@@ -49,6 +50,8 @@ import {
   type Meal,
   type TargetView,
 } from '@/lib/nutrition';
+import { useModules } from '@/lib/ModulesProvider';
+import { foodLogGate } from '@/lib/modules';
 import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useTrackerDay } from '@/lib/useTrackerDay';
@@ -90,6 +93,17 @@ export default function FoodScreen() {
   });
   const { userId } = useAuth();
 
+  // N61: this tab is REACHABLE with nutrition off now — see `(tabs)/_layout.tsx`
+  // for why hiding it was the worse failure — so the screen has to say what
+  // state it is in, the way `bjj/log` already does for its own discipline.
+  //
+  // `foodLogGate` rather than the condition spelled out here: Goals asks the
+  // identical question, and a two-part condition written twice is how one copy
+  // ends up checking only half. Its `ready` half is what stops a cold start
+  // asserting "turned off" from a module list nobody has read yet.
+  const { modules, ready: modulesReady } = useModules();
+  const { disabled: foodDisabled, off: foodOff } = foodLogGate(modules, modulesReady);
+
   const on = dayString(addDays(new Date(), dayOffset));
 
   // The daily trackers, for whatever day is on screen.
@@ -104,6 +118,11 @@ export default function FoodScreen() {
   const isToday = dayOffset === 0;
 
   const refresh = useCallback(() => {
+    // Nothing to read for a module that is off, and `listTargets` would be a
+    // round trip on every focus of a screen showing an explanation. Same shape
+    // as `bjj/positions`, which guards its fetch on the module rather than
+    // relying on the early return below to hide the result.
+    if (foodDisabled) return;
     let live = true;
     // Local first, and it alone is enough to render the day.
     //
@@ -154,7 +173,7 @@ export default function FoodScreen() {
     return () => {
       live = false;
     };
-  }, [getToken, on, userId]);
+  }, [foodDisabled, getToken, on, userId]);
 
   // Refreshed on FOCUS, not mount: this is a tab screen and stays mounted for
   // the life of the process.
@@ -212,6 +231,20 @@ export default function FoodScreen() {
     setLoaded((prev) =>
       prev.on === deletingOn || prev.on === '' ? { on: deletingOn, eaten: eatenFrom(rows) } : prev,
     );
+  }
+
+  // BELOW every hook in this component, and that placement is the rule rather
+  // than a preference: an early return above one changes hook ORDER between
+  // renders, which the typechecker cannot see and which shipped a black screen
+  // on every BJJ session opened from Today. `react-hooks/rules-of-hooks` is an
+  // error in this app for exactly that.
+  //
+  // `foodDisabled` carries the `modulesReady` half, so the first frames after a
+  // cold start do not assert "turned off" from a module list that has not been
+  // read yet — the same reason the tab bar holds a frame, and the same shape
+  // `bjj/index` uses.
+  if (foodDisabled) {
+    return <ModuleOffNotice module={foodOff} action="log food" testID="food-disabled" />;
   }
 
   return (

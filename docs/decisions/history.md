@@ -35959,6 +35959,75 @@ serialised tree instead.
 metric-agnostic and the card takes its formatter, unit and smoother as
 parameters, so the second consumer should be wiring rather than building — but
 until one exists, "reusable" is a claim rather than a demonstration.
+## 2026-08-20 — A tab is a link, so the tab stays: Food and Goals no longer vanish (#423)
+
+The last and largest N61 surface. `(tabs)/_layout.tsx` hid the Food and Goals
+tabs on `!hasFoodLog(modules)`, so an athlete with nutrition switched off lost
+**two of five tabs — 40% of the primary navigation** — with nothing left behind
+to say why. They did not see a reduced app; they saw a different, smaller one.
+
+**The answer is #370's answer, applied to chrome rather than content, and that
+is the whole design decision.** #370 found that the BJJ destinations were never
+the problem: `bjj/log`, `bjj/index`, `bjj/positions` and `PromotionForm` already
+said *"BJJ tracking is off. Turn it back on under Sports in your profile."* What
+was missing was that **nothing linked to them** while the module was off, so the
+athlete never reached the screen that would explain itself. The fix there was to
+restore the links.
+
+A tab **is** the link. So the tab stays, and `(tabs)/food.tsx` and
+`(tabs)/goals.tsx` gained the off-state their BJJ counterparts already had. One
+answer to "is this off, or does it not exist", given on every surface, in one
+component — `components/ModuleOffNotice.tsx` — rather than hand-written a fifth
+and sixth time.
+
+**Hiding survives in exactly one case, and it is the third state**: a deployment
+with no food-log module at all. There is nothing to turn on, so a tab leading to
+an offer to turn it on would promise a feature the server does not have — the
+same lie as hiding one it does, pointing the other way. `serverHasFoodLog` asks
+that and only that, and is provably the union of `hasFoodLog` and
+`moduleOffWithFoodLog`.
+
+**#468's dashed-versus-card rule decides nothing here, and saying why matters
+more than the outcome.** That rule is about a placeholder occupying a slot: one
+standing where content would stand is dashed, one standing beside content is a
+card. Nothing here is standing in for anything — the tab is the real tab and
+leads to the real route. One level down, the notice IS the screen, with no
+content around it to be mistaken for; the four BJJ off-states all settled on
+plain centred text, and this follows them rather than wrapping a dashed
+rectangle around a viewport.
+
+**The method the ticket asked for.** The gating was established by reading
+`lib/modules.ts` and following its importers, not by grep — `grep -rn '\.enabled'`
+returns eleven files and **misses the tab bar**, because `_layout.tsx` asked
+through `hasFoodLog` and never wrote `.enabled` at all. The grep was run
+afterwards as a cross-check and found nothing the read had not.
+
+**The predicate moved out of the route file** into `lib/tabs.ts`, because a
+route file cannot be imported by a test — and it was inline, untested and wrong,
+which are not three unrelated facts. `foodLogGate` in `lib/modules.ts` is the
+screens' half, shared so the two-part condition is not written twice.
+
+**Fifteen mutants, fifteen killed**, and one of them survived first. Removing
+`if (foodDisabled) return;` from Goals' derivation fetch left the suite green,
+because `load` also returns on `!activityReady` and the test asserted before the
+activity cache read had landed — so the assertion could not tell the module gate
+from a race it had already lost. Two lines of waiting fixed the test, not the
+code. That is #468's lesson recurring in a new shape: a guard whose outcome is
+redundant *in the test's timing* is not tested at all.
+
+The vectors were chosen against the same lesson. #468's guard survived because
+every vector had one disabled module and it was always the food-log module. The
+two that matter here are the mirror: **a module that carries the food log and is
+off** (must not hide), and **a disabled module that does not carry it** (must
+not un-hide) — without the second, turning Running off would have put the Food
+and Goals tabs in front of an athlete on a deployment that has no food log.
+
+**Left open: no device evidence.** The ticket's fourth criterion is
+`NEEDS HUMAN EVIDENCE` — nutrition switched off then on, on a real phone,
+confirming the tabs return — and a worktree cannot produce it: `EXPO_PUBLIC_*`
+is inlined at build time from a gitignored `.env.local` no worktree has, and the
+build succeeds while shipping an app with no keys. The issue stays open after
+merge.
 
 ## Open items / known gaps as of this entry
 

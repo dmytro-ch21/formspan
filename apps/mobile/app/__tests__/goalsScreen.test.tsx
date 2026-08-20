@@ -8,6 +8,7 @@ import {
   settleActivityChoice,
 } from '@/lib/activityLevel';
 import { ApiError } from '@/lib/apiError';
+import type { Module } from '@/lib/modules';
 import { fetchAdjustment, listTargets, saveTarget, suggestedTarget } from '@/lib/nutritionApi';
 import { setActivityLevel } from '@/lib/profile';
 
@@ -86,6 +87,23 @@ jest.mock('@/lib/activityLevel', () => ({
 }));
 
 jest.mock('@/lib/profile', () => ({ setActivityLevel: jest.fn() }));
+
+/**
+ * The module set, defaulting to what the real context defaults to.
+ *
+ * `{ modules: [], ready: false }` is `ModulesContext`'s own default, so every
+ * test above this one behaves exactly as it did before the screen consulted
+ * modules at all — an unread list is an unanswered question, and the screen
+ * renders normally rather than claiming anything is off. The N61 test below is
+ * the only one that overrides it.
+ */
+const mockUseModules = jest.fn(() => ({
+  modules: [] as Module[],
+  ready: false,
+  stale: false,
+  apply: jest.fn(),
+}));
+jest.mock('@/lib/ModulesProvider', () => ({ useModules: () => mockUseModules() }));
 
 const mockRead = readActivityChoice as jest.MockedFunction<typeof readActivityChoice>;
 const mockCache = cacheActivityLevel as jest.MockedFunction<typeof cacheActivityLevel>;
@@ -911,5 +929,99 @@ describe('an assumed level is not shown as a chosen one', () => {
 
     const note = await screen.findByTestId('target-activity-assumed');
     expect(note).toHaveTextContent(/Desk job/);
+  });
+});
+
+/**
+ * N61 / #423 — the tab now reaches this screen with nutrition off, so the
+ * screen has to say so.
+ *
+ * The tab bar used to hide Food and Goals outright, which is the defect: 40% of
+ * the primary navigation vanishing with nothing to say why. Restoring the tab
+ * without this is only half a fix — it would trade a silent absence for a
+ * target screen deriving a number for a feature the athlete turned off.
+ */
+describe('with nutrition turned off', () => {
+  const DEFAULT_MODULES = { modules: [] as Module[], ready: false, stale: false, apply: jest.fn() };
+
+  function withModules(modules: Module[]) {
+    mockUseModules.mockReturnValue({ modules, ready: true, stale: false, apply: jest.fn() });
+  }
+
+  // Restored explicitly: `jest.clearAllMocks()` clears CALLS, not return values,
+  // so a `mockReturnValue` set here would otherwise follow every test declared
+  // after it into a state it never asked for.
+  afterEach(() => {
+    mockUseModules.mockReturnValue(DEFAULT_MODULES);
+  });
+
+  const nutritionOff: Module = {
+    key: 'nutrition',
+    label: 'Nutrition',
+    is_sport: false,
+    default_on: true,
+    enabled: false,
+    capabilities: {
+      catalog: '',
+      facets: [],
+      has_goals: false,
+      has_progression: false,
+      has_food_log: true,
+      record_kinds: [],
+    },
+  };
+
+  it('says which module is off instead of deriving a target', () => {
+    withModules([nutritionOff]);
+    render(<GoalsScreen />);
+
+    expect(screen.getByTestId('goals-disabled')).toBeTruthy();
+    expect(screen.getByText('Nutrition is turned off')).toBeTruthy();
+    expect(screen.queryByText('What you are eating to')).toBeNull();
+  });
+
+  // The fetch is guarded, not merely hidden. Without it the screen asks the
+  // server to derive a target on every focus while showing an explanation
+  // instead — and this assertion is what distinguishes the two, since both
+  // render identically.
+  it('asks the server for nothing', async () => {
+    withModules([nutritionOff]);
+    render(<GoalsScreen />);
+
+    // **Wait for the activity cache read to LAND before asserting**, and this
+    // is the whole difference between a test and a decoration. `load` also
+    // returns early on `!activityReady`, which is still false the instant after
+    // render — so a synchronous version of this test passes for a reason that
+    // has nothing to do with the module gate, and the gate's own mutation
+    // SURVIVES it. Measured: removing `if (foodDisabled) return;` from `load`
+    // left this green until these two lines were added.
+    await waitFor(() => expect(readActivityChoice).toHaveBeenCalled());
+    await act(async () => {});
+    refocus();
+    await act(async () => {});
+
+    expect(mockSuggested).not.toHaveBeenCalled();
+    expect(mockList).not.toHaveBeenCalled();
+    expect(mockAdjust).not.toHaveBeenCalled();
+  });
+
+  // **The vector that distinguishes a correct gate from a broken one.** With
+  // the food log ON, a different module being off must change nothing here —
+  // otherwise an athlete who turned Running off loses the target screen.
+  it('renders normally when a DIFFERENT module is off', async () => {
+    withModules([
+      { ...nutritionOff, enabled: true },
+      {
+        ...nutritionOff,
+        key: 'running',
+        label: 'Running',
+        is_sport: true,
+        capabilities: { ...nutritionOff.capabilities, has_food_log: false },
+      },
+    ]);
+    render(<GoalsScreen />);
+
+    expect(screen.queryByTestId('goals-disabled')).toBeNull();
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
   });
 });
