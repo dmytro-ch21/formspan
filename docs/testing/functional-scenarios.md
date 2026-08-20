@@ -11026,31 +11026,56 @@ Reading the diff cannot settle any of these. They need a build.
     there; a plan that moves away from the goal; a stalled rate; and not enough
     to say yet. None may render as blank space, and **none may read as "on
     track"** — we did not check is not the same as it checks out.
+14. **An unreachable plan is explained in the SERVER's words (N101).** Set a
+    phase whose rate cannot reach its goal, two ways, and confirm the sentence
+    differs between them: a rate of zero must say *"this phase holds your
+    weight where it is"*, and a rate pointing the wrong way *"this phase moves
+    your weight away from that goal"*. One sentence covering both means
+    `unreachable_reason` is being dropped again — which is not a visible
+    failure, since the generic sentence is true of either case, so this has to
+    be checked by reading both rather than by waiting for something to look
+    wrong. With the field absent the screen must still say something, falling
+    back to its own wording rather than trailing off after the dash.
 
 ### Correctness traps
 
-14. **A gap is a gap.** Leave a fortnight unweighed and confirm the line
+15. **A gap is a gap.** Leave a fortnight unweighed and confirm the line
     BREAKS rather than running straight through it. A single line across the
     hole is the app inventing a fortnight of data and it looks entirely normal.
-15. **The projection date matches Goals.** The sentence on `/goals/trend` and
+16. **The projection date matches Goals.** The sentence on `/goals/trend` and
     the feasibility line in Goals must show the SAME date — both read the
     server's `reached_on`. If they differ, something has started computing it
     locally again.
-16. **A projection beyond the drawn window exits the right edge** still
+17. **Phone and desk say the same amount about one plan.** Open the same
+    unreachable phase on `/goals/trend` and on web's nutrition targets screen
+    (`Feasibility`). **The REASON CLAUSE must match word for word** — both
+    render the server's own `unreachable_reason` — and both must say what to
+    change. A phone that explains less than the desk is the N101 defect
+    returning; it renders as a plausible sentence either way, so the two have
+    to be read side by side.
+
+    **Check the reason clause, not the whole sentence, and the goal figure is
+    why.** Mobile formats the goal through the athlete's unit setting while
+    web hardcodes `kg`, so on an imperial account the phone says `176.4 lb`
+    and the desk `80 kg` for one goal. Mobile is the correct surface there;
+    web's hardcoded unit is its own defect and is filed separately. A scenario
+    demanding the entire sentence match would fail on the surface that is
+    right.
+18. **A projection beyond the drawn window exits the right edge** still
     travelling, rather than bending to meet the goal line inside the box. A
     line that visibly lands is a claim that it lands within the period shown.
-17. **Timezone.** Run west of Greenwich in the evening and east of it in the
+19. **Timezone.** Run west of Greenwich in the evening and east of it in the
     morning: today's weigh-in must appear, and the chart's right edge must be
     the local day. A UTC date drops a morning reading as "future" on the day it
     was logged.
-18. **Units.** Switch kg/lbs and confirm the callouts, the goal-line label,
+20. **Units.** Switch kg/lbs and confirm the callouts, the goal-line label,
     `TODAY`, the delta and the entries all move together.
 
 ### Accessibility
 
-19. The chart carries a text alternative naming the direction, the amount, the
+21. The chart carries a text alternative naming the direction, the amount, the
     period and the reading count. Chart text itself is invisible to a screen
     reader — and note `getByText` cannot see it in tests either, since
     `react-native-svg` mounts an `RNSVGText` host node.
-20. The selected range chip announces itself as selected, and its label reads
+22. The selected range chip announces itself as selected, and its label reads
     as a period rather than as "1W".

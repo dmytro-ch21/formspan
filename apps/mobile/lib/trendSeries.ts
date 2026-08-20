@@ -424,6 +424,30 @@ export type Projection =
        * - `reached` — already at or past it.
        */
       reason: 'no-goal' | 'no-trend' | 'stalled' | 'moving-away' | 'reached';
+      /**
+       * The refusing party's OWN WORDS for this refusal, when it had any.
+       *
+       * Set only where the refusal was somebody else's judgement to make — in
+       * practice {@link fromPlanProjection}, translating the server's
+       * `unreachable_reason`. {@link projectToGoal} never sets it: it decides
+       * locally, so the enum above already says everything it knows, and a
+       * string invented here would be this file authoring copy about a metric
+       * it deliberately knows nothing about.
+       *
+       * **The enum is the fallback, not the summary.** Where this is present it
+       * is strictly more specific: the server distinguishes a plan that holds
+       * weight where it is from one that moves it away, and both arrive here as
+       * `moving-away` because widening the enum would mean the phone deciding
+       * which kind of unreachable this is — the re-judgement the whole `source`
+       * discriminator exists to prevent. So a render site prefers this string
+       * and falls back to the enum's copy when it is absent.
+       *
+       * Absent, never empty. `unreachable_reason` is `omitempty` on the wire,
+       * and a blank string is normalised away here rather than at the render
+       * site, so `if (serverReason)` is the whole check a caller needs and no
+       * screen can render a dangling em dash.
+       */
+      serverReason?: string;
     };
 
 /**
@@ -518,15 +542,20 @@ export type PlanProjection = {
  * translates them. Recomputing "is this reachable" on the phone is the second
  * implementation that the `source` discriminator above exists to prevent.
  *
- * **It DROPS `unreachable_reason`, and the screen invents its own wording.**
- * That is a known gap, not the design: the server's reason is display-ready
- * prose that says what to change, and threading it through would be strictly
- * better copy. Both server cases currently collapse to `'moving-away'`, whose
- * rendered sentence is a truthful superset of both, so nothing false reaches
- * the athlete today — it is merely vaguer than what we already computed. An
- * earlier version of this comment claimed the screen showed the server's
- * reason, which was simply untrue; filed as follow-up rather than left as a
- * lie in a doc block.
+ * **It carries `unreachable_reason` through as `serverReason`** (N101). The
+ * server's reason is display-ready prose naming the setting at fault — *"this
+ * phase holds your weight where it is"*, *"this phase moves your weight away
+ * from that goal"* — and it is what `apps/web`'s `Feasibility` has always
+ * shown. Dropping it here made the phone say strictly less than the desk about
+ * the same plan: not false, since the enum's sentence is a truthful superset of
+ * both server cases, but vaguer than what had already been computed, and
+ * missing the half that says what to change.
+ *
+ * The refusal itself is still the server's and is still not re-judged. Both
+ * cases remain `'moving-away'` on the enum, because splitting them would mean
+ * reading the prose to decide which kind of unreachable this is — deriving a
+ * judgement from a display string, which is worse than the coarse enum. The
+ * string rides ALONGSIDE the enum; it does not refine it.
  */
 export function fromPlanProjection(
   p: PlanProjection | null | undefined,
@@ -536,10 +565,18 @@ export function fromPlanProjection(
   if (p.already) return { kind: 'none', reason: 'reached' };
   if (p.unreachable) {
     // The server distinguishes a contradictory plan (a bulk toward a lower
-    // goal) from one that simply never arrives. Both are refusals here; the
-    // screen shows the server's own `unreachable_reason` rather than inventing
-    // wording for a judgement it did not make.
-    return { kind: 'none', reason: 'moving-away' };
+    // goal) from one that simply never arrives. Both are the same refusal on
+    // the enum; the difference travels as the server's own words, so the screen
+    // shows the judgement that was actually made rather than inventing wording
+    // for it.
+    //
+    // Trimmed, and blank normalised to absent, so `if (serverReason)` is the
+    // whole check at the render site. A whitespace-only string is not something
+    // this server sends today — `unreachable_reason` is `omitempty` — but the
+    // render site would emit a dangling "— ." if one ever arrived, and a copy
+    // defect is not worth trusting a wire field's manners for.
+    const reason = p.unreachable_reason?.trim();
+    return { kind: 'none', reason: 'moving-away', ...(reason ? { serverReason: reason } : {}) };
   }
   if (!p.reached_on) return { kind: 'none', reason: 'no-trend' };
   return {
