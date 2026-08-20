@@ -31270,6 +31270,39 @@ sugar, 175 sodium, 170 cholesterol, 0 added sugar. The seed diff is **708
 insertions and zero deletions**, verified field by field against the previous
 file so that no pre-existing value moved.
 
+### What review found, and the first one was inside this change
+
+**[blocking] The nutrition module accepted the five macros and silently
+discarded them.** The migration added the columns, `Macros` gained the fields
+and `validate` bounded them — and no SQL in `internal/modules/nutrition` was
+widened. So `POST /v1/nutrition/entries` carrying `sodium_mg: 536` validated,
+inserted without it, and read back `null`. **A stated value became an absence:
+the exact failure class this change is written against, arriving inside the
+change itself**, and invisible because null is a legitimate answer for these
+fields. Fixed across the entry select and upsert, the food select and upsert,
+the recipe-item insert and read, `DayTotals` and `PerServing`.
+
+**[blocking] The contract was wrong in both directions at once.** It advertised
+the five fields on the nutrition schemas, where the server dropped them, and
+omitted them from `CatalogFood` and `BarcodeFood`, where the server had started
+sending them. Both fixed.
+
+### Mutation testing found what the new test did not
+
+The regression test for the blocking bug passed with the macros removed from
+**either** upsert's `SET` clause. Both the food and the entry were saved exactly
+once, so only the `INSERT` half of `ON CONFLICT DO UPDATE` was ever reached —
+and correcting a saved food or a logged entry is the ordinary case, not the
+exotic one. The test now saves each twice and each `SET` clause is confirmed
+red under mutation.
+
+Worth recording how that was caught, because the first attempt at it was itself
+wrong: a `perl` substitution removed the FIRST of two identical `SET` lines,
+which was the entry's rather than the food's, and reported "still passes" for a
+mutation that had hit a different target than intended. Counting the occurrences
+before and after is what made it visible — a mutation you have not confirmed
+landed where you meant is not evidence about the guard you think you tested.
+
 ### Left open
 
 **Nothing displays any of this yet** — that is N53 and N59, and this change is

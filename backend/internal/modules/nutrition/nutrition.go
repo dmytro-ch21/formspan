@@ -497,17 +497,32 @@ func (f *Food) PerServing() Macros {
 		return f.Macros
 	}
 	var total Macros
-	var fibre float64
-	anyFibre := false
+	// The nullable macros accumulate only from items that STATED them, and stay
+	// nil when none did — a recipe whose ingredients never mention sodium is
+	// not a sodium-free recipe. Note the same caveat the day-totals query
+	// carries: if two of five ingredients state sodium, the total is the sum of
+	// two and reads as complete. Partial is the honest best available; zero
+	// would be a claim.
+	sums := map[string]float64{}
+	stated := map[string]bool{}
+	add := func(key string, v *float64, qty float64) {
+		if v == nil {
+			return
+		}
+		sums[key] += *v * qty
+		stated[key] = true
+	}
 	for _, it := range f.Items {
 		total.Kcal += it.Kcal * it.Quantity
 		total.ProteinG += it.ProteinG * it.Quantity
 		total.CarbG += it.CarbG * it.Quantity
 		total.FatG += it.FatG * it.Quantity
-		if it.FibreG != nil {
-			fibre += *it.FibreG * it.Quantity
-			anyFibre = true
-		}
+		add("fibre", it.FibreG, it.Quantity)
+		add("sat", it.SaturatedFatG, it.Quantity)
+		add("sugar", it.SugarG, it.Quantity)
+		add("added", it.AddedSugarG, it.Quantity)
+		add("sodium", it.SodiumMG, it.Quantity)
+		add("chol", it.CholesterolMG, it.Quantity)
 	}
 	y := *f.YieldServings
 	out := Macros{
@@ -516,10 +531,19 @@ func (f *Food) PerServing() Macros {
 		CarbG:    total.CarbG / y,
 		FatG:     total.FatG / y,
 	}
-	if anyFibre {
-		per := fibre / y
-		out.FibreG = &per
+	per := func(key string) *float64 {
+		if !stated[key] {
+			return nil
+		}
+		v := sums[key] / y
+		return &v
 	}
+	out.FibreG = per("fibre")
+	out.SaturatedFatG = per("sat")
+	out.SugarG = per("sugar")
+	out.AddedSugarG = per("added")
+	out.SodiumMG = per("sodium")
+	out.CholesterolMG = per("chol")
 	return out
 }
 

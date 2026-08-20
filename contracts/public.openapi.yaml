@@ -294,6 +294,30 @@ components:
             Null is NOT zero. A source that does not state fibre is not claiming
             there is none, and averaging unstated as zero drags every figure
             down.
+        saturated_fat_g: { type: number, nullable: true }
+        sugar_g: { type: number, nullable: true }
+        added_sugar_g:
+          type: number
+          nullable: true
+          description: >
+            Null for every seeded generic food — USDA SR Legacy does not carry
+            it. Populated from Open Food Facts for scanned products.
+        sodium_mg:
+          type: number
+          nullable: true
+          description: >
+            MILLIGRAMS, the US label and USDA convention. Open Food Facts
+            reports the same quantity in GRAMS and it is converted server-side;
+            a client treating this as grams is out by 1000x on the one figure an
+            athlete managing blood pressure reads. Salt is not carried — it is
+            exactly `sodium x 2.5` and therefore derivable.
+        cholesterol_mg:
+          type: number
+          nullable: true
+          description: >
+            MILLIGRAMS. Usually null for scanned products (Open Food Facts
+            carried it on neither product measured); populated for USDA-seeded
+            foods.
         market:
           type: string
           description: >
@@ -341,6 +365,28 @@ components:
           type: number
           nullable: true
           description: Null is not zero — an unstated figure is not a claim of none.
+        saturated_fat_g: { type: number, nullable: true }
+        sugar_g: { type: number, nullable: true }
+        added_sugar_g:
+          type: number
+          nullable: true
+          description: >
+            Open Food Facts carries this for many packaged products, unlike the
+            USDA-seeded catalog where it is always null.
+        sodium_mg:
+          type: number
+          nullable: true
+          description: >
+            MILLIGRAMS. **The provider reports GRAMS and the server converts**,
+            so a client must not re-scale this. Salt is not carried — measured
+            at exactly `sodium x 2.5`, so derive it if a region needs it.
+        cholesterol_mg:
+          type: number
+          nullable: true
+          description: >
+            MILLIGRAMS. Usually null: Open Food Facts carried it on neither
+            product measured while this was built. That is the ordinary case,
+            not a fault.
         external_id:
           type: string
           nullable: true
