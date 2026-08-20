@@ -12,11 +12,23 @@ name: PR has work
 # jobs run, for every PR in the repo, to fix one check. This is the smaller
 # change.
 #
-# **This adds a SIXTH check run to every PR.** N65 (#368) documents "the count
-# must be 5" as the way to spot a branch that received no checks at all; that
-# number becomes 6 when this lands, and #368's detector needs to know. Flagged
-# on #368 rather than fixed here — the two tasks are adjacent and deliberately
-# not sharing a file.
+# **This adds a sixth check NAME to every PR, and #368 needs to know.** N65
+# documents "the count must be 5" as the way to spot a branch that received no
+# checks at all. Two corrections, both measured on probe PR #401:
+#
+#   1. The number is 6 distinct names, not 5.
+#   2. **A raw count is not a state.** `commits/{sha}/check-runs` ACCUMULATES —
+#      one entry per workflow run, not per check. #401's single SHA `033e8bd`
+#      ended with **8** entries and 6 distinct names, because this workflow ran
+#      three times on it (draft, ready, draft again). Worse, the superseded
+#      middle run is still in there as a `failure`, so `statusCheckRollup` and
+#      the raw API both report a FAILING check on a PR that is green.
+#      `gh pr checks` de-dupes to the latest per name; those two do not.
+#
+# This workflow makes that more visible because it listens to more event types
+# than `ci.yml` does, but it is not the cause — any re-run on one SHA does it.
+# Flagged on #368 rather than fixed here; that session owns the count check and
+# we deliberately share no files.
 on:
   pull_request:
     types:
@@ -32,6 +44,13 @@ on:
       # `converted_to_draft`: so going back to draft clears a red rather than
       # leaving the last ready-state result standing as the visible verdict.
       - converted_to_draft
+      # `edited`: fires when a PR's BASE is retargeted. Without it, pointing a
+      # ready PR at a base that already contains its work empties the diff with
+      # no re-run — a deliberate route around the gate, and also what happens
+      # by accident when a stacked PR's parent merges and GitHub retargets it.
+      # It also fires on every title/body edit, which is a ~20s job we accept:
+      # a gate with a known way around it is worth less than the noise costs.
+      - edited
 
 permissions:
   contents: read

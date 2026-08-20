@@ -50,9 +50,14 @@ Same family, different member, and they need different detectors:
 A count check passes this case cleanly, because five checks genuinely did run.
 Neither covers the other; both are needed.
 
-**Note for #368: this workflow makes the expected count 6, not 5.** It is a
-separate workflow, so it is a separate check run, and it runs on drafts too —
-so the count is stable at 6 in both states rather than moving with draftness.
+**Two corrections for #368, both measured on probe PR #401.** (1) The expected
+number of distinct check names becomes 6, not 5. (2) More importantly, **a raw
+count is not a state**: `commits/{sha}/check-runs` accumulates one entry per
+workflow RUN, so #401's single SHA ended at **8 entries / 6 names** after this
+workflow ran three times on it — and the superseded middle run is still in the
+list as a `failure`, so `statusCheckRollup` and the raw API both report a
+failing check on a PR that is green. `gh pr checks` de-dupes to the latest per
+name; those two do not.
 
 ## How it decides
 

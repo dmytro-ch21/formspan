@@ -33499,13 +33499,43 @@ smaller change. It listens for `opened`, `reopened`, `synchronize`,
 `ready_for_review` and `converted_to_draft` — the last so that going back to
 draft clears the red rather than leaving a stale verdict standing.
 
-**The cost is that the per-PR check count goes from 5 to 6.** N65 (#368)
-documents "the count must be 5" as the way to spot a branch that received no
-checks at all, and that number is now wrong. Flagged on #368 rather than fixed
-here: the two tasks are adjacent, another session owns that one, and they were
-deliberately kept out of each other's files. The count is at least *stable* at
-6 — this workflow runs on drafts too (and passes), so it does not appear and
-disappear with draftness.
+The trigger also carries `edited`, which is the one non-obvious entry: `edited`
+is what fires when a PR's **base is retargeted**. Without it, pointing a ready
+PR at a base that already contains its work empties the diff with no re-run —
+a deliberate route around the gate, and also what happens by accident when a
+stacked PR's parent merges. It costs a ~20s job on every title or body edit,
+which is the right trade against a gate with a known way around it.
+
+### The cost, and a second finding that is worth more than the first
+
+**The per-PR check count goes from 5 to 6**, and N65 (#368) documents "the count
+must be 5" as the way to spot a branch that received no checks at all. Flagged
+on #368 rather than fixed here — another session owns that one, and the two were
+deliberately kept out of each other's files.
+
+The first draft of this entry said the count was "at least *stable* at 6". **It
+is not, and measuring it rather than asserting it is the only reason that claim
+did not ship.** `commits/{sha}/check-runs` accumulates **one entry per workflow
+RUN**, not one per check. Probe PR #401's single SHA `033e8bd` ended with:
+
+```
+8 entries, 6 distinct names
+  Ready PRs contain work  x3   (draft -> success, ready -> FAILURE, draft -> success)
+  the five ci.yml jobs    x1   each
+```
+
+So a raw count is not a state at all — it is a history. And it is worse than
+imprecise: **the superseded `failure` is still in the list**, so
+`statusCheckRollup` and the raw check-runs API both report a failing check on a
+PR that is green, while `gh pr checks` de-dupes to the latest per name and
+reports six passes. Measured all three ways on #401.
+
+That is the same shape as everything else in this entry — a signal that is
+silent, or loud, for two different reasons — and it lands squarely on how anyone
+in this repo reads CI. **Read `gh pr checks`, or group by name yourself, before
+believing either a count or a conclusion.** This workflow is not the cause; any
+re-run on one SHA does it. It listens to more event types than `ci.yml`, so it
+is merely the common way to see it now.
 
 ### Every unknown fails, because the bug is an absence read as success
 

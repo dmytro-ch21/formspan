@@ -351,12 +351,23 @@ fails a PR that is **ready** while its three-dot diff against its base is
 **empty** — the state #355 reached at 5/5 green and `MERGEABLE` with one
 `--allow-empty` commit in it, green precisely because there was nothing in it to
 fail. A **draft** is exempt, always: an empty draft is a branch pushed early.
-Two consequences worth knowing. It is a **separate workflow** because
-`ready_for_review` is not in `pull_request`'s default type set, so `ci.yml`'s
-bare trigger never re-runs when a draft is marked ready — which is why nothing
-in `ci.yml` could ever have caught this. And it makes the **per-PR check count
-6, not 5** — N65's "the count must be 5" is out of date by one. If it fires on
-you, push the work or `gh pr ready --undo <n>`.
+It is a **separate workflow** because `ready_for_review` is not in
+`pull_request`'s default type set, so `ci.yml`'s bare trigger never re-runs when
+a draft is marked ready — which is why nothing in `ci.yml` could ever have
+caught this. If it fires on you, push the work or `gh pr ready --undo <n>`.
+
+**And it corrects how CI is read here, which matters beyond this check.** N65
+says "the check count must be 5". Measured 2026-08-20 on probe PR #401: the
+number of distinct names is now **6**, and — the part that bites — **a raw count
+is not a state.** `commits/{sha}/check-runs` accumulates one entry per workflow
+RUN, not per check, so #401's single SHA `033e8bd` ended with **8 entries and 6
+distinct names** after that workflow ran three times on it. The superseded
+middle run is still in the list as a `failure`, so **`statusCheckRollup` and the
+raw check-runs API both report a failing check on a PR that is green.**
+`gh pr checks` de-dupes to the latest per name; those two do not. Read
+`gh pr checks`, or group by name yourself, before believing either a count or a
+conclusion. (Not caused by this workflow — any re-run on one SHA does it — but
+it listens to more event types, so it is now the common way to see it.)
 
 **Never merge a PR without the user's explicit go-ahead, even if CI is green.** This has been the rule for every PR in this project — don't treat a passing CI run as implicit merge permission.
 
