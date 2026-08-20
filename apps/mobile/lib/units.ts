@@ -166,6 +166,69 @@ export function formatFluid(ml: number | null | undefined, u: UnitSystem): strin
   if (u === 'imperial') return `${trim(toDisplayFluid(ml, u))} fl oz`;
   if (Math.abs(ml) >= 1000) return `${trim(round(ml / 1000, 2))} L`;
   return `${trim(round(ml, 0))} ml`;
+
+/* ---------------------------------------------------------------------------
+ * Food quantities (N90)
+ *
+ * **Grams are stored, always** — the same rule as kilograms above, and for the
+ * same reason: a stored converted value makes every historical row ambiguous
+ * the moment somebody changes the setting.
+ *
+ * The food unit is its OWN setting rather than a reading of UnitSystem.
+ * Kitchen scales and US nutrition labels are both in grams, so an imperial
+ * athlete weighing chicken still wants grams; deriving it from `imperial` would
+ * be wrong for most of the people it affects. `profiles.food_unit` stores the
+ * choice and is null until one is made — which is when `defaultFoodUnit` below
+ * applies, and only then.
+ * ------------------------------------------------------------------------- */
+
+export type FoodUnit = 'g' | 'oz';
+
+/**
+ * International avoirdupois ounce — a unit of MASS. Exact by definition.
+ *
+ * **There are two different ounces in this file and they are not
+ * interchangeable.** This one weighs food; `ML_PER_FL_OZ` measures liquid, and
+ * the US fluid ounce is 29.5735 ml. They differ by 4%, both abbreviate to "oz"
+ * in ordinary speech, and using one for the other produces a number that looks
+ * entirely reasonable. Same hazard `formatVolume` and `formatFluid` already
+ * carry above — an "oz" with no qualifier is ambiguous, so every symbol here
+ * says which.
+ */
+const G_PER_OZ = 28.349523125;
+
+/**
+ * What an athlete who has never chosen sees. The ONLY place UnitSystem touches
+ * food — once `profiles.food_unit` is set, this is not consulted again.
+ */
+export function defaultFoodUnit(u: UnitSystem): FoodUnit {
+  return u === 'imperial' ? 'oz' : 'g';
+}
+
+/** Storage (g) -> what to show in the field. */
+export function toDisplayGrams(grams: number, u: FoodUnit): number {
+  // 2dp in ounces because 0.01oz is ~0.28g — finer than any kitchen scale, and
+  // enough that a round trip does not visibly move. Whole grams because no
+  // scale an athlete owns reads a fraction of one.
+  return u === 'oz' ? round(grams / G_PER_OZ, 2) : round(grams, 0);
+}
+
+/** What was typed -> storage (g). */
+export function fromDisplayGrams(v: number, u: FoodUnit): number {
+  // 2dp rather than whole grams: rounding a typed ounce value to an integer
+  // gram would make the oz round trip lossy at small quantities, which is
+  // exactly what the test asserts against.
+  return u === 'oz' ? round(v * G_PER_OZ, 2) : v;
+}
+
+export function foodUnitLabel(u: FoodUnit): string {
+  return u === 'oz' ? 'oz' : 'g';
+}
+
+/** A quantity with its unit, for display — "150g", "5.29oz". */
+export function formatFoodQuantity(grams: number | null | undefined, u: FoodUnit): string {
+  if (grams == null) return '—';
+  return `${trim(toDisplayGrams(grams, u))}${foodUnitLabel(u)}`;
 }
 
 function round(v: number, places: number): number {

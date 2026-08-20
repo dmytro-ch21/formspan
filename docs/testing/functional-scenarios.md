@@ -9115,6 +9115,35 @@ The catalog was 177 curated foods when the scenarios above were written. It is
 - A category browse (`?category=prepared`, now thousands of rows) puts curated
   foods before bulk ones rather than whatever sorts first alphabetically.
 
+### Portions and quantity (N89, N90)
+
+- `GET /v1/nutrition/catalog/{id}` returns `portions`; a search response does
+  NOT. Assert the absence too — a client that started expecting them on a list
+  would work until the first page of 25.
+- Every portion has `grams > 0`. There is no null and no zero: "Quantity not
+  specified" and "Guideline amount per…" rows are dropped at import.
+- Portions arrive in `seq` order and a client must not re-sort — USDA lists the
+  most representative first.
+- A food with no portions (268 of 12,651) still renders a way to measure it:
+  100 g is always offered and always last.
+- **A deploy must not wipe an admin-authored food's portions.** Take ownership of
+  a food in the console, add a portion, reseed, assert it survives. The food row
+  itself will look correct either way, which is what makes this worth a test.
+- Logging 150 g of a per-100 g food records 1.5 servings and macros scaled by
+  1.5 — not 1 serving. This is the defect N90 exists to fix.
+- The g/oz toggle CONVERTS: 150 g shown as 5.29 oz. A toggle that relabels turns
+  150 g into 150 oz, a 28x overcount that looks like nothing changed.
+- A quantity typed in oz stores GRAMS. Log the same real amount once in each
+  unit and assert the two rows are identical.
+- An empty, zero or non-numeric quantity cannot be logged — `servings` CHECKs
+  `> 0` server-side, so a zero is a 500 rather than an empty meal.
+- `food_unit` is its own profile field. An athlete on `imperial` who has never
+  chosen sees oz; one who explicitly picks `g` keeps grams even after switching
+  to imperial. Those are different states and null is what distinguishes them.
+- **NEEDS DEVICE EVIDENCE**: the control is usable one-handed with the numeric
+  keyboard up, and the keyboard does not cover the field. Belongs in
+  `docs/testing/device-checks.md`; no test can reach it.
+
 ### Edge cases & errors — the availability half
 
 Each of these must produce a DIFFERENT `outcome`. A test that only asserts

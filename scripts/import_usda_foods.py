@@ -636,6 +636,98 @@ CATALOG_CATEGORIES = {
 }
 
 
+# Portions the source states but that are not a portion of food (N89).
+#
+# FNDDS ships 5,363 rows described as "Quantity not specified" — one of them
+# with a gramWeight of literally 0 — and 314 "Guideline amount per cup of hot
+# cereal" style entries, which are recipe-building amounts for the survey's own
+# analysts rather than a way anybody eats a food. Both would show up in a
+# portion picker as an option that means nothing.
+#
+# Matched on the description because that is what the source gives us; there is
+# no flag distinguishing them.
+PORTION_EXCLUDE_EXACT = ("Quantity not specified",)
+PORTION_EXCLUDE_PREFIX = ("Guideline amount",)
+
+# The longest label observed is 114 characters (FNDDS); the column allows 120.
+MAX_PORTION_LABEL = 120
+
+
+def portion_label(portion, dataset):
+    """The phrase a person would say, or None if this portion is unusable.
+
+    **The two datasets describe portions in genuinely different shapes**, and
+    this is the one place that difference is resolved:
+
+      SR Legacy / Foundation   `amount` + `modifier`, e.g. 1 + "waffle, round"
+                               `measureUnit.name` is the literal string
+                               "undetermined" on ALL 14,449 SR Legacy portions,
+                               so it is useless here and deliberately unread.
+      FNDDS                    a ready-made `portionDescription` ("1 cup"), no
+                               `amount` at all, and a `modifier` holding a bare
+                               numeric code ("63480") that must never be shown.
+
+    Reading `modifier` for FNDDS — the obvious thing, since SR Legacy uses it —
+    would put "63480" in front of an athlete as a serving size.
+    """
+    grams = portion.get("gramWeight")
+    # Zero is not a small portion, it is an absent one. FNDDS ships exactly one.
+    if not grams or grams <= 0:
+        return None
+
+    if dataset == "fndds":
+        label = (portion.get("portionDescription") or "").strip()
+    else:
+        modifier = (portion.get("modifier") or "").strip()
+        if not modifier:
+            return None
+        amount = portion.get("amount")
+        # "%g" so 1.0 renders as "1" and 0.5 stays "0.5".
+        label = "%s %s" % (("%g" % amount) if amount is not None else "1",
+                           modifier)
+
+    if not label:
+        return None
+    if label in PORTION_EXCLUDE_EXACT:
+        return None
+    if any(label.startswith(pre) for pre in PORTION_EXCLUDE_PREFIX):
+        return None
+    if len(label) > MAX_PORTION_LABEL:
+        # Fails rather than truncating: a portion label is short by nature, so
+        # one over the limit means the shape changed and somebody should look.
+        raise SystemExit("portion label too long (%d): %r" % (len(label), label))
+    return label
+
+
+def portions_for(food, dataset):
+    """Every usable portion on one source row, in USDA's own sequence order.
+
+    `sequenceNumber` is verified unique within a food across both datasets, so
+    it is safe as half the primary key; a collision would mean the source
+    changed shape and is worth failing on rather than silently dropping one.
+    """
+    out, seen = [], set()
+    for p in food.get("foodPortions") or []:
+        if not isinstance(p, dict):
+            continue
+        label = portion_label(p, dataset)
+        if label is None:
+            continue
+        seq = p.get("sequenceNumber")
+        if seq is None:
+            continue
+        if seq in seen:
+            raise SystemExit(
+                "duplicate portion sequenceNumber %r on fdcId %s"
+                % (seq, food.get("fdcId")))
+        seen.add(seq)
+        out.append({"seq": int(seq),
+                    "label": label,
+                    "grams": round(float(p["gramWeight"]), 2)})
+    out.sort(key=lambda r: r["seq"])
+    return out
+
+
 def check_categories():
     """Fail if a mapping table names a category the catalog does not have.
 
@@ -684,7 +776,7 @@ def nutrient_id(entry):
     return entry.get("nutrientId")
 
 
-def load_dataset(path, key, category_table):
+def load_dataset(path, key, category_table, dataset):
     """Index one FDC dump, keeping only the rows and nutrients we store.
 
     **Null entries are real.** The 2026-04-30 Foundation file carries 32 literal
@@ -745,6 +837,7 @@ def load_dataset(path, key, category_table):
             "desc": description,
             "category": category,
             "macros": macros,
+            "portions": portions_for(f, dataset),
         })
     return out, skipped_no_energy, skipped_category
 
@@ -821,6 +914,7 @@ def build_curated(sr_index):
             "market": MARKET,
             "external_id": str(top["fdc_id"]),
             "usda_description": top["desc"],
+            "portions": top["portions"],
         })
     if missing:
         raise SystemExit("unresolved spec entries: " + ", ".join(missing))
@@ -863,6 +957,7 @@ def build_bulk(indexes, claimed):
                 "serving_grams": SERVING_GRAMS,
                 "market": MARKET,
                 "external_id": str(row["fdc_id"]),
+                "portions": row["portions"],
             })
     return rows
 
@@ -905,13 +1000,13 @@ def main():
     check_categories()
 
     sr_index, sr_noenergy, sr_nocat = load_dataset(
-        args.sr_legacy, "SRLegacyFoods", SR_CATEGORIES)
+        args.sr_legacy, "SRLegacyFoods", SR_CATEGORIES, "sr")
     survey_index, sv_noenergy, sv_nocat = load_dataset(
-        args.survey, "SurveyFoods", WWEIA_CATEGORIES)
+        args.survey, "SurveyFoods", WWEIA_CATEGORIES, "fndds")
     extra = [survey_index]
     if args.foundation:
         found_index, fd_noenergy, fd_nocat = load_dataset(
-            args.foundation, "FoundationFoods", SR_CATEGORIES)
+            args.foundation, "FoundationFoods", SR_CATEGORIES, "sr")
         extra.append(found_index)
         print("foundation: %d usable, %d without energy, %d excluded by category"
               % (len(found_index), fd_noenergy, fd_nocat), file=sys.stderr)
@@ -923,8 +1018,13 @@ def main():
 
     rows = build(sr_index, extra)
     curated = sum(1 for r in rows if r["rank_tier"] == TIER_CURATED)
+    portions = sum(len(r["portions"]) for r in rows)
+    with_portions = sum(1 for r in rows if r["portions"])
     print("catalog:   %d rows (%d curated, %d bulk)"
           % (len(rows), curated, len(rows) - curated), file=sys.stderr)
+    print("portions:  %d across %d rows (%.0f%% of the catalog has one)"
+          % (portions, with_portions, 100.0 * with_portions / len(rows)),
+          file=sys.stderr)
 
     rendered = render(rows)
 

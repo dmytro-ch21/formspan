@@ -175,7 +175,46 @@ func (r *PostgresRepository) Get(ctx context.Context, id string) (*Food, error) 
 	if err != nil {
 		return nil, fmt.Errorf("food: get: %w", err)
 	}
+	// A second query rather than a JOIN. A join would repeat all 23 food
+	// columns once per portion — up to 18 times — and then need de-duplicating
+	// in Go. Two round trips on a single-food read is the cheaper mistake.
+	//
+	// Portions are loaded HERE and not in Search, deliberately: see
+	// Food.Portions for why a 25-row search page must not carry them.
+	portions, err := r.portionsFor(ctx, f.ID)
+	if err != nil {
+		return nil, err
+	}
+	f.Portions = portions
 	return f, nil
+}
+
+// portionsFor returns one food's portions in USDA's own sequence order.
+//
+// Returns nil, not an empty slice, when a food has none — 268 of the 12,651
+// catalog rows are in that state legitimately, and `omitempty` on the field
+// then keeps `portions` off the wire entirely rather than sending `[]`.
+func (r *PostgresRepository) portionsFor(ctx context.Context, foodID string) ([]Portion, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT seq, label, grams FROM food_catalog_portions
+		  WHERE food_id = $1 ORDER BY seq ASC`, foodID)
+	if err != nil {
+		return nil, fmt.Errorf("food: portions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Portion
+	for rows.Next() {
+		var p Portion
+		if err := rows.Scan(&p.Seq, &p.Label, &p.Grams); err != nil {
+			return nil, fmt.Errorf("food: scan portion: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("food: portion rows: %w", err)
+	}
+	return out, nil
 }
 
 // Coverage answers "what is actually in here".
@@ -346,6 +385,53 @@ func (r *PostgresRepository) UpsertAll(ctx context.Context, foods []Food) error 
 	if err := results.Close(); err != nil {
 		return fmt.Errorf("food: batch: %w", err)
 	}
+
+	// Portions are REPLACED wholesale for seed-owned foods, not diffed.
+	//
+	// The food upsert above goes to some trouble to avoid touching rows it did
+	// not change (`IS DISTINCT FROM`), and this deliberately does not: a portion
+	// row is four small columns with no `updated_at` and nothing downstream
+	// watches it, so the diffing machinery would buy nothing. Delete-then-insert
+	// is also the only shape that can REMOVE a portion USDA withdrew, which the
+	// food upsert itself cannot do for a withdrawn food.
+	//
+	// **Both halves are scoped to `source = 'seed'`**, which is what stops a
+	// deploy wiping the portions of a food the console has taken ownership of.
+	// Drop that from either statement and an admin edit loses its portions on
+	// the next deploy — silently, because the food row itself would be fine.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM food_catalog_portions p
+		 USING food_catalog f
+		 WHERE p.food_id = f.id AND f.source = 'seed'`); err != nil {
+		return fmt.Errorf("food: clear portions: %w", err)
+	}
+
+	pbatch := &pgx.Batch{}
+	queued := 0
+	for _, f := range foods {
+		for _, p := range f.Portions {
+			pbatch.Queue(`
+				INSERT INTO food_catalog_portions (food_id, seq, label, grams)
+				SELECT $1, $2, $3, $4
+				 WHERE EXISTS (SELECT 1 FROM food_catalog
+				                WHERE id = $1 AND source = 'seed')`,
+				f.ID, p.Seq, p.Label, p.Grams)
+			queued++
+		}
+	}
+	if queued > 0 {
+		presults := tx.SendBatch(ctx, pbatch)
+		for i := 0; i < queued; i++ {
+			if _, err := presults.Exec(); err != nil {
+				presults.Close() //nolint:errcheck // returning the more useful error
+				return fmt.Errorf("food: upsert portion %d: %w", i, err)
+			}
+		}
+		if err := presults.Close(); err != nil {
+			return fmt.Errorf("food: portion batch: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("food: commit: %w", err)
 	}

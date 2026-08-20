@@ -715,3 +715,134 @@ func TestRankTierDoesNotFlattenOrderingWithinATier(t *testing.T) {
 		t.Errorf("within one tier the decoy ranked first (%q) — lead position is no longer doing its job", got[0].ID)
 	}
 }
+
+// Portions come back in USDA's own sequence order, from Get only (N89).
+func TestGetReturnsPortionsInSequenceOrder(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := seedTierFixtures(t, repo, []tierFixture{
+		{"fd-n89-egg", "Egg, whole, raw, fresh", "egg", 0},
+	})
+	// Inserted OUT of order deliberately: if the query lost its ORDER BY, a
+	// test that inserted them in order could still pass on insertion order.
+	for _, p := range []struct {
+		seq   int
+		label string
+		grams float64
+	}{
+		{3, "1 jumbo", 63},
+		{1, "1 large", 50},
+		{2, "1 extra large", 56},
+	} {
+		if _, err := repo.pool.Exec(ctx,
+			`INSERT INTO food_catalog_portions (food_id, seq, label, grams) VALUES ($1,$2,$3,$4)`,
+			"fd-n89-egg", p.seq, p.label, p.grams); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := repo.Get(ctx, "fd-n89-egg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1 large", "1 extra large", "1 jumbo"}
+	if len(got.Portions) != len(want) {
+		t.Fatalf("got %d portions, want %d", len(got.Portions), len(want))
+	}
+	for i, w := range want {
+		if got.Portions[i].Label != w {
+			t.Errorf("portion %d = %q, want %q — USDA lists the most representative first and that order is the product decision", i, got.Portions[i].Label, w)
+		}
+	}
+	if got.Portions[0].Grams != 50 {
+		t.Errorf("'1 large' = %v g, want 50", got.Portions[0].Grams)
+	}
+}
+
+// Search must NOT carry portions. A 25-row page would haul ~60 of them for a
+// choice the athlete has not made yet.
+func TestSearchDoesNotCarryPortions(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := seedTierFixtures(t, repo, []tierFixture{
+		{"fd-n89-search-egg", "Egg, whole, raw, fresh", "egg", 0},
+	})
+	if _, err := repo.pool.Exec(ctx,
+		`INSERT INTO food_catalog_portions (food_id, seq, label, grams) VALUES ($1,1,'1 large',50)`,
+		"fd-n89-search-egg"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _, err := repo.Search(ctx, SearchFilter{Query: "egg", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range got {
+		if f.ID == "fd-n89-search-egg" {
+			found = true
+			if len(f.Portions) != 0 {
+				t.Errorf("search returned %d portions; the list must not carry them", len(f.Portions))
+			}
+		}
+	}
+	if !found {
+		t.Fatal("fixture did not match — the assertion above never ran")
+	}
+}
+
+// **The guard that silently loses console work if it is dropped.**
+//
+// A deploy replaces portions wholesale rather than diffing them, and both the
+// DELETE and the INSERT are scoped to `source = 'seed'`. Without that scoping a
+// reseed wipes the portions of a food the console has taken ownership of — and
+// it does so invisibly, because the food row itself is left correct by the
+// upsert's own ownership rule. This is the same shape as the exercise module's
+// `updateWithin` blanking, which has shipped three times.
+func TestSeedDoesNotTouchPortionsOfAnAdminOwnedFood(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if _, err := repo.pool.Exec(ctx, `
+		INSERT INTO food_catalog (
+			id, name, brand, category, aliases, serving_label, serving_grams,
+			kcal, protein_g, carb_g, fat_g, fibre_g, market, rank_tier, source,
+			external_id, external_source)
+		VALUES ('fd-n89-admin', 'Console food', '', 'dairy', '{}', '100 g', 100,
+		        100, 1, 1, 1, 0, 'us', 1, 'admin', NULL, NULL)
+		ON CONFLICT (id) DO UPDATE SET source = 'admin'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.pool.Exec(ctx,
+		`INSERT INTO food_catalog_portions (food_id, seq, label, grams)
+		 VALUES ('fd-n89-admin', 1, '1 hand-authored scoop', 31)
+		 ON CONFLICT (food_id, seq) DO UPDATE SET label = EXCLUDED.label`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := repo.pool.Exec(context.Background(),
+			`DELETE FROM food_catalog WHERE id = 'fd-n89-admin'`); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
+
+	// A deploy runs. It carries a row with the same id and different portions,
+	// which is exactly what would overwrite the console's work.
+	if err := repo.UpsertAll(ctx, []Food{{
+		ID: "fd-n89-admin", Name: "Deploy food", Category: "dairy",
+		Aliases: []string{}, ServingLabel: "100 g", Market: "us",
+		KCal: 1, Source: SourceSeed,
+		Portions: []Portion{{Seq: 1, Label: "1 deploy portion", Grams: 999}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.Get(ctx, "fd-n89-admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Portions) != 1 {
+		t.Fatalf("admin-owned food has %d portions after a deploy, want 1 — the deploy wiped console-authored data", len(got.Portions))
+	}
+	if got.Portions[0].Label != "1 hand-authored scoop" || got.Portions[0].Grams != 31 {
+		t.Errorf("deploy overwrote an admin-owned food's portion: got %q = %v g", got.Portions[0].Label, got.Portions[0].Grams)
+	}
+}

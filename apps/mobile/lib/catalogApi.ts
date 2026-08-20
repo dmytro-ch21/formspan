@@ -63,6 +63,21 @@ export type CatalogOutcome =
   /** A value this build does not recognise. Never treated as an answer. */
   | 'unknown';
 
+/**
+ * One household way to measure a food — "1 large" = 50 g (N89).
+ *
+ * Served by `GET /v1/nutrition/catalog/{id}` only; a search result never
+ * carries these, which is why the field is optional here. `seq` is USDA's own
+ * ordering and the array arrives already sorted by it — re-sorting client-side
+ * would replace their editorial judgement with a guess.
+ */
+export type CatalogPortion = {
+  seq: number;
+  label: string;
+  /** Always > 0. A portion with no known weight is dropped server-side. */
+  grams: number;
+};
+
 export type CatalogFood = Macros & {
   id: string;
   name: string;
@@ -70,6 +85,8 @@ export type CatalogFood = Macros & {
   category: string;
   serving_label: string;
   serving_grams: number | null;
+  /** Present on a single-food GET, absent from search results. */
+  portions?: CatalogPortion[];
 };
 
 export type CatalogCoverage = {
@@ -164,4 +181,24 @@ export function emptySearchMessage(result: CatalogSearch, query: string): string
       // value is entitled to claim the food is missing.
       return 'The catalog could not answer that one. Your own saved foods still work.';
   }
+}
+
+/**
+ * One catalog food, WITH its household portions (N89).
+ *
+ * A separate call from `searchCatalog` because the search deliberately does not
+ * carry portions — a 25-row page would haul ~60 of them for a choice the
+ * athlete has not made yet. This is fetched when a specific food is tapped.
+ *
+ * Portions arrive already ordered by USDA's own `seq`; do not re-sort.
+ */
+export async function fetchCatalogFood(
+  getToken: TokenGetter,
+  id: string,
+): Promise<CatalogFood> {
+  const res = await apiRequest<CatalogFood>(
+    getToken,
+    `/nutrition/catalog/${encodeURIComponent(id)}`,
+  );
+  return { ...res, portions: res.portions ?? [] };
 }
