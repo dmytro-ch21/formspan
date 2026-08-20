@@ -166,7 +166,19 @@ const fixtureLockKey = 426
 
 // fixtureLockWait bounds the wait rather than blocking to the test timeout, so
 // the failure names its own cause instead of arriving as a 3-minute hang.
-const fixtureLockWait = 60 * time.Second
+//
+// The budget has to cover a whole neighbouring RUN, because the lock is held
+// for the lifetime of the process holding it — and that is much longer than one
+// package's ~2s when the neighbour was started with `-count=N`. Measured at 60s
+// this was too thin: two lanes each running `-count=10` (a 20-40s hold) put the
+// waiter within a few seconds of the budget every time, and 2 of 10 lane-runs
+// then failed on the wait rather than on anything real. 120s tolerates several
+// queued waiters and still leaves margin under CI's `-timeout 3m`.
+//
+// Contention is zero in the cases that matter: CI gets a throwaway database,
+// and the lock is scoped per-database, so a per-branch `vola_test_<branch>`
+// never queues at all.
+const fixtureLockWait = 120 * time.Second
 
 // The lock's SECOND key is a hash of the database name. Advisory lock keys are
 // CLUSTER-wide, not per-database, so without this two binaries running against
@@ -180,7 +192,9 @@ const fixtureLockScope = `('x' || substr(md5(current_database()), 1, 8))::bit(32
 // connection closes, including when the binary dies, so a crashed run cannot
 // wedge the next one.
 func lockFixtures(ctx context.Context, conn *pgx.Conn) error {
-	deadline := time.Now().Add(fixtureLockWait)
+	started := time.Now()
+	deadline := started.Add(fixtureLockWait)
+	announced := false
 	for {
 		var got bool
 		if err := conn.QueryRow(ctx,
@@ -201,6 +215,15 @@ func lockFixtures(ctx context.Context, conn *pgx.Conn) error {
 					"section describes:\n"+
 					"  createdb -U vola vola_test_<branch> && TEST_DATABASE_URL=…vola_test_<branch>",
 				fixtureLockWait, exBench, exSquat)
+		}
+		// Say so once. A silent wait for a lock is indistinguishable from a
+		// hung test binary, and the person watching has no reason to suspect a
+		// second copy of themselves.
+		if !announced {
+			fmt.Fprintf(os.Stderr,
+				"session tests: waiting for another `session` test binary to release "+
+					"this database's fixture lock (up to %s)…\n", fixtureLockWait)
+			announced = true
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
