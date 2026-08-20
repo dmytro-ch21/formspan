@@ -7155,6 +7155,55 @@ syllabus than the one that was agreed. Nothing goes red on its own.
   thin description silently drops a belt's framing and merely looks plain.
   `TestEveryBeltRoadmapExplainsItselfInItsDescription` covers it.
 
+### The roadmap screen, collapsed by default (N98, 2026-08-20)
+
+`app/curriculum/[id]` was rebuilt as a hierarchy — belt → milestone → lesson,
+each expanding on tap, everything closed on arrival. Almost every scenario here
+is a claim about **what is not on screen**, which is the half a screenshot
+review will not catch.
+
+- **Arriving shows the shape of the belt and none of its contents.** At white
+  belt: eleven milestone cards, their titles and lesson counts, and not one of
+  the 93 lesson names. "Where am I" must be answerable without scrolling.
+- **One milestone open at a time.** Open milestone 3, then milestone 7:
+  milestone 3's lessons must be gone. Otherwise an athlete can manufacture the
+  wall of text the design exists to avoid.
+- **One lesson open at a time**, and opening a different milestone closes the
+  open lesson with it.
+- **A lesson expands IN PLACE.** Nothing navigates. The surrounding milestone,
+  its other lessons and the timeline are all still on screen — in a 93-item
+  roadmap, leaving and coming back loses your position.
+- **The lesson detail says how it is MEASURED and offers no checkbox.** No
+  control anywhere on the screen may mark anything complete; completion is
+  derived from logged evidence and there is no write path for it. Check for a
+  checkbox, a switch and a long-press, not just a visible button.
+- **A concept reads as *understand this*, with no measurement block and no
+  "Work on this".** 22 of purple's 66 items and 48 of brown's 82 are concepts,
+  so this is the common case on the upper belts, not an edge one.
+- **"Work on this" adds exactly one technique**, at the FRONT of the focus list,
+  and nothing else from the roadmap rides in behind it. With five already held
+  the eviction confirm must appear — and the technique just requested must be
+  the one that survives, not the one dropped.
+- **A milestone with nothing completable shows no progress at all** — not `0/0`
+  and not 0%. Purple milestones 2 and 10, and five of brown's ten, are the real
+  cases. A neighbouring milestone showing its own `2/7` in the same run is what
+  proves the counter exists and is being withheld rather than missing.
+- **Concept-only milestones are out of BOTH halves of the belt fraction.** A
+  purple belt with every countable milestone finished must read 100%, not 80%.
+- **Progress is derived on every read.** Log evidence that clears a criterion,
+  return to the screen: the milestone's counter, both rings and the bar all
+  move without any client-side write.
+- **Not enrolled reads as "nothing is being counted"** — the rings show an em
+  dash rather than 0%, the measures show the target with no `have` half, and the
+  primary "Start working this" button is visible rather than buried in the
+  overflow.
+- **Both belts get the progress card**, though the white reference does not draw
+  one. Check white as well as blue.
+- **Measure it at WHITE belt, collapsed and with one milestone open.** Brown is
+  28 countable items and purple is mostly concepts; both render fine and prove
+  nothing. The collapsed case must be instant, and expanding/collapsing must not
+  drop frames on the oldest supported hardware.
+
 ### Re-authoring the content under a mid-roadmap athlete (N97)
 
 **This is the one that looks like a bug and is not**, so run it before believing

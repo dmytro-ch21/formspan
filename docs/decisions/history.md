@@ -36252,6 +36252,132 @@ happily.
   N30's entry already flagged the mobile curriculum screen as a plain
   `ScrollView` at 85 items; this exceeds that.
 
+## 2026-08-20 — N98: the roadmap screen, rebuilt as a hierarchy of collapsed things (#446)
+
+`apps/mobile/app/curriculum/[id].tsx` was a flat list: a description, an
+enrolment button, a focus panel, then every item in the curriculum as a
+`TechniqueRow`, grouped under phase headers. That was defensible at 42 items
+and stopped being defensible the moment **#476 landed 93 lessons across 11
+milestones on white belt** — the entry above ends on exactly that worry, and
+this is the answer to it.
+
+The screen is rebuilt against the two supplied mockups, and the design and the
+performance problem turn out to be one answer rather than two.
+
+**Belt → milestone → lesson, each expanding on tap, everything closed on
+arrival.** The user's own framing: *"each bigger thing on tap expands, that's
+how we see first high level next more in details."* Arriving shows the **shape**
+of the belt — eleven milestones, where you are, what is left — and none of its
+contents. Opening one milestone closes the previous one; opening a lesson
+closes the previous lesson. A lesson expands **in place** and never navigates:
+in a 93-item roadmap, leaving the screen loses your position, and the whole
+point of expanding is that the context stays on screen around it.
+
+That is also what retires N30's sizing flag without changing the container.
+**Closed, the screen mounts eleven cards, a header and two summary cards
+regardless of belt**, and the worst realistic case is one open milestone — 13
+lessons at white, not 93. So it stays a plain `ScrollView`, deliberately and
+now with a reason rather than by omission.
+
+**The lesson level says how it is MEASURED and offers no checkbox.** It cannot
+offer one: completion is derived from logged evidence, and migration 000034 is
+explicit that there is deliberately no way to mark a technique mastered by
+hand. So the honest thing at the level where an athlete asks "what do I have to
+do" is *what would count* — `Landed live 3 / 15`, `Classes drilled in 0 / 10` —
+followed by where their record stands and a **Work on this** button that puts
+the one technique into the focus list, where the reflection wizard will record
+the evidence these thresholds read. `proposeOneFocus` is new for that: same
+wholesale-replacement endpoint and the same cap, but the athlete named ONE
+thing, so nothing else rides in behind it and nothing is retired for being
+mastered. It goes **first** in the list, which is what stops the five-slot cap
+silently dropping the very technique that was just requested.
+
+**A concept expands too, and reads as *understand this*.** `measuresOf` returns
+`null` rather than `[]` for one, and the two are different claims — "no
+criteria" is a fact about the content, "no thresholds met" would be a fact about
+the athlete. Collapsing them is how a concept ends up drawn as an unfinished
+technique, which matters more than it sounds: 22 of purple belt's 66 items and
+48 of brown's 82 are concepts.
+
+**Progress is derived at every level, and a milestone with nothing completable
+in it shows none at all.** Not 0% — a milestone of concepts can never move, and
+0% there reads as failure. Those milestones leave **both** halves of the belt's
+own fraction as well: in the denominator they cap a purple belt below 100%
+forever, and counted as complete they claim work nobody could have done. Two of
+purple's ten milestones and five of brown's ten are in exactly that position, so
+this is most of a belt rather than an edge case.
+
+### What came from the mockups, and the three places they were not followed
+
+The reference is a numbered vertical timeline: a circled number per milestone on
+a **continuous rule in the belt's own colour**, running behind the circles; the
+current milestone's circle larger and ringed in that colour; each milestone a
+card with its title, `N lessons` **in the belt colour**, and a chevron;
+expanded, its lessons as belt-coloured dots on a second **inner** rule. Above
+it a progress card (trophy tile, `White belt path`, `0 of 11 milestones
+completed`, a bar and a percentage ring); below it a completion card with the
+same ring. The belt name is uppercase with 4.5pt of tracking — the most
+distinctive type on the screen, and deliberately not a navigation title, so the
+stack header is hidden and the screen draws its own circular back control.
+
+Three deliberate departures, all recorded on the issue:
+
+- **The white mockup has no progress card; both belts get one.** Two belts
+  behaving differently is a worse outcome than matching one image, and that card
+  is where "0 of 11 milestones completed" lives.
+- **The white mockup shows 10 milestones; the document has 11.** The document
+  wins — that ruling predates this work.
+- **The completion card's glyph is the kit's `goal` bullseye, not a flag.**
+  `assets/brand/icons/` has no flag, and inventing brand geometry to match one
+  mockup is the wrong trade.
+
+Two new pieces of drawing, both small. `components/BeltMark.tsx` is the **tied**
+belt from the reference — `components/Belt.tsx` draws the belt as a physical
+object with its rank bar, which is right for a rank card and reads as a coloured
+rectangle at 64pt, where the knot is what makes it a belt. It takes the belt's
+**accent** rather than its strap colour, which is the one place it departs from
+`Belt`: a strap colour is a picture of dyed cotton (#1B4CC4 measures 2.50:1
+against `surface`), and this is a 16pt mark doing signalling work.
+`components/ui/ProgressRing.tsx` is the percentage ring, and its `percent` is
+**nullable, where null is not zero** — a roadmap nobody has taken on is not 0%
+through, nothing is being counted at all, and it draws an em dash.
+
+No new colours: everything is `beltAccent` and existing `vola` tokens, so
+`check:palette` is unaffected.
+
+### What is tested, and how the tests were checked
+
+`lib/roadmapView.ts` holds every derivation, out of the screen file for the
+reason `lib/curriculumRow.ts` was split out before it — the last blocking
+finding on this feature was a display state derived from the wrong field, in a
+screen file no test could reach. 23 unit tests there, 6 more on
+`proposeOneFocus`, and **18 render tests** in
+`app/__tests__/roadmapScreen.test.tsx`, which is the first component test this
+screen has ever had. The render tests assert what is and is not **mounted**,
+because that is the one thing reading the source cannot tell you: a collapsed
+section and a section rendered at zero height are the same code.
+
+Both mutations were run rather than assumed. Starting `openMilestone` at `1`
+turns 2 tests red; letting a concept-only milestone divide by
+`Math.max(1, countable)` turns 5 red across both files. Baseline green in the
+same session, 63 tests.
+
+### Gaps
+
+- **The belt mark is a judgement call.** It is a tied belt drawn from the
+  reference rather than an asset from `assets/brand/`, which is the source of
+  truth for brand identity. If it is going to be permanent it belongs in the
+  kit, generated like the 25 UI icons.
+- **Triage order is still gone** (previous entry). A white belt being mounted
+  every round meets *Escape Bad Positions* as milestone 10. The "start here"
+  affordance that entry proposed for this screen is not built — the current
+  milestone is simply the first unfinished one, in author order.
+- **The enrolment toggle and the bulk focus write moved into an overflow menu**,
+  because the reference gives them no place on the timeline. The not-enrolled
+  state still carries a visible primary button; the enrolled state does not, and
+  whether "Put this down" is discoverable enough behind `•••` has not been
+  tested on anyone.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.
