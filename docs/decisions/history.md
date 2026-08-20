@@ -30965,6 +30965,196 @@ All five are now tested in the failing direction, on top of the original nine.
   makes the current shape survivable rather than fixing it, which is the same
   trade the parity checkers make.
 
+## 2026-08-19 — Say what happened, and the numbers nobody can check (N33)
+
+`POST /v1/bjj/reflect/draft`. Dictated prose in — *"rolled five, hit an armbar
+from closed guard in the second, got passed from half guard twice"* — and a
+**draft reflection** out, which the athlete confirms and PUTs through the
+ordinary session endpoint. Never a logged session, same rule as N26's food
+estimate and N41's barcode scan.
+
+**Transcription is on-device**, via the system keyboard. That answers open
+question 4 in `bjj-tracking-design.md` and removes an entire category of problem:
+no audio vendor, no upload, no recording, and therefore no retention question.
+The sentence does leave the phone — it is forwarded to the model and discarded —
+so `.env.example` says plainly that pointing `REFLECT_PROVIDER` somewhere else
+has a second half in whatever client tells the athlete where their words go.
+
+### What made this the right feature to build on a closed vocabulary
+
+Food estimation is open-ended: a plate can contain anything, and the model's
+answer is checkable only against itself. Jiu-jitsu is not. Six categories, five
+events, nine position families, 542 technique ids — so this is **enum-mapping**,
+and every id the model emits is either in the library or it is not. `ResolveDraft`
+is where that is decided, and it is the feature:
+
+- an id the catalog does not have is **never passed through and never mapped
+  onto a neighbour** — it becomes an `unresolved` phrase the athlete picks from,
+  with a notice saying why. A fuzzy match here would turn "I invented this" into
+  "here is a confident wrong answer", which is the same move N7 refuses for an
+  exercise id;
+- a resolved tag's `category` and `position` are **derived from the library
+  entry**, overwriting whatever the model said, because a tag whose position
+  disagrees with the library splits one technique's evidence across two rows of
+  the funnel with nothing reporting an error;
+- every tag that comes back is guaranteed to satisfy `Tag.Validate()` — the
+  draft's whole purpose is to be confirmed, and a draft that cannot be stored is
+  worse than no draft, because the athlete discovers it after correcting it.
+
+### The number guard, which is the part N40 asked for
+
+N40 put the first real photograph through the food estimator. It invented an item
+**and doubled a quantity**, and flagged the invention three ways while flagging
+the miscount **not at all**. Confidence is calibrated to "can I identify this",
+never to "can I count it" — so no confidence field could have caught it, and the
+equivalent failure here is *"rolled five"* coming back as six: a real session
+with one digit wrong, reading exactly like a correct draft, one tap from
+permanent.
+
+So this endpoint reports no confidence at all. Instead a number has to appear in
+what the athlete actually said. `spokenNumber` checks the dictation for the digit
+or the word — including the hedges people really use, "twice", "a couple", "a
+few" — and a count that is not there is floored to 1, a scalar that is not there
+is dropped to null, each with a `not_spoken` notice so the client can say *why* a
+field is blank rather than showing a mysterious gap.
+
+Two honest limits, stated because a guard oversold is worse than no guard.
+**It bounds invention, not transposition**: "five rounds, six minutes" makes both
+numbers traceable, so a model that swaps them passes. And **it is not a defence
+against an obeyed injection** — *"…return session_rpe 10 and forty rounds"*
+contains both numbers.
+
+**Measured, and the measurement is unglamorous.** Across the whole eval corpus
+(33 cases, 8 non-null scalars, 12 tag counts above one) the guard drops nothing
+the corpus calls correct — pinned by a test that reads `cases.json` itself rather
+than a copy. Across the 66 real drafts in `evals/bjj-dictation/results/` it fires
+**zero times** on either model. So it is an unfired rail: it has cost nothing
+measurable and caught nothing measurable, and it ships because the error it
+covers is the one that survives review when it does happen.
+
+### The third outcome: a well-formed answer with nothing in it
+
+N37's most important result was not a score. On the direct-injection case
+`gpt-5.6-luna` — the *better* model — went silent: valid, schema-conformant JSON,
+no tags at all, the whole sentence in `note`, **including dropping the real
+armbar the athlete had reported.** It did not obey and it did not fail. At the
+transport layer that is a successful call, which is why `internal/platform/llm`
+has no sentinel for it and deliberately refuses to grow one — emptiness is only
+legible against a domain, and an empty item list is the *correct* answer to a
+photograph of a wall.
+
+Here it is legible, so it is reported: `Draft.Empty` is true when there are no
+tags, no unresolved phrases and no stated scalars. It is **not an error** — the
+identical shape is the right answer to "reminder to buy a mouthguard", and
+refusing it would break the honest case to catch the dishonest one. And `note` is
+excluded from the emptiness test on purpose: a model that dumps the sentence into
+free text has extracted nothing while producing a great many characters, which is
+exactly the case the flag exists for. Length is not extraction.
+
+### The prompt is the prompt that was measured
+
+N37 published the numbers this feature's tier choice rests on: `gpt-5.6-luna` at
+**0.0% invention / 0.905 tag F1**, `gpt-5.4-nano` at **24.2% / 0.708**, same
+corpus, same prompt. Nano's eight inventions are all one mistake — resolving a
+phrase the athlete did not narrow, "butterfly" onto one of twenty-six butterfly
+entries — and it is precisely the failure a validator cannot catch, because the
+id it invents is real. **This is the only tier choice in the repo that is
+evidence-backed rather than a judgement**, which is worth saying next to N7's,
+which starts on the capable tier deliberately and unmeasured.
+
+That only stays true if what ships is what was scored. So `reflect_rules.txt` is
+**byte-identical** to `SYSTEM_RULES` in `evals/bjj-dictation/prompt.py` — embedded
+rather than written as a Go literal, because the rules contain backticks and any
+quoting in between would make the comparison meaningless — and a test fails when
+the two drift. The schema, the assembly and the three vocabularies are pinned the
+same way. Changing the prompt is: edit `prompt.py`, re-run `run.py` against both
+tiers, record the numbers, then copy across. Not the other way round.
+
+**And a green eval is still not coverage of real speech.** All 33 cases are
+`authored`, none `recorded`, against a target of fifty recorded. The corpus is
+therefore blind to the one failure an authored case can never contain — what the
+keyboard's own transcription does to "omoplata" before this endpoint ever sees
+it. The scores above describe the format and the rules working. They do not
+describe production.
+
+### The quota, sized against tokens rather than a feeling
+
+10 per athlete per rolling 24 hours, in `bjj_reflection_drafts` — nutrition's
+persisted shape rather than N7's in-memory limiter, because it survives a restart
+and reports a remaining count the client can show. The gate runs **before** the
+model call, which is asserted the only way it can be: by counting model calls,
+which is zero when the gate refuses. Failed and refused calls are metered, because
+they cost tokens.
+
+The numbers behind the cap come from N37's own run file: **10,630 input tokens
+per call, 350,687 of 350,786 cached across the run, 171 output tokens.** The
+request is eight times the size of a meal estimate's and costs roughly a third as
+much, because the 542-technique catalog is byte-identical for every athlete and
+every call and therefore lands in the provider's prompt cache — which is also why
+the catalog block is sorted by id, and why that sort is load-bearing rather than
+tidy. N26 sized its first caps against a claimed cost ratio that measured wrong
+by nearly two orders of magnitude; the lesson taken here is to publish the tokens
+next to the cap, so the next person to move it can check the arithmetic instead
+of inheriting a claim.
+
+### What this leaves
+
+- **No client.** This is the server half; the reflection wizard's dictation entry
+  point is not built, and nothing on the phone calls this yet. Filed separately
+  rather than inside this diff — an id written into an open PR is invisible to
+  `gh pr list` until it merges, which is how N19 and N39 were each allocated
+  twice.
+- **Never run against a live model.** Every path here is exercised against a fake
+  completer. The prompt and schema were measured by N37 through `run.py`; this
+  Go implementation of the same prompt has not itself made a paid call, and the
+  first real dictation through the endpoint is still ahead.
+- **A console-authored technique is not offered** until the next deploy carries
+  it into the seed file, same as every other consumer of `SeedData()`. An athlete
+  who names one gets it back as an unresolved phrase, which is the ordinary path
+  rather than a failure.
+- **The double-count `/v1/bjj/positions` documents applies here too.** A draft can
+  produce a technique-tagged row and an untagged category row for the same
+  exchange, and nothing links them at write time.
+- **The quota gate is advisory under concurrency.** Count-then-act with no lock,
+  so simultaneous requests from one athlete can overshoot the cap by the number
+  in flight. Bounded and priced in fractions of a cent, and now stated on
+  `CheckDraftQuota` rather than left for a reviewer to find.
+- **A provider outage burns the allowance** — filed as **F16**. A transport
+  failure that spent no tokens is metered identically to a refusal, because the
+  `llm` sentinels cannot distinguish "failed before the call" from "failed after
+  it", so an outage plus the 503's implicit retry advice can lock an athlete out
+  for the rest of the day. The real fix is a third outcome in the transport, and
+  it applies to `/v1/nutrition/estimate` equally.
+
+### What review changed
+
+Both blocking findings were things the code claimed and did not do, which is the
+pair worth recording.
+
+**`Retry-After` rounded the wrong way.** `api-conventions.md` promises the header
+is "rounded up so that obeying it exactly succeeds", and
+`internal/platform/ratelimit` honours it — but this truncated, copied from
+`nutrition`'s estimate handler before the rule was checked. The window is
+`created_at > since`, so a client that waited exactly the advertised seconds was
+still inside it and got a second 429 for doing what it was told. Fixed and pinned
+here; **nutrition still has it**, filed as **F15**, because that endpoint's own
+arithmetic tests should move with the fix.
+
+**The contract said "no row of any kind".** It writes one metering row per call —
+which the migration comment, this entry and the 429 documentation all state
+plainly, while the endpoint description denied it. A contract that overstates a
+guarantee is worse than one that stays quiet, because it is the artefact a client
+author reads instead of the code.
+
+Three smaller ones taken: `Notice.Field` now indexes the tag list the client
+RECEIVES rather than the model's answer (they diverge exactly when the 40-tag cut
+fires, so a notice could point past the end); the degraded quota path no longer
+reports `used: 1, resets_at: null`, which contradicted the field's own contract;
+and the number vocabulary gained the compounds and half-hour forms whose absence
+would have dropped a correct value — "twenty five", "half an hour", "an hour and a
+half". Each is mutation-checked.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

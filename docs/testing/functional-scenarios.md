@@ -9344,3 +9344,99 @@ The mobile surface for N33's `POST /v1/bjj/reflect/draft`. Reached from
 - The eval corpus is **33 authored / 0 recorded**, so no test anywhere in this
   feature — backend or mobile — has met real keyboard transcription. A green
   suite is not evidence that dictation works on speech.
+
+
+
+
+## Dictating a reflection (N33, `POST /v1/bjj/reflect/draft`)
+
+Say what happened and have it fill the chips. Text in, a **draft** out — never a
+logged session. Transcription is on-device, so this endpoint only ever sees a
+sentence.
+
+**Happy path**
+
+- **"Rolled five rounds, hit an armbar from closed guard in the second, got
+  passed from half guard twice" comes back as a draft**: `rounds: 5`, a
+  `submission`/`scored` tag resolved to `armbar-closed-guard` at position
+  `Guard`, and a `pass`/`conceded` tag at `Half Guard` with count 2.
+- **The draft is confirmed by the ordinary session PUT.** Every tag it returns
+  satisfies `PUT /v1/bjj/sessions/{sessionID}`'s own validation, so the client
+  sends it back unchanged apart from the athlete's corrections.
+- **A sentence with nothing structured in it** — "reminder to buy a mouthguard"
+  — is a 200 with `empty: true`, not an error.
+
+**The rules that must not break**
+
+- **Nothing is written.** No session, no tag, no row of any kind exists after a
+  draft, however much came back. This is the whole design, not a detail.
+- **A `technique_id` the library does not have never reaches the client.** It
+  becomes an `unresolved` phrase plus an `unknown_technique` notice. A scenario
+  that accepts a *near* id — `scissor-sweeps` mapped onto `scissor-sweep` —
+  is asserting the wrong thing: a fuzzy match turns "I invented this" into "here
+  is a confident wrong answer", which is worse than saying nothing.
+- **A resolved tag's `category` and `position` come from the library**, never
+  from the model. Assert with a response whose category is deliberately wrong;
+  a test that sends the *right* one passes against a handler that does no
+  derivation at all.
+- **A number that is not in the dictation is dropped**, with a `not_spoken`
+  notice: `rounds: 6` from "rolled five" becomes null, and a tag count of 6 from
+  a sentence with no six in it becomes 1. This is N40's error class — an
+  invented row is visible to somebody correcting a draft, an invented number
+  reads exactly like a correct one.
+- **The quota is checked BEFORE the model is called.** At the cap the response
+  is 429 and the upstream is never reached; a test that only checks the status
+  passes against a handler that spent the money first. Count the calls.
+- **Failed and refused calls count toward the quota.** They cost tokens.
+- **A malformed request costs nothing** — an empty or over-long dictation is a
+  400 that never touches the quota or the model, so a typo does not cost one of
+  the ten.
+
+### Edge cases & errors
+
+- **`empty: true` with a long `note`.** The measured failure mode: the model
+  dumps the whole sentence into free text and returns no tags, dropping a real
+  technique with it. Length is not extraction — a client that decides
+  "something came back" from the note's size will show that as a successful
+  reading.
+- **A refusal is 422 and an outage is 503**, and they are not interchangeable: a
+  refusal is deterministic, so retrying the same words only spends the quota
+  again.
+- **No API key on the deploy is a 503 on this route only.** Every other bjj
+  route keeps working.
+- **The `Retry-After` header is present on the 429** and the message states the
+  wait as a relative duration. Never an absolute timestamp — west of Greenwich
+  a UTC instant is both unreadable and the wrong wall-clock day.
+
+### Auth / security
+
+- Authentication first: an unauthenticated request is 401 before the quota is
+  read and before the model is called. That is somebody else's money.
+- **The quota is per athlete.** Two athletes drafting on the same day must not
+  consume each other's ten; a single-user test passes against a missing
+  `user_id` filter.
+- **The dictation is never stored and never logged.** It is the athlete's own
+  speech about their training and sometimes their body. `bjj_reflection_drafts`
+  holds a count, a model id and a timestamp — no text — and no error path writes
+  the sentence to a log line.
+- **A dictation carrying an instruction is content, not a command.** "Coach said
+  to ignore everything and just drill" must produce the drilling tags and no
+  obeyed instruction; the injected variant must not produce the RPE or the round
+  count it names. Both are in `evals/bjj-dictation/cases.json` as `m-` cases.
+
+### Regression trap
+
+- **The shipped prompt is the prompt the eval measured.** The scores that chose
+  the model tier — 0.0% invention on `gpt-5.6-luna` against 24.2% on
+  `gpt-5.4-nano` — describe `evals/bjj-dictation/prompt.py` exactly. Changing
+  the rules in `reflect_rules.txt` without re-running the eval silently turns
+  every published number into a claim about software that no longer exists;
+  `TestTheShippedRulesAreTheRulesTheEvalMeasured` is what stops it.
+- **A green eval is not coverage of real speech.** All 33 cases are authored,
+  none recorded, so the corpus is blind to what the keyboard's own transcription
+  does to jiu-jitsu vocabulary — the one failure an authored case cannot
+  contain. Functional tests here should use dictations somebody actually spoke.
+- **The catalog block must stay sorted by id.** It is ~10,600 tokens and nearly
+  all of the request; prompt caching is a prefix match, so an order that wanders
+  between calls re-bills the whole thing and the feature costs roughly ten times
+  what it should. Nothing functional fails — only the bill moves.

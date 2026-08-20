@@ -1016,6 +1016,172 @@ components:
             Reflection is recalled in counts. Three armbars is one tag with
             count 3, not three tags.
 
+    BjjReflectionDraft:
+      type: object
+      required:
+        [kind, gi, rounds, round_minutes, session_rpe, note, body_note,
+         tags, unresolved, notices, empty, model]
+      description: >
+        A draft, not a session. Nothing has been written; the athlete corrects
+        this in the reflection wizard and the confirmed version goes back
+        through PUT /v1/bjj/sessions/{sessionID}.
+
+
+        Absence is the normal case, not a degraded one. A null scalar and an
+        empty `kind` both mean "the athlete did not say", and a blank field
+        costs one tap where a wrong one that looks right gets confirmed
+        without being read.
+      properties:
+        kind:
+          type: string
+          enum: ["", class, drilling, positional, rolling]
+          description: Empty means the athlete did not say which it was.
+        gi: { type: boolean, nullable: true }
+        rounds: { type: integer, nullable: true, minimum: 1 }
+        round_minutes: { type: integer, nullable: true, minimum: 1 }
+        session_rpe: { type: integer, nullable: true, minimum: 1, maximum: 10 }
+        note:
+          type: string
+          description: >
+            What was said that is not a tag — how it felt, what the coach
+            said. Never a summary of the tags.
+        body_note:
+          type: string
+          description: Pain, injury or soreness only.
+        tags:
+          type: array
+          maxItems: 40
+          items: { $ref: "#/components/schemas/BjjDraftTag" }
+          description: >
+            Shaped exactly like `BjjSessionTag` minus its id, so a confirmed
+            draft is PUT back without translation. Every entry is guaranteed
+            to satisfy the session endpoint's own validation.
+        unresolved:
+          type: array
+          items: { $ref: "#/components/schemas/BjjUnresolvedPhrase" }
+        notices:
+          type: array
+          items: { $ref: "#/components/schemas/BjjDraftNotice" }
+        empty:
+          type: boolean
+          description: >
+            True when the model returned a well-formed answer with nothing in
+            it: no tags, no unresolved phrases and no stated scalars. Show
+            this as "nothing was picked up", never as a draft.
+
+
+            It is a REPORTED OUTCOME rather than an error, because the same
+            shape is the correct answer to a sentence with no session in it.
+            But it is also the shape a model produces when it goes quiet on
+            input it finds awkward — measured once, on an injected instruction,
+            where the whole sentence came back in `note` and a real technique
+            the athlete had reported was dropped. `note` may therefore be long
+            while `empty` is true; length is not extraction.
+        model:
+          type: string
+          description: Which model produced this, so a later quality question has an answer.
+
+    BjjDraftTag:
+      type: object
+      required: [category, event, position, technique_id, count]
+      description: >
+        One thing that happened, as the model heard it.
+      properties:
+        category:
+          type: string
+          enum: [submission, sweep, pass, escape, takedown, control]
+          description: >
+            DERIVED from the library entry whenever `technique_id` is set,
+            never taken from the model's answer — a category that disagreed
+            with the library would split one technique's evidence across two
+            rows of the funnel with nothing reporting an error.
+        event:
+          type: string
+          enum: [drilled, attempted, scored, conceded, defended]
+        position:
+          type: string
+          description: >
+            Position family, or empty when the athlete did not say. Derived
+            from the library entry when `technique_id` is set.
+        technique_id:
+          type: string
+          nullable: true
+          description: >
+            Set only when the athlete's words identify ONE catalog entry, and
+            validated against the library server-side. An id the library does
+            not have is never passed through and never mapped onto a
+            neighbour: it moves to `unresolved` with a `notice`. Null is the
+            ordinary outcome — "armbar" on its own could be a dozen entries.
+        count:
+          type: integer
+          minimum: 1
+          description: >
+            Floored to 1 when the number does not appear in what the athlete
+            said, with a `not_spoken` notice. An invented ROW is visible to
+            somebody correcting a draft; an invented NUMBER is not, and no
+            confidence score can flag one.
+
+    BjjUnresolvedPhrase:
+      type: object
+      required: [phrase, category, event]
+      description: >
+        Something the athlete named that does not pick out one technique, for
+        them to resolve with the ordinary picker. Not a failure — a guess here
+        would be pre-ticked, plausible, and one tap from permanent.
+      properties:
+        phrase: { type: string, example: butterfly }
+        category:
+          type: string
+          enum: [submission, sweep, pass, escape, takedown, control]
+        event:
+          type: string
+          enum: [drilled, attempted, scored, conceded, defended]
+
+    BjjDraftNotice:
+      type: object
+      required: [field, was, reason]
+      description: >
+        One change the server made to the model's answer. Reported rather than
+        applied silently, so a client can say what happened — "we could not
+        find that number in what you said" — instead of showing a field that
+        is mysteriously blank.
+      properties:
+        field:
+          type: string
+          description: >
+            Path into THIS response — "rounds", "tags[2].count". A `tags[N]`
+            index always resolves against the `tags` array as returned, never
+            against the model's own answer: notices belonging to a tag that was
+            cut by the 40-tag limit are dropped with it, since an explanation of
+            a change to something absent has nothing to explain.
+          example: tags[2].count
+        was:
+          type: string
+          description: What the model said, rendered as text.
+        reason:
+          type: string
+          enum: [unknown_technique, not_spoken, unknown_value, count_below_one, too_many_tags]
+          description: >
+            Part of the contract; branch on this rather than on any message.
+
+    BjjDraftQuota:
+      type: object
+      required: [used, limit, remaining, resets_at]
+      description: Usage of the drafting endpoint, over a rolling 24 hours.
+      properties:
+        used: { type: integer }
+        limit: { type: integer, description: "10 per athlete per rolling day." }
+        remaining:
+          type: integer
+          description: Clamped at zero — never negative, even if the cap is lowered in a deploy.
+        resets_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            When the oldest call in the window ages out, which is when one
+            more becomes available. Null when nothing is used.
+
     BjjSessionDetail:
       type: object
       required: [session_id, kind, tags]
@@ -6520,6 +6686,140 @@ paths:
           $ref: "#/components/responses/NotModified"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /bjj/reflect/draft:
+    post:
+      operationId: draftBjjReflection
+      summary: Turn a dictated reflection into a draft the athlete confirms
+      tags: [BJJ]
+      description: >
+        Say what happened — "rolled five, hit an armbar from closed guard in
+        the second, got passed from half guard twice" — and get back a draft
+        that fills the reflection wizard's chips.
+
+
+        **No session and no tag is written.** The only row this endpoint writes
+        is a usage-metering one — a count, a model id and a timestamp, carrying
+        none of what was said and none of what came back — which is what the
+        quota below is derived from, and why a failed call still counts. The
+        athlete corrects the draft and the confirmed version goes through
+        PUT /v1/bjj/sessions/{sessionID} like any other reflection. A tag
+        written without confirmation is indistinguishable from one the athlete
+        recorded, and every derived number in this module — the funnel, the
+        position map — is only worth reading because a logged tag is a thing
+        that actually happened.
+
+
+        **Transcription is on-device.** The athlete dictates into the system
+        keyboard, so this endpoint receives TEXT and there is no audio vendor
+        anywhere in the stack. The sentence itself does leave the device: it is
+        forwarded to the model provider and discarded, stored nowhere and never
+        logged. A client must say so before sending it.
+
+
+        **Technique ids are validated against the library, server-side.** An id
+        the library does not have is never passed through and never mapped onto
+        a plausible neighbour — it becomes an `unresolved` phrase the athlete
+        picks from, with a `notice` saying why. A resolved tag's `category` and
+        `position` are DERIVED from the library entry rather than taken from
+        the model. This is the whole reason a closed vocabulary suits dictation:
+        a wrong id is checkable in a way a wrong quantity never is.
+
+
+        **Numbers are checked against the words.** A scalar that does not appear
+        in what the athlete said is dropped to null and a tag `count` is floored
+        to 1 — the tag itself is evidence the thing happened at least once, and
+        only the repetitions are unverifiable — each with a `not_spoken`
+        notice. An invented row is visible to somebody correcting a draft; an
+        invented number is not — "rolled five" coming back as six reads exactly
+        like a correct draft and is one tap from being confirmed. No confidence
+        score can flag that, so this endpoint does not report one.
+
+
+        **A well-formed empty answer is a 200 carrying `empty: true`**, not an
+        error. The same shape is the correct answer to a sentence with no
+        session in it, so refusing it would break the honest case to catch the
+        dishonest one.
+
+
+        **Quota: 10 per athlete over a rolling 24 hours**, checked BEFORE the
+        model is called. Failed and refused calls count, because they cost
+        tokens too. Exhaustion is `429` with `rate_limited` and a `Retry-After`
+        header in seconds; the reset is also stated in the message as a
+        relative duration, never as a timestamp.
+      security:
+        - ClerkBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dictation]
+              properties:
+                dictation:
+                  type: string
+                  maxLength: 2000
+                  description: >
+                    What the athlete said, as the keyboard transcribed it.
+                    Deliberately not cleaned up first — the disfluency is
+                    signal, and so is whatever the transcription made of
+                    "omoplata".
+                  example: >-
+                    Rolled five rounds, hit an armbar from closed guard in the
+                    second, got passed from half guard twice.
+      responses:
+        "200":
+          description: A draft. Nothing has been written.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [draft, quota]
+                properties:
+                  draft: { $ref: "#/components/schemas/BjjReflectionDraft" }
+                  quota: { $ref: "#/components/schemas/BjjDraftQuota" }
+        "400":
+          description: >
+            An empty or over-long dictation, or an unreadable body — all
+            detected before the model is called, so a typo never costs one of
+            the ten.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: >
+            The request was well formed and the model declined it. Distinct
+            from 400 — there is nothing in the request to correct — and from
+            503, because a refusal is deterministic: retrying the same words
+            only spends the quota again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: >
+            The daily cap is used up. `Retry-After` gives the wait in whole
+            seconds; the message repeats it as a relative duration. Neither is
+            ever an absolute timestamp — the athlete's timezone is not
+            something this endpoint knows.
+          headers:
+            Retry-After:
+              description: Whole seconds until one more draft is available. Never zero.
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: >
+            The provider is unreachable, answered with something unparseable,
+            or drafting is not configured on this deploy (no API key). All
+            three are retryable and none is the client's fault; every other bjj
+            route is unaffected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /bjj/sessions/{sessionID}:
     parameters:

@@ -5,10 +5,17 @@ an athlete says what happened, and a server-side endpoint returns a **draft they
 correct**. `cases.json` pairs a dictated sentence with the draft a correct
 extraction produces.
 
-This exists **before** the endpoint on purpose. N33 is blocked on a provider
-decision; the eval set is not, and it is the artefact that makes "which model
+This existed **before** the endpoint on purpose. N33 was blocked on a provider
+decision; the eval set was not, and it is the artefact that made "which model
 tier" a measurement instead of an opinion. It also outlives whichever model is
 current.
+
+**The endpoint shipped in #322, and `prompt.py` is now the original of what runs
+in production.** `SYSTEM_RULES` is embedded verbatim in the Go module and a test
+fails when the two drift, so the numbers below keep describing what ships. The
+consequence for anyone editing the prompt: change it here, re-run, record the
+new numbers, then copy across — a prompt improvement that skips the re-run
+silently invalidates every score on this page.
 
 ---
 
