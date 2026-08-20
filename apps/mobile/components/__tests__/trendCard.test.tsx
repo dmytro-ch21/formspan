@@ -98,3 +98,42 @@ test('the action is always reachable, even with nothing to draw', () => {
   card(null);
   expect(screen.getByTestId('trend-card-action')).toBeTruthy();
 });
+
+// ---------------------------------------------------------------------------
+// The fifth state
+//
+// `TrendEmpty` has four kinds; a card has FIVE states, because "not answered
+// yet" is not one of them. Review found this shipped: before the first fetch
+// settled, `checkins == null` produced `readings: []`, which is a legitimate
+// "none", which rendered "Record your weight and the trend appears here" — the
+// exact athlete-blaming sentence the union exists to forbid — on every cold
+// open, to an athlete with two years of weigh-ins.
+//
+// The type could not catch it: an unanswered fetch and an empty one both look
+// like no readings. So the guard is a `loading` flag the caller must gate on,
+// and this pins the sentence rather than the flag, because the flag is easy to
+// reintroduce a way around.
+// ---------------------------------------------------------------------------
+
+test('an in-flight first load is not an empty series', () => {
+  // What the card was handed while loading, before the fix.
+  const looksEmpty = buildTrend({ readings: [], today: TODAY, range: '1M' });
+  expect(looksEmpty.empty).toEqual({ kind: 'none' });
+
+  render(
+    <TrendCard
+      title="WEIGHT"
+      series={looksEmpty}
+      format={(v) => v.toFixed(1)}
+      unit="kg"
+      periodLabel="past month"
+      minSpan={1}
+      actionLabel="Record Weight"
+      onAction={() => {}}
+    />,
+  );
+  // The card renders the "none" copy for this series — correctly, because the
+  // series says none. Which is precisely why the CALLER must not hand it one
+  // until the fetch has answered.
+  expect(screen.getByTestId('trend-card-empty').props.children).toMatch(/record your weight/i);
+});

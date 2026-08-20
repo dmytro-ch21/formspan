@@ -7,18 +7,11 @@ import { TrendChart } from '@/components/TrendChart';
 import { emptyCopy } from '@/components/TrendCard';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { shiftDate, trendWeight, type Measured } from '@/lib/anthropometry';
-import { listCheckins, listPhases, type Checkin, type Phase } from '@/lib/body';
+import { type Checkin } from '@/lib/body';
 import { dayString } from '@/lib/calendar';
 import { suggestedTarget, type Projection as PlanProjectionWire } from '@/lib/nutritionApi';
-import {
-  buildTrend,
-  fromPlanProjection,
-  RANGES,
-  type Projection,
-  type Reading,
-  type TrendRangeKey,
-} from '@/lib/trendSeries';
+import { RANGES, type Projection, type TrendRangeKey } from '@/lib/trendSeries';
+import { useWeightTrend } from '@/lib/useWeightTrend';
 import { toDisplayWeight, weightUnit, type UnitSystem } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -66,9 +59,15 @@ import { useUnits } from '@/lib/useUnits';
  * chart climb out of nothing.
  */
 
-/** A fortnight of slack, so the mean at the far edge has its lookback. */
-const LOOKBACK_SLACK_DAYS = 14;
-/** The widest window a chip can ask for, plus the slack above. */
+/**
+ * The widest window a chip can ask for.
+ *
+ * **`All` therefore means "all of the last three years"**, and `windowStart`
+ * anchors on the first FETCHED reading as though it were the first ever. True
+ * enough today — the feature is younger than that — and it will quietly stop
+ * being true. Raise this, or page the fetch, before anybody has four years of
+ * weigh-ins. Flagged in review rather than discovered later.
+ */
 const FETCH_DAYS = 365 * 3;
 /** Smallest y-axis span in kg. A stable fortnight would otherwise divide by zero. */
 const MIN_SPAN_KG = 1;
@@ -79,84 +78,33 @@ export default function WeightTrendScreen() {
   const accent = useAccent();
 
   const [range, setRange] = useState<TrendRangeKey>('1Y');
-  const [checkins, setCheckins] = useState<Checkin[] | null>(null);
-  const [phase, setPhase] = useState<Phase | null>(null);
   const [plan, setPlan] = useState<PlanProjectionWire | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [loading, setLoading] = useState(true);
 
-  // `dayString`, NOT `toISOString().slice(0,10)`. That is the UTC date, and
-  // check-ins are dated by the LOCAL calendar day: west of Greenwich an evening
-  // opens the chart on an empty "tomorrow", and east of Greenwich a morning
-  // weigh-in lands past the window's right edge and is dropped as a future
-  // reading — invisible, on the day it was logged. Banned once in review
-  // already.
-  const today = dayString(new Date());
-
+  // The derivation is fetched here rather than by the hook: this screen has no
+  // parent holding it, unlike the card in Goals. It is deliberately NOT fatal —
+  // a plan we could not load means no projection sentence, which is a stated
+  // absence rather than a wrong date.
   useFocusEffect(
     useCallback(() => {
       let live = true;
-      const from = shiftDate(today, -(FETCH_DAYS + LOOKBACK_SLACK_DAYS));
-
-      // The three are independent and only the check-ins are fatal. A goal we
-      // could not load means no goal line; a plan we could not load means no
-      // projection sentence. Neither is a reason to withhold the chart, and
-      // both degrade to an ABSENCE that says so rather than to a wrong number.
-      Promise.allSettled([
-        listCheckins(getToken, { from, to: today }),
-        listPhases(getToken),
-        suggestedTarget(getToken, today),
-      ]).then(([c, p, s]) => {
-        if (!live) return;
-        setLoading(false);
-        if (c.status === 'fulfilled') {
-          setCheckins(c.value);
-          setFailed(false);
-        } else {
-          setFailed(true);
-        }
-        setPhase(p.status === 'fulfilled' ? (p.value.find((x) => x.ended_on == null) ?? null) : null);
-        setPlan(s.status === 'fulfilled' ? (s.value.suggestion?.basis?.projection ?? null) : null);
-      });
-
+      suggestedTarget(getToken, dayString(new Date()))
+        .then((s) => {
+          if (live) setPlan(s.suggestion?.basis?.projection ?? null);
+        })
+        .catch(() => {
+          if (live) setPlan(null);
+        });
       return () => {
         live = false;
       };
-    }, [getToken, today]),
+    }, [getToken]),
   );
 
-  const measured: Measured[] = useMemo(() => checkins ?? [], [checkins]);
-
-  const readings: Reading[] | null = useMemo(() => {
-    if (failed) return null; // "we could not ask" — never "you have none"
-    if (checkins == null) return [];
-    return checkins
-      .filter((c) => c.weight_kg != null && c.weight_kg > 0)
-      .map((c) => ({ on: c.measured_on, value: c.weight_kg as number }));
-  }, [checkins, failed]);
-
-  const series = useMemo(
-    () =>
-      buildTrend({
-        readings,
-        today,
-        range,
-        // The smoothing is `lib/anthropometry.ts`'s and is not reimplemented
-        // here — a second mean would be a third number the app could report for
-        // the same body.
-        smooth: (on) => trendWeight(measured, on),
-        planFrom: phase?.started_on ?? null,
-      }),
-    [readings, today, range, measured, phase],
-  );
-
-  const goalKg = phase?.target_weight_kg ?? null;
-
-  // The server's date, adapted — never one derived from the readings. See the
-  // header note.
-  const projection: Projection = useMemo(
-    () => fromPlanProjection(plan, series.readings[series.readings.length - 1] ?? null),
-    [plan, series.readings],
+  const { loading, series, goalKg, projection, today, checkins } = useWeightTrend(
+    getToken,
+    range,
+    FETCH_DAYS,
+    plan,
   );
 
   const fmt = (kg: number) => round1(toDisplayWeight(kg, units)).toString();
@@ -243,7 +191,7 @@ export default function WeightTrendScreen() {
               Day-to-day swings are mostly water, so the line is the one to read.
             </Text>
 
-            <Entries checkins={checkins ?? []} units={units} />
+            <Entries checkins={checkins} units={units} from={series.from} to={series.to} />
           </>
         )}
       </ScrollView>
@@ -275,7 +223,14 @@ function ProjectionLine({
   fmt: (kg: number) => string;
   unit: string;
 }) {
-  if (projection.kind === 'projected') {
+  // `source === 'plan'` is checked HERE, not merely upstream. The module's
+  // claim is that the discriminator makes an observed date unrenderable under
+  // this sentence, and that was only true because nothing currently feeds one
+  // in — a claim about today's call graph, not an invariant. One rewire (an
+  // observed fallback when the plan is missing, say) would have put the wrong
+  // date under "based on your current plan" with no type error. Found by
+  // review.
+  if (projection.kind === 'projected' && projection.source === 'plan') {
     return (
       <Text style={styles.projection} testID="trend-projection-text">
         Based on your current plan, you&apos;ll reach {fmt(projection.basis.goal)} {unit} on{' '}
@@ -283,6 +238,10 @@ function ProjectionLine({
       </Text>
     );
   }
+  // Projected, but from the OBSERVED trend rather than the plan. Not this
+  // sentence's claim, so it says nothing rather than borrowing the copy — the
+  // whole point of the discriminator.
+  if (projection.kind === 'projected') return null;
   if (goalKg == null) return null; // nothing to say about a goal nobody set
   return (
     <Text style={styles.projection} testID="trend-projection-text">
@@ -306,17 +265,45 @@ function refusalCopy(reason: string, goal: string, unit: string): string {
   }
 }
 
-/** The readings behind the chart, newest first. */
-function Entries({ checkins, units }: { checkins: Checkin[]; units: UnitSystem }) {
-  const rows = checkins
-    .filter((c) => c.weight_kg != null && c.weight_kg > 0)
-    .slice()
-    .sort((a, b) => (a.measured_on < b.measured_on ? 1 : -1));
+/**
+ * The readings behind the chart, newest first.
+ *
+ * **Scoped to the window on screen**, which is both the honest reading of
+ * "the entries behind THIS chart" and the fix for a real cost: unscoped, a
+ * daily logger's `1W` chart sat above three years of rows, re-sorted and
+ * re-rendered on every chip tap, unvirtualized inside a ScrollView. Capped as
+ * well, and the cap is STATED rather than silent — a list that quietly stops
+ * is one an athlete would read as "that is all of them".
+ */
+const MAX_ENTRIES = 200;
+
+function Entries({
+  checkins,
+  units,
+  from,
+  to,
+}: {
+  checkins: Checkin[];
+  units: UnitSystem;
+  from: string;
+  to: string;
+}) {
+  const rows = useMemo(
+    () =>
+      checkins
+        .filter(
+          (c) =>
+            c.weight_kg != null && c.weight_kg > 0 && c.measured_on >= from && c.measured_on <= to,
+        )
+        .slice()
+        .sort((a, b) => (a.measured_on < b.measured_on ? 1 : -1)),
+    [checkins, from, to],
+  );
   if (rows.length === 0) return null;
   return (
     <View style={styles.entries}>
       <Text style={styles.entriesHead}>ENTRIES</Text>
-      {rows.map((c) => (
+      {rows.slice(0, MAX_ENTRIES).map((c) => (
         <RNView key={c.measured_on} style={styles.entry} testID={`trend-entry-${c.measured_on}`}>
           <Text style={styles.entryDate}>{longDate(c.measured_on)}</Text>
           <Text style={styles.entryValue}>
@@ -324,6 +311,11 @@ function Entries({ checkins, units }: { checkins: Checkin[]; units: UnitSystem }
           </Text>
         </RNView>
       ))}
+      {rows.length > MAX_ENTRIES ? (
+        <Text style={styles.entriesMore}>
+          Showing the most recent {MAX_ENTRIES} of {rows.length} in this range.
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -389,6 +381,7 @@ const styles = StyleSheet.create({
   note: { fontSize: 13, opacity: 0.65, lineHeight: 19 },
   entries: { gap: 2, marginTop: 6 },
   entriesHead: { fontSize: 11, letterSpacing: 1, opacity: 0.5, marginBottom: 4 },
+  entriesMore: { fontSize: 12, opacity: 0.55, paddingTop: 8 },
   entry: {
     flexDirection: 'row',
     justifyContent: 'space-between',

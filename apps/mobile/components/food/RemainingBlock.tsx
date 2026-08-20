@@ -17,7 +17,8 @@
  *
  * No time axis, no history, one quantity against one target. It is a progress
  * indicator, and it must not be cited as precedent for the N5 carve-out — that
- * still has exactly one instance, `checkin/trend.tsx`.
+ * still has exactly one instance, `app/goals/trend.tsx` (reachable from a
+ * check-in too, via the redirect left at `checkin/trend.tsx`).
  */
 
 import { StyleSheet, View } from 'react-native';

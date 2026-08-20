@@ -129,3 +129,41 @@ test('an empty series still renders without throwing', () => {
   chart({ series });
   expect(screen.queryByTestId('trend-goal-line')).toBeNull();
 });
+
+// ---------------------------------------------------------------------------
+// A trailing gap is a gap too
+//
+// Found by review, and it had no test — which is why it shipped. `daySpan` used
+// to measure the POINTS rather than the window, so for anybody who stopped
+// logging a week ago the axis shrank to their last weigh-in: the line ran to
+// the right edge, and the tick the screen labels "Today" sat on a reading that
+// could be weeks old. Time appeared to end when the athlete stopped logging.
+//
+// A lapsed logger is exactly who the "Record Weight" action is for, so this is
+// the athlete most likely to see it.
+// ---------------------------------------------------------------------------
+
+const circles = () => screen.UNSAFE_root.findAllByType('RNSVGCircle' as never);
+
+test('a trailing gap leaves empty space, rather than the axis ending at the last reading', () => {
+  // Logged for a month, then stopped six weeks ago — half the 90-day window.
+  const readings: Reading[] = [];
+  for (let i = 75; i >= 45; i--) readings.push({ on: shift(TODAY, -i), value: 100 - (75 - i) * 0.05 });
+  const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings) });
+
+  expect(series.to).toBe(TODAY); // the window really does run to today
+  chart({ series });
+
+  // The rightmost mark must sit where its DAY falls in the WINDOW, not at the
+  // right edge. Asserted as a proportion rather than a pixel threshold: a loose
+  // threshold is what let the first version of this test pass against the bug
+  // it was written for. viewBox width is 320 and the window is 90 days.
+  const lastDay = Math.max(...series.readings.map((p) => p.day));
+  const expected = (lastDay / 90) * 320;
+  const maxCx = Math.max(...circles().map((c: any) => Number(c.props.cx)));
+  expect(maxCx).toBeCloseTo(expected, 0);
+
+  // And concretely: well short of the edge. Measuring the data instead would
+  // put it within a few pixels of 320.
+  expect(maxCx).toBeLessThan(230);
+});

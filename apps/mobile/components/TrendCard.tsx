@@ -54,6 +54,12 @@ export type TrendCardProps = {
   onAction: () => void;
   /** Tapping the card body opens the full page. */
   onOpen?: () => void;
+  /**
+   * What opening it does, for a screen reader. The chart's own description
+   * says what the picture SHOWS; without this, VoiceOver announces a button
+   * that gives no hint it navigates anywhere.
+   */
+  openLabel?: string;
   testID?: string;
 };
 
@@ -70,6 +76,7 @@ export function TrendCard({
   actionLabel,
   onAction,
   onOpen,
+  openLabel,
   testID,
 }: TrendCardProps) {
   const accent = useAccent();
@@ -104,7 +111,12 @@ export function TrendCard({
           {emptyCopy(series.empty, title.toLowerCase())}
         </Text>
       ) : (
-        <Pressable onPress={onOpen} disabled={!onOpen} accessibilityRole={onOpen ? 'button' : undefined}>
+        <Pressable
+          onPress={onOpen}
+          disabled={!onOpen}
+          accessibilityRole={onOpen ? 'button' : undefined}
+          accessibilityLabel={onOpen ? openLabel : undefined}
+        >
           <TrendChart
             series={series}
             goal={goal}
@@ -121,10 +133,16 @@ export function TrendCard({
 
       <RNView style={styles.foot}>
         <RNView>
-          <Text style={styles.footLabel}>TODAY</Text>
+          {/* LATEST, not TODAY. For a lapsed logger the newest reading in the
+              window is days or weeks old, and labelling it "today" is a false
+              date claim over a true number — the mirror of the bug the callouts
+              avoid by showing the reading rather than the mean. The date is
+              shown for the same reason. */}
+          <Text style={styles.footLabel}>LATEST</Text>
           <Text style={styles.footValue} testID="trend-card-today">
             {latest ? `${format(latest.value)} ${unit}` : '—'}
           </Text>
+          {latest ? <Text style={styles.footWhen}>{latest.on}</Text> : null}
         </RNView>
         <Pressable
           onPress={onAction}
@@ -197,6 +215,7 @@ const styles = StyleSheet.create({
   foot: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 2 },
   footLabel: { fontSize: 10, letterSpacing: 1, opacity: 0.5 },
   footValue: { fontSize: 20, fontWeight: '700' },
+  footWhen: { fontSize: 11, opacity: 0.5 },
   action: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999 },
   actionText: { fontSize: 13, fontWeight: '600' },
 });

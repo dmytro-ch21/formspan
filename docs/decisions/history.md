@@ -35618,6 +35618,48 @@ turn tests red. 2100 mobile tests pass. Lint sits at exactly 53 of 53 —
 deleting `WeightTrend.tsx` cleared one finding and the ratchet had already been
 lowered to match.
 
+**Review found two blocking bugs after the check suite was green, and both are
+the kind a green suite cannot see.**
+
+**The card rendered the forbidden sentence while loading.** `TrendEmpty` has
+four kinds; a card has FIVE states, because "not answered yet" is not one of
+them. Before the first fetch settled, `checkins == null` produced `readings:
+[]`, which is a legitimate `none`, which rendered *"Record your weight and the
+trend appears here"* — the exact athlete-blaming sentence the union exists to
+forbid — on every cold open of Goals, to an athlete with two years of
+weigh-ins. The type could not catch it, because an unanswered fetch and an
+empty one look identical. The page had a loading gate and the card did not, and
+that divergence existed only because the two had copies of the same fetch — so
+the fix is `lib/useWeightTrend.ts`, one hook owning the fetch, the
+null/`[]`/failed discipline and an explicit `loading`, used by both.
+
+**The chart cropped a TRAILING gap out of existence.** `daySpan` measured the
+POINTS rather than the window, so for anybody who stopped logging a week ago
+the axis shrank to their last weigh-in: the line ran to the right edge and the
+tick labelled "Today" sat on a reading that could be weeks old. Time appeared
+to end when the athlete stopped logging — and a lapsed logger is exactly who
+the "Record Weight" action is for. The series already carried `from` and `to`;
+the component ignored them.
+
+**The first test written for that second bug did not catch it**, which is worth
+recording because it is the more useful half. It asserted the rightmost mark
+sat below a pixel threshold — and the buggy value was also below it, so the
+mutation passed. A threshold chosen to look safe proves nothing; the assertion
+now compares against the day's PROPORTION of the window, and the mutation goes
+red. Checking that a test fails for the right reason is the only thing that
+separates it from decoration.
+
+Also from review, as suggestions taken: the projection sentence now checks
+`source === 'plan'` at the RENDER SITE, because the claim that the
+discriminator makes an observed date unrenderable was true only of today's call
+graph rather than being an invariant; `futureDays` is floored at 0, so a stale
+server `reached_on` cannot draw the dashed line backwards into a claimed
+arrival; the entries list is scoped to the window and capped with the cap
+STATED, since a list that quietly stops reads as "that is all of them"; the
+footer says LATEST with its date rather than TODAY over a reading that may be
+weeks old; and `lib/weightTrend.ts` plus its test are deleted, having been
+orphaned the moment `WeightTrend.tsx` went.
+
 One measured note worth keeping: **`getByText` does not match inside
 `react-native-svg`.** It mounts an `RNSVGText` host node RNTL's text matcher
 does not traverse, so an assertion on chart text fails against a perfectly

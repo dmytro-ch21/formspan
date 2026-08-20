@@ -1,14 +1,10 @@
 import { useMemo } from 'react';
 import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
+import { daysBetween } from '@/lib/anthropometry';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import {
-  trendBounds,
-  type Projection,
-  type TrendPoint,
-  type TrendSeries,
-} from '@/lib/trendSeries';
+import { trendBounds, type Projection, type TrendSeries } from '@/lib/trendSeries';
 
 /**
  * The trend chart itself — one drawing, every metric.
@@ -91,7 +87,12 @@ export function TrendChart({
    * lands is one that lands within the period shown; anything else says "not
    * yet, keep going", which is true.
    */
-  const futureDays = projected ? Math.min(projected.daysAway, dataSpan) : 0;
+  // Floored at 0. A server derivation that predates a fresh weigh-in can hand
+  // back a `reached_on` BEFORE the latest reading, making `daysAway` negative —
+  // which would shrink the domain, clip points past the right edge, and draw
+  // the dashed line BACKWARD to the goal, visually claiming an arrival behind
+  // the latest point. One token, and it cannot happen.
+  const futureDays = projected ? Math.max(0, Math.min(projected.daysAway, dataSpan)) : 0;
   const totalSpan = dataSpan + futureDays;
 
   const x = (day: number) => (day / totalSpan) * W;
@@ -280,9 +281,18 @@ function clamp(v: number, min: number, max?: number): number {
   return max == null ? lo : Math.min(lo, max);
 }
 
-/** Days from the window's start to its end, inclusive. */
+/**
+ * Days from the window's START to its END, inclusive — from the series' own
+ * `from`/`to`, never from where the data happens to stop.
+ *
+ * It used to measure the points, and that cropped a TRAILING gap out of
+ * existence. `trendWeight` returns null once the last seven days hold too few
+ * readings, so for anybody who stopped logging a week ago both the dots and the
+ * line end early, the axis shrank to the last data day, and the tick the screen
+ * labels "Today" landed on a reading that could be weeks old. A trailing gap
+ * has to render as a gap like any other — and a lapsed logger is exactly who
+ * the "Record Weight" action is for. Found by review.
+ */
 function daySpan(series: TrendSeries): number {
-  const pts: TrendPoint[] = [...series.readings, ...series.segments.flat()];
-  const maxDay = pts.reduce((m, p) => Math.max(m, p.day), 0);
-  return maxDay + 1;
+  return daysBetween(series.from, series.to) + 1;
 }
