@@ -1,8 +1,15 @@
-import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import GoalsScreen from '../(tabs)/goals';
+import {
+  cacheActivityLevel,
+  readActivityChoice,
+  rememberActivityChoice,
+  settleActivityChoice,
+} from '@/lib/activityLevel';
 import { ApiError } from '@/lib/apiError';
 import { fetchAdjustment, listTargets, saveTarget, suggestedTarget } from '@/lib/nutritionApi';
+import { setActivityLevel } from '@/lib/profile';
 
 /**
  * The Goals tab, and the two things that broke when it stopped being a pushed
@@ -60,6 +67,33 @@ jest.mock('@/lib/AccentProvider', () => ({
 }));
 
 /**
+ * The activity-level store, stubbed at the STORAGE boundary only.
+ *
+ * `activityParam`, `adoptServerActivity` and `isActivityLevel` come through
+ * `requireActual` — they are the reconciliation rule, and a mock returning
+ * whatever the test handed it would SUPPLY the behaviour under test. Same
+ * reasoning as `targetOn` above. What is stubbed is the four functions that
+ * touch SQLite, because `expo-sqlite` cannot run here and because their SQL is
+ * covered properly by `lib/__tests__/activityLevel.test.ts` against a real
+ * database.
+ */
+jest.mock('@/lib/activityLevel', () => ({
+  ...jest.requireActual('@/lib/activityLevel'),
+  readActivityChoice: jest.fn(),
+  rememberActivityChoice: jest.fn(),
+  cacheActivityLevel: jest.fn(),
+  settleActivityChoice: jest.fn(),
+}));
+
+jest.mock('@/lib/profile', () => ({ setActivityLevel: jest.fn() }));
+
+const mockRead = readActivityChoice as jest.MockedFunction<typeof readActivityChoice>;
+const mockCache = cacheActivityLevel as jest.MockedFunction<typeof cacheActivityLevel>;
+const mockRemember = rememberActivityChoice as jest.MockedFunction<typeof rememberActivityChoice>;
+const mockSettle = settleActivityChoice as jest.MockedFunction<typeof settleActivityChoice>;
+const mockPushLevel = setActivityLevel as jest.MockedFunction<typeof setActivityLevel>;
+
+/**
  * The focus effect is the subject, so it is driven by hand rather than mocked
  * away: `refocus()` runs every registered callback the way returning to a tab
  * does.
@@ -104,6 +138,19 @@ const mockSuggested = suggestedTarget as jest.MockedFunction<typeof suggestedTar
 const mockSave = saveTarget as jest.MockedFunction<typeof saveTarget>;
 const mockList = listTargets as jest.MockedFunction<typeof listTargets>;
 const mockAdjust = fetchAdjustment as jest.MockedFunction<typeof fetchAdjustment>;
+
+/**
+ * Whether a pill is rendered as the athlete's own choice.
+ *
+ * Read off the prop rather than through `toHaveAccessibilityState`, which this
+ * version of RNTL does not ship. `accessibilityState.selected` is the thing
+ * VoiceOver actually announces, so it is also the property worth asserting:
+ * a pill that merely LOOKS unselected while announcing itself as selected is
+ * still telling a blind athlete they chose something they did not.
+ */
+function selectedState(testID: string): boolean | undefined {
+  return screen.getByTestId(testID).props.accessibilityState?.selected;
+}
 
 /** A stored target, as the server sends it back. */
 function target(over: Partial<Awaited<ReturnType<typeof listTargets>>[number]> = {}) {
@@ -157,11 +204,24 @@ function suggestion(kcal: number) {
       },
     },
     missing: [],
+    activity: 'light',
+    activity_chosen: false,
   } as unknown as Awaited<ReturnType<typeof suggestedTarget>>;
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // A device that has never been told, and a server that says it assumed —
+  // the state a brand-new athlete is actually in.
+  mockRead.mockResolvedValue({ level: null, owed: false });
+  mockRemember.mockResolvedValue(undefined);
+  mockSettle.mockResolvedValue(undefined);
+  // Must RESOLVE, not merely be callable. The screen writes the settled level
+  // back with `void cacheActivityLevel(...).catch(...)`, so a `jest.fn()`
+  // returning undefined throws inside the effect - which surfaces as six
+  // unrelated tests timing out, not as anything pointing here.
+  mockCache.mockResolvedValue(undefined);
+  mockPushLevel.mockResolvedValue(undefined as never);
   mockSuggested.mockResolvedValue(suggestion(2400));
   mockSave.mockResolvedValue(undefined as never);
   mockList.mockResolvedValue([]);
@@ -577,5 +637,211 @@ describe('the activity pills move the derivation and nothing else', () => {
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(2));
     expect(mockList).toHaveBeenCalledTimes(1);
     expect(mockAdjust).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * N93 - the level survives leaving the tab.
+ *
+ * Reported from a device as "Target doesn't save previously added type of
+ * activity": the pills were a `useState('light')`, so they reset on every
+ * navigation and the derived calorie target reset with them. The athlete read
+ * one number and came back to another, with nothing saying so.
+ *
+ * **Every case here needs a REFOCUS, not a second render.** A tab mounts once
+ * and stays mounted for the life of the process, so a test that renders the
+ * screen twice tests a lifecycle this screen does not have - and would pass
+ * against the bug.
+ */
+describe('the activity level is remembered', () => {
+  it('is read back on every focus, not only on mount', async () => {
+    render(<GoalsScreen />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(1));
+
+    refocus();
+
+    // The mount-effect version of this passed every other test in this file
+    // and failed exactly here. It is the whole ticket.
+    await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows the stored level on arrival, without anybody pressing anything', async () => {
+    // The cache and the server agree, which is the ordinary state. They have
+    // to be set together: the response is what the screen ultimately believes,
+    // so a fixture where the device holds `active` and the server reports
+    // nobody has chosen is not a stale cache, it is an incoherent world.
+    mockRead.mockResolvedValue({ level: 'active', owed: false });
+    mockSuggested.mockResolvedValue({
+      ...suggestion(2400),
+      activity: 'active',
+      activity_chosen: true,
+    } as never);
+    render(<GoalsScreen />);
+
+    await waitFor(() => expect(selectedState('target-activity-active')).toBe(true));
+    expect(selectedState('target-activity-light')).toBe(false);
+  });
+
+  it('lets go of a cached level the account no longer holds', async () => {
+    // The device cached `active` from an earlier sync and owes nothing, so the
+    // server is authoritative - and it says nobody has chosen. Keeping the
+    // local copy here would let a phone assert a choice the account does not
+    // have, which is the same two-surfaces-disagreeing failure in the other
+    // direction. It reverts to the assumption rather than to a filled pill.
+    mockRead.mockResolvedValue({ level: 'active', owed: false });
+    render(<GoalsScreen />);
+
+    await waitFor(() => expect(selectedState('target-activity-active')).toBe(false));
+    expect(await screen.findByTestId('target-activity-assumed')).toBeTruthy();
+  });
+
+  it('derives at the stored level rather than at the default', async () => {
+    // The half that matters more than the pill: the NUMBER has to be the
+    // stored level's number. A screen that highlighted the right pill and
+    // still derived at `light` would look completely fixed.
+    mockRead.mockResolvedValue({ level: 'active', owed: true });
+    render(<GoalsScreen />);
+
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+    expect(mockSuggested.mock.calls[0][2]).toBe('active');
+  });
+
+  it('asks the server what the account holds when nothing is owed', async () => {
+    // No parameter, deliberately. This is the only path by which a level
+    // chosen in the browser reaches the phone - pin the local value here and
+    // the two surfaces derive different targets for the same athlete, which is
+    // the failure the whole server-side decision exists to prevent.
+    mockRead.mockResolvedValue({ level: 'active', owed: false });
+    render(<GoalsScreen />);
+
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+    expect(mockSuggested.mock.calls[0][2]).toBeUndefined();
+  });
+
+  it('waits for the cache before asking, so the first answer is the right one', async () => {
+    let release: (v: { level: 'active'; owed: boolean }) => void = () => {};
+    mockRead.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    render(<GoalsScreen />);
+
+    // Nothing yet. Asking first would send no parameter, take the server's
+    // answer, and overwrite a choice made offline a moment before the read
+    // landed - and the athlete would watch the number jump.
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    expect(mockSuggested).not.toHaveBeenCalled();
+
+    await act(async () => {
+      release({ level: 'active', owed: true });
+    });
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(1));
+    expect(mockSuggested.mock.calls[0][2]).toBe('active');
+  });
+
+  it('writes the choice to the device before it tries the account', async () => {
+    // A gym is where this gets pressed and a gym is where there is no signal.
+    // Recording the debt only when the push fails loses the change to a crash
+    // between the two.
+    mockPushLevel.mockRejectedValue(new Error('offline'));
+    render(<GoalsScreen />);
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+
+    fireEvent.press(screen.getByTestId('target-activity-active'));
+
+    await waitFor(() => expect(mockRemember).toHaveBeenCalledWith('u1', 'active'));
+    await waitFor(() => expect(mockPushLevel).toHaveBeenCalled());
+    // Not settled: the account never heard it, so the debt has to stand.
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
+  it('says when a choice is on the phone only', async () => {
+    mockPushLevel.mockRejectedValue(new Error('offline'));
+    render(<GoalsScreen />);
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+
+    fireEvent.press(screen.getByTestId('target-activity-active'));
+
+    // "Changed" and "changed on this phone only" are different outcomes. A
+    // pill that simply moves reads as a successful save.
+    expect(await screen.findByTestId('target-activity-unsynced')).toBeTruthy();
+  });
+
+  it('settles the debt and drops the notice once the account has it', async () => {
+    render(<GoalsScreen />);
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+
+    fireEvent.press(screen.getByTestId('target-activity-active'));
+
+    await waitFor(() => expect(mockSettle).toHaveBeenCalledWith('u1', 'active'));
+    await waitFor(() => expect(screen.queryByTestId('target-activity-unsynced')).toBeNull());
+  });
+
+  it('does not re-derive when the push succeeds', async () => {
+    // A successful push must not change the request. Driving the query
+    // parameter off the sync flag instead of a separate pin does exactly that:
+    // the parameter disappears the instant the push lands, and the whole
+    // ladder is fetched a second time for an answer that cannot have moved.
+    render(<GoalsScreen />);
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(1));
+
+    fireEvent.press(screen.getByTestId('target-activity-active'));
+
+    await waitFor(() => expect(mockSettle).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId('target-activity-unsynced')).toBeNull());
+    expect(mockSuggested).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('an assumed level is not shown as a chosen one', () => {
+  it('selects no pill when the athlete has never chosen', async () => {
+    render(<GoalsScreen />);
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+
+    // `activity_chosen: false` is in the contract precisely so a client can
+    // tell an assumption from a decision. A filled pill attributes a choice to
+    // somebody who never made one - and the next request would then send it as
+    // truth, making the assumption permanent and invisible.
+    for (const key of ['sedentary', 'light', 'active']) {
+      expect(selectedState(`target-activity-${key}`)).toBe(false);
+    }
+  });
+
+  it('names the level it assumed rather than leaving it to be guessed', async () => {
+    render(<GoalsScreen />);
+    // The pills show no selection, so without this the screen says nothing at
+    // all about which of the three the number was worked out at.
+    const note = await screen.findByTestId('target-activity-assumed');
+    expect(note).toHaveTextContent(/On your feet/);
+  });
+
+  it('stops saying it assumed once a level is chosen', async () => {
+    mockRead.mockResolvedValue({ level: 'sedentary', owed: false });
+    mockSuggested.mockResolvedValue({
+      ...suggestion(2400),
+      activity: 'sedentary',
+      activity_chosen: true,
+    } as never);
+    render(<GoalsScreen />);
+
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId('target-activity-assumed')).toBeNull());
+  });
+
+  it('names whichever level the SERVER says it used, not the client default', async () => {
+    // Read off the response rather than a local constant, so the pills and the
+    // arithmetic cannot describe different things - which is the reported bug
+    // in its purest form. Pinned to a literal label, not to ACTIVITY_DEFAULT:
+    // a constant asserted against itself survives the constant moving.
+    mockSuggested.mockResolvedValue({
+      ...suggestion(2400),
+      activity: 'sedentary',
+      activity_chosen: false,
+    } as never);
+    render(<GoalsScreen />);
+
+    const note = await screen.findByTestId('target-activity-assumed');
+    expect(note).toHaveTextContent(/Desk job/);
   });
 });
