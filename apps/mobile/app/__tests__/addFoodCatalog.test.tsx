@@ -1,18 +1,12 @@
 /*
- * N67 PROBE ARM 2 — the NINE tests N58 adds are skipped; N51's twelve still run.
- * TEMPORARY; revert with this commit.
+ * N67 PROBE ARM 3 — the FOUR scope-row tests skipped. TEMPORARY.
  *
- * Arm 1 established that EXECUTING this file's tests is the trigger (5/0 with
- * all twenty skipped, against a 40% pass rate when they run). And `main` proves
- * it is not fake timers as such: same file, same `useFakeTimers`, twelve tests,
- * green 10/10.
+ * Arm 1: all 20 skipped -> 5/0 pass.  Arm 2: N58's nine skipped -> 5/0 pass.
+ * So the nine are the trigger. This halves them.
  *
- *   green -> the interaction is in the NEW tests. A test problem, not a feature
- *            one, and `app/food/add.tsx` may ship unchanged.
- *   red   -> all twenty are needed, which points at cumulative cost in the
- *            worker rather than any test's content, and stops being about N58.
- *
- * Five samples. A single green means nothing at a 40% pass rate.
+ *   green -> the four scope tests are it (they press chips, re-render, and
+ *            exercise the `scope !== 'all'` early return in the debounce effect)
+ *   red   -> it is among the five card tests
  */
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -222,7 +216,7 @@ it('does not let a brandless saved food suppress every brand', async () => {
  * string would have failed for the right reason and been "fixed" by weakening
  * it; this is the same claim re-expressed against the new layout.
  */
-it.skip('shows both name and brand, and logs their composition', async () => {
+it('shows both name and brand, and logs their composition', async () => {
   mockSearchCatalog.mockResolvedValue(
     answer({
       foods: [{ ...CATALOG_OATS, id: 'usda-9', name: 'Greek Yogurt', brand: 'Fage' }],
@@ -243,7 +237,7 @@ it.skip('shows both name and brand, and logs their composition', async () => {
 });
 
 /** A generic food has no brand line at all, rather than an empty one. */
-it.skip('omits the brand line entirely for a generic food', async () => {
+it('omits the brand line entirely for a generic food', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
@@ -258,7 +252,7 @@ it.skip('omits the brand line entirely for a generic food', async () => {
  * that makes a list of foods unscannable — 182 against 456 means nothing until
  * you know one is per 100 g and the other per bar.
  */
-it.skip('states the calories WITH the serving they belong to', async () => {
+it('states the calories WITH the serving they belong to', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
@@ -270,7 +264,7 @@ it.skip('states the calories WITH the serving they belong to', async () => {
  * at all and that it is the category's, not a name-derived guess — the
  * substitution `foodGlyph` exists to prevent.
  */
-it.skip('shows the category glyph, not one guessed from the name', async () => {
+it('shows the category glyph, not one guessed from the name', async () => {
   mockSearchCatalog.mockResolvedValue(
     answer({
       foods: [{ ...CATALOG_OATS, id: 'usda-7', name: 'Beef-flavoured tofu', category: 'plant_protein' }],
@@ -298,7 +292,7 @@ it.skip('shows the category glyph, not one guessed from the name', async () => {
  * default: the glyph is findable by testID and NOT by text, which is exactly
  * the pair of facts wanted.
  */
-it.skip('does not announce the glyph to a screen reader', async () => {
+it('does not announce the glyph to a screen reader', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
