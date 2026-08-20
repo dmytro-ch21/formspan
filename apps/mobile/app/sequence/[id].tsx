@@ -64,7 +64,16 @@ export default function SequenceScreen() {
     try {
       const found = await getSequence(userId, id, getToken, c.signal);
       if (c.signal.aborted) return;
-      setSequence(found);
+      // **`?? prev`, not `found`.** This screen reloads on every FOCUS, so the
+      // common path is: read a chain online, background the app, lose signal,
+      // come back. `getSequence` resolves `null` there, and assigning it would
+      // replace steps the athlete is looking at with a full-screen "you're
+      // offline" — honest, and strictly worse than the chain that was already
+      // on the page. Keeping what we hold makes the offline branch below what
+      // it says it is: the case where there is nothing to show. Found by
+      // review; the equivalent path on the list screen is deliberately
+      // different, because there the outbox fallback IS the better answer.
+      setSequence((prev) => found ?? prev);
       setOffline(found === null);
       setError(null);
       // Only when something actually needs it. The whole summary list is
@@ -97,7 +106,11 @@ export default function SequenceScreen() {
     return (
       <View style={styles.screen}>
         <Stack.Screen options={{ title: 'Sequence' }} />
-        <Text style={styles.error} testID="sequence-error">
+        <Text
+          style={styles.error}
+          accessibilityLiveRegion="polite"
+          testID="sequence-error"
+        >
           {error}
         </Text>
       </View>
@@ -137,7 +150,11 @@ export default function SequenceScreen() {
 
       {sequence.description !== '' && <Text style={styles.description}>{sequence.description}</Text>}
 
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error && (
+        <Text style={styles.error} accessibilityLiveRegion="polite">
+          {error}
+        </Text>
+      )}
 
       {sequence.pending && (
         <View style={styles.card}>
@@ -165,6 +182,11 @@ export default function SequenceScreen() {
         </Text>
       ) : (
         steps.map((step, i) => (
+          // Keyed on id AND index deliberately: a chain may legally repeat a
+          // technique — sweep, get passed, sweep again — so `technique_id`
+          // alone is not unique here. The index makes it stable within a
+          // render; it is not stable across a reorder made on web, which is
+          // harmless while these rows hold no state of their own.
           <RNView key={`${step.technique_id}-${i}`}>
             <Pressable
               onPress={() => router.push(`/technique/${step.technique_id}`)}

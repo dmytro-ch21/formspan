@@ -54,7 +54,14 @@ export default function SequencesScreen() {
   const inflight = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
-    if (!userId) return;
+    // Clear `refreshing` on the way out, or a pull-to-refresh in this state
+    // spins forever. Practically unreachable behind the layout's signed-out
+    // guard — Clerk keeps `isSignedIn` true offline — but a spinner that can
+    // never stop is not a state worth leaving reachable at all.
+    if (!userId) {
+      setRefreshing(false);
+      return;
+    }
     inflight.current?.abort();
     const c = new AbortController();
     inflight.current = c;
@@ -122,12 +129,19 @@ export default function SequencesScreen() {
             </Text>
           }
           ListEmptyComponent={
-            // Only ever shown for a genuine empty answer — a failed load has
-            // already fallen back to the outbox and shown its error above.
-            <Text style={styles.empty} testID="sequences-empty">
-              No chains yet. Tag two or more techniques as drilled when you reflect on a session,
-              and you can save them as one.
-            </Text>
+            // **Gated on `error`, and that gate is the whole point of the
+            // screen.** The fallback to the outbox covers the case where this
+            // device is holding captures; when it is holding none, the list is
+            // empty for two completely different reasons — you have no chains,
+            // or we could not ask — and "No chains yet" is a claim about your
+            // training that is simply false in the second. The error above is
+            // the honest answer, and it is the only one shown.
+            error ? null : (
+              <Text style={styles.empty} testID="sequences-empty">
+                No chains yet. Tag two or more techniques as drilled when you reflect on a session,
+                and you can save them as one.
+              </Text>
+            )
           }
           renderItem={({ item }) => (
             <Pressable
