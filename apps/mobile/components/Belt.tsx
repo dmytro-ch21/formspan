@@ -3,15 +3,40 @@ import { StyleSheet, View } from 'react-native';
 import { activeRankBar, activeStrap, vola } from '@/constants/Colors';
 
 /**
- * A jiu-jitsu belt, drawn rather than illustrated.
+ * A jiu-jitsu belt as a physical object — **the LIST-ROW and RANK rendering.**
  *
- * **No SVG, and not for want of trying to be fancy.** A belt is three
- * rectangles — the strap, the rank bar sewn near one end, and the stripes
- * inside it — so plain views draw it exactly. That avoids adding
- * `react-native-svg` (a native dependency, and therefore a prebuild and a
- * fresh device build for everyone) to render four straight lines, and it
- * means the web and admin versions are the same shapes in CSS rather than a
- * separate asset pipeline nobody remembers to regenerate.
+ * ## Which of the two belt renderings to use
+ *
+ * There are exactly two, and they are deliberate. Reach for this one wherever
+ * the belt is **furniture or rank**: a rank card, a syllabus row, anything at
+ * list-row scale, and anything that has to show stripes or a black belt's
+ * degrees — the rank bar is the content there, and only this one draws it.
+ *
+ * `components/BeltMark.tsx` is the other: a **tied** belt, for a hero or
+ * identity slot where the belt names the screen you are on (the roadmap
+ * header). At 64pt a flat strap reads as a coloured rectangle and the knot is
+ * what makes it a belt; it carries no stripes and reports no rank.
+ *
+ * **They are two drawings on purpose. Do not consolidate them, and do not draw
+ * a third.** Consolidating silently changes every rank display in the app; a
+ * third one appears when somebody finds neither of these and starts from
+ * scratch, which is why each file points at the other. `check:palette` catches
+ * colour drift between them because **both take their colours from
+ * `constants/Colors.ts`** — `activeStrap`/`activeRankBar` here,
+ * `activeBeltAccent` there — and never from a literal. Nothing catches SHAPE
+ * drift, so if you change what one of them draws, look at the other.
+ *
+ * **Drawn rather than illustrated.** A belt is three rectangles — the strap,
+ * the rank bar sewn near one end, and the stripes inside it — so plain views
+ * draw it exactly, and it means the web and admin versions are the same shapes
+ * in CSS rather than a separate asset pipeline nobody remembers to regenerate.
+ * (This comment used to justify the plain views as *avoiding*
+ * `react-native-svg`, "a native dependency, and therefore a prebuild and a
+ * fresh device build for everyone". That was true when written and is not now:
+ * `react-native-svg` is declared **and** installed, and eight files on `main`
+ * already import it. The shapes stay as they are — three rectangles want
+ * rectangles — but do not read that sentence as a live constraint, because it
+ * would push the next person to a worse choice.)
  *
  * **The rank bar is black on coloured belts and red on a black belt.** That is
  * how belts are actually made, and getting it wrong is the kind of detail a

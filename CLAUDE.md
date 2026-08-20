@@ -396,7 +396,28 @@ supposed to check rather than a ceremony around it:
   gate and merge: a merge was refused today because four checks re-started in
   the seconds between, and `--admin` was offered and declined.
 - a ticket carrying an unmet `NEEDS HUMAN EVIDENCE` criterion. `closes #N`
-  closes it anyway; reopen it and say why. Four were reopened on 2026-08-20.
+  closes it anyway; reopen it and say why. Six were reopened on 2026-08-20.
+
+**A CODE SPAN DOES NOT DISARM A CLOSING KEYWORD.** Backticks are markdown;
+GitHub parses closing links out of the raw text underneath them. So a PR body
+that *argues a ticket should stay open* still closes it if the argument quotes
+the phrase — which is what happened on 2026-08-20, and **the first correction
+failed because it quoted the offending phrase verbatim.** The fix contained the
+bug.
+
+**Do not verify this by reading the body.** The rendered text looks exactly the
+same either way. Ask GitHub what it parsed:
+
+```bash
+gh api graphql -f query='{repository(owner:"dmytro-ch21",name:"formspan"){pullRequest(number:NNN){closingIssuesReferences(first:10){nodes{number}}}}}'
+```
+
+An empty list is the only evidence. Check it **after every body edit**, because
+an edit that reintroduces the phrase re-arms the link silently.
+
+This is also the likeliest explanation for a ticket that closed with **no commit
+attached** — the signature reads like somebody clicking, and a keyword in a PR
+body produces exactly the same trace.
 
 ## The open list (hard rule)
 

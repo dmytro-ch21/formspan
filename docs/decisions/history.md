@@ -36252,6 +36252,244 @@ happily.
   N30's entry already flagged the mobile curriculum screen as a plain
   `ScrollView` at 85 items; this exceeds that.
 
+## 2026-08-20 — N98: the roadmap screen, rebuilt as a hierarchy of collapsed things (#446)
+
+`apps/mobile/app/curriculum/[id].tsx` was a flat list: a description, an
+enrolment button, a focus panel, then every item in the curriculum as a
+`TechniqueRow`, grouped under phase headers. That was defensible at 42 items
+and stopped being defensible the moment **#476 landed 93 lessons across 11
+milestones on white belt** — the entry above ends on exactly that worry, and
+this is the answer to it.
+
+The screen is rebuilt against the two supplied mockups, and the design and the
+performance problem turn out to be one answer rather than two.
+
+**Belt → milestone → lesson, each expanding on tap, everything closed on
+arrival.** The user's own framing: *"each bigger thing on tap expands, that's
+how we see first high level next more in details."* Arriving shows the **shape**
+of the belt — eleven milestones, where you are, what is left — and none of its
+contents. Opening one milestone closes the previous one; opening a lesson
+closes the previous lesson. A lesson expands **in place** and never navigates:
+in a 93-item roadmap, leaving the screen loses your position, and the whole
+point of expanding is that the context stays on screen around it.
+
+That is also what retires N30's sizing flag without changing the container.
+**Closed, the screen mounts eleven cards, a header and two summary cards
+regardless of belt**, and the worst realistic case is one open milestone — 13
+lessons at white, not 93. So it stays a plain `ScrollView`, deliberately and
+now with a reason rather than by omission.
+
+**The lesson level says how it is MEASURED and offers no checkbox.** It cannot
+offer one: completion is derived from logged evidence, and migration 000034 is
+explicit that there is deliberately no way to mark a technique mastered by
+hand. So the honest thing at the level where an athlete asks "what do I have to
+do" is *what would count* — `Landed live 3 / 15`, `Classes drilled in 0 / 10` —
+followed by where their record stands and a **Work on this** button that puts
+the one technique into the focus list, where the reflection wizard will record
+the evidence these thresholds read. `proposeOneFocus` is new for that: same
+wholesale-replacement endpoint and the same cap, but the athlete named ONE
+thing, so nothing else rides in behind it and nothing is retired for being
+mastered. It goes **first** in the list, which is what stops the five-slot cap
+silently dropping the very technique that was just requested.
+
+**A concept expands too, and reads as *understand this*.** `measuresOf` returns
+`null` rather than `[]` for one, and the two are different claims — "no
+criteria" is a fact about the content, "no thresholds met" would be a fact about
+the athlete. Collapsing them is how a concept ends up drawn as an unfinished
+technique, which matters more than it sounds: 22 of purple belt's 66 items and
+48 of brown's 82 are concepts.
+
+**Progress is derived at every level, and a milestone with nothing completable
+in it shows none at all.** Not 0% — a milestone of concepts can never move, and
+0% there reads as failure. Those milestones leave **both** halves of the belt's
+own fraction as well: in the denominator they cap a purple belt below 100%
+forever, and counted as complete they claim work nobody could have done. Two of
+purple's ten milestones and five of brown's ten are in exactly that position, so
+this is most of a belt rather than an edge case.
+
+### What came from the mockups, and the three places they were not followed
+
+The reference is a numbered vertical timeline: a circled number per milestone on
+a **continuous rule in the belt's own colour**, running behind the circles; the
+current milestone's circle larger and ringed in that colour; each milestone a
+card with its title, `N lessons` **in the belt colour**, and a chevron;
+expanded, its lessons as belt-coloured dots on a second **inner** rule. Above
+it a progress card (trophy tile, `White belt path`, `0 of 11 milestones
+completed`, a bar and a percentage ring); below it a completion card with the
+same ring. The belt name is uppercase with 4.5pt of tracking — the most
+distinctive type on the screen, and deliberately not a navigation title, so the
+stack header is hidden and the screen draws its own circular back control.
+
+Three deliberate departures, all recorded on the issue:
+
+- **The white mockup has no progress card; both belts get one.** Two belts
+  behaving differently is a worse outcome than matching one image, and that card
+  is where "0 of 11 milestones completed" lives.
+- **The white mockup shows 10 milestones; the document has 11.** The document
+  wins — that ruling predates this work.
+- **The completion card's glyph is the kit's `goal` bullseye, not a flag.**
+  `assets/brand/icons/` has no flag, and inventing brand geometry to match one
+  mockup is the wrong trade.
+
+Two new pieces of drawing, both small. `components/BeltMark.tsx` is the **tied**
+belt from the reference — `components/Belt.tsx` draws the belt as a physical
+object with its rank bar, which is right for a rank card and reads as a coloured
+rectangle at 64pt, where the knot is what makes it a belt. It takes the belt's
+**accent** rather than its strap colour, which is the one place it departs from
+`Belt`: a strap colour is a picture of dyed cotton (#1B4CC4 measures 2.50:1
+against `surface`), and this is a 16pt mark doing signalling work.
+`components/ui/ProgressRing.tsx` is the percentage ring, and its `percent` is
+**nullable, where null is not zero** — a roadmap nobody has taken on is not 0%
+through, nothing is being counted at all, and it draws an em dash.
+
+No new colours: everything is `beltAccent` and existing `vola` tokens, so
+`check:palette` is unaffected.
+
+### What is tested, and how the tests were checked
+
+`lib/roadmapView.ts` holds every derivation, out of the screen file for the
+reason `lib/curriculumRow.ts` was split out before it — the last blocking
+finding on this feature was a display state derived from the wrong field, in a
+screen file no test could reach. 23 unit tests there, 6 more on
+`proposeOneFocus`, and **18 render tests** in
+`app/__tests__/roadmapScreen.test.tsx`, which is the first component test this
+screen has ever had. The render tests assert what is and is not **mounted**,
+because that is the one thing reading the source cannot tell you: a collapsed
+section and a section rendered at zero height are the same code.
+
+Both mutations were run rather than assumed. Starting `openMilestone` at `1`
+turns 2 tests red; letting a concept-only milestone divide by
+`Math.max(1, countable)` turns 5 red across both files. Baseline green in the
+same session, 63 tests.
+
+### What review caught, and what writing the test for it caught
+
+Two findings, and the second one is the reason the first was worth a test rather
+than a fix.
+
+**The connecting rule was eleven dashes, not one line.** `styles.row` carried
+`paddingBottom: 10`; the gutter is a stretched *child*, so its height is the
+row's CONTENT box, and an absolutely-positioned `bottom: 0` rail cannot reach
+into the row's padding. The single defining feature of the reference design was
+broken by ten pixels in a place nothing pointed at — and the comment on that
+line **claimed the opposite**, that "the rows butt together so the rule segments
+join into one line". A comment asserting the property its own styles break is
+worse than no comment: the next person reads it and does not look. The spacing
+moved to `cardCol`, inside the box the gutter matches, which is exactly the
+`lessonWrap`/`lessonCol` arrangement one level down — which is why the inner
+rule never had the bug.
+
+**Writing the test for that found a second defect nobody had seen.**
+`styles.rail` set `top: 0, bottom: 0` in the base style, so the last segment's
+`{ top: 0, height: half }` override merged onto an inherited `bottom: 0` — and
+**Yoga resolves top+bottom by stretching and ignoring the height**. The final
+segment ran past its circle and down into the completion card. `innerRail` had
+the identical shape and the identical bug. Both now supply their own vertical
+extent in all three cases and the base style carries none, so there is nothing
+to inherit. This one would have survived a screenshot review: it is a
+belt-coloured line overshooting onto a belt-coloured card edge.
+
+The lesson generalises past this screen. **A style that one branch overrides and
+another inherits is the hazard**, not the individual value; and a layout claim
+in a comment is worth exactly as much as the test under it, which here was
+nothing until there was one.
+
+**The header hid its own content from VoiceOver.** An `accessibilityLabel`
+REPLACES an element's children for a screen reader, so labelling the thesis
+button silenced the thesis; and anything nested inside an accessible element is
+not reachable as its own node, so the expanded description — where #445 put all
+three of the belt's orphaned framing phases — was announced by nothing at all. A
+belt's entire framing, invisible. The label is gone (the button speaks its own
+text), a hint says what tapping does, and the description is rendered outside
+the pressable.
+
+Two smaller ones taken at the same time. The **spoken** "X of Y mastered" is now
+gated on enrolment exactly like the visible counter — ungated it announced "0 of
+2 mastered" to someone who had not started counting, which is the precise
+reading the rest of the screen refuses, leaking through the one layer nobody
+looks at. And **"Work on this" on a technique already in focus was a dead
+control**: `proposeOneFocus` returned `unchanged` and the handler returned
+silently, which is indistinguishable from a dropped tap. The row says "Already
+in your focus" instead, which is also the more useful answer.
+
+Six mutations were run against the resulting guards — row padding reintroduced,
+`top`/`bottom` restored to each of the two rail base styles, the
+`accessibilityLabel` put back, the mastered suffix ungated, and the focus button
+drawn unconditionally. All six red, baseline green. **The first attempt at that
+measured nothing**: the runner helper `cd`'d away, so four apparent failures
+were all the *first* mutation still in place and the later substitutions never
+applied. Redone with absolute paths and an assertion that each target string
+exists before substituting.
+
+### A test that passes warm and fails cold, 3 out of 3
+
+Found while re-applying this work onto a fresh worktree, which is the only
+reason it surfaced at all: a brand-new checkout has **no jest transform cache**,
+and `app/__tests__/roadmapScreen.test.tsx` never set `asyncUtilTimeout`.
+
+RNTL's default is **one second**. Cold, the screen is still showing its
+`ActivityIndicator` when `waitFor` gives up — the first test takes ~1.8s and
+fails **3 out of 3**. Warm, it passes **5 out of 5** in ~160ms. So a local run
+says everything is fine, and the one condition it fails in is the condition
+somebody iterating on this file is in the first time they run it.
+
+**It is NOT a live CI break, and the distinction is worth stating rather than
+assuming in either direction.** Measured: the cold *full* suite passes 2219/2219
+without the fix, because by the time this file runs among 144 suites the shared
+module graph is already compiled by earlier ones. `CI success` on `b31d73e`
+agrees. What was broken is the file **run alone**, which is how it will be run
+every time it is worked on.
+
+The fix is the one seven other suites here already use —
+`configure({ asyncUtilTimeout: 10_000 })`, reachable because `jest.config.js`
+sets `testTimeout: 15_000` (F13). And the apparatus was checked both ways rather
+than trusted: removing the line reproduces the failure 3/3 cold, restoring it
+passes 4/4 cold. An earlier attempt at that measurement was **worthless** — the
+`rm -rf` of the cache directory failed with "Directory not empty" and the run
+was warm, so it "confirmed" a fix against a condition it had not created.
+`jest --clearCache` is the supported way and is what the numbers above use.
+
+### It has been seen on a device, and that closes the previous entry's gap
+
+N97's entry ended on "**Nothing has been seen on a screen**", and that is no
+longer true: this ran on a simulator against a locally seeded database — white
+belt at its real 11 phases and 93 lessons, not a fixture — and the user's
+verdict was *"The roadmaps look outstanding, love it."* Both belts, collapsed
+and expanded. #446 is closed on that evidence.
+
+Worth recording **how** rather than only that, because the setup is the part
+that is easy to get wrong and quietly prove nothing:
+
+- Built from the **worktree**, with `apps/mobile/.env.local` copied in first.
+  Without that copy the build succeeds and launches into a config error — the
+  `EXPO_PUBLIC_*` values are inlined at build time and a worktree never has the
+  file.
+- Metro on **:8082**, not the :8081 instance the primary checkout was already
+  serving for another session. A dev client happily attaches to somebody else's
+  bundler, and the screenshot then shows a build that is not under test.
+- Pointed at a **local** API rather than staging, because staging's database
+  had not been reseeded since #476 and would have rendered the OLD curricula
+  under the new screen — which is the failure that looks most like success.
+
+The one judgement call the user ruled on implicitly by liking it is the belt
+mark; it stays as drawn.
+
+### Gaps
+
+- **The belt mark is a judgement call.** It is a tied belt drawn from the
+  reference rather than an asset from `assets/brand/`, which is the source of
+  truth for brand identity. If it is going to be permanent it belongs in the
+  kit, generated like the 25 UI icons.
+- **Triage order is still gone** (previous entry). A white belt being mounted
+  every round meets *Escape Bad Positions* as milestone 10. The "start here"
+  affordance that entry proposed for this screen is not built — the current
+  milestone is simply the first unfinished one, in author order.
+- **The enrolment toggle and the bulk focus write moved into an overflow menu**,
+  because the reference gives them no place on the timeline. The not-enrolled
+  state still carries a visible primary button; the enrolled state does not, and
+  whether "Put this down" is discoverable enough behind `•••` has not been
+  tested on anyone.
+
 ## 2026-08-20 — The phone stops throwing away the server's reason (N101)
 
 `nutrition.Projection` has carried `unreachable_reason` since N69 — display-ready
@@ -36343,6 +36581,32 @@ chart but renders no projection sentence at all, so an unreachable plan is
 silent there and explained only on the full page. That is pre-existing and
 arguably right for a card, but it is the same absence-with-no-explanation shape
 this entry is about, and nobody has decided it deliberately.
+
+## 2026-08-20 — A code span does not disarm a closing keyword
+
+A PR body argued at length that its ticket should stay open, because the device
+criterion was unmet. It wrapped the phrase in backticks to quote it. **GitHub
+closed the ticket anyway** — backticks are markdown, and closing links are
+parsed out of the raw text underneath.
+
+**The first correction failed because it quoted the offending phrase verbatim.**
+The fix contained the bug. It was caught only by querying
+`closingIssuesReferences` after each edit, which is the one check that reads
+what GitHub parsed rather than what a human sees.
+
+That last point is the transferable half: **the rendered body looks identical
+either way.** Reading it — carefully, twice, out loud — cannot distinguish an
+armed keyword from a quoted one. Only the API can.
+
+It also probably explains part of a pattern that had been read as human error.
+Six tickets were reopened on 2026-08-20 after closing with their evidence
+outstanding, and several closed with **no commit attached** — a signature that
+looks like somebody clicking a button. A keyword in a PR body leaves exactly
+the same trace, so an unknown number of those were this rather than a person.
+
+Documented in `CLAUDE.md` beside the merge rules, with the query, and with the
+instruction to re-check after **every** body edit — because an edit that
+reintroduces the phrase re-arms the link silently.
 
 ## Open items / known gaps as of this entry
 
