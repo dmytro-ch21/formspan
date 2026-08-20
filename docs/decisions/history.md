@@ -33250,6 +33250,21 @@ check in `neverReachedProvider` is *currently redundant*, which is precisely the
 "guard whose outcome is redundant reads as dead code" case, and it has its own
 test on a constructed input saying so.
 
+**One gap was found by review, probed, and closed with a test.** Both SDKs, on
+a status >= 400, hand the body to their own unmarshaller and **return the raw
+unmarshal error instead of their typed `*Error` if that fails** — and a raw
+unmarshal error is neither an SDK `*Error` nor a `*url.Error`, so it would have
+fallen through to `ErrUnavailable` and been **metered**. That matters because a
+real outage rarely answers with the provider's own JSON; it answers with
+whatever the CDN in front of them emits. Measured against both real SDKs: an
+HTML 503, an empty body, `no healthy upstream` and JSON without an `error` key
+all still produce the typed `*Error` with its status, because `apijson`'s
+decoder is lenient. So the classification holds — **but it holds on a
+third-party decoder's leniency, which nothing would notice losing.** An SDK bump
+that made it strict would silently re-meter every CDN-fronted outage. Hence
+`TestAnOutageBodyThatIsNotTheProvidersJSONIsStillUnreachable`, which pins the
+property rather than describing it.
+
 **What remains stub-based, and would need a live call to confirm:** that a
 revoked key really answers `401`, that an outage really answers `5xx`, and that
 neither is billed. Those rest on the providers' documentation. What the
@@ -33258,12 +33273,20 @@ onto its own `*Error` type, over real HTTP — but the choice of status is ours.
 `TestLiveComplete` is where a real call would go; it was not run, because it
 spends money.
 
-**18 mutations, 18 killed**, each gated on `go vet` first so a compile error
+**20 mutations, 20 killed**, each gated on `go vet` first so a compile error
 could not be mistaken for a caught mutation — two of them initially *were*
 compile errors and the harness reported them as proving nothing rather than as
 successes. Baseline measured green in the same session against a per-branch
-database: **34 test packages, 1,273 tests, 0 failures, exactly 1 skip**
+database: **34 test packages, 1,282 tests, 0 failures, exactly 1 skip**
 (`TestLiveComplete`, the documented one).
+
+**A process note worth keeping.** The reviewers were run against this worktree
+while it was still being edited, and one of them compiled a half-written file
+and spent real time ruling out a phantom failing test. That is the
+one-agent-one-worktree rule earning itself from the other direction: it is
+usually stated to stop sessions colliding, and this was a session colliding with
+its own reviewer. Commit before dispatching review, or give the reviewer a
+worktree of its own.
 
 ### Open questions this leaves
 
@@ -33272,9 +33295,19 @@ database: **34 test packages, 1,273 tests, 0 failures, exactly 1 skip**
   401 claim; nobody has spent that.
 - **A 4xx is no longer metered, and a caller can induce some 4xxes.** A
   malformed image that the provider rejects with a 400 is now free to retry.
-  Judged smaller than the athlete-fairness win — a 400 costs the provider
-  nothing, the request body is capped at 8 MB, and the route is authenticated —
-  but it is a real loosening and is stated rather than pretended away.
+  Still judged smaller than the athlete-fairness win, but **the first draft of
+  this entry understated the bound and review caught it.** It said the loop was
+  held by an authenticated route behind a rate limiter, which is true and vague.
+  The real numbers: `/v1/exercises/identify` has its own limiter (burst 20, one
+  per 30 min), but estimate and draft have only the global default — burst 120,
+  then **2/s sustained**. So the daily quota used to stop a 4xx loop after 25
+  calls and now nothing does until ~170k unbilled provider requests a day. No
+  tokens are spent; our request-rate standing with the provider is. The trade is
+  still right — the alternative charges an athlete for a revoked API key, our
+  config error on their allowance — but it is a judgement call and now says so
+  with its arithmetic attached. The cheaper middle position, if it ever matters,
+  is to meter 400/422 while exempting 5xx, 429, 401 **and 404** (a
+  model-not-found is our misconfiguration too).
 - **Outage rate left the usage tables.** Recorded above.
 - **The mobile clients do not yet read the new `unavailable` code.** The server
   now says "this did not cost you anything" and no app surfaces it; the message

@@ -412,3 +412,77 @@ func TestAnImpossibleRequestIsNotReportedAsUnreachable(t *testing.T) {
 		})
 	}
 }
+
+// A 5xx whose body is NOT the provider's JSON error envelope — HTML from a CDN,
+// an empty body, plain text from a load balancer.
+//
+// # Why this test exists, and what it is really pinning
+//
+// This is the sharpest gap in the discriminator argument. It was found by
+// review and then MEASURED rather than reasoned about. Both SDKs, on a status
+// >= 400, read the body and hand it to their own unmarshaller — and **return
+// the raw unmarshal error instead of their typed `*Error` if that fails**
+// (`requestconfig.go`: `err = aerr.UnmarshalJSON(...); if err != nil { return
+// err }`). A raw unmarshal error is neither an SDK `*Error` nor a `*url.Error`,
+// so it would fall through `callFailure` to ErrUnavailable and **be metered**.
+//
+// That matters because **a real outage rarely answers with the provider's own
+// JSON.** It answers with whatever the CDN or load balancer in front of them
+// emits: an HTML 503 page, an empty body, `no healthy upstream`. So the exact
+// shape F16 exists for is the shape most likely to miss the typed-error path.
+//
+// Measured: it does not miss it. Both SDKs' `apijson` decoder is lenient and
+// does not error on garbage, so the typed `*Error` still comes back with its
+// `StatusCode` set, and the classification holds.
+//
+// **So the classification rests on a third-party decoder's leniency, and
+// nothing else in this repo would notice losing it.** An SDK bump that made
+// that decoder strict would silently start metering every CDN-fronted outage
+// again — no compile error, nothing else going red, and the symptom would be
+// athletes quietly losing their allowance during exactly the incidents this
+// change exists for. Hence a test on the property rather than a comment about
+// it.
+func TestAnOutageBodyThatIsNotTheProvidersJSONIsStillUnreachable(t *testing.T) {
+	for _, body := range []struct {
+		name        string
+		contentType string
+		payload     string
+	}{
+		{
+			name: "an HTML page from a CDN", contentType: "text/html",
+			payload: "<html><head><title>503 Service Unavailable</title></head>" +
+				"<body><h1>503 Service Unavailable</h1></body></html>",
+		},
+		{name: "an empty body", contentType: "text/plain", payload: ""},
+		{
+			name: "plain text from a load balancer", contentType: "text/plain",
+			payload: "no healthy upstream",
+		},
+		{
+			name: "JSON with no error envelope", contentType: "application/json",
+			payload: `{"message":"upstream connect error"}`,
+		},
+	} {
+		for _, p := range []Provider{ProviderAnthropic, ProviderOpenAI} {
+			t.Run(body.name+"/"+string(p), func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", body.contentType)
+					w.WriteHeader(http.StatusServiceUnavailable)
+					w.Write([]byte(body.payload))
+				}))
+				t.Cleanup(srv.Close)
+
+				_, err := completerAt(t, p, srv.URL).Complete(context.Background(), aRequest())
+
+				if err == nil {
+					t.Fatal("a 503 came back as a success")
+				}
+				if !errors.Is(err, ErrUnreachable) {
+					t.Fatalf("a 503 carrying %s reported as %v, not ErrUnreachable — an "+
+						"outage fronted by a CDN would be metered, which is the exact case "+
+						"F16 exists for (%s)", body.name, err, p)
+				}
+			})
+		}
+	}
+}

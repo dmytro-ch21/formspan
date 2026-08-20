@@ -10085,6 +10085,14 @@ the status passes against either regression. Assert the quota, not the status.
   `internal/platform/llm/unreachable_test.go` drives real transport failures
   instead — a real closed TCP port, a real unresolvable `.invalid` host — and
   that is the shape to copy for anything asserting provider behaviour.
+- **An outage body is usually NOT the provider's JSON**, and that is the case
+  most likely to regress silently. Both SDKs fall back to a raw unmarshal error
+  — neither their typed `*Error` nor a `*url.Error` — if they cannot decode the
+  error envelope, which would classify a CDN-fronted 503 as metered. Today their
+  decoder is lenient enough that HTML, an empty body and `no healthy upstream`
+  all still yield the typed error, so it works; an SDK bump could take that away
+  with nothing going red. Any scenario list here must cover a **non-JSON 5xx
+  body**, not just the provider's own envelope.
 - **Still unmeasured against the live providers**: that a revoked key really
   answers `401`, that an outage really answers `5xx`, and that neither is
   billed. Those are taken from documentation; the classification of an HTTP

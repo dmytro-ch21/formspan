@@ -143,7 +143,7 @@ func (h *IdentifyHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	// this endpoint had the same bug and none of the stated mitigation.
 	if errors.Is(err, ErrIdentifyUnreachable) {
 		httplog.FromContext(r.Context()).Error("exercise: identification not metered, provider never answered",
-			"err", err)
+			"user_id", userID, "err", err)
 		writeIdentifyError(w, err)
 		return
 	}

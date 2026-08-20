@@ -96,10 +96,18 @@ var ErrUnavailable = errors.New("llm: the provider is unavailable")
 //
 // # What maps here, exactly
 //
-//   - No HTTP response at all — connection refused, DNS failure, TLS failure,
-//     a dial timeout. Both SDKs return the `net/http` error unwrapped in this
-//     case ("Other errors are not wrapped by this SDK"), which is what makes it
-//     detectable rather than guessed at.
+//   - No HTTP response at all — connection refused, DNS failure, TLS failure.
+//     Both SDKs return the `net/http` error unwrapped in this case ("Other
+//     errors are not wrapped by this SDK"), which is what makes it detectable
+//     rather than guessed at.
+//
+//     **A timeout belongs to this bullet only when the DIALER's own clock ran
+//     out** — that arrives as a `*url.Error` wrapping an i/o timeout and does
+//     not match `context.DeadlineExceeded`. A timeout driven by the request
+//     CONTEXT is the opposite case and is metered; see the deadline note below.
+//     An earlier draft of this bullet said "a dial timeout" flatly, which read
+//     as covering both. Raised in review.
+//
 //   - Any HTTP error status the provider's API answered with — 401 on a revoked
 //     key, 429, 500/503/529 during an outage. The API layer rejected or dropped
 //     the request; no completion exists, and neither provider returns a usage
@@ -119,17 +127,31 @@ var ErrUnavailable = errors.New("llm: the provider is unavailable")
 // then retry it for free, which is a small version of the loop the metering
 // exists to close.
 //
-// It is accepted rather than special-cased, on three bounded grounds: a 4xx
-// costs the provider nothing to produce and bills us nothing, the input is
-// already bounded server-side (body size and text length are checked before a
-// token is spent), and every route reaching here is authenticated and sits
-// behind a burst rate limiter. Set against that, splitting 4xx from 5xx would
-// mean charging an athlete for a revoked API KEY — our config error, on their
-// allowance — which is the same indefensible shape F16 exists to remove.
+// It is accepted rather than special-cased, on grounds worth stating with their
+// real numbers rather than as "it is bounded" — because the bound is looser than
+// that phrasing suggests, and an earlier draft of this comment did suggest it:
 //
-// If a caller ever gains an input path that can provoke a provider 400 at will,
-// this is the line to revisit, and metering 4xx while exempting 5xx is the
-// change to make.
+//   - A 4xx bills us no tokens, which is the thing the quota is denominated in.
+//   - The input is already bounded server-side before a token is spent: body
+//     size, image bytes and text length are all checked by the handler.
+//   - Every route reaching here is authenticated.
+//
+// **What is NOT tight is the request rate.** `/v1/exercises/identify` has its
+// own limiter (burst 20, one per 30 min). `/v1/nutrition/estimate` and
+// `/v1/bjj/reflect/draft` have only the global default — **burst 120, then 2/s
+// sustained** (`cmd/api/main.go`). So before this change a caller looping on an
+// input the provider rejects was stopped by the daily quota after 25 calls;
+// now that loop is capped only by the limiter, at roughly 170k unbilled
+// provider requests a day. No tokens are spent, but our request-rate standing
+// with the provider and our own ingest are. Raised in review, and it is a
+// genuine judgement call rather than a free win.
+//
+// It is still the right trade, because the alternative charges an athlete for a
+// revoked API KEY — our config error, on their allowance — which is the same
+// indefensible shape F16 exists to remove. Metering 4xx while exempting 5xx,
+// 429 and 401 is the cheaper middle position if the request-rate exposure ever
+// matters; note that it would have to exempt 404 too, since a model-not-found
+// is also our misconfiguration and not the athlete's doing.
 //
 // # What deliberately does NOT map here
 //
