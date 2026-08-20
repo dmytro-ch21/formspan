@@ -4,22 +4,35 @@ import { describeBelt } from '@/components/Belt';
 import { activeBeltAccent, type BeltKey } from '@/constants/Colors';
 
 /**
- * A **tied** belt, small, centred under a belt's name.
+ * A **tied** belt — **the HERO / IDENTITY rendering.**
  *
- * `components/Belt.tsx` draws the belt as a physical object — a flat strap with
- * the rank bar sewn near one end — and that is the right drawing for a rank
- * card, where the stripes are the content. This is the other one: the mark from
- * the roadmap reference, a belt tied around a waist and seen from the front,
- * where the *knot* is what makes it read as a belt at 64pt wide. A flat strap
- * at that size reads as a coloured rectangle.
+ * ## Which of the two belt renderings to use
+ *
+ * There are exactly two, and they are deliberate. Reach for this one where the
+ * belt **names the screen you are on** and is the largest thing in the header:
+ * the roadmap hero is the first and currently only such slot. The knot is why
+ * it exists — at 64pt a flat strap reads as a coloured rectangle.
+ *
+ * `components/Belt.tsx` is the other: the belt as a physical object, a flat
+ * strap with its rank bar, for **list rows and rank displays**. That one draws
+ * stripes and black-belt degrees; **this one carries neither**, because it
+ * names a belt rather than reporting a rank. Anything at 44pt list-row scale,
+ * and anything that has to show stripes, is that one and not this.
+ *
+ * **They are two drawings on purpose. Do not consolidate them, and do not draw
+ * a third.** Consolidating silently changes every rank display in the app; a
+ * third one appears when somebody finds neither of these and starts from
+ * scratch, which is why each file points at the other. `check:palette` catches
+ * colour drift between them because **both take their colours from
+ * `constants/Colors.ts`** — `activeBeltAccent` here, `activeStrap` /
+ * `activeRankBar` there — and never from a literal. Nothing catches SHAPE
+ * drift, so if you change what one of them draws, look at the other.
  *
  * **In the belt's ACCENT, not its strap colour**, which is the one place this
  * departs from `Belt`. A strap colour is a picture of dyed cotton (#1B4CC4
  * blue measures 2.50:1 against `surface`); this is a 16pt-tall mark on a
  * near-black ground doing signalling work, which is exactly what `beltAccent`
  * was validated for. `activeBeltAccent` so monochrome mode reaches it.
- *
- * No stripes and no rank bar: this names a belt, it does not report a rank.
  */
 export function BeltMark({
   belt,

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import CurriculumScreen from '../curriculum/[id]';
 import type { Curriculum, CurriculumItem } from '@/lib/curriculum';
@@ -183,6 +184,76 @@ describe('arriving', () => {
     fireEvent.press(screen.getByTestId('roadmap-thesis'));
     expect(screen.getByTestId('roadmap-description')).toBeTruthy();
   });
+
+  it('lets the thesis and the description speak for themselves', async () => {
+    // An `accessibilityLabel` REPLACES an element's children for a screen
+    // reader, and anything nested inside an accessible element is not reachable
+    // as its own node. Labelling this button silenced the thesis; rendering the
+    // description inside it made a belt's entire framing — the three orphaned
+    // phases #445 moved into the description — announced by nothing at all.
+    await open();
+    const thesis = screen.getByTestId('roadmap-thesis');
+    expect(thesis.props.accessibilityLabel).toBeUndefined();
+    expect(thesis).toHaveTextContent(/Learn the basic game/);
+
+    fireEvent.press(thesis);
+    // Outside the pressable, so it is its own accessible node.
+    expect(within(thesis).queryByTestId('roadmap-description')).toBeNull();
+    expect(screen.getByTestId('roadmap-description')).toBeTruthy();
+  });
+});
+
+describe('the connecting rule', () => {
+  it('carries no vertical spacing on the row, which is what keeps it unbroken', async () => {
+    // The gutter is a stretched CHILD, so its height is the row's content box:
+    // padding on the row is space an absolutely-positioned `bottom: 0` rail can
+    // never reach, and it turned one belt-coloured line into eleven dashes. The
+    // spacing belongs on `cardCol`, inside the box the gutter matches.
+    await open();
+    const row = StyleSheet.flatten(screen.getByTestId('roadmap-row-2').props.style);
+    expect(row.paddingBottom ?? 0).toBe(0);
+    expect(row.paddingTop ?? 0).toBe(0);
+    expect(row.paddingVertical ?? 0).toBe(0);
+    expect(row.marginBottom ?? 0).toBe(0);
+    expect(row.marginTop ?? 0).toBe(0);
+  });
+
+  it('runs the full height of a middle row, and stops at the last circle', async () => {
+    await open();
+    const middle = StyleSheet.flatten(screen.getByTestId('roadmap-rail-2').props.style);
+    expect([middle.top, middle.bottom]).toEqual([0, 0]);
+
+    // The last segment ends at its own circle's centre rather than running off
+    // the bottom into the completion card.
+    const last = StyleSheet.flatten(screen.getByTestId('roadmap-rail-3').props.style);
+    expect(last.top).toBe(0);
+    expect(last.height).toBeGreaterThan(0);
+    // Not merely overridden — ABSENT. Yoga resolves top+bottom by stretching
+    // and ignoring the height, so an inherited `bottom: 0` here ran the final
+    // segment past its circle and into the completion card.
+    expect(last.bottom).toBeUndefined();
+  });
+
+  it('applies the same three cases to the inner rule under a lesson list', async () => {
+    // Identical shape, identical hazard — and this one is drawn per open
+    // milestone, so it regresses without the outer rule changing at all.
+    await open();
+    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+
+    const first = StyleSheet.flatten(
+      screen.getByTestId('roadmap-inner-rail-scissor-sweep').props.style,
+    );
+    expect(first.top).toBeGreaterThan(0);
+    expect(first.bottom).toBe(0);
+    expect(first.height).toBeUndefined();
+
+    const last = StyleSheet.flatten(
+      screen.getByTestId('roadmap-inner-rail-hip-bump-sweep').props.style,
+    );
+    expect(last.top).toBe(0);
+    expect(last.height).toBeGreaterThan(0);
+    expect(last.bottom).toBeUndefined();
+  });
 });
 
 describe('a milestone', () => {
@@ -324,6 +395,17 @@ describe('the summary cards', () => {
       '0 percent of milestones completed',
     );
     expect(screen.getByTestId('roadmap-completion-ring')).toBeTruthy();
+  });
+
+  it('does not announce a shortfall to a screen reader before counting starts', async () => {
+    // The visible counter is already gated on enrolment; leaving the spoken one
+    // ungated leaks the exact claim the rest of the screen refuses, through the
+    // one layer nobody looks at.
+    mockGetCurriculum.mockResolvedValue({ ...WHITE, enrolled: false, started_on: null });
+    await open();
+    const label = screen.getByTestId('roadmap-milestone-2').props.accessibilityLabel as string;
+    expect(label).toContain('2 lessons');
+    expect(label).not.toContain('mastered');
   });
 
   it('says nothing is being counted for a roadmap not taken on', async () => {

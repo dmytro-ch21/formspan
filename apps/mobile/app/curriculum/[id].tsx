@@ -77,6 +77,23 @@ const CIRCLE = 34;
 /** The current milestone's circle is larger, as in the reference. */
 const CIRCLE_NOW = 40;
 
+/**
+ * What the reference's small controls are short of 44pt, made up in `hitSlop`.
+ *
+ * The circular back and overflow buttons are 38pt because that is the size the
+ * design draws them; the lesson rows are a line of text at ~25pt because that
+ * is what a bulleted list is. Neither may grow without leaving the design, and
+ * both are below the 44pt minimum — and the lesson row is the screen's PRIMARY
+ * interaction, tapped far more than anything else here. `hitSlop` is the way
+ * out: it enlarges the touch target without moving a pixel.
+ */
+const CIRCLE_SLOP = { top: 6, bottom: 6, left: 6, right: 6 } as const;
+
+/** Where a lesson dot's centre sits from the top of its row — `dot.marginTop`
+ *  plus half the dot. The inner rule's first and last segments stop there. */
+const DOT_CENTRE = 11;
+const LESSON_SLOP = { top: 10, bottom: 10, left: 8, right: 8 } as const;
+
 export default function CurriculumScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const getToken = useAuthToken();
@@ -284,6 +301,7 @@ export default function CurriculumScreen() {
             accessibilityRole="button"
             accessibilityLabel="Roadmap options"
             testID="roadmap-menu"
+            hitSlop={CIRCLE_SLOP}
             style={({ pressed }) => [styles.circleButton, pressed && styles.pressed]}
           >
             <Text style={styles.menuGlyph}>•••</Text>
@@ -303,22 +321,37 @@ export default function CurriculumScreen() {
 
         {/* The belt level's own disclosure: the thesis is the one line, and the
             author's full rationale is behind it rather than pushing the
-            milestones off the first screen. */}
-        <Pressable
-          onPress={() => setHeaderOpen((v) => !v)}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: headerOpen }}
-          accessibilityLabel={headerOpen ? 'Hide what this belt is for' : 'What is this belt for'}
-          testID="roadmap-thesis"
-          style={({ pressed }) => [styles.thesisWrap, pressed && styles.pressed]}
-        >
-          <Text style={styles.thesis}>{view.thesis}</Text>
+            milestones off the first screen.
+
+            **The description is rendered OUTSIDE the pressable, and the
+            pressable carries no `accessibilityLabel`.** Both halves matter and
+            both were wrong first time. A label REPLACES an element's children
+            for a screen reader, so labelling this button silenced the thesis
+            itself; and anything nested inside an accessible element is not
+            reachable as its own node, so the description — which is where all
+            three of the belt's orphaned framing phases went in #445 — was
+            announced by nothing at all. A belt's entire framing, invisible.
+            Without the label the button speaks its own text, which is the
+            thesis, and the hint says what tapping does. */}
+        <RNView style={styles.thesisWrap}>
+          <Pressable
+            onPress={() => setHeaderOpen((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: headerOpen }}
+            accessibilityHint={
+              headerOpen ? 'Hides what this belt is for' : 'Shows what this belt is for'
+            }
+            testID="roadmap-thesis"
+            style={({ pressed }) => [pressed && styles.pressed]}
+          >
+            <Text style={styles.thesis}>{view.thesis}</Text>
+          </Pressable>
           {headerOpen && (
             <Text style={styles.description} testID="roadmap-description">
               {view.description}
             </Text>
           )}
-        </Pressable>
+        </RNView>
 
         {error && <Text style={styles.error}>{error}</Text>}
 
@@ -426,6 +459,7 @@ function BackButton({ onPress }: { onPress: () => void }) {
       accessibilityRole="button"
       accessibilityLabel="Back"
       testID="roadmap-back"
+      hitSlop={CIRCLE_SLOP}
       style={({ pressed }) => [styles.circleButton, pressed && styles.pressed]}
     >
       <Icon name="back" size={20} color={vola.text} />
@@ -473,14 +507,26 @@ function MilestoneCard({
   const half = Math.round(size / 2);
 
   return (
-    <RNView style={styles.row}>
+    <RNView style={styles.row} testID={`roadmap-row-${m.index}`}>
       <RNView style={styles.gutter}>
         {!(isFirst && isLast) && (
           <RNView
+            /* Each case supplies its OWN vertical extent, and `styles.rail`
+               deliberately carries none. With `top`/`bottom` in the base style
+               the last segment's `height` merged on top of an inherited
+               `bottom: 0` — and Yoga resolves top+bottom by stretching and
+               ignoring the height, so the final segment ran past its circle and
+               down into the completion card. A style that is overridden in one
+               branch and inherited in another is the whole hazard; there is
+               nothing to inherit now. */
             style={[
               styles.rail,
               { backgroundColor: tone },
-              isFirst ? { top: half, bottom: 0 } : isLast ? { top: 0, height: half } : null,
+              isFirst
+                ? { top: half, bottom: 0 }
+                : isLast
+                  ? { top: 0, height: half }
+                  : { top: 0, bottom: 0 },
             ]}
             testID={`roadmap-rail-${m.index}`}
           />
@@ -511,9 +557,19 @@ function MilestoneCard({
           onPress={onToggle}
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
+          /* The mastered suffix is gated on `enrolled` for the same reason the
+             visible counter is: nothing is being counted until the athlete
+             takes the roadmap on, so "0 of 2 mastered" reports a shortfall
+             against a clock that has not started. Leaving it ungated leaks
+             exactly the claim the rest of the screen refuses, through the one
+             layer nobody looks at. */
           accessibilityLabel={`Milestone ${m.index}, ${m.title}, ${m.lessons.length} lesson${
             m.lessons.length === 1 ? '' : 's'
-          }${m.progress === null ? '' : `, ${m.mastered} of ${m.countable} mastered`}`}
+          }${
+            enrolled && m.progress !== null
+              ? `, ${m.mastered} of ${m.countable} mastered`
+              : ''
+          }`}
           testID={`roadmap-milestone-${m.index}`}
           style={({ pressed }) => [styles.milestone, open && styles.milestoneOpen, pressed && styles.pressed]}
         >
@@ -613,11 +669,17 @@ function LessonRow({
       <RNView style={styles.lessonGutter}>
         {!(isFirst && isLast) && (
           <RNView
+            /* Same three cases, same reason as the outer rule. */
             style={[
               styles.innerRail,
               { backgroundColor: tone },
-              isFirst ? { top: 11, bottom: 0 } : isLast ? { top: 0, height: 11 } : null,
+              isFirst
+                ? { top: DOT_CENTRE, bottom: 0 }
+                : isLast
+                  ? { top: 0, height: DOT_CENTRE }
+                  : { top: 0, bottom: 0 },
             ]}
+            testID={`roadmap-inner-rail-${l.key}`}
           />
         )}
         <RNView
@@ -636,6 +698,7 @@ function LessonRow({
           accessibilityState={{ expanded: open }}
           accessibilityLabel={`${l.name}. ${l.measures === null ? 'Something to understand' : state}`}
           testID={`roadmap-lesson-${l.key}`}
+          hitSlop={LESSON_SLOP}
           style={({ pressed }) => [styles.lessonHead, pressed && styles.pressed]}
         >
           <Text style={[styles.lessonName, l.mastered && { color: tone }]}>{l.name}</Text>
@@ -792,13 +855,21 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
 
   timeline: { marginTop: 4 },
-  // No gap: the rows butt together so the rule segments join into one line.
-  row: { flexDirection: 'row', paddingBottom: 10 },
+  /* **The row carries NO vertical spacing, and that is what makes the rule
+     continuous.** The gutter is a stretched *child*, so its height is the row's
+     CONTENT box — padding on the row is space the gutter never occupies, and an
+     absolutely-positioned `bottom: 0` rail cannot reach into it. Ten pixels of
+     row padding turned one belt-coloured line into eleven dashes, which is the
+     single defining feature of the reference design. The spacing lives on
+     `cardCol` instead, inside the box the gutter stretches to match — exactly
+     the arrangement `lessonWrap`/`lessonCol` already uses one level down, which
+     is why the inner rule never had this bug. If you ever need to space these
+     rows apart, put it on `cardCol`. */
+  row: { flexDirection: 'row' },
   gutter: { width: RAIL_W, alignItems: 'center' },
+  // No `top`/`bottom` here on purpose — see the call site.
   rail: {
     position: 'absolute',
-    top: 0,
-    bottom: 0,
     width: 2,
     left: RAIL_W / 2 - 1,
   },
@@ -815,7 +886,8 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
 
-  cardCol: { flex: 1 },
+  // The timeline's row spacing. On this column and not on `row` — see above.
+  cardCol: { flex: 1, paddingBottom: 10 },
   milestone: {
     backgroundColor: vola.surface,
     borderRadius: 14,
@@ -852,7 +924,7 @@ const styles = StyleSheet.create({
   },
   lessonWrap: { flexDirection: 'row' },
   lessonGutter: { width: 22, alignItems: 'center' },
-  innerRail: { position: 'absolute', top: 0, bottom: 0, width: 1, left: 10.5, opacity: 0.45 },
+  innerRail: { position: 'absolute', width: 1, left: 10.5, opacity: 0.45 },
   dot: {
     width: 8,
     height: 8,
