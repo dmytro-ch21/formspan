@@ -202,12 +202,46 @@ func (s TargetSource) valid() bool {
 // FibreG is a pointer and the others are not: zero fat is a real measurement,
 // but a label that does not state fibre is not claiming zero, and averaging
 // unstated as zero drags every fibre figure down.
+// The five LABEL macros added by N52 are all pointers, for the reason FibreG
+// already is and more sharply: **absence is a fact about what we know, never a
+// fact about the food.** A zero says "this contains no sodium"; nil says
+// "nobody told us". Two of them are nil most of the time by nature of the
+// sources — see the notes on each — so collapsing nil to 0 would not be an edge
+// case, it would be the common case, and it would put a claim in front of an
+// athlete that no source ever made. Clients render `n/a`.
+//
+// **SodiumMG is MILLIGRAMS**, and the unit is in the field name because getting
+// it wrong is a 1000x error that looks plausible. USDA reports sodium in mg and
+// Open Food Facts reports it in GRAMS; the conversion happens at the OFF
+// boundary, not here. Nothing downstream would catch a mistake — 0.536 where
+// 536 belongs is in range, is a believable number, and no test written against
+// one source would ever see the other's unit.
+//
+// **Salt is deliberately absent.** Open Food Facts returns it, and measured on
+// two real products it is EXACTLY sodium x 2.5 (0.536 -> 1.34, 0.0428 -> 0.107).
+// It is therefore derivable, and two stored numbers that can disagree is worse
+// than one and a formula. Do not add a column for it.
 type Macros struct {
 	Kcal     float64  `json:"kcal"`
 	ProteinG float64  `json:"protein_g"`
 	CarbG    float64  `json:"carb_g"`
 	FatG     float64  `json:"fat_g"`
 	FibreG   *float64 `json:"fibre_g"`
+
+	// SaturatedFatG and SugarG come from both sources.
+	SaturatedFatG *float64 `json:"saturated_fat_g"`
+	SugarG        *float64 `json:"sugar_g"`
+	// AddedSugarG comes from Open Food Facts only — **USDA SR Legacy does not
+	// carry it at all**, so this is nil for every seeded generic food and real
+	// for scanned products. That asymmetry is expected, not a gap to fill.
+	AddedSugarG *float64 `json:"added_sugar_g"`
+	// SodiumMG is MILLIGRAMS. See the note above; this is the field the
+	// conversion exists for.
+	SodiumMG *float64 `json:"sodium_mg"`
+	// CholesterolMG comes from USDA only in practice — Open Food Facts carried
+	// it on NEITHER product tested — so a scanned product usually shows `n/a`
+	// here. Correct, and written down because it looks like a bug.
+	CholesterolMG *float64 `json:"cholesterol_mg"`
 }
 
 // bounds are sanity rails against a mis-keyed decimal, not nutritional limits.
@@ -218,6 +252,10 @@ const (
 	maxKcal   = 20000
 	maxMacroG = 2000
 	maxFibreG = 500
+	// Milligram rails, matching the CHECKs in migration 000066. 100,000 mg is
+	// 100 g of sodium, which no serving of food reaches — 100 g of pure salt is
+	// about 39,000 mg.
+	maxMilligrams = 100000
 )
 
 func (m Macros) validate(what string) error {
@@ -242,6 +280,28 @@ func (m Macros) validate(what string) error {
 	if m.FibreG != nil && !(*m.FibreG >= 0 && *m.FibreG < maxFibreG) {
 		return fmt.Errorf("%w: %s fibre must be between 0 and %g", ErrInvalidInput, what, float64(maxFibreG))
 	}
+	// The label macros, same failing-closed form as above — a nil is "not
+	// stated" and passes, a NaN does not.
+	for _, f := range []struct {
+		name string
+		v    *float64
+		max  float64
+	}{
+		{"saturated fat", m.SaturatedFatG, maxMacroG},
+		{"sugar", m.SugarG, maxMacroG},
+		{"added sugar", m.AddedSugarG, maxMacroG},
+		{"sodium", m.SodiumMG, maxMilligrams},
+		{"cholesterol", m.CholesterolMG, maxMilligrams},
+	} {
+		if f.v != nil && !(*f.v >= 0 && *f.v < f.max) {
+			return fmt.Errorf("%w: %s %s must be between 0 and %g", ErrInvalidInput, what, f.name, f.max)
+		}
+	}
+	// Deliberately NO check that added sugar <= total sugar. It is a real
+	// invariant, but both numbers are rounded independently by the source, so a
+	// product legitimately reporting 12.0 total and 12.04 added would be
+	// REFUSED — rejecting real data to enforce an arithmetic tidiness nothing
+	// downstream depends on. Same reasoning as the migration's comment.
 	return nil
 }
 
@@ -437,17 +497,32 @@ func (f *Food) PerServing() Macros {
 		return f.Macros
 	}
 	var total Macros
-	var fibre float64
-	anyFibre := false
+	// The nullable macros accumulate only from items that STATED them, and stay
+	// nil when none did — a recipe whose ingredients never mention sodium is
+	// not a sodium-free recipe. Note the same caveat the day-totals query
+	// carries: if two of five ingredients state sodium, the total is the sum of
+	// two and reads as complete. Partial is the honest best available; zero
+	// would be a claim.
+	sums := map[string]float64{}
+	stated := map[string]bool{}
+	add := func(key string, v *float64, qty float64) {
+		if v == nil {
+			return
+		}
+		sums[key] += *v * qty
+		stated[key] = true
+	}
 	for _, it := range f.Items {
 		total.Kcal += it.Kcal * it.Quantity
 		total.ProteinG += it.ProteinG * it.Quantity
 		total.CarbG += it.CarbG * it.Quantity
 		total.FatG += it.FatG * it.Quantity
-		if it.FibreG != nil {
-			fibre += *it.FibreG * it.Quantity
-			anyFibre = true
-		}
+		add("fibre", it.FibreG, it.Quantity)
+		add("sat", it.SaturatedFatG, it.Quantity)
+		add("sugar", it.SugarG, it.Quantity)
+		add("added", it.AddedSugarG, it.Quantity)
+		add("sodium", it.SodiumMG, it.Quantity)
+		add("chol", it.CholesterolMG, it.Quantity)
 	}
 	y := *f.YieldServings
 	out := Macros{
@@ -456,10 +531,19 @@ func (f *Food) PerServing() Macros {
 		CarbG:    total.CarbG / y,
 		FatG:     total.FatG / y,
 	}
-	if anyFibre {
-		per := fibre / y
-		out.FibreG = &per
+	per := func(key string) *float64 {
+		if !stated[key] {
+			return nil
+		}
+		v := sums[key] / y
+		return &v
 	}
+	out.FibreG = per("fibre")
+	out.SaturatedFatG = per("sat")
+	out.SugarG = per("sugar")
+	out.AddedSugarG = per("added")
+	out.SodiumMG = per("sodium")
+	out.CholesterolMG = per("chol")
 	return out
 }
 

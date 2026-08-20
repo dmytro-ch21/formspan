@@ -57,17 +57,46 @@ import json
 import os
 import sys
 
-# Nutrients we store, by USDA nutrient id. Deliberately only the five the app
-# actually uses: `nutrition_foods` carries kcal/protein/carb/fat/fibre and
-# nothing else, so importing sodium or vitamin C would create a column with no
-# reader and a promise the UI does not keep.
+# Nutrients we store, by USDA nutrient id.
+#
+# Widened by N52 from five to nine: the athlete asked for "all other that are
+# important" and the panel they showed names Total Fat, Sat Fat, Cholesterol,
+# Sodium, Total Carbs, Fiber, Sugars, Protein. The rule this list follows has
+# not changed — a nutrient is imported only when something reads it — which is
+# why vitamins are still absent.
+#
+# **1093 (sodium) is reported by USDA in MILLIGRAMS**, which is what
+# `food_catalog.sodium_mg` stores, so no conversion happens here. Open Food
+# Facts sends GRAMS for the same quantity and converts at its own boundary; see
+# `sodiumMGFromGrams` in backend/internal/modules/food/barcode.go. Getting that
+# backwards is a 1000x error that looks entirely plausible on a screen.
+#
+# **Added sugars (1235) is deliberately NOT here.** SR Legacy does not carry
+# it — measured against the live FDC API on a real entry — so listing it would
+# read as an import that silently never fires. Open Food Facts does carry it,
+# so the column is populated for scanned products and null for every generic.
 NUTRIENTS = {
     1008: "kcal",
     1003: "protein_g",
     1005: "carb_g",
     1004: "fat_g",
     1079: "fibre_g",
+    1258: "saturated_fat_g",   # Fatty acids, total saturated (g)
+    2000: "sugar_g",           # Sugars, total including NLEA (g)
+    1093: "sodium_mg",         # Sodium, Na (MILLIGRAMS)
+    1253: "cholesterol_mg",    # Cholesterol (MILLIGRAMS)
 }
+
+# The nutrients that stay NULL when the source does not state them, rather than
+# defaulting to 0.
+#
+# A source that does not state sodium is not claiming there is none, and a zero
+# would be a claim about the food where a null is a statement about our
+# knowledge. This is the most-repeated defect in this codebase and it is on the
+# exact panel the athlete showed us, so it is a list rather than four separate
+# conditionals that can drift.
+NULLABLE_NUTRIENTS = ("fibre_g", "saturated_fat_g", "sugar_g",
+                      "sodium_mg", "cholesterol_mg")
 
 # Every value in SR Legacy is per 100 g of the edible portion, so every row
 # this writes is per 100 g and the module sets serving_label '100 g' for all of
@@ -354,12 +383,11 @@ def build(index):
             "protein_g": round(float(macros.get("protein_g", 0.0)), 2),
             "carb_g": round(float(macros.get("carb_g", 0.0)), 2),
             "fat_g": round(float(macros.get("fat_g", 0.0)), 2),
-            # Absent fibre stays null rather than becoming 0. A source that
-            # does not state fibre is not claiming there is none, and the
-            # column is nullable for exactly this reason — see the same
-            # argument on nutrition_foods.fibre_g in migration 000059.
-            "fibre_g": (round(float(macros["fibre_g"]), 2)
-                        if "fibre_g" in macros else None),
+            # Absent values stay null rather than becoming 0 — see
+            # NULLABLE_NUTRIENTS for why, and migration 000059's argument on
+            # nutrition_foods.fibre_g for the original statement of it.
+            **{k: (round(float(macros[k]), 2) if k in macros else None)
+               for k in NULLABLE_NUTRIENTS},
             "serving_grams": SERVING_GRAMS,
             "market": MARKET,
             "external_id": str(top["fdc_id"]),

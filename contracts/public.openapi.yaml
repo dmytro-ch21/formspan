@@ -49,10 +49,32 @@ components:
         recomputing it discards the number the manufacturer measured.
 
 
-        `fibre_g` is nullable and the others are not, because that difference is
-        real: zero fat is a measurement, but a label that does not state fibre is
-        not claiming there is none, and averaging unstated as zero drags every
-        fibre figure down.
+        `fibre_g` is nullable and the four above it are not, because that
+        difference is real: zero fat is a measurement, but a label that does not
+        state fibre is not claiming there is none, and averaging unstated as zero
+        drags every fibre figure down.
+
+
+        **The five label macros added by N52 are all nullable, and null is the
+        common case rather than an edge case.** Absence is a fact about what the
+        source stated, never about the food — clients must render `n/a` and must
+        never substitute `0`, which would be a claim nobody made. Two of them are
+        null by nature of the sources: `added_sugar_g` is null for every
+        USDA-seeded generic food (SR Legacy does not carry it) and
+        `cholesterol_mg` is null for most scanned products (Open Food Facts
+        carried it on neither product measured while this was built).
+
+
+        **`sodium_mg` is MILLIGRAMS**, the US label and USDA convention, and the
+        unit is in the field name deliberately. Open Food Facts reports the same
+        quantity in GRAMS and it is converted server-side at that boundary; a
+        client that treats this as grams is out by 1000x on the one figure an
+        athlete managing blood pressure actually reads.
+
+
+        **Salt is deliberately not carried.** Measured on two real products it is
+        exactly `sodium x 2.5`, so a client that needs it derives it. Two numbers
+        that can disagree is worse than one and a formula.
       required: [kcal, protein_g, carb_g, fat_g]
       properties:
         kcal: { type: number }
@@ -60,6 +82,24 @@ components:
         carb_g: { type: number }
         fat_g: { type: number }
         fibre_g: { type: number, nullable: true }
+        saturated_fat_g: { type: number, nullable: true }
+        sugar_g: { type: number, nullable: true }
+        added_sugar_g:
+          type: number
+          nullable: true
+          description: >
+            Null for every seeded generic food — USDA SR Legacy does not carry
+            it. Populated from Open Food Facts for scanned products.
+        sodium_mg:
+          type: number
+          nullable: true
+          description: MILLIGRAMS. See the note above on the unit.
+        cholesterol_mg:
+          type: number
+          nullable: true
+          description: >
+            MILLIGRAMS. Usually null for scanned products; populated for
+            USDA-seeded foods.
 
     MealEstimate:
       type: object
@@ -254,6 +294,30 @@ components:
             Null is NOT zero. A source that does not state fibre is not claiming
             there is none, and averaging unstated as zero drags every figure
             down.
+        saturated_fat_g: { type: number, nullable: true }
+        sugar_g: { type: number, nullable: true }
+        added_sugar_g:
+          type: number
+          nullable: true
+          description: >
+            Null for every seeded generic food — USDA SR Legacy does not carry
+            it. Populated from Open Food Facts for scanned products.
+        sodium_mg:
+          type: number
+          nullable: true
+          description: >
+            MILLIGRAMS, the US label and USDA convention. Open Food Facts
+            reports the same quantity in GRAMS and it is converted server-side;
+            a client treating this as grams is out by 1000x on the one figure an
+            athlete managing blood pressure reads. Salt is not carried — it is
+            exactly `sodium x 2.5` and therefore derivable.
+        cholesterol_mg:
+          type: number
+          nullable: true
+          description: >
+            MILLIGRAMS. Usually null for scanned products (Open Food Facts
+            carried it on neither product measured); populated for USDA-seeded
+            foods.
         market:
           type: string
           description: >
@@ -301,6 +365,28 @@ components:
           type: number
           nullable: true
           description: Null is not zero — an unstated figure is not a claim of none.
+        saturated_fat_g: { type: number, nullable: true }
+        sugar_g: { type: number, nullable: true }
+        added_sugar_g:
+          type: number
+          nullable: true
+          description: >
+            Open Food Facts carries this for many packaged products, unlike the
+            USDA-seeded catalog where it is always null.
+        sodium_mg:
+          type: number
+          nullable: true
+          description: >
+            MILLIGRAMS. **The provider reports GRAMS and the server converts**,
+            so a client must not re-scale this. Salt is not carried — measured
+            at exactly `sodium x 2.5`, so derive it if a region needs it.
+        cholesterol_mg:
+          type: number
+          nullable: true
+          description: >
+            MILLIGRAMS. Usually null: Open Food Facts carried it on neither
+            product measured while this was built. That is the ordinary case,
+            not a fault.
         external_id:
           type: string
           nullable: true

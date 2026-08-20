@@ -769,3 +769,122 @@ func mustExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 		t.Fatalf("fixture: %v", err)
 	}
 }
+
+// The label macros persist through an entry (N52).
+//
+// **This test exists because review caught the exact bug it guards.** The
+// migration added the columns, `Macros` gained the fields and `validate`
+// bounded them — and no SQL in this module was widened, so an entry carrying
+// `sodium_mg: 536` validated, inserted without it, and read back null. A stated
+// value silently became an absence, which is the failure class this whole change
+// is written against, arriving inside the change itself.
+//
+// Nothing else would have caught it: the food module's tests cover the catalog
+// and the barcode boundary, the handler tests never reach SQL, and the value
+// round-trips as `null` rather than erroring.
+func TestLabelMacrosPersistThroughAnEntry(t *testing.T) {
+	r := repoFor(t, uid)
+
+	food := aFood(foodID, "Crisps", 536)
+	food.SaturatedFatG = f(9)
+	food.SugarG = f(1)
+	food.AddedSugarG = f(0) // a stated zero, not an absence
+	food.SodiumMG = f(536)
+	// CholesterolMG deliberately unset — the ordinary case for a scan.
+	if _, err := r.SaveFood(ctx(), food); err != nil {
+		t.Fatalf("save food: %v", err)
+	}
+	got, err := r.GetFood(ctx(), uid, foodID)
+	if err != nil {
+		t.Fatalf("get food: %v", err)
+	}
+	if got.SodiumMG == nil || *got.SodiumMG != 536 {
+		t.Fatalf("food sodium %v, want 536 — the column exists but the write or read drops it", got.SodiumMG)
+	}
+	if got.AddedSugarG == nil {
+		t.Error("a stated zero became null on the food — a fact turned into an absence")
+	}
+	if got.CholesterolMG != nil {
+		t.Errorf("food cholesterol %v for a value never stated — null became a claim", *got.CholesterolMG)
+	}
+
+	// SAVE IT AGAIN with a changed value, so the ON CONFLICT DO UPDATE path is
+	// exercised and not just the INSERT.
+	//
+	// Added after mutation testing showed this test passing with sodium removed
+	// from the upsert's SET clause: a single save only ever inserts, so the
+	// whole update half of that statement was uncovered. An edit to a saved
+	// food is the ordinary case — correcting a number off a packet — so the
+	// path that silently would not have written it is the more likely one.
+	food.SodiumMG = f(410)
+	if _, err := r.SaveFood(ctx(), food); err != nil {
+		t.Fatalf("re-save food: %v", err)
+	}
+	edited, err := r.GetFood(ctx(), uid, foodID)
+	if err != nil {
+		t.Fatalf("get edited food: %v", err)
+	}
+	if edited.SodiumMG == nil || *edited.SodiumMG != 410 {
+		t.Fatalf("edited food sodium %v, want 410 — the column is missing from "+
+			"the upsert's SET clause, so an edit silently keeps the old value", edited.SodiumMG)
+	}
+
+	entry := anEntry(entryID, food, 2)
+	entry.SaturatedFatG = f(18)
+	entry.SugarG = f(2)
+	entry.AddedSugarG = f(0)
+	entry.SodiumMG = f(1072)
+	if _, err := r.SaveEntry(ctx(), entry); err != nil {
+		t.Fatalf("save entry: %v", err)
+	}
+	// Read back through the LIST path, which is the one a client actually uses
+	// and the one whose projection would silently omit a column.
+	list, err := r.ListEntries(ctx(), uid, "2026-08-18", "2026-08-18", 50)
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	var back Entry
+	for _, e := range list {
+		if e.ID == entryID {
+			back = e
+		}
+	}
+	if back.ID == "" {
+		t.Fatalf("the entry just saved is not in the day's list")
+	}
+	if back.SodiumMG == nil || *back.SodiumMG != 1072 {
+		t.Fatalf("entry sodium %v, want 1072 — an entry accepted the value and discarded it", back.SodiumMG)
+	}
+	if back.SaturatedFatG == nil || *back.SaturatedFatG != 18 {
+		t.Errorf("entry saturated fat %v, want 18", back.SaturatedFatG)
+	}
+	if back.AddedSugarG == nil {
+		t.Error("a stated zero became null on the entry")
+	}
+	if back.CholesterolMG != nil {
+		t.Errorf("entry cholesterol %v for a value never stated", *back.CholesterolMG)
+	}
+
+	// And the entry's own ON CONFLICT DO UPDATE path, for the same reason the
+	// food's is exercised above: correcting a logged entry is ordinary, and a
+	// single save only ever reaches the INSERT half of the statement. Mutation
+	// testing found BOTH of these uncovered — the first version of this test
+	// passed with the macros removed from either SET clause.
+	entry.SodiumMG = f(820)
+	if _, err := r.SaveEntry(ctx(), entry); err != nil {
+		t.Fatalf("re-save entry: %v", err)
+	}
+	list2, err := r.ListEntries(ctx(), uid, "2026-08-18", "2026-08-18", 50)
+	if err != nil {
+		t.Fatalf("list entries again: %v", err)
+	}
+	for _, e := range list2 {
+		if e.ID != entryID {
+			continue
+		}
+		if e.SodiumMG == nil || *e.SodiumMG != 820 {
+			t.Fatalf("edited entry sodium %v, want 820 — the column is missing "+
+				"from the entry upsert's SET clause, so a correction is discarded", e.SodiumMG)
+		}
+	}
+}

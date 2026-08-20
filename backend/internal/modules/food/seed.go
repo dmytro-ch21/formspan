@@ -31,15 +31,28 @@ var seedJSON []byte
 // not in the domain: it is there so a reviewer can see which USDA row a number
 // came from without fetching anything, and the API has no reason to serve it.
 type seedFood struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Category        string   `json:"category"`
-	Aliases         []string `json:"aliases"`
-	KCal            float64  `json:"kcal"`
-	ProteinG        float64  `json:"protein_g"`
-	CarbG           float64  `json:"carb_g"`
-	FatG            float64  `json:"fat_g"`
-	FibreG          *float64 `json:"fibre_g"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Category string   `json:"category"`
+	Aliases  []string `json:"aliases"`
+	KCal     float64  `json:"kcal"`
+	ProteinG float64  `json:"protein_g"`
+	CarbG    float64  `json:"carb_g"`
+	FatG     float64  `json:"fat_g"`
+	FibreG   *float64 `json:"fibre_g"`
+	// The label macros (N52). Nullable because USDA does not state every
+	// nutrient for every food — measured coverage over the 177 seeded rows is
+	// 172 saturated fat, 165 sugar, 175 sodium, 170 cholesterol. Absence is
+	// carried through as NULL rather than 0.
+	//
+	// `added_sugar_g` is deliberately NOT here: SR Legacy does not carry it at
+	// all, so it is null for every seeded food and populated only by Open Food
+	// Facts on a scan. A field in this struct that could never be non-nil
+	// would read as an import that silently never fires.
+	SaturatedFatG   *float64 `json:"saturated_fat_g"`
+	SugarG          *float64 `json:"sugar_g"`
+	SodiumMG        *float64 `json:"sodium_mg"`
+	CholesterolMG   *float64 `json:"cholesterol_mg"`
 	ServingGrams    float64  `json:"serving_grams"`
 	Market          string   `json:"market"`
 	ExternalID      string   `json:"external_id"`
@@ -88,6 +101,10 @@ func SeedData() ([]Food, error) {
 			CarbG:          s.CarbG,
 			FatG:           s.FatG,
 			FibreG:         s.FibreG,
+			SaturatedFatG:  s.SaturatedFatG,
+			SugarG:         s.SugarG,
+			SodiumMG:       s.SodiumMG,
+			CholesterolMG:  s.CholesterolMG,
 			Market:         s.Market,
 			Source:         SourceSeed,
 			ExternalID:     &externalID,

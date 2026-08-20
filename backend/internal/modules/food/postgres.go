@@ -20,7 +20,9 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 const selectColumns = `
 	f.id, f.name, f.brand, f.category, f.aliases, f.serving_label, f.serving_grams,
-	f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g, f.market, f.source,
+	f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g,
+	f.saturated_fat_g, f.sugar_g, f.added_sugar_g, f.sodium_mg, f.cholesterol_mg,
+	f.market, f.source,
 	f.external_id, f.external_source, f.created_at, f.updated_at`
 
 type scannable interface {
@@ -31,7 +33,9 @@ func scanFood(row scannable) (*Food, error) {
 	var f Food
 	err := row.Scan(
 		&f.ID, &f.Name, &f.Brand, &f.Category, &f.Aliases, &f.ServingLabel, &f.ServingGrams,
-		&f.KCal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG, &f.Market, &f.Source,
+		&f.KCal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG,
+		&f.SaturatedFatG, &f.SugarG, &f.AddedSugarG, &f.SodiumMG, &f.CholesterolMG,
+		&f.Market, &f.Source,
 		&f.ExternalID, &f.ExternalSource, &f.CreatedAt, &f.UpdatedAt,
 	)
 	if err != nil {
@@ -121,10 +125,24 @@ func (r *PostgresRepository) Search(ctx context.Context, f SearchFilter) ([]Food
 			item Food
 			n    int
 		)
+		// **This is the SECOND scanner over `selectColumns`**, the other being
+		// `scanFood`, and the two must be kept in step by hand — it cannot use
+		// `scanFood` because this query appends a window-function count that
+		// the shared projection knows nothing about.
+		//
+		// N52 found that out the hard way: widening `selectColumns` by five
+		// columns left this one at nineteen destinations and every search test
+		// failed with "24 and 19". Loud, at least — but the exercise module
+		// records the quiet version of the same trap, where a forgotten second
+		// scanner shipped `offered_grips: null` on a whole endpoint. If you add
+		// a column above, add it here.
 		err := rows.Scan(
 			&item.ID, &item.Name, &item.Brand, &item.Category, &item.Aliases,
 			&item.ServingLabel, &item.ServingGrams, &item.KCal, &item.ProteinG,
-			&item.CarbG, &item.FatG, &item.FibreG, &item.Market, &item.Source,
+			&item.CarbG, &item.FatG, &item.FibreG,
+			&item.SaturatedFatG, &item.SugarG, &item.AddedSugarG,
+			&item.SodiumMG, &item.CholesterolMG,
+			&item.Market, &item.Source,
 			&item.ExternalID, &item.ExternalSource, &item.CreatedAt, &item.UpdatedAt, &n,
 		)
 		if err != nil {
@@ -238,8 +256,10 @@ func (r *PostgresRepository) CountMarket(ctx context.Context, market string) (in
 const upsertSQL = `
 	INSERT INTO food_catalog (
 		id, name, brand, category, aliases, serving_label, serving_grams,
-		kcal, protein_g, carb_g, fat_g, fibre_g, market, external_id, external_source
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		kcal, protein_g, carb_g, fat_g, fibre_g,
+		saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
+		market, external_id, external_source
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 	ON CONFLICT (id) DO UPDATE SET
 		name            = EXCLUDED.name,
 		brand           = EXCLUDED.brand,
@@ -252,6 +272,11 @@ const upsertSQL = `
 		carb_g          = EXCLUDED.carb_g,
 		fat_g           = EXCLUDED.fat_g,
 		fibre_g         = EXCLUDED.fibre_g,
+		saturated_fat_g = EXCLUDED.saturated_fat_g,
+		sugar_g         = EXCLUDED.sugar_g,
+		added_sugar_g   = EXCLUDED.added_sugar_g,
+		sodium_mg       = EXCLUDED.sodium_mg,
+		cholesterol_mg  = EXCLUDED.cholesterol_mg,
 		market          = EXCLUDED.market,
 		external_id     = EXCLUDED.external_id,
 		external_source = EXCLUDED.external_source,
@@ -260,13 +285,19 @@ const upsertSQL = `
 		food_catalog.name, food_catalog.brand, food_catalog.category,
 		food_catalog.aliases, food_catalog.serving_label, food_catalog.serving_grams,
 		food_catalog.kcal, food_catalog.protein_g, food_catalog.carb_g,
-		food_catalog.fat_g, food_catalog.fibre_g, food_catalog.market,
+		food_catalog.fat_g, food_catalog.fibre_g,
+		food_catalog.saturated_fat_g, food_catalog.sugar_g, food_catalog.added_sugar_g,
+		food_catalog.sodium_mg, food_catalog.cholesterol_mg,
+		food_catalog.market,
 		food_catalog.external_id, food_catalog.external_source
 	) IS DISTINCT FROM (
 		EXCLUDED.name, EXCLUDED.brand, EXCLUDED.category,
 		EXCLUDED.aliases, EXCLUDED.serving_label, EXCLUDED.serving_grams,
 		EXCLUDED.kcal, EXCLUDED.protein_g, EXCLUDED.carb_g,
-		EXCLUDED.fat_g, EXCLUDED.fibre_g, EXCLUDED.market,
+		EXCLUDED.fat_g, EXCLUDED.fibre_g,
+		EXCLUDED.saturated_fat_g, EXCLUDED.sugar_g, EXCLUDED.added_sugar_g,
+		EXCLUDED.sodium_mg, EXCLUDED.cholesterol_mg,
+		EXCLUDED.market,
 		EXCLUDED.external_id, EXCLUDED.external_source
 	)`
 
@@ -277,7 +308,9 @@ func upsertArgs(f Food) []any {
 	}
 	return []any{
 		f.ID, f.Name, f.Brand, f.Category, aliases, f.ServingLabel, f.ServingGrams,
-		f.KCal, f.ProteinG, f.CarbG, f.FatG, f.FibreG, f.Market,
+		f.KCal, f.ProteinG, f.CarbG, f.FatG, f.FibreG,
+		f.SaturatedFatG, f.SugarG, f.AddedSugarG, f.SodiumMG, f.CholesterolMG,
+		f.Market,
 		f.ExternalID, f.ExternalSource,
 	}
 }
@@ -325,10 +358,14 @@ func (r *PostgresRepository) LookupBarcode(ctx context.Context, barcode string) 
 	)
 	err := r.pool.QueryRow(ctx, `
 		SELECT name, brand, serving_label, serving_grams,
-		       kcal, protein_g, carb_g, fat_g, fibre_g, provider, external_id
+		       kcal, protein_g, carb_g, fat_g, fibre_g,
+		       saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
+		       provider, external_id
 		FROM food_barcode_cache WHERE barcode = $1`, barcode).Scan(
 		&f.Name, &f.Brand, &f.ServingLabel, &f.ServingGrams,
-		&f.KCal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG, &provider, &f.ExternalID)
+		&f.KCal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG,
+		&f.SaturatedFatG, &f.SugarG, &f.AddedSugarG, &f.SodiumMG, &f.CholesterolMG,
+		&provider, &f.ExternalID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", ErrNotFound
 	}
@@ -342,18 +379,25 @@ func (r *PostgresRepository) CacheBarcode(ctx context.Context, barcode string, f
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO food_barcode_cache (
 			barcode, provider, name, brand, serving_label, serving_grams,
-			kcal, protein_g, carb_g, fat_g, fibre_g, external_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			kcal, protein_g, carb_g, fat_g, fibre_g,
+			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
+			external_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (barcode) DO UPDATE SET
 			provider = EXCLUDED.provider,
 			name = EXCLUDED.name, brand = EXCLUDED.brand,
 			serving_label = EXCLUDED.serving_label, serving_grams = EXCLUDED.serving_grams,
 			kcal = EXCLUDED.kcal, protein_g = EXCLUDED.protein_g,
 			carb_g = EXCLUDED.carb_g, fat_g = EXCLUDED.fat_g, fibre_g = EXCLUDED.fibre_g,
+			saturated_fat_g = EXCLUDED.saturated_fat_g, sugar_g = EXCLUDED.sugar_g,
+			added_sugar_g = EXCLUDED.added_sugar_g, sodium_mg = EXCLUDED.sodium_mg,
+			cholesterol_mg = EXCLUDED.cholesterol_mg,
 			external_id = EXCLUDED.external_id,
 			fetched_at = now()`,
 		barcode, provider, f.Name, f.Brand, f.ServingLabel, f.ServingGrams,
-		f.KCal, f.ProteinG, f.CarbG, f.FatG, f.FibreG, f.ExternalID)
+		f.KCal, f.ProteinG, f.CarbG, f.FatG, f.FibreG,
+		f.SaturatedFatG, f.SugarG, f.AddedSugarG, f.SodiumMG, f.CholesterolMG,
+		f.ExternalID)
 	if err != nil {
 		return fmt.Errorf("food: cache barcode: %w", err)
 	}

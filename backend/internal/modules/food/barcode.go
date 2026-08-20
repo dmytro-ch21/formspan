@@ -148,6 +148,18 @@ type offResponse struct {
 			Carbs   *float64 `json:"carbohydrates_100g"`
 			Fat     *float64 `json:"fat_100g"`
 			Fibre   *float64 `json:"fiber_100g"`
+			// The label macros (N52). Field names measured against the live
+			// API rather than guessed — `saturated-fat_100g` is hyphenated
+			// where `fiber_100g` is not, and `added-sugars_100g` is plural.
+			SaturatedFat *float64 `json:"saturated-fat_100g"`
+			Sugars       *float64 `json:"sugars_100g"`
+			AddedSugars  *float64 `json:"added-sugars_100g"`
+			// **GRAMS**, unlike USDA's milligrams. Converted below; the field
+			// is named for what the provider sends, not for what we store, so
+			// the conversion cannot be lost in a rename.
+			SodiumG *float64 `json:"sodium_100g"`
+			// Present in the schema, absent from every product measured.
+			CholesterolG *float64 `json:"cholesterol_100g"`
 		} `json:"nutriments"`
 	} `json:"product"`
 }
@@ -234,11 +246,19 @@ func (o *OpenFoodFacts) Resolve(ctx context.Context, barcode string) (*BarcodeFo
 		// 99.99999999999999 (kJ->kcal conversions produce them) is served raw
 		// on the fetch and 100.00 from the cache, and the same barcode answers
 		// differently depending on whether somebody scanned it before.
-		KCal:       round2(*n.KCal),
-		ProteinG:   round2(deref(n.Protein)),
-		CarbG:      round2(deref(n.Carbs)),
-		FatG:       round2(deref(n.Fat)),
-		FibreG:     round2Ptr(n.Fibre),
+		KCal:     round2(*n.KCal),
+		ProteinG: round2(deref(n.Protein)),
+		CarbG:    round2(deref(n.Carbs)),
+		FatG:     round2(deref(n.Fat)),
+		FibreG:   round2Ptr(n.Fibre),
+
+		SaturatedFatG: round2Ptr(n.SaturatedFat),
+		SugarG:        round2Ptr(n.Sugars),
+		AddedSugarG:   round2Ptr(n.AddedSugars),
+		// THE CONVERSION. Open Food Facts sends grams; we store milligrams.
+		SodiumMG:      round2Ptr(sodiumMGFromGrams(n.SodiumG)),
+		CholesterolMG: round2Ptr(milligramsFromGrams(n.CholesterolG)),
+
 		ExternalID: &id,
 	}
 	// Crowd-sourced numbers get the same treatment as a missing name: an
@@ -249,6 +269,41 @@ func (o *OpenFoodFacts) Resolve(ctx context.Context, barcode string) (*BarcodeFo
 		return nil, ErrNotFound
 	}
 	return out, nil
+}
+
+// gramsToMilligrams is the whole conversion, named as a constant so a mutation
+// of it is visible rather than a stray digit in an expression.
+const gramsToMilligrams = 1000
+
+// sodiumMGFromGrams converts Open Food Facts' sodium into the milligrams this
+// codebase stores.
+//
+// **This function is the single most dangerous line in the barcode path.**
+// USDA reports sodium in mg and Open Food Facts reports it in grams, so
+// omitting this conversion stores a number 1000x too small — and nothing
+// downstream would catch it. `0.536` where `536` belongs passes every CHECK, is
+// a plausible figure, and looks like an ordinary rounding difference to anyone
+// reading it. Sodium is also the one field an athlete managing blood pressure
+// actually reads, so being quietly wrong here is worse than being absent.
+//
+// Measured: `sodium_100g` was 0.536 on one real product and 0.0428 on another,
+// against USDA's 1.0 mg for almonds. Its own function, with its own test in the
+// failing direction, because a conversion guarded only by a comment is how this
+// comes back.
+func sodiumMGFromGrams(g *float64) *float64 { return milligramsFromGrams(g) }
+
+// milligramsFromGrams converts a nullable gram figure, preserving nil.
+//
+// nil in, nil out — deliberately, and it is the reason this is not written
+// inline. Multiplying a "not stated" into a 0 would turn an absence into the
+// claim that a product contains none, which is the failure this whole change
+// is written against.
+func milligramsFromGrams(g *float64) *float64 {
+	if g == nil {
+		return nil
+	}
+	v := *g * gramsToMilligrams
+	return &v
 }
 
 // round2 matches NUMERIC(_, 2), the scale every macro column here uses.

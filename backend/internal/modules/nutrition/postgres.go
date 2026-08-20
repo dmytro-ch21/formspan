@@ -54,6 +54,7 @@ const entryCols = `
 	id::text, user_id, eaten_on::text, meal,
 	name, servings, serving_label,
 	kcal, protein_g, carb_g, fat_g, fibre_g,
+	saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
 	source_food_id::text, notes, created_at, updated_at`
 
 func scanEntry(row pgx.Row) (Entry, error) {
@@ -62,6 +63,7 @@ func scanEntry(row pgx.Row) (Entry, error) {
 		&e.ID, &e.UserID, &e.EatenOn, &e.Meal,
 		&e.Name, &e.Servings, &e.ServingLabel,
 		&e.Kcal, &e.ProteinG, &e.CarbG, &e.FatG, &e.FibreG,
+		&e.SaturatedFatG, &e.SugarG, &e.AddedSugarG, &e.SodiumMG, &e.CholesterolMG,
 		&e.SourceFoodID, &e.Notes, &e.CreatedAt, &e.UpdatedAt,
 	)
 	return e, err
@@ -117,8 +119,10 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 			id, user_id, eaten_on, meal,
 			name, servings, serving_label,
 			kcal, protein_g, carb_g, fat_g, fibre_g,
+			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
 			source_food_id, notes)
-		VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+		        $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (id) DO UPDATE SET
 			eaten_on = EXCLUDED.eaten_on,
 			meal = EXCLUDED.meal,
@@ -130,6 +134,11 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 			carb_g = EXCLUDED.carb_g,
 			fat_g = EXCLUDED.fat_g,
 			fibre_g = EXCLUDED.fibre_g,
+			saturated_fat_g = EXCLUDED.saturated_fat_g,
+			sugar_g = EXCLUDED.sugar_g,
+			added_sugar_g = EXCLUDED.added_sugar_g,
+			sodium_mg = EXCLUDED.sodium_mg,
+			cholesterol_mg = EXCLUDED.cholesterol_mg,
 			source_food_id = EXCLUDED.source_food_id,
 			notes = EXCLUDED.notes,
 			updated_at = now()
@@ -138,6 +147,7 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 		e.ID, e.UserID, e.EatenOn, e.Meal,
 		e.Name, e.Servings, e.ServingLabel,
 		e.Kcal, e.ProteinG, e.CarbG, e.FatG, e.FibreG,
+		e.SaturatedFatG, e.SugarG, e.AddedSugarG, e.SodiumMG, e.CholesterolMG,
 		e.SourceFoodID, e.Notes)
 
 	out, err := scanEntry(row)
@@ -176,6 +186,7 @@ func (r *PostgresRepository) DayTotals(ctx context.Context, userID, from, to str
 	rows, err := r.pool.Query(ctx, `
 		SELECT d.eaten_on::text,
 		       d.entries, d.kcal, d.protein_g, d.carb_g, d.fat_g, d.fibre_g,
+		       d.saturated_fat_g, d.sugar_g, d.added_sugar_g, d.sodium_mg, d.cholesterol_mg,
 		       t.kcal, t.protein_g
 		FROM (
 			SELECT eaten_on,
@@ -186,7 +197,25 @@ func (r *PostgresRepository) DayTotals(ctx context.Context, userID, from, to str
 			       sum(fat_g)        AS fat_g,
 			       -- NULL when no entry that day stated fibre, rather than 0:
 			       -- a day nobody recorded fibre for is not a zero-fibre day.
-			       sum(fibre_g)      AS fibre_g
+			       sum(fibre_g)      AS fibre_g,
+			       -- The label macros (N52), same NULL-not-zero rule. Sodium
+			       -- is the one worth having a daily total for at all — it is
+			       -- the nutrient with a daily guideline rather than a
+			       -- per-food one.
+			       --
+			       -- CAVEAT worth knowing before rendering these: SQL sum()
+			       -- SKIPS nulls, so a day where three of five entries stated
+			       -- sodium returns the sum of three and looks complete. NULL
+			       -- means "nobody stated it all day"; a number does NOT mean
+			       -- "everything is accounted for". Same caveat has always
+			       -- applied to fibre. A client showing these against a daily
+			       -- guideline should say how many entries contributed —
+			       -- exactly the honesty rule N28 set for averages.
+			       sum(saturated_fat_g) AS saturated_fat_g,
+			       sum(sugar_g)         AS sugar_g,
+			       sum(added_sugar_g)   AS added_sugar_g,
+			       sum(sodium_mg)       AS sodium_mg,
+			       sum(cholesterol_mg)  AS cholesterol_mg
 			FROM nutrition_entries
 			WHERE user_id = $1 AND eaten_on BETWEEN $2::date AND $3::date
 			GROUP BY eaten_on
@@ -209,6 +238,7 @@ func (r *PostgresRepository) DayTotals(ctx context.Context, userID, from, to str
 		var d DayTotals
 		if err := rows.Scan(&d.EatenOn, &d.Entries,
 			&d.Kcal, &d.ProteinG, &d.CarbG, &d.FatG, &d.FibreG,
+			&d.SaturatedFatG, &d.SugarG, &d.AddedSugarG, &d.SodiumMG, &d.CholesterolMG,
 			&d.TargetKcal, &d.TargetProteinG); err != nil {
 			return nil, translate(err)
 		}
@@ -221,6 +251,7 @@ const foodCols = `
 	id::text, user_id, kind, name, brand,
 	serving_label, serving_grams,
 	kcal, protein_g, carb_g, fat_g, fibre_g,
+	saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
 	yield_servings, source, external_id, barcode,
 	created_at, updated_at`
 
@@ -230,6 +261,7 @@ func scanFood(row pgx.Row) (Food, error) {
 		&f.ID, &f.UserID, &f.Kind, &f.Name, &f.Brand,
 		&f.ServingLabel, &f.ServingGrams,
 		&f.Kcal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG,
+		&f.SaturatedFatG, &f.SugarG, &f.AddedSugarG, &f.SodiumMG, &f.CholesterolMG,
 		&f.YieldServings, &f.Source, &f.ExternalID, &f.Barcode,
 		&f.CreatedAt, &f.UpdatedAt,
 	)
@@ -296,7 +328,8 @@ func (r *PostgresRepository) ListFoods(ctx context.Context, userID, q string, li
 func (r *PostgresRepository) itemsFor(ctx context.Context, foodIDs []string) (map[string][]RecipeItem, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT food_id::text, name, quantity, serving_label,
-		       kcal, protein_g, carb_g, fat_g, fibre_g, source_food_id::text
+		       kcal, protein_g, carb_g, fat_g, fibre_g,
+		       saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source_food_id::text
 		FROM nutrition_recipe_items
 		WHERE food_id = ANY($1::uuid[])
 		ORDER BY food_id, position`, foodIDs)
@@ -310,7 +343,9 @@ func (r *PostgresRepository) itemsFor(ctx context.Context, foodIDs []string) (ma
 		var id string
 		var it RecipeItem
 		if err := rows.Scan(&id, &it.Name, &it.Quantity, &it.ServingLabel,
-			&it.Kcal, &it.ProteinG, &it.CarbG, &it.FatG, &it.FibreG, &it.SourceFoodID); err != nil {
+			&it.Kcal, &it.ProteinG, &it.CarbG, &it.FatG, &it.FibreG,
+			&it.SaturatedFatG, &it.SugarG, &it.AddedSugarG, &it.SodiumMG, &it.CholesterolMG,
+			&it.SourceFoodID); err != nil {
 			return nil, translate(err)
 		}
 		out[id] = append(out[id], it)
@@ -363,8 +398,10 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 			id, user_id, kind, name, brand,
 			serving_label, serving_grams,
 			kcal, protein_g, carb_g, fat_g, fibre_g,
+			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
 			yield_servings, source, external_id, barcode)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+		        $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		ON CONFLICT (id) DO UPDATE SET
 			kind = EXCLUDED.kind,
 			name = EXCLUDED.name,
@@ -376,6 +413,11 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 			carb_g = EXCLUDED.carb_g,
 			fat_g = EXCLUDED.fat_g,
 			fibre_g = EXCLUDED.fibre_g,
+			saturated_fat_g = EXCLUDED.saturated_fat_g,
+			sugar_g = EXCLUDED.sugar_g,
+			added_sugar_g = EXCLUDED.added_sugar_g,
+			sodium_mg = EXCLUDED.sodium_mg,
+			cholesterol_mg = EXCLUDED.cholesterol_mg,
 			yield_servings = EXCLUDED.yield_servings,
 			source = EXCLUDED.source,
 			external_id = EXCLUDED.external_id,
@@ -386,6 +428,7 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 		f.ID, f.UserID, f.Kind, f.Name, f.Brand,
 		f.ServingLabel, f.ServingGrams,
 		f.Kcal, f.ProteinG, f.CarbG, f.FatG, f.FibreG,
+		f.SaturatedFatG, f.SugarG, f.AddedSugarG, f.SodiumMG, f.CholesterolMG,
 		f.YieldServings, f.Source, f.ExternalID, f.Barcode)
 
 	saved, err := scanFood(row)
@@ -405,10 +448,14 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO nutrition_recipe_items (
 				food_id, position, name, quantity, serving_label,
-				kcal, protein_g, carb_g, fat_g, fibre_g, source_food_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+				kcal, protein_g, carb_g, fat_g, fibre_g,
+				saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source_food_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+			        $11, $12, $13, $14, $15, $16)`,
 			saved.ID, i, it.Name, it.Quantity, it.ServingLabel,
-			it.Kcal, it.ProteinG, it.CarbG, it.FatG, it.FibreG, it.SourceFoodID); err != nil {
+			it.Kcal, it.ProteinG, it.CarbG, it.FatG, it.FibreG,
+			it.SaturatedFatG, it.SugarG, it.AddedSugarG, it.SodiumMG, it.CholesterolMG,
+			it.SourceFoodID); err != nil {
 			return Food{}, translate(err)
 		}
 	}
