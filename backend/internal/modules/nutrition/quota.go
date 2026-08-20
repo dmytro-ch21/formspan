@@ -25,37 +25,57 @@ import (
 //	6-item meal, typed (again)  1348     1022     1345       6
 //	768px photo                 2006        —        0       —
 //	1024px photo                2543        —        0       —
+//	1080px photo, real plate    2620   795..1374    1792       6
 //
 // Three things follow, and together they say the split was measuring the wrong
 // variable.
 //
 // **Input is a floor, not a variable.** ~1,340 tokens whatever the athlete
 // types, because the system prompt and JSON schema are sent every time and
-// dominate. A photo adds ~658 tokens at 768px — an addition, never a
-// multiplier.
+// dominate. A photograph is an ADDITION to that floor, never a multiplier —
+// and the size of the addition is the resolution the client sends, not a
+// property of "being a photo": ~658 tokens at 768px, ~1,195 at 1024px, and
+// **~1,272 at the 1080px the app actually resizes to** (`describe.tsx` does
+// `resize: { width: 1080 }, compress: 0.8`). An earlier version of this
+// comment quoted ~500 for the image, which was both the wrong number and the
+// wrong resolution.
 //
 // **Output is the bill, and it tracks ITEM COUNT.** 184 tokens for one item,
-// 519 for three, ~885 for six. Roughly half of that is reasoning, which is
-// billed as output. So the expensive call is a BIG MEAL, and it is exactly as
-// expensive typed as photographed — a six-item description costs three to four
-// times a one-item photograph.
+// 519 for three, ~885 for six typed. Roughly half of that is reasoning, which
+// is billed as output. So the expensive call is a BIG MEAL, and it is about as
+// expensive typed as photographed.
 //
-// **Photo-vs-text, for the same meal, is about 1.2–1.5x.** Slightly worse than
-// the raw token counts suggest, because a photo call gets NO prompt-cache
-// discount at all (measured: 0 cached, against ~1,345 of 1,348 on a warm text
-// call). Still nowhere near a difference worth two counters.
+// **That last claim is measured now rather than inferred.** The real plate from
+// N40 — fried egg, potato hash, pickled mushrooms, pickles, bread — went
+// through the shipped path nine times at 1080px:
 //
-// So the athlete who photographed five meals was being stopped from
-// photographing a sixth while remaining free to type a twentieth — a rule that
-// bore no relation to what anything cost. One budget is simpler and closer to
-// the truth.
+//	real plate, 6 items   input 2,620   output 795..1,374 (mean ~994)
+//	typed, 6 items        input 1,348   output 798..1,022 (mean ~885)
 //
-// **Note the run-to-run spread**: the same six-item description returned 798
-// and 1,022 output tokens on consecutive calls, ±13%. A single measurement of
-// a reasoning model is not a cost, and any future re-tune should say how many
-// samples it rests on. These figures are four synthetic descriptions, not
-// production traffic — which is what the usage columns added alongside this
-// exist to accumulate.
+// Photo output sits inside the typed range for the same meal, which is what
+// "output tracks item count, not modality" predicted. The previous version of
+// this comment had to infer that; it no longer does.
+//
+// **Two corrections to earlier claims in this file, both from too few
+// samples.** Recorded rather than quietly fixed, because the sampling mistake
+// is more reusable than either number.
+//
+//  1. It said a photo call gets NO prompt-cache discount ("0 cached"). Wrong —
+//     that rested on two photo calls against a cold cache. Warm, every one of
+//     six consecutive calls cached 1,792 of 2,620. Photo calls DO cache; they
+//     cache a smaller SHARE than text (~68% here, and expect nearer ~51% in
+//     production, since 1,792 includes the repeated image bytes and real
+//     athletes send different pictures — only the ~1,330-token prompt prefix
+//     is shared).
+//  2. The photo/text ratio for the same meal is still ~1.2-1.5x, but for a
+//     different reason than stated: not "no caching", just more uncached input.
+//
+// **Run-to-run spread is the finding worth carrying.** Identical input, same
+// model, consecutive calls: the typed six-item meal returned 798 and 1,022
+// output tokens (±13%), and the photographed one ranged 795 to 1,374 across
+// nine runs (**±29%**). A single measurement of a reasoning model is not a
+// cost. Any cost claim in this repo should say how many samples it rests on;
+// these rest on nine and two, which is why the usage columns exist.
 //
 // # Why 25
 //

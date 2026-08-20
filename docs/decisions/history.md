@@ -31028,9 +31028,9 @@ of ~500 was low, and 1024px costs nearly twice that again.)
 for three, ~885 for six, roughly half of it reasoning. So the expensive call is
 a **big meal**, and it is just as expensive typed as photographed.
 
-**A photo call gets no prompt-cache discount at all** — 0 cached, against
-~1,345 of 1,348 on a warm text call. That is the one real asymmetry, and it
-still only makes photo-versus-text about **1.2–1.5x** for the same meal.
+**A photo call caches a smaller share than a text one**, which is a weaker
+claim than the one first written here — see the correction below. Either way it
+only makes photo-versus-text about **1.2–1.5x** for the same meal.
 
 Put together: a six-item description costs **three to four times** a one-item
 photograph. The two-cap split was rationing modality while cost was driven by
@@ -31073,14 +31073,46 @@ produced — unbounded in their history, on a query that runs before every call.
 would have caught it. `nutrition_estimates_user_window_idx` serves the new
 shape; the old index is kept for the per-source analysis.
 
-### Known gaps
+### The real plate, and two corrections to the paragraphs above
 
-- **Photo output on real food is still inferred.** Every photograph put through
-  during this work was correctly refused as not-food, which collapses output to
-  ~30–50 tokens, so the photo path's output figure is taken from the text path
-  on the reasoning that output tracks item count and item count is
-  modality-independent. Measured input, inferred output — the same caveat the
-  previous entry carried, narrowed but not closed.
+The last inferred figure is now measured. N40's actual photograph — fried egg,
+potato hash with dill, pickled mushrooms, pickles, bread — went through the
+shipped path nine times, resized to 1080px exactly as `describe.tsx` does:
+
+| | input | output | cached | items |
+|---|---|---|---|---|
+| real plate, 1080px | 2,620 | 795–1,374 (mean ~994) | 1,792 | 5–6 |
+| typed, six items | 1,348 | 798–1,022 (mean ~885) | 1,345 | 6 |
+
+**The prediction held**: photo output lands inside the typed range for the same
+meal, so output really does track item count rather than modality. That was the
+inference the whole re-tune rested on, and it is now evidence.
+
+It also **falsified two things written earlier in this entry**, both from too
+few samples, and both are corrected in `quota.go` rather than quietly patched:
+
+1. **"A photo call gets no prompt-cache discount at all — 0 cached."** Wrong.
+   That rested on two photo calls against a cold cache. Warm, all six
+   consecutive runs cached **1,792 of 2,620**. Photo calls do cache; they cache
+   a smaller *share* than text. Expect nearer ~51% in production rather than the
+   68% seen here, because 1,792 includes the repeated image bytes and real
+   athletes send different pictures — only the ~1,330-token prompt prefix is
+   genuinely shared.
+2. **The image adds ~658 tokens.** True at 768px, but the app resizes to
+   **1080px**, where it adds **~1,272**. The figure was right for a resolution
+   the client does not send.
+
+Neither changes the decision — the item-count effect is ~5x and dominates both
+— but the sampling error is the more reusable finding. **The photographed meal
+varied ±29% across nine identical calls** (795 to 1,374 output tokens), against
+±13% on the typed path. Writing "0 cached" from two samples is exactly the
+mistake this task existed to stop, committed inside the fix for it.
+
+### Known gaps
+- **Production caching will differ from these numbers.** Every measurement here
+  repeats one prompt and one image, which caches far better than real traffic
+  where every athlete sends a different picture. The columns are what will say
+  by how much.
 - **`Usage.ImageTokens` is never populated on the shipped configuration.**
   OpenAI's response shape has the field and `gpt-5.6-luna` does not fill it;
   Anthropic does not report one at all. The image cost is therefore obtained by
