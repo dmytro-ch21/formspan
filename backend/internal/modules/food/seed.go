@@ -19,7 +19,8 @@ import (
 // number came from, and hand-editing breaks the ability to check one.
 //
 // **12,651 rows since N88**, of which 177 are the hand-curated set the file used
-// to hold in full. At ~5.6 MB this is by far the largest embedded asset in the
+// to hold in full. At ~8.2 MB — 5.6 MB of foods plus N89's 29,634 portions in
+// the same file — this is by far the largest embedded asset in the
 // binary; `techniques.json` is 669 KB and `exercises.json` 382 KB.
 //
 // Embedded rather than read from disk so the binary is self-contained and a

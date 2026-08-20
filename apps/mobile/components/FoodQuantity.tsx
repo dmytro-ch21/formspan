@@ -22,7 +22,7 @@
  * visible change on screen beyond two letters — and there is a test named after
  * that specific failure.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
@@ -51,6 +51,30 @@ export function FoodQuantity({
   const initial = options[0]?.grams ?? 100;
   const [grams, setGrams] = useState<number>(initial);
   const [text, setText] = useState<string>(String(toDisplayGrams(initial, foodUnit)));
+
+  // **Re-render the field when the unit changes from OUTSIDE this component.**
+  //
+  // `text` is seeded once at mount and otherwise only rewritten by the toggle
+  // and the portion chips. That leaves one path uncovered: the provider adopting
+  // a different `food_unit` from the server while this sheet is open. The
+  // component re-renders with the new unit — the toggle highlight and the
+  // input's accessibility label both flip — while `text` still holds the OLD
+  // unit's number. That is precisely the relabel-without-converting state this
+  // component exists to prevent, and it is worse than the toggle version because
+  // nobody touched anything: the field would read "100" beside a lit `oz`, and
+  // editing it to "101" would commit ~2,863 g.
+  //
+  // Keyed on the unit and NOT on `grams`, so it cannot fight the athlete's own
+  // typing — an effect that also watched `grams` would rewrite the field
+  // mid-keystroke and make "10" un-typeable on the way to "100".
+  const lastUnit = useRef(foodUnit);
+  useEffect(() => {
+    if (lastUnit.current === foodUnit) return;
+    lastUnit.current = foodUnit;
+    setText(String(toDisplayGrams(grams, foodUnit)));
+    // `grams` is deliberately absent from the deps — see above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foodUnit]);
 
   const commitText = useCallback(
     (next: string) => {

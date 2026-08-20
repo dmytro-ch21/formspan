@@ -36730,6 +36730,11 @@ the code was not.
 
 ### Everything else that moved
 
+- **`foods.json` finishes at 8.2 MB**, not the 5.6 MB the N88 entry records —
+  N89's 29,634 portions land in the same embedded file, and the earlier figure
+  predates them. Caught by `ac-verifier` against N88's own acceptance criterion,
+  which asks for the size to be stated; a number that was true when written and
+  silently stopped being true is exactly what that criterion is for.
 - **A second scanner.** `Search` scans `selectColumns` inline rather than through
   `scanFood`, because it appends a window-function count. Adding `rank_tier` to
   one and not the other failed with "25 and 24" — loudly, which is what the
@@ -36738,7 +36743,8 @@ the code was not.
 - Seeding 12,651 rows through the real `UpsertAll` batch takes **~9 s**, in one
   transaction. The `IS DISTINCT FROM` guard in the upsert stops a no-op deploy
   rewriting every row; it mattered little at 177 and matters now.
-- `foods.json` is **5.6 MB** embedded, against `techniques.json` at 669 KB and
+- `foods.json` is **5.6 MB** embedded at this point in the branch, against
+  `techniques.json` at 669 KB and
   `exercises.json` at 382 KB. By far the largest asset in the binary.
 
 ### The frozen dataset was not byte-stable, and 38 rows changed

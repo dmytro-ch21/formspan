@@ -12,6 +12,7 @@ import {
   servingBasisGrams,
   servingsForGrams,
 } from '../foodQuantity';
+import { fromDisplayGrams } from '../units';
 import type { CatalogFood } from '../catalogApi';
 
 const banana: CatalogFood = {
@@ -106,4 +107,67 @@ test('a quantity that cannot be logged parses as null rather than NaN', () => {
   expect(parseQuantity(' 5.29 ')).toBe(5.29);
   // A comma decimal is what most of the world's keyboards produce.
   expect(parseQuantity('5,29')).toBe(5.29);
+});
+
+/**
+ * N89 criterion 5, second half: **a logged entry must not follow a portion.**
+ *
+ * Written because `ac-verifier` found the criterion specified a test that did
+ * not exist. The property held structurally — nothing anywhere stores a portion
+ * reference — but "no code does this" is an argument, and the criterion asked
+ * for a test. An absent guard and a guard nobody wrote a test for look identical
+ * six months later.
+ *
+ * The rule is migration 000066's, applied one level out: a logged entry OWNS its
+ * numbers. Correcting a catalog portion later must not rewrite a meal somebody
+ * already ate.
+ */
+test('changing a portion afterwards cannot move an entry already logged', () => {
+  const withPortion = { ...banana, portions: [{ seq: 1, label: '1 medium', grams: 118 }] };
+
+  // Log against the portion: grams resolved AT LOG TIME.
+  const loggedGrams = withPortion.portions[0].grams;
+  const logged = {
+    servings: servingsForGrams(withPortion, loggedGrams),
+    ...macrosForGrams(withPortion, loggedGrams),
+  };
+
+  // USDA revises the portion — a re-import says a medium banana is 136 g.
+  const revised = { ...banana, portions: [{ seq: 1, label: '1 medium', grams: 136 }] };
+  const nowWouldBe = macrosForGrams(revised, revised.portions[0].grams);
+
+  // The revision is real...
+  expect(nowWouldBe.kcal).not.toBeCloseTo(logged.kcal, 1);
+  // ...and the already-logged entry is untouched by it, because it holds
+  // resolved numbers rather than a pointer to the portion.
+  expect(logged.servings).toBeCloseTo(1.18, 2);
+  expect(logged.kcal).toBeCloseTo(105, 0);
+  expect(Object.keys(logged)).not.toContain('portion_id');
+  expect(Object.keys(logged)).not.toContain('seq');
+});
+
+/**
+ * N90 criterion 7: **the same real quantity logged in g and in oz must produce
+ * identical rows.** Also specified by the criterion and previously untested.
+ *
+ * This is the whole storage rule in one assertion. If a display unit could ever
+ * reach the database, these two diverge.
+ */
+test('the same quantity logged in g and in oz is the same row', () => {
+  // 4 oz, expressed both ways. fromDisplayGrams is the input transform the
+  // quantity control applies before anything is stored.
+  const viaOunces = fromDisplayGrams(4, 'oz');
+  const viaGrams = fromDisplayGrams(113.4, 'g');
+  expect(viaOunces).toBeCloseTo(viaGrams, 1);
+
+  const a = macrosForGrams(banana, viaOunces);
+  const b = macrosForGrams(banana, viaGrams);
+  expect(a.kcal).toBeCloseTo(b.kcal, 1);
+  expect(a.protein_g).toBeCloseTo(b.protein_g, 1);
+  expect(a.carb_g).toBeCloseTo(b.carb_g, 1);
+  expect(a.fat_g).toBeCloseTo(b.fat_g, 1);
+  expect(servingsForGrams(banana, viaOunces)).toBeCloseTo(
+    servingsForGrams(banana, viaGrams),
+    2,
+  );
 });

@@ -103,6 +103,7 @@ which only parses, so this must never need a toolchain to be syntax-checked.
 """
 
 import argparse
+import collections
 import json
 import os
 import sys
@@ -682,9 +683,15 @@ def portion_label(portion, dataset):
         if not modifier:
             return None
         amount = portion.get("amount")
+        if amount is None:
+            # Defaulting to "1" would state a quantity the source never gave —
+            # a guess in the confident direction, displayed to an athlete as a
+            # serving size. Dropped instead. Believed unreachable (every SR
+            # Legacy portion measured carries `amount`), which is exactly why it
+            # must not silently invent one if that ever stops being true.
+            return None
         # "%g" so 1.0 renders as "1" and 0.5 stays "0.5".
-        label = "%s %s" % (("%g" % amount) if amount is not None else "1",
-                           modifier)
+        label = "%s %s" % ("%g" % amount, modifier)
 
     if not label:
         return None
@@ -865,8 +872,24 @@ def resolve(index, must, notw):
     return hits
 
 
+# Rows where a core macro was absent and became 0.0. Counted rather than
+# silenced: NOT NULL forces a value, so unlike the nullable nutrients this one
+# genuinely cannot record "unknown" — which makes it the one place this script
+# states something the source did not. A count on stderr keeps that visible
+# instead of letting it hide behind the schema.
+DEFAULTED_MACROS = collections.Counter()
+
+
 def macro_fields(macros):
-    """The nine nutrient fields, with absence carried through as null."""
+    """The nine nutrient fields, with absence carried through as null.
+
+    `kcal`/`protein_g`/`carb_g`/`fat_g` are NOT NULL in the schema, so an absent
+    one becomes 0.0 and is tallied in DEFAULTED_MACROS. The other five stay NULL,
+    per the rule that absence is a fact about the source rather than the food.
+    """
+    for k in ("protein_g", "carb_g", "fat_g"):
+        if k not in macros:
+            DEFAULTED_MACROS[k] += 1
     fields = {
         "kcal": round(float(macros["kcal"]), 2),
         "protein_g": round(float(macros.get("protein_g", 0.0)), 2),
@@ -1025,6 +1048,14 @@ def main():
     print("portions:  %d across %d rows (%.0f%% of the catalog has one)"
           % (portions, with_portions, 100.0 * with_portions / len(rows)),
           file=sys.stderr)
+    if DEFAULTED_MACROS:
+        # Not fatal — a food with energy but no stated protein is still
+        # loggable — but it is the one number in the output the source did not
+        # state, so it is said out loud rather than left to a reader to notice.
+        print("defaulted to 0.0 (source stated nothing): %s"
+              % ", ".join("%s x%d" % (k, n)
+                          for k, n in sorted(DEFAULTED_MACROS.items())),
+              file=sys.stderr)
 
     rendered = render(rows)
 

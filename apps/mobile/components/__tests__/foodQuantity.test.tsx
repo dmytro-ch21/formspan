@@ -119,3 +119,34 @@ test('a food with no portions still offers 100 g', () => {
   render(<FoodQuantity food={{ ...egg, portions: [] }} onLog={jest.fn()} />);
   expect(screen.getByTestId('food-portion-100')).toBeTruthy();
 });
+
+/**
+ * The unit changing from OUTSIDE the component (raised in review).
+ *
+ * `switchUnit` is not the only way `foodUnit` moves: the provider adopts the
+ * server's value after the profile read resolves, which can land while this
+ * sheet is open. Before the fix, the toggle highlight and the input's
+ * accessibility label flipped while the number did not — a relabel nobody
+ * touched, and editing the field then committed a ~28x quantity.
+ */
+test('a unit change from the provider re-renders the field, it does not relabel it', () => {
+  const { rerender } = render(<FoodQuantity food={egg} onLog={jest.fn()} />);
+  fireEvent.changeText(screen.getByTestId('food-quantity-input'), '150');
+  expect(screen.getByTestId('food-quantity-input').props.value).toBe('150');
+
+  // The provider adopts 'oz' from the server. Nothing in this component was
+  // touched.
+  mockUnit = 'oz';
+  rerender(<FoodQuantity food={egg} onLog={jest.fn()} />);
+
+  expect(screen.getByTestId('food-quantity-input').props.value).toBe('5.29');
+});
+
+test('an outside unit change does not fight the athlete mid-keystroke', () => {
+  // The effect is keyed on the unit alone. Keyed on grams too, it would rewrite
+  // the field on every edit and make "10" un-typeable on the way to "100".
+  render(<FoodQuantity food={egg} onLog={jest.fn()} />);
+  fireEvent.changeText(screen.getByTestId('food-quantity-input'), '1');
+  fireEvent.changeText(screen.getByTestId('food-quantity-input'), '10');
+  expect(screen.getByTestId('food-quantity-input').props.value).toBe('10');
+});
