@@ -245,13 +245,51 @@ function ProjectionLine({
   if (goalKg == null) return null; // nothing to say about a goal nobody set
   return (
     <Text style={styles.projection} testID="trend-projection-text">
-      {refusalCopy(projection.reason, fmt(goalKg), unit)}
+      {refusalCopy(projection, fmt(goalKg), unit)}
     </Text>
   );
 }
 
-function refusalCopy(reason: string, goal: string, unit: string): string {
-  switch (reason) {
+/**
+ * The sentence for a refusal — the server's words where it sent any, ours
+ * otherwise.
+ *
+ * **The server's prose wins, and that is the point of N101.** `project` in
+ * `backend/internal/modules/nutrition/target.go` already decides WHICH kind of
+ * unreachable a plan is and writes display-ready prose naming the setting at
+ * fault. The phone used to throw that away and render one invented sentence
+ * covering both cases — true of either, and vaguer than what had already been
+ * computed, while `apps/web`'s `Feasibility` showed the real thing. Two
+ * surfaces telling an athlete different amounts about the same plan.
+ *
+ * Phrased to match web's, deliberately — `Feasibility` in
+ * `apps/web/.../nutrition/targets/Derivation.tsx` says *"This plan never
+ * reaches X kg — «reason». Change the goal weight or the phase."* and this is
+ * that sentence, so an athlete who reads it in both places is not left working
+ * out whether the two surfaces disagree about their plan.
+ *
+ * **The fallbacks stay, and they are not dead code.** `serverReason` is only
+ * ever set on the plan-sourced refusal; `reached`, `no-trend` and a locally
+ * computed `stalled` reach here with nothing but the enum, and every one of
+ * them still has to render a sentence. Blank space is the failure this whole
+ * area exists to prevent.
+ *
+ * Exported for its own test. Expo Router reads only the default export from a
+ * route file, so a named one alongside it is inert — and the alternative was
+ * moving weight-and-plan copy into the metric-agnostic trend modules, which is
+ * how `lib/trendSeries.ts` would start authoring sentences about bodies.
+ */
+export function refusalCopy(
+  projection: Extract<Projection, { kind: 'none' }>,
+  goal: string,
+  unit: string,
+): string {
+  // Normalised to absent-or-non-empty by `fromPlanProjection`, so this is the
+  // whole check — no dangling em dash is reachable from here.
+  if (projection.serverReason) {
+    return `This plan never reaches ${goal} ${unit} — ${projection.serverReason}. Change the goal weight or the phase.`;
+  }
+  switch (projection.reason) {
     case 'reached':
       return `You're at your ${goal} ${unit} goal.`;
     case 'moving-away':

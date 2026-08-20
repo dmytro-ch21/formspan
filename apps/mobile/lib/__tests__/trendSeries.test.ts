@@ -357,7 +357,68 @@ test("the server's refusals are translated, not re-judged", () => {
       { ...base, already: false, unreachable: true, unreachable_reason: 'a bulk toward a lower goal' },
       null,
     ),
-  ).toEqual({ kind: 'none', reason: 'moving-away' });
+  ).toEqual({
+    kind: 'none',
+    reason: 'moving-away',
+    serverReason: 'a bulk toward a lower goal',
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N101 — the server's own words survive the adapter.
+//
+// `project` in backend/internal/modules/nutrition/target.go writes two distinct
+// reasons and this collapsed both into one enum, discarding the prose. Nothing
+// false rendered — the enum's sentence is a truthful superset of both — but the
+// phone said less than `apps/web`'s `Feasibility`, which has always shown the
+// string. These assert the carrying, not the judging: the enum deliberately
+// still says `moving-away` for both, because refining it would mean the phone
+// deciding which kind of unreachable this is off a display string.
+// ---------------------------------------------------------------------------
+
+const UNREACHABLE = {
+  reached_on: '',
+  target_weight_kg: 80,
+  kg_to_go: 5,
+  weeks_to_go: 0,
+  already: false,
+  unreachable: true,
+};
+
+test("both of the server's unreachable reasons reach the caller verbatim", () => {
+  // The exact two strings target.go emits. Written out rather than derived, so
+  // a wording change on the server shows up here as a diff to read rather than
+  // as a test that adapts to whatever it is handed.
+  for (const reason of [
+    'this phase holds your weight where it is',
+    'this phase moves your weight away from that goal',
+  ]) {
+    const p = fromPlanProjection({ ...UNREACHABLE, unreachable_reason: reason }, null);
+    expect(p).toEqual({ kind: 'none', reason: 'moving-away', serverReason: reason });
+  }
+});
+
+test('a reason the server did not send leaves serverReason absent, not empty', () => {
+  // The render site's whole check is `if (serverReason)`, and an empty string
+  // there would print a dangling em dash with nothing after it. Absent is the
+  // contract, so the enum's own copy is what gets rendered.
+  for (const p of [
+    fromPlanProjection(UNREACHABLE, null),
+    fromPlanProjection({ ...UNREACHABLE, unreachable_reason: '' }, null),
+    fromPlanProjection({ ...UNREACHABLE, unreachable_reason: '   ' }, null),
+  ]) {
+    expect(p).toEqual({ kind: 'none', reason: 'moving-away' });
+    expect(p.kind === 'none' && p.serverReason).toBeFalsy();
+  }
+});
+
+test('a locally decided refusal never carries a server reason', () => {
+  // projectToGoal judges for itself, so there is no other party whose words it
+  // could be quoting. A string here would be this module authoring copy about a
+  // metric it deliberately knows nothing about.
+  const local = projectToGoal(losing(), 200); // moving away from an absurd goal
+  expect(local.kind).toBe('none');
+  expect(local.kind === 'none' && local.serverReason).toBeUndefined();
 });
 
 test('no plan projection at all is the no-goal absence, not a blank', () => {
