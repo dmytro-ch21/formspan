@@ -30964,6 +30964,206 @@ All five are now tested in the failing direction, on top of the original nine.
   different places merge cleanly instead of conflicting as one line. This check
   makes the current shape survivable rather than fixing it, which is the same
   trade the parity checkers make.
+## 2026-08-19 — What a call actually costs, and the cap that was rationing the wrong thing
+
+N49 asked for two things in order: re-measure the estimate cost on the model
+actually shipping, then re-tune the caps against it. The line was explicit that
+the order matters — *"do not re-tune before re-measuring; that is how the
+current numbers happened."*
+
+The first finding was that step one could not be done as written.
+
+### The plan assumed an apparatus that did not exist
+
+N49's plan was that "a week of production traffic replaces all of them with
+real ones". A week of production traffic would have produced **call counts and
+nothing else**. `nutrition_estimates` recorded `source`, `succeeded`, `model`
+and `item_count`; `llm.Response` carried `Raw` and `Model`. Both providers
+return token usage on every call and the transport was **discarding it**.
+
+So nothing in this system could answer "what did that cost", which is exactly
+why the caps were still the ones sized against a guess. A week later we would
+have re-tuned from the same absence, with more confidence.
+
+The instrumentation came first: `llm.Usage` on every response, five columns on
+`nutrition_estimates`, recorded on success **and on refusal**, because a
+refusal is an HTTP 200 that was billed in full — and the traffic a runaway
+client generates is precisely the traffic that would otherwise go uncounted.
+
+**Two normalisations were needed and neither is cosmetic.** The providers
+disagree about whether cached tokens sit inside the input count: OpenAI's
+`prompt_tokens` includes them, Anthropic's `input_tokens` excludes them and
+reports cache reads and writes separately. On this prompt 1,334 of 1,337 input
+tokens come back cached, so reading Anthropic's figure as if it were OpenAI's
+reports a 1,337-token prompt as a **3-token** one. `llm.Usage.InputTokens` is
+always the inclusive total. And reasoning tokens stay inside `OutputTokens`,
+because they are billed as output; they are reported separately as well, never
+instead.
+
+**NULL is not zero, and here it is load-bearing.** The new columns are nullable
+with no default. A `DEFAULT 0` would have backfilled every pre-existing row
+with a confident zero, and the first query anybody wrote — average cost per
+call — would have silently included hundreds of rows claiming a call was free,
+dragging the figure toward zero exactly as it was being used to justify a new
+cap. NULL means "predates metering"; 0 means "metered, and genuinely zero". The
+same rule this schema already applies to `nutrition_foods.fibre_g`.
+
+### The measurement, live on `gpt-5.6-luna`
+
+| case | input | output | cached | items |
+|---|---|---|---|---|
+| "two eggs" | 1,317 | 184 | 0 | 1 |
+| 3-item meal, typed | 1,327 | 519 | 1,302 | 3 |
+| 6-item meal, typed | 1,348 | 798 | 1,302 | 6 |
+| 6-item meal, typed again | 1,348 | 1,022 | 1,345 | 6 |
+| 768px photograph | 2,006 | — | 0 | — |
+| 1024px photograph | 2,543 | — | 0 | — |
+
+**Input is a floor, not a variable.** ~1,340 tokens whatever the athlete types,
+because the system prompt and JSON schema go on every call and dominate. A
+768px photo adds ~658 — an addition, never a multiplier. (The earlier estimate
+of ~500 was low, and 1024px costs nearly twice that again.)
+
+**Output is the bill, and it tracks ITEM COUNT.** 184 tokens for one item, 519
+for three, ~885 for six, roughly half of it reasoning. So the expensive call is
+a **big meal**, and it is just as expensive typed as photographed.
+
+**A photo call caches a smaller share than a text one**, which is a weaker
+claim than the one first written here — see the correction below. Either way it
+only makes photo-versus-text about **1.2–1.5x** for the same meal.
+
+Put together: a six-item description costs **three to four times** a one-item
+photograph. The two-cap split was rationing modality while cost was driven by
+meal size.
+
+**The run-to-run spread is worth recording too.** The same six-item description
+returned 798 and 1,022 output tokens on consecutive calls — ±13%. A single
+measurement of a reasoning model is not a cost, and these figures are four
+synthetic descriptions rather than production traffic. That is what the new
+columns are for.
+
+### One budget
+
+20 text / 5 photo became **25 estimates a day, any mix**. The total is
+unchanged deliberately: the correction was to the shape of the limit, not its
+size, and holding the total fixed means nobody's usable allowance shrinks.
+
+`Quota.source` is **removed** rather than ignored, and the mobile copy changed
+with it. A client rendering "3 of 25 photos" from a combined budget states
+something false about what the athlete may do next — and the old screen really
+did read `quota.source === 'photo' ? 'photos' : 'descriptions'`.
+
+The unit test that asserted the two caps must DIFFER is replaced by one
+asserting they are the same budget, rather than deleted. A future session that
+reintroduces a per-path cap should have to argue with a measurement instead of
+quietly restoring a guess.
+
+`source` is still recorded on every row. The photo-to-text mix is a real
+question; it simply no longer decides who gets stopped.
+
+### A dropped index nobody would have noticed
+
+Removing the `source` predicate from the quota query made
+`nutrition_estimates_quota_idx` unusable for it: that index leads
+`(user_id, source, created_at DESC)`, so with `source` unfiltered it sits
+between the two columns still being filtered and the window can no longer be a
+range scan. The planner falls back to reading every row the athlete has ever
+produced — unbounded in their history, on a query that runs before every call.
+**The count comes out right either way**, which is why no correctness test
+would have caught it. `nutrition_estimates_user_window_idx` serves the new
+shape; the old index is kept for the per-source analysis.
+
+### The real plate, and two corrections to the paragraphs above
+
+The last inferred figure is now measured. N40's actual photograph — fried egg,
+potato hash with dill, pickled mushrooms, pickles, bread — went through the
+shipped path nine times, resized to 1080px exactly as `describe.tsx` does:
+
+| | input | output | cached | items |
+|---|---|---|---|---|
+| real plate, 1080px | 2,620 | 795–1,374 (mean ~994) | 1,792 | 5–6 |
+| typed, six items | 1,348 | 798–1,022 (mean ~885) | 1,345 | 6 |
+
+**The prediction held**: photo output lands inside the typed range for the same
+meal, so output really does track item count rather than modality. That was the
+inference the whole re-tune rested on, and it is now evidence.
+
+It also **falsified two things written earlier in this entry**, both from too
+few samples, and both are corrected in `quota.go` rather than quietly patched:
+
+1. **"A photo call gets no prompt-cache discount at all — 0 cached."** Wrong.
+   That rested on two photo calls against a cold cache. Warm, all six
+   consecutive runs cached **1,792 of 2,620**. Photo calls do cache; they cache
+   a smaller *share* than text. Expect nearer ~51% in production rather than the
+   68% seen here, because 1,792 includes the repeated image bytes and real
+   athletes send different pictures — only the ~1,330-token prompt prefix is
+   genuinely shared.
+2. **The image adds ~658 tokens.** True at 768px, but the app resizes to
+   **1080px**, where it adds **~1,272**. The figure was right for a resolution
+   the client does not send.
+
+Neither changes the decision — the item-count effect is ~5x and dominates both
+— but the sampling error is the more reusable finding. **The photographed meal
+varied ±29% across nine identical calls** (795 to 1,374 output tokens), against
+±13% on the typed path. Writing "0 cached" from two samples is exactly the
+mistake this task existed to stop, committed inside the fix for it.
+
+### A migration number BELOW the database's version is silently skipped
+
+Worth recording on its own, because the advice that produced it was reasonable
+and the failure is invisible.
+
+Three branches held `000064` at once tonight. When N33's merged first, this one
+was told to take **`000065`** — "the gap reserved for you", since `main` had by
+then gone 62, 63, 64, **66** with 65 free. That is how a human reads a list of
+filenames, and it is not how `golang-migrate` works: it tracks **one integer**,
+and `up` applies only what is strictly above it.
+
+Measured rather than reasoned about, on a database migrated from `main`:
+
+```
+version after main's migrations   66
+add 000065, run `migrate up`      "migrate: up: done"     <- exit 0
+version after                     66                      <- unchanged
+input_tokens column               absent
+```
+
+**It reports success.** No error, no warning, no dirty flag — the one output a
+deploy would check says the migration ran. Staging is already at 66, and so is
+every developer machine that has pulled `main`, so the columns would simply
+never exist there while CI stayed green on a throwaway database that starts at
+zero and applies everything in order. The symptom would have arrived later and
+somewhere else: every estimate call failing on `column "input_tokens" does not
+exist`, which reads as a code bug and is a numbering one.
+
+Renumbered to **`000067`**, above `main`'s top, and the fix was verified the
+same way — same database at 66, `up`, version 67, columns and index present.
+Both directions demonstrated; neither assumed.
+
+The rule that follows is narrower than "claim your number at rebase time",
+which this branch had already done twice and which did not save it: **claim a
+number strictly ABOVE the highest on `main`, never a gap below it.** A gap in
+the sequence is not free space. It is a number that can only ever be applied by
+a database that has not yet reached it.
+
+### Known gaps
+- **Production caching will differ from these numbers.** Every measurement here
+  repeats one prompt and one image, which caches far better than real traffic
+  where every athlete sends a different picture. The columns are what will say
+  by how much.
+- **`Usage.ImageTokens` is never populated on the shipped configuration.**
+  OpenAI's response shape has the field and `gpt-5.6-luna` does not fill it;
+  Anthropic does not report one at all. The image cost is therefore obtained by
+  differencing input against a text-only call. The column is NULL rather than 0
+  for exactly this reason — "not reported" must not read as "the image was
+  free".
+- **No cost is derived from the tokens anywhere in code.** There are no
+  per-token prices in this repo and none were invented; everything above is
+  token counts and ratios. A cost figure needs a pricing source that is itself
+  checkable.
+- **The caps still rest on four synthetic descriptions.** They are now
+  measured rather than assumed, which is the whole change, but production
+  traffic through the new columns is what should settle them.
 
 ## 2026-08-19 — Say what happened, and the numbers nobody can check (N33)
 

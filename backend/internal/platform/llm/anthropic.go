@@ -72,8 +72,12 @@ func (a *anthropicCompleter) Complete(ctx context.Context, req Request) (Respons
 	// CHECK stop_reason BEFORE READING CONTENT. A refusal is a successful HTTP
 	// 200 with an empty or partial content array, so code that indexes
 	// content[0] breaks on exactly the response it most needs to handle.
+	// Built before the two billed-200 branches below, same reasoning as the
+	// OpenAI backend: a refusal costs tokens and must still be metered.
+	usage := anthropicUsage(resp)
+
 	if resp.StopReason == anthropic.StopReasonRefusal {
-		return Response{}, ErrRefused
+		return Response{Model: string(resp.Model), Usage: usage}, ErrRefused
 	}
 	// Truncation, reported the SAME WAY as on the other backend. Without this
 	// a response cut off at MaxTokens fell through to the JSON parse, failed
@@ -82,9 +86,37 @@ func (a *anthropicCompleter) Complete(ctx context.Context, req Request) (Respons
 	// request. The two backends disagreeing about the same event is precisely
 	// what the shared completer exists to prevent, and they did.
 	if resp.StopReason == anthropic.StopReasonMaxTokens {
-		return Response{}, fmt.Errorf("%w: response was cut off", ErrRefused)
+		return Response{Model: string(resp.Model), Usage: usage}, fmt.Errorf("%w: response was cut off", ErrRefused)
 	}
-	return Response{Raw: anthropicText(resp), Model: string(resp.Model)}, nil
+	return Response{Raw: anthropicText(resp), Model: string(resp.Model), Usage: usage}, nil
+}
+
+// anthropicUsage maps Anthropic's accounting onto the normalised shape.
+//
+// **`InputTokens` here EXCLUDES anything served from or written to the cache**,
+// which is the opposite of OpenAI's `prompt_tokens`. Adding the two cache
+// figures back in is what makes the same field name mean the same thing on both
+// backends — without it, this prompt's 1,337-token input reports as 3 tokens
+// once the cache is warm, and every cost derived from it is nonsense.
+//
+// Reasoning maps from `output_tokens_details.thinking_tokens`, which this SDK
+// does expose — an earlier version of this file claimed it did not and left the
+// field at zero, which would have recorded "reasoning was free" for every
+// Anthropic call as though it were measured. Raised in review.
+//
+// No image breakdown: Anthropic has no equivalent field, so ImageTokens stays
+// nil — "not reported", never "the image was free".
+func anthropicUsage(resp *anthropic.Message) Usage {
+	if resp == nil {
+		return Usage{}
+	}
+	return Usage{
+		InputTokens: resp.Usage.InputTokens +
+			resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens,
+		OutputTokens:      resp.Usage.OutputTokens,
+		CachedInputTokens: resp.Usage.CacheReadInputTokens,
+		ReasoningTokens:   resp.Usage.OutputTokensDetails.ThinkingTokens,
+	}
 }
 
 // anthropicText returns the first text block, skipping thinking blocks.

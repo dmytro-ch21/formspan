@@ -140,6 +140,82 @@ type Response struct {
 	// id that was asked for — an alias resolves to a dated snapshot. Worth
 	// recording rather than echoing the request.
 	Model string
+	// Usage is what the call cost, in tokens.
+	//
+	// **Populated even when Complete returns ErrRefused**, because a refusal
+	// and a truncation are HTTP 200s that were billed in full. A caller
+	// metering spend has to see those or it under-counts exactly the traffic a
+	// runaway client generates. It is empty only when the call never produced
+	// a response at all — a transport failure, where there is genuinely
+	// nothing to report rather than nothing to find.
+	Usage Usage
+}
+
+// Usage is what one call cost, in tokens, normalised across providers.
+//
+// It exists because nothing in this system could previously answer "what did
+// that cost". The nutrition estimate quotas were sized on an ASSUMED ~50x cost
+// ratio between a photo call and a text one, which turned out to be ~1.1x when
+// somebody finally measured by hand — and the plan to "replace the numbers with
+// a week of production traffic" could not have worked, because no token count
+// was recorded anywhere. See N49.
+//
+// # The normalisation that matters
+//
+// **The two providers disagree about whether cached tokens are inside the input
+// count**, and taking either at face value makes the other's numbers wrong:
+//
+//   - OpenAI's `prompt_tokens` INCLUDES tokens served from cache;
+//     `prompt_tokens_details.cached_tokens` says how many of them were.
+//   - Anthropic's `input_tokens` EXCLUDES them; `cache_read_input_tokens` and
+//     `cache_creation_input_tokens` are reported alongside and must be added
+//     to get the comparable figure.
+//
+// InputTokens here is always the INCLUSIVE total, so the same number means the
+// same thing on both. That is not a detail: on this prompt 1,334 of 1,337
+// input tokens come back cached, so reading Anthropic's exclusive figure as if
+// it were inclusive would report a ~1,300-token prompt as a 3-token one.
+type Usage struct {
+	// InputTokens is every token sent, cached ones included.
+	InputTokens int64
+	// OutputTokens is every token generated, reasoning included — reasoning is
+	// billed as output, so excluding it would under-report the bill on exactly
+	// the models where it dominates.
+	OutputTokens int64
+	// CachedInputTokens is the part of InputTokens served from the provider's
+	// prompt cache, and therefore billed at a discount or not at all. The
+	// difference between the list price and the real one.
+	CachedInputTokens int64
+	// ReasoningTokens is the part of OutputTokens spent thinking rather than
+	// answering.
+	//
+	// Both providers report it: OpenAI as
+	// `completion_tokens_details.reasoning_tokens`, Anthropic as
+	// `usage.output_tokens_details.thinking_tokens`. An earlier version of this
+	// comment claimed Anthropic did not, and left the field unmapped — which
+	// would have written a confident `reasoning_tokens = 0` for every Anthropic
+	// call, the exact zero-that-means-unknown this package's NULL rule exists
+	// to prevent. Raised in review.
+	ReasoningTokens int64
+	// ImageTokens is the part of InputTokens the image accounted for, from the
+	// provider's own accounting rather than from a guess.
+	//
+	// **A POINTER, so "not reported" and "reported as zero" stay different
+	// things.** Nil means the provider said nothing; a zero value means it said
+	// zero. Collapsing them into an int64 forced the repository to guess from
+	// `> 0`, which made a genuine zero on a text call indistinguishable from an
+	// unreported breakdown on a photo call — and the column comment then
+	// documented a state no code path could produce. Raised in review.
+	//
+	// **Measured 2026-08-19: `gpt-5.6-luna` does not populate it**, and
+	// Anthropic has no equivalent field at all, so on the shipped configuration
+	// this is always nil. Kept because the field exists in the OpenAI response
+	// shape and a model that fills it answers the photo cost question directly.
+	//
+	// Until then the image cost is obtained by DIFFERENCING InputTokens against
+	// a text-only call: 1,348 without a picture against 2,620 with the 1080px
+	// one the app actually sends, so ~1,272 tokens.
+	ImageTokens *int64
 }
 
 // validate rejects a request that cannot succeed, before it costs anything.

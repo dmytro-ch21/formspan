@@ -496,8 +496,7 @@ export default function DescribeMealScreen() {
 
       {quota ? (
         <Text style={styles.quota} testID="describe-quota">
-          {quota.remaining} of {quota.limit} {quota.source === 'photo' ? 'photos' : 'descriptions'}{' '}
-          left today
+          {quota.remaining} of {quota.limit} estimates left
         </Text>
       ) : null}
     </KeyboardAwareScrollView>
@@ -715,7 +714,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   remove: { fontSize: 12, color: vola.textDim, marginTop: 6 },
-  quota: { fontSize: 11, color: vola.textDim },
+  // textMuted, not textDim: at 11pt this is small text, and textDim measures
+  // 3.96:1 on `bg` — below AA's 4.5:1. `bjj/dictate.tsx`'s quota line already
+  // uses the muted token for the same reason. Raised in review.
+  quota: { fontSize: 11, color: vola.textMuted },
   primary: {
     minHeight: 46,
     borderRadius: 12,

@@ -160,12 +160,24 @@ components:
 
     EstimateQuota:
       type: object
-      description: Usage of one path, over a rolling 24 hours.
-      required: [source, used, limit, remaining, resets_at]
+      description: >
+        The athlete's estimate usage over a rolling 24 hours. **One budget
+        covers both paths** — a photograph and a description draw on the same
+        allowance.
+
+
+        **`source` was removed.** The cap used to be per path (20 text, 5
+        photo), sized against an assumed ~50x cost difference. Measured on the
+        shipped model a photo costs ~1.2–1.5x a description of the SAME meal,
+        while the number of items in the meal moves the bill ~5x — so the split
+        rationed the wrong variable, and an athlete could be stopped from
+        photographing a sixth meal while still free to type a twentieth. A
+        client must not render "3 of 25 photos": that states something false
+        about what they may do next.
+      required: [used, limit, remaining, resets_at]
       properties:
-        source: { type: string, enum: [text, photo] }
         used: { type: integer }
-        limit: { type: integer, description: "20 for text, 5 for photo." }
+        limit: { type: integer, description: "25 estimates a day, any mix of descriptions and photographs." }
         remaining:
           type: integer
           description: >
@@ -9311,12 +9323,24 @@ paths:
         photo leaves the device before sending it.
 
 
-        **Quotas are per athlete, per path, over a rolling 24 hours** — 20 text
-        and 5 photo, counted separately so the dearer path cannot exhaust the
-        cheap one. (Measured on the shipped model, a photo costs about 1.1x a
-        description rather than the ~50x originally assumed: the JSON schema and
-        system prompt are sent on every call and dominate the image's ~500
-        tokens. The ratio moves with the model — it was ~1.4x on Haiku 4.5.)
+        **One quota per athlete over a rolling 24 hours — 25 estimates, any
+        mix of descriptions and photographs.**
+
+
+        It used to be two counters, 20 text and 5 photo, on the reasoning that
+        the dearer path must not exhaust the cheap one. Measured live on the
+        shipped model, that distinction is not worth a counter: input is a flat
+        ~1,340-token floor whatever is sent (the schema and system prompt
+        dominate), a photograph adds ~1,272 at the 1080px the app resizes to,
+        and **output — which is the bill on a reasoning-billed model — tracks
+        the NUMBER OF ITEMS in the meal**, from ~184 tokens for one to ~885 for
+        six. A six-item description therefore costs three to four times a
+        one-item photograph, while photo-versus-text for the same meal is only
+        ~1.2–1.5x — the difference being uncached input, since a photo call
+        caches a smaller share of its prompt than a typed one rather than none
+        of it.
+
+
         Failed and refused calls count, because they cost tokens too.
         Exhaustion is `429` with `rate_limited`, carrying a `Retry-After`
         header in seconds; the reset is also stated in the message as a

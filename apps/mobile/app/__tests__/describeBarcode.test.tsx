@@ -94,7 +94,7 @@ function item(over: Record<string, unknown> = {}) {
 function estimate(items: unknown[]) {
   return {
     estimate: { items, note: '', model: 'test', source: 'text' },
-    quota: { source: 'text', used: 1, limit: 10, remaining: 9, resets_at: null },
+    quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
   };
 }
 
