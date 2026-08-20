@@ -20,13 +20,46 @@ VOLA is a unified training and nutrition platform for BJJ athletes who also stre
 
 ## Which platform gets a feature (hard rule)
 
-**An in-progress session is a phone thing. The web app is for planning and analysis.**
+**MOBILE FIRST. Everything must be manageable on the phone. Web is the
+complementary surface where some of it gets richer.**
+
+**Set by the user 2026-08-19, and it REPLACES the rule this section used to
+open with** — "an in-progress session is a phone thing, the web app is for
+planning and analysis". Their words: *"we have to have the mindset of mobile
+first, we target people using only phones and have a complimentary web app that
+is a bit more advanced. but everything should be managable on the phone."*
+
+The old rule read as a **split**: some jobs belonged to the phone and others to
+the desk. That is now wrong in one direction and still right in the other:
+
+- **Wrong**: nothing may be phone-*impossible*. An athlete who never opens the
+  web app must be able to run the whole product. If a job can only be done at a
+  desk, that is a gap, not a design.
+- **Still right**: the phone gets the version that answers the question in the
+  moment, and web may carry a richer one. Deeper analysis, wide tables, side-by-
+  side comparison and bulk authoring can be *better* on web — they may not be
+  *only* on web.
+
+The test changed accordingly. It used to be "which of the two is this?" It is
+now: **"can an athlete with only a phone do this at all?"** If no, build the
+phone version — however reduced — before or alongside the web one.
+
+**What produced it**: `nutrition-design.md` §5 put target-setting on "one web
+screen". So a user looking at a 2,700 kcal target on their phone had the
+derivation in front of them and **no way to disagree with it**, because manual
+entry existed only on web. That is the failure this rule now forbids: the
+reasoning was reachable and the action was not.
+
+**Consequence for §5 and anything like it**: a doc that assigns a capability to
+web *exclusively* is superseded on the exclusivity, not on the design. §5's
+three sections are still the right three sections; "one web screen" is now "one
+screen on each, and the phone's may be smaller".
 
 - `scripts/generate_sounds.py` — the **sonic** identity, same relationship to the app that `assets/brand/` has: the sounds are synthesised, not sampled, and the script is the source of truth. It renders a 17-sound family (F# pentatonic, four struck voices — `glass`/`bell`/`marimba`/`pad`) but the app bundles only the ones listed in `BUNDLE` (eight so far), under the filenames `apps/mobile/lib/sounds.ts` already `require`s. The rest go to a gitignored `assets/audio/` for auditioning; adding one to the app is three lines (`BUNDLE`, `SOUND_NAMES`, and the matching `require` in that file's `SOURCES` — `SoundName` derives from the array and `SOURCES` is keyed on it, so extending one without the other fails typecheck). **This is the one script that is not stdlib-only** — it needs numpy and ffmpeg, which is what buys the convolution room and per-partial voicing. Nothing in CI or `verify` imports it, so that is not a pipeline dependency — `check:python` only `ast.parse`s. **`--check` needs numpy and ffmpeg too**: it re-renders every sound and byte-compares rather than hashing against a manifest, and it reports drift without ever failing. Levels are intentionally unequal (−19 dBFS for a tap, −4 for rest-over); do not "fix" that by normalising them together.
 - **Mobile** owns live logging: recording sets mid-workout, the rest timer, swapping an exercise because the rack is taken. These are done standing up, one-handed, with 20 seconds between sets.
 - **Web** owns authoring and review: building templates (two-pane, catalog always visible), reading history back, and the analytical surface. It can also start, review and correct a session — those are desk activities — but it does **not** get in-workout affordances. A rest countdown on a desktop you are not standing next to is decoration.
 
-This was re-litigated per feature for a while; it isn't open. When adding something to the session flow, decide which of the two it is before building it, and say so in the history entry.
+~~This was re-litigated per feature for a while; it isn't open.~~ **Superseded by the mobile-first rule above.** The two bullets remain a good description of where each surface is *strongest* — a rest countdown on a desktop is still decoration, and a two-pane template builder is still better with a keyboard. They are no longer a licence to make something phone-impossible. When adding to the session flow, say in the history entry how it is reachable on a phone.
 
 **One carve-out, added 2026-08-17 for N5, and it is narrow on purpose.** A
 *trend you read in three seconds to decide something* is not analysis, it is
