@@ -35233,6 +35233,35 @@ build time from a gitignored `.env.local` no worktree has, and the build
 and is written out in the PR body and in `docs/testing/functional-scenarios.md`.
 It is not argued up to met.
 
+## 2026-08-20 — Merge authority is a grant, not a default, and the file said otherwise
+
+`CLAUDE.md` said *"never merge a PR without the user's explicit go-ahead, even
+if CI is green"*. On 2026-08-20 the user granted a coordinating session standing
+authority — *"if the ci is green merge... dont wait for me"* — and that session
+merged 25 PRs in a day. **The file and the instruction then disagreed for the
+whole day**, and a security check correctly flagged the conflict rather than
+guessing which won.
+
+Amended so both are expressible: the default is ask, the user may grant standing
+authority for a session, and **the grant is per-session and does not transfer**.
+That last clause is the load-bearing one. One session refused to merge on the
+grounds that a peer's account of a mandate is not a mandate it holds — which is
+exactly right, and is the laundering shape even when the mandate is real.
+
+**What the grant does not waive** is recorded with it, because those are the
+things merging is supposed to check rather than ceremony around it: the diff
+contains work, the `headRefOid` is the real one, the check **count** is right
+rather than merely un-red, and `mergeable` is re-read immediately before the
+merge. That last item earned its place the same day — a merge was refused
+because four checks had re-started in the seconds between the gate and the
+attempt, `--admin` was offered, and waiting was the correct answer.
+
+Also recorded: a ticket with an unmet `NEEDS HUMAN EVIDENCE` criterion closes on
+`closes #N` regardless, and four were reopened by hand on the same day. That is
+tracked separately as its own defect — the convention has no way to express
+*code merged, evidence outstanding*, which is the normal end state for every
+device-reported ticket.
+
 ## Open items / known gaps as of this entry
 
 - **Twelve backend packages still delete each other's fixtures across concurrent test binaries — filed as #454.** #426 fixed `session`; `workout`, `nutrition`, `sequence`, `exercise`, `bjj`, `technique`, `feed`, `activity`, `health`, `food`, `profile`, `friend` and `theme` all still fail when two test binaries share a database, by the identical mechanism (per-test seed + per-test delete of fixed ids). Measured at four concurrent full suites: `workout` failed 21 of 24 runs. **It is not a hypothetical — `vola_test` is the documented default and a dozen worktrees share it.** The cheap fix is `session`'s: seed once in `TestMain` under a database-scoped advisory lock. The reason it was not done in that PR is that doing it everywhere serialises concurrent suites at every package, which is a real wall-clock cost and a design call worth its own review. Note the irony to resolve along the way: CLAUDE.md names `workout` as *the one to copy*, and `workout` is the worst offender.
