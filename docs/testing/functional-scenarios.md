@@ -6,6 +6,8 @@ Recommended end-to-end scenarios for every shipped piece of functionality — on
 
 **Keeping this current:** this is a living document, same discipline as `docs/decisions/history.md`. Whenever a new module or user-facing feature lands, add its scenarios here as part of finishing that work — see the standing rule in `CLAUDE.md`.
 
+**Its companion is [device-checks.md](device-checks.md)**, and the split is worth knowing before you add anything here. This file lists what a test *could* assert. That one lists what **no test can reach** — a camera, a microphone, a real photograph, a permission prompt, a notch, a speaker, a gym with no signal — as a script a person walks on a real phone. If a scenario you are about to write here can only be settled by a human holding hardware, it belongs there instead.
+
 ---
 
 ## Backend health check (`GET /v1/healthz`)
