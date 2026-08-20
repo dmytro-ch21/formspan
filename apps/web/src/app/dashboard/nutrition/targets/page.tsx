@@ -185,10 +185,18 @@ export default function NutritionTargetPage() {
       try {
         await updateActivityLevel(getToken, level);
       } catch (e) {
+        // ALWAYS attributed, never just the raw message.
+        //
+        // This was inverted: the sentence explaining what failed sat in the
+        // `!(e instanceof Error)` branch, which almost nothing reaches —
+        // `ApiError` extends Error, and a dropped connection is a `TypeError`
+        // reading "Failed to fetch". So the athlete got a bare "Failed to
+        // fetch" in the page's shared error slot, attached to nothing, while a
+        // chip sat filled and `aria-pressed` for a level the account never
+        // stored. Caught in review.
+        const detail = e instanceof Error ? e.message : "";
         setError(
-          e instanceof Error
-            ? e.message
-            : "Could not save how much you move. The number below is right for this visit only.",
+          `Could not save how much you move${detail ? `: ${detail}` : ""}. The chip below is right for this visit only.`,
         );
       }
     },

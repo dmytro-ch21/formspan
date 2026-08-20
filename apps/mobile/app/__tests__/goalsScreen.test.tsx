@@ -778,6 +778,74 @@ describe('the activity level is remembered', () => {
     await waitFor(() => expect(screen.queryByTestId('target-activity-unsynced')).toBeNull());
   });
 
+  it('retries a push the account never heard, on the next focus', async () => {
+    // **The offline half of the feature is this test.** Without the retry, the
+    // only `setActivityLevel` call in the app is a pill press — so a choice
+    // made in a gym dead-spot stays owed FOREVER unless the athlete happens to
+    // tap the same pill again while online, and web goes on deriving at the
+    // stale level indefinitely. The screen promises otherwise in as many words
+    // ("It reaches your account next time you have signal").
+    //
+    // Review found this. The module doc described the retry and the on-screen
+    // copy promised it; nothing implemented it, and every other test here
+    // passed.
+    mockRead.mockResolvedValue({ level: 'active', owed: true });
+    render(<GoalsScreen />);
+
+    await waitFor(() => expect(mockPushLevel).toHaveBeenCalledWith(expect.anything(), 'active'));
+    await waitFor(() => expect(mockSettle).toHaveBeenCalledWith('u1', 'active'));
+    // And it stops claiming to be unsent once it has landed.
+    await waitFor(() => expect(screen.queryByTestId('target-activity-unsynced')).toBeNull());
+  });
+
+  it('leaves the debt standing when the retry cannot reach the server either', async () => {
+    mockRead.mockResolvedValue({ level: 'active', owed: true });
+    mockPushLevel.mockRejectedValue(new Error('still offline'));
+    render(<GoalsScreen />);
+
+    await waitFor(() => expect(mockPushLevel).toHaveBeenCalled());
+    // Not settled — settling on a failed push marks the change as sent and it
+    // never goes out again, which is worse than never having retried.
+    expect(mockSettle).not.toHaveBeenCalled();
+    expect(await screen.findByTestId('target-activity-unsynced')).toBeTruthy();
+  });
+
+  it('does not retry when there is nothing owed', async () => {
+    mockRead.mockResolvedValue({ level: 'active', owed: false });
+    render(<GoalsScreen />);
+
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+    // A PATCH on every focus would write the athlete's own value back to the
+    // account forever, for nothing.
+    expect(mockPushLevel).not.toHaveBeenCalled();
+  });
+
+  it('does not let a slow cache read revert a pill pressed while it was in flight', async () => {
+    let release: (v: { level: 'light'; owed: boolean }) => void = () => {};
+    mockRead
+      .mockResolvedValueOnce({ level: 'light', owed: false })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      );
+    render(<GoalsScreen />);
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+
+    // A second focus starts a read; the athlete taps before it resolves.
+    refocus();
+    await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(2));
+    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await waitFor(() => expect(selectedState('target-activity-active')).toBe(true));
+
+    // The read now resolves with its PRE-TAP snapshot. Applying it would put
+    // the pill back to `light` under the athlete's thumb and unpin the query.
+    await act(async () => {
+      release({ level: 'light', owed: false });
+    });
+    expect(selectedState('target-activity-active')).toBe(true);
+  });
+
   it('does not re-derive when the push succeeds', async () => {
     // A successful push must not change the request. Driving the query
     // parameter off the sync flag instead of a separate pin does exactly that:

@@ -10152,9 +10152,17 @@ chosen*.
   return to the phone's Goals tab, and the phone follows. Agreement is by
   construction — one column, both clients omit the `activity` parameter and
   adopt what the server reports — not by a parity script.
-- **A level chosen in airplane mode is not lost.** Pick one with no signal, see
-  the "saved on this phone" line, restore the network, revisit the tab. It syncs
-  once and does not revert.
+- **A level chosen in airplane mode reaches the account by itself.** Pick one
+  with no signal, see the "saved on this phone" line, restore the network,
+  revisit the tab. It syncs once, the line goes away, and it does not revert —
+  then check web and confirm the browser derives at the new level too.
+
+  **Both halves matter and only one is obvious.** "Not lost" is satisfied by
+  any local write; "reaches the account" needs a retry, and the first draft of
+  this feature had none — the PATCH fired only on a pill press, so the debt
+  stood forever unless the athlete tapped again while online, and web derived
+  at the stale level indefinitely. Three places in the diff *said* it retried.
+  A scenario that stops at "the phone still shows it" passes against that bug.
 
 ### Edge cases & errors
 
@@ -10186,8 +10194,19 @@ chosen*.
 - **A PATCH that does not mention `activity_level` leaves it alone.** Changing
   units from Settings must not blank it — the `updateWithin` failure mode that
   has silently wiped authored data three times.
-- **A failed save says so.** A chip that visibly moves reads as a successful
-  save; "changed" and "changed on this phone only" are different outcomes.
+- **A failed save says so, and says WHAT failed.** A chip that visibly moves
+  reads as a successful save; "changed" and "changed on this phone only" are
+  different outcomes. On web, check the message is attributed — a bare
+  "Failed to fetch" in a shared error slot reads as a failed derivation, not a
+  failed save, while the chip sits filled for a level nothing stored.
+- **An offline pill change leaves the arithmetic behind, and must say so.** The
+  ladder is fetched from the server, so with no signal the new pill sits above
+  the previous level's working out. Silence there is the "pill shows one level,
+  arithmetic used another" failure in its persistent form.
+- **A cache read in flight must not revert a pill pressed while it was
+  running.** Narrow, but not closed: the read's snapshot predates the tap, and
+  applying it puts the pill back under the athlete's thumb for the rest of the
+  visit.
 
 ### Auth / correctness
 

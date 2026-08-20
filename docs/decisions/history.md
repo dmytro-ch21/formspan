@@ -34507,9 +34507,42 @@ the whole ladder for an answer that cannot have moved.
   the rule returned `undefined` correctly, and the screen tests mock the
   function away. It has a test at the wire level on both clients' behalf.
 
+### The review caught a promise with nothing behind it
+
+Two reviewers and the acceptance-criteria check independently found the same
+hole, and it is the one worth recording: **the offline retry did not exist.**
+`setActivityLevel` had exactly one call site — a pill press — so a choice made
+in a gym dead-spot stayed owed *forever* unless the athlete happened to tap the
+same pill again while online, and web went on deriving at the stale level
+indefinitely. That re-opens the agree-by-construction goal for precisely the
+athlete the offline criterion names.
+
+What makes it worth a paragraph rather than a line is that **three places said
+otherwise**: `lib/activityLevel.ts`'s own module doc ("the push is retried on
+the next focus that has a connection"), the on-screen copy ("It reaches your
+account next time you have signal"), and the first draft of this entry. The
+design was written down, described accurately, reviewed against — and not
+implemented. Every other test on the screen passed. A doc that describes
+intended behaviour is indistinguishable from one that describes real behaviour,
+which is why the retry now has a test that fails when it is removed.
+
+Two smaller review findings, both real:
+
+- **A comment of mine was factually wrong in three places.** I wrote that a
+  carried out-of-vocabulary level would derive at "a zero multiplier". It would
+  not — `Suggest` coerces an invalid activity to `light` itself. The truth is
+  worse: a perfectly plausible number, derived at `light`, reported as the
+  athlete's own choice. Checked against the code rather than taken on trust.
+- **Web's honest failure message sat in an unreachable branch.** The sentence
+  explaining what failed was the fallback for `!(e instanceof Error)`, and
+  almost nothing reaches that — `ApiError` extends `Error`, and a dropped
+  connection is a `TypeError` reading `Failed to fetch`. So the athlete got a
+  bare "Failed to fetch" attached to nothing, while a chip sat filled and
+  `aria-pressed` for a level the account never stored.
+
 ### Measurement
 
-Twenty mutations, ten backend and ten mobile, **each scored on failing tests
+**Twenty-seven mutations — twelve backend, fifteen mobile — each scored on failing tests
 with the test count checked — never on exit codes**. The first attempt at the
 mount-vs-focus mutation replaced only the head of
 `useFocusEffect(useCallback(...))` and left its tail: a parse error, 17 tests
@@ -34535,7 +34568,10 @@ trap #398 found on this same screen.
   needs it yet.
 - **Not verified on a device.** The pills, the dashed assumed state and the
   offline path are all claims a simulator or a handset has to confirm, and a
-  worktree cannot produce a build with `EXPO_PUBLIC_*` in it.
+  worktree cannot produce a build with `EXPO_PUBLIC_*` in it. The airplane-mode
+  round trip in particular — change it with no signal, restore the network,
+  check web — is the one the acceptance criteria ask for by name and the one
+  the suite can only approximate.
 
 ## 2026-08-20 — A label photo that failed silently, and the two ways it could (N92)
 

@@ -53,7 +53,7 @@
 
 import { useAuth } from '@clerk/clerk-expo';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -204,6 +204,14 @@ export default function TargetScreen() {
    * See `lib/activityLevel.ts` for why the value lives on the profile at all.
    */
   const { userId } = useAuth();
+  /**
+   * How many times a pill has been pressed this session.
+   *
+   * Read only inside promise callbacks, never during render. Its single job is
+   * to let an in-flight cache read notice that the athlete chose something
+   * after it started, so a stale snapshot cannot revert a fresh tap.
+   */
+  const choiceSeq = useRef(0);
   const [activity, setActivity] = useState<{
     level: ActivityLevel | null;
     pinned: boolean;
@@ -296,14 +304,52 @@ export default function TargetScreen() {
   useFocusEffect(
     useCallback(() => {
       let live = true;
+      // Bumped by every pill press. Captured before the read so the resolution
+      // can tell whether a tap landed while it was in flight: the read's
+      // snapshot would then be older than what the athlete just chose, and
+      // applying it reverts the pill under their thumb for the rest of the
+      // visit. One SQLite read is a narrow window, but it is not a closed one.
+      const seq = choiceSeq.current;
       readActivityChoice(userId ?? '')
-        .then((c) => {
-          if (!live) return;
+        .then(async (c) => {
+          if (!live || seq !== choiceSeq.current) return;
           setActivity((prev) =>
             prev && prev.level === c.level && prev.pinned === c.owed && prev.unsynced === c.owed
               ? prev
               : { level: c.level, pinned: c.owed, unsynced: c.owed },
           );
+
+          /**
+           * Retry a push the account has never heard.
+           *
+           * **Without this the offline half of the feature does not exist.**
+           * The only other `setActivityLevel` call is a pill press, so a choice
+           * made in a gym dead-spot would stay owed *forever* unless the
+           * athlete happened to tap the same pill again while online — and web
+           * would go on deriving at the stale level indefinitely, which is the
+           * cross-surface disagreement this whole change exists to remove. The
+           * screen even promises otherwise in as many words ("It reaches your
+           * account next time you have signal"). Caught in review; the doc and
+           * the copy described it and nothing implemented it.
+           *
+           * `pinned` is deliberately left set. It is what keeps this visit's
+           * derivation on the athlete's own level, and clearing it here would
+           * change the query and refetch the ladder for an answer that cannot
+           * have moved. The next focus clears it, having re-read a settled
+           * cache.
+           */
+          if (!c.owed || !c.level || !userId) return;
+          try {
+            await setActivityLevel(getToken, c.level);
+            await settleActivityChoice(userId, c.level).catch(() => {});
+            if (!live || seq !== choiceSeq.current) return;
+            setActivity((prev) =>
+              prev?.level === c.level ? { ...prev, unsynced: false } : prev,
+            );
+          } catch {
+            // Still unreachable. The debt stands on disk and the next focus
+            // tries again — which is the whole contract.
+          }
         })
         .catch(() => {
           // The cache is unreadable — a corrupt database, or a signed-out
@@ -315,7 +361,7 @@ export default function TargetScreen() {
       return () => {
         live = false;
       };
-    }, [userId]),
+    }, [userId, getToken]),
   );
 
   /**
@@ -472,6 +518,8 @@ export default function TargetScreen() {
    */
   const chooseActivity = useCallback(
     async (level: ActivityLevel) => {
+      // Before any await, so a cache read already in flight sees it.
+      choiceSeq.current += 1;
       // `pinned` stays true through the successful push: it decides what the
       // NEXT derivation asks for, and flipping it back here would change the
       // query and refetch the whole ladder for an answer that cannot have
@@ -731,6 +779,13 @@ export default function TargetScreen() {
           <Text style={styles.note}>
             Could not reach the server. This one number is worked out there, because it needs
             your training history — everything else in Food works offline.
+          </Text>
+        )}
+
+        {failed && activity?.unsynced && (
+          <Text style={styles.note} testID="target-activity-stale">
+            The working out below is still from your previous answer. Your new one is saved and
+            the number will catch up once there is signal.
           </Text>
         )}
 
@@ -1095,7 +1150,13 @@ const styles = StyleSheet.create({
   },
   // The level the derivation ASSUMED, nobody having chosen. Deliberately not
   // the accent border a real choice gets — see the render site.
-  pillAssumed: { borderStyle: 'dashed', borderColor: vola.textDim },
+  //
+  // `textMuted` (4.67:1) rather than `textDim`, which `constants/Colors.ts`
+  // itself records at 2.51:1 — under the 3:1 floor for a non-text element, so
+  // the dashed-versus-solid distinction would simply not exist for a low-vision
+  // reader. The state is carried in prose and in the accessibility label too,
+  // so this was never the sole channel; it costs nothing to make it legible.
+  pillAssumed: { borderStyle: 'dashed', borderColor: vola.textMuted },
   pillLabel: { fontSize: 14, fontWeight: '600' },
   pillHint: { fontSize: 12, color: vola.textDim },
   row: {
