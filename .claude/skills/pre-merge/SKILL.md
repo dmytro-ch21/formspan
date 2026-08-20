@@ -123,10 +123,17 @@ pnpm run ci:checks
 It must report **5** check runs and exit 0. **A count of 0 is not "nothing
 failed" — it is "nothing ran", and the two are indistinguishable** in
 `gh pr view`, in an empty `statusCheckRollup`, and in `mergeStateStatus`. A
-conflicting PR receives zero runs silently, because GitHub cannot build the
+conflicting PR receives no new runs, because GitHub cannot build the
 `refs/pull/N/merge` commit that a `pull_request` workflow runs on; the fix is
 `git fetch origin && git rebase origin/main && git push --force-with-lease`.
 See "CI can run ZERO checks" in `CLAUDE.md`.
+
+**Exit 5 is the one to read carefully**: every check green *and* the PR
+conflicting. Existing runs are never withdrawn, so those checks describe a merge
+commit that no longer exists — GitHub will refuse the merge and a rebase re-runs
+all of them. Every other surface calls that state ready. And if it notes
+`mergeable` is `UNKNOWN`, **run it again**; GitHub computes that lazily and the
+second call is the one with an answer.
 
 Never report a PR as green off the absence of failures. Report the number.
 

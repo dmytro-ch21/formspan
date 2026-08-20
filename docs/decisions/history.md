@@ -32214,6 +32214,57 @@ conflicted deliberately:
 Draft status is not involved: #390, a clean draft, had its five throughout.
 #393 was closed and its branch deleted once measured.
 
+### The refinement: it is about run CREATION, not run existence
+
+The claim as first written — *a conflicting pull request receives zero check
+runs* — is not quite right, and the coordinating session found the counterexample
+while independently checking a **different** theory of its own. Worth recording
+in that order, because the sequence is the point: they had posted a *stale base*
+theory, measured four branches, and #395 falsified it. The same #395 then looks
+like it falsifies this one:
+
+| PR | checks | commits behind | mergeable |
+|---|---|---|---|
+| #400 | **0** | 2 | CONFLICTING / DIRTY |
+| #395 | **6** | 2 | CONFLICTING / DIRTY |
+| #390 | 5 | 0 | MERGEABLE / CLEAN |
+
+A conflicting pull request **with six green check runs**. Re-measured here
+rather than taken on trust, and confirmed: 6 runs, all `success`, `CONFLICTING`.
+
+The timestamps settle it. #395's six runs started `14:40:33Z`–`14:40:34Z`; the
+merge that created its conflict, **#404 into `main`, landed at `14:40:52Z`**.
+Eighteen to nineteen seconds. The runs were created while the pull request still
+merged cleanly, `main` moved underneath it, and **existing check runs are never
+withdrawn.**
+
+So the precise claim is: **a pull request that conflicts with its base receives
+no NEW check runs.** That is exactly what `refs/pull/N/merge` failing to exist
+predicts, so it *strengthens* the mechanism rather than qualifying it — a run
+that already exists is the record of a merge commit that once did. It also
+explains both of the coordinating session's original observations and their own
+falsification, which a stale-base theory could not.
+
+**And it exposes a second trap, quieter than the first.** A full set of green
+checks on a CONFLICTING pull request is the most misreadable state in this whole
+area: every GitHub surface calls it ready to merge. The checks are real and they
+passed — but they describe a merge commit that no longer exists, GitHub will
+refuse the merge, and rebasing re-runs all of them, so the green says nothing
+about the code that would actually land. It is the stale-`headRefOid` trap with
+a perfectly valid `headRefOid`.
+
+`ci:checks` now exits **5** (`EXIT_STALE`, "GREEN, BUT STALE") on it. Verified
+live against #395: exit 5, message printed. Mutation-tested by restoring the
+pre-refinement behaviour — mergeability annotating but never revising the
+verdict — which turns two assertions red.
+
+One deliberate tolerance, and it showed itself on the first live run: `mergeable`
+is `UNKNOWN` for a few seconds after any push, and #395 returned `UNKNOWN` on one
+call and `CONFLICTING` seconds later. Failing on `UNKNOWN` would cry wolf on
+every healthy pull request, and a check that cries wolf gets silenced — so that
+path prints a note and still exits 0, saying out loud that a re-run is needed.
+Both halves have a vector.
+
 ### And then it happened to this branch, unprompted, mid-review
 
 The best evidence was not arranged. Twenty minutes after the probe was closed,

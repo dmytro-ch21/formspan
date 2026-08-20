@@ -285,10 +285,19 @@ rather than a habit.
 **The cause is known, as of 2026-08-20 (N65, #368).** A `pull_request` workflow
 does not run on your branch — it runs on `refs/pull/N/merge`, the commit GitHub
 builds by merging your head into the base. **If the PR conflicts with its base,
-that merge commit cannot be built, so no workflow run is created at all**, with
-no failure, no annotation and nothing anywhere saying so. Your branch is not
-broken and CI is not down; the pull request is simply unmergeable and GitHub
-declines silently.
+that merge commit cannot be built, so no NEW workflow run is created**, with no
+failure, no annotation and nothing anywhere saying so. Your branch is not broken
+and CI is not down; the pull request is simply unmergeable and GitHub declines
+silently.
+
+**"No NEW run", not "no runs" — and the difference is a trap of its own.**
+Existing check runs are never withdrawn, so a PR can show a **full set of green
+checks while conflicting**. Measured on #395: six runs started `14:40:33Z`, the
+merge that created its conflict landed `14:40:52Z` — nineteen seconds. Those
+checks are real and they passed, but they describe a merge commit that **no
+longer exists**; GitHub will refuse the merge, and rebasing re-runs all of them.
+Every GitHub surface calls that state ready to merge. `ci:checks` exits **5**
+on it (`GREEN, BUT STALE`), which is the only thing that will tell you.
 
 So **if a PR shows zero checks, this is the first thing to do, not the last**:
 
@@ -320,10 +329,17 @@ self-test, not a check of any PR.
 
 Exit codes are distinct on purpose: **1** nothing ran, a declared check is
 missing, or one was **skipped**; **2** something failed; **3** still running;
-**4** could not ask GitHub. A *skipped* check is counted as not-checked rather
-than passed — five jobs behind a job-level `if:` are five check runs with the
-right names and a green tick, which is the same absence wearing better
-camouflage.
+**4** could not ask GitHub; **5** green but the PR is CONFLICTING, so the green
+is about a merge commit that no longer exists. A *skipped* check is counted as
+not-checked rather than passed — five jobs behind a job-level `if:` are five
+check runs with the right names and a green tick, which is the same absence
+wearing better camouflage.
+
+One deliberate tolerance: `mergeable` is `UNKNOWN` for a few seconds after every
+push, and `ci:checks` prints a note and still exits 0 there rather than crying
+wolf on healthy PRs. **If you see that note, run it again** — the second call is
+when GitHub has an answer. Observed on #395: `UNKNOWN` then `CONFLICTING`,
+seconds apart.
 
 **Never merge a PR without the user's explicit go-ahead, even if CI is green.** This has been the rule for every PR in this project — don't treat a passing CI run as implicit merge permission.
 
