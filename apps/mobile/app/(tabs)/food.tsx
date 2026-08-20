@@ -168,12 +168,21 @@ export default function FoodScreen() {
 
   async function onDelete(id: string) {
     if (!userId) return;
+    // The day this delete belongs to, captured BEFORE any await. Without it,
+    // deleting and then stepping days races: the delete's re-read resolves last
+    // and writes `loaded` back to the old day, so the new day falls to
+    // `loading` until the next focus or sync. It fails honest — never a number
+    // from the wrong day — but it strands the screen. Found in review.
+    const deletingOn = on;
     await removeEntry(userId, id);
     // Every other write in this feature asks for a push; without it the
     // tombstone sits until the next foreground or timer tick, and a row deleted
     // on the phone stays on web for minutes.
     requestSync('food deleted');
-    setLoaded({ on, eaten: eatenFrom(await localEntries(userId, on)) });
+    const rows = await localEntries(userId, deletingOn);
+    setLoaded((prev) =>
+      prev.on === deletingOn || prev.on === '' ? { on: deletingOn, eaten: eatenFrom(rows) } : prev,
+    );
   }
 
   return (
@@ -215,7 +224,23 @@ export default function FoodScreen() {
             <RemainingBlock eaten={eaten} view={view} testID="food-remaining" />
           </View>
 
-          {slots.map((slot) => (
+          {/* The meal sections render ONLY on a real answer.
+              Rendered while loading, or after a failed read, they are four
+              headers with no rows and an Add button each — visually
+              indistinguishable from a genuinely empty day, sitting under a
+              banner saying the read failed. No number lies (subtotals are
+              suppressed at 0, the headline is a dash), but the dominant surface
+              of the screen still asserts "your meals are empty" from a read
+              that never happened. That is the N28 failure in miniature and the
+              same one this task exists to fix. Found in review. */}
+          {eaten.state !== 'ready' ? (
+            <Text style={styles.slotsAbsent} testID="food-slots-absent">
+              {eaten.state === 'loading'
+                ? 'Loading your meals…'
+                : 'Your meals could not be read from this device.'}
+            </Text>
+          ) : (
+            slots.map((slot) => (
             <View key={slot.meal} style={styles.slot}>
               <SectionHeader
                 label={`${MEAL_LABELS[slot.meal]}${slot.kcal > 0 ? ` · ${Math.round(slot.kcal)} kcal` : ''}`}
@@ -260,7 +285,7 @@ export default function FoodScreen() {
                 <Text style={[styles.addText, { color: accent.ink }]}>Add</Text>
               </Pressable>
             </View>
-          ))}
+          )))}
         </View>
       </ScrollView>
     </View>
@@ -285,6 +310,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
+  slotsAbsent: { fontSize: 13, color: vola.textMuted, marginTop: 18 },
   slot: { gap: 6 },
   // Matches SwipeToDelete's own backing exactly — surface at radius 12 — or the
   // revealed action shows a seam behind the row.

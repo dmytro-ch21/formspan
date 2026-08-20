@@ -31388,11 +31388,43 @@ red). Eight new tests on `NutritionCard`, covering the day total in all four
 target states, the three eaten states, and — the case that must NOT be swept up
 by the other two — a genuine zero still reporting as a zero.
 
+### What review then found, and it is the same shape one level out
+
+No blocking findings, but the sharpest suggestion was this: the fix stopped
+`RemainingBlock` lying, and left the **meal sections** doing it. While the read
+was `loading` or `unavailable`, the screen still rendered all four meal headers
+with no rows and an Add button each — visually indistinguishable from a
+genuinely empty day, sitting directly under a banner saying the read failed.
+
+No *number* lied: the subtotals are suppressed at zero and the headline figure
+is a dash. But the dominant surface of the screen still asserted "your meals are
+empty" from a read that never happened, which is the N28 web failure in
+miniature and the same one this task exists to fix. The sections now render only
+on a real answer.
+
+Also fixed: the delete path re-read and wrote `loaded` with no day guard, so
+deleting and then stepping days raced — the delete's read resolves last and
+writes the OLD day back, stranding the new day on "Loading" until the next focus
+or sync. It failed honest rather than wrong, which is why it was a suggestion
+and not a blocker, but a functional update that bails when the day has moved
+closes it.
+
+One thing review noted and I have left: `ready` carries `rows` and `totals` as
+independent fields, so nothing but discipline stops a caller building a
+mismatched pair by literal. `eatenFrom` is "the one place a total is derived"
+by convention rather than by construction, and both construction sites go
+through it.
+
 ### What this leaves open
 
 - **Not verified on a device**, which is where it was reported. The states are
   covered by component tests against the real component, but nobody has watched
   the fix on the phone that produced the report.
+- **The screens themselves have no tests.** `RemainingBlock` is covered
+  thoroughly; nothing proves `food.tsx` and `index.tsx` feed it correctly — and
+  the keying, the `.catch → unavailable` paths and the delete race are exactly
+  the subtle parts. Review named a screen-level test in `app/__tests__/` as the
+  highest-value addition and it is not done here.
 - The `unavailable` copy says the read failed and offers no retry. There is no
   retry affordance on this screen and adding one is a bigger change than the
   bug warrants; a pull-to-refresh or a re-focus already re-reads.
