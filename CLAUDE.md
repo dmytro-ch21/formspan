@@ -346,6 +346,18 @@ wolf on healthy PRs. **If you see that note, run it again** — the second call 
 when GitHub has an answer. Observed on #395: `UNKNOWN` then `CONFLICTING`,
 seconds apart.
 
+**Marking a PR ready for review is gated.** `.github/workflows/pr-has-work.yml`
+fails a PR that is **ready** while its three-dot diff against its base is
+**empty** — the state #355 reached at 5/5 green and `MERGEABLE` with one
+`--allow-empty` commit in it, green precisely because there was nothing in it to
+fail. A **draft** is exempt, always: an empty draft is a branch pushed early.
+Two consequences worth knowing. It is a **separate workflow** because
+`ready_for_review` is not in `pull_request`'s default type set, so `ci.yml`'s
+bare trigger never re-runs when a draft is marked ready — which is why nothing
+in `ci.yml` could ever have caught this. And it makes the **per-PR check count
+6, not 5** — N65's "the count must be 5" is out of date by one. If it fires on
+you, push the work or `gh pr ready --undo <n>`.
+
 **Never merge a PR without the user's explicit go-ahead, even if CI is green.** This has been the rule for every PR in this project — don't treat a passing CI run as implicit merge permission.
 
 ## The open list (hard rule)

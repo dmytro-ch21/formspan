@@ -33455,6 +33455,147 @@ worktree of its own.
   carries it in prose, which is the weaker channel. That is a client change and
   is not in this PR.
 
+## 2026-08-20 — A green PR that contains nothing (N75, #388)
+
+`git diff --stat origin/main...origin/feat/n70-navigation` on #355 was
+**empty**. The PR was 5/5 green and `MERGEABLE`, and it was about to go into a
+release build; a peer read the diff and stopped it. It was green *because there
+was nothing in it to fail* — the branch was one `--allow-empty` claim commit.
+
+Nothing separated that from a real green PR. Five check runs, all successful, in
+both cases. `mergeStateStatus` `CLEAN` in both cases. A title in the PR list in
+both cases. **The only difference was in the diff, and looking at it was a step
+that depended on remembering.**
+
+### The gate is on the transition, not on the emptiness
+
+The obvious check — "refuse an empty branch" — would have broken the thing it
+was protecting. When this was filed, `git commit --allow-empty` plus
+`gh pr create --draft` was *how every task in this repo was claimed*, so every
+claimed task passed through green-and-empty legitimately. A check firing on that
+fires on every claim and is disabled inside a day.
+
+So the gate is on the **exit** from that state: a draft passes, and a PR that is
+**ready for review** with an empty three-dot diff fails. Draft means "I am
+working on this"; ready means "this is finished", and there is nothing in it.
+
+That framing survived the convention being retired underneath it the same
+afternoon. #399 moved claiming to GitHub Issues hours after this work started,
+so an empty claim commit is no longer required by anything — but an empty draft
+is still a branch somebody pushed early, which is normal and not a build
+failure. The exemption was never really about claiming.
+
+### Why it is a separate workflow, and the cost of that
+
+**`ready_for_review` is not in `pull_request`'s default type set** (`opened`,
+`synchronize`, `reopened`). `ci.yml` uses a bare `pull_request:`, so it gets the
+defaults — which means marking a draft ready re-runs nothing, and the last run
+standing on a claim PR is the one taken while it was still a draft. `ci.yml`
+could not have caught #355 no matter what job were added to it.
+
+Listing types on `ci.yml`'s trigger would change when all five of its jobs run,
+for every PR, to fix one check. `.github/workflows/pr-has-work.yml` is the
+smaller change. It listens for `opened`, `reopened`, `synchronize`,
+`ready_for_review` and `converted_to_draft` — the last so that going back to
+draft clears the red rather than leaving a stale verdict standing.
+
+**The cost is that the per-PR check count goes from 5 to 6.** N65 (#368)
+documents "the count must be 5" as the way to spot a branch that received no
+checks at all, and that number is now wrong. Flagged on #368 rather than fixed
+here: the two tasks are adjacent, another session owns that one, and they were
+deliberately kept out of each other's files. The count is at least *stable* at
+6 — this workflow runs on drafts too (and passes), so it does not appear and
+disappear with draftness.
+
+### Every unknown fails, because the bug is an absence read as success
+
+`scripts/check-pr-has-work.py` is stdlib-only like its siblings. It reads
+`draft`, `base.sha` and `head.sha` from the event payload and takes the diff
+itself. There is no path through it that answers "no diff" when it could not
+look:
+
+- no payload, or one that will not parse — fail;
+- `draft` absent — fail. Defaulting a missing field to `True` would turn a
+  payload-shape change into a permanently disabled gate with nothing going red,
+  which is this bug one level up;
+- either sha missing from the clone — fail, naming `fetch-depth` as the cause,
+  so a shallow checkout cannot quietly become a permanent pass;
+- the merge base not an ancestor of both — fail. That one guards the *other*
+  direction: a wrong base makes an empty diff look like real work, which fails
+  open.
+
+`base.sha` comes from the payload rather than from `origin/main`, so a PR
+stacked on another feature branch is judged against its real base — which this
+repo has, and which is why `ci.yml`'s trigger is deliberately unfiltered by base
+branch.
+
+One deliberate non-failure. GitHub reports `changed_files` on the PR object; it
+is compared against git's answer and a **disagreement fails**, because that
+means one of the two is reading the wrong commits. A *missing* field prints a
+loud note and proceeds on git alone. Requiring it would let a payload change on
+GitHub's side turn every PR in the repo red at once, which is too much blast
+radius for a second opinion; git is the ground truth either way, and git alone
+still catches the case this exists for.
+
+There is also no pipe and no grep in the CI step. `grep -c` exits 1 on no match
+and `gofmt -l` exits 0 while printing offenders — both have bitten this repo, and
+both bite hardest when the offending command is the last one in a step.
+
+### Measured, in both directions, twice over
+
+`--self-test` builds **real git repositories** in a temp directory — a base
+commit, a branch carrying one empty commit, a branch carrying actual work — and
+runs the check end to end against synthesised payloads: 6 verdict cases, 7
+unknown-input cases, 6 more through `main()` so the exit-code layer is covered
+too. It is wired into `pnpm run verify` as `check:pr-work` (and
+`check-verify-chain.py`'s `MIN_GATES` went 27 → 28), because there is no pull
+request to check locally. Removing the link was tried: the chain check goes red.
+
+**Seven mutations applied, seven caught.** Three of them were real findings, not
+confirmations:
+
+- Deleting the `commit_exists` guard **survived** the first run, because
+  `git merge-base` fails a moment later on the same input. The case still went
+  red, so the guard read as dead code. Fixed by asserting the failure *message*,
+  not just the failure — CLAUDE.md's rule about redundant guards, arrived at
+  independently.
+- The `main()` error path returning `PASS` instead of `FAIL` **survived**,
+  because every case called `check()` directly and nothing exercised the layer
+  that turns an error into an exit code. That is the precise mistake this file
+  is about, sitting untested inside the file about it. Six `main()` cases added.
+- One mutation reported `ANCHOR NOT FOUND` — the harness had guessed the
+  indentation wrong and had been measuring nothing. Worth stating because it is
+  the failure mode of mutation testing itself, and the run that surfaced it is
+  the same run that surfaced the two above.
+
+Fixing the first of those found a fourth thing by accident: `check(..., out=sys.stdout)`
+binds the default **at import**, so `contextlib.redirect_stdout` never touched
+it and the self-test was leaking its own fixture output into `verify`. It is
+`out=None` now.
+
+**And it was demonstrated on a real pull request, because a detector for an
+absence-reads-as-success bug that has only ever been reasoned about is the same
+class of thing it exists to catch.** #401 was opened as a throwaway probe, based
+on this branch so its three-dot diff was empty, titled `[probe] … DO NOT MERGE`
+and closed afterwards. Same head SHA `033e8bd` throughout; only the draft flag
+moved:
+
+| event | run | verdict | output |
+|---|---|---|---|
+| opened (draft) | 32379968216 | **success** | `PR #401 is a draft — not checked.` |
+| `ready_for_review` | 32380048688 | **failure** | `PR #401 is READY FOR REVIEW and its diff is EMPTY.` |
+| `converted_to_draft` | — | success | the red clears rather than sticking |
+
+Nothing about the PR changed between the first two rows except the flag. That is
+the whole check, observed rather than argued.
+
+### What it does not cover
+
+It reads emptiness, not meaningfulness. A ready PR containing one whitespace
+change passes, and so does one whose content is real but wrong — that is what
+review is for. It also cannot fire if the workflow itself never runs, which is
+exactly N65 (#368) and is why both are needed.
+
 
 ## Open items / known gaps as of this entry
 

@@ -18,16 +18,24 @@ somebody remembering.**
 
 ## Why the obvious fix is wrong
 
-"Reject empty branches" would break the thing it is protecting. `git commit
---allow-empty -m "Claim X"` followed by `gh pr create --draft` is *how a task is
-claimed* in this repo — see CLAUDE.md's claiming rule — so **every** claimed
-task legitimately passes through green-and-empty, and that state must stay
-legal. A check that fires on it fires on every claim and is disabled inside a
-day.
+"Reject empty branches" would break the thing it is protecting. **A draft is
+allowed to be empty**, and at the time this was written it was *required* to be:
+`git commit --allow-empty -m "Claim X"` followed by `gh pr create --draft` was
+how every task in this repo was claimed, so every claimed task passed through
+green-and-empty. A check that fires on that fires on every claim and is disabled
+inside a day.
 
-So the gate is not on the empty diff. It is on the **transition out of draft**
-with an empty diff — the one moment a PR stops saying "I am working on this"
-and starts saying "this is finished". That is the event nothing marked.
+That convention was retired hours later — #399 moved claiming to GitHub Issues,
+where a claim is an assignee and needs no commit at all. **The draft exemption
+survives the change and is not a leftover.** A draft PR means "I am working on
+this"; an empty one is a branch somebody has pushed early, which is a normal and
+useful thing to do and nothing to fail a build over. The signal was never the
+emptiness.
+
+So the gate is on the **transition out of draft** with an empty diff — the one
+moment a PR stops saying "I am working on this" and starts saying "this is
+finished". That is the event nothing marked, and it is the same event under
+either convention.
 
 ## Not to be confused with N65 (#368)
 
@@ -42,11 +50,16 @@ Same family, different member, and they need different detectors:
 A count check passes this case cleanly, because five checks genuinely did run.
 Neither covers the other; both are needed.
 
+**Note for #368: this workflow makes the expected count 6, not 5.** It is a
+separate workflow, so it is a separate check run, and it runs on drafts too —
+so the count is stable at 6 in both states rather than moving with draftness.
+
 ## How it decides
 
 Only from the `pull_request` event payload plus git:
 
-1. `pull_request.draft` is true  -> **pass**, and say so. A claim is not a fault.
+1. `pull_request.draft` is true  -> **pass**, and say so. Work in progress is
+   not a fault.
 2. otherwise, three-dot-diff `base.sha...head.sha`; empty -> **fail**.
 
 `base.sha` comes from the payload rather than from `origin/main`, so the check
@@ -220,8 +233,8 @@ def check(repo: Path, payload: dict, out=None) -> int:
     if draft:
         print(
             f"PR #{number} is a draft — not checked. "
-            "An empty claim draft is exactly what the claiming convention asks "
-            "for, and it stays legal.",
+            "A draft is work in progress, and an empty one is a branch "
+            "pushed early — legal, and nothing to fail a build over.",
             file=out,
         )
         return PASS
@@ -257,14 +270,13 @@ def check(repo: Path, payload: dict, out=None) -> int:
             f"  git diff --stat {base_sha[:12]}...{head_sha[:12]}   ->   no changes\n"
             f"\n"
             "Marking a PR ready says the work is finished; there is no work in "
-            "it. This is almost always a claim PR (`git commit --allow-empty`) "
-            "that was marked ready before, or instead of, its work being "
-            "pushed — a state that is 5/5 green and MERGEABLE precisely "
-            "because there is nothing in it to fail.\n"
+            "it. This is almost always a branch pushed early — an empty commit, "
+            "or work that was committed somewhere else — marked ready before "
+            "its content arrived. Such a PR is 5/5 green and MERGEABLE "
+            "precisely because there is nothing in it to fail.\n"
             "\n"
             "Either push the work, or convert the PR back to draft "
-            "(`gh pr ready --undo <n>`), which is a claim and passes this "
-            "check.",
+            "(`gh pr ready --undo <n>`), which passes this check.",
             file=out,
         )
         return FAIL
@@ -356,7 +368,7 @@ def self_test() -> int:
                 FAIL,
             ),
             (
-                "empty diff + draft  -> green (a legitimate claim)",
+                "empty diff + draft  -> green (a legitimate work-in-progress draft)",
                 _payload(True, base, empty_head, changed_files=0),
                 PASS,
             ),
