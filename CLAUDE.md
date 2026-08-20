@@ -529,6 +529,33 @@ All three are **read-only diagnostics** — they report, they don't fix. Resolve
 or explicitly justify every `[blocking]` finding *before* opening the PR;
 `[suggestion]` items are judgment calls.
 
+**"Read-only" means they will not FIX anything. It does not mean they never
+write to your working tree — and the difference cost a pushed commit on 2026-08-20
+(N91, #432).** A criterion like *mutation-check the suite and confirm it goes
+red* can only be answered by mutating the code and running it, so a reviewer
+edits a file and restores it. That is correct behaviour. What it makes unsafe is
+**`git add -A` while a reviewer is running**: `ac-verifier` had removed the
+`try`/`catch` under test and had not yet restored it when a `commit --amend`
+swept the tree, so the branch was force-pushed carrying **the mutation instead
+of the fix** — the crash the PR existed to prevent, shipped by the machinery
+built to prevent it. Nothing failed loudly: the amend succeeded, the rebase
+carried it forward, and the push was clean.
+
+Two rules follow, and the second is the general one:
+
+- **Do not stage or commit while a review subagent is working in your worktree.**
+  Launch them, wait for every one to report, *then* touch git. If you must
+  commit first, commit before you launch.
+- **A restore is confirmed by re-running the thing that fails — never by
+  grepping the file.** A `grep -c "try {"` returned the right answer here, at a
+  moment when the file really was fine, and the file changed afterwards. That is
+  the apparatus trap from *Verify that a check can fail* pointed at your own
+  undo: the check was real, it was just answering about the past.
+
+What did work, and is the reason this is a story rather than a defect on `main`:
+the branch's own regression test went red on it in `verify`, in CI, and in both
+reviews independently.
+
 **Hand the acceptance criteria to the reviewers too, not just to
 `ac-verifier`.** They already ask for design intent, and the criteria are that
 intent already written down — it is the cheapest handover available.
@@ -897,6 +924,18 @@ way:
 ## Known gotchas
 
 - **A new native dependency is DECLARED by a merge and INSTALLED by nobody.** #320 added `expo-camera` to `apps/mobile/package.json` and a plugin entry to `app.json`; pulling that `main` onto a machine with an existing `node_modules` fails at config resolution with `PluginError: Failed to resolve plugin for module "expo-camera"`, **and the process exits 0 while printing it.** It reads like a broken checkout and is nothing of the sort — run `pnpm install`. CI never sees this because CI installs from the lockfile on every run, so the gap exists only for people who already have the repo. This sits one step *earlier* in the chain than the existing "first run after a new native dep must be `run:ios`, not `start`" trap: that one is a stale native binary, this one is a missing package.
+
+  **And there is a THIRD step, which is the one that reached a device (N91, #432).** The package can be installed and the JS bundled while the **iOS project never learns about it** — `pod install` has not been re-run, so `ios/Podfile.lock` and the generated `Pods/Target Support Files/Pods-VOLA/ExpoModulesProvider.swift` simply do not mention it. Nothing warns. The build succeeds. Measured 2026-08-20: of the twenty native dependencies in `apps/mobile/package.json`, **nineteen were in `Podfile.lock` and `expo-camera` was not**, and the `VOLA.app` built from that project contained no `ExpoCamera` symbol while its `main.jsbundle` contained the whole scan screen.
+
+  **The symptom is the app dying instantly with no error at all**, which reads as a crash in the feature and is nothing of the sort. `expo-camera` — like most `expo-*` packages — calls `requireNativeModule('X')` at **module scope**, and that *throws* when the module is absent. An ESM import cannot be caught, so the throw lands while the route module is being evaluated, i.e. on navigation, and in a **Release** build an unhandled JS error is fatal: no red box, no dialog, no JS stack. Debug would have shown a red box, which is why this class survives every simulator session and only appears on the build somebody carries around.
+
+  Diagnose it in one command, from the primary checkout:
+
+  ```bash
+  grep -c ExpoCamera apps/mobile/ios/Podfile.lock   # 0 = the project never learned about it
+  ```
+
+  and generally: compare `package.json`'s packages carrying an `expo-module.config.json` with an iOS section against `Podfile.lock`. The fix is `pnpm install` → `pod install` → **native rebuild**; re-bundling does nothing, because the missing half is native. `apps/mobile/lib/cameraModule.ts` now contains the blast radius for the camera specifically — a mismatch renders an explained screen instead of killing the process — but that is a guard on one package, not a fix for the class.
 - **`apps/mobile/app.json` has THREE silent permission traps, and nothing in the pipeline can see any of them** — they exist only in a built binary, so no test, no lint, no typecheck and no CI job will ever fail on them. (1) `expo-image-picker`'s plugin adds `NSMicrophoneUsageDescription` and Android `RECORD_AUDIO` unless you pass `microphonePermission: false`. (2) `expo-camera`'s plugin does **the same thing** — `withCamera.js` passes it into `createPermissionsPlugin` unless `microphonePermission: false` **and** `recordAudioAndroid: false`. Both matter because `lib/sounds.ts` sets `allowsRecording: false` and its test calls asking for the microphone "indefensible": the runtime guard was honoured while the binary declared the capability anyway, which is what App Store review and the privacy label read. (3) **Both plugins declare `cameraPermission`, and `applyPermissions` resolves that as _last explicit string wins_** — plugins run in order, so whichever sorts later silently replaces the other's justification. They are deliberately given the **same** string rather than ordered, because order-dependence is the hazard: the next plugin added between them moves the answer again. **A permission change only takes effect after a native rebuild**, so merging the fix does not fix an installed binary.
 - **`secrets.txt`** may show up untracked in the repo root containing what looks like a live API key. Never stage or commit it — flag it to the user instead.
 - This Next.js version renamed the `middleware.ts` file convention to `proxy.ts` (same `clerkMiddleware()` export, just a renamed file). Separately: `next dev --hostname 127.0.0.1` breaks when a `proxy.ts`/`clerkMiddleware()` is present — Next's Proxy runtime tries to self-fetch via `localhost` internally and fails (`ECONNRESET`, surfaces as a 500). Use `--port` alone when running concurrent dev instances; never pass `--hostname`.
