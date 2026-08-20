@@ -55,7 +55,11 @@ const CATALOG_OATS = {
   id: 'usda-1',
   name: 'Oats, rolled',
   brand: '',
-  category: 'grains',
+  // 'grain', not 'grains' — the seed's vocabulary. The typo made every card
+  // in this suite render the NEUTRAL plate, which quietly vacated the
+  // screen-reader assertion below: it checked that 🌾 was absent, and 🌾 was
+  // never rendered in any form. Caught in review.
+  category: 'grain',
   serving_label: '100 g',
   serving_grams: 100,
   kcal: 389,

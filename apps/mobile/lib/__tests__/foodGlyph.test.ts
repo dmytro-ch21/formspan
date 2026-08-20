@@ -71,7 +71,22 @@ describe('the fallback', () => {
    * nearest match: a wrong glyph is worse than no glyph, which is the whole
    * premise of deriving it from a category rather than from the name.
    */
-  it.each(['', '   ', 'something_new', 'MEAT', 'veg'])(
+  it.each([
+    '',
+    '   ',
+    'something_new',
+    'MEAT',
+    'veg',
+    // The two that defeated `??`. An object literal inherits from
+    // `Object.prototype`, so these returned the `Object` FUNCTION and
+    // `Object.prototype` — both non-nullish, so the fallback never fired, and
+    // both crash React when rendered as a Text child. Reachable because
+    // `category` is free text with only a length constraint. Found in review;
+    // the original fallback cases could not have caught it.
+    'constructor',
+    '__proto__',
+    'Constructor',
+  ])(
     'is neutral for %p',
     (category) => {
       expect(glyphFor(category)).toBe(NEUTRAL_GLYPH);
@@ -83,6 +98,19 @@ describe('the fallback', () => {
     expect(glyphFor(undefined)).toBe(NEUTRAL_GLYPH);
   });
 
+  /**
+   * The type, not just the value. A non-string return is the specific damage
+   * the inherited-key hole did — `Object` and `Object.prototype` are both
+   * truthy, so a value-only assertion on some future variant could pass while
+   * the screen still crashes on render.
+   */
+  it.each(['constructor', '__proto__', 'hasownproperty', 'valueof'])(
+    'returns a string for %p',
+    (category) => {
+      expect(typeof glyphFor(category)).toBe('string');
+    },
+  );
+
   it('tolerates case and whitespace on a known category', () => {
     expect(glyphFor(' Vegetable ')).toBe(glyphFor('vegetable'));
     expect(glyphFor('vegetable')).not.toBe(NEUTRAL_GLYPH);
@@ -90,26 +118,32 @@ describe('the fallback', () => {
 });
 
 /**
- * The rule the whole module exists for, stated as a test so it cannot be
- * softened by a later "helpful" improvement.
+ * The rule the whole module exists for, asserted structurally.
  *
- * Keyword matching on the NAME is the tempting alternative and the one that
- * manufactures the failure: each of these names contains a word that would
- * match a meat or dairy glyph, and each is categorised as something else.
- * If any of them ever renders a meat glyph, somebody has added name matching.
+ * The previous version of this block was **theatre**, and review said so:
+ * `expect(glyphFor(c)).toBe(glyphFor(c))` is a tautology and
+ * `expect(name.length).toBeGreaterThan(0)` asserts a fixture. Neither could go
+ * red for the failure it named, because `glyphFor` takes no name — any
+ * implementation passed. Writing assertions that cannot fail is the exact
+ * defect this session kept finding elsewhere, so it is replaced rather than
+ * left as decoration.
+ *
+ * What survives is the one thing a unit test here can actually pin: the
+ * function's ARITY. It accepts a category and nothing else, so a name cannot
+ * reach it without changing the signature — and changing the signature fails
+ * here. The behavioural half lives in `addFoodCatalog.test.tsx`, which renders
+ * a food NAMED "Beef-flavoured tofu" categorised `plant_protein` and asserts
+ * the pixel is not a steak.
  */
-describe('a name is never read', () => {
-  it.each([
-    ['Beef-flavoured tofu', 'plant_protein'],
-    ['Chicken-style seitan', 'plant_protein'],
-    ['Butter beans', 'legume'],
-    ['Coconut milk', 'plant_protein'],
-    ['Egg noodles', 'grain'],
-  ])('%p in %p does not borrow a glyph from its name', (name, category) => {
-    expect(glyphFor(category)).toBe(glyphFor(category));
-    // The glyph depends on the category alone, so the name cannot change it.
-    expect(glyphFor(category)).not.toBe(glyphFor('red_meat'));
-    expect(glyphFor(category)).not.toBe(glyphFor('poultry'));
-    expect(name.length).toBeGreaterThan(0);
+describe('a name cannot be read', () => {
+  it('takes a category and nothing else', () => {
+    expect(glyphFor.length).toBe(1);
+  });
+
+  /** Two foods whose names imply meat resolve on category alone. */
+  it('gives the same glyph regardless of what a food is called', () => {
+    expect(glyphFor('plant_protein')).not.toBe(glyphFor('red_meat'));
+    expect(glyphFor('plant_protein')).not.toBe(glyphFor('poultry'));
+    expect(glyphFor('legume')).not.toBe(glyphFor('dairy'));
   });
 });

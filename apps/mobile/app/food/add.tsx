@@ -210,6 +210,16 @@ export default function AddFoodScreen() {
   useEffect(() => {
     const query = q.trim();
     let live = true;
+    // Nothing downstream renders a catalog answer outside `All`, so asking for
+    // one under `My Foods` or `Recipes` spends a round trip on a result that
+    // cannot be shown. Switching back to `All` re-runs this effect, so nothing
+    // is lost by not prefetching. Raised in review.
+    // Returns without touching state: a synchronous setState in an effect body
+    // is a cascading render, and this app's ratchet holds that warning at zero
+    // headroom. Nothing needs clearing anyway — every render of `searching` is
+    // itself gated on `scope === 'all'`, and switching back re-runs this effect
+    // and sets it properly.
+    if (scope !== 'all') return;
     // Everything happens inside the timer, including the empty-query reset —
     // a synchronous setState in an effect body cascades renders, and the rule
     // that says so is a warning this app's ratchet will not absorb.
@@ -239,7 +249,7 @@ export default function AddFoodScreen() {
       live = false;
       clearTimeout(t);
     };
-  }, [q, getToken]);
+  }, [q, getToken, scope]);
 
   const searched = q.trim();
   /**
@@ -452,7 +462,14 @@ export default function AddFoodScreen() {
         <>
           <SectionHeader label="From the food catalog" />
           {catalogOnly.map((f) => (
-            <View key={f.id} style={styles.card}>
+            <Pressable
+              key={f.id}
+              style={styles.card}
+              onPress={() => void logCatalog(f)}
+              accessibilityRole="button"
+              accessibilityLabel={`Log ${catalogName(f)} from the food catalog`}
+              testID={`add-catalog-row-${f.id}`}
+            >
               {/* Derived from the CATEGORY, never the name — see `foodGlyph`.
                   A wrong glyph is worse than none, and name matching is what
                   puts a steak on a beef-flavoured tofu. */}
@@ -463,8 +480,14 @@ export default function AddFoodScreen() {
               <Text
                 style={styles.cardGlyph}
                 testID={`add-catalog-glyph-${f.id}`}
-                accessibilityElementsHidden
-                importantForAccessibility="no"
+                // `aria-hidden`, which React Native maps to BOTH
+                // `accessibilityElementsHidden` (iOS) and
+                // `importantForAccessibility="no-hide-descendants"` (Android).
+                // The first version paired the iOS prop with the weaker
+                // Android `"no"`, and RNTL only treats the strong forms as
+                // hidden — so the Android half was both weaker AND invisible
+                // to the test that claimed to cover it. Raised in review.
+                aria-hidden
               >
                 {glyphFor(f.category)}
               </Text>
@@ -483,9 +506,17 @@ export default function AddFoodScreen() {
                 <Text style={styles.cardServing}>{servingLine(f)}</Text>
               </View>
 
-              {/* The whole point of the `+`: it logs without opening anything.
-                  A separate control from the card body so a future detail
-                  screen can take the card's own press without this moving. */}
+              {/* The `+` logs, and so does the card body — the SAME action for
+                  now. The saved-food rows directly above these cards log on a
+                  whole-row tap, and a list where the row above responds to a
+                  body tap and this one ignores it teaches a gesture it then
+                  refuses. Raised in review; the body was dead.
+
+                  Still a separate control rather than only a row press,
+                  because when a detail screen exists the body's press becomes
+                  "open" and the `+` keeps meaning "log" — that is the whole
+                  point of a quick-add affordance, and it should not have to be
+                  re-added then. */}
               <Pressable
                 onPress={() => void logCatalog(f)}
                 style={[styles.cardAdd, { borderColor: accent.accent }]}
@@ -499,7 +530,7 @@ export default function AddFoodScreen() {
               >
                 <Text style={[styles.cardAddText, { color: accent.ink }]}>+</Text>
               </Pressable>
-            </View>
+            </Pressable>
           ))}
           {/* Honest about the cap. "20 of 63" beats a list that silently
               stops and implies it is everything. */}

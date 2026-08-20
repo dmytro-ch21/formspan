@@ -24,8 +24,9 @@
  *
  * `category` is nevertheless a free-text column (`TEXT`, 1-40 chars, migration
  * `000062`) with no CHECK constraint, so an admin-authored food can carry
- * anything at all. That is precisely why the fallback is unconditional and
- * neutral rather than clever.
+ * anything at all. That is precisely why the fallback is total and
+ * neutral rather than clever — and why the lookup uses `Object.hasOwn` rather
+ * than `??`, which review caught leaking `Object.prototype`'s own keys.
  *
  * ## Emoji rather than the brand icon set, and the cost of that
  *
@@ -98,5 +99,25 @@ export const KNOWN_CATEGORIES = Object.keys(CATEGORY_GLYPHS);
  */
 export function glyphFor(category: string | null | undefined): string {
   if (!category) return NEUTRAL_GLYPH;
-  return CATEGORY_GLYPHS[category.trim().toLowerCase()] ?? NEUTRAL_GLYPH;
+  const key = category.trim().toLowerCase();
+  // `Object.hasOwn`, NOT `CATEGORY_GLYPHS[key] ?? NEUTRAL_GLYPH`.
+  //
+  // An object literal inherits from `Object.prototype`, so that lookup returns
+  // a NON-NULLISH value for two real strings and `??` never fires:
+  // `constructor` yields the `Object` function and `__proto__` yields
+  // `Object.prototype`. Rendering either as a `<Text>` child throws
+  // "Functions are not valid as a React child" and takes the whole search list
+  // down with it.
+  //
+  // Reachable, not theoretical: `category` is free text — `TEXT` 1-40 with a
+  // LENGTH check and no charset constraint (migration `000062`) — so an
+  // admin-authored food categorised `constructor` (or `Constructor`, which
+  // lowercases into it) is enough. Lowercasing happens to save `toString` and
+  // `valueOf`, since neither survives it as an inherited key; that is luck
+  // rather than design, and it is exactly these two that get through.
+  //
+  // Found in review. The module's whole promise is that an unrecognised
+  // category degrades to a neutral glyph, and this was the one input class
+  // where it degraded to a crash instead.
+  return Object.hasOwn(CATEGORY_GLYPHS, key) ? CATEGORY_GLYPHS[key] : NEUTRAL_GLYPH;
 }

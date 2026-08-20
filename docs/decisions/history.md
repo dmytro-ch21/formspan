@@ -31961,11 +31961,34 @@ answer produced by a reasonable-looking rule.
 A category map cannot produce one, because it never reads the name. The seeded
 catalog's 177 foods carry 18 categories and every row has one, so coverage is
 complete today; `category` is nevertheless free text (`TEXT` 1-40, no CHECK,
-migration `000062`), which is why the fallback is unconditional and neutral
-rather than clever.
+migration `000062`), which is why the fallback is total and neutral rather than
+clever.
+
+**It was not total in the first version, and the hole is worth recording.** The
+lookup was `CATEGORY_GLYPHS[key] ?? NEUTRAL_GLYPH`, and an object literal
+inherits from `Object.prototype` — so `constructor` returned the `Object`
+FUNCTION and `__proto__` returned `Object.prototype`. Both are non-nullish, so
+`??` never fired, and both crash React when rendered as a `<Text>` child: the
+search list would have gone down entirely. Reachable, because `category` is free
+text with a LENGTH constraint and no charset — an admin-authored food
+categorised `constructor` is enough. Lowercasing happens to save `toString` and
+`valueOf`; that is luck, not design. `Object.hasOwn` is the fix, and the
+fallback tests now cover both strings plus a `typeof` assertion, since a
+value-only check could pass while the render still crashed. Found in review.
 
 `foodGlyph.test.ts` reads `foods.json` directly rather than duplicating the
-vocabulary — a copied expectation agrees with itself. It fails if the seed grows
+vocabulary — a copied expectation agrees with itself.
+
+One block in it was **theatre**, and review said so. A describe named "a name is
+never read" asserted `glyphFor(c) === glyphFor(c)` and that a fixture string was
+non-empty: a tautology and a fixture check, neither able to go red for the
+failure it named, because `glyphFor` takes no name and any implementation
+passed. It is replaced by the one thing a unit test here can pin — the
+function's **arity** — so adding a name parameter fails, while the behavioural
+half stays where it belongs, in a component test that renders a food called
+"Beef-flavoured tofu" and checks the pixel is not a steak. Writing assertions
+that cannot fail is the defect this session kept finding elsewhere; it is worth
+noting it was committed here too. It fails if the seed grows
 a category the map lacks, if the map grows one the seed does not use, or if any
 seeded food falls back to the plate. That is the drift
 `positionVocabulary.test.ts` exists for, and which went unnoticed there twice
@@ -31992,8 +32015,17 @@ The glyph is hidden from the accessibility tree. It is decoration — the name
 carries the meaning — and "seedling, Beef-flavoured tofu" before every row is
 noise in the one list that has to be fast to move through. Worth recording that
 RNTL's queries exclude accessibility-hidden elements by default, so the test
-needing `includeHiddenElements` IS the evidence the hiding works; the test
-asserts both halves, since either alone passes with the glyph removed.
+needing `includeHiddenElements` IS the evidence the hiding works.
+
+Two corrections there, both from review. The prop pair was
+`accessibilityElementsHidden` plus Android's weaker `importantForAccessibility="no"`,
+and **RNTL only treats the strong forms as hidden** — so the Android half was
+both weaker and invisible to the test that claimed to cover it. `aria-hidden`
+maps to both strong props at once. And the component fixture carried category
+`'grains'` where the vocabulary is `'grain'`, so **every card in that suite
+rendered the neutral plate** and the assertion that the wheat glyph was absent
+passed because wheat was never rendered at all. With the fixture corrected the
+guard now genuinely fails when the hiding is removed; before, it could not.
 
 ### Three chips, not four, and the two missing ones are refused
 
