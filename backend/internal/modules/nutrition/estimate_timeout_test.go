@@ -152,9 +152,14 @@ func TestACallerWhoHangsUpIsNotReportedAsOurDeadline(t *testing.T) {
 	// The discriminator. Both a client disconnect and our own deadline reach
 	// the estimator as a context error, and `translateLLMError` maps both to
 	// the generic unavailable case — so the handler tells them apart by
-	// reading the two CONTEXTS, not the error. Drop the
-	// `r.Context().Err() == nil` half and this goes red: an abandoned request
-	// starts reporting itself as a considered 504.
+	// reading the CONTEXT rather than the error.
+	//
+	// **The mutation that kills this is weakening the check to
+	// `callCtx.Err() != nil`** — verified, it goes red here with this message.
+	// An earlier draft of this comment named a `r.Context().Err() == nil` half
+	// that the shipped handler does not contain, which is worse than no comment:
+	// it is a written claim about what makes the suite go red, naming a mutation
+	// nobody can apply. Found in review.
 	est := &blockingEstimator{released: make(chan struct{})}
 	usage := &memUsage{}
 	// A deadline far longer than the test, so the only thing that can end the
@@ -185,6 +190,56 @@ func TestACallerWhoHangsUpIsNotReportedAsOurDeadline(t *testing.T) {
 		t.Fatalf("%d rows recorded for a cancelled call, want 1 — cancellation has been "+
 			"metered since review, precisely so it cannot be used to spend for free",
 			len(usage.rows))
+	}
+}
+
+// racingEstimator returns an UNREACHABLE failure while the deadline is already
+// blown — the race the rewrap guard exists for.
+//
+// It waits for the context to be done and then answers as though the provider
+// had refused the connection a moment earlier, which is what a real outage
+// landing at ~34.99s looks like from here: the error says nothing was spent,
+// and the clock says we stopped waiting.
+type racingEstimator struct{ calls int }
+
+func (e *racingEstimator) Estimate(ctx context.Context, _ EstimateInput) (Estimate, CallMeta, error) {
+	e.calls++
+	<-ctx.Done()
+	// Zero usage, because nothing was billed. A fake that returned tokens here
+	// would be describing a different failure and would make the assertion
+	// below pass for the wrong reason.
+	return Estimate{}, CallMeta{}, fmt.Errorf("%w: connection refused", ErrEstimateUnreachable)
+}
+
+func TestAnOutageThatRacesTheDeadlineIsStillNotMetered(t *testing.T) {
+	// F16 (#367) says a call the provider never answered spends none of the
+	// athlete's 25 — their allowance must not pay for our supplier's outage.
+	//
+	// The rewrap uses `%v`, which flattens what it wraps, so without the
+	// `!errors.Is(estErr, ErrEstimateUnreachable)` guard an outage that arrives
+	// in the same instant as our deadline loses its unreachable match, gets
+	// relabelled a timeout, and is metered. Nothing on the ordinary path can
+	// produce this — `llm.neverReachedProvider` checks the context errors first
+	// — which is exactly why removing the guard survives a suite that lacks
+	// this case.
+	est := &racingEstimator{}
+	usage := &memUsage{}
+	h := handlerWithTimeout(est, usage, 20*time.Millisecond)
+
+	w := call(t, h, `{"description":"two eggs"}`)
+
+	if est.calls != 1 {
+		t.Fatalf("the estimator was called %d times, want 1", est.calls)
+	}
+	if len(usage.rows) != 0 {
+		t.Fatalf("%d rows recorded for a provider that never answered, want 0 — the athlete "+
+			"is paying for our supplier's outage because it happened to race our deadline (F16)",
+			len(usage.rows))
+	}
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503 — an outage stays an outage even when the deadline "+
+			"fires in the same instant, and only the 503 promises the allowance is intact",
+			w.Code)
 	}
 }
 

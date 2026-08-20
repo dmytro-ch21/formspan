@@ -34297,10 +34297,31 @@ It is also why such a failure leaves nothing an operator can find. A 429 and a
 503 are in the log with a status on them; a request the client abandoned is a
 200 several minutes later, indistinguishable from a success nobody received.
 
-`estimateTimeout` is 45s — about six times the measured 7.7s working call, and
-inside the time somebody will hold a phone up at a shelf. It answers **504**
-with `unavailable`, and the code is the half that matters: a client's correct
-move is to retry the identical request, exactly as for the 503.
+It answers **504** with `unavailable`, and the code is the half that matters: a
+client's correct move is to retry the identical request, exactly as for the 503.
+
+**The number is derived, and getting it wrong was a live near-miss worth
+recording.** `estimateTimeout` was written at 45s — six times the measured 7.7s
+working call, and inside the time somebody will hold a phone up at a shelf. Then
+**N55 (#448) landed while this was in flight and gave the client its own
+deadline**, setting the estimate route's to `SLOW_REQUEST_TIMEOUT_MS` — 45s. The
+rebase turned a deliberate margin into an **exact tie**, which is no better than
+no server deadline at all: the two race, the phone may abort first, and the
+athlete gets a generic client-side timeout instead of the status this change
+exists to deliver. Both suites stayed green. Nothing in the build had an
+opinion, because the two numbers live in two languages and each is individually
+reasonable.
+
+It is now **35s**, and the margin is ten seconds rather than nominal because
+**the two clocks do not start together**: the client's starts when it begins
+writing the request, ours when the handler runs — after the body has arrived. A
+photo upload on gym wifi is spent entirely out of a one- or two-second gap.
+
+`scripts/check-timeout-parity.py` is what keeps it true, and it is the fourth
+parity check in `verify` — but the first that demands the two copies **differ,
+and in which direction**. Its three siblings check for equality. Verified it can
+fail three ways: on the tie, on the server exceeding the client, and on the
+constant being renamed out from under its parser.
 
 **It is metered, and that placement is the whole meaning of the sentinel.**
 `ErrEstimateTimeout` wraps `ErrEstimateUnavailable` and deliberately *not*
@@ -34327,6 +34348,13 @@ deterministic on-device failure — an unreadable frame, no disk, a format the
 encoder will not take — fell through to `messageFor`, whose fallback read
 *"Could not reach the server. Try again when you have signal."* The radio is
 idle at that point. Nothing had been sent.
+
+**N55 fixed the fallback and does not fix this**, which is the distinction worth
+keeping. N55 classifies *dead requests* — it makes the transport say which kind
+of failure it was instead of calling all of them a signal problem. A frame that
+could not be re-encoded is not a dead request; it is not a request. It reaches
+the same handler by falling past the network call entirely, so no amount of
+transport taxonomy sees it. The guard is what does.
 
 `identify.tsx` already had exactly this guard, added by #361, with a comment
 saying in as many words that without it the false diagnosis is "the same N73
@@ -34358,16 +34386,23 @@ NEEDS HUMAN EVIDENCE box open on both counts.
 
 ### Open questions this leaves
 
-- **The client's own ceiling is unmeasured.** React Native passes
-  `timeoutInterval` straight through from the JS `timeout` option
-  (`RCTNetworking.mm`), and `fetch` never sets one, so the phone inherits
-  whatever the platform default is. 45s was chosen against what an athlete will
-  wait, not against that constant — but if a client is ever given a shorter
-  deadline, this number has to come down with it, or the silence returns.
-- **The 504 is not yet rendered as itself by any client.** `messageFor` shows
-  the server's sentence, which is correct and is the weaker channel; no app
-  reads the `unavailable` code. That is the same gap F16's entry recorded above
-  and is #365's to close.
+- **The OS-level ceiling under both deadlines is still unmeasured**, and now
+  matters less. React Native passes `timeoutInterval` straight through from the
+  JS `timeout` option (`RCTNetworking.mm`) and `fetch` never sets one, so the
+  phone inherited the platform default — reportedly 60s on iOS, unverified, and
+  different on Android's OkHttp. N55's explicit 45s now fires first on both, so
+  the platform number is no longer load-bearing; it would become so again only
+  if either deadline were raised past it.
+- **The 504 has no client-side reading of its own**, and probably does not need
+  one: N55's `estimateErrorMessage` special-cases the 503 (which needs to say
+  "not switched on here yet") and otherwise renders the server's sentence, which
+  for the 504 is already written for this screen. Worth revisiting only if the
+  copy has to differ per platform.
+- **`messageFor` on this screen is now N55's `estimateErrorMessage`.** This
+  branch changed that fallback independently and the rebase discarded its
+  version in favour of N55's, which is the better one and owns the concern.
+  What survives here is the guard *above* it — the half N55 does not cover,
+  because it is about a failure that never reaches the transport at all.
 - **Nothing reports a failed estimate to `/v1/client-errors`.** The endpoint,
   the table and the admin Health screen all exist. Wiring the photo path into
   them is what would make the *next* occurrence answerable without a proxy, and

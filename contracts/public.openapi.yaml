@@ -1424,9 +1424,17 @@ components:
                 - unavailable
                 - internal
               description: >
-                `unavailable` accompanies `503` and means the request was fine
-                and the server could not answer it — an upstream lookup that
-                timed out, refused, or is not configured on this deploy. It is
+                `unavailable` accompanies `503` **and `504`**, and means the
+                request was fine and the server could not answer it — an
+                upstream lookup that timed out, refused, or is not configured on
+                this deploy. The two statuses split that on WHOSE clock ran out:
+                `503` is the upstream declining or absent, `504` is this service
+                giving up waiting on one that was still working. The code is
+                shared because the client's move is the same either way.
+                **What is not shared is the cost** — a `503`/`unavailable` on
+                `/nutrition/estimate` promises the athlete's daily allowance is
+                untouched, and a `504` makes no such promise, because the
+                provider was reached and its tokens were probably bought. It is
                 deliberately NOT `not_found`: "this barcode is not in the
                 database" and "I could not reach the database" look identical to
                 a client that only sees an empty result, and they are opposite
@@ -9902,7 +9910,7 @@ paths:
         '504':
           description: >
             The provider was still working when THIS SERVICE stopped waiting.
-            The deadline is ours — 45 seconds — and it exists so that this
+            The deadline is ours — 35 seconds — and it exists so that this
             endpoint always answers with a status.
 
 

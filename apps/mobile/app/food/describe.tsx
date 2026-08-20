@@ -204,7 +204,17 @@ export default function DescribeMealScreen() {
             { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
           );
         } catch {
-          setError('That photo could not be read. Try taking another, or describe the meal instead.');
+          // Branched on `fromCamera` for the same reason the picker's own catch
+          // fifteen lines up is: "try taking another" cannot be followed by
+          // somebody who chose an existing photo, and advice that cannot be
+          // acted on is the smaller version of the defect this whole guard is
+          // for. `identify.tsx` shares the camera wording and is camera-only,
+          // so it has no second case to get wrong.
+          setError(
+            fromCamera
+              ? 'That photo could not be read. Try taking another, or describe the meal instead.'
+              : 'That photo could not be read. Try a different one, or describe the meal instead.',
+          );
           return;
         }
         receive(

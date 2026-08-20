@@ -27,7 +27,7 @@ type EstimateHandler struct {
 	// now is injectable so the quota window is testable without waiting a day.
 	now func() time.Time
 	// timeout is injectable for the same reason `now` is: the deadline it
-	// bounds is 45 seconds, and a test that waited for it would be a test
+	// bounds is 35 seconds, and a test that waited for it would be a test
 	// nobody runs. Set from `estimateTimeout` by the constructor, so the
 	// shipped value is the one every caller gets and the seam exists only for
 	// the suite.
@@ -63,21 +63,33 @@ const maxEstimateBody = 8 << 20
 // client abandoned is a 200 several minutes later, indistinguishable from a
 // success nobody was there to receive.
 //
-// # Why 45 seconds
+// # The number is DERIVED FROM THE CLIENT'S, not chosen freely
 //
-// Chosen against what an athlete will stand still for, not against a protocol
-// constant. The measured shape of a real call is single-digit seconds — a live
-// staging estimate on 2026-08-20 took 7.7s end to end — so this is roughly six
-// times the working case and still inside the time somebody will hold a phone
-// up at a supermarket shelf. Past about a minute the answer has no value even
-// if it arrives.
+// N55 (#448) gave the app its own deadline while this was in flight, and the
+// estimate route gets `SLOW_REQUEST_TIMEOUT_MS` — **45 seconds**, in
+// `apps/mobile/lib/authedFetch.ts`. A server deadline equal to the client's is
+// no better than none: the two race, the phone may abort first, and the
+// athlete gets a generic client-side timeout instead of the status this whole
+// change exists to deliver. The first draft of this constant was 45s for
+// exactly that reason — it was picked before N55 landed, and the rebase turned
+// a safe margin into a tie.
 //
-// **It must stay comfortably below the client's own ceiling**, whatever that
-// turns out to be on each platform, because the entire point is that WE answer
-// first. If a client is ever given a shorter deadline than this, this number
-// comes down with it; a server deadline above the client's restores exactly
-// the silence it was added to end.
-const estimateTimeout = 45 * time.Second
+// So it is **35s, ten seconds under the client**, and the margin has to be
+// that wide rather than nominal because **the two clocks do not start
+// together**. The client's starts when it begins writing the request; ours
+// starts when the handler runs, which is after the body has arrived. A photo
+// upload on gym wifi shifts us several seconds later, and a one- or two-second
+// nominal gap is spent entirely on that shift. Ten seconds survives it.
+//
+// It is still ~4.5x the working case: a live staging estimate on 2026-08-20
+// took **7.7s** end to end. Past that, an answer at a supermarket shelf has
+// little value even when it arrives.
+//
+// **If either number moves, both move.** `scripts/check-timeout-parity.py`
+// fails the build when this stops being strictly less than the client's, which
+// is the only thing standing between a future edit and the silent return of
+// the failure N92 was reported for.
+const estimateTimeout = 35 * time.Second
 
 type estimateResponse struct {
 	// Estimate is the DRAFT. The field is named for what it is so no client
@@ -181,7 +193,25 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	// Checked before the unreachable branch below so the ordering is stated
 	// rather than emergent. `ErrEstimateTimeout` wraps ErrEstimateUnavailable,
 	// not ErrEstimateUnreachable, so this call stays metered.
-	if estErr != nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+	//
+	// **The `!errors.Is(estErr, ErrEstimateUnreachable)` guard protects F16
+	// against a race, and it is not theoretical enough to leave out.** The
+	// rewrap uses `%v`, which flattens whatever it wraps — so if a genuine
+	// no-spend failure (a provider 5xx, a dial failure, a revoked key) lands in
+	// the window between the provider answering and this line reading the
+	// clock, the rewrap would strip its unreachable match and the athlete would
+	// be charged for our supplier's outage under a 504. That is precisely the
+	// thing F16 (#367) exists to prevent, arrived at sideways.
+	//
+	// It cannot fire on the ordinary path — `llm.neverReachedProvider` checks
+	// the context errors FIRST and answers false, so a deadline-caused failure
+	// is never `Unreachable` to begin with. Which is exactly why it needs
+	// saying: the guard is invisible in every normal run, and the mutation that
+	// removes it survives a suite that does not have this case in it. Raised in
+	// review, and pinned by
+	// `TestAnOutageThatRacesTheDeadlineIsStillNotMetered`.
+	if estErr != nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) &&
+		!errors.Is(estErr, ErrEstimateUnreachable) {
 		estErr = fmt.Errorf("%w after %s: %v", ErrEstimateTimeout, h.timeout, estErr)
 	}
 

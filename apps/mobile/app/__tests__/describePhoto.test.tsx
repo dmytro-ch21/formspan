@@ -157,10 +157,36 @@ it('does not blame the network when the frame cannot be re-encoded', async () =>
   for (const word of NETWORK_WORDS) {
     expect(shown.props.children).not.toMatch(word);
   }
+  // **LOAD-BEARING, and not duplicated copy.** After N55 the shared fallback
+  // is also free of network words, so the four assertions above pass whether
+  // the inner guard exists or not — delete it and they stay green. This line
+  // is the ONLY one that distinguishes the guard from the fallback, which is
+  // why it asserts a phrase rather than an absence. Raised in review; do not
+  // remove it as redundant with the copy in the component.
   expect(shown.props.children).toMatch(/photo could not be read/i);
   // And nothing was uploaded, which is the other half of "this never touched
   // the network".
   expect(mockPhotograph).not.toHaveBeenCalled();
+  // The screen RECOVERED. Held only by the outer `finally`, so a refactor that
+  // lifts the inner catch out of the outer try — a plausible simplification —
+  // would strand the spinner forever with every other assertion here green.
+  expect(screen.queryByLabelText('Working it out')).toBeNull();
+});
+
+it('tells someone who CHOSE a photo to try a different one, not to take one', async () => {
+  // The picker's own catch branches on `fromCamera`; this one did not, so an
+  // athlete who picked an unreadable library photo was told to take another —
+  // advice they cannot follow, on a screen whose other button is "Choose one".
+  mockManipulate.mockRejectedValue(new Error('decode failed'));
+
+  render(<DescribeMealScreen />);
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('describe-library'));
+  });
+
+  const shown = await screen.findByTestId('describe-error');
+  expect(shown.props.children).toMatch(/try a different one/i);
+  expect(shown.props.children).not.toMatch(/taking another/i);
 });
 
 it('shows the server its own words when the server answered', async () => {
