@@ -33139,18 +33139,32 @@ The load that flakes came from merging PR #351's branch into a scratch branch �
 | arm | config | result | CPU | wall |
 |---|---|---|---|---|
 | A | unset (jest default, 3 workers) | **6 failures / 35** | 311–330% of 400% | 28–31s |
+| C | 3 workers + `workerIdleMemoryLimit: '512MB'` | **3 failures / 10** | — | — |
 | B | `maxWorkers: 2` | **0 failures / 30** | 240–251% | 24–32s |
 
-Fisher's exact, one-sided: **p = 0.02**. The cap costs no wall time, which is
-the same thing the 10-core local measurement found — the oversubscription was
-never buying throughput.
+Pooling the two 3-worker arms against B, Fisher's exact one-sided: **p = 0.007**.
+The cap costs no wall time, which is the same thing the 10-core local
+measurement found — the oversubscription was never buying throughput.
+
+**Arm C is the one that earns the conclusion.** `workerIdleMemoryLimit` was
+named in the issue as the alternative lever, and a second session's local data
+had been read as evidence for it. So it was run rather than argued away: the
+memory lever, with workers left at jest's default, **still failed 3 of 10** with
+the identical signature. Peak RSS had already said so — 785–910 MB against
+15,989 MB of RAM — but a rival hypothesis that is only refuted by an inference
+is not refuted. Adopted on the strength of one green run, it would have been
+believed, and it would have failed exactly where the failure lives.
 
 **The apparatus was shown to go red before any of the greens were believed.**
-Arm A is the pre-change baseline and it failed in four of its five rounds; the
-cap's effect was also visible in a second, independent channel — CPU dropped
-from 311–330% to 240–251%, and the `Jest worker plan` step printed
-`configured maxWorkers = 2` against `jest default would be 3` on every sample.
-Five greens with no red to compare them against would have been unattributable.
+Arm A is the pre-change baseline and it failed in four of its five rounds, so
+the harness demonstrably produces both outcomes. The cap's effect showed up in
+two further independent channels: CPU dropped from 311–330% to 240–251%, and an
+experiment-only `Jest worker plan` step (on the scratch branch, not in the
+shipped workflow) printed `configured maxWorkers = 2` against `jest default
+would be 3` on every sample. Each arm-B green was additionally confirmed from
+**jest's own summary line**, not the job's exit status, because a wrapper's exit
+code is the wrapper's until checked. Five greens with no red to compare them
+against would have been unattributable.
 
 Every arm-A failure carried one signature: `Unable to find an element with
 testID: celebration-milestone`, in `bjjSessionScreen.test.tsx`. Never a wrong
@@ -33159,27 +33173,30 @@ render it was waiting on never got scheduled. (Which file loses is arbitrary:
 the local runs recorded on #409 saw the same signature take out `sharedScreen`
 and `dictateScreen` instead.)
 
-**`workerIdleMemoryLimit` was rejected on evidence, not taste.** Peak RSS on the
-failing runs was 785–910 MB against 15,989 MB of RAM. Memory was never the
-scarce resource, so a memory lever would have been a placebo — and a placebo
-that made the suite pass would have been worse than no fix, because it would
-have been believed.
-
 ### What shipped
 
 - `jest.config.js` sets `maxWorkers: 2` **guarded on `process.env.CI`**. Local
   behaviour is unchanged: a 10-core Mac has no SMT and genuinely wants 9 for a
   solo run.
 - A `Runner capacity` step in the Mobile job prints `nproc`, the `lscpu` core/
-  thread split and `os.cpus().length` on **every** run. Three lines, and the
-  cheapest available defence against the next person re-deriving a worker count
-  from a spec sheet.
-- CLAUDE.md's rationale corrected, and its **list of victim filenames deleted**.
-  It named `sharedScreen.test.tsx`; `dictateScreen` and `bjjSessionScreen` have
-  since failed identically, so anyone hitting a red `dictateScreen` grepped the
-  file, found only `sharedScreen`, and concluded they had found a new bug. A
-  filename list goes stale silently and reads as exhaustive. It states the
-  mechanism now, and says outright that which suite loses is a coin toss.
+  thread split, `os.cpus().length` and **the worker count the config actually
+  resolves to** on every run. That last line makes the step self-verifying
+  rather than merely descriptive: if it ever reads the same number as the
+  printed default, the guard has stopped firing. The `lscpu` filter carries a
+  `|| lscpu` fallback for two reasons found in review — a bare `grep` that
+  matches nothing exits 1 under the job's `bash -e` and would turn the build red
+  on a *diagnostic*, and GitHub's ARM runners say `Core(s) per cluster` rather
+  than `per socket`, where the filter would still match on `CPU(s):`, exit 0 and
+  silently drop the physical-core count at exactly the moment a runner change
+  made it matter.
+- CLAUDE.md's rationale corrected, and its **list of victim filenames demoted
+  from a diagnosis to an illustration**. It named `sharedScreen.test.tsx`;
+  `dictateScreen` and `bjjSessionScreen` have since failed identically, so
+  anyone hitting a red `dictateScreen` grepped the file, found only
+  `sharedScreen`, and concluded they had found a new bug. The names are still
+  there — deleting them outright would leave that grep finding nothing at all —
+  but they now sit inside an explicit statement that which suite loses is a coin
+  toss, with the mechanism as the invariant.
 - The local `--maxWorkers=3` guidance is reframed as the complement rather than
   a rival: the CLI overrides the config, so the two settings answer two
   different questions about two different machines.
@@ -33206,6 +33223,22 @@ have been believed.
 - **17.1% is this suite on this day.** The rate is a function of how much work
   the suite does, so the baseline moves under every future PR; the number worth
   keeping is the mechanism, not the percentage.
+- **A per-instance cap has a ceiling, and locally we are at it.** Sessions
+  measured `--maxWorkers=3` rescuing the suite reliably at ambient load 26–40
+  and failing to at 156–171. That is consistent with the CPU story rather than
+  against it — a cap bounds *your* contribution to oversubscription, not the
+  machine's total, so at load 160 the cores are gone whatever one instance asks
+  for. It does mean there is no flag that makes a 10-core machine host eleven
+  concurrent suites, and pretending otherwise sends people hunting for one.
+- **A possible second, unrelated flake needs its own ticket.** One session
+  measured `dictateScreen.test.tsx` failing **4 of 11 runs in isolation** at
+  local load 140–195 — no concurrent suite, nothing for a worker cap to fix. If
+  that reproduces it is a genuine defect in that test, distinct from the
+  contention story here, and folding it into #409 would bury it. It did **not**
+  reproduce on CI: `dictateScreen` was green in all 75 runs across the three
+  arms, and every one of the nine failures observed was `bjjSessionScreen`. So
+  it is either local-load-specific or something CI's environment does not
+  expose — either way, unresolved and not this entry's.
 
 ## Open items / known gaps as of this entry
 

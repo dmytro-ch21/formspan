@@ -57,7 +57,8 @@ const config = {
  * CI only — and the number is measured on the machine it applies to, which is
  * the whole point of issue #409.
  *
- * jest sizes its worker pool as `os.cpus().length - 1`. Measured from a real
+ * jest sizes its worker pool as `os.availableParallelism() - 1`, falling back to
+ * `os.cpus().length` — the two agree on both machines below. Measured from a real
  * `ubuntu-latest` step, not from GitHub's published spec: `nproc` = 4 and
  * `os.cpus().length` = 4, so jest picks **3**. But `lscpu` on that same runner
  * reports `Core(s) per socket: 2` and `Thread(s) per core: 2` — the four are
@@ -69,17 +70,21 @@ const config = {
  * whose budget expires because the render it is waiting on never got scheduled.
  * Which suite loses is arbitrary; three different ones have been blamed.
  *
- * Measured on the full suite, 119 files, with the load that made it flake:
- *   unset (3 workers): 6 failures / 35 runs, 311–330% CPU, 28–31s
- *   maxWorkers: 2:     0 failures / 30 runs, 240–251% CPU, 24–32s
- * Fisher's exact, one-sided: p = 0.02. The cap costs no wall time, because the
- * oversubscription was never buying throughput — the same result the 10-core
- * local measurement reached.
+ * Measured on the full suite, 119 files, three arms on real runners:
+ *   A  unset (3 workers)               6 failures / 35   311–330% CPU  28–31s
+ *   C  3 workers + idle memory limit   3 failures / 10   (memory lever only)
+ *   B  maxWorkers: 2                   0 failures / 30   240–251% CPU  24–32s
+ * Fisher's exact, one-sided, pooling the two 3-worker arms against B: p = 0.007.
+ * The cap costs no wall time, because the oversubscription was never buying
+ * throughput — the same result the 10-core local measurement reached.
  *
- * NOT `workerIdleMemoryLimit`, and that was measured rather than assumed: peak
- * RSS on the failing runs was 785–910 MB against 15,989 MB of RAM. Memory was
- * never the scarce resource here, so a memory lever would have been a placebo
- * that appeared to work.
+ * **Arm C is why this is `maxWorkers` and not `workerIdleMemoryLimit`.** The
+ * memory lever was the leading rival hypothesis, so it was run rather than
+ * argued away: `workerIdleMemoryLimit: '512MB'` with workers left at the
+ * default still failed 3 of 10, with the identical signature. That is what the
+ * RSS measurement predicted — peak 785–910 MB against 15,989 MB of RAM, so
+ * memory was never the scarce resource. Adopted on the strength of one green
+ * run instead, it would have been believed.
  *
  * Guarded on CI because a developer machine is the opposite case — 10 real
  * cores, no SMT, where jest's default of 9 is right for a solo run. When
@@ -91,7 +96,7 @@ const config = {
  * scaling this number by the published vCPU count — that inference is the
  * defect this comment exists to record.
  */
-if (process.env.CI) {
+if (process.env.CI && process.env.CI !== 'false') {
   config.maxWorkers = 2;
 }
 
