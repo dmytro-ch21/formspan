@@ -148,7 +148,7 @@ func (h *DraftHandler) Draft(w http.ResponseWriter, r *http.Request) {
 	// `bjj_reflection_drafts` records calls that happened, and this one did
 	// not. The log line carries the operational fact.
 	if errors.Is(draftErr, ErrDraftUnreachable) {
-		httplog.FromContext(r.Context()).Warn("bjj: reflection draft not metered, provider never answered",
+		httplog.FromContext(r.Context()).Error("bjj: reflection draft not metered, provider never answered",
 			"user_id", userID, "err", draftErr)
 		writeDraftError(w, draftErr)
 		return

@@ -115,11 +115,34 @@ var ErrUnavailable = errors.New("llm: the provider is unavailable")
 //   - A refusal or a truncation. Both are billed HTTP 200s. They stay
 //     ErrRefused and they stay metered — that is the loop-prevention property
 //     this whole scheme exists for, and it is untouched.
-//   - A CANCELLED or timed-out call. The request very likely reached the model
-//     and was billed for an answer nobody stayed to read, and "the caller hangs
-//     up mid-call" is precisely the spend-somebody-else's-money loop the meter
-//     was hardened against in review. Those keep costing the caller, so
-//     `neverReachedProvider` checks the context errors FIRST and answers false.
+//
+//   - A CANCELLED or timed-out call. TWO independent reasons, and the second is
+//     the one that would still hold if the first were somehow addressed:
+//
+//     1. Correctness. The request very likely reached the model and was billed
+//     for an answer nobody stayed to read, and "the caller hangs up mid-call"
+//     is precisely the spend-somebody-else's-money loop the meter was hardened
+//     against in review.
+//
+//     2. Adversarial. **If cancellation were free, the quota would be trivially
+//     defeatable**: fire a request, cancel at 50ms, repeat. The provider bills
+//     us for every one and the athlete's row count never moves. A quota with a
+//     free path around it is not a quota.
+//
+//     So `neverReachedProvider` checks the context errors FIRST and answers
+//     false.
+//
+//     **The asymmetry this costs, stated so nobody files it as a bug.** A
+//     genuine network timeout where the request never reached the provider is
+//     metered too, and we cannot tell it apart from a cancellation that arrived
+//     after the model had already answered — by the time the deadline fires,
+//     the two are the same error. So an athlete on a bad connection can be
+//     charged a unit nobody was billed for. That is deliberate: it is the
+//     conservative direction (over-charging one unit, versus handing out a free
+//     bypass of the whole cap), and it is bounded by the rolling 24-hour
+//     window. Reversing it would be safe only with per-call evidence that the
+//     provider never started work, which no response we get carries.
+//
 //   - A 200 whose body could not be read or parsed. The model answered; we
 //     failed. ErrUnavailable, and metered, because it was billed.
 var ErrUnreachable = errors.New("llm: the provider never answered")

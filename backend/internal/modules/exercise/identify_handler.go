@@ -140,7 +140,7 @@ func (h *IdentifyHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	// is persisted, with the same rolling 24-hour window as the other two, so
 	// this endpoint had the same bug and none of the stated mitigation.
 	if errors.Is(err, ErrIdentifyUnreachable) {
-		httplog.FromContext(r.Context()).Warn("exercise: identification not metered, provider never answered",
+		httplog.FromContext(r.Context()).Error("exercise: identification not metered, provider never answered",
 			"err", err)
 		writeIdentifyError(w, err)
 		return

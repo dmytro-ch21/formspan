@@ -246,12 +246,17 @@ func TestAnAnsweredButUselessResponseIsUnavailableNotUnreachable(t *testing.T) {
 
 // A cancelled call must keep costing the caller.
 //
-// This is the guard on the sharpest way to get F16's fix wrong. A caller who
-// hangs up mid-call may well have been billed in full — the model answered,
-// nobody stayed to read it — and "disconnect before the response" is exactly
-// the spend-somebody-else's-money loop the meter was hardened against in
-// review, with `context.WithoutCancel` on both Record calls. Classifying a
-// cancellation as unreachable would hand that loop straight back.
+// This is the guard on the sharpest way to get F16's fix wrong, and there are
+// two independent reasons it matters. Correctness: the caller may well have
+// been billed in full — the model answered, nobody stayed to read it — which is
+// the loop `context.WithoutCancel` on both Record calls was added to close.
+// And adversarially: **a free cancellation is a free bypass of the entire
+// quota** — fire, cancel at 50ms, repeat, and the row count never moves while
+// the provider bills us for every one.
+//
+// See ErrUnreachable for the asymmetry this knowingly accepts: a genuine
+// network timeout that never reached the provider is metered too, because by
+// the time a deadline fires the two are indistinguishable.
 func TestACancelledCallIsNotUnreachable(t *testing.T) {
 	for _, p := range []Provider{ProviderAnthropic, ProviderOpenAI} {
 		t.Run(string(p), func(t *testing.T) {

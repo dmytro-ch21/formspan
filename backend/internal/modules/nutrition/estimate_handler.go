@@ -135,15 +135,13 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	// nothing has nothing to contribute to it. The operational fact that an
 	// outage happened is in the log line below, which is where an outage
 	// belongs. The cost: outage RATE is no longer derivable from this table.
-	//
 	if errors.Is(estErr, ErrEstimateUnreachable) {
-		httplog.FromContext(r.Context()).Warn("nutrition: estimate not metered, provider never answered",
+		httplog.FromContext(r.Context()).Error("nutrition: estimate not metered, provider never answered",
 			"user_id", userID, "source", src, "err", estErr)
 		writeEstimateError(w, estErr)
 		return
 	}
 
-	//
 	// **`WithoutCancel`, not the request context.** The tokens are already
 	// spent by this line, so a caller who disconnects mid-call would otherwise
 	// escape the meter entirely — and a cancel-loop is exactly the
