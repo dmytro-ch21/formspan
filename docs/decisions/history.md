@@ -33499,6 +33499,191 @@ putting a guess into the artefact everything else measures against.
   `concept` item kind exists for but which no roadmap has leaned on at this
   scale.
 
+## 2026-08-20 — "You are offline" was the only thing the transport could say (N55)
+
+An athlete photographed a gym machine on a phone with four bars and read *"Could
+not reach the server. Try again when you have signal or search for an exercise
+instead."* #361 fixed the trigger — the screen was posting a 4-12MB camera frame
+— and said in its own body that the message was a second bug it was not fixing.
+This is that bug.
+
+`netFetch` was eight lines, and this was all of them:
+
+```ts
+try { return await fetch(input, init); }
+catch (err) {
+  if (err instanceof Error && err.name === 'AbortError') throw err;
+  throw new OfflineError();
+}
+```
+
+Every rejection except an abort became `OfflineError` — whose own docstring says
+it means "nothing was ever answered, no route to the API". So a TLS failure, a
+DNS failure, a timeout, and a body the server cut off mid-stream were **the same
+object** by the time any screen saw them. No per-screen wording can recover a
+distinction the transport already threw away, which is why two screens had
+already written their own network copy and a third would have made it the
+pattern.
+
+### What React Native can actually tell you, measured rather than assumed
+
+This is the constraint the design is shaped around, so it was measured against
+the installed modules before anything was written.
+
+`fetch` here is `whatwg-fetch@3.6.20` over RN's own `XMLHttpRequest`. On the
+native side, `RCTNetworking.mm:701` sends JS
+`[requestID, error.localizedDescription, error.code == kCFURLErrorTimedOut]` —
+and `localizedDescription` is exactly the string that separates *"The Internet
+connection appears to be offline."* from *"An SSL error has occurred and a
+secure connection to the server cannot be made."*
+
+**JS never sees it.** `whatwg-fetch` sets `responseType = 'blob'` (RN has Blob,
+so its feature check passes), and RN's `XMLHttpRequest` stores the error string
+only when the response type is `''` or `'text'`. Driving RN's real
+`XMLHttpRequest` with the payload iOS sends: with `'text'` the string is right
+there in `responseText`; with `'blob'` — what `fetch` uses — `responseText`
+*throws*, and `fetch` hands back no xhr to read it from anyway. The only other
+route to it is `XMLHttpRequest.__setInterceptor_DO_NOT_USE`, a single global slot
+the dev network inspector already claims; the name is the API's own opinion of
+that idea.
+
+So through `fetch`, three outcomes survive: **abort**, **timeout** (iOS only,
+`kCFURLErrorTimedOut` only, arriving as `TypeError('Network request timed out')`)
+and **everything else**, as one undifferentiated `TypeError('Network request
+failed')`.
+
+**That means the acceptance criterion asking for a TLS/DNS failure to be named
+separately cannot be met from the error object, and a classifier that appeared
+to would be reading its own fixtures.** This is recorded as a finding, not
+worked around. Android is a further gap: its `NetworkingModule` ships as a
+prebuilt AAR, so the same mapping was read on iOS and is unverified there.
+
+### So classify by evidence, not by inference
+
+The phone stops guessing what a failure meant and asks a question it can get a
+real answer to. On an unclassifiable rejection it sends one bodyless,
+unauthenticated GET to `/v1/healthz` and classifies on whether anything comes
+back. **Any** response counts, including a 500 — the question is whether packets
+reach VOLA, not whether VOLA is well.
+
+Three sentinels under one `TransportError` base:
+
+- **`OfflineError`** — no route to the API. Now the case with evidence behind
+  it rather than the fallback, which is the whole inversion.
+- **`TimeoutError`** — we stopped waiting. `netFetch` now imposes a deadline
+  (30s, 45s for the two photo-upload routes); nothing in the app had one before
+  except two screens that wrote their own, so a request ran to whatever iOS
+  allowed and then failed with a message about signal.
+- **`RequestDroppedError`** — the request failed while VOLA answered a probe.
+  The likeliest real producer is an upload: the backend's `MaxBytesReader`
+  closes the connection after answering, so a client still writing may never
+  read the 400 it was sent.
+
+What the probe cannot do is stated next to it: a captive portal answering 200 to
+everything reads as reachable, and "this phone has no radio" and "VOLA is down"
+are not separable — both are *no route to the API*, which is what `OfflineError`
+now claims and the most the app can honestly say. Separating them means probing
+a third-party host from an athlete's phone, which is not a trade this project
+makes for a wording nuance.
+
+`isOffline` narrowed to mean only the first, so every caller that used it to
+mean *"I could not ask, stay quiet and retry"* moved to `isTransportFailure` —
+four sync classifiers and the two places `sequences.ts` degrades to the outbox.
+Before N55 every no-answer failure **was** an `OfflineError`, so the base check
+is what preserves their behaviour exactly. One call site deliberately keeps the
+narrow reading: `sync.ts` drives the words "Connected"/"No connection", and a
+`RequestDroppedError` was thrown *because* VOLA answered — printing "No
+connection" over that evidence is the same confident false statement in a
+smaller font.
+
+### Diagnosis and action are separate, which is what keeps this out of the screens
+
+Each sentinel carries a `diagnosis` (what happened) and a message (that plus a
+default action). A surface with a better action composes its own:
+`identifyErrorMessage` appends *"Search for the exercise instead."*, the meal
+screen *"Enter the food by hand."* The wording of a failed request stays in one
+place; only the action is local. Copy is one line then an action throughout —
+the athlete's verdict on the old three-sentence version was "the error itself is
+ugly", read one-handed over a plate.
+
+The estimate screen's `messageFor` moved into `estimateApi.ts` as
+`estimateErrorMessage`, which also fixes the second half of the report: the
+route answers **503 when the deploy has no provider key**, by the handler's own
+comment, and the screen was showing the server's bare *"meal estimation is not
+available"* with nothing saying that typing the meal in still works. It now
+reads as a feature that is not switched on. Everything else the server answered
+keeps **its own** message — the 429 says *"you have used all 25 estimates for
+today — one more in 20 minutes"*, and paraphrasing that would throw away the one
+number the athlete can act on.
+
+### The bug found on the way, which is worse than the one being fixed
+
+`app/library.tsx` and `app/position/[id].tsx` were the two screens with their own
+deadlines, and both told a timeout apart from a supersede by aborting with a
+reason and reading `signal.reason` back.
+
+**`signal.reason` does not exist on a phone.** RN's `setUpXHR.js` replaces the
+global `AbortController` with `abort-controller@3.0.0`, and `polyfillGlobal`
+replaces unconditionally. Measured against that installed module:
+`abort('MY_REASON')` gives `reason: undefined`, and `AbortSignal.timeout`,
+`AbortSignal.any` and `signal.throwIfAborted` are all undefined. Node — which
+jest runs on — has all four.
+
+So on a device: the library's `reason === SUPERSEDED` never matched, and a search
+abandoned mid-typing fell through to the error branch and rendered **"Aborted"**;
+its `finally` guard never matched either, so a superseded request cleared the
+*newer* request's spinner. On the position screen a timeout took the unmount
+path and `loading` stayed true forever — **the exact permanent spinner that
+screen's own comment says the reason exists to prevent.** Both had passing tests,
+because the tests ran on Node.
+
+Both mechanisms are gone rather than repaired: the deadline moved to `netFetch`,
+which owns it in a plain local it can trust, so each screen's controller is now
+aborted for one reason only and `signal.aborted` answers on its own.
+`lib/__tests__/rnGlobals.test.ts` is a source scan that fails on any
+reintroduction of the four APIs — a runtime test cannot see this class of defect,
+because these APIs work perfectly in the runner.
+
+### What the tests do and do not establish
+
+22 transport cases, plus copy tests for both photo routes. **Twelve mutations
+were applied to the guards and the suite watched go red. Ten were caught on the
+first pass; the two survivors were both real gaps in the tests, and both are
+caught now** — which is the entire reason for running it:
+
+- Replacing the whole deadline with a hardcoded 30ms changed nothing, because
+  two stubs resolved on their own timers and ignored the abort signal — the
+  deadline tests were measuring the stub. (A third stub had the same flaw and
+  was caught earlier by tests that hung instead.)
+- Deleting the `AbortError` rethrow changed nothing, because no case exercised
+  an abort that was neither our deadline nor a caller's signal. It has one now:
+  a guard whose outcome is redundant still needs a test, or a surviving mutation
+  reads as dead code.
+
+The `rnGlobals` scan was mutation-tested the same way, and **its own self-test
+caught a hole in it**: the ban on `abort(reason)` required a string literal, so
+it missed `abort(TIMED_OUT)` — the exact form both screens shipped.
+
+What none of it establishes is which real-world cause produces which rejection.
+The stubs are honest about a Promise contract and nothing more; the offline
+branch in particular is confirmed only by a device with its radio off, and the
+TLS branch by pointing the app at a host that refuses one. Both are listed under
+*Needs a device* in `functional-scenarios.md` rather than claimed.
+
+### Left open
+
+- **The two AI routes answer 503 with the error code `internal`.** The contract
+  says `unavailable` means "the request was fine and the server could not answer
+  it — an upstream lookup that timed out, refused, **or is not configured on
+  this deploy**", and `apihttp.CodeUnavailable` exists and is used elsewhere. The
+  client turns on the status here, so nothing is broken; the wire contract is
+  just contradicting its own documentation. Not fixed with this, which is a
+  mobile change.
+- **`EXPO_PUBLIC_API_URL` is copied into twelve modules.** The probe made it
+  thirteen until `apiRequest` was pointed at the transport's copy; the other
+  eleven are untouched and a real refactor.
+- **Android's timeout mapping is unverified**, as above.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

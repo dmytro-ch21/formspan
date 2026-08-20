@@ -21,6 +21,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { transportDiagnosis } from '@/lib/apiError';
 import { getStanding } from '@/lib/bjj';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -72,16 +73,42 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * search box drives both.
  */
 
-// Abort reasons, so a superseded request (silent) and a timeout (a real
-// error the user must see) don't both collapse into `signal.aborted`.
-const SUPERSEDED = 'superseded';
-const TIMED_OUT = 'timed-out';
+/**
+ * How long this screen is willing to wait, handed to the transport.
+ *
+ * **This used to be armed here, and the mechanism was dead on a phone (N55).**
+ * A superseded request (silent) and a timeout (a real error) both abort the
+ * same controller, so they were told apart by an abort *reason* —
+ * `abort(TIMED_OUT)` and `abort(SUPERSEDED)`, read back off `signal.reason`.
+ *
+ * React Native replaces the global `AbortController` with
+ * `abort-controller@3.0.0`, which has no `reason` at all: `abort(x)` takes the
+ * argument and drops it, and `signal.reason` is `undefined` forever. Measured
+ * against the installed module. Jest runs on Node, where `reason` works, so
+ * every test of this agreed with the code and none of them were about a phone.
+ *
+ * What that cost on a device: `reason === SUPERSEDED` never matched, so a
+ * request abandoned mid-typing fell through to `setError` and printed
+ * **"Aborted"**; `reason === TIMED_OUT` never matched, so a real timeout got
+ * the generic message instead of its own; and the `finally` guard never
+ * matched either, so a superseded request cleared the *newer* request's
+ * spinner.
+ *
+ * Both distinctions are gone rather than repaired. The deadline belongs to
+ * `netFetch`, which owns it in a local and reports a `TimeoutError`; this
+ * controller is aborted for exactly one reason now — a newer search or an
+ * unmount — so `signal.aborted` answers on its own.
+ */
+const REQUEST_TIMEOUT_MS = 10_000;
 
 function describeError(err: unknown): string {
+  // A dead request already says what it was — offline, too slow, or dropped
+  // with VOLA reachable. This screen adds its own action because it has a
+  // better one than "try again": pull down.
+  const diagnosis = transportDiagnosis(err);
+  if (diagnosis) return `${diagnosis} Pull down to try again.`;
+
   const msg = err instanceof Error ? err.message : String(err);
-  // React Native's fetch says "Network request failed", which tells a user
-  // nothing actionable.
-  if (/network request failed/i.test(msg)) return "You're offline.";
   if (/\(401\)/.test(msg)) return 'Your session expired. Sign in again.';
   return msg;
 }
@@ -513,11 +540,11 @@ export default function LibraryScreen() {
     techniqueAbortRef.current?.abort();
     const ac = new AbortController();
     techniqueAbortRef.current = ac;
-    const deadline = setTimeout(() => ac.abort(), 10_000);
+    const deadline = { timeoutMs: REQUEST_TIMEOUT_MS };
     try {
       const [list, rs] = await Promise.all([
-        fetchTechniques(getToken, ac.signal),
-        fetchRulesets(getToken, ac.signal),
+        fetchTechniques(getToken, ac.signal, deadline),
+        fetchRulesets(getToken, ac.signal, deadline),
       ]);
       setTechniques(list);
       setRulesets(rs);
@@ -557,13 +584,13 @@ export default function LibraryScreen() {
           setSyllabuses([]);
         }
       }
-    } catch (err) {
-      // A supersede is not a failure; a timeout is. `fetchTechniques` rejects
-      // with AbortError for both, so the only way to tell them apart is
-      // whether this controller is still the current one.
+    } catch {
+      // A supersede is not a failure; a timeout is. They no longer arrive as
+      // the same kind of rejection — a timeout is a `TimeoutError` now — but
+      // this check is kept as the primary one because it also covers an
+      // unmount, and because a superseded request must not touch state that
+      // the newer one has already set.
       if (techniqueAbortRef.current === ac) setTechniquesFailed(true);
-    } finally {
-      clearTimeout(deadline);
     }
   }, [getToken, techniqueSport]);
 
@@ -574,14 +601,9 @@ export default function LibraryScreen() {
 
   const load = useCallback(
     async (opts: { silent?: boolean } = {}) => {
-      abortRef.current?.abort(SUPERSEDED);
+      abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-
-      // Without a deadline the initial spinner can spin forever on a captive
-      // or dead network — and the RefreshControl isn't mounted in the
-      // spinner branch, so there'd be no way to recover.
-      const timeout = setTimeout(() => controller.abort(TIMED_OUT), 10_000);
 
       if (!opts.silent) setLoading(true);
       setError(null);
@@ -613,6 +635,10 @@ export default function LibraryScreen() {
           getToken,
           { sport: sport || undefined, q: query.trim() || undefined },
           controller.signal,
+          // Without a deadline the initial spinner can spin forever on a
+          // captive or dead network — and the RefreshControl isn't mounted in
+          // the spinner branch, so there'd be no way to recover.
+          { timeoutMs: REQUEST_TIMEOUT_MS },
         );
         if (!controller.signal.aborted) {
           setExercises(list);
@@ -623,23 +649,19 @@ export default function LibraryScreen() {
           setEverLoaded(true);
         }
       } catch (err) {
-        // Superseding our own request is not a failure — showing an error
-        // for it would make fast typing look broken. A timeout is, though,
-        // so the two aborts have to be distinguishable rather than lumped
-        // together under `signal.aborted`.
-        if (controller.signal.reason === SUPERSEDED) return;
+        // Superseding our own request is not a failure — showing an error for
+        // it would make fast typing look broken. This controller is aborted
+        // for that reason only now that the deadline lives in the transport,
+        // so `aborted` says it without needing a reason the runtime drops.
+        if (controller.signal.aborted) return;
         // With a cached catalog on screen, failing to refresh is an ordinary
         // offline state, not an error worth covering it with.
         if (showedCache) return;
-        setError(
-          controller.signal.reason === TIMED_OUT
-            ? "Couldn't reach the server. Pull down to try again."
-            : describeError(err),
-        );
+        // Including a timeout, which arrives as a `TimeoutError` and says so.
+        setError(describeError(err));
         setEverLoaded(true); // so the empty state stops claiming to be authoritative
       } finally {
-        clearTimeout(timeout);
-        if (controller.signal.reason !== SUPERSEDED) {
+        if (!controller.signal.aborted) {
           setLoading(false);
           setRefreshing(false);
         }
@@ -654,7 +676,7 @@ export default function LibraryScreen() {
     return () => clearTimeout(t);
   }, [load]);
 
-  useEffect(() => () => abortRef.current?.abort(SUPERSEDED), []);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // Symmetric to the stored-filter guard on load: if the discipline currently
   // filtering the list gets turned off while the user is standing here, the

@@ -1,6 +1,6 @@
 import { apiRequest } from './apiRequest';
 import { newTraceId, traceparent } from './trace';
-import { netFetch } from './authedFetch';
+import { netFetch, type NetFetchOptions } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
@@ -145,6 +145,7 @@ export async function fetchExercises(
   getToken: TokenGetter,
   filter: ExerciseFilter = {},
   signal?: AbortSignal,
+  opts?: NetFetchOptions,
 ): Promise<Exercise[]> {
   const token = await getToken();
 
@@ -153,13 +154,17 @@ export async function fetchExercises(
   if (filter.q) params.set('q', filter.q);
   const qs = params.toString();
 
-  const res = await netFetch(`${API_BASE}/exercises${qs ? `?${qs}` : ''}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      traceparent: traceparent(newTraceId()),
+  const res = await netFetch(
+    `${API_BASE}/exercises${qs ? `?${qs}` : ''}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        traceparent: traceparent(newTraceId()),
+      },
+      signal,
     },
-    signal,
-  });
+    opts,
+  );
 
   if (!res.ok) {
     throw new Error(`Couldn't load exercises (${res.status}).`);

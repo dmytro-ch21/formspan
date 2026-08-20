@@ -22,7 +22,7 @@
 
 import { randomUUID } from 'expo-crypto';
 
-import { isOffline, isPermanentRejection } from './apiError';
+import { isPermanentRejection, isTransportFailure } from './apiError';
 import { getDb, withTransaction } from './db';
 import type { Entry, Food, Macros, Meal, Target, TargetView } from './nutrition';
 import * as api from './nutritionApi';
@@ -462,7 +462,7 @@ export type FoodSyncResult = {
 };
 
 function classify(err: unknown): 'offline' | 'permanent' | 'transient' {
-  if (isOffline(err)) return 'offline';
+  if (isTransportFailure(err)) return 'offline';
   if (isPermanentRejection(err)) return 'permanent';
   return 'transient';
 }

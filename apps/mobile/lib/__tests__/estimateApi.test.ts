@@ -12,7 +12,13 @@
 import { describeMeal, itemToEntry, photographMeal, type EstimatedItem } from '../estimateApi';
 
 const mockFetch = jest.fn();
+// Spread over the real module rather than replacing it: `authedFetch` also
+// exports `API_BASE` (which `apiRequest` builds every URL from) and the two
+// timeout constants, and a bare object mock silently makes all three
+// `undefined` — the request would still be made, to `undefined/nutrition/...`,
+// with no deadline and nothing red.
 jest.mock('../authedFetch', () => ({
+  ...jest.requireActual('../authedFetch'),
   netFetch: (...a: unknown[]) => mockFetch(...a),
 }));
 
