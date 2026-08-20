@@ -1625,7 +1625,10 @@ components:
         name: { type: string }
         figure:
           type: string
-          description: Strength only — the top working set, e.g. "140 kg × 5".
+          description: >
+            Strength only — the top working set, e.g. "140 kg × 5". The weight
+            is **per implement**, like every load this API publishes: a pair of
+            30 kg dumbbells reads "30 kg × 5". See `Set.weight_kg`.
         outcome:
           type: string
           description: >
@@ -1724,7 +1727,10 @@ components:
         name: { type: string }
         figure:
           type: string
-          description: Strength only — the top working set, e.g. "140 kg × 5".
+          description: >
+            Strength only — the top working set, e.g. "140 kg × 5". The weight
+            is **per implement**, like every load this API publishes: a pair of
+            30 kg dumbbells reads "30 kg × 5". See `Set.weight_kg`.
         outcome:
           type: string
           description: >
@@ -3193,6 +3199,28 @@ components:
             estimates **36 kg**, not 72. See `Set.weight_kg` for the full rule.
 
 
+            **`r` is EFFECTIVE reps, not logged reps** — stated in symbols so it
+            need not be inferred from the examples:
+
+
+            - `rir` present: `r = reps + rir`. RIR **wins** whenever both it and
+              `rpe` are given; it is the directly observed quantity where RPE
+              has to be converted.
+            - `rpe` only: `r = reps + max(0, 10 − min(rpe, 10))`. Kept
+              **fractional, never rounded** — the scale is used in half steps,
+              and rounding makes 8.5 and 8 give the same answer.
+            - neither: `r = reps`, which under-states a submaximal set. The
+              honest direction to be wrong in.
+            - assisted sets are the exception, and it inverts the rule: `r` is
+              the SOLO count and effort is **discarded**, because an RIR on an
+              assisted set describes the set including the help. See
+              `last_assisted_reps`.
+
+
+            `r > 12` returns null rather than a fiction, and `r ≤ 1` returns `w`
+            unchanged — a true single is its own maximum.
+
+
             Null when the set can't support an estimate: no weight recorded,
             or more than 12 effective reps, past which every rep-max curve is
             fiction.
@@ -3357,8 +3385,11 @@ components:
           nullable: true
           description: >
             The evidence set's load, per implement — the same reading as
-            `value`, so the two are directly comparable and an
-            `estimated_1rm` recomputes from this weight and `reps`.
+            `value`, so the two are directly comparable. Recomputing an
+            `estimated_1rm` from it uses the documented rule rather than bare
+            Brzycki on `reps`: that count is the FULL one, and the estimate
+            derives from the solo count with effort folded in (see
+            `assisted_reps`).
         seconds: { type: integer, nullable: true }
         distance_m: { type: integer, nullable: true }
         rir: { type: integer, nullable: true }
@@ -3442,9 +3473,14 @@ components:
           nullable: true
           description: >
             The weight the estimate was taken from, in the SAME per-implement
-            unit as the estimate — so feeding this and `best_1rm_reps` back
-            through Brzycki reproduces `best_1rm_kg`. Doubling it first for a
-            pair of dumbbells gives twice the published number.
+            unit as the estimate. Doubling it first for a pair of dumbbells
+            gives twice the published number.
+
+
+            **Recomputing `best_1rm_kg` takes the documented rule, not bare
+            Brzycki on `best_1rm_reps`** — that count is the FULL one, and the
+            estimate uses the solo count with effort folded in. See
+            `best_1rm_reps` and `best_1rm_rir`, which carry the two corrections.
         best_1rm_assisted_reps: { type: integer, nullable: true }
         best_1rm_rir:
           type: integer

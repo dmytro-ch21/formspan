@@ -632,8 +632,14 @@ func TestLoadHistory_EffortTravelsWithTheEstimate(t *testing.T) {
 //	          effective reps = 5 reps + 2 RIR = 7,
 //	          30 x 36/(37-7) = 30 x 1.2                        =  36 kg
 //
-// Both are exact in binary — 36/30 is 1.2 and 30 x 1.2 is 36 — so these are
-// equality assertions rather than tolerances, and a drift of any size fails.
+// Both land on their expectation EXACTLY, so these are equality assertions
+// rather than tolerances and a drift of any size fails. **Not because 1.2 is
+// representable — it is not.** The estimator evaluates `w * 36 / (37 - r)`
+// left to right, so this is `(30 * 36) / 30` = `1080 / 30`: 1080, 30 and the
+// exact quotient 36 are all representable, and IEEE division is correctly
+// rounded, so it returns exactly 36. Do not "fix" this into a tolerance, and
+// do not assume the same holds for other operands — it is a property of these
+// numbers, not of the formula.
 //
 // The fixture DISTINGUISHES the two readings, which is the property that makes
 // asserting either one worth anything: each wrong reading lands on its own

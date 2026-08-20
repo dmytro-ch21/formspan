@@ -32635,35 +32635,59 @@ across 21 sessions) answers it:
 | population | sets | median | max |
 |---|---|---|---|
 | `load_mode = per_side`, `implements = 2` (a PAIR) | 50 | 22.7 kg | 54.4 kg |
-| `load_mode = per_side`, `implements = 1` (one implement) | 1 | 20.0 kg | 20.0 kg |
 | `load_mode = total` (barbell, machine) | 390 | 54.4 kg | 285.8 kg |
 
-A pair logged as a TOTAL would sit at roughly twice the one-implement per-side
-rows. It sits in the same place. And the distribution is **unimodal** — bucketed
-in 5 kg steps it peaks at 20–25 kg and tails off smoothly, with no second
-cluster at double.
+A pair median of 22.7 kg against a barbell median of 54.4 kg is the ordinary
+per-hand ratio; read as a pair TOTAL it would mean ~11 kg dumbbells for athletes
+benching 54 kg. And the distribution is **unimodal** — bucketed in 5 kg steps it
+peaks at 20–25 kg and tails off smoothly, with no second cluster at double.
 
-**The sharpest cut is chronological.** The "per hand" input hint shipped
-2026-08-16 (#241, W3); the staging data starts 2026-08-01. So there are 28 sets
-logged by an athlete who was never told which number to type, and 22 logged by
-one who was:
+(There is also a single `per_side, implements = 1` row at 20.0 kg. It is **n=1**
+and is recorded here only so nobody re-runs the query and thinks it was missed —
+one observation is not a population, and no weight is put on it.)
+
+There is also a chronological cut, and it is worth stating **with its limit**,
+because the first draft of this entry called it the sharpest evidence and it is
+not. The "per hand" input hint shipped 2026-08-16 (#241, W3) while the staging
+data starts 2026-08-01, so 28 sets were logged by an athlete never told which
+number to type and 22 by one who was:
 
 | era | sets | median |
 |---|---|---|
 | before the hint (< 2026-08-16) | 28 | **22.7 kg** |
 | after the hint | 22 | **22.7 kg** |
 
-Identical. Athletes were already entering what was stamped on the dumbbell
-before anything asked them to. **Live data carries ONE convention, and it is the
-per-implement one** — so this is a documentation defect and not a data one, and
-no migration is owed.
+Identical — **but a null result here rules out less than it appears to.** It
+kills "the hint changed what people typed", and it is equally consistent with
+"everyone always logged the pair total and ignored the hint". It cannot separate
+those two, and review caught this entry claiming otherwise.
 
-Two honest limits on that: n=50 across 3 athletes, and nobody independently
-recorded which dumbbells were picked up, so this is convergent evidence rather
-than a labelled ground truth. It is corroborated by the thing that decides what
-gets stored in the first place — **every capture surface asks per hand**
-(mobile `session/[id].tsx` and `workout/[id].tsx`, web's session and workout
-editors), so the unit the athlete is asked for is the unit the column holds.
+**What actually settles it is structural, checkable without a database, and
+stronger than any of the above:**
+
+1. **Every exercise whose tonnage doubles is one whose input asks per hand.**
+   `exercise/implements_test.go` enforces `load_mode = total ⇒ implements = 1`,
+   so `implements = 2` implies `load_mode = per_side` — which is exactly the
+   condition the "per hand" hint renders on, at all four capture surfaces
+   (mobile `session/[id].tsx` and `workout/[id].tsx`, web's session and workout
+   editors). There is no doubling exercise that fails to ask per hand.
+2. **Only tonnage multiplies, and it does so in exactly two places** — checked
+   by enumeration, not assumed: `SQLTonnage` (`session/postgres.go`) for the
+   SQL side and `Set.TotalWeightKg` (`session/session.go`) for the Go side,
+   which are deliberately the same rule written twice and pinned against each
+   other by `TestHistoryAgreesWithSummarise`. A third site, `attachSets`,
+   *assigns* the factor without applying it. Nothing in records, feed,
+   sessioncard, workout, progression or the summaries folds it in.
+3. **The contract already published the reading**, on `Set.load_factor`, before
+   this branch: *"Total load is `weight_kg × load_factor`."* This branch does not
+   choose a reading; it propagates an already-published one onto the fields that
+   were silent.
+
+So **live data carries ONE convention and it is the per-implement one** — a
+documentation defect, not a data one, and no migration is owed. The staging
+numbers corroborate; they are the weakest strand, not the load-bearing one.
+n=50 across 3 athletes, and nobody independently recorded which dumbbells were
+picked up, so there is no labelled ground truth anywhere in this.
 
 ### Both numbers were already right. The contract was wrong.
 
