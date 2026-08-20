@@ -32567,6 +32567,55 @@ manufacturing a red rather than a green.
   disappearing on a round trip is exactly what a suite cannot see and a person
   can.
 
+## 2026-08-20 — `In Progress` means dispatched, and a claim with nothing behind it
+
+Within an hour of moving the open list to Issues, the session that did the move
+reintroduced the failure the move was meant to end.
+
+A user asked for three tickets to be prioritised. Prioritising them felt like
+claiming them, so all three were marked assigned and `In Progress` — while only
+one had a session on it. For a few minutes the board was telling every other
+session to skip two tickets **nobody was working**. That is a claim with nothing
+behind it, which is exactly what `docs/TASKS.md` used to produce and what
+server-side claiming was supposed to make impossible.
+
+The mechanism is that two different facts share one row and it is easy to
+collapse them: **board position is priority**, `Status` is **what is actually
+happening**. Raising priority is not claiming. The rule is now written in
+CLAUDE.md's Claiming section and in the `ticket-manager` agent: set `In Progress`
+at dispatch, together with the assignee, never earlier — and un-claim rather than
+leave the board asserting something untrue.
+
+**The interesting part is the argument about whether to write it down at all.**
+The instinct was to carry the rule verbally until #409 landed, on the grounds
+that a docs-only PR still runs five required checks including a `Mobile (Expo)`
+job believed flaky, and would consume CI on the exact bottleneck. Another session
+**measured that premise instead of debating it**: 12 completed runs and 3 in
+progress with zero failures, and `Mobile (Expo)` green on every sampled run —
+the ~60% failure rate is specific to the N58 branch, the only tree carrying
+enough tests to cross the threshold. Verified independently before acting on it.
+
+So the cost being traded against was near zero, and the risk being carried was
+not: that session had briefed seven sessions and six agents on a convention that
+changed underneath all of them, and sent **thirteen correction messages**. One
+agent still nearly acted on the old rule after being corrected — not from
+carelessness, but because **a message in a transcript is not a thing you re-read
+before acting, and `CLAUDE.md` is.** That is the argument for writing conventions
+down, and it was run as an accidental experiment rather than reasoned about.
+
+**Not duplicated here, deliberately:** the zero-check-runs-on-a-conflicting-base
+finding is already documented at length by #390, including the note that
+archiving `TASKS.md` removes one source of it without touching the mechanism. A
+second copy is how two copies drift.
+
+### Open questions this leaves
+
+- **Nothing enforces `In Progress` = dispatched.** A checker could compare
+  assigned issues against live worktrees and branches, and flag a claim with no
+  tree behind it. Not built; worth it only if this recurs.
+- **The un-claim path is manual.** A session that dies mid-task leaves a claim
+  standing, and nobody notices until somebody wonders why a ticket has not moved.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
