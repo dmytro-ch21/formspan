@@ -302,5 +302,23 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck:mobile
 
+      # jest's worker budget is sized against this machine, so print what the
+      # machine actually is. Issue #409 was exactly the failure of not doing
+      # that: `apps/mobile/jest.config.js` carried no `maxWorkers` and CLAUDE.md
+      # justified it with "CI runs one instance, where 9 workers is right" — a
+      # number measured on a 10-core Mac, for a job that has never run on one.
+      #
+      # `os.cpus().length` is the figure jest divides, and it counts THREADS.
+      # `lscpu` is here because it is the one that disagrees: the runner reports
+      # 4 CPUs and 2 physical cores, and the gap between those two numbers is
+      # the entire bug. Three lines of output on every run is the cheapest
+      # possible defence against re-deriving a worker count from a spec sheet.
+      - name: Runner capacity (what jest sizes its pool against)
+        run: |
+          echo "nproc: $(nproc)"
+          lscpu | grep -E '^(CPU\(s\)|Thread\(s\) per core|Core\(s\) per socket):'
+          free -m | head -2
+          node -e "const os=require('os');console.log('os.cpus().length =', os.cpus().length, '-> jest default would be', Math.max(os.cpus().length-1,1));"
+
       - name: Test
         run: pnpm run test:mobile
