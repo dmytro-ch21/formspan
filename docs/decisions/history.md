@@ -35202,17 +35202,24 @@ dead code and exactly the reading a redundant guard invites. It is gone; the
 range check does both jobs and is mutation-covered from both ends (`i >= length`
 and `i < 0` separately).
 
-**Sixteen mutations, all red, baseline and restore green in the same session** —
+**Nineteen mutations, all red, baseline and restore green in the same session** —
 ten against `lib/roadmapEntry.ts` (off-by-one, denominator, `nextStep` versus
-first-unmastered-item, both range bounds, the null-list guard, the enrolled
-filter, the countable filter, the eligibility filter) and six against the two
-components (the milestone line never rendering, the next step dropped, a
+first-unmastered-item, the range check three ways, the null-list guard, the
+enrolled filter, the countable filter, the eligibility filter) and nine against
+the two components (the milestone line never rendering, the next step dropped, a
 milestone claimed when there is none, the offer rendering before anything was
 read, the offer reading on mount instead of on focus, the card pointing at the
-wrong destination). The component six exist because the lib ten structurally
-cannot see the thing the ticket is about: a component that computes the right
-milestone and never renders it passes every assertion in the lib file, and
-"hidden" is a render-path property.
+wrong destination, the in-flight read not cancelled, the abort signal not passed,
+and the body sentence losing a space between two clauses). The component nine
+exist because the lib ten structurally cannot see the thing the ticket is about:
+a component that computes the right milestone and never renders it passes every
+assertion in the lib file, and "hidden" is a render-path property.
+
+One thing deliberately **not** covered by a test: the eyebrow icon is `route`
+rather than `goal`, because `goal` is the Goals TAB's glyph and would put the
+same shape on two unrelated destinations eight hundred points apart on one
+screen. That mutation survives, and should — it is a visual judgment, not a
+guard, and an assertion on it would be brittle without being about anything.
 
 **Small cleanup carried along.** `moduleWithCatalog` joins `moduleOffWithCatalog`
 in `lib/modules.ts`. The enabled half of that predicate had already rotted into
@@ -35224,6 +35231,24 @@ one ends up checking only half" that produced `hasFoodLog`.
 on #445 re-authoring the curricula, and deliberately untouched: this half makes
 anyone arrive at that screen, and shipping the redesign alone would be a
 beautiful screen nobody opens.
+
+**Two test mocks quietly repaired the bug they were covering, and this is the
+sharpest instance of the apparatus rule in this entry.** Review asked for an
+abort on the offer's in-flight read — the stale-read shape `planSeq` and
+`readSeq` already guard. The test written for it passed with the guard deleted.
+Twice. The cause was the `useAuthToken` stub returning `async () => 'token'`
+inline, so a **new** function every render: `load` changed identity, the focus
+effect re-ran, and the component refetched after every `setState`. That is a
+refetch loop the real app does not have — `lib/useAuthToken.ts` opens with "A
+token getter whose identity never changes" — and it overwrote the stale value the
+test was watching for. The `useFocusEffect` stub had the same disease from the
+other end, firing in the render body rather than in an effect. Both are fixed to
+match the real contracts, and both abort mutations then went red.
+
+Worth stating as a general shape rather than a one-off: **a mock that is more
+eager than the thing it stands in for does not merely fail to catch a bug, it
+actively supplies the missing behaviour.** The suite was green, the mutation was
+applied, the harness confirmed it applied, and the answer was still wrong.
 
 **NEEDS HUMAN EVIDENCE, and it is the central claim.** "An athlete can now find
 this" is a claim about a person, not about a diff — and this branch is a
