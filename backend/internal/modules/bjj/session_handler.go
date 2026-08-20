@@ -235,6 +235,20 @@ func (h *FocusHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 type focusRequest struct {
 	TechniqueIDs []string `json:"technique_ids"`
+	// Roadmap attributes part of this write to the curriculum that asked for it,
+	// and is absent on a hand edit.
+	//
+	// A NESTED subset rather than a bare curriculum id, because the two lists are
+	// genuinely different. Applying a roadmap re-sends the athlete's own entries
+	// alongside the roadmap's — roadmapFocus.ts keeps them on purpose, "the
+	// roadmap is not entitled to it" — so a flat `curriculum_id` would have to be
+	// read as "everything here is the roadmap's", which hands it the power to
+	// delete the athlete's choices on deactivation. That is the data-loss bug
+	// this whole feature exists to avoid, arriving through the wire format.
+	Roadmap *struct {
+		CurriculumID string   `json:"curriculum_id"`
+		TechniqueIDs []string `json:"technique_ids"`
+	} `json:"roadmap"`
 }
 
 // Set replaces the list wholesale.
@@ -281,10 +295,41 @@ func (h *FocusHandler) Set(w http.ResponseWriter, r *http.Request) {
 		seen[id] = true
 	}
 
-	if err := h.repo.SetFocus(r.Context(), claims.UserID, body.TechniqueIDs); err != nil {
-		if errors.Is(err, ErrInvalidInput) {
+	var source *FocusSource
+	if body.Roadmap != nil {
+		if body.Roadmap.CurriculumID == "" {
 			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
-				"technique_ids must all name a technique in the library")
+				"roadmap.curriculum_id is required when roadmap is present")
+			return
+		}
+		// SUBSET, checked here rather than trusted. Attribution is what makes a
+		// row deletable on deactivation, so an id the roadmap names but the list
+		// does not contain is either a client bug or a client claiming something
+		// it is not writing — and both should be a 400 rather than a silently
+		// ignored element. The repository ignores them anyway; this is the layer
+		// that says so.
+		for _, id := range body.Roadmap.TechniqueIDs {
+			if !seen[id] {
+				apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+					"roadmap.technique_ids must be a subset of technique_ids")
+				return
+			}
+		}
+		source = &FocusSource{
+			CurriculumID: body.Roadmap.CurriculumID,
+			TechniqueIDs: body.Roadmap.TechniqueIDs,
+		}
+	}
+
+	if err := h.repo.SetFocus(r.Context(), claims.UserID, body.TechniqueIDs, source); err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			// Covers both foreign keys — the technique library and, when a
+			// roadmap is attached, curricula. One message rather than two,
+			// because distinguishing them would let a caller probe which
+			// curriculum ids exist, including private ones they cannot read.
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"technique_ids must all name a technique in the library, "+
+					"and roadmap.curriculum_id an existing curriculum")
 			return
 		}
 		apihttp.WriteInternal(w, r, "bjj", err)

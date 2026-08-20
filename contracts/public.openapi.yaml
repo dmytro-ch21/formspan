@@ -7013,9 +7013,20 @@ paths:
         fact about the athlete, and a roadmap that vanishes on abandonment
         cannot later say "you did three quarters of this". It does NOT mean
         completed — completion is derived from the evidence.
+
+
+        It ALSO withdraws this curriculum's claim on the caller's BJJ focus list,
+        removing the techniques it put there — and only those. Anything the
+        athlete chose by hand stays, as does anything another roadmap they are
+        still working also wants. Entries written before focus recorded its
+        provenance are left alone, since there is no way to tell which they were.
+
+
+        Idempotent as a whole: a retry after a failure converges, and the release
+        happens before the archive so a repeated call cannot strand focus rows.
       responses:
         "204":
-          description: Archived.
+          description: Archived, and its focus techniques released.
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -7061,6 +7072,16 @@ paths:
         ranking and is preserved. An empty array clears the list, which is a
         normal thing to do at the end of a block. At most 5 techniques, no
         repeats; every id must exist in the library.
+
+
+        Each entry also records WHY it is in the list, which is what makes
+        leaving a roadmap able to remove its techniques without touching the
+        athlete's own. Send `roadmap` when applying a curriculum; omit it for a
+        hand edit, and the new entries become the athlete's, which no roadmap can
+        ever remove. Provenance is fixed when an entry first appears and is never
+        rewritten by a later save — so a technique picked by hand and later also
+        named by a roadmap stays the athlete's, and survives that roadmap's
+        deactivation.
       requestBody:
         required: true
         content:
@@ -7074,6 +7095,30 @@ paths:
                   maxItems: 5
                   items: { type: string }
                   example: [armbar-from-guard, triangle-from-guard]
+                roadmap:
+                  type: object
+                  description: >
+                    The curriculum this write is applying, when it is one.
+                    Absent on a hand edit.
+
+
+                    `technique_ids` here is a SUBSET of the write's own
+                    `technique_ids` — the roadmap's techniques only. Applying a
+                    roadmap re-sends whatever the athlete already had alongside
+                    it, and naming those here would let deactivating the roadmap
+                    delete them. A member not present in the outer list is a 400.
+                  required: [curriculum_id, technique_ids]
+                  properties:
+                    curriculum_id:
+                      type: string
+                      description: >
+                        Must name an existing curriculum. Attribution only ever
+                        affects the caller's own focus rows.
+                    technique_ids:
+                      type: array
+                      maxItems: 5
+                      items: { type: string }
+                      example: [armbar-from-guard]
       responses:
         "200":
           description: >

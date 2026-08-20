@@ -65,10 +65,27 @@ export const MAX_FOCUS = 5;
  * why advancing a roadmap needed a laptop even though every other step of the
  * loop was already here.
  */
-export function setFocus(getToken: TokenGetter, techniqueIDs: string[]): Promise<void> {
+export function setFocus(
+  getToken: TokenGetter,
+  techniqueIDs: string[],
+  /**
+   * The roadmap this write is applying, when it is one.
+   *
+   * Omit it for a hand edit — a reorder, or adding a technique from the focus
+   * list — and the new entries are recorded as the athlete's own, which makes
+   * them sovereign: no roadmap deactivation can ever remove them.
+   *
+   * Pass it when applying a roadmap, with `technique_ids` set to
+   * `proposal.fromRoadmap` and NOT to `proposal.next`. The two differ by the
+   * athlete's own entries, which a roadmap re-sends but does not own — see
+   * roadmapFocus.ts rule 3. Sending `next` here would hand the roadmap the
+   * right to delete hand-picked techniques when it is switched off.
+   */
+  roadmap?: { curriculum_id: string; technique_ids: string[] },
+): Promise<void> {
   return apiRequest<void>(getToken, '/bjj/focus', {
     method: 'PUT',
-    body: JSON.stringify({ technique_ids: techniqueIDs }),
+    body: JSON.stringify({ technique_ids: techniqueIDs, roadmap }),
   });
 }
 
