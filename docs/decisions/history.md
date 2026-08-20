@@ -32995,6 +32995,9 @@ by a broken fetch or a failed deploy.
 
 ### The audit, and why the obvious method would have missed the worst instance
 
+(One surface still escaped the first pass — see the known gaps. The method below
+is necessary and was not sufficient.)
+
 Every gate in the app is `enabled && capabilities.X`, so the tempting audit is
 `grep -rn '\.enabled'`. That returns 11 files and **misses the tab bar**, where
 two of five tabs disappear — because `_layout.tsx` asks through the
@@ -33077,8 +33080,17 @@ nothing to configure.
 - **The Food and Goals tabs still vanish silently** when nutrition is off. It is
   the same defect and the largest instance, and it is left because the tab bar
   landed hours ago in N70 and a second opinion on its shape belongs with that
-  work rather than smuggled in here. The Sports row now at least makes it
-  *findable*; it does not make it self-explaining.
+  work rather than smuggled in here. Filed as its own issue. The Sports row now
+  at least makes it *findable*; it does not make it self-explaining.
+- **Today's Fuel card vanishes the same way**, gated on `hasFoodLog` at
+  `index.tsx:578` and rendered at `1478`. **This was missing from the first
+  version of the audit**, and the miss is worth recording because of its shape
+  rather than its size: it fell between two rows that each looked like they
+  covered it. The tabs row is about the tab BAR; the Today row said "a disabled
+  **sport**", and nutrition is `is_sport: false`. Two adjacent categories, and
+  the thing sat in the gap between their wordings — so the audit read as
+  complete while one surface had no row. Found by `ac-verifier` reading the
+  code against the table rather than reading the table.
 - **Today still does not hint** that a disabled sport exists. The all-off case
   is handled; the partial case relies on the picker, one tap away.
 - **Five sites compare `m.key === 'bjj'`** — the pattern this codebase bans in
