@@ -33099,6 +33099,222 @@ nothing to configure.
   changing them is a refactor with no user-visible effect, and this change is
   already wide.
 
+## 2026-08-20 — A provider outage stops costing the athlete their allowance (F16, #367)
+
+**The bug, in one sentence: the athlete was charged for the provider's failure.**
+They ask for a food estimate, the provider is down, they get nothing — and their
+daily quota is decremented anyway. The 503 says "try again", which is honest
+advice and was also the mechanism: each retry took another slice, so a bad
+twenty minutes emptied the day and **left them locked out for up to 24 hours
+after service came back**. Nothing they could do about it, on a request they had
+done nothing wrong on.
+
+Metering failures is deliberate and stays. A refusal is a **billed HTTP 200** —
+the model read the input and declined — so a meter that counted only successes
+would let a caller loop on input the model keeps declining and pay for every
+attempt. What the two existing sentinels could not express is that some failures
+are not billed at all.
+
+### The third sentinel, and where the line actually falls
+
+`internal/platform/llm` now has **`ErrUnreachable`**: *the provider produced no
+answer, so nothing was billed for one.* `ErrRefused` and `ErrUnavailable` are
+unchanged in meaning; `ErrUnavailable` narrowed to what it now honestly covers.
+
+| outcome | sentinel | metered? |
+|---|---|---|
+| declined, or truncated at the cap | `ErrRefused` | yes — billed 200 |
+| answered, and the answer was unusable (no choices, empty body, unparseable) | `ErrUnavailable` | yes — billed 200 |
+| no HTTP response at all — refused connection, DNS, TLS | `ErrUnreachable` | **no** |
+| an HTTP error status — 401 on a revoked key, 429, 500/503/529 | `ErrUnreachable` | **no** |
+| cancelled or timed out | `ErrUnavailable` | yes — see below |
+
+Two of those rows are the interesting ones.
+
+**The name stretches on the HTTP-status row and that is deliberate.** A 503 did
+reach the provider's front door. It is the same sentinel because the *caller's*
+action is identical — do not meter, tell the client to retry — and splitting
+them would create a distinction no caller acts on. Leaving 5xx metered would
+also have been a hollow fix: an outage usually *answers*, with a 5xx, so the
+narrow reading would have fixed the issue's three examples and left the common
+case in place.
+
+**A cancelled call still meters, and getting this wrong would have been the
+worst outcome of the whole change.** A caller who hangs up mid-call may well
+have been billed in full — the model answered, nobody stayed to read it — and
+"disconnect before the response" is exactly the spend-somebody-else's-money loop
+that review closed by putting `context.WithoutCancel` on both `Record` calls.
+`neverReachedProvider` therefore checks `context.Canceled` / `DeadlineExceeded`
+**first** and answers false before it looks at anything else.
+
+The discriminator for "no HTTP response" is `*url.Error`, and it is exact rather
+than a heuristic: `http.Client.Do` wraps every error it returns in one, and it
+returns an error *only* when no response headers arrived. Once headers are in,
+`Do` succeeds and a later body-read or parse failure comes back unwrapped —
+which is the case that must keep metering, because the model answered. Both SDKs
+document the other half in the same words: their `*Error` type appears if and
+only if the API answered with a status, and *"Other errors are not wrapped by
+this SDK."*
+
+### Each module keeps its own vocabulary, and the wrapping is load-bearing
+
+`nutrition`, `bjj` and `exercise` each gained an `Err*Unreachable` that **wraps**
+their existing `Err*Unavailable` rather than sitting beside it. That is what
+makes the change safe to add: every pre-existing `errors.Is(err,
+Err*Unavailable)` keeps matching, so the cost of some call site not learning
+about the new sentinel is *"behaves exactly as before"* rather than *"falls
+through to a 500"*. A sibling sentinel would have made the failure mode of
+forgetting it the loud one.
+
+The corollary is a silent regression that nothing else would catch: the
+`translate*Error` arms are ordered most-specific-first, and moving the
+unreachable case below anything matching the unavailable one folds every outage
+back into the metered branch **while every status code stays identical**. Three
+tests exist purely to pin that ordering.
+
+### A third endpoint was affected, and the issue said it was not
+
+The issue scoped this to `/v1/nutrition/estimate` and `/v1/bjj/reflect/draft`,
+noting that "the identify route uses an in-memory limiter, so it recovers on
+restart". That was true when it was filed and stopped being true with **N48**,
+which gave `/v1/exercises/identify` a *persisted* 20-a-day quota on the same
+rolling window. The in-memory limiter is still there — it is the burst gate —
+but the thing that locks an athlete out for a day is a Postgres table. So that
+route had the identical bug with none of the stated mitigation, and it is fixed
+here rather than filed again. Worth recording as a shape: **a mitigation quoted
+in an issue is a claim with a date on it.**
+
+### What the client is told, which was half the bug
+
+An outage and an exhausted allowance are opposite instructions — "try again
+shortly" against "come back tomorrow" — and the conventions let a client act on
+the `code` and explicitly forbid it matching the message. All three endpoints
+were reporting an outage as **`internal`**, which means *we* are broken, so the
+app could not tell a provider outage from a bug in the endpoint. They now report
+`503` with **`unavailable`** — the code that already existed for "somebody we
+depend on is broken" — and the message says the call was not charged, because
+otherwise the athlete assumes it was and stops trying.
+
+On nutrition this also splits a status that was doing two jobs: `502` now means
+the provider answered unusably (**metered**), `503`/`unavailable` means it never
+answered (**free**).
+
+### Already-locked-out athletes: nothing, and here is why
+
+There is a real question hiding behind the forward-looking fix — an athlete who
+burned their allowance during last week's outage is still locked out now. A
+refund path, a reset, or nothing?
+
+**Nothing, deliberately.** All three windows are **rolling 24 hours**, not
+calendar days, so every wrongly-charged unit ages out within a day of the deploy
+— strictly faster than any refund path could be written, reviewed and shipped.
+A retrospective correction was considered and is technically available:
+`nutrition_estimates` writes NULL token columns exactly when no call reached the
+provider, so `succeeded = false AND input_tokens IS NULL` identifies historical
+transport failures. It was rejected because it buys at most a few hours over
+doing nothing, while teaching the quota query to infer intent from NULLs — and
+that query is served by a specific index whose behaviour a correctness test
+cannot see.
+
+### The cost, stated rather than buried
+
+Nothing is written to the usage table at all on the unreachable path, rather
+than a row flagged unmetered. Those tables are **spend** datasets — every column
+is a token count or an attribution for one — and a call that spent nothing has
+nothing to contribute. The trade: **outage rate is no longer derivable from
+`nutrition_estimates`**. It is in the log line each handler now writes, which is
+where an operational event belongs, but a dashboard built on the table would
+have to move.
+
+### How this was verified, and what is still only stubbed
+
+The non-negotiable here was not repeating this repo's sharpest scar — every test
+of an external provider stubbed it with `httptest` returning 200 because that is
+what the author believed it did: green, thorough, mutation-tested, and
+confirming the wrong thing, with nothing for review to notice because the code
+and the tests agreed perfectly.
+
+So `internal/platform/llm/unreachable_test.go` uses **no fake `Completer`**. The
+unexported provider constructors take `option.RequestOption`s (nothing in
+production passes any, and `New` does not expose them), which lets the tests
+point the real SDK at:
+
+- **a real closed TCP port** — bound, released, and re-dialled to confirm it is
+  actually refusing before the assertion is trusted;
+- **a real unresolvable host** (`.invalid`, reserved by RFC 2606).
+
+Both classify as `ErrUnreachable` on both backends. One measurement fell out of
+it that contradicted the first draft of the test: **both SDKs return `ctx.Err()`
+bare on a cancellation**, not wrapped in a `*url.Error` — so the context-first
+check in `neverReachedProvider` is *currently redundant*, which is precisely the
+"guard whose outcome is redundant reads as dead code" case, and it has its own
+test on a constructed input saying so.
+
+**One gap was found by review, probed, and closed with a test.** Both SDKs, on
+a status >= 400, hand the body to their own unmarshaller and **return the raw
+unmarshal error instead of their typed `*Error` if that fails** — and a raw
+unmarshal error is neither an SDK `*Error` nor a `*url.Error`, so it would have
+fallen through to `ErrUnavailable` and been **metered**. That matters because a
+real outage rarely answers with the provider's own JSON; it answers with
+whatever the CDN in front of them emits. Measured against both real SDKs: an
+HTML 503, an empty body, `no healthy upstream` and JSON without an `error` key
+all still produce the typed `*Error` with its status, because `apijson`'s
+decoder is lenient. So the classification holds — **but it holds on a
+third-party decoder's leniency, which nothing would notice losing.** An SDK bump
+that made it strict would silently re-meter every CDN-fronted outage. Hence
+`TestAnOutageBodyThatIsNotTheProvidersJSONIsStillUnreachable`, which pins the
+property rather than describing it.
+
+**What remains stub-based, and would need a live call to confirm:** that a
+revoked key really answers `401`, that an outage really answers `5xx`, and that
+neither is billed. Those rest on the providers' documentation. What the
+`httptest` cases *do* prove is real — each SDK's mapping of an HTTP error status
+onto its own `*Error` type, over real HTTP — but the choice of status is ours.
+`TestLiveComplete` is where a real call would go; it was not run, because it
+spends money.
+
+**20 mutations, 20 killed**, each gated on `go vet` first so a compile error
+could not be mistaken for a caught mutation — two of them initially *were*
+compile errors and the harness reported them as proving nothing rather than as
+successes. Baseline measured green in the same session against a per-branch
+database: **34 test packages, 1,282 tests, 0 failures, exactly 1 skip**
+(`TestLiveComplete`, the documented one).
+
+**A process note worth keeping.** The reviewers were run against this worktree
+while it was still being edited, and one of them compiled a half-written file
+and spent real time ruling out a phantom failing test. That is the
+one-agent-one-worktree rule earning itself from the other direction: it is
+usually stated to stop sessions colliding, and this was a session colliding with
+its own reviewer. Commit before dispatching review, or give the reviewer a
+worktree of its own.
+
+### Open questions this leaves
+
+- **The HTTP-status half is unverified against the live providers.** See above.
+  A single `LLM_LIVE=1` run against a deliberately revoked key would settle the
+  401 claim; nobody has spent that.
+- **A 4xx is no longer metered, and a caller can induce some 4xxes.** A
+  malformed image that the provider rejects with a 400 is now free to retry.
+  Still judged smaller than the athlete-fairness win, but **the first draft of
+  this entry understated the bound and review caught it.** It said the loop was
+  held by an authenticated route behind a rate limiter, which is true and vague.
+  The real numbers: `/v1/exercises/identify` has its own limiter (burst 20, one
+  per 30 min), but estimate and draft have only the global default — burst 120,
+  then **2/s sustained**. So the daily quota used to stop a 4xx loop after 25
+  calls and now nothing does until ~170k unbilled provider requests a day. No
+  tokens are spent; our request-rate standing with the provider is. The trade is
+  still right — the alternative charges an athlete for a revoked API key, our
+  config error on their allowance — but it is a judgement call and now says so
+  with its arithmetic attached. The cheaper middle position, if it ever matters,
+  is to meter 400/422 while exempting 5xx, 429, 401 **and 404** (a
+  model-not-found is our misconfiguration too).
+- **Outage rate left the usage tables.** Recorded above.
+- **The mobile clients do not yet read the new `unavailable` code.** The server
+  now says "this did not cost you anything" and no app surfaces it; the message
+  carries it in prose, which is the weaker channel. That is a client change and
+  is not in this PR.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

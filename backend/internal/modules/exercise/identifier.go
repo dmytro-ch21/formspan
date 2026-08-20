@@ -233,6 +233,11 @@ func translateIdentifyError(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, llm.ErrUnreachable):
+		// Before every other arm, because ErrIdentifyUnreachable wraps
+		// ErrIdentifyUnavailable — the other order folds an outage back into
+		// the metered branch with nothing failing to say so.
+		return fmt.Errorf("%w: %v", ErrIdentifyUnreachable, err)
 	case errors.Is(err, llm.ErrRefused):
 		return fmt.Errorf("%w: %v", ErrIdentifyRefused, err)
 	default:

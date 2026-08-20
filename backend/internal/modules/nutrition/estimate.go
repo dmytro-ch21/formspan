@@ -83,6 +83,21 @@ var (
 	// ErrEstimateUnavailable is the upstream being unreachable or erroring.
 	// Retryable, unlike a refusal.
 	ErrEstimateUnavailable = errors.New("nutrition: estimation is unavailable")
+	// ErrEstimateUnreachable is the provider never answering at all — a refused
+	// connection, a DNS failure, a revoked key, an upstream 5xx.
+	//
+	// **It WRAPS ErrEstimateUnavailable rather than sitting beside it**, which
+	// is what makes this change safe to add. Every existing `errors.Is(err,
+	// ErrEstimateUnavailable)` — the handler's status mapping, anything a
+	// future caller writes — keeps matching, so the failure mode of forgetting
+	// this sentinel is "behaves as before", not "falls through to a 500".
+	// A separate sentinel would have made the safe default the wrong one.
+	//
+	// What it changes is one thing: the handler does not METER a call that
+	// carries it. Nothing was spent, so nothing is charged — see F16 (#367),
+	// and `llm.ErrUnreachable` for which failures qualify and which
+	// deliberately do not.
+	ErrEstimateUnreachable = fmt.Errorf("%w: the provider never answered", ErrEstimateUnavailable)
 )
 
 // MaxDescriptionRunes bounds the text path.

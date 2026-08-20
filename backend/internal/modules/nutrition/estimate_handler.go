@@ -110,11 +110,42 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 
 	est, meta, estErr := h.estimator.Estimate(r.Context(), in)
 
-	// RECORDED WHETHER OR NOT IT WORKED, and deliberately not gated on estErr.
-	// A refusal and an upstream error both cost tokens, so a meter that counted
+	// RECORDED WHETHER OR NOT IT WORKED — with ONE exception, below.
+	//
+	// Not gated on estErr, because a refusal costs tokens: a meter that counted
 	// only successes would let a caller loop on input the model keeps declining
 	// and pay for every attempt.
 	//
+	// **The exception is a provider that never answered** (F16, #367). A
+	// refused connection, a DNS failure, a revoked key or an upstream 5xx spend
+	// nothing, and charging the athlete a slice of their 25 for them meant a
+	// provider outage locked them out of the feature for up to a day AFTER
+	// service returned — the 503's implicit "try again" quietly eating the
+	// allowance one retry at a time. The athlete did everything right, got
+	// nothing, and paid for it.
+	//
+	// The loop this metering exists to close is NOT reopened: a refusal is
+	// still metered, and a refusal is the input-determined failure a caller
+	// could otherwise sit in. An outage is not something a caller induces with
+	// its input, and it is over when it is over.
+	//
+	// That argument covers a 5xx and a dead connection cleanly and a provider
+	// **4xx** only mostly — see `llm.ErrUnreachable`, which states the
+	// loosening and what bounds it rather than leaving it implied here.
+	//
+	// Nothing is written at all on this path, rather than a row flagged
+	// unmetered. `nutrition_estimates` is a SPEND dataset — every column on it
+	// is a token count or an attribution for one — and a call that spent
+	// nothing has nothing to contribute to it. The operational fact that an
+	// outage happened is in the log line below, which is where an outage
+	// belongs. The cost: outage RATE is no longer derivable from this table.
+	if errors.Is(estErr, ErrEstimateUnreachable) {
+		httplog.FromContext(r.Context()).Error("nutrition: estimate not metered, provider never answered",
+			"user_id", userID, "source", src, "err", estErr)
+		writeEstimateError(w, estErr)
+		return
+	}
+
 	// **`WithoutCancel`, not the request context.** The tokens are already
 	// spent by this line, so a caller who disconnects mid-call would otherwise
 	// escape the meter entirely — and a cancel-loop is exactly the
@@ -205,7 +236,31 @@ func writeEstimateError(w http.ResponseWriter, err error) {
 		// refusal, because a garbled response is not deterministic.
 		apihttp.WriteError(w, http.StatusBadGateway, apihttp.CodeInternal,
 			"estimation returned something unusable — try again")
+	case errors.Is(err, ErrEstimateUnreachable):
+		// BEFORE the ErrEstimateUnavailable arm, which this one wraps — the
+		// other order silently renders every outage as the generic case and
+		// loses the distinction the client needs.
+		//
+		// **503 with `unavailable`, not 502 with `internal`**, and the code is
+		// the half that matters. `internal` means WE are broken; `unavailable`
+		// means somebody we depend on is, and only the second tells a client to
+		// retry the identical request later. Before this the athlete's app
+		// could not tell a provider outage from a bug in the endpoint — both
+		// arrived as `internal` — and could not tell either from the 429 that
+		// means their allowance is gone, except by reading a prose message the
+		// conventions forbid it from matching on.
+		//
+		// The message says the estimate was not charged because that is the
+		// thing the athlete would otherwise assume it was, and assuming it is
+		// what stops them retrying when service returns.
+		apihttp.WriteError(w, http.StatusServiceUnavailable, apihttp.CodeUnavailable,
+			"estimation is temporarily unavailable — this one did not use any of your daily estimates")
 	case errors.Is(err, ErrEstimateUnavailable):
+		// The provider ANSWERED and the answer was unusable, which is a
+		// different fault from never answering: 502 says the upstream is
+		// misbehaving rather than absent, and this one WAS metered because it
+		// may well have been billed.
+		//
 		// The wrapped upstream text is deliberately NOT forwarded: it can carry
 		// request ids and prompt fragments, and no raw internal error reaches a
 		// client here.

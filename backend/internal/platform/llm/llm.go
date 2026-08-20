@@ -42,6 +42,8 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 )
 
 // ErrRefused means the provider declined to answer.
@@ -59,13 +61,184 @@ import (
 // so a retry produces the same truncation and bills the caller twice for it.
 var ErrRefused = errors.New("llm: the provider declined the request")
 
-// ErrUnavailable covers everything else — transport failure, an empty body, an
-// upstream 5xx.
+// ErrUnavailable covers a call that REACHED the provider and came back
+// unusable — an HTTP 200 with no choices, an empty body, a response whose
+// envelope could not be read.
 //
-// Implementations must map their own errors onto these two and never return a
+// It used to cover transport failures and upstream 5xxes as well. Those moved
+// to ErrUnreachable below, and the line between the two is now the one a caller
+// meters on: this sentinel means the model may well have answered and been
+// billed for it, so the call still counts against whatever budget the caller
+// keeps.
+//
+// Implementations must map their own errors onto these three and never return a
 // raw upstream error: those carry request ids and prompt fragments, and this
 // package's errors reach a client through the caller's error vocabulary.
 var ErrUnavailable = errors.New("llm: the provider is unavailable")
+
+// ErrUnreachable means the provider produced NO ANSWER, so nothing was billed
+// for one.
+//
+// # Why a third sentinel rather than a flag on ErrUnavailable
+//
+// Every LLM-backed endpoint in this repo meters failures on purpose: a refusal
+// costs tokens, so a caller that could loop on input the model keeps declining
+// would spend our money doing it. But two sentinels forced one answer for two
+// opposite situations. A connection refused, a DNS failure and a revoked key
+// spend NOTHING, and charging the athlete a slice of their daily allowance for
+// them means a provider outage locks them out of the feature for up to a day
+// after service returns — punishing the user for our supplier's failure, on a
+// request they did everything right on. That is F16 (#367).
+//
+// The knowledge needed to tell those apart exists only here. Above this package
+// an error is an error; the HTTP status, or the absence of any HTTP response at
+// all, is visible at the transport and nowhere else.
+//
+// # What maps here, exactly
+//
+//   - No HTTP response at all — connection refused, DNS failure, TLS failure.
+//     Both SDKs return the `net/http` error unwrapped in this case ("Other
+//     errors are not wrapped by this SDK"), which is what makes it detectable
+//     rather than guessed at.
+//
+//     **A timeout belongs to this bullet only when the DIALER's own clock ran
+//     out** — that arrives as a `*url.Error` wrapping an i/o timeout and does
+//     not match `context.DeadlineExceeded`. A timeout driven by the request
+//     CONTEXT is the opposite case and is metered; see the deadline note below.
+//     An earlier draft of this bullet said "a dial timeout" flatly, which read
+//     as covering both. Raised in review.
+//
+//   - Any HTTP error status the provider's API answered with — 401 on a revoked
+//     key, 429, 500/503/529 during an outage. The API layer rejected or dropped
+//     the request; no completion exists, and neither provider returns a usage
+//     block on an error response.
+//
+// The name says "unreachable" and the second bullet stretches it — a 503 did
+// reach the provider's front door. They are one sentinel because the CALLER's
+// action is identical in both: do not meter it, and tell the client to try
+// again. Splitting them would create a distinction no caller acts on.
+//
+// # The 4xx half is a deliberate loosening, and the usual argument does not cover it
+//
+// The consumers of this package justify not metering with "an outage is not
+// something a caller induces with its input". That is true of a 5xx, a DNS
+// failure and a refused connection. It is **not** strictly true of a 4xx: a
+// client could in principle send something the provider rejects with a 400 and
+// then retry it for free, which is a small version of the loop the metering
+// exists to close.
+//
+// It is accepted rather than special-cased, on grounds worth stating with their
+// real numbers rather than as "it is bounded" — because the bound is looser than
+// that phrasing suggests, and an earlier draft of this comment did suggest it:
+//
+//   - A 4xx bills us no tokens, which is the thing the quota is denominated in.
+//   - The input is already bounded server-side before a token is spent: body
+//     size, image bytes and text length are all checked by the handler.
+//   - Every route reaching here is authenticated.
+//
+// **What is NOT tight is the request rate.** `/v1/exercises/identify` has its
+// own limiter (burst 20, one per 30 min). `/v1/nutrition/estimate` and
+// `/v1/bjj/reflect/draft` have only the global default — **burst 120, then 2/s
+// sustained** (`cmd/api/main.go`). So before this change a caller looping on an
+// input the provider rejects was stopped by the daily quota after 25 calls;
+// now that loop is capped only by the limiter, at roughly 170k unbilled
+// provider requests a day. No tokens are spent, but our request-rate standing
+// with the provider and our own ingest are. Raised in review, and it is a
+// genuine judgement call rather than a free win.
+//
+// It is still the right trade, because the alternative charges an athlete for a
+// revoked API KEY — our config error, on their allowance — which is the same
+// indefensible shape F16 exists to remove. Metering 4xx while exempting 5xx,
+// 429 and 401 is the cheaper middle position if the request-rate exposure ever
+// matters; note that it would have to exempt 404 too, since a model-not-found
+// is also our misconfiguration and not the athlete's doing.
+//
+// # What deliberately does NOT map here
+//
+//   - A refusal or a truncation. Both are billed HTTP 200s. They stay
+//     ErrRefused and they stay metered — that is the loop-prevention property
+//     this whole scheme exists for, and it is untouched.
+//
+//   - A CANCELLED or timed-out call. TWO independent reasons, and the second is
+//     the one that would still hold if the first were somehow addressed:
+//
+//     1. Correctness. The request very likely reached the model and was billed
+//     for an answer nobody stayed to read, and "the caller hangs up mid-call"
+//     is precisely the spend-somebody-else's-money loop the meter was hardened
+//     against in review.
+//
+//     2. Adversarial. **If cancellation were free, the quota would be trivially
+//     defeatable**: fire a request, cancel at 50ms, repeat. The provider bills
+//     us for every one and the athlete's row count never moves. A quota with a
+//     free path around it is not a quota.
+//
+//     So `neverReachedProvider` checks the context errors FIRST and answers
+//     false.
+//
+//     **The asymmetry this costs, stated so nobody files it as a bug.** A
+//     genuine network timeout where the request never reached the provider is
+//     metered too, and we cannot tell it apart from a cancellation that arrived
+//     after the model had already answered — by the time the deadline fires,
+//     the two are the same error. So an athlete on a bad connection can be
+//     charged a unit nobody was billed for. That is deliberate: it is the
+//     conservative direction (over-charging one unit, versus handing out a free
+//     bypass of the whole cap), and it is bounded by the rolling 24-hour
+//     window. Reversing it would be safe only with per-call evidence that the
+//     provider never started work, which no response we get carries.
+//
+//   - A 200 whose body could not be read or parsed. The model answered; we
+//     failed. ErrUnavailable, and metered, because it was billed.
+var ErrUnreachable = errors.New("llm: the provider never answered")
+
+// neverReachedProvider reports whether err means no HTTP response ever arrived.
+//
+// `*url.Error` is the discriminator, and it is exact rather than a heuristic:
+// `http.Client.Do` wraps every failure it returns in one, and it returns an
+// error ONLY when no response headers were received. Once headers are in, `Do`
+// succeeds and any later failure — a body read, a JSON parse — comes back
+// unwrapped by `*url.Error`. So this answers "the request never completed at
+// the HTTP level", which is the question, instead of "some network-ish thing
+// happened", which would also catch a body-read failure on a call that was
+// billed in full.
+//
+// **The context check has to come first.** A cancelled request can surface as a
+// `*url.Error` wrapping `context.Canceled`, and reading that as "never reached
+// the provider" would stop metering exactly the cancel-loop the meter was
+// hardened against.
+func neverReachedProvider(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var urlErr *url.Error
+	return errors.As(err, &urlErr)
+}
+
+// callFailure turns one provider's SDK error into this package's vocabulary.
+//
+// Shared rather than written twice, because two copies is two chances for the
+// backends to disagree about whether an outage costs the athlete a meal
+// estimate — the same reasoning that put the refusal and truncation branches
+// under one rule. What each provider supplies is the half only it can know:
+// `apiStatus`, the HTTP status its own SDK error type carries, or 0 when the
+// SDK returned something that is not an API error at all.
+//
+// The upstream text is embedded for the caller's LOG, never for its client;
+// every consumer writes a fixed message and logs this error, which is the
+// convention in docs/architecture/api-conventions.md.
+func callFailure(err error, apiStatus int) error {
+	switch {
+	case apiStatus >= 400:
+		// Deliberately NOT the upstream text on this branch: an API error's
+		// `Error()` renders the full response body, and a 4xx body is the one
+		// most likely to quote the request back. The status is the whole
+		// signal.
+		return fmt.Errorf("%w: provider answered HTTP %d", ErrUnreachable, apiStatus)
+	case neverReachedProvider(err):
+		return fmt.Errorf("%w: %v", ErrUnreachable, err)
+	default:
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+}
 
 // There is a THIRD outcome, and this package deliberately has no error for it.
 //

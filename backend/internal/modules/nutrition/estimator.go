@@ -222,12 +222,23 @@ func NewEstimator(cfg EstimatorConfig) (Estimator, error) {
 
 // translateLLMError maps the transport's vocabulary onto this module's.
 //
-// Two sentinels either side, and the mapping is deliberately total: anything
-// that is neither a refusal nor a recognised transport failure becomes
+// Three sentinels either side now, and the mapping is deliberately total:
+// anything that is neither a refusal nor a recognised transport failure becomes
 // unavailable rather than escaping as itself, because an unmapped error reaches
 // the handler as a 500 carrying whatever text the SDK put in it.
 func translateLLMError(err error) error {
 	switch {
+	case errors.Is(err, llm.ErrUnreachable):
+		// FIRST, and it has to be, because ErrEstimateUnreachable wraps
+		// ErrEstimateUnavailable: putting the unavailable arm above this one
+		// would swallow every outage into the metered branch and quietly undo
+		// F16. The arms are ordered most-specific-first for that reason, not
+		// stylistically.
+		//
+		// The detail is kept for the log. `llm` already stripped the provider's
+		// body on this path — an HTTP status and nothing else — so there is no
+		// upstream text to leak here.
+		return fmt.Errorf("%w: %v", ErrEstimateUnreachable, err)
 	case errors.Is(err, llm.ErrRefused):
 		// The detail is KEPT, not dropped to the bare sentinel. The client sees
 		// a hard-coded 422 message either way, but the handler logs this error,

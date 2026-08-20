@@ -9637,7 +9637,7 @@ split will pass against a per-path regression, so they have to change.
 - Fill the budget with a **mix** (say 13 typed, 12 photographed) and assert the
   26th call is refused whichever path it uses. Filling it with 25 photos would
   also pass against a per-path cap of 25.
-- A refused or failed estimate still consumes budget — it was billed.
+- A **refused** estimate still consumes budget — it was billed. A failure where the provider **never answered** does not, as of F16; see that section below.
 - Exhaustion is `429` `rate_limited` with `Retry-After`, and the message names
   no path ("all 25 estimates for today"), because naming one would imply the
   other is still open.
@@ -10006,3 +10006,99 @@ The scenarios that matter are the ones distinguishing three states, not two.
 - **"Off" and "empty" are different failures.** A prompt that fires on an empty
   list rather than on a disabled module turns "we could not reach the server"
   into "you do not train this".
+
+
+## A provider outage must not spend the athlete's allowance (F16, #367)
+
+Three endpoints meter LLM calls against a persisted rolling-24-hour quota:
+`POST /v1/nutrition/estimate` (25/day), `POST /v1/bjj/reflect/draft` (10/day)
+and `POST /v1/exercises/identify` (20/day). All three used to charge for
+**every** failure, including ones where the provider was never reached and
+nothing was spent — so an outage emptied the day's allowance one retry at a
+time and the athlete stayed locked out for up to 24 hours after service
+returned.
+
+The fix is a third transport sentinel, `llm.ErrUnreachable`, and each module's
+own `Err*Unreachable` wrapping its existing `Err*Unavailable`.
+
+**Every scenario below has to be written in PAIRS.** The whole risk in this
+area is fixing the outage half and silently breaking the refusal half, or the
+other way round — and both halves return an error, so a test that only checks
+the status passes against either regression. Assert the quota, not the status.
+
+### Happy path
+
+- An outage-free call still meters exactly one, on all three endpoints.
+- After N calls that the provider never answered, `used` is unchanged and the
+  athlete can immediately make a real call that succeeds. **N must exceed the
+  cap** — 20 against bjj's 10 — or the assertion also passes against an
+  implementation that merely under-counts.
+
+### Edge cases & errors — the pairs
+
+- **Refusal vs outage, same endpoint, same test.** A refusal (`422`) increments
+  `used`; a provider that never answered (`503`/`unavailable`) does not. Run
+  both against one handler in one table so neither can be changed alone.
+- **Answered-but-unusable vs never-answered.** An HTTP 200 with no content, or
+  a body that will not parse, DID reach the model and was billed: it must still
+  meter. Only the never-answered case is free. This pair is the one most likely
+  to be collapsed by a well-meaning refactor, because both are "the provider
+  failed" in ordinary speech.
+- **A cancelled call still meters.** If the athlete's phone drops the
+  connection mid-call the tokens are already spent, and not metering it hands
+  back the cancel-loop that `context.WithoutCancel` was added to close. A
+  cancellation must NOT classify as unreachable.
+- **A config error is not an outage.** `MaxTokens: 0`, an unknown provider, a
+  missing model id — these must not arrive as `ErrUnreachable`, or a broken
+  deploy stops being metered AND stops looking like a deploy problem.
+
+### What the client is told
+
+- **An outage and an exhausted allowance must differ in the `code`, not only
+  the status.** `unavailable` means our provider is broken and the identical
+  request will work later; `rate_limited` means come back tomorrow; `internal`
+  means we are broken. Before F16 an outage reported `internal`, so a client
+  reading only the code — which is the only part of the body the conventions
+  let it read — could not tell an outage from a bug in the endpoint.
+- On nutrition, `502` and `503` now mean different things and one of them costs
+  an estimate: `502` is a provider that answered unusably (metered), `503` with
+  `unavailable` is one that never answered (free). A test asserting "an error
+  is 502" will fail, correctly.
+- **No upstream text on any of these paths.** An API error's `Error()` renders
+  the whole response body, and a 4xx body is the one most likely to quote our
+  prompt back. Assert the response carries no request id, no provider hostname
+  and no prompt fragment.
+
+### Regression trap
+
+- **The arm ORDER in each `translate*Error` is load-bearing and invisible.**
+  `Err*Unreachable` wraps `Err*Unavailable`, so putting the unavailable case
+  first swallows every outage into the metered branch — and **every status code
+  stays identical**, so nothing that asserts on the response notices. Only a
+  test asserting `errors.Is(..., Err*Unreachable)` catches it.
+- **The wrapping itself.** Redeclaring `Err*Unreachable` as a bare
+  `errors.New` compiles, keeps the new branch working, and quietly breaks every
+  pre-existing `errors.Is(err, Err*Unavailable)` — turning an outage into
+  whatever the default arm does. Assert the wrapping directly.
+- **Do not verify this against a fake `Completer`.** A fake returns whatever
+  error its author believed the SDK returns, which makes the suite a mirror.
+  `internal/platform/llm/unreachable_test.go` drives real transport failures
+  instead — a real closed TCP port, a real unresolvable `.invalid` host — and
+  that is the shape to copy for anything asserting provider behaviour.
+- **An outage body is usually NOT the provider's JSON**, and that is the case
+  most likely to regress silently. Both SDKs fall back to a raw unmarshal error
+  — neither their typed `*Error` nor a `*url.Error` — if they cannot decode the
+  error envelope, which would classify a CDN-fronted 503 as metered. Today their
+  decoder is lenient enough that HTML, an empty body and `no healthy upstream`
+  all still yield the typed error, so it works; an SDK bump could take that away
+  with nothing going red. Any scenario list here must cover a **non-JSON 5xx
+  body**, not just the provider's own envelope.
+- **Still unmeasured against the live providers**: that a revoked key really
+  answers `401`, that an outage really answers `5xx`, and that neither is
+  billed. Those are taken from documentation; the classification of an HTTP
+  error status is verified only against `httptest`.
+- **`/v1/exercises/identify` was outside the issue's stated scope and should
+  not have been.** The issue said that route "uses an in-memory limiter, so it
+  recovers on restart" — true when filed, and untrue since N48 gave it a
+  persisted quota. Any scenario list that treats identify as unaffected is
+  reading a stale premise.

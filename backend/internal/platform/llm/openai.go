@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 
 	"github.com/openai/openai-go/v3"
@@ -28,9 +29,18 @@ type openAICompleter struct {
 	model  string
 }
 
-func newOpenAI(apiKey, model string) *openAICompleter {
+// newOpenAI builds the backend.
+//
+// `opts` is how a test reaches a REAL transport failure rather than a stubbed
+// one — `option.WithBaseURL` pointed at a closed port or an unresolvable host
+// makes the SDK's own error path run for real. Nothing in production passes
+// any, and `New` does not expose it, so this cannot become deploy
+// configuration by accident. The alternative is a fake `Completer`, which can
+// only return the error its author already believes the SDK returns; that is
+// the shape this repo has been burned by, and F16 turns on getting it right.
+func newOpenAI(apiKey, model string, opts ...option.RequestOption) *openAICompleter {
 	return &openAICompleter{
-		client: openai.NewClient(option.WithAPIKey(apiKey)),
+		client: openai.NewClient(append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)...),
 		model:  model,
 	}
 }
@@ -89,9 +99,23 @@ func (o *openAICompleter) Complete(ctx context.Context, req Request) (Response, 
 		},
 	})
 	if err != nil {
-		return Response{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		// `*openai.Error` is returned if and ONLY IF the API answered with a
+		// status — the SDK's own words are "Error represents an error that
+		// originates from the API, i.e. when a request is made and the API
+		// returns a response with a HTTP status code. Other errors are not
+		// wrapped by this SDK." So `errors.As` failing here is itself the
+		// evidence that no response arrived, and `callFailure` reads the two
+		// cases apart. See ErrUnreachable.
+		var apiErr *openai.Error
+		if errors.As(err, &apiErr) {
+			return Response{}, callFailure(err, apiErr.StatusCode)
+		}
+		return Response{}, callFailure(err, 0)
 	}
 	if len(resp.Choices) == 0 {
+		// The provider ANSWERED and the answer was useless, which is a
+		// different thing from never answering: this is an HTTP 200 that may
+		// have been billed, so it stays ErrUnavailable and stays metered.
 		return Response{}, fmt.Errorf("%w: no choices returned", ErrUnavailable)
 	}
 
