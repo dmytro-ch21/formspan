@@ -596,11 +596,16 @@ export default function TodayScreen() {
     // The week's logged-day count. Its own read, because it spans seven days
     // and the entries read above is one — and a failure here leaves the count
     // absent rather than zero, for the same reason.
+    // `null` for the signed-out branch, NOT an empty list. Resolving `[]` fed
+    // `daysLogged` a query that never ran and produced "0 of 7 days logged" —
+    // the confident zero the comment on `foodLogged` exists to forbid, and a
+    // discouraging one. Found in review, two lines under that comment.
     (userId
       ? localLoggedDays(userId, dayString(addDays(new Date(), -6)), today)
-      : Promise.resolve<string[]>([]))
+      : Promise.resolve<string[] | null>(null))
       .then((days) => {
-        if (live) setFoodLogged(daysLogged(days, today, LOGGED_WINDOW_DAYS));
+        if (!live) return;
+        setFoodLogged(days === null ? null : daysLogged(days, today, LOGGED_WINDOW_DAYS));
       })
       .catch(() => {
         if (live) setFoodLogged(null);

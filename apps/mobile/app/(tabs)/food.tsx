@@ -42,8 +42,7 @@ import { cacheTargets, localEntries, localTargetView, removeEntry } from '@/lib/
 import {
   bySlot,
   eatenFrom,
-  viewTarget,
-  viewTotals,
+  mealBudgetLine,
   type EatenView,
   type Entry,
   type Meal,
@@ -171,7 +170,13 @@ export default function FoodScreen() {
   // different figures. Null unless both halves are known: with no target there
   // is nothing left to be left of, and with no read there is no eaten figure
   // to subtract — and inventing either is the false precision this replaces.
-  const budget = mealBudgetLine(eaten, view);
+  // Only on TODAY. The screen has a day stepper, and both halves resolve for
+  // whatever day is being viewed — so on yesterday this rendered yesterday's
+  // remaining under the words "left today", and on tomorrow it rendered the
+  // whole target the same way. Correct numbers, false sentence, on 100% of
+  // non-today views. A past day has nothing "left", so suppression is the
+  // honest state rather than a rewording. Found in review.
+  const budget = isToday ? mealBudgetLine(eaten, view) : null;
 
   async function onDelete(id: string) {
     if (!userId) return;
@@ -311,27 +316,6 @@ export default function FoodScreen() {
         </View>
       </ScrollView>
     </View>
-  );
-}
-
-/**
- * "536 kcal left today · 28g protein · 48g carbs · 13g fat", or null.
- *
- * Null rather than a partial line in every state that cannot support it: no
- * target means nothing is "left", and an unread day means the eaten half is
- * unknown. A line assembled from half an answer is the shape this whole task
- * has been about.
- */
-function mealBudgetLine(eaten: EatenView, view: TargetView): string | null {
-  const totals = viewTotals(eaten);
-  const target = viewTarget(view);
-  if (!totals || !target) return null;
-  const left = (a: number, b: number) => Math.max(0, Math.round(a - b));
-  return (
-    `${left(target.kcal, totals.kcal)} kcal left today · ` +
-    `${left(target.protein_g, totals.protein_g)}g protein · ` +
-    `${left(target.carb_g, totals.carb_g)}g carbs · ` +
-    `${left(target.fat_g, totals.fat_g)}g fat`
   );
 }
 

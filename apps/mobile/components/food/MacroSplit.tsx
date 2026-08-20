@@ -47,9 +47,14 @@ export function MacroSplit({
         // `null` totals means the read has not answered. A zero here would be
         // a claim about the day, so it is a dash.
         const eatenText = totals ? String(Math.round(m.eaten)) : '—';
-        const label = m.goal == null
-          ? `${m.label}: ${eatenText} grams eaten, no goal set`
-          : `${m.label}: ${eatenText} of ${m.goal} grams`;
+        // The dash is for the eye. A screen reader announces it as "em dash"
+        // or drops it entirely — "Protein: of 141 grams" — so the unloaded
+        // state gets words instead. Found in review.
+        const label = !totals
+          ? `${m.label}: not loaded yet`
+          : m.goal == null
+            ? `${m.label}: ${eatenText} grams eaten, no goal set`
+            : `${m.label}: ${eatenText} of ${m.goal} grams`;
         return (
           <View key={m.key} style={styles.cell} accessible accessibilityLabel={label}>
             <Text style={styles.figure} testID={`macro-${m.key}`}>

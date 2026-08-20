@@ -246,6 +246,42 @@ function addDaysISO(key: string, n: number): string {
   return at.toISOString().slice(0, 10);
 }
 
+/**
+ * "536 kcal left today · 28g protein · 48g carbs · 13g fat", or null.
+ *
+ * The counter-proposal to the one thing `nutrition-design.md` §5 rejects by
+ * name. Their objection is to ALLOCATING a budget per meal — "it requires
+ * knowing a day the app cannot see, it is wrong the moment you eat a big lunch,
+ * and it manufactures four budgets to fail against instead of one honest
+ * running total". This is the DAY's remaining, computed once, shown in the
+ * placement the athlete asked for. "left today" is load-bearing in that
+ * sentence, and the caller is responsible for only rendering it on today.
+ *
+ * **Null rather than a partial line** in every state that cannot support one:
+ * no target means nothing is "left", and an unread day means the eaten half is
+ * unknown. A line assembled from half an answer is the failure N54 was for.
+ *
+ * Lives here rather than in the screen because it is a rule, and a rule in a
+ * component is a rule no test can reach — the first version of it was in
+ * `food.tsx` and its "tests" asserted on hand-written literals instead, so
+ * deleting the function left them all green. Found in review.
+ */
+export function mealBudgetLine(eaten: EatenView, view: TargetView): string | null {
+  const totals = viewTotals(eaten);
+  const target = viewTarget(view);
+  if (!totals || !target) return null;
+  // Floored at zero: "−140 kcal left" is a contradiction, and `RemainingBlock`
+  // already says "140 over" in its own words. Two surfaces phrasing one
+  // overage differently is the drift the shared component exists to prevent.
+  const left = (goal: number, eatenAmount: number) => Math.max(0, Math.round(goal - eatenAmount));
+  return (
+    `${left(target.kcal, totals.kcal)} kcal left today · ` +
+    `${left(target.protein_g, totals.protein_g)}g protein · ` +
+    `${left(target.carb_g, totals.carb_g)}g carbs · ` +
+    `${left(target.fat_g, totals.fat_g)}g fat`
+  );
+}
+
 export type Remaining = {
   kcal: number;
   protein_g: number;

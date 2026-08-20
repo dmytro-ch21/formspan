@@ -31711,6 +31711,42 @@ streak that stops at the first gap, and a day counted once per entry rather than
 once. Removing the macro row from the card turns a component test red. `verify`
 exit 0, 1737 mobile tests, zero lint warnings added.
 
+### What review caught, and one of them was mine twice over
+
+**[blocking] The line said "left today" on days that are not today.** The Food
+screen has a day stepper, and both halves of `mealBudgetLine` resolve for
+whatever day is being viewed — so yesterday rendered yesterday's remaining under
+the word "today", and tomorrow rendered the whole target the same way. Correct
+numbers, false sentence, on **every** non-today view. The commit that introduced
+it had a comment saying "left today" was load-bearing and must not be shortened,
+which was right and was exactly why the render needed gating on `isToday`. A
+past day has nothing "left", so suppression is the honest state.
+
+**And the three tests covering that line were tautologies.** `mealBudgetLine`
+lived in `food.tsx` and was not exported, so the tests re-declared a local
+lambda and asserted on hand-written literals: "never divides the target between
+meals" was `expect(1500).not.toBe(600)`. Deleting the shipped function, or
+changing it to divide by four, left all three green — and the commit message
+counted them in its total.
+
+That is the failure this suite was founded on, and the fix is structural rather
+than a better assertion: **the function moved into `lib/nutrition.ts`, because a
+rule inside a component is a rule no test can reach.** Divide-by-four now turns
+three tests red, and the two null gates — the load-bearing half, previously
+untested anywhere — are covered.
+
+Also fixed: the signed-out branch resolved `[]` into `daysLogged` and rendered
+"0 of 7 days logged", the confident zero the comment two lines above it exists
+to forbid; and `MacroSplit`'s unloaded accessibility label interpolated an em
+dash, which VoiceOver reads as "em dash" or drops entirely ("Protein: of 141
+grams").
+
+`localLoggedDays` gained a **fixture** test rather than a pure one, per this
+repo's rule that SQL behaviour belongs against a real database — a text
+assertion proves a clause is present, not that SQLite honours it. Four
+mutations red: dropping the tombstone filter, dropping the user scoping, making
+the range exclusive at the start, and dropping `DISTINCT`.
+
 ### What this leaves open
 
 - **Nothing here has run on a device**, and this is the one that most needs it:
