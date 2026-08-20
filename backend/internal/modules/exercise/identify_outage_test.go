@@ -18,7 +18,7 @@ import (
 // since N48 gave this route a PERSISTED daily quota with the same rolling
 // 24-hour window as the other two. The in-memory limiter is still there, but
 // it is the burst gate; the thing that locks an athlete out for a day is
-// `identify_usage`, which is a Postgres table. So this route had the same bug
+// `exercise_identifications`, which is a Postgres table. So this route had the same bug
 // with none of the stated mitigation, and it is fixed here rather than filed
 // again.
 //

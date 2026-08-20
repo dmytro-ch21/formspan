@@ -129,6 +129,10 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	// could otherwise sit in. An outage is not something a caller induces with
 	// its input, and it is over when it is over.
 	//
+	// That argument covers a 5xx and a dead connection cleanly and a provider
+	// **4xx** only mostly — see `llm.ErrUnreachable`, which states the
+	// loosening and what bounds it rather than leaving it implied here.
+	//
 	// Nothing is written at all on this path, rather than a row flagged
 	// unmetered. `nutrition_estimates` is a SPEND dataset — every column on it
 	// is a token count or an attribution for one — and a call that spent

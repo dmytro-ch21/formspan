@@ -132,11 +132,13 @@ func (h *IdentifyHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	// returned. Nothing was spent, so nothing is charged.
 	//
 	// The loop this meter exists to close is untouched: a REFUSAL still meters,
-	// and a refusal is the input-determined failure a caller could sit in.
+	// and a refusal is the input-determined failure a caller could sit in. That
+	// argument covers a 5xx and a dead connection cleanly and a provider 4xx only
+	// mostly; `llm.ErrUnreachable` states the loosening and what bounds it.
 	//
 	// This route was outside F16's stated scope, which said the identify path
 	// "uses an in-memory limiter, so it recovers on restart". That was true
-	// when the issue was filed and stopped being true with N48 — `identify_usage`
+	// when the issue was filed and stopped being true with N48 — `exercise_identifications`
 	// is persisted, with the same rolling 24-hour window as the other two, so
 	// this endpoint had the same bug and none of the stated mitigation.
 	if errors.Is(err, ErrIdentifyUnreachable) {

@@ -48,7 +48,7 @@ var ErrIdentifyUnavailable = errors.New("exercise: machine identification is una
 //
 // This route was NOT in F16's original scope — the issue says "the identify
 // route uses an in-memory limiter, so it recovers on restart", which was true
-// when it was filed and stopped being true with N48. `identify_usage` is a
+// when it was filed and stopped being true with N48. `exercise_identifications` is a
 // Postgres table with the same rolling 24-hour window as the other two, so an
 // outage burned this allowance exactly as hard. The in-memory limiter is still
 // there and still in memory; it is the second, tighter gate that the quota

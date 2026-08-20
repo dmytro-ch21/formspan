@@ -110,6 +110,27 @@ var ErrUnavailable = errors.New("llm: the provider is unavailable")
 // action is identical in both: do not meter it, and tell the client to try
 // again. Splitting them would create a distinction no caller acts on.
 //
+// # The 4xx half is a deliberate loosening, and the usual argument does not cover it
+//
+// The consumers of this package justify not metering with "an outage is not
+// something a caller induces with its input". That is true of a 5xx, a DNS
+// failure and a refused connection. It is **not** strictly true of a 4xx: a
+// client could in principle send something the provider rejects with a 400 and
+// then retry it for free, which is a small version of the loop the metering
+// exists to close.
+//
+// It is accepted rather than special-cased, on three bounded grounds: a 4xx
+// costs the provider nothing to produce and bills us nothing, the input is
+// already bounded server-side (body size and text length are checked before a
+// token is spent), and every route reaching here is authenticated and sits
+// behind a burst rate limiter. Set against that, splitting 4xx from 5xx would
+// mean charging an athlete for a revoked API KEY — our config error, on their
+// allowance — which is the same indefensible shape F16 exists to remove.
+//
+// If a caller ever gains an input path that can provoke a provider 400 at will,
+// this is the line to revisit, and metering 4xx while exempting 5xx is the
+// change to make.
+//
 // # What deliberately does NOT map here
 //
 //   - A refusal or a truncation. Both are billed HTTP 200s. They stay

@@ -142,7 +142,10 @@ func (h *DraftHandler) Draft(w http.ResponseWriter, r *http.Request) {
 	//
 	// The loop-prevention property is intact: a REFUSAL still meters, and a
 	// refusal is the input-determined failure a caller could otherwise sit in.
-	// An outage is not induced by anyone's dictation.
+	// An outage is not induced by anyone's dictation — cleanly true of a 5xx and
+	// a dead connection, only mostly true of a provider 4xx, which
+	// `llm.ErrUnreachable` states as a deliberate loosening rather than leaving
+	// implied here.
 	//
 	// Nothing is written on this path rather than a row marked unmetered —
 	// `bjj_reflection_drafts` records calls that happened, and this one did
