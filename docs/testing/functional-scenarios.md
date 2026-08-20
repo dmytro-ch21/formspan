@@ -9777,8 +9777,22 @@ quoted on N70's task line.
   a tab that would drop the athlete wherever they happened to be last, so the
   save now says "Saved" where they are standing. A write with no visible outcome
   is the failure the offline branch beside it already exists to prevent.
-- **Editing after saving** clears the acknowledgement, so it can never describe
-  a number that is no longer on screen.
+- **Editing after saving clears the acknowledgement**, so it can never describe
+  a number that is no longer on screen. **This sentence was false when it was
+  first written** — `setSaved(false)` ran only inside the save itself, so moving
+  an activity pill produced a fresh, unsaved suggestion with "Saved" still
+  sitting under it. Review caught it; a test now fails if it comes back.
+- **The tab refetches on every focus, and re-reads the date while doing it.**
+  The pushed screen got this free by remounting. As a tab it mounts once and
+  stays mounted, so without it the arithmetic ladder describes whatever was true
+  the first time the tab was ever opened — and `on`, the day the target is filed
+  under, freezes at that moment, which turns a stale read into a wrong write
+  after midnight.
+- **Focus is the only fetch trigger, deliberately.** An earlier fix had a focus
+  effect *and* a mount effect; they fired together, asked three times for one
+  opening, and a late answer wiped the "Saved" receipt a moment after it
+  appeared. `useFocusEffect` re-runs when its callback changes, so an activity
+  change goes through the same path rather than a second one.
 
 ### Regression trap
 
@@ -9789,6 +9803,17 @@ quoted on N70's task line.
   that actually proves it: delete `apps/mobile/.expo/types`, run
   `pnpm run routes:mobile`, and confirm the file comes back naming the new
   routes — `/library` and `/(tabs)/goals` present, `/(tabs)/library` absent.
+- **A test mock can violate an invariant the real code documents, and then the
+  correct component fails.** Two of these, both in `goalsScreen.test.tsx`:
+  mocking `useFocusEffect` with `[]` deps models a hook that never re-runs on a
+  callback change, which the screen depends on; and returning a fresh
+  `jest.fn()` from `useAuthToken` reintroduces the infinite refetch loop that
+  hook's `useCallback(..., [])` exists to prevent, inside the test only. Both
+  made a working screen look broken. When a screen test fails, check the mock
+  against the real module's contract before touching the screen.
+- **`getByText` does not match inside `react-native-svg`** — it mounts an
+  `RNSVGText` host node the matcher does not traverse, so an assertion on text
+  in a chart fails against a correct component. Measured by the N56 session.
 - **`lint:mobile` has zero headroom at 54 warnings**, and a navigation change
   touches enough files to add one. Removing `router.back()` left `router` as an
   unused `useCallback` dependency — one new warning, which failed the gate. The

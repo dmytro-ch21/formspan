@@ -580,8 +580,8 @@ function DrilledStep({
 
       {failed && all.length === 0 && (
         <Text style={styles.muted}>
-          The technique library isn&apos;t loaded on this device yet. Open the Library tab once with
-          a connection, or skip this step — everything else still saves.
+          The technique library isn&apos;t loaded on this device yet. Open it once with a
+          connection — You → Library — or skip this step; everything else still saves.
         </Text>
       )}
 

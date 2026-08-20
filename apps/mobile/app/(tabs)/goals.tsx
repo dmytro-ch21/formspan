@@ -29,9 +29,9 @@
  * never happens, invisibly, forever.
  */
 
-import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -61,6 +61,10 @@ const ACTIVITIES = [
   { key: 'active', label: 'Physical job', hint: 'Moving most of the day' },
 ] as const;
 
+/** Said once, written once — a receipt that reads differently to a screen
+ *  reader than to the screen is two receipts. */
+const SAVED_MESSAGE = 'Saved. Food measures the day against this from now on.';
+
 export default function TargetScreen() {
   const router = useRouter();
   const accent = useAccent();
@@ -80,9 +84,31 @@ export default function TargetScreen() {
   // visible outcome is the failure mode the offline branch below already
   // exists to prevent; this is the same rule applied to success.
   const [saved, setSaved] = useState(false);
-  const on = todayString();
+  // The day this screen is about, RE-READ ON EVERY FOCUS rather than computed
+  // once at mount — see the focus effect below for why that distinction only
+  // started to matter when this became a tab.
+  const [on, setOn] = useState(todayString);
 
-  useEffect(() => {
+  /**
+   * Refetch whenever the tab is focused, and re-read the date while doing it.
+   *
+   * **A pushed screen got this for free and a tab does not**, which is the one
+   * lifecycle assumption that survived the move from `food/target.tsx` intact
+   * and wrong. Pushed, this screen remounted on every open: the effect ran, the
+   * ladder was current, and `todayString()` was evaluated afresh. A tab mounts
+   * once, lazily, and then stays mounted for the life of the process — so
+   * without this it would show the weight, training load and phase it read the
+   * first time it was ever opened, for as long as the app stays alive.
+   *
+   * The date is the half that turns staleness into a WRONG WRITE rather than a
+   * stale read. `on` is what `accept` saves against, so an app left open past
+   * midnight would file tomorrow's target under yesterday, silently, and ask
+   * the server for a suggestion about a day that has gone.
+   *
+   * Found in review of the move, not by a test — nothing in the suite mounts a
+   * tab twice, and both symptoms need a second visit to appear.
+   */
+  const load = useCallback(() => {
     let live = true;
     // Both flags are set from the CALLBACKS, never synchronously here. A reset
     // on the way in is a setState during the effect — the rule the lint ratchet
@@ -93,6 +119,12 @@ export default function TargetScreen() {
         if (!live) return;
         setData(d);
         setFailed(false);
+        // The receipt belongs to the numbers that were saved, and these are
+        // different numbers. Moving an activity pill, or coming back to the tab
+        // on a new day, produces a fresh and UNSAVED suggestion — leaving
+        // "Saved" under it would attach a confirmation to something that was
+        // never stored, which is worse than showing nothing at all.
+        setSaved(false);
       })
       .catch(() => {
         if (live) setFailed(true);
@@ -101,6 +133,33 @@ export default function TargetScreen() {
       live = false;
     };
   }, [getToken, on, activity]);
+
+  /**
+   * FOCUS is the only trigger, and it is deliberately the only one.
+   *
+   * A pushed screen got this for free — `food/target.tsx` remounted on every
+   * open, so the effect ran, the ladder was current, and the day it saves
+   * against was evaluated afresh. A tab mounts once, lazily, and then stays
+   * mounted for the life of the process: without this it would show the weight,
+   * training load and phase it read the first time it was ever opened.
+   *
+   * The date is the half that turns a stale read into a WRONG WRITE. `on` is
+   * what `accept` files the target under, so an app left open past midnight
+   * would save tomorrow's target against yesterday.
+   *
+   * `useFocusEffect` re-runs when its callback's identity changes while the
+   * screen is focused, and `load` changes with the activity — so moving a pill
+   * refetches through this same path rather than through a second effect. That
+   * matters: an earlier version had both, and the two fired together on mount,
+   * asking three times for one opening and letting a late answer wipe the
+   * "Saved" receipt a moment after it appeared.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      setOn(todayString());
+      return load();
+    }, [load]),
+  );
 
   const accept = useCallback(async () => {
     const s = data?.suggestion;
@@ -119,6 +178,13 @@ export default function TargetScreen() {
         basis: s.basis,
       });
       setSaved(true);
+      // SPOKEN, not just rendered. `router.back()` used to be the confirmation
+      // and navigation announces itself; a Text appearing mid-page while focus
+      // stays on the button does not, so a VoiceOver user tapped "Use this
+      // target" and heard nothing at all. iOS has no live regions, which is why
+      // this is an imperative announcement — the same call sign-in and sign-up
+      // already make for their errors. Raised in review.
+      AccessibilityInfo.announceForAccessibility(SAVED_MESSAGE);
     } catch {
       // Accepting a target is the one WRITE on this screen, and offline is this
       // app's ordinary weather. Without this the button simply un-dimmed and
@@ -280,8 +346,14 @@ export default function TargetScreen() {
               </Text>
             ) : null}
             {saved ? (
-              <Text style={styles.saved} testID="target-saved">
-                Saved. Food measures the day against this from now on.
+              <Text
+                style={styles.saved}
+                testID="target-saved"
+                // Android's half of the same problem; iOS ignores it and takes
+                // the imperative announcement above.
+                accessibilityLiveRegion="polite"
+              >
+                {SAVED_MESSAGE}
               </Text>
             ) : null}
             <Text style={styles.footnote}>

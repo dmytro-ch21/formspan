@@ -78,10 +78,13 @@ export default function TabLayout() {
 
   // Hold the frame until the cached module set has been read. This is the
   // whole reason the cache exists: without it the first frames compute
-  // `anyCatalog` from an empty list, so the Library tab is ABSENT and then pops
+  // `anyFoodLog` from an empty list, so Food and Goals are ABSENT and then pop
   // in — the tab bar visibly rearranging on every cold start, which is exactly
   // what the provider's docstring says it prevents. `RootLayoutNav` already
   // holds a frame this way for Clerk.
+  //
+  // (This used to name `anyCatalog` and the Library tab, which N70 moved into
+  // You. Same failure, different tabs.)
   if (!ready) return null;
 
   return (
