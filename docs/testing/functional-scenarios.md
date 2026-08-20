@@ -185,6 +185,33 @@ Domain: fully separate from `apps/web`, not athlete-facing. Reuses the same Cler
 
 ---
 
+## Migration guard (`cmd/migrate`)
+
+Domain: the CLI that applies migrations, and its refusal to touch a database it cannot vouch for. Not an HTTP surface, but it is the thing that took staging down for forty minutes (#461/#465), so it gets scenarios. Unit-level coverage lives in `backend/internal/platform/migrateguard`; what is listed here is what should be exercised end to end against a real database, because the mechanisms are a real git repository and a real connection string and both are easy to mock into agreeing with you.
+
+**Happy path**
+- `migrate up` against a **local** database on a feature branch carrying a new migration numbered above the recorded version → applies it, and the preamble names the target, the source and its verification state, the current version and the pending list before acting.
+- `migrate up` against a **non-local** database from a checkout whose `backend/migrations` is byte-identical to `origin/main` → **permitted**, migrations applied. This is the legitimate deploy-by-hand path; a guard that misfires here is worse than no guard, so it is the case most worth having a test for.
+- A binary linked with `-X …/migrateguard.BuildChannel=deploy` (what `backend/Dockerfile` builds) run outside any git repository against a non-local database → permitted, source reported as the build attestation, git never consulted. This is the Railway pre-deploy path.
+- `migrate status` → read-only. Prints target, recorded version, dirty flag and pending list in the same shape as `up`'s preamble, and creates nothing (golang-migrate would create `schema_migrations` merely by being opened).
+
+**Edge cases & errors**
+- `migrate up` against a non-local database with a migration file that is **not on `origin/main`** (untracked, or modified) → refused, exit non-zero, the offending filenames named, nothing applied.
+- Same, but the checkout is **behind** `origin/main` (a migration file missing) → refused, with the fix being to rebase rather than to force anything.
+- `git fetch origin main` cannot run (offline, or the remote is gone) → refused rather than falling back to a possibly stale `origin/main`.
+- Recorded version **above** the highest migration file, on any target → refused with wording that names the cause (an unmerged branch's migration was applied here) and the fix — not golang-migrate's `no migration found for version NN: read down ... file does not exist`.
+- A migration numbered **at or below** the recorded version and not on `origin/main`, on any target including a local scratch database → refused as "would be silently skipped". Without the guard this prints `done` and exits 0. **The boundary case — numbered exactly equal to the recorded version — is the one that must be covered**; a `<` instead of `<=` passes every vector that sits strictly below.
+- A migration numbered above the recorded version and not on `origin/main`, local target → **not** flagged. Ordinary branch work; flagging it would make the guard painful.
+- Database marked dirty → refused, naming the version.
+- `migrate down` against a non-local database → refused outright (it takes no step argument and unwinds everything).
+- An unparseable `DATABASE_URL` → treated as **not local** (fail closed) and the DSN fully redacted in output.
+
+**Auth/security**
+- No output path may print the password: URL userinfo, a `?password=` query parameter, and libpq `password=` keyword form all have to be redacted, and an unparseable DSN redacted entirely since the password could be anywhere in it.
+- There is deliberately **no environment variable that disables the guard**. A test that asserts one does not exist is worth having: the failure mode is somebody adding one "temporarily".
+
+---
+
 ## Server-controlled feature flags (`GET /v1/flags`)
 
 Domain: operator-controlled, global on/off switches — distinct from the profile module's per-user `bjj_enabled`/`strength_enabled`/etc. toggles. Global booleans only, no percentage rollout or per-user targeting. **Read-only** — there's no write endpoint or admin UI yet; flags are toggled via direct SQL.

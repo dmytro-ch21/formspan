@@ -976,8 +976,28 @@ up` leaves the shared database at version 46 while `main` tops out at 45 —
 after which *every other branch* fails with `no migration found for version
 46`, including branches that have never touched the backend. It reads like a
 broken checkout and is nothing of the sort. This has happened; it cost a
-confusing debugging session and it will happen again, because nothing prevents
-it.
+confusing debugging session.
+
+**The rule is not about `vola_test`. It is about any database you did not
+create** — and on a deployed one it costs an environment rather than an
+afternoon, which is what happened to staging on 2026-08-20 (story in
+`docs/decisions/history.md`). `cmd/migrate` now refuses that case rather than
+relying on you to remember it:
+
+- `up` will not touch a **non-local** database unless the migration files are
+  byte-identical to `origin/main`. The deploy image carries its own attestation,
+  so a real deploy needs nothing from you — and there is deliberately no
+  environment variable that turns any of this off.
+- On **every** target, including your own scratch database, it refuses when the
+  recorded version is above the highest migration here, or when one of your
+  migrations is numbered at or below the recorded version and would therefore be
+  silently skipped.
+- `down` against a non-local database is refused outright.
+- `migrate status` is read-only and always allowed. It prints the target, the
+  recorded version and what is pending — reach for it before anything else.
+
+The sharpest edge is `backend/.env.staging.local`: real staging credentials,
+gitignored, one retyped variable away from being your `DATABASE_URL`.
 
 **Two different problems produce this error and they look identical**, so
 diagnose before acting. Both say `no migration found for version NN`, and the
@@ -1024,7 +1044,9 @@ shared database usable while several branches carry schema changes at once.
 
 **To undo one migration, do NOT run `go run ./cmd/migrate down`.** That command
 takes no step argument: it calls golang-migrate's `m.Down()`, which unwinds
-**every** migration and leaves you with an empty schema. There is no per-step
+**every** migration and leaves you with an empty schema. (It is refused
+outright against a non-local database now, but a local one it will still
+happily empty.) There is no per-step
 form in the CLI, and "down" is exactly what somebody wanting to step back one
 will type. Roll a single migration back by hand instead, in one transaction,
 using that migration's own `.down.sql` rather than a guess:
