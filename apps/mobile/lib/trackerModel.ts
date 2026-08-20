@@ -257,16 +257,20 @@ export function addLabel(t: Tracker): string {
   return `Add a ${noun} of ${t.name}`;
 }
 
-/**
- * The whole row, as one sentence, for the container.
+/*
+ * There was a `rowLabel` here — "Water, 4 of 8 cups" — for the glyph row's
+ * container. It is GONE, and the reason is worth keeping so nobody re-adds it.
  *
- * VoiceOver reads a container's label before its children, so this is what
- * orients somebody before they start swiping — and on a rotor jump it may be
- * the only thing they hear.
+ * A plain `View` without `accessible` is not an accessibility element on iOS,
+ * so the label was never spoken by VoiceOver; and setting `accessible` would
+ * collapse the row into ONE element, swallowing the per-glyph labels that make
+ * the row navigable at all. So the container can be labelled or usable, not
+ * both — and usable wins. The name and the value are already their own text
+ * elements directly above the row.
+ *
+ * It had a passing test, which is exactly why this note exists: a tested
+ * function that nothing can hear reads as load-bearing.
  */
-export function rowLabel(t: Tracker, entries: TrackerEntry[]): string {
-  return `${t.name}, ${valueLine(t, entries)}`;
-}
 
 /** 0..1, clamped for the bar. Over target is drawn full, never past the end. */
 export function progress(t: Tracker, entries: TrackerEntry[]): number {

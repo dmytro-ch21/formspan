@@ -224,6 +224,12 @@ func TestListEntriesRequiresAWindowAndBoundsIt(t *testing.T) {
 		{"?from=2026-8-1&to=2026-08-20", http.StatusBadRequest},
 		{"?from=2026-08-21&to=2026-08-20", http.StatusBadRequest},
 		{"?from=2020-01-01&to=2026-08-20", http.StatusBadRequest}, // wider than the cap
+		// The boundary itself, both sides. The cap counts DATES and both ends
+		// are inclusive, so 400 dates is a 399-day span — which is exactly the
+		// distinction an off-by-one here moves, and why the pair is asserted
+		// rather than one arbitrary wide window.
+		{"?from=2025-07-17&to=2026-08-21", http.StatusBadRequest}, // 401 dates
+		{"?from=2025-07-18&to=2026-08-21", http.StatusOK},         // 400 dates
 		{"?from=2026-08-20&to=2026-08-20", http.StatusOK},
 	}
 	for _, c := range cases {

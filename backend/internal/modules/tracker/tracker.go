@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -294,6 +295,30 @@ func (n New) Validate() error {
 	if len(n.ID) > 64 {
 		return fmt.Errorf("%w: id is too long", ErrInvalidInput)
 	}
+	// The `t_` namespace belongs to provisioning, and this is a security guard
+	// rather than tidiness. Preset ids are DERIVED from the athlete's user id
+	// (see PresetID), which is a Clerk id and not a secret — so anyone can
+	// compute another athlete's water id. Without this, they can create their
+	// own tracker on it; the victim's provisioning then collides on the PRIMARY
+	// KEY, which the (user_id, preset) arbiter does not cover, and every
+	// subsequent GET /v1/trackers answers 409 with no way to free the id.
+	//
+	// Found by review. `EnsureDefaults` carries the second half of the fix, so
+	// that neither guard is load-bearing alone.
+	//
+	// This lives in Validate and NOT in validateFields because provisioning
+	// legitimately mints ids in this namespace — the rule is "a client may not
+	// claim one", not "the id is illegal". `validatePresets` therefore checks
+	// the fields without this clause.
+	if strings.HasPrefix(n.ID, PresetIDPrefix) {
+		return fmt.Errorf("%w: that id prefix is reserved", ErrInvalidInput)
+	}
+	return n.validateFields()
+}
+
+// validateFields is everything about a New EXCEPT who is allowed to mint its id.
+// Shared by the client-facing Validate above and by the preset self-check.
+func (n New) validateFields() error {
 	if len(n.Preset) > 32 {
 		return fmt.Errorf("%w: preset is too long", ErrInvalidInput)
 	}

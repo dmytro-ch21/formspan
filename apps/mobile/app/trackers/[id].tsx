@@ -73,6 +73,11 @@ export default function TrackerSettingsScreen() {
           setMissing(true);
           return;
         }
+        // CLEARED on the found branch. Without this, one lookup that missed —
+        // a race with the first cache fill, a deep link before any fetch, a
+        // `view.state === 'unknown'` — pinned "not on this device" forever,
+        // because the `missing` branch renders before `tracker` is consulted.
+        setMissing(false);
         setTracker(found);
         const target = targetCount(found);
         setCountText(target == null ? '' : String(target));
@@ -194,6 +199,13 @@ export default function TrackerSettingsScreen() {
         keyboardType="number-pad"
         placeholder="No target"
         placeholderTextColor={vola.textDim}
+        // Labelled explicitly: a visible `Text` above a field is not associated
+        // with it, so VoiceOver read this one as its PLACEHOLDER ("No target")
+        // and the one below as bare digits — on the only screen in the app that
+        // can change a target.
+        accessibilityLabel={`Daily target for ${tracker.name}${
+          noun ? `, in ${pluralise(noun, 2)}` : ''
+        }`}
         testID="tracker-target-input"
       />
       <Text style={styles.hint}>
@@ -211,6 +223,9 @@ export default function TrackerSettingsScreen() {
           setError(null);
         }}
         keyboardType="decimal-pad"
+        accessibilityLabel={`One tap adds, for ${tracker.name}${
+          unitLabel ? `, in ${unitLabel}` : ''
+        }`}
         testID="tracker-increment-input"
       />
 
@@ -233,9 +248,17 @@ export default function TrackerSettingsScreen() {
         onPress={confirmArchive}
         style={styles.secondary}
         accessibilityRole="button"
+        // Stated as unavailable UP FRONT rather than after a destructive-styled
+        // confirm that then refuses. The capability stays legible — an athlete
+        // can see stopping a tracker is coming — without the dialog promising
+        // something this build cannot do.
+        accessibilityState={{ disabled: true }}
+        accessibilityHint="Not available yet — arrives with custom trackers"
         testID="tracker-settings-archive"
       >
-        <Text style={[styles.secondaryText, { color: fill }]}>Stop tracking {tracker.name}</Text>
+        <Text style={[styles.secondaryText, { color: vola.textDim }]}>
+          Stop tracking {tracker.name}
+        </Text>
       </Pressable>
     </ScreenShell>
   );

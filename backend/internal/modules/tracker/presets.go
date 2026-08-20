@@ -81,6 +81,17 @@ func Presets() []Preset { return presets }
 // recognisable in a log. Not a secret and not a capability: every read in this
 // module is scoped by user_id, so knowing another athlete's tracker id buys
 // nothing. It is one-way regardless, so a user id cannot be recovered from it.
+//
+// **It IS computable, though, and that has one consequence worth stating.** A
+// Clerk user id is not secret, so anybody can derive another athlete's water
+// id. Left unguarded they could create their own tracker on it, and the
+// victim's provisioning would then collide on the PRIMARY KEY — which the
+// (user_id, preset) arbiter does not cover — turning every subsequent
+// GET /v1/trackers into a 409 with no way to ever free the id. Two guards close
+// it, deliberately independent of one another: `New.Validate` refuses the `t_`
+// namespace on create, and `EnsureDefaults` tolerates a taken id rather than
+// failing the whole list. Found by review, not by the suite; both are tested
+// now.
 func DefaultsFor(userID string) []New {
 	out := make([]New, 0, len(presets))
 	for _, p := range presets {
@@ -94,10 +105,17 @@ func DefaultsFor(userID string) []New {
 	return out
 }
 
+// PresetIDPrefix is the namespace provisioning owns.
+//
+// A client may not create a tracker whose id starts here — `New.Validate`
+// refuses it — because these ids are DERIVED from the athlete's user id and are
+// therefore computable by anyone who knows it. See the note on DefaultsFor.
+const PresetIDPrefix = "t_"
+
 // PresetID is the deterministic id of one athlete's instance of a preset.
 func PresetID(userID, presetKey string) string {
 	sum := sha256.Sum256([]byte(userID + "\x00" + presetKey))
-	return "t_" + hex.EncodeToString(sum[:16])
+	return PresetIDPrefix + hex.EncodeToString(sum[:16])
 }
 
 // Validate checks every preset ships legal. Called by a test rather than at
@@ -119,7 +137,9 @@ func validatePresets() error {
 		}
 		n := p.Fields
 		n.ID = PresetID("validate", p.Key)
-		if err := n.Validate(); err != nil {
+		// validateFields, not Validate: a preset id legitimately carries the
+		// reserved prefix, which is exactly what Validate refuses.
+		if err := n.validateFields(); err != nil {
 			return fmt.Errorf("tracker: preset %q: %w", p.Key, err)
 		}
 	}

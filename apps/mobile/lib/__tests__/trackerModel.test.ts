@@ -10,7 +10,6 @@ import {
   loggedCount,
   progress,
   resolveRenderStyle,
-  rowLabel,
   targetCount,
   unitNoun,
   valueLine,
@@ -145,7 +144,7 @@ describe('crossing the target is not an end state', () => {
     for (const t of [water, coffee, creatine, capsules]) {
       for (const n of [0, 1, 4, 8, 10, 31]) {
         const e = taps(t, n);
-        strings.push(valueLine(t, e), rowLabel(t, e), addLabel(t));
+        strings.push(valueLine(t, e), addLabel(t));
         strings.push(glyphLabel(t, 0, Math.max(n, 1), n > 0));
       }
     }
@@ -237,7 +236,6 @@ describe('VoiceOver', () => {
     // N78's stated format is "creatine, 1 of 1, taken" — the tracker's name
     // first, which is what makes several rows on Today distinguishable by ear.
     expect(glyphLabel(creatine, 0, 1, true)).toContain('Creatine');
-    expect(rowLabel(water, taps(water, 4))).toBe('Water, 4 of 8 cups');
     expect(addLabel(water)).toBe('Add a cup of Water');
   });
 

@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Animated, Pressable, StyleSheet, View as RNView } from 'react-native';
+import {
+  Animated,
+  Pressable,
+  StyleSheet,
+  View as RNView,
+  type PressableProps,
+} from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -13,7 +19,6 @@ import {
   loggedCount,
   progress,
   resolveRenderStyle,
-  rowLabel,
   targetCount,
   valueLine,
   type Tracker,
@@ -57,7 +62,7 @@ export function TrackerCard({
   units,
   unitsReady,
   onAdd,
-  onRemoveAt,
+  onRemove,
   onEdit,
   testID,
 }: {
@@ -67,8 +72,8 @@ export function TrackerCard({
   /** Never print a unit-bearing number before the preference has been read. */
   unitsReady: boolean;
   onAdd: () => void;
-  /** Remove the nth logged tap — index into the filled glyphs, left to right. */
-  onRemoveAt: (index: number) => void;
+  /** Remove one logged tap, named by its entry id rather than its position. */
+  onRemove: (entryID: string) => void;
   onEdit: () => void;
   testID?: string;
 }) {
@@ -82,12 +87,18 @@ export function TrackerCard({
     <View style={styles.card} testID={testID ?? `tracker-card-${tracker.id}`}>
       <RNView style={styles.head}>
         <RNView style={[styles.dot, { backgroundColor: fill }]} />
+        {/* Uppercased by STYLE, never by `.toUpperCase()`. VoiceOver spells out
+            short all-caps strings letter by letter, so a transformed name reads
+            as "W-A-T-E-R"; `textTransform` leaves the accessible string intact
+            and changes only the glyphs drawn. */}
         <Text style={[styles.eyebrow, { color: fill }]} numberOfLines={1}>
-          {tracker.name.toUpperCase()}
+          {tracker.name}
         </Text>
         <Pressable
           onPress={onEdit}
-          hitSlop={12}
+          // 16pt icon + 14 all round = 44pt, the iOS minimum. It was 12, which
+          // is 40 — near enough to look fine and not near enough to be right.
+          hitSlop={14}
           accessibilityRole="button"
           // The overflow control is the ONLY route to the target on a phone, so
           // its label says what it opens rather than "more". "Everything should
@@ -105,14 +116,19 @@ export function TrackerCard({
         {amount ? <Text style={styles.amount}>{`  ·  ${amount}`}</Text> : null}
       </Text>
 
-      <RNView
-        style={styles.row}
-        accessibilityLabel={rowLabel(tracker, entries)}
-        testID={`tracker-row-${tracker.id}`}
-      >
+      {/* No `accessibilityLabel` here, deliberately, and it used to have one.
+          A plain View without `accessible` is not an accessibility element on
+          iOS, so the label was never spoken — and adding `accessible` would
+          make the row ONE element and swallow every glyph inside it, which is
+          strictly worse than the per-glyph labels this design is built on. The
+          name and the value are already their own elements above. */}
+      <RNView style={styles.row} testID={`tracker-row-${tracker.id}`}>
         <Pressable
           onPress={onAdd}
-          hitSlop={6}
+          // 30pt drawn + 7 all round = 44pt. This is the PRIMARY affordance on
+          // the card — the one an athlete hits several times a day — so it is
+          // the one that must not be a near miss.
+          hitSlop={7}
           style={[styles.add, { borderColor: fill }]}
           accessibilityRole="button"
           accessibilityLabel={addLabel(tracker)}
@@ -126,10 +142,11 @@ export function TrackerCard({
         ) : (
           <Glyphs
             tracker={tracker}
-            count={count}
+            entries={entries}
             fill={fill}
             single={style === 'dose'}
-            onRemoveAt={onRemoveAt}
+            onAdd={onAdd}
+            onRemove={onRemove}
           />
         )}
       </RNView>
@@ -145,6 +162,37 @@ export function TrackerCard({
 }
 
 /**
+ * The drawn glyph, and the slop that turns it into a touch target.
+ *
+ * **Measured, not chosen, and the first version was wrong.** It was 22pt with
+ * `hitSlop={4}` — a 30pt target, on the one control whose entire purpose is
+ * correcting a one-handed mis-tap. The affordance for fixing a fat-finger error
+ * was itself fat-finger-hostile, and iOS asks for 44.
+ *
+ * The horizontal axis cannot reach 44 and that is arithmetic rather than a
+ * choice. On a 375pt phone: 375 − 40 (Today's body padding) − 28 (the card's)
+ * − 30 (the `+`) − 10 (the row gap) leaves **267pt** for the glyphs. Eight
+ * 44pt-wide targets need 394pt. They would wrap to two rows, and eight cups
+ * split across two rows is exactly the uncountable block the twelve-glyph cap
+ * exists to prevent — so the row idiom and a 44pt width are incompatible, and
+ * the row idiom is the feature.
+ *
+ * So: **34 × 44pt**. Vertical slop is free, so it takes the full 44. Horizontal
+ * slop is capped at half the gap — beyond that, adjacent targets OVERLAP, and
+ * overlapping targets on identical adjacent glyphs make mis-taps worse rather
+ * than better, which would defeat the point. The gap is 8 so the slop can be 4,
+ * and 26 + 8 = 34pt wide; eight cups then need 26×8 + 8×7 = 264pt of the 267
+ * available, which is why the glyph is 26 and not 28.
+ *
+ * 34 × 44 clears WCAG 2.5.8 (Minimum, AA) at 24 × 24 with room, and falls short
+ * of Apple's 44 × 44 guideline on one axis. Stated rather than hidden. The two
+ * controls that CAN be 44 both ways — the `+` and the settings button — are.
+ */
+const GLYPH = 26;
+const GLYPH_GAP = 8;
+const GLYPH_SLOP = { top: 9, bottom: 9, left: GLYPH_GAP / 2, right: GLYPH_GAP / 2 };
+
+/**
  * The glyph row.
  *
  * Each glyph is its own button with its own label, which is the accessibility
@@ -154,19 +202,22 @@ export function TrackerCard({
  */
 function Glyphs({
   tracker,
-  count,
+  entries,
   fill,
   single,
-  onRemoveAt,
+  onAdd,
+  onRemove,
 }: {
   tracker: Tracker;
-  count: number;
+  entries: TrackerEntry[];
   fill: string;
   single: boolean;
-  onRemoveAt: (index: number) => void;
+  onAdd: () => void;
+  onRemove: (entryID: string) => void;
 }) {
+  const count = entries.length;
   const slots = single ? 1 : glyphSlots(tracker, count);
-  const size = single ? 44 : 22;
+  const size = single ? 44 : GLYPH;
   return (
     <RNView style={styles.glyphs}>
       {Array.from({ length: slots }, (_, i) => {
@@ -180,11 +231,20 @@ function Glyphs({
             label={glyphLabel(tracker, i, slots, filled)}
             hint={glyphHint(filled)}
             testID={`tracker-glyph-${tracker.id}-${i}`}
-            // A filled glyph removes ITS tap; an empty one adds. Tapping a
-            // filled cup to empty it is the correction a one-handed mis-tap
-            // needs, and a tracker you cannot correct gets abandoned.
-            onPress={() => onRemoveAt(i)}
-            disabled={!filled}
+            hitSlop={single ? 4 : GLYPH_SLOP}
+            // A filled glyph removes ITS OWN tap; an empty one adds.
+            //
+            // The entry ID rather than the index, and that is a correctness fix
+            // rather than a tidy-up: resolving an index against a freshly-read
+            // day at tap time means two quick taps on one glyph can each resolve
+            // against a different snapshot and remove two cups. The id names the
+            // row the athlete actually pointed at, so the second tap is a no-op.
+            //
+            // Empty glyphs ADD rather than being disabled. A disabled glyph made
+            // `glyphHint(false)` unreachable — the hint was suppressed exactly
+            // when it applied — and left a VoiceOver user with no add affordance
+            // where they already were, forcing a swipe back to the `+`.
+            onPress={filled ? () => onRemove(entries[i].id) : onAdd}
           />
         );
       })}
@@ -208,8 +268,8 @@ function Glyph({
   label,
   hint,
   onPress,
-  disabled,
   testID,
+  hitSlop,
 }: {
   filled: boolean;
   fill: string;
@@ -217,8 +277,8 @@ function Glyph({
   label: string;
   hint: string;
   onPress: () => void;
-  disabled: boolean;
   testID: string;
+  hitSlop: PressableProps['hitSlop'];
 }) {
   // `useState` with a lazy initialiser rather than `useRef`, and the difference
   // is not cosmetic: reading `.current` during render is what `react-hooks/refs`
@@ -238,15 +298,22 @@ function Glyph({
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled}
-      hitSlop={4}
+      hitSlop={hitSlop}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint={disabled ? undefined : hint}
-      // Read as a checkbox by VoiceOver, so the state is spoken by the system
-      // as well as being in the label. Belt and braces on the one row in the
-      // app that is a wall of identical shapes.
-      accessibilityState={{ checked: filled, disabled }}
+      accessibilityHint={hint}
+      // **The LABEL is what carries the state, not this.** With
+      // `accessibilityRole="button"` iOS ignores `checked` — so "filled"/"empty"
+      // in the label is load-bearing and this is a hint to Android and to any
+      // future audit, not a second channel on iOS. Said plainly because the
+      // comment here used to claim belt and braces, and it is braces.
+      //
+      // `role="checkbox"` would make iOS announce the state natively, and then
+      // double-announce it against the label. The genuinely better shape for a
+      // row of N identical steps is one `adjustable` element with increment and
+      // decrement actions — one swipe stop per card instead of up to thirteen —
+      // and that is worth doing when N78 makes these rows numerous.
+      accessibilityState={{ checked: filled }}
       testID={testID}
     >
       <RNView
@@ -309,7 +376,13 @@ const styles = StyleSheet.create({
   },
   head: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   dot: { width: 7, height: 7, borderRadius: 4 },
-  eyebrow: { fontSize: 11, fontWeight: '800', letterSpacing: 1.4, flex: 1 },
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    flex: 1,
+    textTransform: 'uppercase',
+  },
   value: { fontSize: 15, fontWeight: '700', color: vola.text },
   amount: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -321,10 +394,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Wraps rather than scrolls: twelve is the cap, and twelve 22pt glyphs fit
-  // two rows on the narrowest phone this app supports. Past twelve the card is
-  // a bar, so this never becomes the uncountable block N78 forbids.
-  glyphs: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
+  // Wraps rather than scrolls. `GLYPH_GAP` is load-bearing, not spacing: the
+  // horizontal touch slop is half of it, so narrowing this narrows the target.
+  // Eight 26pt glyphs at this gap need 264pt of the 267 available on a 375pt
+  // phone — see the note on GLYPH. Past twelve the card is a bar, so this never
+  // becomes the uncountable block N78 forbids.
+  glyphs: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: GLYPH_GAP,
+    alignItems: 'center',
+  },
   glyph: {
     borderWidth: 1.5,
     alignItems: 'stretch',

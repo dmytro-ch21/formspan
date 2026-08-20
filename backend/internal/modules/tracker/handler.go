@@ -174,7 +174,10 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	// fixed-width format; the span below needs real dates.
 	f, _ := time.Parse("2006-01-02", from)
 	t, _ := time.Parse("2006-01-02", to)
-	if t.Sub(f) > maxWindowDays*24*time.Hour {
+	// `maxWindowDays` counts DATES, and both ends are inclusive — so the widest
+	// legal span is one day less than the cap. Written out because `> cap*24h`
+	// reads correct and quietly admits 401.
+	if t.Sub(f) > (maxWindowDays-1)*24*time.Hour {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			"window is too wide")
 		return
@@ -188,6 +191,12 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 }
 
 // LogEntry records one tap under a client-supplied id.
+//
+// **An ARCHIVED tracker still accepts taps, deliberately.** A phone that logged
+// a cup in a dead spot may push it long after the athlete archived the tracker
+// on another device, and refusing it would drop a real event for a tidiness
+// rule. The entry stays reachable through the entries window; only the card
+// stops being listed.
 //
 // PUT, keyed on the entry id the phone generated: sending it twice is the same
 // as sending it once, which is what makes a cup logged in a kitchen with no

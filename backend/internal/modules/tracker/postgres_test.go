@@ -2,6 +2,7 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -530,5 +531,65 @@ func TestPresetIDIsStableAndPerAthlete(t *testing.T) {
 	}
 	if a == PresetID(userA, "coffee") {
 		t.Fatal("two presets share an id for one athlete")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The derived preset id is COMPUTABLE by anybody who knows the athlete's Clerk
+// user id, which is not a secret. So it is a namespace somebody can squat, and
+// the consequence was severe: a row planted on another athlete's derived water
+// id collides on the PRIMARY KEY, which the `(user_id, preset)` arbiter does
+// not cover — so provisioning raised 23505, `List` returned 409, and there is
+// no delete path to ever free the id. Every subsequent GET /v1/trackers, for
+// the life of the account.
+//
+// Found by review, not by this suite. Two independent guards, because either
+// alone leaves a hole: the create path refuses the namespace, and provisioning
+// tolerates a taken id rather than failing the whole list.
+// ---------------------------------------------------------------------------
+
+func TestClientsCannotClaimTheDerivedPresetNamespace(t *testing.T) {
+	repo, _ := newTestRepo(t)
+
+	in := fixture()
+	in.ID = PresetID(userA, "water") // userB, having computed userA's id
+	_, err := repo.Create(context.Background(), userB, in)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("creating a tracker on a derived preset id: got %v, want ErrInvalidInput.\n"+
+			"The `t_` namespace is ours to assign; a client that can claim one can "+
+			"permanently brick another athlete's tracker list.", err)
+	}
+
+	// And an ordinary id is still fine — otherwise this guard could pass by
+	// refusing everything, which would break N78 before it starts.
+	ok := fixture()
+	ok.ID = "9f1c2b3d-4e5f-6071-8293-a4b5c6d7e8f9"
+	if _, err := repo.Create(context.Background(), userB, ok); err != nil {
+		t.Fatalf("an ordinary client id was refused: %v", err)
+	}
+}
+
+func TestProvisioningSurvivesASquattedID(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+
+	// Planted directly, so this holds even if the guard above is ever weakened
+	// or bypassed by a path that does not go through Create.
+	squatted := PresetID(userA, "water")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO daily_trackers (id, user_id, preset, name, color_key, increment)
+		VALUES ($1, $2, '', 'Squatter', 'water', 1)`, squatted, userB); err != nil {
+		t.Fatalf("plant: %v", err)
+	}
+
+	// The whole point: userA's list must still WORK. They lose the water card,
+	// because the id is taken and nothing can free it — but a Today missing one
+	// card is recoverable and a permanent 409 is not.
+	if err := repo.EnsureDefaults(ctx, userA, DefaultsFor(userA)); err != nil {
+		t.Fatalf("provisioning failed because another athlete holds the id: %v.\n"+
+			"That is a permanent 409 on every GET /v1/trackers for this athlete.", err)
+	}
+	if _, err := repo.List(ctx, userA); err != nil {
+		t.Fatalf("list: %v", err)
 	}
 }

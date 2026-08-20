@@ -18,13 +18,29 @@ import type { UnitSystem } from '@/lib/units';
 export function TrackerList({
   day,
   on,
+  dayAtTap,
   units,
   unitsReady,
   testID,
 }: {
   day: TrackerDay;
-  /** The local calendar day these cards describe. */
+  /** The local calendar day these cards DESCRIBE — what is rendered. */
   on: string;
+  /**
+   * The day a tap should be FILED UNDER, resolved at the moment of the tap.
+   *
+   * Separate from `on` because the two genuinely differ on Today. `on` is
+   * computed during render, and Today stays mounted for the life of the
+   * process — so a phone left open across midnight renders yesterday's key
+   * until something re-renders it, and the first tap at 00:05 would file a cup
+   * under the day that just ended. Food is the opposite case: its day is the
+   * subject of the screen, chosen with a stepper, and a tap there must land on
+   * the day being looked at rather than on today.
+   *
+   * So the screen decides. Today passes a function reading the clock; Food
+   * passes its stepper's day.
+   */
+  dayAtTap: () => string;
   units: UnitSystem;
   unitsReady: boolean;
   testID?: string;
@@ -52,8 +68,8 @@ export function TrackerList({
           entries={day.entriesFor(t.id)}
           units={units}
           unitsReady={unitsReady}
-          onAdd={() => void day.addTap(t, on)}
-          onRemoveAt={(i) => void day.removeTapAt(t, on, i)}
+          onAdd={() => void day.addTap(t, dayAtTap())}
+          onRemove={(entryID) => void day.removeEntry(entryID, dayAtTap())}
           onEdit={() => day.openSettings(t)}
         />
       ))}

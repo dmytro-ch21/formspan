@@ -543,8 +543,13 @@ export async function fetchTrackerDay(
   getToken: TokenGetter,
   on: string,
 ): Promise<void> {
-  const trackers = await api.listTrackers(getToken);
+  // Both requests in flight at once: they are independent, and this runs on
+  // every focus of TWO tab screens, so a sequential pair doubles the wait for
+  // no reason. Cached in order afterwards.
+  const [trackers, entries] = await Promise.all([
+    api.listTrackers(getToken),
+    api.listEntries(getToken, { from: on, to: on }),
+  ]);
   await cacheTrackers(userId, trackers);
-  const entries = await api.listEntries(getToken, { from: on, to: on });
   await cacheEntries(userId, on, on, entries);
 }

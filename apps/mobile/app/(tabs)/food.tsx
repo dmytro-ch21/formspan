@@ -260,6 +260,10 @@ export default function FoodScreen() {
           <TrackerList
             day={trackerDay}
             on={on}
+            // The day being LOOKED AT, unlike Today's clock read: the stepper is
+            // the point of this screen, so a tap while reading Tuesday belongs
+            // to Tuesday.
+            dayAtTap={() => on}
             units={units}
             unitsReady={unitsReady}
             testID="food-trackers"

@@ -1526,6 +1526,13 @@ export default function TodayScreen() {
         <TrackerList
           day={trackerDay}
           on={todayKey}
+          // Read at the MOMENT of the tap, not at render. `todayKey` is computed
+          // during render and this screen never unmounts, so a phone left open
+          // across midnight still holds yesterday's key until something
+          // re-renders — and the first tap at 00:05 would file a cup under the
+          // day that just ended. Found in review; the 23:58 case was covered and
+          // this, its mirror, was not.
+          dayAtTap={() => dayString(new Date())}
           units={units}
           unitsReady={unitsReady}
           testID="today-trackers"

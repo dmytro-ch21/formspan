@@ -690,21 +690,6 @@ export const activeSportColors: Record<SportKey, string> = isMono
  * not in it. Same shape as `activeSportColors`: the literal stays parseable for
  * the validator, and the swap happens here where the components read it.
  */
-/**
- * A tracker's fill, mode-aware, with a DEFAULT for a key this build has never
- * heard of.
- *
- * The fallback is load-bearing rather than defensive: `color_key` comes from the
- * server, and an athlete who authors a tracker on a newer build (or on web)
- * then opens an older phone would otherwise get `undefined` straight into a
- * `backgroundColor` — a transparent cup that reads as empty, which is the one
- * thing this card must never render wrongly.
- */
-export function trackerFill(key: string): string {
-  const set: Record<string, string> = isMono ? monoTrackerColors : trackerColors;
-  return set[key] ?? (isMono ? monoTrackerColors.water : trackerColors.water);
-}
-
 export const activeMedalFace: Record<MedalTier, string> = isMono ? monoMedalFace : medalFace;
 export const activeMedalRim: Record<MedalTier, string> = isMono ? monoMedalRim : medalRim;
 export const activeBeltAccent: Record<BeltKey, string> = isMono ? monoBeltAccent : beltAccent;
@@ -720,6 +705,21 @@ export const activeStrap: Record<BeltKey, string> = isMono ? monoStrap : strap;
 export const activeRankBar: Record<BeltKey, string> = isMono
   ? { ...rankBar, black: monoRankBar }
   : rankBar;
+
+/**
+ * A tracker's fill, mode-aware, with a DEFAULT for a key this build has never
+ * heard of.
+ *
+ * The fallback is load-bearing rather than defensive: `color_key` comes from the
+ * server, and an athlete who authors a tracker on a newer build (or on web)
+ * then opens an older phone would otherwise get `undefined` straight into a
+ * `backgroundColor` — a transparent cup that reads as empty, which is the one
+ * thing this card must never render wrongly.
+ */
+export function trackerFill(key: string): string {
+  const set: Record<string, string> = isMono ? monoTrackerColors : trackerColors;
+  return set[key] ?? (isMono ? monoTrackerColors.water : trackerColors.water);
+}
 
 export default {
   light: scheme,

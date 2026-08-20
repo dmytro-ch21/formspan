@@ -105,7 +105,17 @@ func (r *PostgresRepository) EnsureDefaults(ctx context.Context, userID string, 
 				id, user_id, preset, name, icon, color_key, unit,
 				increment, target, render_style, sort_order)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-			ON CONFLICT (user_id, preset) WHERE preset <> '' DO NOTHING`,
+			-- NO ARBITER, and that is the point. An arbiter names ONE constraint,
+			-- so the (user_id, preset) form absorbed a re-provision and let a
+			-- PRIMARY KEY collision raise 23505 -- which List turned into a 409 on
+			-- every subsequent read, permanently, because nothing can free the id.
+			-- That was reachable from outside: preset ids are derived from the
+			-- athlete's user id, so anybody could plant a row on one. The bare form
+			-- absorbs every unique violation, which is exactly what provisioning
+			-- means: insert if you can, otherwise leave what is already there.
+			-- (No backticks in here -- this is a Go raw string literal, and one
+			-- silently ends it. Same trap db.ts records for its CREATE statements.)
+			ON CONFLICT DO NOTHING`,
 			p.ID, userID, p.Preset, p.Name, p.Icon, p.ColorKey, p.Unit,
 			p.Increment, p.Target, p.RenderStyle, p.SortOrder)
 	}
@@ -155,6 +165,15 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]Tracker
 // user_id predicate on the re-read this endpoint would be an IDOR that any
 // caller could walk by replaying UUIDs.
 func (r *PostgresRepository) Create(ctx context.Context, userID string, in New) (*Tracker, error) {
+	// Validated HERE and not only in the handler. The handler is the only caller
+	// today, so this is redundant — and "the caller validates" is a convention,
+	// which means it holds until the second caller arrives and does not. One of
+	// the rules it enforces is a security guard (the reserved `t_` namespace),
+	// and a security guard that lives one layer above the write is one somebody
+	// can walk around without noticing.
+	if err := in.Validate(); err != nil {
+		return nil, err
+	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO daily_trackers (
 			id, user_id, preset, name, icon, color_key, unit,
@@ -204,6 +223,13 @@ func (r *PostgresRepository) getOwned(ctx context.Context, userID, id string) (*
 // ErrNotFound. Distinguishing them would confirm a row exists to somebody
 // enumerating ids.
 func (r *PostgresRepository) Update(ctx context.Context, userID, id string, p Patch) (*Tracker, error) {
+	// Same reasoning as Create: the handler validates, and so does this, because
+	// the alternative is a repository that writes whatever it is handed. Without
+	// it, a caller passing {Name: set, Value: nil} writes an empty string into a
+	// column whose emptiness nothing downstream expects.
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
 	cols := patchColumns(p)
 	if len(cols) == 0 {
 		return nil, fmt.Errorf("%w: nothing to update", ErrInvalidInput)

@@ -40,8 +40,8 @@ export type TrackerDay = {
   /** Load, for the given local day. Returns a cancel function. */
   refresh: (on: string) => () => void;
   addTap: (tracker: Tracker, on: string) => Promise<void>;
-  /** Remove the nth logged tap on a tracker, counting from the left. */
-  removeTapAt: (tracker: Tracker, on: string, index: number) => Promise<void>;
+  /** Remove one logged tap, named by its entry id rather than its position. */
+  removeEntry: (entryID: string, on: string) => Promise<void>;
   openSettings: (tracker: Tracker) => void;
 };
 
@@ -104,18 +104,17 @@ export function useTrackerDay(): TrackerDay {
     [userId],
   );
 
-  const removeTapAt = useCallback(
-    async (tracker: Tracker, on: string, index: number) => {
+  const removeEntry = useCallback(
+    async (entryID: string, on: string) => {
       if (!userId) return;
-      // The nth tap on THIS tracker, in the order the row draws them. The row's
-      // glyphs are ordered by `logged_at`, so the index the athlete pointed at
-      // and the entry removed are the same one — which matters, because
-      // removing "some cup" from a row of identical cups looks like nothing
-      // happened if the count is what changes and the wrong entry goes.
-      const mine = (await localEntries(userId, on)).filter((e) => e.tracker_id === tracker.id);
-      const target = mine[index];
-      if (!target) return;
-      await removeTap(userId, target.id);
+      // The entry the athlete actually pointed at, by id.
+      //
+      // This used to take an INDEX and resolve it against a freshly-read day —
+      // which meant two quick taps on one glyph could each resolve against a
+      // different snapshot and remove two cups, because the re-render that
+      // empties the glyph lands after the second tap. `removeTap` is idempotent
+      // on an id, so the second tap is now a no-op instead.
+      await removeTap(userId, entryID);
       requestSync('tracker tap removed');
       const entries = await localEntries(userId, on);
       setLoaded((prev) => (prev.on === on ? { ...prev, entries } : prev));
@@ -133,5 +132,5 @@ export function useTrackerDay(): TrackerDay {
     [router],
   );
 
-  return { view: loaded.view, entriesFor, refresh, addTap, removeTapAt, openSettings };
+  return { view: loaded.view, entriesFor, refresh, addTap, removeEntry, openSettings };
 }
