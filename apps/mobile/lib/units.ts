@@ -316,6 +316,7 @@ export function formatFluid(ml: number | null | undefined, u: UnitSystem): strin
   if (u === 'imperial') return `${trim(toDisplayFluid(ml, u))} fl oz`;
   if (Math.abs(ml) >= 1000) return `${trim(round(ml / 1000, 2))} L`;
   return `${trim(round(ml, 0))} ml`;
+}
 
 /* ---------------------------------------------------------------------------
  * Food quantities (N90)
