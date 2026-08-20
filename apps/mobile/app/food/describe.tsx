@@ -41,6 +41,7 @@ import { rememberBarcode } from '@/lib/barcodeCache';
 import { parseOr } from '@/lib/draftNumber';
 import {
   describeMeal,
+  estimateErrorMessage,
   itemToEntry,
   photographMeal,
   type EstimateQuota,
@@ -160,10 +161,10 @@ export default function DescribeMealScreen() {
           ? await ImagePicker.launchCameraAsync({ quality: 1 })
           : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
       } catch {
-        // NOT messageFor: both of its branches are network-flavoured, and its
-        // fallback says "Could not reach the server. Try again when you have
-        // signal." — the wrong diagnosis entirely for a camera that would not
-        // open, and one that sends the athlete to check their signal.
+        // NOT messageFor: nothing here has been near the network. It classifies
+        // an endpoint's failures, and the camera refusing to open is not one —
+        // it would fall through to the "the server answered" branch and show
+        // whatever the OS put in the exception.
         setError(
           fromCamera
             ? 'The camera would not open. Try again, or describe the meal instead.'
@@ -641,16 +642,18 @@ function perServing(it: EstimatedItem): Macros {
 }
 
 /**
- * The server's message, which is written for the athlete.
+ * The copy for a failed estimate.
  *
- * Codes are contract and messages are not, so this shows the message rather
- * than mapping the code to copy of its own — the one thing worth saying here
- * that the server cannot is what to do about a network failure.
+ * **This used to live here**, as `messageFor`: the server's message when there
+ * was one, and *"Could not reach the server. Try again when you have signal."*
+ * when there was not. It moved to `estimateApi.ts` with N55, for two reasons —
+ * a dead request now carries its own diagnosis from the transport instead of
+ * every one of them being called a signal problem, and the 503 that means
+ * "this deploy has no provider key" needed to stop reading as an outage. Both
+ * are properties of the endpoint, not of this screen, so they are testable
+ * without rendering it.
  */
-function messageFor(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  return 'Could not reach the server. Try again when you have signal.';
-}
+const messageFor = estimateErrorMessage;
 
 function mealLabel(m: Meal): string {
   return m === 'snack' ? 'Snacks' : m[0].toUpperCase() + m.slice(1);

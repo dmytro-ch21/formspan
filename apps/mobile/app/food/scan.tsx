@@ -62,7 +62,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { FOOD_BARCODE_TYPES, normaliseBarcode } from '@/lib/barcode';
 import { lookupBarcode, type CachedSource, type ScannedFood } from '@/lib/barcodeApi';
 import { cachedBarcode, rememberBarcode } from '@/lib/barcodeCache';
-import { ApiError, isOffline } from '@/lib/apiError';
+import { ApiError, transportDiagnosis } from '@/lib/apiError';
 import { parseOr } from '@/lib/draftNumber';
 import { logFood } from '@/lib/foodLog';
 import { MEALS, scale, slotForClock, todayString, type Food, type Meal } from '@/lib/nutrition';
@@ -685,8 +685,14 @@ function Field({
  * ask successfully, so we cannot say the catalog lacks the food.
  */
 function messageForLookupFailure(err: unknown): string {
-  if (isOffline(err)) {
-    return "You're offline, so a new barcode can't be looked up. A food you've scanned on this phone before still works without signal.";
+  // Every dead request, not just an absent radio (N55). This used to test
+  // `isOffline` alone, and once the transport started telling a timeout and a
+  // dropped connection apart from no-route, those two stopped matching and
+  // fell through to the raw message — losing the one thing this screen knows
+  // that the transport does not, which is that the scan cache still works.
+  const diagnosis = transportDiagnosis(err);
+  if (diagnosis) {
+    return `${diagnosis} A barcode you've scanned on this phone before still works.`;
   }
   if (err instanceof ApiError && err.status === 404 && err.code !== 'not_found') {
     return 'The server this app is talking to does not have barcode lookup. Describing the food works now.';

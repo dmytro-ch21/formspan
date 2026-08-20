@@ -1,10 +1,7 @@
 import { ApiError } from './apiError';
-import { netFetch } from './authedFetch';
+import { API_BASE, netFetch, type NetFetchOptions } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 import { newTraceId, traceparent } from './trace';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 /**
  * One authenticated JSON request, throwing the house `ApiError`.
@@ -24,6 +21,7 @@ export async function apiRequest<T>(
   getToken: TokenGetter,
   path: string,
   init: RequestInit = {},
+  opts: NetFetchOptions = {},
 ): Promise<T> {
   const token = await getToken();
 
@@ -38,15 +36,19 @@ export async function apiRequest<T>(
   // wire. Two FormData bodies now: the meal photo and the machine photo (N44).
   const isForm = typeof FormData !== 'undefined' && init.body instanceof FormData;
 
-  const res = await netFetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      ...init.headers,
-      Authorization: `Bearer ${token}`,
-      ...(isForm ? null : { 'Content-Type': 'application/json' }),
-      traceparent: traceparent(newTraceId()),
+  const res = await netFetch(
+    `${API_BASE}${path}`,
+    {
+      ...init,
+      headers: {
+        ...init.headers,
+        Authorization: `Bearer ${token}`,
+        ...(isForm ? null : { 'Content-Type': 'application/json' }),
+        traceparent: traceparent(newTraceId()),
+      },
     },
-  });
+    opts,
+  );
 
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => null);

@@ -8819,11 +8819,12 @@ while the bug is present.
 
 - **A request that fails for any reason other than a dead radio must not tell
   the athlete to go find signal.** This is the device-reported symptom: the
-  no-status default reads "Try again when you have signal" and was shown to
-  someone with four bars. Currently unfixable at this screen — `netFetch`
-  collapses timeout, TLS, DNS and body-too-large into one `OfflineError` (N55),
-  so the test belongs at the transport, and this line is here to record that
-  the screen is not where it can be satisfied.
+  no-status default read "Try again when you have signal" and was shown to
+  someone with four bars. **Satisfiable at this screen as of N55** — the
+  transport now names which kind of dead request it was and
+  `identifyErrorMessage` composes that diagnosis with the search fallback, so
+  assert the three transport outcomes give three different sentences here. The
+  transport half is under *Transport error taxonomy* at the end of this file.
 - **A genuinely offline phone still gets the offline message.** The pair matters:
   fixing the above by deleting the network wording would break the one case it
   is right for.
@@ -10102,3 +10103,116 @@ the status passes against either regression. Assert the quota, not the status.
   recovers on restart" — true when filed, and untrue since N48 gave it a
   persisted quota. Any scenario list that treats identify as unaffected is
   reading a stale premise.
+---
+
+## Transport error taxonomy (N55, `apps/mobile/lib/authedFetch.ts`, `lib/apiError.ts`)
+
+Every request the app makes goes through `netFetch`, which used to convert
+**every** `fetch` rejection except an abort into `OfflineError`. A timeout, a
+TLS failure, a DNS failure and a phone in a lift were the same object by the
+time a screen saw them, so an athlete with four bars was told *"Could not reach
+the server. Try again when you have signal"* while a photo upload was being
+dropped for its size.
+
+There are now three sentinels under one base — `OfflineError` (no route to the
+API), `TimeoutError` (we stopped waiting), `RequestDroppedError` (the request
+failed while VOLA answered a probe) — and the discriminator is a **measurement,
+not a guess**: on an unclassifiable failure the phone sends one bodyless GET to
+`/v1/healthz` and classifies on whether anything comes back.
+
+### Happy path
+
+- A request that gets any HTTP status resolves normally and **no probe is
+  made**. Classifying a status is the caller's job.
+- A slow-but-successful request inside its deadline still succeeds — including
+  a photo estimate, which gets a longer deadline than a JSON read.
+
+### Edge cases & errors
+
+- **Airplane mode → `OfflineError`, and only there.** The message says the
+  athlete is still signed in and never suggests signing in again. This is the
+  case the whole family exists to keep true, so a fix that broadens any other
+  branch has to be checked against it.
+- **A host that resolves and refuses TLS → not "offline".** From the app's
+  vantage point a host-wide TLS or DNS failure fails the probe too, so it
+  lands in `OfflineError` — *"Can't reach VOLA"*, which is true. What must
+  never happen is a **per-request** failure over a working network reading as
+  no connection.
+- **A captive portal that answers everything with its own 200 reads as
+  reachable**, so a genuinely blocked request says *"That didn't get through"*
+  rather than *"Can't reach VOLA"*. Wrong in detail, right in advice, and
+  neither sends the athlete to sign in again or to hunt for a signal they
+  already have. **Test it as the accepted limit, not as a bug** — a fix that
+  narrows it must not widen `OfflineError` back into a catch-all.
+- **A request killed mid-body while the API is up → `RequestDroppedError`.**
+  Reproduce by making the request fail against a reachable API; the message
+  must not contain the word "signal". The likeliest real producer is the
+  server's `MaxBytesReader` closing the connection after answering an
+  oversized upload, so the client never reads its 400.
+- **A request that outruns its deadline → `TimeoutError`**, with no probe: the
+  app caused this and knows it.
+- **A superseded or unmounted request → the `AbortError` passes through
+  untouched**, and is never reported to the athlete at all.
+- **Two failures close together make one probe**, not one per failure — an
+  outbox drain against a dead network would otherwise probe once per pending
+  row.
+- **A probe that never answers still classifies** within its own deadline. A
+  classification that can hang leaves a dead request unreported on screen.
+
+### The copy
+
+- One line then an action, on all three. The athlete's verdict on the old
+  three-sentence version was *"the error itself is ugly"*, read one-handed over
+  a plate.
+- A screen with a better action than "try again" composes its own message from
+  `transportDiagnosis()` — the camera says *search for the exercise instead*,
+  the meal screen *enter the food by hand*, the barcode scanner *a barcode
+  you've scanned before still works*. **The diagnosis stays central; only the
+  action is local.** Assert that the action is not printed twice.
+- **Every screen that degrades to a local cache offers it for all three
+  outcomes, not only for `OfflineError`.** The barcode scanner is the case:
+  narrowing it back to `isOffline` drops the cache hint on a timeout and on a
+  dropped lookup, which is the same "one branch quietly stopped matching" that
+  the taxonomy was introduced to end.
+- **A 503 from the estimate route reads as a feature that is not switched on**,
+  names manual entry, and never mentions the connection. The route answers 503
+  when the deploy has no provider key.
+- **The 429 keeps the server's own wording**, reset time included. Mapping it
+  to copy of our own throws away the one number the athlete can act on.
+
+### Regression trap
+
+- **`signal.reason` does not exist on a phone, and jest has it.** React Native
+  replaces the global `AbortController` with `abort-controller@3.0.0`: no
+  `reason`, no `throwIfAborted`, no `AbortSignal.timeout`, no
+  `AbortSignal.any`. Two screens told a timeout apart from a supersede by
+  reading `signal.reason`, and neither comparison could ever match — the
+  library search rendered **"Aborted"** for a request abandoned mid-typing, and
+  the position screen's spinner never resolved on a timeout, which is the exact
+  failure its own comment said the reason existed to prevent. Both had passing
+  tests. `lib/__tests__/rnGlobals.test.ts` is a source scan that fails on any
+  reintroduction; a runtime test cannot see this, because these APIs work
+  perfectly in the runner.
+
+### The deadline
+
+- **Every request has one now** — 30s by default, 45s for anything carrying a
+  photo *or waiting on a language model*. The text estimate path is in the
+  second group even though it uploads nothing: same route, same provider, and a
+  constant named `UPLOAD_TIMEOUT_MS` nearly argued it out of a budget it needs.
+- **A screen that wants to give up sooner passes its own** — the library and
+  the position screen both ask for 10s. Assert the screen ASKS: if the option
+  stops being passed, the request silently runs to the 30s default and nothing
+  goes red, because it still completes and still renders.
+- **A timeout does not abort the caller's controller**, so a screen must not
+  treat it as an unmount. That confusion is what left the position screen
+  spinning forever.
+
+### Needs a device
+
+- **Airplane mode, on a real phone.** The offline branch is the one no stub can
+  confirm: what a stub proves is that `netFetch` classifies a rejection, not
+  that iOS produces one for a radio that is off.
+- **A host that resolves but refuses TLS**, pointing `EXPO_PUBLIC_API_URL` at
+  it — to confirm the app does not claim the athlete is offline.
+- **A deploy with no provider key**, to read the 503 copy in place.

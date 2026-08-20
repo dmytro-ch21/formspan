@@ -1,5 +1,5 @@
 import { identifyErrorMessage, isRetryable } from '../identifyApi';
-import { ApiError } from '../apiError';
+import { ApiError, OfflineError, RequestDroppedError, TimeoutError } from '../apiError';
 
 /**
  * The two pure decisions in the machine-identify client.
@@ -71,5 +71,55 @@ describe('identifyErrorMessage', () => {
       identifyErrorMessage(new ApiError('x', 'c', s)),
     );
     expect(new Set(msgs).size).toBe(5);
+  });
+});
+
+/**
+ * The branch N55 added, and the one the device report was actually about.
+ *
+ * The athlete photographed a machine on a phone with four bars and read
+ * *"Could not reach the server. Try again when you have signal, or search for
+ * the exercise instead."* — this function's no-status default, taken because
+ * an oversized upload was dropped and every dead request looked alike.
+ */
+describe('identifyErrorMessage, on a request that never got an answer', () => {
+  const dead = [
+    ['no route to the API', new OfflineError()],
+    ['a timeout', new TimeoutError()],
+    ['a dropped connection', new RequestDroppedError()],
+  ] as const;
+
+  it.each(dead)('says which kind of dead request it was: %s', (_label, err) => {
+    // Each carries its own diagnosis rather than all three sharing one
+    // sentence. Fold two of them together and this goes red.
+    expect(identifyErrorMessage(err)).toContain(err.diagnosis);
+  });
+
+  it('gives all three different copy', () => {
+    const msgs = dead.map(([, err]) => identifyErrorMessage(err));
+    expect(new Set(msgs).size).toBe(3);
+  });
+
+  it('never sends an athlete with a working connection to look for signal', () => {
+    // The exact regression. A dropped upload and a timeout both happened over
+    // a network that was working; only the offline case may mention reach.
+    expect(identifyErrorMessage(new RequestDroppedError())).not.toMatch(/signal|reach/i);
+    expect(identifyErrorMessage(new TimeoutError())).not.toMatch(/signal/i);
+  });
+
+  it('still offers the search fallback on every one of them', () => {
+    // Mid-session, the athlete needs the exercise either way.
+    for (const [, err] of dead) expect(identifyErrorMessage(err)).toMatch(/search/i);
+  });
+
+  it('adds the action once, not twice', () => {
+    // The sentinel's own message ends in an action too. Composing the whole
+    // message instead of the diagnosis would read "... Try again. Search for
+    // the exercise instead."
+    expect(identifyErrorMessage(new TimeoutError())).not.toMatch(/try again/i);
+  });
+
+  it('offers a retry, because none of these is the athlete\'s fault', () => {
+    for (const [, err] of dead) expect(isRetryable(err)).toBe(true);
   });
 });

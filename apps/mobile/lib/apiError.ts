@@ -33,27 +33,130 @@ export class ApiError extends Error {
 }
 
 /**
- * We could not reach VOLA — no token, or no route to the API.
+ * The request produced no answer at all — the base of the transport family.
  *
- * Deliberately NOT an `ApiError`: nothing was ever answered, so there is no
- * status and no code to classify. That distinction is the whole point. The
- * old code threw `new Error('Not signed in.')` when Clerk returned a null
- * token, which offline is simply untrue and is what drove an athlete to try
- * signing in again mid-workout.
+ * Deliberately NOT an `ApiError`: nothing was answered, so there is no status
+ * and no code to classify. That distinction is the whole point.
  *
- * The message is written to be read on a phone in a gym: it says what
- * happened, says the session is intact, and says what to expect next.
+ * **Why it is a family rather than one class (N55).** It used to be one:
+ * `netFetch` converted every `fetch` rejection except an abort into
+ * `OfflineError`, so a TLS failure, a DNS failure, a timeout and a phone with
+ * no radio were literally the same object by the time any screen saw them.
+ * An athlete with four bars was told to *"Try again when you have signal"*
+ * while a photo upload was being dropped for its size. One sentinel cannot
+ * carry four diagnoses, and no per-screen wording can recover a distinction
+ * the transport already threw away.
+ *
+ * ## Diagnosis and action are separate on purpose
+ *
+ * `diagnosis` is what happened; the message is that plus a default action.
+ * A surface with a better action than "try again" — the machine camera can
+ * send you to search, the meal screen to manual entry — composes its own from
+ * `transportDiagnosis()` instead of writing a second description of the same
+ * failure. That is what keeps the wording central while the actions stay
+ * local: two screens had already written their own network copy, and a third
+ * would have made it the pattern.
+ *
+ * Copy is one line then an action, because it is read one-handed over a plate.
  */
-export class OfflineError extends Error {
+export class TransportError extends Error {
+  /** What happened, with no advice attached. Always ends in a full stop. */
+  readonly diagnosis: string;
+
+  constructor(diagnosis: string, action: string) {
+    super(`${diagnosis} ${action}`);
+    this.name = 'TransportError';
+    this.diagnosis = diagnosis;
+  }
+}
+
+/**
+ * No route to the API — nothing answered, and VOLA did not answer a probe
+ * either.
+ *
+ * **This is now the narrow case, not the default.** It is thrown when we have
+ * positive evidence that the API is unreachable: `netFetch` asks `/v1/healthz`
+ * before claiming it. `session.ts` also throws it when Clerk cannot be
+ * reached, which is the same statement about the same network.
+ *
+ * The "still signed in" clause is load-bearing and is not to be trimmed away:
+ * Clerk returns `null` offline, nine modules once read that as *"Not signed
+ * in."*, and a gym dead-spot told a signed-in athlete to sign in again on
+ * every screen at once. What was trimmed is the third sentence.
+ *
+ * Note what it does **not** claim: not "you are offline". A phone with a
+ * perfect signal and an API that is down is also here, and the athlete cannot
+ * act on the difference — see the captive-portal note in `authedFetch.ts`.
+ */
+export class OfflineError extends TransportError {
   constructor() {
-    super("Can't reach VOLA. You're still signed in — this'll load when the connection is back.");
+    super("Can't reach VOLA.", "You're still signed in — try again in a moment.");
     this.name = 'OfflineError';
   }
 }
 
-/** "I couldn't ask", as opposed to any answer the server gave. */
+/**
+ * We stopped waiting.
+ *
+ * Thrown when `netFetch`'s own deadline fires — so the app decides this, it
+ * does not read it off an error — and also when the runtime reports its own
+ * timeout. Distinct from `OfflineError` because a request that ran for thirty
+ * seconds had a network under it the whole time, and telling that athlete to
+ * go and find signal is the exact misdiagnosis N55 is about.
+ */
+export class TimeoutError extends TransportError {
+  constructor() {
+    super('VOLA took too long to answer.', 'Try again.');
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * The request failed while VOLA was demonstrably reachable.
+ *
+ * A connection reset, a refused body, a TLS handshake that failed on this
+ * request — the transport cannot tell us which (see `authedFetch.ts`), so this
+ * says only what was actually established: the network is there, and this
+ * request did not complete. That is enough to stop sending the athlete to look
+ * for signal, which is the whole complaint.
+ *
+ * The likeliest producer is an upload: biggest body, longest round trip, and
+ * the one the backend can cut off mid-stream — `MaxBytesReader` closes the
+ * connection after answering, so a client that is still writing may never read
+ * the 400 it was sent.
+ */
+export class RequestDroppedError extends TransportError {
+  constructor() {
+    super("That didn't get through.", 'Try again.');
+    this.name = 'RequestDroppedError';
+  }
+}
+
+/**
+ * "I couldn't ask", as opposed to any answer the server gave.
+ *
+ * **This is the check that inherited the old `isOffline` behaviour**, and
+ * every caller that used `isOffline` to mean "stay quiet and retry later" was
+ * moved to it — because before N55 every no-answer failure WAS an
+ * `OfflineError`, so this is what those call sites have always meant. Reach
+ * for `isOffline` only when the difference between "no route" and "the request
+ * failed" changes what you show.
+ */
+export function isTransportFailure(err: unknown): boolean {
+  return err instanceof TransportError;
+}
+
+/** Specifically no route to the API, as opposed to any other dead request. */
 export function isOffline(err: unknown): boolean {
   return err instanceof OfflineError;
+}
+
+/**
+ * The sentence describing a dead request, for a surface that supplies its own
+ * action. `null` for anything the server actually answered.
+ */
+export function transportDiagnosis(err: unknown): string | null {
+  return err instanceof TransportError ? err.diagnosis : null;
 }
 
 /**

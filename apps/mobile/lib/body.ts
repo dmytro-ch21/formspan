@@ -1,5 +1,5 @@
 import { apiRequest } from './apiRequest';
-import { netFetch } from './authedFetch';
+import { netFetch, SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
 import type { PhaseKind } from './anthropometry';
 import type { TokenGetter } from './useAuthToken';
 
@@ -209,13 +209,20 @@ export async function uploadCheckinPhoto(
     );
   }
 
-  const res = await netFetch(ticket.upload_url, {
-    method: 'PUT',
-    // Exactly the content type that was signed. Anything else is refused by
-    // the signature, which is the point of signing it.
-    headers: { 'Content-Type': ticket.content_type },
-    body: blob,
-  });
+  const res = await netFetch(
+    ticket.upload_url,
+    {
+      method: 'PUT',
+      // Exactly the content type that was signed. Anything else is refused by
+      // the signature, which is the point of signing it.
+      headers: { 'Content-Type': ticket.content_type },
+      body: blob,
+    },
+    // The slow budget, not the default: this is a multi-megabyte PUT to
+    // object storage over whatever the changing room has, and it is the one
+    // request in the app most likely to be slow for reasons of size alone.
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
+  );
   if (!res.ok) {
     throw new Error(`Couldn't upload that photo (${res.status}).`);
   }

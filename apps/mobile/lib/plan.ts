@@ -1,7 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import type * as SQLite from 'expo-sqlite';
 
-import { ApiError, isNotFound, isOffline, isPermanentRejection } from '@/lib/apiError';
+import { ApiError, isNotFound, isPermanentRejection, isTransportFailure } from '@/lib/apiError';
 import { dayString } from '@/lib/calendar';
 import { getDb } from '@/lib/db';
 import {
@@ -222,7 +222,7 @@ export type PlanSyncResult = {
 };
 
 function classify(err: unknown): 'offline' | 'permanent' | 'transient' {
-  if (isOffline(err)) return 'offline';
+  if (isTransportFailure(err)) return 'offline';
   if (isPermanentRejection(err)) return 'permanent';
   return 'transient';
 }

@@ -322,6 +322,12 @@ async function run(reason: string): Promise<void> {
       failures++;
       emit({
         lastError: err instanceof Error ? err.message : String(err),
+        // **`isOffline`, deliberately narrow.** This drives the word
+        // "Connected"/"No connection" on the sync screen, so it is the one
+        // place the N55 distinction changes an answer rather than preserving
+        // one: a `RequestDroppedError` was thrown *because* VOLA answered a
+        // probe, and reporting "No connection" over the top of that evidence
+        // is the same confident false statement in a smaller font.
         online: !isOffline(err),
         // Cleared, not carried. The run threw before reporting a count, so
         // the previous run's number describes nothing that is true now.

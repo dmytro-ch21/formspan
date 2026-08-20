@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 
 import { apiRequest } from './apiRequest';
 import { getDb } from './db';
-import { isOffline, isPermanentRejection } from './apiError';
+import { isPermanentRejection, isTransportFailure } from './apiError';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -171,10 +171,15 @@ export async function listSequences(
     const body = await apiRequest<{ sequences: Sequence[] }>(getToken, '/sequences', { signal });
     remote = body.sequences ?? [];
   } catch (err) {
-    // Offline is not an error here — the outbox is the answer. Anything else
-    // is worth propagating, or a server fault reads as "you have no
-    // sequences", which is the failure this codebase keeps re-learning.
-    if (!isOffline(err)) throw err;
+    // A request that got no answer is not an error here — the outbox is the
+    // answer. Anything else is worth propagating, or a server fault reads as
+    // "you have no sequences", which is the failure this codebase keeps
+    // re-learning.
+    //
+    // `isTransportFailure`, not `isOffline`: since N55 a dead request may be a
+    // timeout or a dropped connection as well as no route, and all three mean
+    // the same thing here — we could not ask, so fall back to what is local.
+    if (!isTransportFailure(err)) throw err;
   }
   const localIDs = new Set(local.map((s) => s.id));
   return [...local, ...remote.filter((s) => !localIDs.has(s.id))];
@@ -191,7 +196,9 @@ export async function getSequence(
   try {
     return await apiRequest<Sequence>(getToken, `/sequences/${encodeURIComponent(id)}`, { signal });
   } catch (err) {
-    if (isOffline(err)) return null;
+    // Same reading as the list above: no answer means "I could not ask", not
+    // "it is not there".
+    if (isTransportFailure(err)) return null;
     throw err;
   }
 }
@@ -207,7 +214,7 @@ export type SequenceSyncResult = {
 };
 
 function classify(err: unknown): 'offline' | 'permanent' | 'transient' {
-  if (isOffline(err)) return 'offline';
+  if (isTransportFailure(err)) return 'offline';
   if (isPermanentRejection(err)) return 'permanent';
   return 'transient';
 }

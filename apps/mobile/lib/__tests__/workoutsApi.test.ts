@@ -17,7 +17,12 @@ import { deleteWorkout, createWorkout, replaceItems } from '../workouts';
  */
 
 const mockFetch = jest.fn();
-jest.mock('../authedFetch', () => ({ netFetch: (...a: unknown[]) => mockFetch(...a) }));
+// Spread, not replaced — see the note in estimateApi.test.ts: `API_BASE` and
+// the timeout constants live in this module too.
+jest.mock('../authedFetch', () => ({
+  ...jest.requireActual('../authedFetch'),
+  netFetch: (...a: unknown[]) => mockFetch(...a),
+}));
 jest.mock('../trace', () => ({ newTraceId: () => 't', traceparent: () => 'tp' }));
 jest.mock('expo-crypto', () => ({ randomUUID: () => 'uuid' }));
 
