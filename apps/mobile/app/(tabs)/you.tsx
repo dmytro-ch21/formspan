@@ -190,7 +190,9 @@ export default function YouScreen() {
         labelled row reads, where a parenthetical crammed into a 14pt header
         label is something you squint at.
       */}
-      <ScreenHeader title="You" />
+      {/* Inside the ScrollView, so it scrolls away with the content and
+          nothing passes under it — no bottom rule. See `ScreenHeader`. */}
+      <ScreenHeader title="You" contentScrollsUnder={false} />
 
       <View style={styles.body}>
         {error && <Text style={styles.error}>{error}</Text>}

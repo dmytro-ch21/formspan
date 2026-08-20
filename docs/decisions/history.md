@@ -36776,6 +36776,167 @@ is the escaping trap that section warns about.
 The five already-closed tickets are a separate, deliberate decision: the script
 lists them (`--backfill --dry-run`) and reopening them is a bulk board move, so
 it waits on the user rather than happening as a side effect of this landing.
+## 2026-08-20 — W10: the Goals screen "scrolls until the content disappears", and the scroll was never the problem
+
+Reported from a device: *"the Goals screen scrolls on and on until the content
+disappears."* Three readings were possible and they need three different fixes —
+content ending early into blank space, momentum over an over-tall container, or
+something genuinely unmounting mid-scroll — so the first job was deciding which,
+not writing a fix.
+
+**It was none of them.** `app/(tabs)/goals.tsx`'s single `KeyboardAwareScrollView`
+was instrumented with `onLayout`, `onContentSizeChange` and an `onScroll` that
+computes `contentSize − viewport + contentInset.bottom` inside the same event it
+compares against. On an iPhone 17 Pro the extent is **exact in every state
+reachable**, `delta = 0.0` throughout:
+
+| state | contentSize | viewport | offset at the end |
+|---|---|---|---|
+| bare account | 1662.3 | 666 | 996.3 |
+| full derivation ladder + manual form | 2179 | 666 | 1513 |
+| accessibility XXXL, ladder | 7759 | 630 | 7129 |
+| accessibility XXXL, + manual form | 9492 | 630 | 8862 |
+| accessibility XXXL, + keyboard up | 9492 | 630 | 9076 (inset 214) |
+
+The keyboard inset is the true overlap, not the keyboard's height — keyboard top
+at 565pt against a scroll-view bottom at 780pt is 215, and RN applied 214 — and
+it returns to 0 after an interactive drag-dismiss, with no accumulation across
+cycles. The largest overshoot past the end across every sampled scroll event was
+**62.7pt**, springing back: ordinary rubber-band. Nothing over-scrolls, nothing
+unmounts (`goals.tsx` passes no `onScroll` of its own and `KeyboardAwareScroll`'s
+handler writes a ref, so **scrolling causes no re-render at all**; there are no
+timers or layout animations in the subtree; and `useWeightTrend`'s `loading`
+latches false after the first fetch, so a focus refetch cannot unmount
+`WeightTrendCard` and shrink the content underneath you).
+
+**The cause is that the header has no edge.** `View` from `Themed` deliberately
+paints no background, so `ScreenHeader` is transparent and the screen's own
+`vola.bg` shows through above and below the scroll view's top edge. The scroll
+view clips at its own frame. So content is cut **mid-glyph against an identical
+colour**, with no line, no shadow and no change of tone marking where it stopped
+being drawn. At accessibility text sizes a line is ~60pt, so a whole line
+vanishes into nothing at a time, and the manual form's `Use this from
+2026-08-20` button is sliced horizontally through its middle with the top half
+simply absent. The report was a literal and accurate description of that.
+
+**Method note, because it decided the result.** The first pass set the simulator
+text size while the app was running and only reached a third of the way down by
+hand — which produced stale Yoga layout (overlapping, clipped lines that are an
+artefact, not a bug) and left the extent question open at accessibility sizes.
+Setting the size **before launch**, and driving `scrollToEnd` from a temporary
+ref because 7129pt is not reachable in a sane number of swipes, is what turned
+"could not reproduce" into a measurement.
+
+**The fix is one hairline in `ScreenHeader`, and the predicate that decides where
+it is drawn took two attempts to get right.** The first version asked "is the
+header pinned?" and found four: `goals`, `workouts`, `library`, `phase`. That is
+a true fact about those screens and **the wrong question**, because the rule
+belongs to whatever content actually scrolls under. There are THREE arrangements:
+
+- **The header IS the boundary** — `goals`, `phase`. Draws the rule.
+- **The header scrolls away**, rendered inside the scroll view as its first
+  child — `index`, `food`, `you`. Nothing passes under it.
+- **The header sits above OTHER fixed chrome that owns the boundary** —
+  `workouts` has a scope tab strip that already draws
+  `borderBottomWidth: hairlineWidth` in `vola.line`, and `library` has a search
+  field and filter chips. Content scrolls under the chrome, not the header.
+
+Shipping the first version would have put a **second hairline about 40pt above
+an existing one** on `workouts` — the stacked-seams pattern this component's own
+history records eliminating — and on `library` it would have marked the
+header/search boundary, where nothing scrolls, while leaving the real clip edge
+below the chips exactly as bg-on-bg as before. **W10's own failure mode would
+have survived on Library, behind a rule that looked like a fix.** Caught in
+review; no test could see it, and none can. Library's unmarked edge is filed
+separately rather than papered over.
+
+So the prop is named for the question — `contentScrollsUnder`, default true —
+rather than for either reason to opt out. It was briefly `scrollsWithContent`,
+which described only the second arrangement and would have been a false
+assertion at the two call sites that opt out for the third.
+
+The "one continuous ground" objection this header was built on still stands
+where it applies: it did apply to `workouts`, which is why that screen is opted
+out rather than given a second seam, and it does not apply to `goals`/`phase`,
+which keep the page's ground and gain one hairline over a boundary that exists.
+
+That objection does not apply to what landed: the header keeps the page's ground
+and gains one hairline, and it divides a boundary that genuinely exists. The
+colour is `lineSoft`, which is already the tab bar's `borderTopColor`, so the
+scrolling region is bounded by the same weight of rule at both ends.
+
+**Default on, `scrollsWithContent` opts out**, because the two failure directions
+are not symmetric: a missing edge on a pinned header is this bug, a surplus edge
+on a scrolling one is a decorative line. A new screen that pins the header is
+therefore right without anyone remembering — the opt-in rot
+`KeyboardAwareScroll`'s own doc comment is about.
+
+**Not a scroll listener, and that is a deliberate trade.** An edge that fades in
+once content is beneath it says more. The header and the scroller are siblings,
+so a scroll-derived value has to be plumbed between them through a provider
+wrapping both, on four screens — and the property being protected is that
+`goals.tsx` re-renders **zero** times while scrolling. A static hairline costs
+nothing and fixes the reported bug.
+
+Both arms are tested and both mutants were killed: drop the edge and the pinned
+test goes red, apply it unconditionally and the scrolling test does, and the
+restore was confirmed by re-running rather than by grepping the file.
+
+**A comment asserting what the code contradicts — the third instance in one
+day.** The doc block above shipped, in review, claiming content passes under the
+header on four screens when it does so on two. The other two that day: a rail
+comment saying rows butt together when `paddingBottom: 10` guaranteed they did
+not, and a `history.md` claim that a one-bullet rule held "with no exceptions"
+against three exceptions. Each was caught by review, **none by a test**, and each
+was written by someone who believed it. The pattern is worth more than any of the
+three: a comment is an assertion nothing executes, so it decays silently and it
+decays *fastest* in exactly the places we write the most prose — the ones we
+think are subtle. Where a comment states a fact about other files, check the
+files.
+
+**Known and not fixed: the rule is 1.23:1** (`lineSoft` `#1A2230` on `bg`
+`#080B12`), against a palette whose own commentary records rejecting 1.14:1
+elsewhere as reading like "scattered dots". `line` would be 1.38:1 and 3:1 needs
+roughly `#5A606A`, a loud divider rather than a hairline — so closing it is a
+decision about the app's visual character, not a bug fix. The sharp version:
+**this fix is weakest exactly where the bug is worst**, since the reader losing a
+whole 60pt line at a time is the one on accessibility sizes. Filed as F20 (#496)
+with the options costed. Two mitigations, from review: a continuous full-width
+line resolves far better than the dotted grid that precedent is about, and the
+failure mode is degradation to the status quo rather than to something worse.
+
+**Verified by pixel-sampling rather than by looking**, because "I can see it" is
+not a measurement on a dark screenshot: on `Goals` at accessibility XXXL the
+device row at exactly 150.0pt is `#1A2230` across **100%** of the width between
+two rows of `#080B12`; at default text the row at 114.0pt is `#1A2230` across
+82%, the missing 18% being the floating settings button that overlays the
+header. On `Plan` the same scan returns **0%**. The first attempt at that check
+compared two files that turned out to be byte-identical — I had named a capture
+"plan" without ever leaving Goals — which is this file's own apparatus rule
+arriving inside the evidence for a fix about false assertions.
+
+**Deliberately not attempted here: the length.** The screen is 2.5–3.3 viewports
+at default text, 3.2 at the largest ordinary size, and **twelve to fifteen at
+accessibility sizes**. That is a faithful second cause of "scrolls on and on" and
+it is a redesign, not a fix; it belongs to N106 (#485), which was given the
+numbers.
+
+**Two accessibility-size defects found while measuring, neither fixed here.**
+`TrendCard`'s footer row has no `flexShrink` on its action pill, so at
+accessibility XXXL `Record Weight` wraps to two lines, widens past the card's
+border and runs off the right edge of the screen — filed as #491, and it is a
+shared component so fixing it inside W10 would have fixed one caller. And
+`Row`'s label column (`rowMain: flex: 1`) squeezes "Resting rate" onto three
+narrow lines beside its value; that one goes to the redesign.
+
+**Gaps stated rather than left implicit.** The smallest supported device is
+unverified — an iPhone SE (3rd gen) simulator was created and the build
+installed, but this session had no input access to it. Extent-equality is a
+property of the layout tree and a shorter viewport cannot make an exact extent
+inexact, so that gap does not touch the diagnosis; it touches the verification.
+And the derivation ladder was driven from a fixture rather than real account
+data, which is sufficient when the thing measured is geometry.
+
 
 ## Open items / known gaps as of this entry
 

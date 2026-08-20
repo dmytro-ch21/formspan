@@ -11128,3 +11128,74 @@ Reading the diff cannot settle any of these. They need a build.
     `react-native-svg` mounts an `RNSVGText` host node.
 22. The selected range chip announces itself as selected, and its label reads
     as a period rather than as "1W".
+
+## W10 — the scrolling region has a visible top edge (`components/ScreenHeader.tsx`)
+
+Covers the hairline `ScreenHeader` draws when its own bottom edge is the top of
+the scrolling region, and suppresses otherwise.
+
+Background, because it decides what "correct" looks like: `View` from `Themed`
+paints no background, so the header is transparent and the screen's own ground
+shows through on both sides of the scroll view's top edge. Without a rule,
+content is clipped mid-glyph against an identical colour — reported from a
+device as *"the Goals screen scrolls on and on until the content disappears"*.
+The scroll extent was measured as exact in every state, so **nothing here is
+about how far the screen scrolls.**
+
+**The predicate is not "is the header fixed?"** Three arrangements exist across
+the seven callers, and only the first draws a rule:
+
+| screen | arrangement | rule under the header? |
+|---|---|---|
+| `Goals`, `Phase` | header sits directly on the scroller | **yes** |
+| `Today`, `Food`, `You` | header is inside the scroll view and scrolls away | no |
+| `Plan` | scope tab strip below owns the boundary and draws its own rule | no |
+| `Library` | search field and chips below sit between header and list | no |
+
+### Happy path
+
+1. **`Goals` and `Phase`.** Scroll. Content must meet a visible full-width rule
+   under the title and pass under it — never dissolve into the background.
+2. **`Today`, `Food`, `You`.** No rule under the header: it scrolls away with
+   the content and nothing passes beneath it.
+3. **`Plan`.** Exactly **one** rule in the fixed chrome — the scope strip's.
+   A second hairline ~40pt above it, under the header, is the regression this
+   scenario exists to catch.
+4. **`Library`.** No rule under the header. Note the clip edge **below** the
+   search and chips is still unmarked — tracked separately; do not "fix" it by
+   putting a rule under the header, which marks a boundary nothing crosses.
+5. **The rule matches the tab bar's.** On the screens that draw it, the edge
+   under the header and the edge along the top of the tab bar are the same
+   weight and colour.
+
+### Edge cases
+
+6. **Accessibility text sizes** (`Settings ▸ Accessibility ▸ Display & Text Size
+   ▸ Larger Text`, at maximum). Set it **before launching the app** — a size
+   changed while the app is running leaves stale layout, which looks like a
+   rendering bug and is an artefact. This is where the bug was unmistakable: a
+   line is ~60pt tall, so a whole line used to vanish at a time.
+7. **Is the rule legible to you?** It is 1.23:1 against the page ground (#496).
+   Judge it at accessibility sizes specifically, where it matters most and where
+   the reader most likely has reduced vision. A "no" here is a real finding.
+8. **A control crossing the boundary.** Scroll `Goals` until the manual form's
+   `Use this from <date>` button is half under the header. It must be visibly
+   cut by the rule rather than sliced through its middle with the top half
+   simply absent.
+9. **Smallest supported device.** Repeat 1–4 on an iPhone SE — a header edge is
+   one of the things a short viewport shows most of.
+10. **A drawing screen with nothing to scroll.** `Phase` with a short form. The
+    rule is present and marks a boundary nothing is passing under. Accepted, not
+    a defect — but confirm it reads as an edge rather than a stray divider.
+11. **Keyboard up.** Open `Type your own target` on `Goals` and focus a field.
+    The rule stays put; the content inset changes, the header does not.
+
+### Not covered by the suite
+
+12. Whether the rule is **visible**, whether it lands exactly on the scroll
+    view's top edge, and whether 1.23:1 is legible to a low-vision reader. jest
+    runs no Yoga pass and has no pixels — `components/__tests__/screenHeader.test.tsx`
+    pins only the decision (draws / does not). Pixel-sampling a device
+    screenshot at the header's bottom edge is the cheap objective check: on
+    `Goals` at accessibility XXXL the row at 150.0pt is `#1A2230` across 100% of
+    the width, between two rows of `#080B12`.

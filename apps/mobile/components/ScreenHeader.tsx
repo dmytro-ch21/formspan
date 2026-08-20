@@ -91,6 +91,97 @@ import { useAccent } from '@/lib/AccentProvider';
  * `onLayout` reports it — so there is no factor here to go stale. The obvious
  * future edit (`if (fontScale > 1.3) hide`) would inherit that trap and
  * re-encode today's labels; do not.
+ *
+ * ## The edge belongs to whatever the content actually scrolls under (W10)
+ *
+ * Seven screens use this header, and the question that decides whether it
+ * draws a bottom rule is **not** "is the header fixed?" — it is **"is this
+ * header's bottom edge the top of the scrolling region?"** Three arrangements
+ * exist and only the first says yes:
+ *
+ *  - **The header IS the boundary** — a sibling directly above the scroller, so
+ *    content passes under the header itself. `goals`, `phase`. These draw it.
+ *  - **The header scrolls away** — rendered INSIDE the scroll view as its first
+ *    child, so nothing ever passes under it. `index` (Today), `food`, `you`.
+ *  - **The header sits above OTHER fixed chrome, which owns the boundary** —
+ *    `workouts` has a scope tab strip between the header and its list, and that
+ *    strip already draws `borderBottomWidth: hairlineWidth` in `vola.line`;
+ *    `library` has a search field and filter chips. In both, content scrolls
+ *    under the chrome, not under the header.
+ *
+ * **An earlier version of this note got that wrong**, and it is worth leaving
+ * the correction visible rather than quietly fixing it: it said four screens
+ * pin the header and therefore four have content passing underneath. The first
+ * half was true and the second did not follow, so the rule would have put a
+ * SECOND hairline about 40pt above `workouts`'s existing one — the stacked
+ * seams this component's own history records eliminating — while on `library`
+ * it would have marked the header/search boundary, where nothing scrolls, and
+ * left the real clip edge below the chips exactly as bg-on-bg as before. Caught
+ * in review, not by any test. See the note in `docs/decisions/history.md`.
+ *
+ * ## What the bug was
+ *
+ * `View` from `Themed` deliberately paints no background, so this header is
+ * transparent and the screen's own `vola.bg` shows through on both sides of the
+ * scroll view's top edge. The scroll view clips at its own frame. So content is
+ * **cut mid-glyph against an identical colour** — no line, no shadow, no change
+ * of tone at the place where it stops being drawn.
+ *
+ * That is W10, reported as *"the Goals screen scrolls on and on until the
+ * content disappears"*, and the report was accurate. Measured on an iPhone
+ * 17 Pro: the extent is exact in every state (`contentOffset` lands on
+ * `contentSize − viewport + inset` to the pixel, at default AND at accessibility
+ * text sizes), so nothing is over-tall and nothing unmounts — text simply leaves
+ * the screen with no edge to leave at. At accessibility sizes a line is ~60pt,
+ * so a whole line vanishes into nothing at a time.
+ *
+ * ## Why a hairline, when this header exists partly to have removed one
+ *
+ * The note above records replacing React Navigation's header because it drew
+ * "its own surface colour and a hairline rule — two bands of subtly different
+ * dark, stacked against a third". That objection was to a stack of SURFACES,
+ * and to seams "dividing a layout that has no actual sections". Neither applies
+ * where this rule is drawn: the header keeps the page's ground and gains one
+ * hairline, over a boundary that genuinely exists. It very much DID apply to
+ * `workouts`, which is why that screen is opted out rather than given a second
+ * seam.
+ *
+ * `lineSoft` matches the tab bar's own `borderTopColor` in
+ * `app/(tabs)/_layout.tsx`, so on the two screens that draw it the scrolling
+ * region is bounded by the same weight of rule at both ends.
+ *
+ * **Known and NOT fixed: `lineSoft` on `vola.bg` is 1.23:1** — under the 3:1
+ * non-text floor, and this palette's own commentary records rejecting 1.14:1
+ * elsewhere as reading like "scattered dots". No line token here reaches 3:1;
+ * that needs roughly `#5A606A`, which is a loud divider rather than a hairline,
+ * and choosing it is a decision about the app's visual character. The sharp
+ * version: **this fix is weakest exactly where the bug is worst**, since the
+ * reader losing a whole 60pt line at a time is the one on accessibility sizes.
+ * Tracked as F20 (#496); do not close it by nudging the token here.
+ *
+ * ## Why always-present rather than appearing on scroll
+ *
+ * An edge that fades in once content is beneath it says more. It is not cheap
+ * here: the header and the scroller are SIBLINGS, so a scroll-derived value has
+ * to be plumbed between them through a provider wrapping both. That buys the
+ * animation at the cost of the property worth protecting — `goals.tsx` passes no
+ * `onScroll` of its own and re-renders **zero** times while scrolling. A static
+ * hairline costs nothing and fixes the reported bug; take it.
+ *
+ * ## Default ON, opt out with `contentScrollsUnder={false}`
+ *
+ * Five of seven callers opt out, which looks backwards until you compare the
+ * two failure directions. A **missing** edge where content scrolls under the
+ * header is the reported bug: invisible in code review, invisible to every
+ * test, and found only when somebody reports it from a device. A **surplus**
+ * edge is a stray line somebody sees immediately. So the default is the one
+ * whose failure is loud, and a new screen that pins the header straight onto a
+ * scroller is right without anyone remembering.
+ *
+ * **Known and accepted**: on a screen that draws it but whose content is shorter
+ * than the viewport, the rule marks a boundary nothing is currently passing
+ * under. It still says the region below scrolls, and it becomes load-bearing the
+ * moment that screen has one more row than fits.
  */
 
 /** The artwork's width, and the clearance it needs on each side. */
@@ -134,7 +225,27 @@ function useMeasuredWidth(): [number | null, (e: LayoutChangeEvent) => void] {
   return [width, onLayout];
 }
 
-export function ScreenHeader({ title, action }: { title: string; action?: React.ReactNode }) {
+export function ScreenHeader({
+  title,
+  action,
+  contentScrollsUnder = true,
+}: {
+  title: string;
+  action?: React.ReactNode;
+  /**
+   * Does this header's bottom edge sit at the top of the scrolling region?
+   *
+   * `false` when the header scrolls away inside the scroll view, AND when it is
+   * pinned above other fixed chrome that owns the boundary instead — see the
+   * three arrangements at the top of this file. Both suppress the rule, for
+   * different reasons, so each call site says which.
+   *
+   * Named for the question rather than for either reason on purpose: an earlier
+   * `scrollsWithContent` described only the first, and would have been a false
+   * assertion at the two call sites that opt out for the second.
+   */
+  contentScrollsUnder?: boolean;
+}) {
   const insets = useSafeAreaInsets();
   const accent = useAccent();
 
@@ -153,7 +264,14 @@ export function ScreenHeader({ title, action }: { title: string; action?: React.
   return (
     // The row is the positioning context for the centred wordmark, so the
     // title's own width can't push it off-centre.
-    <View style={[styles.wrap, { paddingTop: insets.top + 14 }]}>
+    <View
+      style={[
+        styles.wrap,
+        contentScrollsUnder && styles.scrollEdge,
+        { paddingTop: insets.top + 14 },
+      ]}
+      testID="screen-header"
+    >
       <View style={styles.row} onLayout={onRowLayout} testID="screen-header-row">
         <RNView style={styles.titleWrap} onLayout={onLeftLayout}>
           <Text style={styles.title}>{title}</Text>
@@ -211,6 +329,16 @@ export function ScreenHeader({ title, action }: { title: string; action?: React.
 
 const styles = StyleSheet.create({
   wrap: { paddingHorizontal: 20, paddingBottom: 10 },
+  // The top of the scrolling region, when this header is what content passes
+  // under — see the three arrangements in the W10 note at the top. `lineSoft`
+  // is the tab bar's own `borderTopColor`, so on those screens the scrolling
+  // region is bounded by the same weight of rule at both ends. Full-bleed
+  // rather than inset by `paddingHorizontal`: it marks the edge of the scroll
+  // view, which runs the whole width, not the edge of the text.
+  scrollEdge: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.lineSoft,
+  },
   wordmark: {
     position: 'absolute',
     left: 0,

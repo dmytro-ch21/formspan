@@ -258,7 +258,12 @@ export default function WorkoutsScreen() {
     <View style={styles.container} testID="workouts-screen">
       {/* "Plan", not "Workouts": this screen is now the week's plan *and* the
           templates it draws from, and the tab bar has always called it Plan. */}
-      <ScreenHeader title="Plan" />
+      {/* No bottom rule: the scope strip below owns this boundary and already
+          draws one (`scopeRow`, `borderBottomColor: vola.line`). Content scrolls
+          under THAT, not under the header — a rule here would be a second seam
+          ~40pt above the first, which is the stacked-seams pattern this header
+          exists to have removed. Raised in review on the W10 PR. */}
+      <ScreenHeader title="Plan" contentScrollsUnder={false} />
       {/*
         A tab strip with an underline, not two filled buttons.
 

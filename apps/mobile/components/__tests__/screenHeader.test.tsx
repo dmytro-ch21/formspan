@@ -1,4 +1,4 @@
-import { View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 import { configure, fireEvent, render, screen, within } from '@testing-library/react-native';
 
 import { ScreenHeader, wordmarkFits } from '../ScreenHeader';
@@ -170,5 +170,67 @@ describe('the header itself', () => {
     const cluster = within(screen.getByTestId('screen-header-actions'));
     expect(cluster.getByTestId('sync-chip')).toBeTruthy();
     expect(cluster.getByTestId('probe-action')).toBeTruthy();
+  });
+});
+
+/**
+ * W10 — the rule marks the top of the scrolling region, and nothing else.
+ *
+ * The bug: `View` from `Themed` paints no background, so this header is
+ * transparent and the screen's own ground shows through on both sides of the
+ * scroll view's top edge. Content is therefore clipped **mid-glyph against an
+ * identical colour**, with nothing marking where it stopped being drawn —
+ * reported from a device as "scrolls on and on until the content disappears".
+ *
+ * **The predicate is not "is the header fixed?"** Seven callers, three
+ * arrangements: the header IS the boundary (`goals`, `phase`); the header
+ * scrolls away inside the scroll view (`index`, `food`, `you`); the header is
+ * pinned above OTHER fixed chrome that owns the boundary (`workouts`'s scope
+ * strip, which already draws its own rule; `library`'s search and chips). Only
+ * the first draws. The first version of this fix conflated the first and third
+ * and would have put a second seam 40pt above an existing one — review caught
+ * it, this suite did not, which is why the third arrangement is named here.
+ *
+ * **What this test can and cannot prove.** It pins the decision, and either
+ * mutation turns one arm red. It cannot prove the rule is VISIBLE, that it
+ * lands on the scroll view's top edge, or that 1.23:1 is legible to anyone —
+ * jest runs no Yoga pass and has no pixels.
+ *
+ * **The device half is answered by sampling pixels, not by looking**, and the
+ * numbers are recorded on #484: on `Goals` at accessibility XXXL the device row
+ * at exactly 150.0pt is `#1A2230` across 100% of the width, between two rows of
+ * `#080B12`; at default text the row at 114.0pt is `#1A2230` across 82%, the
+ * rest being the floating settings button that overlays the header; on `Plan`
+ * the same scan returns 0%. `docs/testing/functional-scenarios.md` carries that
+ * scan as a repeatable check alongside the per-screen script, and #496 tracks
+ * whether 1.23:1 is enough for the reader who needs it most.
+ *
+ * BOTH arms are required. With only the first, "always draws" passes while
+ * seaming five screens that have no boundary; with only the second, "never
+ * draws" passes while leaving the reported bug exactly as it was.
+ */
+describe('the edge at the top of the scrolling region', () => {
+  it('draws a rule when content scrolls under the header itself', () => {
+    // `goals` and `phase`: the header's bottom edge IS the scroll view's top.
+    render(<ScreenHeader title="Your target" />);
+    expect(screen.getByTestId('screen-header')).toHaveStyle({
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      // LITERAL, per this file's convention — `vola.lineSoft`. A token-based
+      // assertion would silently follow a palette change, and at 1.23:1 (#496)
+      // this is precisely the value worth making a human re-confirm. It must
+      // stay equal to the tab bar's `borderTopColor` in `app/(tabs)/_layout.tsx`,
+      // which is a route file and cannot be imported here.
+      borderBottomColor: '#1A2230',
+    });
+  });
+
+  it('draws none when nothing scrolls under the header', () => {
+    // Two different reasons, one flag: the header scrolls away (`index`,
+    // `food`, `you`), or fixed chrome below owns the boundary (`workouts`,
+    // `library`). A rule in either case is a seam across nothing.
+    render(<ScreenHeader title="Today" contentScrollsUnder={false} />);
+    const header = screen.getByTestId('screen-header');
+    expect(header).not.toHaveStyle({ borderBottomWidth: StyleSheet.hairlineWidth });
+    expect(StyleSheet.flatten(header.props.style).borderBottomWidth).toBeUndefined();
   });
 });

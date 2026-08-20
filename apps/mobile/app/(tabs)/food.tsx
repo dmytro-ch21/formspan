@@ -253,8 +253,11 @@ export default function FoodScreen() {
         contentContainerStyle={[styles.container, { paddingBottom: TAB_BAR_CLEARANCE + 40 }]}
         contentInsetAdjustmentBehavior="never"
       >
+        {/* Inside the ScrollView, so it scrolls away with the content and
+            nothing passes under it — no bottom rule. See `ScreenHeader`. */}
         <ScreenHeader
           title="Food"
+          contentScrollsUnder={false}
           action={
             <Pressable
               onPress={() => router.push('/(tabs)/goals')}

@@ -1010,7 +1010,9 @@ export default function TodayScreen() {
       contentInsetAdjustmentBehavior="never"
       testID="today-screen"
     >
-      <ScreenHeader title="Today" />
+      {/* Inside the ScrollView, so it scrolls away with the content and
+          nothing passes under it — no bottom rule. See `ScreenHeader`. */}
+      <ScreenHeader title="Today" contentScrollsUnder={false} />
 
       <View style={styles.body}>
         {/*
