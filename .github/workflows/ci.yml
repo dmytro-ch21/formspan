@@ -264,6 +264,22 @@ jobs:
       - name: Telemetry buffer parity
         run: python3 scripts/check-telemetry-parity.py
 
+      # Two deadlines bound one request, in two languages, and what matters is
+      # the ORDER between them rather than either value: the server must answer
+      # before the phone gives up, or the athlete receives no status at all and
+      # the app can only say it could not reach the server. That is N92 (#433).
+      #
+      # Unlike its three siblings above, this one demands the copies DIFFER, and
+      # by a margin — the two clocks do not start together, so a nominal gap is
+      # spent on the upload before the handler's clock has begun.
+      #
+      # It nearly shipped broken: N92's constant was written at 45s before N55
+      # (#448) gave the client a deadline, and N55 chose 45s too. The rebase
+      # turned a deliberate margin into an exact tie, both suites stayed green,
+      # and nothing else in the build had an opinion.
+      - name: Request timeout parity
+        run: python3 scripts/check-timeout-parity.py
+
       # The dictation eval corpus (N33/N34) is hand-authored, and a hand-authored
       # expectation is exactly as capable of being wrong as the model it grades.
       # An expected tag naming a technique id that does not exist — or writing a

@@ -19,6 +19,7 @@
     "check:rate-parity": "python3 scripts/check-rate-parity.py",
     "check:tasks": "python3 scripts/check-tasks-integrity.py",
     "check:telemetry-parity": "python3 scripts/check-telemetry-parity.py",
+    "check:timeout-parity": "python3 scripts/check-timeout-parity.py",
     "check:verify-chain": "python3 scripts/check-verify-chain.py",
     "ci:checks": "python3 scripts/check-ci-checks.py",
     "dev:admin": "pnpm --filter admin dev",
@@ -38,7 +39,7 @@
     "typecheck:admin": "pnpm --filter admin exec tsc --noEmit",
     "typecheck:mobile": "pnpm run routes:mobile && pnpm --filter mobile exec tsc --noEmit",
     "typecheck:web": "pnpm --filter web exec tsc --noEmit",
-    "verify": "pnpm run check:tasks && pnpm run check:verify-chain && pnpm run check:ci-detector && pnpm run check:palette && pnpm run check:icons && pnpm run check:python && pnpm run check:grip-parity && pnpm run check:rate-parity && pnpm run check:telemetry-parity && pnpm run check:evals && pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run lint:mobile && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run check:brand-copies && pnpm run lint:web && pnpm run typecheck:web && pnpm run test:web && pnpm run lint:admin && pnpm run typecheck:admin && pnpm run test:admin",
+    "verify": "pnpm run check:tasks && pnpm run check:verify-chain && pnpm run check:ci-detector && pnpm run check:palette && pnpm run check:icons && pnpm run check:python && pnpm run check:grip-parity && pnpm run check:rate-parity && pnpm run check:telemetry-parity && pnpm run check:timeout-parity && pnpm run check:evals && pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run lint:mobile && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run check:brand-copies && pnpm run lint:web && pnpm run typecheck:web && pnpm run test:web && pnpm run lint:admin && pnpm run typecheck:admin && pnpm run test:admin",
     "vet:api": "cd backend && go vet ./..."
   },
   "devDependencies": {

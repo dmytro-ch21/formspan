@@ -98,6 +98,24 @@ var (
 	// and `llm.ErrUnreachable` for which failures qualify and which
 	// deliberately do not.
 	ErrEstimateUnreachable = fmt.Errorf("%w: the provider never answered", ErrEstimateUnavailable)
+	// ErrEstimateTimeout is OUR OWN deadline firing — the provider was still
+	// thinking when `estimateTimeout` ran out and we stopped waiting.
+	//
+	// **It wraps ErrEstimateUnavailable and NOT ErrEstimateUnreachable**, and
+	// that placement is the whole of its meaning rather than a detail. The
+	// unreachable sentinel is the F16 exemption: nothing was spent, so nothing
+	// is metered. A call we abandoned mid-flight is the opposite case — the
+	// request reached the provider and the tokens are very likely already
+	// bought — and `llm.ErrUnreachable`'s own doc comment says so explicitly of
+	// cancelled and timed-out calls. So this one IS metered, exactly as an
+	// unmapped upstream failure is, and the only thing it changes is the status
+	// and the sentence the athlete reads.
+	//
+	// It exists because the two are indistinguishable to a client otherwise:
+	// before this, a slow provider produced no HTTP response at all, and a
+	// phone that receives no response has nothing to say except that it could
+	// not reach us. See N92 (#433).
+	ErrEstimateTimeout = fmt.Errorf("%w: no answer before our deadline", ErrEstimateUnavailable)
 )
 
 // MaxDescriptionRunes bounds the text path.

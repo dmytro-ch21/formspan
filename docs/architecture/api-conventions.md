@@ -35,6 +35,16 @@ Every route is prefixed with a version: `/v1/...`. Added now, while it's cheap (
 | 410 | The resource was really here and is really gone — currently only `POST /v1/shares/{id}/accept`, when the sender deleted the thing between sending and accepting. Distinct from 404 because the caller was genuinely sent something, and a silent miss would read to them as a bug. Note it carries the `not_found` **code**: the code enum is part of the contract and closed, and a 410 is a not-found with provenance. |
 | 499 | The caller disconnected before the response was written (nginx's convention). **The one response with no body** — nothing is listening, and a JSON error shape would be misleading if it somehow were. Not a failure: it is not logged at ERROR and should not count toward an error-rate alert. |
 | 500 | Unexpected server error |
+| 504 | **We** stopped waiting on an upstream we depend on — currently only `POST /v1/nutrition/estimate`, whose provider call is bounded at 35s, ten seconds under the mobile client's own. Carries `unavailable`, same as the 503, because the client's move is identical: retry the same request later, nothing in it to fix. It exists so that endpoint always answers with a *status*: a client that times out instead receives no status and no body, and has nothing left to say except that it could not reach the server — which is what an athlete was shown on a working connection (N92). |
+
+Not exhaustive for the AI-backed routes. `/v1/nutrition/estimate` and
+`/v1/exercises/identify` also answer 422 (the model refused a well-formed
+request), 502 (the provider answered with something unusable) and 503 (the
+provider never answered, or this deploy has no key) — **and which of those meter
+the athlete's daily quota differs per status**, which is contract a client has
+to read. [contracts/public.openapi.yaml](../../contracts/public.openapi.yaml) is
+the source for those, per the note under the error shape below; this table is
+the cross-cutting set.
 
 ## Error response shape
 
