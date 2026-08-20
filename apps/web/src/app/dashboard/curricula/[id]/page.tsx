@@ -99,7 +99,13 @@ export default function CurriculumDetailPage() {
     setBusy(true);
     try {
       const p = proposeFocus(c.items ?? [], focus);
-      await setBjjFocus(getToken, p.next);
+      // `fromRoadmap`, never `next` — the difference is the athlete's own
+      // entries, which this roadmap carries along but does not own. Attributing
+      // those to it would delete them when it is deactivated.
+      await setBjjFocus(getToken, p.next, {
+        curriculum_id: c.id,
+        technique_ids: p.fromRoadmap,
+      });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

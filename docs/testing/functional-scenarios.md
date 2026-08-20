@@ -3057,6 +3057,69 @@ differ here — deliberately, and stated rather than implied.
   drop a `user_id` and the easiest to not notice.
 - Unauthenticated → 401.
 
+### Focus provenance, and leaving a roadmap (`PUT /v1/bjj/focus` `roadmap`, `DELETE /v1/curricula/{id}/enrollment`)
+
+A focus row records WHY it is there, so un-enrolling can take back what a roadmap
+put in the list without touching what the athlete chose. **Every scenario below is
+about a deletion, so each one is either the reported bug or a data-loss bug — there
+is no cosmetic case here.**
+
+**Happy path**
+
+- Enrol in a roadmap, apply its focus, deactivate it → **its techniques are gone
+  from the list and from the reflection wizard's chips.** This is N95 itself.
+- Hand-pick two techniques first, then enrol and deactivate → **both hand-picked
+  ones survive.** Assert them by name, not by count: a fix that deleted the wrong
+  row still leaves two.
+- Two roadmaps active, deactivate one → the other's techniques stay. **Make them
+  OVERLAP on at least one technique**, which is the case a single-valued
+  provenance column gets wrong and a set gets right. Non-overlapping roadmaps
+  pass either implementation.
+- A technique in focus from **both** a roadmap and the athlete's own choice
+  survives deactivation. Test it in the order hand-first-then-roadmap; that is
+  the order provenance is designed around.
+
+**Edge cases and errors**
+
+- **An ordinary reorder must not rewrite provenance.** Apply a roadmap, then
+  reorder by hand (a `PUT` with no `roadmap` block), then deactivate. The
+  roadmap's techniques must still go. If provenance is rewritten on re-save,
+  every roadmap row launders itself into hand-picked on the most ordinary edit
+  there is — and the bug returns, silently and permanently.
+- **Rows created before provenance existed are never deleted by a deactivation.**
+  The migration records them `unknown` rather than guessing, so they behave as
+  hand-picked. The visible consequence, which is intended: an athlete already
+  carrying stale roadmap techniques keeps them until they clear them by hand.
+- **A roadmap may not take ownership of a row the athlete owns**, even when the
+  roadmap lists that technique. Assert on the stored claim, not only on what a
+  later deactivation deletes — the attribution guard and the release guard cover
+  for each other, so an outcome-only assertion passes with either one removed.
+- Deactivating twice changes nothing the second time; deactivating a roadmap
+  never enrolled in changes nothing at all.
+- `roadmap.technique_ids` containing an id absent from `technique_ids` → 400,
+  and nothing is written.
+- `roadmap` present with no `curriculum_id` → 400.
+- `roadmap.curriculum_id` naming no curriculum → 400 (not 500), whole save rolls
+  back.
+- An **empty** `roadmap.technique_ids` is accepted, not refused — a roadmap whose
+  every technique is mastered proposes a list made entirely of the athlete's own
+  entries, and refusing it would make "apply" fail exactly when the roadmap is
+  finished.
+- **A failed focus release must not archive the enrolment.** Otherwise the
+  athlete is un-enrolled from a roadmap whose techniques no future call can
+  reach — the reported bug, made permanent by the fix for it.
+
+**Auth and security**
+
+- **One athlete leaving a shared public syllabus must not disturb another's.**
+  Two athletes enrolled in the same curriculum, both with focus rows from it; one
+  deactivates. Assert the other's row survives **and that their own deactivation
+  still works afterwards** — the second half is the one that matters. Dropping
+  the user scope from the claim delete leaves every row count green while
+  silently stranding the other athlete's row with nothing able to release it.
+- Un-enrolment is self-scoped: no request can name another athlete.
+- Unauthenticated → 401, and no focus rows are released.
+
 ### The technique funnel, read back (`GET /v1/bjj/proficiency`, `/dashboard/proficiency`)
 
 **Happy path**

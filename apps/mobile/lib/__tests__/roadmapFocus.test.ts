@@ -166,6 +166,45 @@ describe('the cap', () => {
   });
 });
 
+describe('fromRoadmap', () => {
+  // What the server attributes to this roadmap, and therefore what deactivating
+  // it is allowed to delete. Getting this wrong in either direction is a bug
+  // with a face: too wide deletes the athlete's own choices, too narrow leaves
+  // the roadmap's techniques in the wizard after they switch it off (N95).
+  it('names the roadmap steps and never the athlete-held entries beside them', () => {
+    // `x` is the athlete's own, unrelated to the roadmap, kept by rule 3.
+    const p = proposeFocus([step('a', false), step('b', false)], [focus('x')]);
+    expect(p.next).toEqual(['a', 'b', 'x']);
+    expect(p.fromRoadmap).toEqual(['a', 'b']);
+  });
+
+  it('claims a technique the athlete already held, so the roadmap can be one of its reasons', () => {
+    // The both-sources case. The client names it; the SERVER is what refuses to
+    // take ownership of a row already marked as the athlete's, so naming it here
+    // is safe — and necessary, because a second roadmap wanting the same
+    // technique must be able to register its own claim or deactivating the first
+    // takes the technique away from it.
+    const p = proposeFocus([step('a', false)], [focus('a'), focus('x')]);
+    expect(p.fromRoadmap).toEqual(['a']);
+  });
+
+  it('is always a subset of next, so the cap cannot let it name an unsent id', () => {
+    // The server rejects a fromRoadmap id that is not in technique_ids, so an
+    // implementation reading the roadmap's items rather than `next` would 400
+    // the moment the cap trimmed one.
+    const many = Array.from({ length: 9 }, (_, i) => step(`t${i}`, false));
+    const p = proposeFocus(many, [], 5);
+    expect(p.fromRoadmap).toEqual(p.next);
+    expect(p.fromRoadmap).toHaveLength(5);
+  });
+
+  it('excludes a mastered roadmap technique, which is leaving rather than arriving', () => {
+    const p = proposeFocus([step('a', true), step('b', false)], [focus('a')]);
+    expect(p.next).toEqual(['b']);
+    expect(p.fromRoadmap).toEqual(['b']);
+  });
+});
+
 describe('unchanged', () => {
   it('is true only when the order matches too, not just the members', () => {
     // The wizard renders chips in this order, so a reshuffle is a real change.

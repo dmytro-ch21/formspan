@@ -94,9 +94,16 @@ export default function CurriculumScreen() {
 
   const applyFocus = useCallback(
     async (proposal: FocusProposal) => {
+      if (!curriculum) return;
       setBusy(true);
       try {
-        await setFocus(getToken, proposal.next);
+        // `fromRoadmap`, never `next` — the difference is the athlete's own
+        // entries, which this roadmap carries along but does not own. Attributing
+        // those to it would delete them when it is deactivated.
+        await setFocus(getToken, proposal.next, {
+          curriculum_id: curriculum.id,
+          technique_ids: proposal.fromRoadmap,
+        });
         await load();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -104,7 +111,7 @@ export default function CurriculumScreen() {
         setBusy(false);
       }
     },
-    [getToken, load],
+    [curriculum, getToken, load],
   );
 
   const confirmFocus = useCallback(

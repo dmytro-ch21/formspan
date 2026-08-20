@@ -1284,10 +1284,27 @@ export function getBjjFocus(getToken: Token, signal?: AbortSignal): Promise<BjjF
 }
 
 /** Replaces the list wholesale; array order is the athlete's own ranking. */
-export function setBjjFocus(getToken: Token, techniqueIDs: string[]): Promise<BjjFocus[]> {
+export function setBjjFocus(
+  getToken: Token,
+  techniqueIDs: string[],
+  /**
+   * The roadmap this write is applying, when it is one.
+   *
+   * Omit it for a hand edit — the proficiency screen's focus picker — and the
+   * new entries are recorded as the athlete's own, which makes them sovereign:
+   * no roadmap deactivation can ever remove them.
+   *
+   * Pass it when applying a roadmap, with `technique_ids` set to
+   * `proposal.fromRoadmap` and NOT `proposal.next`. The two differ by the
+   * athlete's own entries, which a roadmap re-sends but does not own — see
+   * roadmapFocus.ts rule 3. Sending `next` here would hand the roadmap the
+   * right to delete hand-picked techniques when it is switched off.
+   */
+  roadmap?: { curriculum_id: string; technique_ids: string[] },
+): Promise<BjjFocus[]> {
   return request<{ focus: BjjFocus[] }>(getToken, "/bjj/focus", {
     method: "PUT",
-    body: JSON.stringify({ technique_ids: techniqueIDs }),
+    body: JSON.stringify({ technique_ids: techniqueIDs, roadmap }),
   }).then((r) => r.focus ?? []);
 }
 

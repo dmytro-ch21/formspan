@@ -196,6 +196,10 @@ const fixtureLockWait = 120 * time.Second
 // what CLAUDE.md tells you to use.
 const fixtureLockScope = `('x' || substr(md5(current_database()), 1, 8))::bit(32)::int`
 
+// fixtureLockPID is the Postgres backend pid of the connection holding the lock
+// — set by lockFixtures, read only by the guard that checks we are the holder.
+var fixtureLockPID int
+
 // lockFixtures takes the session-level advisory lock that makes this process
 // the sole owner of the fixture ids in this database. It is released when the
 // connection closes, including when the binary dies, so a crashed run cannot
@@ -212,6 +216,14 @@ func lockFixtures(ctx context.Context, conn *pgx.Conn) error {
 			return fmt.Errorf("take the fixture lock: %w", err)
 		}
 		if got {
+			// Remember WHICH backend holds it, so the guard below can assert
+			// that this process is the holder rather than merely that somebody
+			// is. Without that distinction the guard passes vacuously whenever
+			// a neighbouring binary happens to hold the lock — which is exactly
+			// the situation it exists to police.
+			if err := conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&fixtureLockPID); err != nil {
+				return fmt.Errorf("read the fixture lock holder's backend pid: %w", err)
+			}
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -354,17 +366,25 @@ func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 	// Registered first so it closes last under LIFO cleanup.
 	t.Cleanup(pool.Close)
 
-	// The SESSION rows are still swept per test, unchanged. This is the net for
-	// session rows whose ids a test did not hand to `cleanup`, and it has to
-	// stay per-test: moved to package teardown it would let one test's rows
-	// survive into the next, which is a different behaviour and not one this
-	// change is trying to make. Only the EXERCISE rows moved to the process.
+	// The SESSION and WORKOUT sweeps stay per test, exactly as they were. They
+	// are the net for rows whose ids a test did not hand to its own cleanup, and
+	// they have to stay per-test: moved to package teardown they would let one
+	// test's rows survive into the next, which is a different behaviour and not
+	// one this change is trying to make. Only the EXERCISE rows — the fixed ids
+	// two processes were fighting over — moved to the process.
 	t.Cleanup(func() {
+		ids := fixtureExerciseIDs()
 		if _, err := pool.Exec(context.Background(), `
 			DELETE FROM sessions WHERE id IN (
 				SELECT session_id FROM session_sets WHERE exercise_id = ANY($1))`,
-			fixtureExerciseIDs()); err != nil {
+			ids); err != nil {
 			t.Logf("cleanup sessions referencing fixture exercises: %v", err)
+		}
+		if _, err := pool.Exec(context.Background(), `
+			DELETE FROM workouts WHERE id IN (
+				SELECT workout_id FROM workout_items WHERE exercise_id = ANY($1))`,
+			ids); err != nil {
+			t.Logf("cleanup workouts referencing fixture exercises: %v", err)
 		}
 	})
 	return NewPostgresRepository(pool), pool
@@ -375,37 +395,49 @@ func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 // red — without it the removal is silent, and the package goes back to passing
 // alone and failing in a fleet, which is the exact shape of #426.
 //
-// A second connection is what makes this a real probe: advisory locks are held
-// per SESSION, so if TestMain's connection holds it, no other connection can
-// take it. It is taken from the pool explicitly rather than through
-// `pool.QueryRow`, because a pooled connection is handed straight back and the
-// unlock below would then run on a different session and do nothing.
+// It asks `pg_locks` who the holder IS, rather than asking whether the lock can
+// be taken. The difference matters and review caught it: a `pg_try_advisory_lock`
+// probe only proves SOMEBODY holds the key, so with the `lockFixtures` call
+// deleted it still passes whenever a neighbouring binary happens to hold it —
+// vacuously green in exactly the fleet conditions the lock exists for. Comparing
+// the holder's backend pid against our own closes that window.
+//
+// `objsubid = 2` is how Postgres marks the two-key form of an advisory lock, and
+// the keys land in `classid`/`objid` as oids — hence the `::oid` casts, which
+// also carry the negative int4 the database-name hash can produce (verified:
+// -347321596 surfaces as objid 3947645700).
 func TestTheFixtureLockIsHeldForTheWholeProcess(t *testing.T) {
 	_, pool := newTestRepo(t) // skips when TEST_DATABASE_URL is unset
 	ctx := context.Background()
 
-	conn, err := pool.Acquire(ctx)
+	rows, err := pool.Query(ctx, `
+		SELECT pid FROM pg_locks
+		WHERE locktype = 'advisory'
+		  AND classid = $1::int::oid
+		  AND objid = (`+fixtureLockScope+`)::oid
+		  AND objsubid = 2
+		  AND granted`, fixtureLockKey)
 	if err != nil {
-		t.Fatalf("acquire a second connection: %v", err)
+		t.Fatalf("read the fixture lock's holders: %v", err)
 	}
-	defer conn.Release()
-
-	var got bool
-	if err := conn.QueryRow(ctx,
-		`SELECT pg_try_advisory_lock($1::int, `+fixtureLockScope+`)`,
-		fixtureLockKey).Scan(&got); err != nil {
-		t.Fatalf("probe the fixture lock: %v", err)
-	}
-	if got {
-		if _, err := conn.Exec(ctx,
-			`SELECT pg_advisory_unlock($1::int, `+fixtureLockScope+`)`,
-			fixtureLockKey); err != nil {
-			t.Logf("release the probe lock: %v", err)
+	var holders []int
+	for rows.Next() {
+		var pid int
+		if err := rows.Scan(&pid); err != nil {
+			t.Fatalf("scan a lock holder: %v", err)
 		}
-		t.Fatal("a second connection was able to take this package's fixture lock, so " +
-			"nothing stops a second `session` test binary deleting these fixtures out " +
-			"from under an in-flight test. TestMain must hold it for the lifetime of " +
-			"the process — see #426.")
+		holders = append(holders, pid)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("lock holder rows: %v", err)
+	}
+
+	if len(holders) != 1 || holders[0] != fixtureLockPID {
+		t.Fatalf("this database's fixture lock is held by %v, and THIS process's "+
+			"connection is pid %d. Exactly one holder, and it must be us — otherwise "+
+			"nothing stops a second `session` test binary deleting these fixtures out "+
+			"from under an in-flight test, which is #426. TestMain must take the lock "+
+			"and hold it for the lifetime of the process.", holders, fixtureLockPID)
 	}
 }
 
