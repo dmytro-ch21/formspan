@@ -26,7 +26,7 @@ import (
 type fakeEstimator struct {
 	out    Estimate
 	err    error
-	usage  Usage
+	meta   CallMeta
 	calls  int
 	lastIn EstimateInput
 	// onCall fires inside the estimate, so a test can cancel the request while
@@ -35,7 +35,7 @@ type fakeEstimator struct {
 	onCall func()
 }
 
-func (f *fakeEstimator) Estimate(_ context.Context, in EstimateInput) (Estimate, Usage, error) {
+func (f *fakeEstimator) Estimate(_ context.Context, in EstimateInput) (Estimate, CallMeta, error) {
 	f.calls++
 	f.lastIn = in
 	if f.onCall != nil {
@@ -45,7 +45,7 @@ func (f *fakeEstimator) Estimate(_ context.Context, in EstimateInput) (Estimate,
 	// estimator: a refusal is a billed 200, so a fake that zeroed usage on the
 	// error path would make the metering tests below pass against an
 	// implementation that loses exactly the spend it exists to catch.
-	return f.out, f.usage, f.err
+	return f.out, f.meta, f.err
 }
 
 // memUsage is an in-memory meter, so the handler tests need no database.
@@ -404,8 +404,8 @@ func TestHowTheWaitIsSpoken(t *testing.T) {
 // runaway client generates, which is what the quota exists to bound.
 func TestUsageIsMeteredEvenWhenTheEstimateFails(t *testing.T) {
 	est := &fakeEstimator{
-		err:   ErrEstimateRefused,
-		usage: Usage{InputTokens: 1337, OutputTokens: 12, CachedInputTokens: 1334},
+		err:  ErrEstimateRefused,
+		meta: CallMeta{Model: "gpt-5.6-luna", Usage: Usage{InputTokens: 1337, OutputTokens: 12, CachedInputTokens: 1334}},
 	}
 	usage := &memUsage{}
 	h := NewEstimateHandler(est, usage)
@@ -428,8 +428,8 @@ func TestUsageIsMeteredEvenWhenTheEstimateFails(t *testing.T) {
 // breakdown that the whole photo-vs-text question turns on.
 func TestUsageIsMeteredOnASuccessfulEstimate(t *testing.T) {
 	est := &fakeEstimator{
-		out:   Estimate{Items: []EstimatedItem{}, Model: "gpt-5.6-luna"},
-		usage: Usage{InputTokens: 1837, OutputTokens: 726, CachedInputTokens: 1334, ImageTokens: 500},
+		out:  Estimate{Items: []EstimatedItem{}, Model: "gpt-5.6-luna"},
+		meta: CallMeta{Model: "gpt-5.6-luna", Usage: Usage{InputTokens: 1837, OutputTokens: 726, CachedInputTokens: 1334, ImageTokens: int64Ptr(500)}},
 	}
 	usage := &memUsage{}
 	h := NewEstimateHandler(est, usage)
@@ -439,7 +439,7 @@ func TestUsageIsMeteredOnASuccessfulEstimate(t *testing.T) {
 	if len(usage.rows) != 1 {
 		t.Fatalf("recorded %d rows, want 1", len(usage.rows))
 	}
-	if got := usage.rows[0].Usage; got.ImageTokens != 500 || got.InputTokens != 1837 {
+	if got := usage.rows[0].Usage; got.ImageTokens == nil || *got.ImageTokens != 500 || got.InputTokens != 1837 {
 		t.Fatalf("usage = %+v, want the image breakdown carried through", got)
 	}
 }
@@ -449,8 +449,8 @@ func TestUsageIsMeteredOnASuccessfulEstimate(t *testing.T) {
 // field would have put our per-call cost on the wire for every client to read.
 func TestTheResponseBodyDoesNotLeakTokenUsage(t *testing.T) {
 	est := &fakeEstimator{
-		out:   Estimate{Items: []EstimatedItem{}, Model: "gpt-5.6-luna"},
-		usage: Usage{InputTokens: 1837, OutputTokens: 726},
+		out:  Estimate{Items: []EstimatedItem{}, Model: "gpt-5.6-luna"},
+		meta: CallMeta{Model: "gpt-5.6-luna", Usage: Usage{InputTokens: 1837, OutputTokens: 726}},
 	}
 	h := NewEstimateHandler(est, &memUsage{})
 
@@ -461,5 +461,30 @@ func TestTheResponseBodyDoesNotLeakTokenUsage(t *testing.T) {
 		if strings.Contains(body, leaked) {
 			t.Errorf("response body contains %q — token spend is the server's business: %s", leaked, body)
 		}
+	}
+}
+
+func int64Ptr(n int64) *int64 { return &n }
+
+// **A refusal is billed in full, and both providers name the model on it.**
+// Every error path returns a zero Estimate, so taking the model from the draft
+// records an empty string for exactly the calls this meter exists to catch —
+// leaving that spend unattributable in the dataset the caps get re-derived
+// from. Raised in review.
+func TestARefusalRecordsTheModelThatChargedForIt(t *testing.T) {
+	est := &fakeEstimator{
+		err:  ErrEstimateRefused,
+		meta: CallMeta{Model: "gpt-5.6-luna", Usage: Usage{InputTokens: 1337, OutputTokens: 12}},
+	}
+	usage := &memUsage{}
+	h := NewEstimateHandler(est, usage)
+
+	call(t, h, `{"description":"two eggs"}`)
+
+	if len(usage.rows) != 1 {
+		t.Fatalf("recorded %d rows, want 1", len(usage.rows))
+	}
+	if got := usage.rows[0].Model; got != "gpt-5.6-luna" {
+		t.Fatalf("model = %q, want the model that charged for the refusal", got)
 	}
 }

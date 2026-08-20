@@ -108,7 +108,7 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	est, usage, estErr := h.estimator.Estimate(r.Context(), in)
+	est, meta, estErr := h.estimator.Estimate(r.Context(), in)
 
 	// RECORDED WHETHER OR NOT IT WORKED, and deliberately not gated on estErr.
 	// A refusal and an upstream error both cost tokens, so a meter that counted
@@ -128,11 +128,14 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	// that silently stops metering is worse than one that errors.
 	if err := h.usage.Record(context.WithoutCancel(r.Context()), EstimateRecord{
 		UserID: userID, Source: src, Succeeded: estErr == nil,
-		Model: est.Model, ItemCount: len(est.Items),
+		// From the CALL rather than the draft: every error path returns a zero
+		// Estimate, so `est.Model` is empty on exactly the billed-in-full
+		// refusals this meter exists to catch.
+		Model: meta.Model, ItemCount: len(est.Items),
 		// Recorded on the failure path too, and it is not zero there: a
 		// refusal and a truncation are billed 200s. This is the whole point of
 		// metering tokens rather than calls — see N49.
-		Usage: usage,
+		Usage: meta.Usage,
 	}); err != nil {
 		httplog.FromContext(r.Context()).Error("nutrition: estimate not metered",
 			"user_id", userID, "source", src, "err", err)

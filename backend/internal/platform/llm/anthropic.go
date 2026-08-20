@@ -99,8 +99,13 @@ func (a *anthropicCompleter) Complete(ctx context.Context, req Request) (Respons
 // backends — without it, this prompt's 1,337-token input reports as 3 tokens
 // once the cache is warm, and every cost derived from it is nonsense.
 //
-// No image breakdown: Anthropic does not report one, so ImageTokens stays zero.
-// That is "not reported", not "the image was free" — read it that way.
+// Reasoning maps from `output_tokens_details.thinking_tokens`, which this SDK
+// does expose — an earlier version of this file claimed it did not and left the
+// field at zero, which would have recorded "reasoning was free" for every
+// Anthropic call as though it were measured. Raised in review.
+//
+// No image breakdown: Anthropic has no equivalent field, so ImageTokens stays
+// nil — "not reported", never "the image was free".
 func anthropicUsage(resp *anthropic.Message) Usage {
 	if resp == nil {
 		return Usage{}
@@ -110,6 +115,7 @@ func anthropicUsage(resp *anthropic.Message) Usage {
 			resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens,
 		OutputTokens:      resp.Usage.OutputTokens,
 		CachedInputTokens: resp.Usage.CacheReadInputTokens,
+		ReasoningTokens:   resp.Usage.OutputTokensDetails.ThinkingTokens,
 	}
 }
 

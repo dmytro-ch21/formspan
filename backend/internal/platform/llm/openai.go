@@ -131,11 +131,19 @@ func openAIUsage(resp *openai.ChatCompletion) Usage {
 	if resp == nil {
 		return Usage{}
 	}
-	return Usage{
+	u := Usage{
 		InputTokens:       resp.Usage.PromptTokens,
 		OutputTokens:      resp.Usage.CompletionTokens,
 		CachedInputTokens: resp.Usage.PromptTokensDetails.CachedTokens,
 		ReasoningTokens:   resp.Usage.CompletionTokensDetails.ReasoningTokens,
-		ImageTokens:       resp.Usage.PromptTokensDetails.ImageTokens,
 	}
+	// Presence, not value. The SDK zero-values an absent field, so `0` alone
+	// cannot tell "this text call had no image" from "this model does not
+	// report a breakdown" — and the shipped model is the second case on every
+	// call. `Valid()` is the only thing that separates them.
+	if resp.Usage.PromptTokensDetails.JSON.ImageTokens.Valid() {
+		n := resp.Usage.PromptTokensDetails.ImageTokens
+		u.ImageTokens = &n
+	}
+	return u
 }

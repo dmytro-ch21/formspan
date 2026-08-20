@@ -189,7 +189,7 @@ func TestUsageIsPersistedWhenTheProviderAnswered(t *testing.T) {
 		UserID: userID, Source: SourcePhoto, Succeeded: true, Model: "gpt-5.6-luna",
 		Usage: Usage{
 			InputTokens: 1837, OutputTokens: 726,
-			CachedInputTokens: 1334, ReasoningTokens: 448, ImageTokens: 500,
+			CachedInputTokens: 1334, ReasoningTokens: 448, ImageTokens: int64Ptr(500),
 		},
 	}); err != nil {
 		t.Fatal(err)

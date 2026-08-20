@@ -75,12 +75,11 @@ func (r *PostgresEstimateUsage) Record(ctx context.Context, rec EstimateRecord) 
 	if rec.Usage != (Usage{}) {
 		in, out = &rec.Usage.InputTokens, &rec.Usage.OutputTokens
 		cached, reasoning = &rec.Usage.CachedInputTokens, &rec.Usage.ReasoningTokens
-		// Only recorded when the provider broke it out. Anthropic does not, so
-		// a zero from it would read as "the image was free" rather than "not
-		// reported" — see the column comment.
-		if rec.Usage.ImageTokens > 0 {
-			image = &rec.Usage.ImageTokens
-		}
+		// Carried straight through: the transport already distinguishes
+		// "reported" from "not reported" with a pointer, so there is nothing to
+		// infer here. It used to guess from `> 0`, which could not tell a text
+		// call's genuine zero from an unreported breakdown.
+		image = rec.Usage.ImageTokens
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO nutrition_estimates (

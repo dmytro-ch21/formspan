@@ -187,24 +187,35 @@ type Usage struct {
 	// difference between the list price and the real one.
 	CachedInputTokens int64
 	// ReasoningTokens is the part of OutputTokens spent thinking rather than
-	// answering. Zero on models that do not reason or providers that do not
-	// break it out — which is NOT the same as a model that reasoned for free,
-	// so treat zero as "not reported".
+	// answering.
+	//
+	// Both providers report it: OpenAI as
+	// `completion_tokens_details.reasoning_tokens`, Anthropic as
+	// `usage.output_tokens_details.thinking_tokens`. An earlier version of this
+	// comment claimed Anthropic did not, and left the field unmapped — which
+	// would have written a confident `reasoning_tokens = 0` for every Anthropic
+	// call, the exact zero-that-means-unknown this package's NULL rule exists
+	// to prevent. Raised in review.
 	ReasoningTokens int64
 	// ImageTokens is the part of InputTokens the image accounted for, from the
 	// provider's own accounting rather than from a guess.
 	//
-	// **Measured 2026-08-19: `gpt-5.6-luna` does NOT populate this**, and
-	// neither does Anthropic, so on the shipped configuration it is always
-	// zero. Kept anyway, because the field exists in the OpenAI response shape
-	// and a model that fills it makes the photo question answerable directly.
+	// **A POINTER, so "not reported" and "reported as zero" stay different
+	// things.** Nil means the provider said nothing; a zero value means it said
+	// zero. Collapsing them into an int64 forced the repository to guess from
+	// `> 0`, which made a genuine zero on a text call indistinguishable from an
+	// unreported breakdown on a photo call — and the column comment then
+	// documented a state no code path could produce. Raised in review.
 	//
-	// Zero therefore means "not reported" far more often than "no image was
-	// sent", and it must never be read as "the image was free". The image cost
-	// is currently obtained by DIFFERENCING InputTokens against a text-only
-	// call — 1,348 without a picture against 2,006 with a 768px one, so ~658
-	// tokens. The repository writes NULL rather than 0 for exactly this reason.
-	ImageTokens int64
+	// **Measured 2026-08-19: `gpt-5.6-luna` does not populate it**, and
+	// Anthropic has no equivalent field at all, so on the shipped configuration
+	// this is always nil. Kept because the field exists in the OpenAI response
+	// shape and a model that fills it answers the photo cost question directly.
+	//
+	// Until then the image cost is obtained by DIFFERENCING InputTokens against
+	// a text-only call: 1,348 without a picture against 2,620 with the 1080px
+	// one the app actually sends, so ~1,272 tokens.
+	ImageTokens *int64
 }
 
 // validate rejects a request that cannot succeed, before it costs anything.

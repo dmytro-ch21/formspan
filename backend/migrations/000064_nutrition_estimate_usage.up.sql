@@ -65,11 +65,17 @@ ALTER TABLE nutrition_estimates
     -- The part of input_tokens the image accounted for, from the provider's
     -- own accounting rather than from a guess.
     --
-    -- **This is the column N49 exists to fill.** The photo-vs-text cost ratio
-    -- is the entire justification for two separate caps rather than one budget,
-    -- and until now it has only ever been estimated. Zero when no image was
-    -- sent; NULL when the provider does not break it out (Anthropic does not),
-    -- which is why it is nullable independently of the others.
+    -- **This is the column N49 exists to fill**, and on the shipped model it is
+    -- always NULL: `gpt-5.6-luna` does not populate the field and Anthropic has
+    -- no equivalent, so the image cost is currently obtained by DIFFERENCING
+    -- input against a text-only call (~1,272 tokens at the 1080px the app
+    -- sends).
+    --
+    -- NULL and 0 are told apart by field PRESENCE in the provider response, not
+    -- by value. An earlier version of this comment said 0 meant "no image was
+    -- sent" — a state the writer could not produce, because it inferred
+    -- presence from `> 0` and so wrote NULL for a text call too. Raised in
+    -- review; the transport carries a pointer now.
     ADD COLUMN image_tokens INTEGER
         CHECK (image_tokens IS NULL OR image_tokens >= 0);
 
@@ -78,9 +84,11 @@ COMMENT ON COLUMN nutrition_estimates.input_tokens IS
     '0 means metered and genuinely zero. Filter IS NOT NULL before averaging.';
 
 COMMENT ON COLUMN nutrition_estimates.image_tokens IS
-    'What the photograph cost, from the provider. NULL where unreported '
-    '(Anthropic), 0 where no image was sent. The number the two-cap split '
-    'was always missing.';
+    'What the photograph cost, from the provider. NULL means the provider '
+    'reported no breakdown at all -- which on the shipped model is every call, '
+    'so expect this column to be entirely NULL until a model fills it. 0 means '
+    'the provider reported zero. The two are told apart by field PRESENCE in '
+    'the response, not by value.';
 
 
 -- The quota query lost its `source` predicate when the two caps became one

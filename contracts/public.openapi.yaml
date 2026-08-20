@@ -9331,12 +9331,14 @@ paths:
         the dearer path must not exhaust the cheap one. Measured live on the
         shipped model, that distinction is not worth a counter: input is a flat
         ~1,340-token floor whatever is sent (the schema and system prompt
-        dominate), a 768px photograph adds ~658, and **output — which is the
-        bill on a reasoning-billed model — tracks the NUMBER OF ITEMS in the
-        meal**, from ~184 tokens for one to ~885 for six. A six-item
-        description therefore costs three to four times a one-item photograph.
-        Photo-versus-text for the same meal is ~1.2–1.5x, most of that because
-        a photo call gets no prompt-cache discount.
+        dominate), a photograph adds ~1,272 at the 1080px the app resizes to,
+        and **output — which is the bill on a reasoning-billed model — tracks
+        the NUMBER OF ITEMS in the meal**, from ~184 tokens for one to ~885 for
+        six. A six-item description therefore costs three to four times a
+        one-item photograph, while photo-versus-text for the same meal is only
+        ~1.2–1.5x — the difference being uncached input, since a photo call
+        caches a smaller share of its prompt than a typed one rather than none
+        of it.
 
 
         Failed and refused calls count, because they cost tokens too.
