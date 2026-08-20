@@ -32806,6 +32806,48 @@ predicted:
   and read the two numbers off one screen. That is the issue's own "Steps to
   test" and it remains unrun.
 
+## 2026-08-20 — A check that could not succeed: the mirror of every false green (follow-up to L1, #400)
+
+Every apparatus failure catalogued in `CLAUDE.md`'s *Verify that a check can
+fail* is a check that **could not fail** — a mutation that never applied, a
+filter that matched nothing, a stub agreeing with the assumption that built it.
+This one is the mirror, found while landing #400, and it is worth its own entry
+because the failure mode is genuinely more dangerous than the eleven above it.
+
+A background poller was armed on `e3d148d` to wait for that commit's CI check
+runs, at a moment when the branch really was receiving zero checks (N65, since
+diagnosed in #390: a PR conflicting with its base gets no `refs/pull/N/merge`,
+so no run is ever created). The branch was then rebased and force-pushed. That
+left `e3d148d` on **no branch at all** — `git branch --contains` returns
+nothing. The poller went on asking about it for fifteen minutes, correctly found
+zero checks, and **exited 1 with the message "N65 reproduced"**.
+
+**Why a false red beats a false green for damage.** A false green is inert: it
+tells you nothing is wrong, and usually nothing is. A false red *acts*. This one
+was **self-corroborating** — it named a real bug that had really been happening
+an hour earlier, so it read as confirmation rather than as an error, and there
+was a merged issue to point at. And the timing is the whole trap: it landed
+after the rebase, but **had it landed before, it would have read as fresh
+evidence of a problem already fixed**, and the response would have been to go
+back and re-diagnose something solved. An hour of re-hunting a closed bug, with
+a plausible red exit code as the reason.
+
+The rule now sits as the third corollary in that section: **a watcher pinned to
+a SHA must verify the SHA is still reachable**, the same discipline the section
+already demands of `gh run list --branch` (compare against `headRefOid`),
+generalised to anything that polls, waits or retries against an identifier a
+rebase, force-push or cleanup can invalidate underneath it.
+
+Two smaller things from the same session, recorded because both cost real time:
+
+- **`scripts/check-ci-checks.py`'s exit code is the verdict**, so piping it
+  through `tail` reads the pipe's status and reports a confident `0`. It bit two
+  people the same afternoon, in opposite directions.
+- **The per-session scratchpad is not per-session.** A concurrent session
+  overwrote a PR body at the same path mid-task; the recovered file had to be
+  given a unique name. Anything written there is shared and can be clobbered
+  without warning.
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
