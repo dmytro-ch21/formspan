@@ -662,7 +662,7 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - **Swapping an exercise keeps the sets already logged**, rewriting them in place. Measures carry over only when the load types match; effort is always cleared.
 
 **Not yet covered / deferred**
-- **Weights and distances are kilograms and metres everywhere** — there is no unit preference, so a lifter who thinks in pounds can't use the app as-is. Needs a stored preference plus conversion at every display and input site; not built.
+- ~~**Weights and distances are kilograms and metres everywhere** — there is no unit preference.~~ **Done.** `profiles.unit_system` has existed since migration 000011, and N105 finished the other half: one generated units module, height and girth support, and a check that fails when a screen prints a unit itself. See *Units and settings* below.
 - **Sessions are online-only** — unlike `/v1/activities` they don't go through the SQLite outbox, so logging in a basement gym with no signal currently fails. The idempotent client-generated ID is already the right contract for fixing this; the local queue isn't built.
 - No rest timer, no supersets (a set belongs to one exercise, and grouping is by adjacency), no per-set notes surfaced in either UI, and no editing of a session's name or notes after it starts.
 - No history analytics — nothing yet reads sessions back to show progress over time, which is the point of collecting RIR/RPE at all.
@@ -909,9 +909,40 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - A unit outside `metric|imperial` → `400`.
 - **No raw Postgres text may reach the client.** A check violation is mapped by constraint name; the module used to echo `pgErr.Message`, which includes the offending value and the constraint body.
 
-**Unit-aware surfaces:** session logger, workout template editor, workout cards, start chooser. The exercise library shows no weights, so there is nothing to convert there.
+**Unit-aware surfaces:** session logger, workout template editor, workout cards, start chooser, the phase screen, the Goals arithmetic and feasibility copy, the web derivation, and profile height. The exercise library shows no weights, so there is nothing to convert there.
 
 **Not yet:** the override applies on the session screen only — the workout editor uses the account default. Distance conversion is implemented but no screen takes a distance input yet, so that path is untested in anger.
+
+### N105 — one config for units
+
+**The goal weight (the reported bug, and the sharpest case).**
+- With the profile set to **imperial**, open the phase screen. The field must ask for **lb**, and its accessibility label must say "pounds" — a screen reader reads `lb` as two letters.
+- Type `175` and start the phase. What is stored must be **~79.4 kg, not 175**. This shipped storing 175 kilograms, which then fed the rate band and the calorie target with nothing on screen looking wrong.
+- The check must be the **converted value**, not "different from 175" — a conversion applied backwards gives 385.8 and would satisfy a not-equal assertion while being just as wrong.
+- Submitting **before the unit preference has resolved** must not write. Until the cache is read the preference reads `metric`, so a submission in that window stores the same wrong number.
+
+**Height (no unit support existed at all before this).**
+- Metric shows one **cm** box; imperial shows **two** boxes, feet and inches. A single "70.9 inches" field is a faithful conversion nobody says out loud.
+- `5'11"` round-trips: stored as 180.3 cm, redisplayed as 5'11". Check both extremes — 1'8" and 8'6" — since the column's `CHECK` is `> 50 AND < 260` and an out-of-range value returns a 400 the athlete cannot explain.
+- **Clearing must work.** Emptying both boxes must clear the value rather than storing 0. This failed first time: with derived values the "both empty" state is unreachable, because clearing one box leaves the other showing a derived `0`.
+- Height feeds **BMR**, so a wrong height is a wrong calorie target — verify the derivation changes when height does.
+
+**Everything follows one preference, with no restart.**
+- Change the preference in Settings and confirm **every mounted surface** follows without a reload — Goals, Today, the session logger, workout cards, the web dashboard. On web this was impossible before N105: `setUnits` updated only the calling component.
+- Web reads the preference **server-side** in the dashboard layout, so no unit-bearing number should ever be painted in metric and then corrected a frame later. Watch for a flash on first paint.
+- The **per-exercise override still wins** over the account default. A central resolver that flattened it would look like a simplification and be a regression.
+
+**The round trip, which only holds in one direction.**
+- **display → storage → display is exact** — the number the athlete typed comes back unchanged, in both systems, for weight, height, girth, distance and fluid volume.
+- **storage → display → storage is not, and must not be "fixed"** — a display value is rounded, so 16,627 of 17,001 kilogram values differ by up to 0.001 kg after a round trip through pounds. Making that exact would mean storing display units, which makes every historical row ambiguous the moment somebody changes the setting.
+
+**The two checks, which must be verified by breaking them.**
+- `pnpm run check:units` — edit `apps/web/src/lib/units.ts` by hand, or edit the mobile source without running `pnpm run units:write`, and confirm it goes red. Rename the marker and confirm **`--write` also fails**, or a broken marker silently emits a truncated units module.
+- `pnpm run check:unit-literals` — put a literal `kg` back into `goals.tsx`'s feasibility copy and confirm it goes red. This is the case that slipped through the first version: the allowlist was keyed on a file, and `goals.tsx` has a legitimate `g per kg` elsewhere, so the whole file was excused.
+
+**Deliberate exceptions, which should NOT be "fixed" without a product decision.**
+- `g/kg` and `kcal/kg` stay in kilograms in both derivations. Sports nutrition states these in g/kg universally, including in the US.
+- Check-in **girths** stay in centimetres. The primitives exist; the screen is a separate ticket. Relabelling it "inches" while still showing centimetres would be worse.
 
 ## Library filter and search memory (`apps/mobile` Library tab)
 
@@ -11131,13 +11162,15 @@ Reading the diff cannot settle any of these. They need a build.
     returning; it renders as a plausible sentence either way, so the two have
     to be read side by side.
 
-    **Check the reason clause, not the whole sentence, and the goal figure is
-    why.** Mobile formats the goal through the athlete's unit setting while
-    web hardcodes `kg`, so on an imperial account the phone says `176.4 lb`
-    and the desk `80 kg` for one goal. Mobile is the correct surface there;
-    web's hardcoded unit is its own defect and is filed separately. A scenario
-    demanding the entire sentence match would fail on the surface that is
-    right.
+    **Check the WHOLE sentence now, including the goal figure.** This used to
+    say "the reason clause, not the whole sentence", because web hardcoded
+    `kg` while mobile formatted through the athlete's setting — so on an
+    imperial account the phone said `176.4lb` and the desk `80 kg` for one
+    goal, and a scenario demanding the full match would have failed on the
+    surface that was right. N105 (#489) converted web's `Feasibility`, so both
+    surfaces now render every weight through the same generated units module
+    and the narrowing is no longer needed. Widen it back: on an imperial
+    account the goal, the gap and the shortfall must read identically on both.
 18. **A projection beyond the drawn window exits the right edge** still
     travelling, rather than bending to meet the goal line inside the box. A
     line that visibly lands is a claim that it lands within the period shown.

@@ -60,7 +60,7 @@ Deliberately NOT allowlisted, and the distinction matters: the `g/kg` and
 decision** — sports nutrition states protein in g/kg universally, including in
 the US, and the reference designs pair `2.2 g per kg` with a weight in `lb` —
 so they are recorded here as an exception with the ticket that owns the
-decision, rather than silently blessed.
+decision (N111, #494), rather than silently blessed.
 
 Stdlib-only, like its siblings, so `verify` needs no toolchain and the
 `Scripts (Python)` CI job — which installs neither Node nor pnpm — runs it
@@ -114,7 +114,7 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "kg",
         "kcal per kg",
         "A scientific coefficient in a derivation, not a measurement the athlete owns. "
-        "Left in kcal/kg deliberately — see N105's follow-up ticket.",
+        "Left in kcal/kg deliberately — the decision is N111 (#494).",
     ),
     (
         "apps/web/src/app/dashboard/nutrition/targets/AdjustmentCard.tsx",
@@ -127,7 +127,7 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "kg",
         "g per kg",
         "`protein_g_per_kg` and `fat_g_per_kg` — the mobile mirror of the web "
-        "derivation below, and the same product decision.",
+        "derivation below, and the same product decision — N111 (#494).",
     ),
     (
         "apps/web/src/app/dashboard/nutrition/targets/Derivation.tsx",
@@ -142,7 +142,7 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "g/kg",
         "`protein_g_per_kg` and `fat_g_per_kg`. Sports nutrition states these in g/kg "
         "universally, including in the US, and the reference designs pair them with a "
-        "weight in lb. Product decision, tracked separately.",
+        "weight in lb. Product decision, tracked as N111 (#494).",
     ),
     (
         "apps/mobile/app/checkin/[date].tsx",
@@ -151,7 +151,8 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "The nine check-in GIRTH fields, which N105 deliberately left in centimetres: "
         "the length primitives now exist (`formatGirth`, `girthUnit`) but the screen "
         "has not been converted, and relabelling it 'inches' while still showing "
-        "centimetres would be worse. Tracked as N105's girth follow-up.",
+        "centimetres would be worse. Tracked as N112 (#495); remove this entry when\n"
+        "that lands.",
     ),
 ]
 

@@ -36937,6 +36937,155 @@ inexact, so that gap does not touch the diagnosis; it touches the verification.
 And the derivation ladder was driven from a fixture rather than real account
 data, which is sufficient when the thing measured is geometry.
 
+## 2026-08-20 — One config for units, and the goal weight that was stored in the wrong one (N105, #489)
+
+Reported from a device: *"setting a diet target asks for weight in kg while the
+profile is imperial"*. That was one symptom of units not being centrally
+managed, and the ticket was deliberately the general one.
+
+### The reported bug was data corruption, not a label
+
+`app/phase/index.tsx` never called `useUnits()` at all. It took the typed number
+and passed it straight to `createPhase` as `target_weight_kg`, while the field
+said "(kg)" whatever the profile said. So an imperial athlete typing `175` —
+meaning 175 lb, about 79 kg — **stored a goal of 175 kilograms**, and the rate
+band, the calorie target and the "kg to go" line all derived from it. Nothing on
+any screen looked wrong.
+
+Staging was checked before assuming: 2 phases, 1 with a target weight, 55.00 kg,
+0 above 140. **No live row is corrupted — the fix is preventive.** Worth keeping
+is that the column's only constraint is `CHECK (target_weight_kg > 0)` with no
+upper bound, so 175 would have been accepted without complaint. We are ahead of
+this by timing, not by design; an upper bound is filed as a follow-up.
+
+That query was run by the coordinating session, because connecting to staging
+with live credentials was refused by the permission boundary in the session
+doing the work. **That refusal was correct and is worth recording as a
+precedent**: rerouting the same action through a different tool would have been
+the same action wearing a different hat.
+
+### Two hand-maintained copies, and why the answer is a generator
+
+`apps/mobile/lib/units.ts` (179 lines, 16 exports) and
+`apps/web/src/lib/units.ts` (137, 12) had already drifted — web lacked all four
+fluid functions, so mobile could render a volume in the athlete's units and web
+could not. Nobody decided that; it is what two copies do.
+
+**A shared workspace package is the obvious answer and this repo had already
+measured it.** N50 built `packages/telemetry` for the same shape and abandoned
+it "two bundlers down with three untested ahead", tree restored; `packages/*` is
+still declared in `pnpm-workspace.yaml` and still empty. N50's *load-bearing*
+argument does not transfer here — telemetry's transport genuinely could not be
+shared, while this module is `Math.round` and `toLocaleString` with no platform
+surface — but the bundler cost is real, and **generation avoids it entirely**:
+both files stay exactly where they were, so jest, Metro, turbopack and vitest
+resolve them unchanged and neither app gains a dependency.
+
+Generation over parity is also this repo's own stated preference rather than a
+taste call. `check-brand-copies.mjs` opens by calling itself "a stopgap" and
+names the real fix as "generating both files from source, the way
+`scripts/generate_icons.mjs` now generates the mobile icon set". And generation
+is the stronger guarantee: parity says the two agree, generation says web
+matches the source, and it ships a fix (`pnpm run units:write`) rather than only
+a red light.
+
+Mobile is the source because it is the superset, because mobile-first is the
+rule here, and because it was already covered by four gates web's copy was not.
+
+### Height, which had no unit support anywhere
+
+`height_cm` ran from the column through `profile.go` and `lib/profile.ts` onto a
+box labelled "Height (cm)" whatever the profile said. **BMR derives from
+height**, so this was the phase bug one step removed — a wrong number reaching
+the calorie target with nothing looking wrong.
+
+Imperial gets two boxes rather than one, because nobody says "70.9 inches".
+Girth is separate from height despite sharing the arithmetic: a waist is
+"32.5 in", never 2'8". `fromFeetInches` rounds to one decimal to match
+`NUMERIC(5,1)`, so the client and Postgres agree about what was stored.
+
+### The round trip, stated because only one direction can hold
+
+- **display → storage → display is exact.** 0 failures in 9,990 pound values, 0
+  for all 83 whole-inch heights from 1'8" to 8'6", 0 for all 2,099 one-decimal
+  centimetre values.
+- **storage → display → storage is not, and cannot be**, because a display value
+  is rounded: 16,627 of 17,001 kilogram values differ after a round trip through
+  pounds, every one inside 0.001 kg.
+
+The first is the property an athlete can observe. Asserting the second would be
+asserting a falsehood, and "fixing" it would mean storing display units — which
+is what this module exists to prevent, since it makes every historical row
+ambiguous the moment somebody changes the setting.
+
+### Web got the provider mobile already had
+
+`useUnits` was a hook called from ten surfaces, each with its own state and its
+own `GET /v1/profile` — `dashboard/sessions/page.tsx` documents that costing one
+request *per session rendered*. Worse, `setUnits` updated only the calling
+component, so changing the preference left every other mounted surface on the
+old units until a reload; the "every surface, no restart" criterion was
+unreachable. `initial` is now read server-side in the layout, mirroring
+`ModulesProvider`, through a directiveless `lib/unitSystem.ts` — `api.ts` carries
+`"use client"`, so calling `getProfile` from a Server Component throws at runtime
+while the build stays green.
+
+### Three checks, each made to fail before being trusted
+
+`check:units` (the generator) fails four ways: web edited by hand, mobile edited
+without regenerating, the marker renamed — non-zero on `--write` as well as
+`--check`, so a broken marker cannot silently emit a truncated units module —
+and an unrecognised flag.
+
+`check:unit-literals` is the other half, and **mutation-testing it found a real
+hole**. Keyed on (file, token) the allowlist excused the whole file, so putting
+the literal `kg` back into `goals.tsx`'s feasibility copy — the exact regression
+it exists to prevent — passed clean, because one legitimate `g per kg` lives in
+the same file. Entries are keyed on a line snippet now, and all four mutations go
+red. It exists because four tickets (#485, #487, #486, #447) rebuild the very
+screens that were worst affected.
+
+The units suite is 25 tests where there were **none** on either side, sweeping
+every displayed value in both systems for all five quantities, each loop
+asserting its own iteration count so a vacuous pass is distinguishable from a
+real one.
+
+### Two things the tests caught that review would not have
+
+The height field's "both boxes empty" condition was **unreachable**: with
+derived values, clearing inches leaves feet at 5, and clearing feet then passes
+the sibling's derived `'0'` rather than `''`. Height could never be cleared once
+set. Keyed on the total being zero now.
+
+And the literal check caught its author: a `git checkout --` on
+`profile/edit.tsx` during a mutation run reverted uncommitted work to HEAD, and
+the check reported `Height (cm)` at line 246 within seconds. The
+restore-is-verified-by-re-running rule, applied to the person applying it.
+
+### Apparatus note worth keeping
+
+**Running `jest` directly bypasses the `TZ=America/Los_Angeles` prefix**, which
+lives on the `test` script rather than in `jest.config.js`. A first full run
+showed one failure — a clock reading 19:40 instead of 16:40 in
+`trackerModel.test.ts` — which was the harness, not the code. And
+`pnpm run test:mobile -- --maxWorkers=3` does not work either: the `--` makes
+jest read the flag as a path pattern, matching nothing. The form that works is
+`TZ=America/Los_Angeles pnpm exec jest --maxWorkers=3` from `apps/mobile`.
+
+### Deliberately not done
+
+`g/kg` and `kcal/kg` stay as they are. Sports nutrition states protein in g/kg
+universally including in the US, the reference designs pair `2.2 g per kg` with
+a weight in `lb`, and a coefficient the server computed is not the same object
+as a measurement the athlete owns. The counter-argument — that half-converted
+arithmetic does not check out when the bodyweight beside it is in pounds — is
+real, and is filed as its own ticket so it is a product decision rather than a
+side effect of a plumbing change.
+
+Check-in girths stay in centimetres: the primitives exist now, the screen is a
+follow-up, and relabelling it "inches" while still showing centimetres would be
+worse than leaving it consistent. Web still has no height input at all, which is
+acceptable under the mobile-first rule but is a gap.
 
 ## 2026-08-20 — `migrate` refuses a database it cannot vouch for
 
