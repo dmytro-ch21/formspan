@@ -1,3 +1,19 @@
+/*
+ * N67 PROBE ARM 2 — the NINE tests N58 adds are skipped; N51's twelve still run.
+ * TEMPORARY; revert with this commit.
+ *
+ * Arm 1 established that EXECUTING this file's tests is the trigger (5/0 with
+ * all twenty skipped, against a 40% pass rate when they run). And `main` proves
+ * it is not fake timers as such: same file, same `useFakeTimers`, twelve tests,
+ * green 10/10.
+ *
+ *   green -> the interaction is in the NEW tests. A test problem, not a feature
+ *            one, and `app/food/add.tsx` may ship unchanged.
+ *   red   -> all twenty are needed, which points at cumulative cost in the
+ *            worker rather than any test's content, and stops being about N58.
+ *
+ * Five samples. A single green means nothing at a 40% pass rate.
+ */
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
@@ -206,7 +222,7 @@ it('does not let a brandless saved food suppress every brand', async () => {
  * string would have failed for the right reason and been "fixed" by weakening
  * it; this is the same claim re-expressed against the new layout.
  */
-it('shows both name and brand, and logs their composition', async () => {
+it.skip('shows both name and brand, and logs their composition', async () => {
   mockSearchCatalog.mockResolvedValue(
     answer({
       foods: [{ ...CATALOG_OATS, id: 'usda-9', name: 'Greek Yogurt', brand: 'Fage' }],
@@ -227,7 +243,7 @@ it('shows both name and brand, and logs their composition', async () => {
 });
 
 /** A generic food has no brand line at all, rather than an empty one. */
-it('omits the brand line entirely for a generic food', async () => {
+it.skip('omits the brand line entirely for a generic food', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
@@ -242,7 +258,7 @@ it('omits the brand line entirely for a generic food', async () => {
  * that makes a list of foods unscannable — 182 against 456 means nothing until
  * you know one is per 100 g and the other per bar.
  */
-it('states the calories WITH the serving they belong to', async () => {
+it.skip('states the calories WITH the serving they belong to', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
@@ -254,7 +270,7 @@ it('states the calories WITH the serving they belong to', async () => {
  * at all and that it is the category's, not a name-derived guess — the
  * substitution `foodGlyph` exists to prevent.
  */
-it('shows the category glyph, not one guessed from the name', async () => {
+it.skip('shows the category glyph, not one guessed from the name', async () => {
   mockSearchCatalog.mockResolvedValue(
     answer({
       foods: [{ ...CATALOG_OATS, id: 'usda-7', name: 'Beef-flavoured tofu', category: 'plant_protein' }],
@@ -282,7 +298,7 @@ it('shows the category glyph, not one guessed from the name', async () => {
  * default: the glyph is findable by testID and NOT by text, which is exactly
  * the pair of facts wanted.
  */
-it('does not announce the glyph to a screen reader', async () => {
+it.skip('does not announce the glyph to a screen reader', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
@@ -389,14 +405,14 @@ describe('the scope row', () => {
     mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   });
 
-  it('shows both sources under All', async () => {
+  it.skip('shows both sources under All', async () => {
     await search('o');
     await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
     expect(screen.getByTestId('add-food-mine-food')).toBeTruthy();
   });
 
   /** The catalog is an additional source; My Foods is the athlete's own. */
-  it('hides the catalog under My Foods', async () => {
+  it.skip('hides the catalog under My Foods', async () => {
     await search('o');
     await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
     await act(async () => {
@@ -407,7 +423,7 @@ describe('the scope row', () => {
   });
 
   /** Recipes reads the STORED kind rather than guessing from the name. */
-  it('shows only recipes under Recipes', async () => {
+  it.skip('shows only recipes under Recipes', async () => {
     await search('o');
     await waitFor(() => expect(screen.getByTestId('add-food-mine-food')).toBeTruthy());
     await act(async () => {
@@ -428,7 +444,7 @@ describe('the scope row', () => {
    * that adding one later is a deliberate act with data behind it rather than
    * a quiet completion of the mockup.
    */
-  it('offers no chip that nothing backs', async () => {
+  it.skip('offers no chip that nothing backs', async () => {
     render(<AddFoodScreen />);
     expect(screen.queryByTestId('add-scope-meals')).toBeNull();
     expect(screen.queryByTestId('add-scope-verified')).toBeNull();
