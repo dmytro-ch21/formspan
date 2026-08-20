@@ -506,3 +506,92 @@ func TestBrowseWithoutAQueryPagesDeterministically(t *testing.T) {
 		t.Fatalf("paged %d distinct rows of %d — the browse sort skipped one", len(seen), len(ids))
 	}
 }
+
+// The label macros round-trip through Postgres (N52), and an absent one stays
+// absent.
+//
+// This covers what the barcode tests structurally cannot: they exercise the
+// provider boundary against a fake HTTP server and never touch SQL, so dropping
+// a column from `upsertSQL`'s INSERT list, its SET clause or its
+// change-detection tuple leaves every one of them green while the value
+// silently never persists.
+func TestLabelMacrosRoundTripThroughTheCatalog(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	id := "test-label-macros"
+	t.Cleanup(func() {
+		if _, err := repo.pool.Exec(ctx, `DELETE FROM food_catalog WHERE id = $1`, id); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
+	if _, err := repo.pool.Exec(ctx, `DELETE FROM food_catalog WHERE id = $1`, id); err != nil {
+		t.Fatalf("pre-clean: %v", err)
+	}
+
+	f := func(v float64) *float64 { return &v }
+	grams := 100.0
+	in := Food{
+		ID: id, Name: "Test Crisps", Category: "snack", Aliases: []string{},
+		ServingLabel: SeedServingLabel, ServingGrams: &grams, Market: "US",
+		KCal: 536, ProteinG: 3.5, CarbG: 57, FatG: 32, FibreG: f(4),
+		SaturatedFatG: f(9), SugarG: f(1), AddedSugarG: f(0),
+		SodiumMG: f(536),
+		// Deliberately NOT set — the ordinary case for a scanned product.
+		CholesterolMG: nil,
+	}
+	if err := repo.UpsertAll(ctx, []Food{in}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	got, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	for _, c := range []struct {
+		name string
+		got  *float64
+		want *float64
+	}{
+		{"saturated_fat_g", got.SaturatedFatG, f(9)},
+		{"sugar_g", got.SugarG, f(1)},
+		{"added_sugar_g", got.AddedSugarG, f(0)},
+		{"sodium_mg", got.SodiumMG, f(536)},
+	} {
+		if c.got == nil {
+			t.Errorf("%s came back nil — the column is missing from the write or the read", c.name)
+			continue
+		}
+		if *c.got != *c.want {
+			t.Errorf("%s = %v, want %v", c.name, *c.got, *c.want)
+		}
+	}
+	// The half that matters most: a value nobody stated must survive the round
+	// trip as NULL, not as 0. A zero here is a claim that the food contains no
+	// cholesterol, which is the absence-reads-as-an-answer failure this whole
+	// change is written against.
+	if got.CholesterolMG != nil {
+		t.Errorf("cholesterol came back %v for a food that never stated it — "+
+			"NULL became a claim", *got.CholesterolMG)
+	}
+	// A stated ZERO is not an absence and must not have collapsed to NULL.
+	if got.AddedSugarG == nil {
+		t.Error("a stated zero for added sugar became NULL — that turns a fact into an absence")
+	}
+
+	// And a re-seed CORRECTS them: the change-detection tuple has to include
+	// the new columns, or a deploy whose only change is a sodium figure matches
+	// nothing and the row keeps a stale number forever while every other field
+	// tracks the deploy.
+	in.SodiumMG = f(410)
+	if err := repo.UpsertAll(ctx, []Food{in}); err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+	again, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("get again: %v", err)
+	}
+	if again.SodiumMG == nil || *again.SodiumMG != 410 {
+		t.Errorf("a sodium-only re-seed changed nothing (%v) — the column is "+
+			"missing from the change-detection tuple", again.SodiumMG)
+	}
+}

@@ -31154,6 +31154,134 @@ and the number vocabulary gained the compounds and half-hour forms whose absence
 would have dropped a correct value — "twenty five", "half an hour", "an hour and a
 half". Each is mutation-checked.
 
+## 2026-08-19 — A thousandfold error that would have looked like a rounding difference (N52)
+
+The catalog carried kcal, protein, carbs, fat and fibre. The athlete asked for
+"all other that are important", and the panel they showed names Total Fat, Sat
+Fat, Cholesterol, Sodium, Total Carbs, Fiber, Sugars, Protein. Migration
+`000064` adds **saturated fat, total sugars, added sugars, sodium and
+cholesterol** to five tables.
+
+### The set was measured, not assumed
+
+The brief asked for a recommendation on three open questions — salt versus
+sodium, whether added sugar is separable, and cholesterol. Rather than reason
+from what nutrition labels generally carry, both sources were queried live
+first, because a column nothing can populate is worse than one omitted:
+
+```
+                  USDA SR Legacy     Open Food Facts      unit
+saturated fat     3.802 g            9 g / 10.6 g         g / g
+sugars (total)    4.35 g             1 g / 56.3 g         g / g
+added sugars      ABSENT             0 g / 52.13 g        — / g
+sodium            1.0 mg             0.536 g / 0.0428 g   mg / g
+cholesterol       0.0 mg             ABSENT on both       mg / —
+```
+
+That table answered all three questions and produced one finding nobody had
+asked about.
+
+### The finding: the two sources disagree about the unit
+
+**USDA reports sodium in milligrams. Open Food Facts reports it in grams.**
+
+Storing whichever arrived would put a **1000x error** into the one field an
+athlete managing blood pressure actually reads — and nothing downstream would
+have caught it. `0.536` where `536` belongs is inside every CHECK, is a
+plausible figure, and reads as an ordinary rounding difference. No test written
+against one source would ever have seen the other's unit, and both sources would
+have looked individually correct.
+
+Stored as **mg** — the US label convention, the USDA convention, and what the
+athlete's own reference panel shows. The conversion lives at the Open Food Facts
+boundary in its own named function, with the test written in the failing
+direction: feed it the provider's real 0.536 and assert 536, then mutate the
+multiplier and watch it go red. A conversion guarded only by a comment is how
+this comes back.
+
+This is the same family as everything else this week, with one difference worth
+naming: usually an **absence** is read as an answer. Here the **number itself**
+would have been the lie.
+
+### Salt is not stored, and the reason is a measurement
+
+Open Food Facts returns both. On both products, `salt_100g` is **exactly**
+`sodium_100g x 2.5` (0.536 → 1.34; 0.0428 → 0.107). It is therefore derivable,
+and two stored numbers that can disagree is strictly worse than one and a
+formula. The ratio is in the code comment rather than only here, so the next
+person does not re-add the column.
+
+### Null is the common case, and that is the design
+
+Every new column is nullable, because **absence is a fact about what the source
+stated, never about the food.** Two are null by nature rather than by accident,
+and both will look like bugs to whoever meets them first — so they are written
+down in the migration, the domain type and the contract:
+
+- **`added_sugar_g` is null for every one of the 177 seeded generic foods.** SR
+  Legacy does not carry it. Open Food Facts does, so scans populate it. It was
+  included rather than deferred because it fails the "column we can never
+  populate" test and because adding one later is a migration.
+- **`cholesterol_mg` is null for most scanned products.** Open Food Facts
+  carried it on neither product measured.
+
+### Five tables, not two
+
+The brief named `nutrition_foods` and `food_catalog`. It is five:
+`food_barcode_cache` because scans are where added sugar comes from, and
+`nutrition_entries` and `nutrition_recipe_items` because **both own their
+numbers and deliberately do not follow `source_food_id`** — so that correcting a
+saved food cannot rewrite what somebody already logged. Without them, a logged
+meal could never show its sodium.
+
+`nutrition_targets` is deliberately not widened. A target is a goal, and nobody
+has asked to set a saturated-fat goal; adding columns nothing sets would be
+inventing an intention.
+
+### Two things that reported success while doing nothing
+
+**The seeder said "177 upserted" and wrote no new values.** The migration was
+applied, the JSON had the numbers, the upsert listed the columns — and the
+loader's own `seedFood` struct did not, so every value was nil before it reached
+SQL. The success line counts rows queued, not columns written. Caught only by
+reading the table afterwards.
+
+**The FDC batch endpoint silently returned 55 results for a 60-id request**, with
+a 200 and no error. Two foods (`pork-tenderloin`, `potato-baked`) were missing
+from the response and resolve perfectly well individually, so it is provider
+truncation rather than absent data. They are null for now and a regeneration
+from the bulk file will fill them. A batch API that quietly drops 8% of a
+request is the same shape as everything else here: a confident result measuring
+less than it claims.
+
+### What is guarded
+
+Six mutations, each confirmed to produce a **test** failure rather than a
+compile error, against a baseline green in the same session: dropping the
+gram→milligram conversion; turning an absent value into a zero; dropping added
+sugars from the parse; removing the milligram plausibility bound; dropping
+sodium from the catalog upsert's SET clause; and dropping it from the
+change-detection tuple alone — which is the quiet one, since a re-seed whose
+only change is a sodium figure then matches nothing and the row keeps a stale
+number forever while every other field tracks the deploy.
+
+Seed coverage is measured rather than assumed: 172/177 saturated fat, 165
+sugar, 175 sodium, 170 cholesterol, 0 added sugar. The seed diff is **708
+insertions and zero deletions**, verified field by field against the previous
+file so that no pre-existing value moved.
+
+### Left open
+
+**Nothing displays any of this yet** — that is N53 and N59, and this change is
+schema, ingestion and contract only. The honesty rule those screens inherit is
+the load-bearing part: `n/a` must render as `n/a` and never as `0`.
+
+**A macro the model guessed is not yet distinguishable from one read off a
+label.** The brief is right that this is the harder half. N40 measured the
+estimator inventing an item and doubling a quantity while flagging only the
+invention, so the principle #319 landed for the barcode `'ai'` source needs
+applying one level down — per-field provenance, not per-row. That is not in this
+change and should be its own task rather than a silent gap.
 
 ## Open items / known gaps as of this entry
 

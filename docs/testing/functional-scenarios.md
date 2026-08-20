@@ -9440,3 +9440,51 @@ sentence.
   all of the request; prompt caching is a prefix match, so an order that wanders
   between calls re-bills the whole thing and the feature costs roughly ten times
   what it should. Nothing functional fails — only the bill moves.
+## The label macros (N52 — `food_catalog`, barcode scans, saved foods, entries)
+
+Saturated fat, total sugars, added sugars, sodium and cholesterol, across five
+tables. Schema and ingestion only — display is N53 and N59.
+
+### Happy path
+
+- `GET /v1/nutrition/catalog?q=almond` returns `saturated_fat_g`, `sugar_g`,
+  `sodium_mg` and `cholesterol_mg` alongside the original four.
+- `GET /v1/nutrition/catalog/barcode/{barcode}` returns the same fields for a
+  scanned product, plus `added_sugar_g`.
+- A logged entry keeps its own copy: correcting the saved food it came from does
+  not rewrite what was logged.
+
+### Edge cases & errors
+
+- **`sodium_mg` is MILLIGRAMS.** Open Food Facts sends grams; the server
+  converts. A scanned product whose provider value is `0.536` must be served as
+  `536`. Serving `0.536` is a 1000× understatement that passes every bound.
+- **An absent value is `null`, never `0`.** `cholesterol_mg` is null for most
+  scanned products and `added_sugar_g` is null for every seeded generic food —
+  both are the ordinary case, not an error state.
+- **A stated zero stays zero.** "This product has no added sugar" is a fact and
+  must not collapse into "we do not know".
+- An implausible figure — a sodium value only sane in the wrong unit — is
+  refused as `not_found` rather than shown, matching the existing treatment of a
+  nameless or zero-kcal product.
+- A re-seed **corrects** a changed value: the change-detection tuple includes
+  the new columns, so a deploy whose only change is a sodium figure still lands.
+
+### Regression trap
+
+- **Two scanners read `selectColumns` in `food/postgres.go`** — `scanFood` and a
+  hand-rolled one in `List` that appends a window-function count. Widening the
+  projection without updating both fails loudly here ("24 and 19"), but the
+  exercise module records the quiet version of the same trap, where a forgotten
+  second scanner shipped `null` on a whole endpoint.
+- **The seeder's "N upserted" line counts rows queued, not columns written.** A
+  column present in the migration, the JSON and the SQL still writes nothing if
+  the loader's own struct lacks the field — it reports complete success. Verify
+  by reading the table, never by reading the log line.
+- **The FDC batch endpoint silently truncates.** A 60-id request returned 55
+  results with a 200 and no error; the missing ids resolve individually. Any
+  bulk fetch from it must compare the response set against the request set.
+- **Salt must not be added as a column.** It is exactly `sodium × 2.5` on real
+  data, so it is derivable; storing it creates two numbers that can disagree.
+- `nutrition_targets` deliberately has none of these. A target is a goal, and
+  adding goal columns nothing sets would invent an intention.

@@ -115,6 +115,21 @@ type Food struct {
 	// unstated as zero drags every fibre figure down.
 	FibreG *float64 `json:"fibre_g"`
 
+	// The label macros (N52), all nullable for the reason FibreG is — absence
+	// is a fact about the source, not about the food, and a zero would be a
+	// claim nobody made. Two are nil by nature rather than by accident:
+	// `AddedSugarG` is nil for every USDA-seeded row (SR Legacy does not carry
+	// it) and `CholesterolMG` is nil for most scanned products (Open Food Facts
+	// carried it on neither product measured).
+	//
+	// **SodiumMG is MILLIGRAMS**, the US label and USDA convention. Open Food
+	// Facts sends grams and is converted at that boundary.
+	SaturatedFatG *float64 `json:"saturated_fat_g"`
+	SugarG        *float64 `json:"sugar_g"`
+	AddedSugarG   *float64 `json:"added_sugar_g"`
+	SodiumMG      *float64 `json:"sodium_mg"`
+	CholesterolMG *float64 `json:"cholesterol_mg"`
+
 	// Market is which region's food supply this row describes. A column
 	// rather than a global assumption so that "we do not stock this food" and
 	// "we do not cover your region" can stay different answers without a
@@ -270,6 +285,19 @@ type BarcodeFood struct {
 	FatG     float64  `json:"fat_g"`
 	FibreG   *float64 `json:"fibre_g"`
 
+	// The label macros (N52). Pointers because absence is a fact about what the
+	// provider stated, never about the product — nil renders `n/a`, and 0 would
+	// be a claim nobody made.
+	SaturatedFatG *float64 `json:"saturated_fat_g"`
+	SugarG        *float64 `json:"sugar_g"`
+	AddedSugarG   *float64 `json:"added_sugar_g"`
+	// SodiumMG is MILLIGRAMS, converted from Open Food Facts' GRAMS at the
+	// boundary. See `sodiumMGFromGrams`.
+	SodiumMG *float64 `json:"sodium_mg"`
+	// CholesterolMG is usually nil: Open Food Facts carried it on NEITHER
+	// product measured while building this. Expected, not a gap.
+	CholesterolMG *float64 `json:"cholesterol_mg"`
+
 	ExternalID *string `json:"external_id"`
 }
 
@@ -292,6 +320,21 @@ func (b *BarcodeFood) plausible() bool {
 	}
 	if b.FibreG != nil && !inRange(*b.FibreG, 500) {
 		return false
+	}
+	// The label macros, against migration 000064's own CHECKs. The milligram
+	// pair matters most: a sodium figure that failed the bound is very likely a
+	// missed unit conversion rather than bad crowd data, and letting it through
+	// would show a 1000x number as measured fact.
+	for _, p := range []struct {
+		v   *float64
+		max float64
+	}{
+		{b.SaturatedFatG, 2000}, {b.SugarG, 2000}, {b.AddedSugarG, 2000},
+		{b.SodiumMG, 100000}, {b.CholesterolMG, 100000},
+	} {
+		if p.v != nil && !inRange(*p.v, p.max) {
+			return false
+		}
 	}
 	if b.ServingGrams != nil && *b.ServingGrams <= 0 {
 		return false
