@@ -10216,3 +10216,123 @@ not a guess**: on an unclassifiable failure the phone sends one bodyless GET to
 - **A host that resolves but refuses TLS**, pointing `EXPO_PUBLIC_API_URL` at
   it — to confirm the app does not claim the athlete is offline.
 - **A deploy with no provider key**, to read the 503 copy in place.
+
+## Daily trackers — water first, and the model the next two need (N76)
+
+Backend `internal/modules/tracker` (`/v1/trackers`), mobile `lib/trackerModel.ts`,
+`lib/trackers.ts`, `components/TrackerCard.tsx`, `app/trackers/[id].tsx`, rendered
+on Today and in Food.
+
+**Read the scope before writing a test here.** Water is a *seeded preset* of a
+generic model, not a feature. Most of what is worth testing is the model: N77
+(coffee) and N78 (custom trackers) are meant to land as configuration, and a test
+that only exercises water cannot tell whether that is true.
+
+### Happy path
+
+- Open Today signed in for the first time. The Water card is there with no setup:
+  `0 of 8 cups`, `0 ml`, an empty row of eight glyphs and a leading `+`.
+- Tap `+` four times. Four glyphs fill left to right; the value line reads
+  `4 of 8 cups · 1 L`.
+- Tap the third filled glyph. It empties, the count drops to 3, and the entry
+  removed is the third one — not "some cup".
+- Open Food. The same card is there, showing the same day, and the day stepper
+  moves it: stepping back a day shows that day's cups.
+- Open the card's settings from the phone, change the target to 10, save. The row
+  re-renders with ten slots. **No web screen is involved at any point** — that is
+  the criterion, not a detail.
+- Clear the target field entirely and save. The card becomes a plain count with
+  no "N to go" line and no implied goal.
+
+### Edge cases & errors
+
+- **Ten of eight logs.** Log ten cups against an eight-cup target: all ten log,
+  ten glyphs draw, the line reads `10 of 8 cups`, nothing is blocked and nothing
+  changes tone. Read every string on the card and find no praise and no scolding
+  — `trackerModel.test.ts` asserts this over an enumerated word list, and a
+  functional test should confirm it on screen.
+- **Thirteen of eight becomes a bar.** Past twelve glyphs the row must not wrap
+  into an uncountable block; it switches to a bar with the number stated.
+- **A single-dose tracker draws one large glyph**, not a one-item row.
+- **Units.** Switch the profile between metric and imperial. The volume line
+  follows (`1 L` ↔ `33.8 fl oz`), the cup *count* does not change, and no stored
+  number moves. Nothing unit-bearing renders before `unitsReady`.
+- **A failed read never renders as zero.** With no network and nothing cached,
+  the card is absent rather than claiming "you have no trackers" — the same
+  `unknown` vs `none` distinction the nutrition target already makes.
+
+### Offline
+
+- Airplane mode: tap three cups. They stick, the card is correct, and nothing
+  spins. Restore the network; they sync once and do not double-count.
+- Airplane mode: change the target. It applies immediately and pushes later.
+- Airplane mode: tap a cup then untap it. Both survive a relaunch, and the sync
+  screen's pending count includes them (a tap that is owed but reported as
+  nothing owed reads as "it saved", which is the reassurance that must not be
+  false).
+
+### The local day
+
+- Set the device clock to 23:58 local, log a cup, cross midnight. The cup belongs
+  to the earlier day and the new day starts empty. **West of Greenwich this is
+  the failing case** — a UTC-derived date files a 23:58 glass under tomorrow, and
+  the mobile suite runs under `TZ=America/Los_Angeles` for exactly this.
+
+### VoiceOver
+
+- Turn VoiceOver on and add and remove a cup without looking at the screen.
+- Each glyph announces its position, total, state and tracker: `Water, cup 3 of
+  8, filled`. A row of eight identically-labelled shapes is unusable even though
+  every shape is technically labelled — the hazard is sameness, not silence.
+- Each glyph is a checkbox to the system as well as in its label, and its hint
+  says what a double-tap will do.
+- The settings control announces what it opens, not "more": it is the only route
+  to the target on a phone.
+
+### Auth & security
+
+- Every `/v1/trackers` route 401s without a bearer token.
+- Ids are client-generated, so every read and write is scoped to the caller:
+  another athlete's tracker id 404s on PATCH and DELETE, does not appear in the
+  list, cannot be logged against, and re-creating it returns `already_exists`
+  rather than handing the row over.
+- A client cannot claim a `preset` on create — that would collide with
+  provisioning and make somebody's water card unreachable.
+- The entries window is bounded; an unbounded `from`/`to` is a way to ask for
+  every row an athlete has ever written in one request.
+
+### Regression trap
+
+- **A partial PATCH must never blank a field it did not name.** This is the bug
+  `exercise.updateWithin` shipped three times (migrations 000052, 000057,
+  000061), each time caught in review and never by the suite. The guard here is
+  structural: `patch_test.go` enumerates `Patch`'s fields by reflection and fails
+  if one is unwired in either direction, and `postgres_test.go` patches each
+  field alone and asserts the other seven are unchanged. **If you add a column,
+  write the restore-path case before the migration** — `oneOf` in that file
+  fatals on a field it has no case for, so the omission is loud.
+- **`target` is nullable and three-state.** Absent means leave it alone, `null`
+  means the athlete wants no ceiling, a number sets one. A client that builds its
+  patch with `{ target: x ?? null }` silently turns the first into the second and
+  clears targets nobody asked to clear.
+- **Provisioning is a write on a read.** `GET /v1/trackers` creates the default
+  presets. It must stay idempotent under concurrency (the `(user_id, preset)`
+  unique index, not a flag), must not overwrite an edited target, and must not
+  re-provision a tracker the athlete archived.
+- **The preset id is derived from `(user_id, preset)`, not random.** With a
+  random id, two devices provisioning at once each believe a different id is "the
+  water tracker" and one device's cups reference a tracker the server never
+  stored.
+- **A tracker colour is a KEY, never a hex.** `scripts/validate_palette.mjs`
+  measures every entry in `trackerColors` for contrast on `surface`/`raised` and
+  CIEDE2000 separation from `info` and from each other under three CVD
+  simulations. A free colour picker cannot be checked at authoring time. Adding
+  one means bumping the expected count in that script, which is what forces the
+  measurement.
+- **The suite's timezone is set on the `test` script, at process launch.**
+  Running `jest` directly loses it, and the local-day assertions then pass in the
+  wrong zone — measured here: `formatClock` returned `19:40` under the machine's
+  zone and `16:40` under `America/Los_Angeles`.
+- **`lint:mobile` has zero headroom at 54 warnings.** `useRef(new
+  Animated.Value(...)).current` is a `react-hooks/refs` warning; a lazy
+  `useState` initialiser is the same value with no ref read during render.

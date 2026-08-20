@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(20);
+  expect(row.user_version).toBe(21);
 });
 
 it('a fresh install has the sequences outbox', async () => {
@@ -122,7 +122,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 20 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -156,7 +156,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 20 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -177,7 +177,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 20 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
@@ -331,7 +331,7 @@ it('upgrading a v15-shaped database does not mark every cached name as owed', as
     .prepare(`SELECT name_dirty FROM workout_cache WHERE id = 'w1'`)
     .get() as { name_dirty: number };
   expect(row.name_dirty).toBe(0);
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 20 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
 });
 
 it('a fresh install has the food log', async () => {
@@ -407,7 +407,7 @@ it('upgrades a v17-shaped database by adding the food log', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 20 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -432,7 +432,7 @@ it('upgrades a v18-shaped database by adding the target cache', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 20 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -453,7 +453,7 @@ it('upgrades a v19-shaped database by adding the barcode cache', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 20 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -473,4 +473,73 @@ it('the food log is indexed on the two reads that matter', async () => {
   expect(idx).toEqual(
     expect.arrayContaining(['food_entries_user_day_idx', 'foods_user_recent_idx']),
   );
+});
+
+it('a fresh install has both daily-tracker tables, with the outbox columns', async () => {
+  // The version bump on its own proves nothing — it is a number in a file.
+  // This is what the bump was FOR. Both shapes matter to the push loop:
+  // without `dirty` the outbox cannot know what it owes, without `deleted_at`
+  // an offline delete undoes itself on the next pull, and without `user_id` a
+  // shared phone pushes one athlete's water under the next one's token.
+  const db = await migratedFixture();
+  const cols = (t: string) =>
+    (db.raw.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+
+  expect(cols('daily_trackers')).toEqual(
+    expect.arrayContaining([
+      'id', 'user_id', 'preset', 'name', 'icon', 'color_key', 'unit',
+      'increment', 'target', 'render_style', 'sort_order', 'archived_at',
+      'updated_at', 'dirty', 'remote', 'last_error',
+    ]),
+  );
+  expect(cols('tracker_entries')).toEqual(
+    expect.arrayContaining([
+      'id', 'tracker_id', 'user_id', 'logged_on', 'logged_at', 'amount',
+      'updated_at', 'dirty', 'remote', 'deleted_at', 'last_error',
+    ]),
+  );
+});
+
+it('a device already stamped 20 reaches the tracker tables', async () => {
+  // The upgrade path, which is what the version bump exists for: every dev
+  // machine and every installed build is stamped 20, and `migrate()` returns
+  // early at `current >= SCHEMA_VERSION`. Reverting SCHEMA_VERSION to 20 is
+  // what this catches — those devices would simply not have the tables, and
+  // every tap would fail with no error anywhere.
+  const db = await migratedFixture();
+  db.raw.exec('DROP TABLE tracker_entries; DROP TABLE daily_trackers; PRAGMA user_version = 20;');
+
+  await migrate(db as never);
+
+  const tables = (
+    db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+  ).map((t) => t.name);
+  expect(tables).toContain('daily_trackers');
+  expect(tables).toContain('tracker_entries');
+});
+
+it("a tracker's target may be NULL, because a count with no goal is a real state", async () => {
+  // Not a formality: a NOT NULL here would make N77's coffee card impossible to
+  // express, and the tempting fix at that point is a sentinel 0 — which then
+  // renders as "0 of 0" at an athlete who asked for no target at all.
+  const db = await migratedFixture();
+  await db.runAsync(
+    `INSERT INTO daily_trackers (id, user_id, name, color_key, increment, target)
+     VALUES ('t1', 'u1', 'Coffee', 'coffee', 1, NULL)`,
+  );
+  const row = await db.getFirstAsync<{ target: number | null }>(
+    `SELECT target FROM daily_trackers WHERE id = 't1'`,
+  );
+  expect(row?.target).toBeNull();
+});
+
+it('the tracker entries are indexed on the read the card runs', async () => {
+  // The day query runs on every focus of Today AND of Food, for every tracker.
+  // A missing index here is a scan on the table expected to grow fastest —
+  // several rows a day, forever.
+  const db = await migratedFixture();
+  const idx = (
+    db.raw.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]
+  ).map((i) => i.name);
+  expect(idx).toContain('tracker_entries_user_day_idx');
 });

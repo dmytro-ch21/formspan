@@ -33726,6 +33726,196 @@ thing to expect on the day a convention changes.
   eleven are untouched and a real refactor.
 - **Android's timeout mapping is unverified**, as above.
 
+## 2026-08-20 — Daily trackers: water is a row in a table, not a card (N76)
+
+The ticket asked for a water card you tap on Today. The thing that was actually
+built is the model underneath it, because **#407 (coffee) and #408 (custom
+trackers) were both `Blocked` on it**, and the stated test was not "does water
+work" — it was *could coffee and the third one land as configuration.*
+
+So: one `daily_trackers` table, one `tracker_entries` table, and everything that
+distinguishes water from coffee from creatine is a value in a column.
+
+| | unit | increment | target | render | colour |
+|---|---|---|---|---|---|
+| water (seeded) | `ml` | 250 | 2000 | `auto` → glyphs | `water` |
+| coffee (N77) | `cup` | 1 | **NULL** | `auto` → glyphs | `coffee` |
+| creatine (N78) | `g` | 5 | 5 | `auto` → dose | picked |
+| 30 capsules (N78) | `dose` | 1 | 30 | `auto` → **bar** | picked |
+
+Every one of those rows renders today through the same component and the same
+pure model; three of the four have no feature behind them yet. `presets.go` is
+where the second one goes, and it is a struct literal.
+
+### The design trap, and the guard written before the code
+
+This repo has the failure on file three times: `exercise`'s `updateWithin`
+blanked authored data in migrations 000052, 000057 and 000061 — a column added
+to a fixed SET clause, a restore path writing an empty value over a real one,
+and `writeWithRevision` then recording the wipe as legitimate history. **All
+three were caught in review; none was caught by the suite.**
+
+A tracker model is exactly that shape: a shared write path several features will
+extend, where an omission has no symptom until real data hits it. So the write
+path here has no fixed SET clause at all. `Patch` is a struct of
+`Field[T] { Set bool; Value *T }`, `patchColumns` emits **only** what the caller
+set, and the `UPDATE` is assembled from that. A field the body did not mention
+is not in the statement, so it cannot be blanked.
+
+`Field[T]` exists rather than `*T` because a JSON key has three states and a
+pointer has two. `target` is nullable — coffee is a count with no ceiling — so
+*"clear my target"* and *"do not touch my target"* both have to be sayable, and
+with `*float64` they are the same wire shape.
+
+**The tests were written before `postgres.go` existed**, and they are structural
+rather than enumerated by hand:
+
+- `patch_test.go` reflects over `Patch` and asserts `patchColumns` yields exactly
+  one distinct column per field, that an empty patch yields none, and that each
+  field set alone yields exactly one. It also reflects over `Tracker` and fails
+  if a mutable field has no `Patch` counterpart, with an explicit immutable list
+  that itself has to stay in sync. `patchColumns` is written out by hand on
+  purpose: if both sides used reflection they would agree by construction and
+  prove nothing.
+- `postgres_test.go` runs one subtest **per patch field**, patching that field
+  alone against a real Postgres and asserting the other seven columns — plus
+  identity, ownership and `created_at` — came back unchanged. It also checks the
+  patched field actually moved, so the test cannot pass by writing nothing.
+
+**Mutation-tested, five ways, each compile-checked first:**
+
+| mutation | result |
+|---|---|
+| drop `target` from `patchColumns` | 3 tests red |
+| make every `add()` unconditional (the blanking bug) | 9 tests red, every field |
+| add a `Note` column to `Tracker` with no `Patch` field | red, naming `Tracker.Note` |
+| append a hardcoded `icon = ''` to the SET clause | 8 subtests red: *"patching Name also changed Icon: 💧 → ."* |
+| baseline restored | green, uncached |
+
+The fourth is the real bug reproduced — and note migration 000061's column was
+literally called `note`.
+
+### What is deliberately NOT a special case
+
+- **Provisioning is `ON CONFLICT (user_id, preset) DO NOTHING`** on a partial
+  unique index, on `GET /v1/trackers`. A write on a read, stated rather than
+  hidden: it is idempotent, safe to race, and the alternative (a "set up my
+  trackers" call) is a step that gets skipped and leaves Today empty. An edited
+  target survives it; an archived tracker is not handed back, because archiving
+  is a timestamp and the row keeps its index entry.
+- **The preset id is derived**, `sha256(userID + preset)`, not random. With a
+  random id two devices provisioning at once each believe a different id is "the
+  water tracker", and one device's cups reference a tracker the server never
+  stored. The unique index stops the duplicate row; it does not make the two
+  devices agree.
+- **`amount` lives on the entry**, not just on the definition. Switching from a
+  250 ml glass to a 500 ml bottle must not rewrite last week — the same class of
+  mistake as deriving a local day from a UTC timestamp.
+- **The count is `entries.length`**, never `amount / increment`. An athlete who
+  logged four cups and then widened the increment has still tapped four times;
+  the division says two and two of their cups vanish from the row.
+
+### Mobile
+
+`lib/trackerModel.ts` is pure and mentions water nowhere. `resolveRenderStyle`
+takes the *current count* as well as the record, because a row that would grow
+past twelve glyphs has to become a bar — that is a property of the day, not of
+the definition, and it is N78's "thirty capsules is a wall of identical glyphs
+nobody can count" solved for every tracker at once.
+
+`lib/trackers.ts` is the third outbox and copies `foodLog.ts` almost line for
+line — the monotonic `stamp()`, the compare-and-swap on `updated_at` on **both**
+the success and failure branches, tombstones for anything the server has seen,
+`break` on offline. Those are the accumulated repairs of several real data-loss
+bugs, and an outbox that reinvented them would reintroduce whichever one it
+forgot. Definitions push *before* entries, because `tracker_id` is a real foreign
+key server-side and an entry against a locally-created tracker would 404 —
+classifying as permanent, which would make the outbox give up on a good cup.
+
+One thing measured rather than assumed: a freshly logged tap is
+`dirty = 1, remote = 0`, so `removeTap` **tombstones** it rather than
+hard-deleting. The flags cannot distinguish never-attempted from
+attempt-in-flight, and hard-deleting the second loses the delete. The cost is a
+doomed `DELETE` after a tap-and-untap offline, which for a cup row is common —
+one idempotent request the server answers 204 to. Written as a test asserting
+the wrong behaviour first, which is how it was found.
+
+`useTrackerDay` is one hook, used by both Today and Food. #392 exists because two
+image-upload paths each learned the same downscale independently; two copies of
+"read SQLite, then the network, then re-read" would diverge in exactly the places
+that are hard to see. Today pins its row to today (a tap logs a cup *now*); Food
+follows the day stepper (the day is the subject there).
+
+`app/trackers/[id].tsx` is the target editor, and it exists because of the hard
+rule rather than because a tracker needed a detail view. The failure that rule
+was written from is this exact shape — `nutrition-design.md` put target-setting
+on "one web screen", so the reasoning was reachable on a phone and the action was
+not. There is no web counterpart, which is fine in this direction.
+
+### Colour, measured
+
+Water is `#408D96`, a deep teal, and the vivid cyan it wants to be does not
+exist. `#2ED9E0`, `#40E0D0` and `#7FE9F0` land at **ΔE 8.0 / 9.5 / 10.6 against
+`info` under simulated tritanopia**, where the blue axis collapses and the two
+become one hue separated only by lightness — and `info` is the categorical blue
+this app already uses. Separation has to come from lightness, which means going
+darker: `#408D96` measures ΔE 16.1, and 4.76:1 on `surface`.
+
+`validate_palette.mjs` now loops over the whole `trackerColors` block rather than
+naming checks, so N77's colour is covered by adding one line — and `block(...,
+2)` forces that line through the gate rather than past it. Coffee's `#C08457` is
+already in there and already measured (ΔE 23.4 from the water teal under
+protanopia) so that PR is a seed row, not a colour search. Confirmed the gate can
+fail: swapping in `#2ED9E0` reports *"ΔE 8.00 under tritanopia, needs 15. Normal
+vision sees 23.33, which is why it looks fine."*
+
+Two candidates were rejected at 4.35:1 and 4.40:1 on `raised` before the
+threshold was corrected — a filled glyph is a graphic (WCAG 1.4.11, 3:1) and only
+the value line on `surface` is text (4.5:1). Holding a fill to 4.5 on `raised` is
+stricter than anything else in that file, and a gate nothing else obeys is a gate
+that stops meaning anything. Said out loud in the file, with the condition under
+which it tightens again.
+
+### Numbers
+
+`pnpm run verify` green (exit 0), 120 suites / 1828 tests. Backend **38 packages,
+1 skip, 0 failures** on a migrated database — the skip is the intentional
+`TestLiveComplete`. `lint:mobile` at **54** warnings, unchanged: the one new
+`react-hooks/refs` finding was cleared by replacing `useRef(new
+Animated.Value(...)).current` with a lazy `useState` initialiser rather than by
+raising the ceiling. Migration **000068**, claimed against `origin/main` at push
+time; the hole at `000065` is untouched.
+
+Four mobile guards were mutation-tested too: swapping `dayString` for
+`toISOString().slice(0,10)` reddens the 23:58 local-day test; dropping
+`WHERE dirty = 0` from the pull reddens the no-clobber test; writing nulls for
+unmentioned patch fields reddens thirteen; removing the push compare-and-swap
+reddens the in-flight-edit test.
+
+### Open questions this leaves
+
+- **Archiving has no screen.** The backend archives (`DELETE /v1/trackers/{id}`,
+  a timestamp, entries kept) and the settings screen says so rather than
+  pretending — a tracker you can stop with no way to get it back is a trap, and
+  the archived list belongs to N78. The endpoint is tested; the button is not
+  wired.
+- **The count noun is derived from the unit**, so 30 g of fibre in 5 g steps
+  reads "6 doses", which is not what anyone would say. An authored noun belongs
+  to N78, where arbitrary trackers arrive.
+- **Nothing has run on a device.** The animation, VoiceOver, the keyboard on the
+  target field and the row's wrap at twelve glyphs are all Simulator-or-device
+  questions, and none has been answered. VoiceOver in particular is the least
+  verified thing in this app (L1) and the row is deliberately the most
+  accessibility-sensitive control it has.
+- **`GET /v1/trackers` writes.** It is idempotent and tested, but a read that
+  provisions is the kind of thing a future caching layer gets wrong. The ETag
+  middleware wraps the whole mux; nothing has been checked about a 304 on a
+  response whose side effect matters.
+- **The pull for entries is one day wide.** `fetchTrackerDay` asks for the day on
+  screen. Reading a week back on Food is a request per day, which is fine at this
+  size and is the first thing to change if a history view arrives.
+
+
 ## Open items / known gaps as of this entry
 
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
