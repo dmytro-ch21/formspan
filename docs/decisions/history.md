@@ -33230,15 +33230,15 @@ and `dictateScreen` instead.)
   machine's total, so at load 160 the cores are gone whatever one instance asks
   for. It does mean there is no flag that makes a 10-core machine host eleven
   concurrent suites, and pretending otherwise sends people hunting for one.
-- **A possible second, unrelated flake needs its own ticket.** One session
+- **A possible second, unrelated flake — filed as F18 (#431).** One session
   measured `dictateScreen.test.tsx` failing **4 of 11 runs in isolation** at
-  local load 140–195 — no concurrent suite, nothing for a worker cap to fix. If
-  that reproduces it is a genuine defect in that test, distinct from the
-  contention story here, and folding it into #409 would bury it. It did **not**
-  reproduce on CI: `dictateScreen` was green in all 75 runs across the three
-  arms, and every one of the nine failures observed was `bjjSessionScreen`. So
-  it is either local-load-specific or something CI's environment does not
-  expose — either way, unresolved and not this entry's.
+  local load 140–195 — no concurrent suite, so nothing for a worker cap to fix.
+  It did **not** reproduce on CI: `dictateScreen` was green in all 75 runs
+  across the three arms, and every one of the nine failures observed was
+  `bjjSessionScreen`. That leaves three live explanations — load-dependent
+  beyond anything CI reaches, real but rarer than 75 runs, or an artefact of the
+  local measurement — and #431 exists to settle which rather than let it be
+  absorbed by a fix that does not address it.
 
 ## Open items / known gaps as of this entry
 
