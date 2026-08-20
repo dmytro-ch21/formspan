@@ -197,6 +197,30 @@ the quantities specifically, not just the names.
 trends downstream, and a wrong number there is invisible forever after. A real
 plate has, as far as anyone can tell, never been through it.
 
+**Also: photograph a product LABEL, which is the reported failure (N92, #433).**
+Scan a barcode the catalog does not have, take the "Describe it instead" path
+it offers, and photograph the nutrition panel on the packet. This is the third
+rung of the scan ladder and it is the exact journey the report came from — a
+phone answering **"can't reach server"** on a connection that was working.
+
+Two mechanisms that could produce that sentence are now closed: the endpoint
+had no deadline at all, so a slow provider ran until the phone gave up and
+received no status to render; and a failure re-encoding the frame — which
+happens on the device with the radio idle — fell through to a message about
+signal. **What has NOT been established is which one the reporter hit**, so
+this check is evidence, not a regression test.
+
+**Should:** A draft comes back with the label's own figures in it, and you
+confirm it. If it fails instead, the sentence must name what failed — a
+timeout, an outage, or the allowance being spent and when it returns — and must
+not mention signal, a connection, or being offline.
+
+**Capture the status, whatever happens.** That is the acceptance criterion the
+ticket cannot close without: a proxy, the device console, or the server's own
+log by `request_id`. Note that a **504** is the new answer for "we stopped
+waiting", and unlike the 503 it *does* spend one of the day's 25 — so check the
+remaining count before concluding a quota was burned by something else (#367).
+
 ---
 
 ## D5 — Scan a barcode on a real packet
