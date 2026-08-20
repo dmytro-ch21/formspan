@@ -30,6 +30,25 @@ The damage is quiet in the way that matters: an id reverted to `[ ]` reads as
 "still to do", so the next session picks it up and redoes finished work — which
 is the exact loss the claiming convention was written to prevent.
 
+## It has caught its own author twice, on different failure modes
+
+Recorded because the lesson is not obvious from the code, and because both were
+rebase resolutions that no other check in the repo can see.
+
+**A duplicated id.** A helper written to make doc resolutions safer re-added a
+ticked line whose counterpart sat OUTSIDE the conflict hunk, so the same id
+appeared twice. Automation aimed at this problem created a fresh instance of it.
+
+**A regressed tick.** A later version of that helper kept "the longer line per
+id" — and an upstream `[x]` lost to a longer local `[ ]`, silently reopening a
+finished task. **Length is a proxy for authority and a bad one**: it happens to
+work until a verbose local edit meets a terse upstream tick.
+
+The rule a conflict resolver actually needs is about **authority, not shape**: a
+tick upstream is a claim that work landed, and it wins regardless of how the two
+lines look. That is what this check's own failure message says, and it took two
+goes to put it in the resolver.
+
 ## What it promises, and what it cannot
 
 It compares this working tree against the **merge base** with `origin/main`.
@@ -54,6 +73,13 @@ ones that matter operationally and the first draft of this file omitted both:
   worse trade. Split with a new id instead.
 - **It does not read prose.** A line rewritten to say something false, or a task
   ticked that was never done, is out of scope. This checks structure only.
+- **It only guards a tick being ERASED, never one being forgotten.** A PR whose
+  title says `closes N68` and which never ticks N68 passes here cleanly. That
+  half is real and has cost a day already — an id sat open, marked HIGH
+  PRIORITY with a stale diagnosis, well after the PR that fixed it had merged.
+  Closing it means comparing a PR's stated intent against the file, which needs
+  the PR context this script does not have; filed separately rather than bolted
+  on here.
 
 Retiring or renumbering an id fails as a dropped line. That is deliberate —
 `CLAUDE.md` says a finished task's line is never deleted, because it is the

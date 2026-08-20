@@ -10140,6 +10140,50 @@ quoted on N70's task line.
   touches enough files to add one. Removing `router.back()` left `router` as an
   unused `useCallback` dependency — one new warning, which failed the gate. The
   fix is the dependency, never the ceiling.
+## Food search result cards (N58 — `app/food/add.tsx`, `lib/foodGlyph.ts`)
+
+Follows N51, which wired the search. This is what a result looks like.
+
+### Happy path
+
+- A search shows **cards**: glyph, name, brand beneath (when there is one), a
+  serving line reading `389 cals per 100 g`, and a circular `+`.
+- **The `+` logs without opening anything** — one tap, straight into the day.
+- A long USDA name wraps to **two** lines and then truncates. One line hides the
+  half that distinguishes "Cheese, cheddar" from "Cheese, cheddar, reduced fat".
+- A **generic** food (every seeded USDA row) shows **no brand line at all**,
+  rather than an empty one.
+
+### The glyph
+
+- **It comes from the category, never the name.** The test worth running by hand:
+  search a food whose name contains a different food's word — "beef-flavoured
+  tofu", "chicken-style seitan", "butter beans". None may show a meat or dairy
+  glyph. This is the failure the design named, and the one keyword matching
+  creates.
+- **An unrecognised category shows a neutral plate**, never a nearest match.
+  Reachable for real: author a food in the admin console with a category the
+  seed does not use (`category` is free text).
+- **VoiceOver must not announce it.** Sweep the list with a screen reader: each
+  row reads its name, brand and serving — no "seedling", no "cut of meat".
+
+### The scope row
+
+- `All` shows the athlete's own foods **and** the catalog.
+- `My Foods` shows only their own — the catalog disappears.
+- `Recipes` shows only saved recipes, read from the stored `kind`.
+- **`Meals` and a verified-only filter do not exist and must not be added
+  without data behind them.** A chip that filters nothing is indistinguishable
+  from a filter that found nothing.
+
+### Regression trap
+
+- **A wrong glyph is worse than none.** If a future change makes the glyph read
+  the name — for speed, for coverage, for anything — the tofu cases above are
+  what catch it, and `lib/__tests__/foodGlyph.test.ts` pins the rule.
+- **Coverage rots silently.** Adding a category to `foods.json` without a glyph
+  makes every food in it render as a plate, with no diff to read. The test reads
+  the seed directly and fails; do not fix it by widening the fallback.
 
 ## Setting a target by hand, and taking the weekly adjustment (N72, mobile — `app/(tabs)/goals.tsx`, `components/nutrition/ManualTarget.tsx`, `components/nutrition/AdjustmentCard.tsx`, `lib/manualTarget.ts`)
 

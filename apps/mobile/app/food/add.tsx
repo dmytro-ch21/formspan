@@ -58,6 +58,7 @@ import {
   type CatalogFood,
   type CatalogSearch,
 } from '@/lib/catalogApi';
+import { glyphFor } from '@/lib/foodGlyph';
 import { localFoods, logFood, recentsFor, saveFoodLocally } from '@/lib/foodLog';
 import {
   MEALS,
@@ -81,6 +82,19 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * is how a search appears to change its mind.
  */
 type CatalogState = { forQuery: string; result: CatalogSearch | 'unreachable' };
+
+/**
+ * The serving line: `182 cals per 100 g`.
+ *
+ * Reads the food's OWN serving label rather than inventing a unit, so a food
+ * measured per bar says "per 1 bar" and one measured per 100 g says so. The
+ * calorie figure is the one for that serving, which is what makes the two
+ * halves comparable — a number without its unit is the thing that makes a list
+ * of foods unscannable.
+ */
+function servingLine(food: CatalogFood): string {
+  return `${Math.round(food.kcal)} cals per ${food.serving_label}`;
+}
 
 /**
  * The key two food lists are compared on.
@@ -109,6 +123,15 @@ function catalogName(food: CatalogFood): string {
     : `${food.brand} ${food.name}`;
 }
 
+/** The scopes with data behind them. See the note on `scope`. */
+const SCOPES = [
+  { key: 'all', label: 'All' },
+  { key: 'mine', label: 'My Foods' },
+  { key: 'recipes', label: 'Recipes' },
+] as const;
+
+type Scope = (typeof SCOPES)[number]['key'];
+
 export default function AddFoodScreen() {
   const router = useRouter();
   const accent = useAccent();
@@ -124,6 +147,24 @@ export default function AddFoodScreen() {
   const [recents, setRecents] = useState<Food[]>([]);
   const [matches, setMatches] = useState<Food[]>([]);
   const [creating, setCreating] = useState(false);
+
+  /**
+   * Which sources the list draws from.
+   *
+   * **Three chips, not the four the design asked for, and the two missing ones
+   * are refused rather than stubbed.** `Meals` has no backing at all — a food's
+   * `kind` is `food | recipe` and nothing models a meal — and the design's
+   * `verified-only` filter would filter on a field that does not exist in
+   * `food_catalog`, in `nutrition_foods`, or on the wire. A chip that filters
+   * nothing is an affordance that lies, which is the failure N39 records: an
+   * empty affordance is worse than an absent one, because the athlete cannot
+   * tell it from a filter that found nothing.
+   *
+   * `All` and `My Foods` are the honest home for the distinction N51 already
+   * built — the catalog is an additional source, the personal list is theirs —
+   * and `Recipes` is real because `kind` is stored and read.
+   */
+  const [scope, setScope] = useState<Scope>('all');
 
   /**
    * The catalog half of the search.
@@ -169,6 +210,16 @@ export default function AddFoodScreen() {
   useEffect(() => {
     const query = q.trim();
     let live = true;
+    // Nothing downstream renders a catalog answer outside `All`, so asking for
+    // one under `My Foods` or `Recipes` spends a round trip on a result that
+    // cannot be shown. Switching back to `All` re-runs this effect, so nothing
+    // is lost by not prefetching. Raised in review.
+    // Returns without touching state: a synchronous setState in an effect body
+    // is a cascading render, and this app's ratchet holds that warning at zero
+    // headroom. Nothing needs clearing anyway — every render of `searching` is
+    // itself gated on `scope === 'all'`, and switching back re-runs this effect
+    // and sets it properly.
+    if (scope !== 'all') return;
     // Everything happens inside the timer, including the empty-query reset —
     // a synchronous setState in an effect body cascades renders, and the rule
     // that says so is a warning this app's ratchet will not absorb.
@@ -198,7 +249,7 @@ export default function AddFoodScreen() {
       live = false;
       clearTimeout(t);
     };
-  }, [q, getToken]);
+  }, [q, getToken, scope]);
 
   const searched = q.trim();
   /**
@@ -230,7 +281,16 @@ export default function AddFoodScreen() {
     return answer.foods.filter((f) => !savedNames.has(foodKey(f)));
   }, [answer, savedNames]);
 
-  const shown = searched ? matches : recents;
+  /**
+   * The athlete's own rows, narrowed by scope. `Recipes` reads the stored
+   * `kind`; it does not guess from the name.
+   */
+  const ownRows = useMemo(() => {
+    const rows = searched ? matches : recents;
+    return scope === 'recipes' ? rows.filter((f) => f.kind === 'recipe') : rows;
+  }, [searched, matches, recents, scope]);
+
+  const shown = ownRows;
   const exact = useMemo(
     () => matches.some((f) => f.name.toLowerCase() === q.trim().toLowerCase()),
     [matches, q],
@@ -345,6 +405,25 @@ export default function AddFoodScreen() {
         testID="add-search"
       />
 
+      <View style={styles.scopes}>
+        {SCOPES.map((sc) => {
+          const on = sc.key === scope;
+          return (
+            <Pressable
+              key={sc.key}
+              onPress={() => setScope(sc.key)}
+              style={[styles.scopePill, on && { backgroundColor: accent.accent }]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`Show ${sc.label}`}
+              testID={`add-scope-${sc.key}`}
+            >
+              <Text style={[styles.scopeText, on && { color: accent.on }]}>{sc.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <SectionHeader label={q.trim() ? 'Matches' : 'Recent'} />
 
       {shown.map((f) => (
@@ -379,25 +458,78 @@ export default function AddFoodScreen() {
           a catalog row is reference data. Merging them would also hide which
           of the two a tap is about to log, and they behave differently — a
           saved food records provenance and a catalog row cannot. */}
-      {searched && catalogOnly.length > 0 ? (
+      {scope === 'all' && searched && catalogOnly.length > 0 ? (
         <>
           <SectionHeader label="From the food catalog" />
           {catalogOnly.map((f) => (
             <Pressable
               key={f.id}
-              style={styles.row}
+              style={styles.card}
               onPress={() => void logCatalog(f)}
               accessibilityRole="button"
               accessibilityLabel={`Log ${catalogName(f)} from the food catalog`}
-              testID={`add-catalog-${f.id}`}
+              testID={`add-catalog-row-${f.id}`}
             >
-              <View style={styles.rowMain}>
-                <Text style={styles.rowName} numberOfLines={1}>
-                  {catalogName(f)}
+              {/* Derived from the CATEGORY, never the name — see `foodGlyph`.
+                  A wrong glyph is worse than none, and name matching is what
+                  puts a steak on a beef-flavoured tofu. */}
+              {/* Hidden from the accessibility tree. It is decoration — the
+                  name carries the meaning — and a screen reader announcing
+                  "seedling, Beef-flavoured tofu" before every row is noise in
+                  the one place a list has to be fast to move through. */}
+              <Text
+                style={styles.cardGlyph}
+                testID={`add-catalog-glyph-${f.id}`}
+                // `aria-hidden`, which React Native maps to BOTH
+                // `accessibilityElementsHidden` (iOS) and
+                // `importantForAccessibility="no-hide-descendants"` (Android).
+                // The first version paired the iOS prop with the weaker
+                // Android `"no"`, and RNTL only treats the strong forms as
+                // hidden — so the Android half was both weaker AND invisible
+                // to the test that claimed to cover it. Raised in review.
+                aria-hidden
+              >
+                {glyphFor(f.category)}
+              </Text>
+
+              <View style={styles.cardMain}>
+                {/* Two lines, then truncate. A catalog name is a USDA
+                    description and routinely long; one line hides the half
+                    that distinguishes it from its neighbour. */}
+                <Text style={styles.cardName} numberOfLines={2}>
+                  {f.name}
                 </Text>
-                <Text style={styles.rowServing}>{f.serving_label}</Text>
+                {/* Omitted entirely when absent rather than rendered empty —
+                    every seeded USDA food is generic and has no brand, so an
+                    empty line would be the common case. */}
+                {f.brand ? <Text style={styles.cardBrand}>{f.brand}</Text> : null}
+                <Text style={styles.cardServing}>{servingLine(f)}</Text>
               </View>
-              <Text style={styles.rowKcal}>{Math.round(f.kcal)}</Text>
+
+              {/* The `+` logs, and so does the card body — the SAME action for
+                  now. The saved-food rows directly above these cards log on a
+                  whole-row tap, and a list where the row above responds to a
+                  body tap and this one ignores it teaches a gesture it then
+                  refuses. Raised in review; the body was dead.
+
+                  Still a separate control rather than only a row press,
+                  because when a detail screen exists the body's press becomes
+                  "open" and the `+` keeps meaning "log" — that is the whole
+                  point of a quick-add affordance, and it should not have to be
+                  re-added then. */}
+              <Pressable
+                onPress={() => void logCatalog(f)}
+                style={[styles.cardAdd, { borderColor: accent.accent }]}
+                accessibilityRole="button"
+                accessibilityLabel={`Add ${catalogName(f)}`}
+                // Bigger than it looks. The circle is 32pt and a thumb is not,
+                // and this sits at the edge of the screen where a miss scrolls
+                // the list instead.
+                hitSlop={10}
+                testID={`add-catalog-${f.id}`}
+              >
+                <Text style={[styles.cardAddText, { color: accent.ink }]}>+</Text>
+              </Pressable>
             </Pressable>
           ))}
           {/* Honest about the cap. "20 of 63" beats a list that silently
@@ -428,7 +560,7 @@ export default function AddFoodScreen() {
           `answer &&` also matters on its own: without it the block renders an
           empty `Text` between the keystroke and the debounce — a stray node
           saying nothing that a test can find and mistake for a message. */}
-      {searched && answer && !searching && (answer === 'unreachable' || answer.foods.length === 0) ? (
+      {scope === 'all' && searched && answer && !searching && (answer === 'unreachable' || answer.foods.length === 0) ? (
         <Text style={styles.empty} testID="add-catalog-empty">
           {answer === 'unreachable'
             ? 'Could not reach the food catalog. Your own saved foods are still searched.'
@@ -704,6 +836,41 @@ const styles = StyleSheet.create({
   rowMain: { flex: 1, gap: 2 },
   rowName: { fontSize: 15, fontWeight: '600' },
   rowServing: { fontSize: 12, color: vola.textDim },
+  scopes: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  scopePill: {
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: vola.line,
+  },
+  scopeText: { fontSize: 12, fontWeight: '600', color: vola.textMuted },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: vola.lineSoft,
+    backgroundColor: vola.surface,
+    marginBottom: 8,
+  },
+  cardGlyph: { fontSize: 26 },
+  cardMain: { flex: 1, gap: 2 },
+  cardName: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
+  cardBrand: { fontSize: 12, color: vola.textMuted },
+  cardServing: { fontSize: 12, color: vola.textDim },
+  cardAdd: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardAddText: { fontSize: 20, lineHeight: 22, fontWeight: '600' },
   rowKcal: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
   empty: { fontSize: 13, color: vola.textMuted, paddingVertical: 8 },
   newRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },

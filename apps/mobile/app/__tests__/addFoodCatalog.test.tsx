@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
+import { glyphFor } from '@/lib/foodGlyph';
+
 import AddFoodScreen from '../food/add';
 
 /**
@@ -53,7 +55,11 @@ const CATALOG_OATS = {
   id: 'usda-1',
   name: 'Oats, rolled',
   brand: '',
-  category: 'grains',
+  // 'grain', not 'grains' — the seed's vocabulary. The typo made every card
+  // in this suite render the NEUTRAL plate, which quietly vacated the
+  // screen-reader assertion below: it checked that 🌾 was absent, and 🌾 was
+  // never rendered in any form. Caught in review.
+  category: 'grain',
   serving_label: '100 g',
   serving_grams: 100,
   kcal: 389,
@@ -189,8 +195,18 @@ it('does not let a brandless saved food suppress every brand', async () => {
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-9')).toBeTruthy());
 });
 
-/** What the row says is what the diary records. */
-it('logs the same name it displayed', async () => {
+/**
+ * What the card says is what the diary records.
+ *
+ * The original defect was a row showing the bare name while the log recorded
+ * brand-plus-name, so a tap on one thing put another in the diary. N58's card
+ * shows the two as SEPARATE elements — name, brand muted beneath — so they are
+ * no longer one text node, and the invariant is now that both parts are on the
+ * card and the logged name composes exactly them. Asserting the old single
+ * string would have failed for the right reason and been "fixed" by weakening
+ * it; this is the same claim re-expressed against the new layout.
+ */
+it('shows both name and brand, and logs their composition', async () => {
   mockSearchCatalog.mockResolvedValue(
     answer({
       foods: [{ ...CATALOG_OATS, id: 'usda-9', name: 'Greek Yogurt', brand: 'Fage' }],
@@ -200,11 +216,85 @@ it('logs the same name it displayed', async () => {
   );
   await search('greek');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-9')).toBeTruthy());
-  expect(screen.getByText('Fage Greek Yogurt')).toBeTruthy();
+  // Both halves visible, as two elements.
+  expect(screen.getByText('Greek Yogurt')).toBeTruthy();
+  expect(screen.getByText('Fage')).toBeTruthy();
   await act(async () => {
     fireEvent.press(screen.getByTestId('add-catalog-usda-9'));
   });
+  // And the diary gets exactly what the card showed, composed.
   expect(mockLogFood.mock.calls[0][1].name).toBe('Fage Greek Yogurt');
+});
+
+/** A generic food has no brand line at all, rather than an empty one. */
+it('omits the brand line entirely for a generic food', async () => {
+  mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
+  await search('oats');
+  await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
+  expect(screen.getByText('Oats, rolled')).toBeTruthy();
+  // Every seeded USDA food is generic, so an empty brand line would be the
+  // common case rather than the exception.
+  expect(screen.queryByText('')).toBeNull();
+});
+
+/**
+ * The serving line carries its unit. A calorie figure without one is the thing
+ * that makes a list of foods unscannable — 182 against 456 means nothing until
+ * you know one is per 100 g and the other per bar.
+ */
+it('states the calories WITH the serving they belong to', async () => {
+  mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
+  await search('oats');
+  await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
+  expect(screen.getByText('389 cals per 100 g')).toBeTruthy();
+});
+
+/**
+ * The glyph is derived from the CATEGORY. This pins that the card renders one
+ * at all and that it is the category's, not a name-derived guess — the
+ * substitution `foodGlyph` exists to prevent.
+ */
+it('shows the category glyph, not one guessed from the name', async () => {
+  mockSearchCatalog.mockResolvedValue(
+    answer({
+      foods: [{ ...CATALOG_OATS, id: 'usda-7', name: 'Beef-flavoured tofu', category: 'plant_protein' }],
+      total: 1,
+      outcome: 'ok',
+    }),
+  );
+  await search('tofu');
+  await waitFor(() => expect(screen.getByTestId('add-catalog-usda-7')).toBeTruthy());
+  // `includeHiddenElements` because the glyph is deliberately hidden from the
+  // accessibility tree, and RNTL's queries exclude hidden elements by default.
+  // Needing this option IS the evidence that the hiding works.
+  const glyph = screen.getByTestId('add-catalog-glyph-usda-7', { includeHiddenElements: true });
+  expect(glyph).toHaveTextContent(glyphFor('plant_protein'));
+  expect(glyph).not.toHaveTextContent(glyphFor('red_meat'));
+});
+
+/**
+ * The glyph is decoration and must not be announced. A screen reader reading
+ * "seedling, Beef-flavoured tofu" before every row is noise in the one place a
+ * list has to be fast to move through — and it is the name that carries the
+ * meaning.
+ *
+ * Asserted via `getByText`, which excludes accessibility-hidden elements by
+ * default: the glyph is findable by testID and NOT by text, which is exactly
+ * the pair of facts wanted.
+ */
+it('does not announce the glyph to a screen reader', async () => {
+  mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
+  await search('oats');
+  await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
+  // Present in the tree...
+  expect(
+    screen.getByTestId('add-catalog-glyph-usda-1', { includeHiddenElements: true }),
+  ).toBeTruthy();
+  // ...and absent from every query that respects accessibility, which is what a
+  // screen reader walks. Both halves matter: the first alone would pass with
+  // the glyph removed, the second alone would pass with it never rendered.
+  expect(screen.queryByTestId('add-catalog-glyph-usda-1')).toBeNull();
+  expect(screen.queryByText(glyphFor('grain'))).toBeNull();
 });
 
 describe('an empty result says which kind of empty', () => {
@@ -282,4 +372,65 @@ it('says how many of the total it is showing', async () => {
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-more')).toBeTruthy());
   expect(screen.getByTestId('add-catalog-more')).toHaveTextContent(/1 of 63/);
+});
+
+describe('the scope row', () => {
+  const SAVED_FOOD = {
+    id: 'mine-food', kind: 'food', name: 'Porridge', brand: '', serving_label: '40 g',
+    serving_grams: 40, kcal: 150, protein_g: 5, carb_g: 26, fat_g: 3, fibre_g: 4,
+  };
+  const SAVED_RECIPE = {
+    id: 'mine-recipe', kind: 'recipe', name: 'Chilli', brand: '', serving_label: '1 portion',
+    serving_grams: 350, kcal: 520, protein_g: 38, carb_g: 44, fat_g: 18, fibre_g: 9,
+  };
+
+  beforeEach(() => {
+    mockLocalFoods.mockResolvedValue([SAVED_FOOD, SAVED_RECIPE]);
+    mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
+  });
+
+  it('shows both sources under All', async () => {
+    await search('o');
+    await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
+    expect(screen.getByTestId('add-food-mine-food')).toBeTruthy();
+  });
+
+  /** The catalog is an additional source; My Foods is the athlete's own. */
+  it('hides the catalog under My Foods', async () => {
+    await search('o');
+    await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('add-scope-mine'));
+    });
+    expect(screen.queryByTestId('add-catalog-usda-1')).toBeNull();
+    expect(screen.getByTestId('add-food-mine-food')).toBeTruthy();
+  });
+
+  /** Recipes reads the STORED kind rather than guessing from the name. */
+  it('shows only recipes under Recipes', async () => {
+    await search('o');
+    await waitFor(() => expect(screen.getByTestId('add-food-mine-food')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('add-scope-recipes'));
+    });
+    expect(screen.getByTestId('add-food-mine-recipe')).toBeTruthy();
+    expect(screen.queryByTestId('add-food-mine-food')).toBeNull();
+    expect(screen.queryByTestId('add-catalog-usda-1')).toBeNull();
+  });
+
+  /**
+   * The two chips the design asked for that are NOT built.
+   *
+   * `Meals` has no backing — a food's kind is `food | recipe` and nothing
+   * models a meal — and a `verified-only` filter would filter on a field that
+   * exists nowhere. A chip that filters nothing is an affordance that lies, and
+   * an athlete cannot tell it from a filter that found nothing. Asserted so
+   * that adding one later is a deliberate act with data behind it rather than
+   * a quiet completion of the mockup.
+   */
+  it('offers no chip that nothing backs', async () => {
+    render(<AddFoodScreen />);
+    expect(screen.queryByTestId('add-scope-meals')).toBeNull();
+    expect(screen.queryByTestId('add-scope-verified')).toBeNull();
+  });
 });
