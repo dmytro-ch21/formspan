@@ -333,6 +333,15 @@ jobs:
       - name: Evidence latch decides correctly
         run: python3 scripts/evidence-latch.py --self-test
 
+      # The `.vola-agent/` policy contract is what the AI-SDLC dev engine reads
+      # before touching a ticket: human-gated paths, raise-only risk rules, the
+      # context map, the ticket schema. A typo'd path in human_gate.paths gates
+      # nothing and no other check can see it. The script self-tests on every
+      # run (mutates copies of the real files and asserts each is caught), so
+      # this step also proves the validation can fail.
+      - name: Agent policy contract
+        run: python3 scripts/check-agent-policy.py
+
       # Until this job existed, NOTHING in this repo read a .py file: no CI
       # step, no `verify` link, no pyproject/ruff config anywhere. The content
       # pipeline is Python, and the script that imports the whole catalog is
