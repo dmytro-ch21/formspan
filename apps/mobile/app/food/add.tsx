@@ -61,7 +61,7 @@ import {
 } from '@/lib/catalogApi';
 import { FoodQuantity } from '@/components/FoodQuantity';
 import { glyphFor } from '@/lib/foodGlyph';
-import { localFoods, logFood, recentsFor, saveFoodLocally } from '@/lib/foodLog';
+import { localFoods, logFood, recentsFor, saveFoodLocally, type FoodDraft } from '@/lib/foodLog';
 import { macrosForGrams, servingBasisGrams, servingsForGrams } from '@/lib/foodQuantity';
 import {
   MEALS,
@@ -424,7 +424,13 @@ export default function AddFoodScreen() {
         onSave={async (draft) => {
           if (!userId) return;
           const id = await saveFoodLocally(userId, draft);
-          await log({ ...draft, id }, 1);
+          // A draft may leave the recipe fields unsaid; a `Food` may not.
+          // `NewFood` only ever builds a plain food, so the answer is the
+          // same one the store just wrote.
+          await log(
+            { ...draft, id, yield_servings: draft.yield_servings ?? null, items: draft.items ?? [] },
+            1,
+          );
         }}
       />
     );
@@ -716,7 +722,7 @@ function NewFood({
 }: {
   initialName: string;
   onCancel: () => void;
-  onSave: (draft: Omit<Food, 'id'>) => Promise<void>;
+  onSave: (draft: FoodDraft) => Promise<void>;
 }) {
   const accent = useAccent();
   const [name, setName] = useState(initialName);

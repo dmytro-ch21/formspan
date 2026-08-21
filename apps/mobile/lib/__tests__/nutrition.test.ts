@@ -58,6 +58,8 @@ function food(over: Partial<Food> = {}): Food {
     kind: 'food',
     name: 'Chicken thigh',
     brand: '',
+    yield_servings: null,
+    items: [],
     serving_label: '100 g',
     serving_grams: 100,
     kcal: 180,

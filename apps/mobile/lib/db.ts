@@ -319,6 +319,24 @@ const CREATE_FOODS = `
     -- not a state worth carrying: every row that predates this column was typed
     -- by hand, which is exactly what 'user' means.
     source TEXT NOT NULL DEFAULT 'user',
+    -- N87: what makes this row a recipe. Null for a plain food, and the server
+    -- refuses either half of the mismatch — a recipe without a yield and a food
+    -- with one are both a 400.
+    yield_servings REAL,
+    -- A recipe's ingredients, as a JSON array, in entry order.
+    --
+    -- A blob rather than a "food_items" table, and it is the same call
+    -- "local_sessions" makes about sets one screen over, for the same reason:
+    -- "PUT /nutrition/foods/{id}" replaces the whole ordered list in one call
+    -- and the editor edits it as one array, so no operation anywhere touches a
+    -- single ingredient in isolation. Rows would buy a join and a
+    -- reconciliation step and nothing else.
+    --
+    -- "'[]'" rather than NULL as the default, because a plain food having no
+    -- ingredients is a FACT about it and not a question nobody has asked yet.
+    -- Every read parses this, so a null here would make each caller invent its
+    -- own answer to what the absence meant.
+    items TEXT NOT NULL DEFAULT '[]',
     last_used_at TEXT,
     use_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -520,7 +538,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 23;
+const SCHEMA_VERSION = 24;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1008,6 +1026,35 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
          END
        WHERE count_noun = '';
     `);
+  }
+
+  if (current < 24) {
+    // N87: `foods.yield_servings` and `foods.items` — what a recipe is.
+    //
+    // **24, not 23 — N78 took 23 while this branch was open**, exactly as N78's
+    // own note above records N114 taking 22 from it. Two blocks guarded on the
+    // same `current <` is the local-schema form of a duplicate migration
+    // number: a device stamped 23 by whichever landed first would never run
+    // the other's, silently, with no error anywhere. There is no check for
+    // this — rebase is the only place it is visible.
+    //
+    // Real ALTERs, same shape as 22's and for the same reason: `CREATE TABLE IF
+    // NOT EXISTS` is a no-op against the existing `foods` table, so a device
+    // stamped 22 would keep a table without these and every read would throw.
+    //
+    // Routed through `addColumnIfMissing` rather than 22's hand-rolled
+    // `table_info` check — same guarantee, and it is the helper this file's own
+    // docblock says every `ADD COLUMN` must use. The guard is what makes
+    // `migrate()` re-enterable: a run that failed between these two statements
+    // and the version stamp would otherwise hit `duplicate column name` for the
+    // life of the install.
+    //
+    // `items` is NOT NULL DEFAULT '[]', which is also what backfills every
+    // pre-N87 row: SQLite writes the default into the existing rows as part of
+    // the ALTER, so an old saved food reads back as "no ingredients" rather
+    // than as a null every caller has to interpret.
+    await addColumnIfMissing(db, 'foods', 'yield_servings', 'REAL');
+    await addColumnIfMissing(db, 'foods', 'items', `TEXT NOT NULL DEFAULT '[]'`);
   }
 
   // The day query the card runs on every render of Today.

@@ -374,6 +374,8 @@ describe('the foods pull', () => {
       kind: 'food',
       name: 'Web recipe',
       brand: '',
+      yield_servings: null,
+      items: [],
       serving_label: '1 portion',
       serving_grams: null,
       kcal: 500,

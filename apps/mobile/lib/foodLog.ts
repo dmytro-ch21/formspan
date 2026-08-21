@@ -24,7 +24,7 @@ import { randomUUID } from 'expo-crypto';
 
 import { isPermanentRejection, isTransportFailure } from './apiError';
 import { getDb, withTransaction } from './db';
-import type { Entry, Food, Macros, Meal, Target, TargetView } from './nutrition';
+import type { Entry, Food, Macros, Meal, RecipeItem, Target, TargetView } from './nutrition';
 import * as api from './nutritionApi';
 import { PREF_TARGETS_FETCHED_AT, readPref, writePref } from './prefs';
 import type { TokenGetter } from './useAuthToken';
@@ -396,6 +396,49 @@ export async function cacheTargets(
   await writePref(userId, PREF_TARGETS_FETCHED_AT, stamp());
 }
 
+/**
+ * The columns every read of `foods` selects. One constant rather than five
+ * copies, because this list has already been the place a new column was
+ * forgotten — a food read through a SELECT that predates it loses the value
+ * silently, and an empty recipe looks like an empty recipe rather than a bug.
+ */
+const FOOD_COL_NAMES = [
+  'id', 'kind', 'name', 'brand', 'serving_label', 'serving_grams',
+  'kcal', 'protein_g', 'carb_g', 'fat_g', 'fibre_g', 'source',
+  'yield_servings', 'items',
+] as const;
+
+const FOOD_COLS = FOOD_COL_NAMES.join(', ');
+
+/** The same list against an aliased table, for the one read that joins. */
+const foodColsFrom = (alias: string) => FOOD_COL_NAMES.map((c) => `${alias}.${c}`).join(', ');
+
+/** How a `foods` row arrives: `items` is the TEXT column, not the array. */
+type FoodRow = Omit<Food, 'items'> & { items: string | null };
+
+/**
+ * Turn a stored row into a `Food`.
+ *
+ * **A malformed or absent `items` becomes `[]`, never a throw.** The column is
+ * NOT NULL DEFAULT '[]' so neither should happen — but this is the read path
+ * for every saved food on the device, and a single unparseable row taking the
+ * whole quick-add list down with it is a far worse failure than one recipe
+ * showing no ingredients. The parse is defensive precisely because the write
+ * side is the thing under test.
+ */
+function hydrate(row: FoodRow): Food {
+  let items: RecipeItem[] = [];
+  if (row.items) {
+    try {
+      const parsed: unknown = JSON.parse(row.items);
+      if (Array.isArray(parsed)) items = parsed as RecipeItem[];
+    } catch {
+      items = [];
+    }
+  }
+  return { ...row, yield_servings: row.yield_servings ?? null, items };
+}
+
 export async function localFoods(userId: string, q = ''): Promise<Food[]> {
   const db = await getDb();
   // `%` and `_` are LIKE metacharacters, so a search for "100%" would otherwise
@@ -404,32 +447,47 @@ export async function localFoods(userId: string, q = ''): Promise<Food[]> {
   // than either being wrong.
   const escaped = q.trim().toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`);
   const like = `%${escaped}%`;
-  return db.getAllAsync<Food>(
-    `SELECT id, kind, name, brand, serving_label, serving_grams,
-            kcal, protein_g, carb_g, fat_g, fibre_g, source
+  const rows = await db.getAllAsync<FoodRow>(
+    `SELECT ${FOOD_COLS}
        FROM foods
       WHERE user_id = ? AND deleted_at IS NULL AND lower(name) LIKE ? ESCAPE '\\'
       ORDER BY lower(name)`,
     userId, like,
   );
+  return rows.map(hydrate);
 }
 
 /** One saved food, for the screen that corrects it. Null when it is not here. */
 export async function localFood(userId: string, id: string): Promise<Food | null> {
   const db = await getDb();
-  const row = await db.getFirstAsync<Food>(
-    `SELECT id, kind, name, brand, serving_label, serving_grams,
-            kcal, protein_g, carb_g, fat_g, fibre_g, source
+  const row = await db.getFirstAsync<FoodRow>(
+    `SELECT ${FOOD_COLS}
        FROM foods
       WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     id, userId,
   );
-  return row ?? null;
+  return row ? hydrate(row) : null;
 }
+
+/**
+ * What a caller must say to save a food, and what it may leave out.
+ *
+ * **The recipe fields are optional on the WRITE and required on the READ**, and
+ * that asymmetry is the point. A screen saving a plain food has nothing to say
+ * about ingredients, so making it write `items: []` would be ceremony — and
+ * ceremony is what gets copy-pasted wrong. A screen READING a food always gets
+ * an answer, because "does this have ingredients" is a question the store can
+ * always settle and a caller left to interpret `undefined` cannot.
+ */
+export type FoodDraft = Omit<Food, 'id' | 'yield_servings' | 'items'> & {
+  id?: string;
+  yield_servings?: number | null;
+  items?: RecipeItem[];
+};
 
 /** Save a food locally: owed to the server, and usable immediately. */
 export async function saveFoodLocally(
-  userId: string, input: Omit<Food, 'id'> & { id?: string },
+  userId: string, input: FoodDraft,
 ): Promise<string> {
   const db = await getDb();
   const id = input.id ?? randomUUID();
@@ -437,14 +495,24 @@ export async function saveFoodLocally(
   await db.runAsync(
     `INSERT INTO foods (
        id, user_id, kind, name, brand, serving_label, serving_grams,
-       kcal, protein_g, carb_g, fat_g, fibre_g, source, created_at, updated_at,
+       kcal, protein_g, carb_g, fat_g, fibre_g, source,
+       yield_servings, items, created_at, updated_at,
        dirty, remote, cached_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,?)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,?)
      ON CONFLICT(id) DO UPDATE SET
        kind = excluded.kind, name = excluded.name, brand = excluded.brand,
        serving_label = excluded.serving_label, serving_grams = excluded.serving_grams,
        kcal = excluded.kcal, protein_g = excluded.protein_g, carb_g = excluded.carb_g,
        fat_g = excluded.fat_g, fibre_g = excluded.fibre_g,
+       -- **"excluded", NOT a COALESCE, and the asymmetry with "source" below is
+       -- deliberate.** An absent "source" means "I am not claiming a
+       -- provenance", so the stored one survives. An absent ingredient list
+       -- means the athlete took everything out of the recipe, and there is no
+       -- other way for them to express that — the server's own write path says
+       -- the same thing by DELETEing the items before re-INSERTing whatever it
+       -- was sent. Making this a COALESCE would compile, read as defensive, and
+       -- make an ingredient impossible to remove.
+       yield_servings = excluded.yield_servings, items = excluded.items,
        -- **NOT "excluded.source"**, and this is the same guard the server's own
        -- upsert carries. A caller that says nothing about provenance is editing
        -- the macros, not relabelling the row: "COALESCE" keeps what is stored,
@@ -456,7 +524,11 @@ export async function saveFoodLocally(
        dirty = 1, updated_at = excluded.updated_at, last_error = NULL`,
     id, userId, input.kind, input.name, input.brand, input.serving_label, input.serving_grams,
     input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
-    input.source ?? 'user', now, now, now,
+    input.source ?? 'user',
+    // A plain food must store NULL rather than 0 here: the server refuses
+    // `kind: 'food'` carrying a yield at all, and 0 is a value.
+    input.yield_servings ?? null, JSON.stringify(input.items ?? []),
+    now, now, now,
     // The same value again, as its own binding for the COALESCE above — and
     // `?? null` rather than `?? 'user'`, because on an UPDATE "unstated" must
     // fall through to the stored value rather than to a default.
@@ -491,9 +563,15 @@ export async function recentsFor(
   userId: string, meal: Meal,
 ): Promise<{ food: Food; uses: number; lastUsedOn: string | null }[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<Food & { uses: number; last_used_on: string | null }>(
-    `SELECT f.id, f.kind, f.name, f.brand, f.serving_label, f.serving_grams,
-            f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g,
+  // `FoodRow`, not `Food`, and the difference is not cosmetic. The generic here
+  // is an ASSERTION about what the SELECT returns, not a check of it — so
+  // naming `Food` would tell the typechecker that `items` is present while the
+  // column list never asked for it, and every recipe in the quick-add list
+  // would carry `items: undefined` with nothing anywhere going red. Selecting
+  // through `FOOD_COLS` and mapping through `hydrate` is what makes the two
+  // agree.
+  const rows = await db.getAllAsync<FoodRow & { uses: number; last_used_on: string | null }>(
+    `SELECT ${foodColsFrom('f')},
             COUNT(e.id) AS uses, MAX(e.eaten_on) AS last_used_on
        FROM foods f
        JOIN food_entries e
@@ -504,14 +582,13 @@ export async function recentsFor(
       ORDER BY uses DESC`,
     meal, userId,
   );
-  return rows.map((r) => ({
-    food: {
-      id: r.id, kind: r.kind, name: r.name, brand: r.brand,
-      serving_label: r.serving_label, serving_grams: r.serving_grams,
-      kcal: r.kcal, protein_g: r.protein_g, carb_g: r.carb_g, fat_g: r.fat_g, fibre_g: r.fibre_g,
-    },
-    uses: r.uses,
-    lastUsedOn: r.last_used_on,
+  // Destructured rather than `hydrate(r)`, so the aggregate columns cannot ride
+  // along into the food object as stray runtime properties the type never
+  // mentions.
+  return rows.map(({ uses, last_used_on, ...row }) => ({
+    food: hydrate(row),
+    uses,
+    lastUsedOn: last_used_on,
   }));
 }
 
@@ -571,18 +648,33 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
   // and nothing anywhere says so. Pinned by
   // `savedFoods.test.ts`'s "sends the food BEFORE the entry that references it"
   // and by the consequence test beside it.
-  const foods = await db.getAllAsync<Food & { updated_at: string }>(
-    `SELECT id, kind, name, brand, serving_label, serving_grams,
-            kcal, protein_g, carb_g, fat_g, fibre_g, source, updated_at
+  const foodRows = await db.getAllAsync<FoodRow & { updated_at: string }>(
+    `SELECT ${FOOD_COLS}, updated_at
        FROM foods WHERE user_id = ? AND dirty = 1 AND deleted_at IS NULL`,
     userId,
   );
+  const foods = foodRows.map((r) => ({ ...hydrate(r), updated_at: r.updated_at }));
   for (const f of foods) {
     try {
       await api.saveFood(getToken, f.id, {
         kind: f.kind, name: f.name, brand: f.brand,
         serving_label: f.serving_label, serving_grams: f.serving_grams,
         kcal: f.kcal, protein_g: f.protein_g, carb_g: f.carb_g, fat_g: f.fat_g, fibre_g: f.fibre_g,
+        // **A recipe MUST carry both of these or it is a permanent 400** — the
+        // server's `Food.Validate` checks `(kind == recipe) != (yield_servings
+        // != null)` and rejects either half of the mismatch, and `classify`
+        // reads a 400 as permanent, so the row leaves the outbox with the
+        // athlete's recipe living only on this phone.
+        //
+        // Before N87 the phone had no way to author a recipe, but it could
+        // still PULL one authored on the web and then push it back after an
+        // edit — dropping the yield on the way, which was exactly that
+        // permanent rejection. Pinned by `recipeStore.test.ts`.
+        //
+        // Sent as `null`/`[]` for a plain food rather than omitted, because the
+        // biconditional bites in BOTH directions: a food carrying a yield is
+        // refused too.
+        yield_servings: f.yield_servings, items: f.items,
         // Sent on EVERY push, not only when it changed. The server keeps what
         // it stores when this is absent, which is the right default for an old
         // client — but this one knows the answer, and a row whose provenance
@@ -763,13 +855,19 @@ async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
         `INSERT INTO foods (
            id, user_id, kind, name, brand, serving_label, serving_grams,
            kcal, protein_g, carb_g, fat_g, fibre_g, source,
+           yield_servings, items,
            created_at, updated_at, cached_at, dirty, remote)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind, name = excluded.name, brand = excluded.brand,
            serving_label = excluded.serving_label, serving_grams = excluded.serving_grams,
            kcal = excluded.kcal, protein_g = excluded.protein_g,
            carb_g = excluded.carb_g, fat_g = excluded.fat_g, fibre_g = excluded.fibre_g,
+           -- The server is authoritative for a recipe's shape as much as for
+           -- its numbers, and this branch only runs for "dirty = 0", so there
+           -- is no local claim to protect. A recipe edited on the web arrives
+           -- here with its new ingredients and replaces the cached ones.
+           yield_servings = excluded.yield_servings, items = excluded.items,
            -- The server is authoritative here, unlike in "saveFoodLocally":
            -- this branch only ever runs for a row with "dirty = 0", so there is
            -- no local claim to protect. A server that sends nothing (an older
@@ -796,6 +894,11 @@ async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
         // SQLite — it fails the constraint. A brand-new row we are being told
         // nothing about is the athlete's own, which is what `user` means.
         f.source ?? 'user',
+        // `?? null` / `?? []` cover a server older than N87 that sends neither
+        // field. That reads as a plain food, which is what every pre-N87 row
+        // is — and `items` gets a real `'[]'` for the same NOT NULL reason as
+        // `source` above.
+        f.yield_servings ?? null, JSON.stringify(f.items ?? []),
         now, now, now,
         // The UPDATE arm's own binding, nullable: silence means "keep what is
         // stored", which is the opposite of the default above and the reason

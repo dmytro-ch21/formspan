@@ -755,7 +755,10 @@ function messageForLookupFailure(err: unknown): string {
  * empty `id` is never read; nothing here is persisted as a food.
  */
 function asFood(food: ScannedFood): Food {
-  return { ...food, id: '', kind: 'food' };
+  // `yield_servings`/`items` say what they always say for a scanned product:
+  // it is a plain food, not a recipe. Stated rather than left off, because
+  // `Food` promises a reader an answer to that question.
+  return { ...food, id: '', kind: 'food', yield_servings: null, items: [] };
 }
 
 /** Brand and name, without repeating the brand when it is already in the name. */

@@ -23,12 +23,43 @@ export type EntryInput = Macros & {
   notes?: string;
 };
 
+/**
+ * One component of a recipe, on the wire.
+ *
+ * Macros are per ONE `serving_label`; the server multiplies by `quantity` when
+ * it derives the parent's per-serving figures, so sending an absolute total
+ * here with `quantity: 3` triples it.
+ */
+export type RecipeItemInput = Macros & {
+  name: string;
+  quantity: number;
+  serving_label: string;
+  source_food_id?: string | null;
+};
+
 export type FoodInput = Macros & {
   kind?: 'food' | 'recipe';
   name: string;
   brand?: string;
   serving_label: string;
   serving_grams?: number | null;
+  /**
+   * Required when `kind` is `recipe` and forbidden otherwise — the server
+   * checks `(kind == recipe) != (yield_servings != null)` and answers 400 for
+   * either half. A push that sends `kind: 'recipe'` without this is a
+   * PERMANENT rejection, which strands the row in the outbox rather than
+   * retrying it.
+   */
+  yield_servings?: number | null;
+  /**
+   * A recipe's components. **The server REPLACES the stored list with this**
+   * (`DELETE … INSERT` inside one transaction), so omitting it on an edit does
+   * not leave the ingredients alone — it empties them.
+   *
+   * For `kind: 'recipe'` the parent's per-serving macros are DERIVED from
+   * these divided by `yield_servings`; any macros sent alongside are ignored.
+   */
+  items?: RecipeItemInput[];
   /**
    * How this row was produced (N114).
    *
