@@ -112,6 +112,11 @@ function landSync() {
   mockSyncClock.lastSyncAt = (mockSyncClock.lastSyncAt ?? 0) + 1000;
   for (const l of mockSyncListeners) l({ ...mockSyncClock });
 }
+/** What `setSyncIdentity(null, null)` broadcasts when the athlete signs out. */
+function signOut() {
+  mockSyncClock.lastSyncAt = null;
+  for (const l of mockSyncListeners) l({ ...mockSyncClock });
+}
 jest.mock('@/lib/sync', () => ({
   ...jest.requireActual('@/lib/sync'),
   syncState: () => ({ ...mockSyncClock }),
@@ -564,6 +569,23 @@ describe('a session logged while the roadmap is open', () => {
     // Without the null guard every arrival costs two identical round trips.
     await open();
     expect(mockGetCurriculum).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refetch on sign-out, which broadcasts a null clock', async () => {
+    // `setSyncIdentity(null, null)` emits `lastSyncAt: null`. A subscriber
+    // holding a number reads that as a change and would fetch with no
+    // identity, flashing an error at an athlete who has just signed out in the
+    // window before the layout unmounts this screen. Nine modules once told a
+    // signed-in athlete to sign in for the mirror-image reason; this is the
+    // same class and must stay shut.
+    await open();
+    landSync();
+    await waitFor(() => expect(mockGetCurriculum).toHaveBeenCalledTimes(2));
+
+    signOut();
+    // And a sync that lands AFTER sign-out is still not this screen's cue —
+    // the guard must re-arm rather than latch.
+    expect(mockGetCurriculum).toHaveBeenCalledTimes(2);
   });
 
   it('says what would count where the athlete drilled something measured live', async () => {

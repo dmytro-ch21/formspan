@@ -162,6 +162,17 @@ export default function CurriculumScreen() {
   useEffect(() => {
     let seen = syncState().lastSyncAt;
     return subscribeSync((s) => {
+      // SIGN-OUT IS NOT A SYNC. `setSyncIdentity(null, null)` emits
+      // `lastSyncAt: null`, which a subscriber holding a number reads as a
+      // change — so this would fire `load()` with no identity and flash an
+      // error at an athlete who has just signed out, in the window before the
+      // layout unmounts the screen. Re-arm and say nothing. This project has
+      // had the signed-out-athlete-told-to-sign-in bug once already, across
+      // nine modules, when Clerk returned null offline.
+      if (s.lastSyncAt === null) {
+        seen = null;
+        return;
+      }
       if (s.lastSyncAt === seen) return;
       seen = s.lastSyncAt;
       void load();

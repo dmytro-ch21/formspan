@@ -38043,6 +38043,49 @@ Promise.resolve('token')`, a fresh closure per render, so `load`'s identity
 changed on every re-render and the mocked `useFocusEffect` re-fired each time.
 Any test counting reads was measuring the mock. Stabilised.
 
+### What review added, and one lesson about `verify` itself
+
+Two `[suggestion]` findings were taken. **Sign-out is not a sync**:
+`setSyncIdentity(null, null)` emits `lastSyncAt: null`, which a subscriber
+holding a number reads as a change — so both new subscriptions would have fired
+a fetch with no identity and flashed an error at an athlete who had just signed
+out, in the window before the layout unmounts. This project has had the
+signed-out-athlete-told-to-sign-in bug once already, across nine modules, when
+Clerk returned null offline; the guard re-arms rather than latching, and the
+test asserts a later sync is still not a cue. And **`evidenceNoteOf` now checks
+`kind === 'concept'` itself** rather than leaning on `criteria === null`: its
+docstring promised a concept is never explained, and a docstring describing a
+defence the code does not have is worse than none. The test for it uses a
+MALFORMED concept — kind `concept` carrying criteria, which
+`curriculum_items_kind_shape` forbids — because the ordinary concept fixture
+exits on the null branch and says nothing about the guard.
+
+One was declined: a response-ordering guard on `load()`, for the case where a
+request is outstanding across an entire outbox push and an older answer lands
+last. Real, but it needs a request hung for the length of a sync, and the fix is
+a restructure of `load`. `planSeq` on Today is the in-repo precedent if anyone
+wants it; referenced here so the next person finds that pattern rather than
+inventing a second one.
+
+**And a lesson about the check suite, which is the part worth carrying.** A
+TS18048 in this branch's own test file — `Curriculum.items` is optional and the
+fixture dereferenced it — reached CI green-locally. `verify` chains
+`test:mobile && typecheck:mobile`, so the CPU-contention flake in an unrelated
+suite aborted the chain **before typecheck ever ran**. The flake was correctly
+diagnosed as machine noise; what did not follow, and was assumed, is that
+nothing else was wrong behind it. **A flaky earlier link hides a real later
+one**, and "that failure was noise" is not "the rest passed" — the `&&` that
+makes `verify` trustworthy is the same `&&` that truncates it.
+
+### Related, filed separately
+
+The identity seam under this one has a real hazard, filed as **#523**:
+`bjj_session_tags.technique_id` is `ON DELETE SET NULL` while
+`curriculum_items.technique_id` is `ON DELETE CASCADE`, and the progress query
+requires `technique_id IS NOT NULL`. Retiring one technique from the library
+therefore silently voids every athlete's evidence for it *and* drops it from
+every roadmap, with nothing raised anywhere. Not touched here.
+
 ### Not verified
 
 `refreshRoadmaps()` on Today and `RoadmapSummary`'s subscription have no test of

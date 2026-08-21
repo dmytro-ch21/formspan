@@ -279,7 +279,13 @@ function whatWouldCount(c: NonNullable<CurriculumItem['criteria']>): string {
 export function evidenceNoteOf(item: CurriculumItem, enrolled: boolean): string | null {
   const c = item.criteria;
   const p = item.progress;
-  if (!enrolled || c === null || p == null) return null;
+  // `item.kind === 'concept'` is checked HERE and not left to `c === null`,
+  // for the reason `measuresOf` states one function up: a concept carries no
+  // criteria BY DESIGN, and leaning on that makes this correct only while the
+  // schema's `curriculum_items_kind_shape` holds. The docstring above promises
+  // a concept is never explained; this is that promise being kept in code
+  // rather than borrowed from a constraint in another file.
+  if (!enrolled || item.kind === 'concept' || c === null || p == null) return null;
   if (c.target_drilled_sessions !== null) return null;
   if (p.drilled_sessions <= 0) return null;
   const classes = p.drilled_sessions === 1 ? '1 class' : `${p.drilled_sessions} classes`;

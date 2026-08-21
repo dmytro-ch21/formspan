@@ -363,6 +363,20 @@ describe('what would count — the drilled-against-a-live-criterion explanation'
     expect(evidenceNoteOf(concept(0, 0, 'Position before submission'), true)).toBeNull();
   });
 
+  it('stays silent for a MALFORMED concept that somehow carries criteria', () => {
+    // The ordinary concept path is covered above and exits on `criteria: null`,
+    // so it says nothing about the kind guard. This one has both, which the
+    // schema's `curriculum_items_kind_shape` forbids — and that is the point:
+    // the guard exists so this function is correct on its own terms rather
+    // than only while a constraint in another file holds.
+    const malformed: CurriculumItem = {
+      ...concept(0, 0, 'Position before submission'),
+      criteria: { ...NO_CRITERIA, target_scored: 12 },
+      progress: { ...NO_PROGRESS, drilled_sessions: 5 },
+    };
+    expect(evidenceNoteOf(malformed, true)).toBeNull();
+  });
+
   it('stays silent when not enrolled — nothing is being counted at all', () => {
     const item = technique('armbar', 0, { target_scored: 12 }, { drilled_sessions: 9 });
     expect(evidenceNoteOf(item, false)).toBeNull();

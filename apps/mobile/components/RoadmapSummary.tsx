@@ -72,6 +72,13 @@ export function RoadmapSummary() {
   useEffect(() => {
     let seen = syncState().lastSyncAt;
     return subscribeSync((s) => {
+      // Sign-out emits `lastSyncAt: null`, which is not a sync — see the
+      // longer note on the roadmap screen. Re-arm and say nothing rather than
+      // fetching with no identity.
+      if (s.lastSyncAt === null) {
+        seen = null;
+        return;
+      }
       if (s.lastSyncAt === seen) return;
       seen = s.lastSyncAt;
       void load();
