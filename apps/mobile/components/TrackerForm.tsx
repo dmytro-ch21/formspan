@@ -22,6 +22,14 @@ import { fromDisplayFluid, toDisplayFluid, type UnitSystem } from '@/lib/units';
 /**
  * The fields of a tracker, as one form.
  *
+ * `keyboard-container: provided by parent` — this renders a FRAGMENT, never a
+ * screen. Both call sites (`app/trackers/new.tsx` and `app/trackers/[id].tsx`)
+ * wrap it in `KeyboardAwareScrollView`, and adding a second scroll container
+ * here would nest one inside the other. The claim is checked at the two places
+ * that can honour it rather than here, which is the limit
+ * `keyboardCoverage.test.ts` states about itself: it proves the import, not the
+ * wrapping. **If a third screen renders this, it needs that container too.**
+ *
  * **Shared by creating and editing on purpose.** Two copies of a nine-field
  * form is two places for the colour picker to fall out of step with the
  * palette, and #392 in this repo is exactly that shape — two image-upload paths

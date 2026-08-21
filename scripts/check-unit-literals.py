@@ -146,11 +146,23 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "converts it through `fluidUnit(units)` for display, which is the right place.",
     ),
     (
-        "apps/mobile/app/trackers/[id].tsx",
+        "apps/mobile/lib/db.ts",
+        "ml",
+        "WHEN 'ml' THEN 'cup'",
+        "A migration backfilling `count_noun` from the STORAGE tag, for rows written "
+        "before that column existed. Nothing here is displayed — it maps a stored unit "
+        "to a stored word, and it has to reproduce exactly what the old client derived "
+        "or every existing water card silently loses its \"cups\" on upgrade. The "
+        "backend's migration 000074 carries the identical CASE.",
+    ),
+    (
+        "apps/mobile/components/TrackerForm.tsx",
         "ml",
         "'ml'",
         "Branches on the same storage tag as trackerModel.ts, to decide whether the "
-        "increment needs converting at all.",
+        "increment needs converting at all. Moved here from app/trackers/[id].tsx "
+        "when N78 gave creating and editing one shared form — the exception follows "
+        "the branch, it is not a second one.",
     ),
     (
         "apps/mobile/components/nutrition/AdjustmentCard.tsx",
