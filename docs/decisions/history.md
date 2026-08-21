@@ -37934,6 +37934,49 @@ round trip and the derived-estimate guard are all covered by the suite, but
 "enter a girth, leave, come back, same number" against the real API is the
 reporter's own check and is left outstanding on the ticket.
 
+## 2026-08-21 — the heading has more mentions than headings (CLAUDE.md)
+
+A fourth branch spliced its `history.md` entry into the middle of this file,
+cutting an older sentence in half and leaving a spurious column-0
+`## Open items` heading parsing as real twenty-one thousand lines above the
+real one. Found by `frontend-reviewer` on #521, not by any check — `verify` was
+green and all six CI jobs passed, because nothing reads this file's structure.
+
+The rule already said *append immediately before the trailing heading, never
+after it*, and had said so since the third repair. It was followed. What it
+never said is the part that actually bites: **finding the heading is the hard
+part.**
+
+Measured on `origin/main` today: that string occurs **five** times here, at
+lines 16330, 16625, 17040, 37450 and 37937. **Only 37937 is a heading.** The
+other four are prose — and every one of them sits inside an entry describing
+this exact repair. So the decoys are produced BY the repairs. Each time somebody
+falls in and writes it up, the next person has one more wrong anchor to hit, and
+the trap gets measurably worse. That is why stating the goal harder was never
+going to work; it had been stated three times.
+
+An insert anchored on *a* match, or on the *first* match, now lands mid-file
+with near-certainty. The branch that hit it anchored on 16330 — a backticked
+mention inside a sentence about repairing this damage, which is as close to a
+booby trap as a document gets.
+
+**The rule now names the instrument**: anchor on the LAST occurrence
+(`s.rindex(...)`, `grep -n ... | tail -1`), never `index`, never a bare regex
+search, never an editor's first hit. And verify by **counting** column-0
+headings rather than reading the diff, which looks correct either way:
+
+    grep -c '^## Open items / known gaps as of this entry' docs/decisions/history.md   # must be 1
+
+This entry was appended with `rindex` and verified by that count, which is the
+only demonstration worth having.
+
+**What is still not solved:** nothing enforces it. A check that asserts exactly
+one column-0 occurrence would catch the next instance at `verify` time rather
+than at review time, and would have caught this one. Not built here because it
+belongs with the person who decides what else that check should assert about
+this file — but it is the obvious next step, and the fifth repair is the
+argument for it.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.

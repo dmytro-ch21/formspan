@@ -633,7 +633,33 @@ bullet list, and branches have anchored on both sides of it: insert before and
 the heading keeps its list, insert after and the heading is stranded on the
 newest entry while its list drifts below, reading as though those gaps belong
 to whatever landed under it. Two branches doing different things merge into
-exactly that, and it has been repaired three times. One side, always: before. Skip it only for truly trivial changes (typo fixes, formatting) that don't represent a decision anyone would need to know about later.
+exactly that, and it has been repaired **four** times. One side, always: before.
+
+**And the reason it keeps recurring is that FINDING the heading is the hard
+part, which this rule never said.** The file contains **five** occurrences of
+that string and **only the last is a heading** — the other four are prose,
+inside entries describing this very repair. So each repair adds another decoy,
+and the trap gets measurably worse every time somebody falls into it.
+
+An insert anchored on *a* match, or on the *first* match, therefore lands in the
+middle of the file with near-certainty. Measured 2026-08-21 on `origin/main`:
+matches at lines 16330, 16625, 17040, 37450 and 37937, of which 37937 is the
+heading. A branch that anchored on 16330 cut an eight-year-old sentence in half,
+left a spurious column-0 `## Open items` heading parsing as real at line ~16453,
+and put a 2026-08-21 entry twenty-one thousand lines above the 2026-08-20 ones.
+Nothing failed; `verify` was green and all six CI checks passed, because no check
+reads this file's structure.
+
+So: **anchor on the LAST occurrence.** `s.rindex(heading)` in Python, `grep -n
+... | tail -1` in shell — never `index`, never a bare regex `search`, never the
+first hit of an editor's find. And **verify by counting, not by reading the
+diff**, which looks correct either way:
+
+```bash
+grep -c '^## Open items / known gaps as of this entry' docs/decisions/history.md   # must be 1
+```
+
+Skip the entry only for truly trivial changes (typo fixes, formatting) that don't represent a decision anyone would need to know about later.
 
 ## Keep functional test scenarios current (hard rule)
 
