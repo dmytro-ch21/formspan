@@ -5,7 +5,7 @@ import { useAuth } from "@clerk/nextjs";
 
 import { setModules } from "@/lib/api";
 import { useModules } from "@/lib/ModulesProvider";
-import { UNIT_SYSTEMS } from "@/lib/units";
+import { UNIT_SYSTEMS, type UnitSystem } from "@/lib/units";
 import { useUnits } from "@/lib/useUnits";
 import { BjjRankSection } from "./BjjRankSection";
 
@@ -24,6 +24,20 @@ export default function SettingsPage() {
   const { modules, apply } = useModules();
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The promise was dropped (`onClick={() => setUnits(...)}`), so a failed
+  // PATCH was invisible. That mattered more after N105 gave the dashboard one
+  // shared units state: the optimistic value is now shown on every mounted
+  // surface, not just this page. The provider rolls back and rethrows; this
+  // reports it through the same error line the module toggles use.
+  async function changeUnits(next: UnitSystem) {
+    setError(null);
+    try {
+      await setUnits(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function toggle(key: string, next: boolean) {
     setSaving(key);
@@ -133,7 +147,7 @@ export default function SettingsPage() {
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                onClick={() => setUnits(u.key)}
+                onClick={() => void changeUnits(u.key)}
                 className={`flex items-center gap-4 rounded-card border px-5 py-4 text-left transition ${
                   selected
                     ? "border-lime bg-surface-raised"

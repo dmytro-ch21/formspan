@@ -72,11 +72,25 @@ export function UnitsProvider({
     async (u: UnitSystem) => {
       // Applied locally first so every surface switches instantly, then
       // persisted. The optimistic order is carried over from the hook this
-      // replaces; what is new is that "locally" now means everywhere.
+      // replaces; what is new is that "locally" now means EVERYWHERE — which
+      // is also why the rollback below had to be added rather than inherited.
+      //
+      // In the old per-component hook a failed PATCH left one component
+      // optimistically wrong. Sharing the state widened that blast radius to
+      // the whole dashboard: every mounted surface would show a preference the
+      // server never accepted, and the next navigation would silently snap them
+      // all back. So a failure restores the previous value and rethrows, which
+      // is what lets the caller say so.
+      const previous = units;
       setLocal(u);
-      await updateUnitSystem(getToken, u);
+      try {
+        await updateUnitSystem(getToken, u);
+      } catch (err) {
+        setLocal(previous);
+        throw err;
+      }
     },
-    [getToken],
+    [getToken, units],
   );
 
   const value = useMemo(() => ({ units, setUnits }), [units, setUnits]);

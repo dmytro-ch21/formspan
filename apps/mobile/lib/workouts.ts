@@ -118,7 +118,16 @@ export function withTarget(
 }
 
 /** A one-line human summary of an item's targets, e.g. "3 × 5 · 100kg". */
-export function summariseTargets(item: WorkoutItem, units: UnitSystem = 'metric'): string {
+/**
+ * `units` is REQUIRED, deliberately.
+ *
+ * It defaulted to `'metric'`, which means a call site that forgets it renders
+ * kilograms to an imperial athlete AND TYPECHECKS. That is the silent-metric
+ * failure this whole change exists to remove — a default here quietly reopens
+ * it for every future caller, and no check can see it: the literal `kg` never
+ * appears in the source, it comes out of `formatWeight`.
+ */
+export function summariseTargets(item: WorkoutItem, units: UnitSystem): string {
   const parts: string[] = [];
   if (item.target_sets && item.target_reps) parts.push(`${item.target_sets} × ${item.target_reps}`);
   else if (item.target_sets) parts.push(`${item.target_sets} sets`);

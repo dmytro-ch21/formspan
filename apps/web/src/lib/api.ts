@@ -174,9 +174,18 @@ export const FIELD_KEY: Record<TargetField, keyof WorkoutItem> = {
   distance: "target_distance_m",
 };
 
+/**
+ * `units` is REQUIRED, deliberately.
+ *
+ * It defaulted to `"metric"`, which means a call site that forgets it renders
+ * kilograms to an imperial athlete AND TYPECHECKS. That is the silent-metric
+ * failure this whole change exists to remove — a default here quietly reopens
+ * it for every future caller, and no check can see it: the literal `kg` never
+ * appears in the source, it comes out of `formatWeight`.
+ */
 export function summariseTargets(
   i: WorkoutItem,
-  units: UnitSystem = "metric",
+  units: UnitSystem,
 ): string {
   const parts: string[] = [];
   if (i.target_sets && i.target_reps)
@@ -793,7 +802,13 @@ export function sessionVolume(sets: LoggedSet[]): {
   };
 }
 
-export function describeSet(s: LoggedSet, units: UnitSystem = "metric"): string {
+/**
+ * Has NO callers today — see L8, which is about whether it should exist at all.
+ * Left in place rather than deleted here, because that is L8's decision and not
+ * this ticket's; `units` is required for the reason above so that whoever
+ * revives it cannot revive the metric-by-default bug with it.
+ */
+export function describeSet(s: LoggedSet, units: UnitSystem): string {
   const parts: string[] = [];
   if (s.reps != null && s.weight_kg != null)
     parts.push(`${s.reps} × ${formatWeight(s.weight_kg, units)}`);

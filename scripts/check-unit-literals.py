@@ -45,6 +45,38 @@ That bounds what it promises. It catches `kg`, `lb`, `cm`, `km`, `yd`, `ml`,
 cannot catch a unit rendered from a variable, or one the SERVER sends in a
 message, or a wrong-but-converted number. Those need tests, and have them.
 
+## The blind spot, stated plainly, because it is not obvious
+
+**The quoted/JSX heuristic is SAME-LINE and positional**, keyed on a `}` before
+the token or a `<` after it. That makes it good at
+`{p.kg_to_go} kg to go` — `goals.tsx`'s shape — and **blind to bare JSX text
+that opens on one line and closes on another**, which is most multi-line JSX.
+
+That blindness was measured, not assumed, and it covered the headline bug: the
+verbatim original line
+
+    Target weight (kg){kind === 'making_weight' ? '' : ' — optional'}
+
+was appended to a file and this check exited **0**. A guard whose docstring
+implies it prevents a class of bug, and which cannot catch the very instance
+that motivated it, is carrying a false claim.
+
+So a **second pattern** was added for the one shape that covers it: a
+PARENTHESISED unit — `(kg)`, `(lb)`, `(cm)`, `(ft)` — in a non-attribute
+position, matched wherever it appears rather than only inside a string. That is
+how unit labels are actually written on a field, and it is unambiguous enough
+not to need the positional heuristic. `Math.abs(kg)` and
+`distanceInputUnit(units)` do not match, because the `(` must be preceded by
+whitespace or `>` rather than by an identifier character.
+
+**What is still not seen**, and what a future change should fix rather than
+rediscover: a bare unit token in multi-line JSX text that is not parenthesised,
+e.g. a `<Text>` whose content is `Weight` on one line and `kg` on the next.
+Catching that needs real JSX-aware parsing — tracking whether a position is
+inside an element body — which is a bigger change than this check justified at
+the time. The self-test vectors below pin what IS caught, so shrinking that set
+fails rather than passes quietly.
+
 ## The allowlist
 
 Every entry names a file, a token and a REASON. They fall into two kinds:
@@ -200,7 +232,81 @@ def strip_noise(src: str) -> str:
 
 
 PAT = re.compile(rf"(?<![\w-])({UNITS})(?![\w-])")
+
+#: Units that are unambiguous ONCE PARENTHESISED. `in`, `ft`, `mi`, `L` and
+#: `m` are excluded from `UNITS` because they are English words, SVG path
+#: commands and duration suffixes — but `(in)` and `(ft)` on a field label are
+#: none of those things, so the paren form can afford a wider vocabulary.
+PAREN_UNITS = (
+    r"kgs?|lbs?|cm|mm|km|mi|yd|ft|in|ml|L|fl oz"
+    r"|kilograms?|pounds?|inches|feet|centimet(?:er|re)s?|met(?:er|re)s?"
+)
+
+#: The `(` must follow whitespace, `>`, or the start of the line. That is what
+#: separates a LABEL — `Target weight (kg)` — from a CALL — `Math.abs(kg)`,
+#: `distanceInputUnit(units)` — where an identifier character precedes it.
+PAREN = re.compile(rf"(?:(?<=[\s>])|^)\((?:{PAREN_UNITS})\)")
 ATTR = re.compile(r"(className|style|testID|href|key|id|data-testid)\s*=\s*[\"'{][^\"']*$")
+
+
+#: Lines that MUST be reported, and lines that must NOT be.
+#:
+#: Run on every invocation rather than behind a flag — there is no expensive
+#: half to separate out, and a self-test nobody runs is the thing this file's
+#: docstring is about. The cost is microseconds.
+#:
+#: The first vector is the **verbatim original bug line** from
+#: `app/phase/index.tsx`, which the positional heuristic could not see. If a
+#: future refactor of the matching drops it, this fails rather than quietly
+#: covering less.
+MUST_MATCH = [
+    "          Target weight (kg){kind === 'making_weight' ? '' : ' — optional'}",
+    '        label="Height (cm)"',
+    "        You are already at {p.target_weight_kg} kg. This phase has done its job.",
+    "      hint={`${b.weight_kg} kg on ${b.weight_measured_on}`}",
+    "  <Text>Waist (cm)</Text>",
+    '  <span>Distance (yd)</span>',
+]
+
+#: Lines that must stay silent. Every one of these is a shape that a careless
+#: widening of the patterns would start reporting — and a check that cries wolf
+#: is one somebody eventually silences.
+MUST_NOT_MATCH = [
+    "    return `${kg > 0 ? '+' : '−'}${formatWeight(Math.abs(kg), units)}`;",
+    "    const label = f === 'distance' ? distanceInputUnit(units) : FIELD_LABEL[f];",
+    "    if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;",
+    "    parts.push(m ? `${m}m${s ? ` ${s}s` : ''}` : `${s}s`);",
+    '    <span className="ml-2 text-text-dim">',
+    "    return `${minutes}m ago`;",
+    "  const cm = toFeetInches(cm);",
+    '    <path d="M 0 0 L 8 4 L 0 8 z" />',
+]
+
+
+def _reports(line: str) -> bool:
+    """Whether the matchers would flag one line, ignoring the allowlist."""
+    stripped = strip_noise(line)
+    for pm in PAREN.finditer(stripped):
+        if not ATTR.search(stripped[: pm.start()]):
+            return True
+    for m in PAT.finditer(stripped):
+        before, after = stripped[: m.start()], stripped[m.end() :]
+        quoted = before.count("'") % 2 or before.count('"') % 2 or before.count("`") % 2
+        jsx = before.rstrip().endswith("}") or after.lstrip().startswith("<")
+        if (quoted or jsx) and not ATTR.search(before):
+            return True
+    return False
+
+
+def self_test() -> list[str]:
+    problems = []
+    for line in MUST_MATCH:
+        if not _reports(line):
+            problems.append(f"  MISSED (should be reported): {line.strip()!r}")
+    for line in MUST_NOT_MATCH:
+        if _reports(line):
+            problems.append(f"  FALSE POSITIVE (should be silent): {line.strip()!r}")
+    return problems
 
 
 def violations() -> list[tuple[str, int, str, str]]:
@@ -218,6 +324,16 @@ def violations() -> list[tuple[str, int, str, str]]:
             if rel.endswith("lib/units.ts"):
                 continue
             for ln, line in enumerate(strip_noise(f.read_text()).split("\n"), 1):
+                # The parenthesised form first: it needs no positional
+                # heuristic, so it sees the multi-line JSX the one below
+                # cannot. See "The blind spot" in the module docstring.
+                for pm in PAREN.finditer(line):
+                    tok = pm.group(0).strip("()")
+                    if ATTR.search(line[: pm.start()]):
+                        continue
+                    if excused(rel, tok, line):
+                        continue
+                    found.append((rel, ln, tok, line.strip()[:100]))
                 for m in PAT.finditer(line):
                     tok, before, after = m.group(1), line[: m.start()], line[m.end() :]
                     quoted = (
@@ -235,6 +351,20 @@ def violations() -> list[tuple[str, int, str, str]]:
 
 
 def main() -> int:
+    # Before anything else: can this check still detect what it claims to?
+    failures = self_test()
+    if failures:
+        print(
+            "check-unit-literals: the matchers no longer behave as specified.\n"
+            + "\n".join(failures)
+            + "\n\nThe vectors are in MUST_MATCH / MUST_NOT_MATCH in this file. A miss "
+            "means the check has silently stopped covering a shape it is supposed to "
+            "catch; a false positive means it will be ignored by the next person it "
+            "shouts at. Fix the matcher, not the vector — unless the vector is genuinely "
+            "wrong, in which case say why in the commit."
+        )
+        return 1
+
     if "--list" in sys.argv[1:]:
         for path, tok, snippet, why in sorted(ALLOW):
             print(f"{path}  [{tok}]  matching {snippet!r}\n    {why}\n")
@@ -281,7 +411,10 @@ def main() -> int:
         )
         return 1
 
-    print(f"no hardcoded unit literals ({len(ALLOW)} allowed exceptions, each with a reason)")
+    print(
+        f"no hardcoded unit literals "
+        f"({len(ALLOW)} allowed exceptions, {len(MUST_MATCH) + len(MUST_NOT_MATCH)} self-test vectors)"
+    )
     return 0
 
 
