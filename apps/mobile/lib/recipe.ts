@@ -43,6 +43,55 @@ export const MAX_ITEMS = 100;
 export const MAX_YIELD = 1000;
 
 /**
+ * The server's own length limits, mirrored — and mirrored in its UNITS.
+ *
+ * `validateName` and `validateLabel` trim, then count **runes**
+ * (`len([]rune(n))`), so the client has to count code points, not UTF-16 units.
+ * `brand` is checked with a bare `len(f.Brand)`, which in Go is **bytes** — a
+ * different unit, and using runes for it would let a non-ASCII note through
+ * that the server refuses.
+ *
+ * These exist because getting them wrong is not a validation message, it is a
+ * LOST RECIPE: the server answers 400, `classify` reads a 400 as permanent, the
+ * outbox clears `dirty`, and the recipe lives only on that phone with nothing
+ * anywhere saying so. Checking here is also what makes the refusal work
+ * offline, where the server's answer is not available at all.
+ */
+export const MAX_NAME_RUNES = 120;
+export const MAX_LABEL_RUNES = 40;
+export const MAX_BRAND_BYTES = 80;
+
+/** Code points, matching Go's `len([]rune(strings.TrimSpace(v)))`. */
+function runes(v: string): number {
+  return Array.from(v.trim()).length;
+}
+
+/** UTF-8 bytes, matching Go's `len(s)` on a string. */
+function bytes(v: string): number {
+  return new TextEncoder().encode(v.trim()).length;
+}
+
+/**
+ * Cut a name down to what the server will accept.
+ *
+ * **Measured, not hypothetical: 72 of the catalog's 12,651 foods have names
+ * over 120 runes, the longest 184** — USDA descriptions like "Chicken or
+ * turkey, breaded, fried, garden salad with bacon and cheese, …". Copying one
+ * verbatim into an ingredient produced a recipe that passed every client check
+ * and then 400-ed permanently on push.
+ *
+ * Truncating rather than refusing, because the athlete did nothing wrong — they
+ * picked a real food out of our own catalog — and a picker that rejects 72 of
+ * its own rows is a worse answer than a shortened label. The ellipsis is there
+ * so a clipped name reads as clipped rather than as a different food.
+ */
+export function clampName(v: string): string {
+  const cp = Array.from(v.trim());
+  if (cp.length <= MAX_NAME_RUNES) return v.trim();
+  return cp.slice(0, MAX_NAME_RUNES - 1).join('').trimEnd() + '…';
+}
+
+/**
  * Sum a recipe's ingredients and divide by its yield.
  *
  * Mirrors `Food.PerServing()` in `backend/internal/modules/nutrition`, INCLUDING
@@ -94,7 +143,7 @@ export function perServing(items: RecipeItem[], yieldServings: number): Macros {
  */
 export function itemFromCatalog(food: CatalogFood, grams: number): RecipeItem {
   return {
-    name: food.brand ? `${food.brand} ${food.name}` : food.name,
+    name: clampName(food.brand ? `${food.brand} ${food.name}` : food.name),
     quantity: 1,
     serving_label: `${round(grams)} g`,
     ...macrosForGrams(food, grams),
@@ -112,7 +161,7 @@ export function itemFromCatalog(food: CatalogFood, grams: number): RecipeItem {
  */
 export function itemFromSavedFood(food: Food, quantity: number): RecipeItem {
   return {
-    name: food.brand ? `${food.brand} ${food.name}` : food.name,
+    name: clampName(food.brand ? `${food.brand} ${food.name}` : food.name),
     quantity,
     serving_label: food.serving_label,
     kcal: food.kcal,
@@ -127,10 +176,15 @@ export function itemFromSavedFood(food: Food, quantity: number): RecipeItem {
 /** What is wrong with a draft, or null when it is ready to save. */
 export type RecipeProblem =
   | 'no_name'
+  | 'name_too_long'
   | 'no_serving_label'
+  | 'label_too_long'
+  | 'note_too_long'
   | 'no_yield'
+  | 'yield_too_large'
   | 'no_items'
-  | 'too_many_items';
+  | 'too_many_items'
+  | 'item_name_too_long';
 
 export type RecipeDraft = {
   name: string;
@@ -154,10 +208,21 @@ export type RecipeDraft = {
  */
 export function recipeProblem(draft: RecipeDraft): RecipeProblem | null {
   if (!draft.name.trim()) return 'no_name';
+  if (runes(draft.name) > MAX_NAME_RUNES) return 'name_too_long';
   if (!draft.serving_label.trim()) return 'no_serving_label';
-  if (!(draft.yield_servings > 0 && draft.yield_servings < MAX_YIELD)) return 'no_yield';
+  if (runes(draft.serving_label) > MAX_LABEL_RUNES) return 'label_too_long';
+  // The note is stored as `brand`, and the server caps that at 80. A field
+  // labelled "Note" with placeholder "Optional" invites prose, so this is the
+  // limit most likely to be met by somebody writing normally.
+  if (bytes(draft.brand) > MAX_BRAND_BYTES) return 'note_too_long';
+  if (!(draft.yield_servings > 0)) return 'no_yield';
+  if (draft.yield_servings >= MAX_YIELD) return 'yield_too_large';
   if (draft.items.length === 0) return 'no_items';
   if (draft.items.length > MAX_ITEMS) return 'too_many_items';
+  // Defensive: `clampName` means an ingredient added through this app cannot be
+  // too long. A recipe PULLED from the server, or one written by an older
+  // build, can be — and re-saving it would strand the whole recipe.
+  if (draft.items.some((i) => runes(i.name) > MAX_NAME_RUNES)) return 'item_name_too_long';
   return null;
 }
 
@@ -166,6 +231,18 @@ export function problemMessage(problem: RecipeProblem): string {
   switch (problem) {
     case 'no_name':
       return 'Give the recipe a name.';
+    case 'name_too_long':
+      return `Shorten the name — ${MAX_NAME_RUNES} characters at most.`;
+    case 'label_too_long':
+      return `Shorten what one portion is — ${MAX_LABEL_RUNES} characters at most.`;
+    case 'note_too_long':
+      return 'Shorten the note — it is a label, not a method.';
+    case 'yield_too_large':
+      // Distinct from `no_yield` on purpose: "say how many portions this makes"
+      // is the wrong sentence for somebody who said, and said 5000.
+      return `That is a lot of portions — fewer than ${MAX_YIELD}, please.`;
+    case 'item_name_too_long':
+      return 'One ingredient has a name too long to save. Remove it and add it again.';
     case 'no_serving_label':
       return 'Say what one portion is — "1 bowl", "1 portion".';
     case 'no_yield':

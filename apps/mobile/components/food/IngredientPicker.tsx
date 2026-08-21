@@ -54,8 +54,25 @@ import {
 } from '@/lib/catalogApi';
 import { localFoods } from '@/lib/foodLog';
 import type { Food, RecipeItem } from '@/lib/nutrition';
-import { itemFromCatalog, itemFromSavedFood } from '@/lib/recipe';
+import { clampName, itemFromCatalog, itemFromSavedFood } from '@/lib/recipe';
 import type { TokenGetter } from '@/lib/useAuthToken';
+
+/**
+ * The by-hand ingredient form, as data.
+ *
+ * A table rather than eight copies of the same JSX, so a field cannot pick up a
+ * different keyboard or lose its `testID` by being edited in only one place.
+ */
+const MANUAL_FIELDS: { key: string; label: string; placeholder: string; numeric?: boolean }[] = [
+  { key: 'name', label: 'Ingredient', placeholder: "Nan's tomato sauce" },
+  { key: 'quantity', label: 'How many', placeholder: '1', numeric: true },
+  { key: 'serving_label', label: 'Of what', placeholder: '100 g' },
+  { key: 'kcal', label: 'Calories in one', placeholder: '—', numeric: true },
+  { key: 'protein_g', label: 'Protein in one', placeholder: '—', numeric: true },
+  { key: 'carb_g', label: 'Carbs in one', placeholder: '—', numeric: true },
+  { key: 'fat_g', label: 'Fat in one', placeholder: '—', numeric: true },
+  { key: 'fibre_g', label: 'Fibre in one (optional)', placeholder: 'Not stated', numeric: true },
+];
 
 /** The answer to the query that is currently typed, or nothing yet. */
 type CatalogState = { forQuery: string; result: CatalogSearch | 'unreachable' };
@@ -85,6 +102,21 @@ export function IngredientPicker({
   const [picking, setPicking] = useState<CatalogFood | null>(null);
   /** A saved food whose quantity is being chosen, with the typed quantity. */
   const [savedPick, setSavedPick] = useState<{ food: Food; text: string } | null>(null);
+  /**
+   * An ingredient being typed out by hand.
+   *
+   * **Not a fallback for when search fails — a first-class route.** A catalog
+   * of 12,651 foods still does not contain somebody's grandmother's sauce, and
+   * a recipe builder that can only compose things we already know about is not
+   * one an athlete can put their own cooking into. Without it the only way out
+   * of a `no_match` is to leave for the quick-add sheet and create the food
+   * there — which LOGS it as a meal on the way past, a side effect nobody
+   * assembling a recipe wants.
+   *
+   * Text, never numbers: round-tripping a draft through `Number` on every
+   * keystroke deletes the decimal point out from under the cursor.
+   */
+  const [manual, setManual] = useState<Record<string, string> | null>(null);
 
   const searched = q.trim();
 
@@ -233,6 +265,78 @@ export function IngredientPicker({
     );
   }
 
+  if (manual) {
+    const num = (k: string) => Number((manual[k] ?? '').replace(',', '.'));
+    const ok = (k: string) => Number.isFinite(num(k)) && num(k) >= 0;
+    const qty = num('quantity');
+    const valid =
+      manual.name.trim() !== ''
+      && manual.serving_label.trim() !== ''
+      && Number.isFinite(qty) && qty > 0 && qty < 10000
+      && ['kcal', 'protein_g', 'carb_g', 'fat_g'].every(ok)
+      // Fibre may be left blank — "not stated" is a real answer and is not the
+      // same as zero. Only a value that cannot be read is a problem.
+      && (manual.fibre_g.trim() === '' || ok('fibre_g'));
+
+    return (
+      <View style={styles.wrap}>
+        <Pressable
+          onPress={() => setManual(null)}
+          accessibilityRole="button"
+          accessibilityLabel="Back to the ingredient search"
+          testID="ingredient-manual-cancel"
+        >
+          <Text style={styles.back}>← Back</Text>
+        </Pressable>
+        <Text style={styles.hint}>
+          The numbers for ONE of what you name below — the quantity multiplies them.
+        </Text>
+        {MANUAL_FIELDS.map((f) => (
+          <View key={f.key} style={styles.manualField}>
+            <Text style={styles.manualLabel}>{f.label}</Text>
+            <TextInput
+              value={manual[f.key]}
+              onChangeText={(t) => setManual((cur) => (cur ? { ...cur, [f.key]: t } : cur))}
+              keyboardType={f.numeric ? 'decimal-pad' : 'default'}
+              inputMode={f.numeric ? 'decimal' : 'text'}
+              placeholder={f.placeholder}
+              placeholderTextColor={vola.textDim}
+              style={styles.manualInput}
+              accessibilityLabel={f.label}
+              testID={`ingredient-manual-${f.key}`}
+            />
+          </View>
+        ))}
+        <Pressable
+          onPress={() => {
+            if (!valid) return;
+            onPick({
+              name: clampName(manual.name),
+              quantity: qty,
+              serving_label: manual.serving_label.trim(),
+              kcal: num('kcal'),
+              protein_g: num('protein_g'),
+              carb_g: num('carb_g'),
+              fat_g: num('fat_g'),
+              fibre_g: manual.fibre_g.trim() === '' ? null : num('fibre_g'),
+              // Nothing to point at: this ingredient came from the athlete's
+              // head, not from a row anything else owns.
+              source_food_id: null,
+            });
+            setManual(null);
+          }}
+          disabled={!valid}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !valid }}
+          style={[styles.add, !valid && styles.addOff, { backgroundColor: accent.accent }]}
+          testID="ingredient-manual-add"
+        >
+          <Text style={[styles.addText, { color: accent.on }]}>Add to recipe</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.wrap}>
       <Pressable
@@ -326,6 +430,32 @@ export function IngredientPicker({
           Search the food catalog, or pick from foods you have saved.
         </Text>
       ) : null}
+
+      {/* Always offered, not only after a search comes back empty. Somebody
+          adding their own sauce knows the catalog will not have it and should
+          not have to prove that first. */}
+      <Pressable
+        onPress={() =>
+          setManual({
+            name: searched,
+            quantity: '1',
+            serving_label: '100 g',
+            kcal: '',
+            protein_g: '',
+            carb_g: '',
+            fat_g: '',
+            fibre_g: '',
+          })
+        }
+        accessibilityRole="button"
+        accessibilityLabel="Add an ingredient by typing its numbers"
+        style={styles.byHand}
+        testID="ingredient-by-hand"
+      >
+        <Text style={[styles.byHandText, { color: accent.ink }]}>
+          Not in the catalog? Type it in
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -370,6 +500,20 @@ const styles = StyleSheet.create({
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
+  manualField: { gap: 6, marginBottom: 10 },
+  manualLabel: { fontSize: 13, color: vola.textMuted },
+  manualInput: {
+    fontSize: 16,
+    color: vola.text,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+  },
+  byHand: { paddingVertical: 14, alignItems: 'center' },
+  byHandText: { fontSize: 14, fontWeight: '600' },
   add: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   addOff: { opacity: 0.4 },
   addText: { fontSize: 16, fontWeight: '700' },

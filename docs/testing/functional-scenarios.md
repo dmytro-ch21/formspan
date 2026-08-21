@@ -12140,3 +12140,24 @@ replacement.
   for an ingredient. If one appears, it is guessing 100 g silently.
 - The quantity control's button says `Add to recipe`, not `Log`; nothing has been
   logged at that point.
+- **The saved-food editor must refuse a recipe.** Reach `food/saved/[id]` with a
+  recipe's id — from the Edit control, and from the AI-draft screen's "fix these
+  numbers for next time", which passes whatever the server's saved-food match
+  returned and CAN return a recipe. Both must land in the recipe editor instead.
+  Assert the plain-food case still opens the saved-food editor, or a guard that
+  redirects everything passes while breaking the screen it protects.
+- **The redirect must fire once.** `useRouter()` returns a new object per render,
+  so an effect-driven `replace` re-navigates forever; the first version of this
+  guard exhausted the test worker's memory rather than failing. A count, not a
+  "was called".
+- **72 of the catalog's 12,651 foods have names over the server's 120-rune
+  limit** (longest 184). Add one as an ingredient: the name is clamped and marked
+  as clipped, and the recipe saves and syncs. Without the clamp this is a
+  permanent 400 and a lost recipe.
+- **The note is capped in BYTES, not runes** — the server checks `brand` with a
+  bare `len()`. 80 accented characters must be refused on the phone.
+- **An ingredient the catalog lacks is not a dead end**: "Not in the catalog?
+  Type it in" is offered before any search has failed, carries the typed query
+  across, and adds the ingredient without logging anything as a meal.
+- Blank fibre on the by-hand form stays *not stated*; a typed `0` stays `0`. A
+  number that cannot be read disables the button rather than being taken as zero.

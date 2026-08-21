@@ -30,7 +30,7 @@
  */
 
 import { useAuth } from '@clerk/clerk-expo';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
@@ -58,6 +58,18 @@ export default function EditSavedFoodScreen() {
 
   const [food, setFood] = useState<Food | null>(null);
   const [missing, setMissing] = useState(false);
+  /**
+   * Set when the id turns out to name a recipe — see the effect below.
+   *
+   * **A declarative `<Redirect>` rather than `router.replace()` in the effect**,
+   * and that is not style. `useRouter()` returns a NEW object on every render,
+   * so a `router.replace` whose effect lists `router` as a dependency
+   * re-navigates on every render forever: the first attempt at this guard
+   * OOM-ed the test runner rather than failing, which is the loop showing up as
+   * a crash instead of an assertion. Rendering a redirect has no dependency to
+   * get wrong.
+   */
+  const [sendToRecipe, setSendToRecipe] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [servingLabel, setServingLabel] = useState('');
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -72,6 +84,29 @@ export default function EditSavedFoodScreen() {
         if (!live) return;
         if (!f) {
           setMissing(true);
+          return;
+        }
+        // **A RECIPE MUST NOT BE EDITED HERE (N87), and the guard belongs on
+        // this screen rather than on each caller.**
+        //
+        // This form knows about per-serving macros and nothing about a yield or
+        // an ingredient list, so saving a recipe through it writes an empty
+        // `items` and a null `yield_servings` — the local upsert replaces both
+        // rather than COALESCEing them, deliberately, because that is the only
+        // way an athlete can take an ingredient OUT of a recipe. The push then
+        // sends `kind: 'recipe'` with no yield, the server refuses it 400, and
+        // `classify` reads a 400 as permanent: `dirty` is cleared and the
+        // correction is gone. The athlete never saw the ingredient list they
+        // just destroyed.
+        //
+        // `add.tsx` routes recipes away from here too, which avoids the bounce.
+        // This is the backstop, and it is the half that matters: review found a
+        // SECOND caller — `describe.tsx`'s "fix these numbers for next time",
+        // which passes whatever `savedmatch` returned, and the server's saved
+        // match really does return recipes (`TestReusingARecipeGivesOnePortionOfIt`
+        // pins that). A per-caller guard is one somebody forgets to add.
+        if (f.kind === 'recipe') {
+          setSendToRecipe(f.id);
           return;
         }
         setFood(f);
@@ -151,6 +186,12 @@ export default function EditSavedFoodScreen() {
       setSaving(false);
     }
   }, [userId, food, saving, name, servingLabel, draft, router]);
+
+  // Before `missing`, and before the form: a recipe must never render this
+  // screen even for one frame. See the note on `sendToRecipe`.
+  if (sendToRecipe) {
+    return <Redirect href={{ pathname: '/food/recipe/[id]', params: { id: sendToRecipe } }} />;
+  }
 
   if (missing) {
     return (

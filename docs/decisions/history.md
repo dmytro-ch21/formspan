@@ -39530,7 +39530,7 @@ would either guess 100 g silently or do nothing, and this repo already refuses
 
 ### What was measured
 
-24 mutations applied and each confirmed to produce a **test** failure against a
+37 mutations applied and each confirmed to produce a **test** failure against a
 baseline green in the same session, with the apparatus checked both ways: a
 mutation that failed to apply, or a `-t` filter matching no tests, is reported as
 broken rather than as a pass.
@@ -39541,6 +39541,66 @@ inside the editor's `save()` left every test green — because a disabled
 and says nothing about the guard behind it. The disabled STATE is asserted
 separately now, in both directions, so a button that stopped tracking the problem
 and a button that is always disabled each go red.
+
+### What review found, and two of them were the same failure this ticket is about
+
+**[blocking] A second route into the saved-food editor, which the new upsert
+turned from a stranded push into a local wipe.** This branch guarded
+`add.tsx`'s `Edit`, and `describe.tsx`'s *"fix these numbers for next time"*
+pushes the same screen with whatever the server's saved-food match returned —
+and that match really does return recipes (`TestReusingARecipeGivesOnePortionOfIt`
+pins it server-side). Saving a recipe through a form that knows nothing about a
+yield writes an empty `items`, and because the local upsert REPLACES rather than
+COALESCEs — deliberately, since that is the only way to take an ingredient out —
+the ingredient list was destroyed locally without ever being on screen. Then the
+push 400-ed permanently, as before.
+
+**The guard moved to `saved/[id]` itself**, which is the half that matters: a
+per-caller check is one somebody forgets to add, and this diff is the proof —
+the guard was written and a second caller was missed on the same day.
+
+**And the first attempt at it was worse than the bug.** `router.replace()` from
+an effect that lists `router` as a dependency re-navigates on every render,
+because `useRouter()` returns a new object each time. It did not fail a test; it
+took the jest worker out of memory. It renders a declarative `<Redirect>` now,
+which has no dependency to get wrong, and the test asserts the redirect fires
+**once** — a plain "was called" cannot tell a working redirect from a loop.
+
+**[blocking] 72 of the catalog's 12,651 foods have names the server refuses.**
+Measured, not estimated: `validateName` caps a name at 120 **runes**, and the
+longest catalog name is 184 ("Chicken or turkey, breaded, fried, garden salad
+with bacon and cheese, …"). `itemFromCatalog` copied the name verbatim, so
+adding one of those 72 produced a recipe that passed every client check and then
+400-ed permanently on push — the exact stranded-recipe failure this ticket
+exists to close, arriving through the feature that closes it.
+
+Names are clamped at construction and the limits are mirrored in
+`recipeProblem`, **in the server's own units**: runes for names and labels,
+**bytes** for the note, because the server checks that one with a bare `len()`
+on a Go string. A rune-based check there would pass 80 accented characters that
+the server refuses at 160 bytes. Checking on the client is also what makes the
+refusal work offline, where the server's answer is not available at all.
+
+**[suggestion, taken] The picker had no way to type an ingredient in**, while
+this file's own docblock claimed it did. An ingredient the catalog lacks was a
+dead end in flow: the only way out was to leave for the quick-add sheet and
+create the food there, which **logs it as a meal** on the way past. A catalog of
+12,651 foods still does not contain somebody's grandmother's sauce, so the
+by-hand route is offered always rather than only after a search fails — someone
+adding their own sauce should not have to prove the catalog lacks it first.
+
+### The instrument was wrong before the code was
+
+The mutation harness asked `'0 total' in summary` to detect a `-t` filter that
+matched nothing. `'0 total'` is a substring of `'40 total'`, so it reported
+**APPARATUS BROKEN on five guards that were working perfectly** — the substring
+trap this project keeps recording, arriving inside the tool built to catch it.
+It parses the count now. Worth stating because the failure was in the safe
+direction only by luck: the same check could as easily have read a broken run as
+a passing one.
+
+**37 mutations in total**, each confirmed to produce a test failure rather than a
+compile error, against a baseline green in the same session.
 
 ### Left open
 

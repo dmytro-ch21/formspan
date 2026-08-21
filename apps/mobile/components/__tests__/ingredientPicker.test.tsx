@@ -315,3 +315,128 @@ describe('the search itself', () => {
     );
   });
 });
+
+describe('typing an ingredient in by hand', () => {
+  /**
+   * **A catalog of 12,651 foods still does not contain somebody's grandmother's
+   * sauce.** Without this route an ingredient the catalog lacks is a dead end
+   * in-flow: the only way out is to leave for the quick-add sheet and create the
+   * food there, which LOGS it as a meal on the way past — a side effect nobody
+   * assembling a recipe wants. Review found this as a gap between the screen's
+   * docblock and the screen.
+   */
+  it('is offered without having to prove the catalog failed first', async () => {
+    mount();
+    await act(async () => { jest.advanceTimersByTime(300); });
+    expect(screen.getByTestId('ingredient-by-hand')).toBeTruthy();
+  });
+
+  it('hands back an ingredient built from what was typed', async () => {
+    mount();
+    await act(async () => { jest.advanceTimersByTime(300); });
+    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), "Nan's sauce");
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-quantity'), '2');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-serving_label'), '1 ladle');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+
+    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+
+    expect(onPick).toHaveBeenCalledTimes(1);
+    const item = onPick.mock.calls[0][0];
+    expect(item.name).toBe("Nan's sauce");
+    expect(item.quantity).toBe(2);
+    expect(item.serving_label).toBe('1 ladle');
+    // Per ONE of what was named — `perServing` applies the quantity, and
+    // multiplying here as well would double the ingredient silently.
+    expect(item.kcal).toBe(90);
+    expect(item.source_food_id).toBeNull();
+  });
+
+  /**
+   * Blank fibre is "not stated", which is a real answer and is NOT zero. A form
+   * that coerced it would have the recipe claim a fibre total assembled out of
+   * silence — the same collapse `perServing`'s fibre rule exists to prevent, one
+   * layer up.
+   */
+  it('keeps blank fibre as not stated rather than zero', async () => {
+    mount();
+    await act(async () => { jest.advanceTimersByTime(300); });
+    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), 'Sauce');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+
+    expect(onPick.mock.calls[0][0].fibre_g).toBeNull();
+  });
+
+  it('records a stated zero fibre as zero, not as unstated', async () => {
+    // The other direction, so "blank is null" cannot be satisfied by throwing
+    // every fibre value away.
+    mount();
+    await act(async () => { jest.advanceTimersByTime(300); });
+    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), 'Sauce');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-fibre_g'), '0');
+    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+
+    expect(onPick.mock.calls[0][0].fibre_g).toBe(0);
+  });
+
+  /**
+   * A malformed number must be REFUSED, not read as 0 — a stored 0 kcal comes
+   * back with the athlete's own authority behind it, on a row every future log
+   * of this recipe is made from.
+   */
+  it('refuses a number it cannot read rather than storing a zero', async () => {
+    mount();
+    await act(async () => { jest.advanceTimersByTime(300); });
+    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), 'Sauce');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '12..5');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+
+    expect(screen.getByTestId('ingredient-manual-add').props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true }),
+    );
+    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unnamed ingredient', async () => {
+    mount();
+    await act(async () => { jest.advanceTimersByTime(300); });
+    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+
+    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('carries the query across, so a failed search is not retyped', async () => {
+    mount();
+    await type('unobtainium');
+    await waitFor(() => expect(screen.getByTestId('ingredient-empty')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+    expect(screen.getByTestId('ingredient-manual-name').props.value).toBe('unobtainium');
+  });
+});

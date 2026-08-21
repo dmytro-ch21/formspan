@@ -9,7 +9,12 @@
 import type { CatalogFood } from '../catalogApi';
 import type { Food, RecipeItem } from '../nutrition';
 import {
+  MAX_BRAND_BYTES,
   MAX_ITEMS,
+  MAX_LABEL_RUNES,
+  MAX_NAME_RUNES,
+  MAX_YIELD,
+  clampName,
   draftToFood,
   itemFromCatalog,
   itemFromSavedFood,
@@ -112,8 +117,7 @@ describe('perServing', () => {
   });
 });
 
-describe('an ingredient taken from the catalog', () => {
-  const catalogFood: CatalogFood = {
+const catalogFood: CatalogFood = {
     id: 'chicken-breast',
     name: 'Chicken breast, raw',
     brand: '',
@@ -126,10 +130,11 @@ describe('an ingredient taken from the catalog', () => {
     carb_g: 0,
     fat_g: 3.6,
     fibre_g: null,
-    market: 'us',
-    source: 'seed',
-  } as CatalogFood;
+  market: 'us',
+  source: 'seed',
+} as CatalogFood;
 
+describe('an ingredient taken from the catalog', () => {
   it('records the weight that was picked, not a multiplier of 100 g', () => {
     const it = itemFromCatalog(catalogFood, 150);
     expect(it.serving_label).toBe('150 g');
@@ -159,8 +164,7 @@ describe('an ingredient taken from the catalog', () => {
   });
 });
 
-describe('an ingredient taken from a saved food', () => {
-  const saved: Food = {
+const savedFood: Food = {
     id: '11111111-1111-4111-8111-111111111111',
     kind: 'food',
     name: 'Skyr',
@@ -172,9 +176,12 @@ describe('an ingredient taken from a saved food', () => {
     carb_g: 4,
     fat_g: 0.2,
     fibre_g: null,
-    yield_servings: null,
-    items: [],
-  };
+  yield_servings: null,
+  items: [],
+};
+
+describe('an ingredient taken from a saved food', () => {
+  const saved = savedFood;
 
   /**
    * The mirror of the catalog case, and the pair is the point: a saved food IS
@@ -197,17 +204,19 @@ describe('an ingredient taken from a saved food', () => {
   });
 });
 
+function draftWith(over: Partial<RecipeDraft> = {}): RecipeDraft {
+  return {
+    name: 'Traybake',
+    brand: '',
+    serving_label: '1 portion',
+    yield_servings: 4,
+    items: [item()],
+    ...over,
+  };
+}
+
 describe('what stops a draft being saved', () => {
-  function draft(over: Partial<RecipeDraft> = {}): RecipeDraft {
-    return {
-      name: 'Traybake',
-      brand: '',
-      serving_label: '1 portion',
-      yield_servings: 4,
-      items: [item()],
-      ...over,
-    };
-  }
+  const draft = draftWith;
 
   it('accepts a complete draft', () => {
     expect(recipeProblem(draft())).toBeNull();
@@ -226,7 +235,9 @@ describe('what stops a draft being saved', () => {
   });
 
   it('refuses a yield the server would refuse', () => {
-    expect(recipeProblem(draft({ yield_servings: 1000 }))).toBe('no_yield');
+    // `yield_too_large`, not `no_yield`: the athlete DID say how many portions,
+    // so "say how many portions this makes" would be the wrong sentence.
+    expect(recipeProblem(draft({ yield_servings: 1000 }))).toBe('yield_too_large');
   });
 
   /**
@@ -298,5 +309,100 @@ describe('draftToFood', () => {
    */
   it('claims no gram weight for a portion', () => {
     expect(draftToFood(base).serving_grams).toBeNull();
+  });
+});
+
+describe('the server length limits, mirrored so a recipe is never stranded', () => {
+  /**
+   * **Not hypothetical: 72 of the catalog's 12,651 foods have names over 120
+   * runes, the longest 184.** This is one of them, verbatim. Copying it into an
+   * ingredient produced a recipe that passed every client check and then 400-ed
+   * permanently on push — `dirty` cleared, recipe lost, nothing saying so.
+   *
+   * The guard is only exercised by the input it is meant to reject, so the
+   * vector has to be a real over-length name rather than a short one.
+   */
+  const REAL_LONG_NAME =
+    'Chicken or turkey, breaded, fried, garden salad with bacon and cheese, chicken and/or turkey, '
+    + 'tomato and/or carrots, other vegetables, dressing';
+
+  it('the fixture is actually over the limit', () => {
+    // Guards the guard: a vector that quietly came in under 120 would make
+    // every assertion below pass while testing nothing.
+    expect(Array.from(REAL_LONG_NAME).length).toBeGreaterThan(MAX_NAME_RUNES);
+  });
+
+  it('clamps a catalog name the server would refuse', () => {
+    const it_ = itemFromCatalog({ ...catalogFood, name: REAL_LONG_NAME }, 100);
+    expect(Array.from(it_.name).length).toBeLessThanOrEqual(MAX_NAME_RUNES);
+  });
+
+  it('marks a clamped name as clipped rather than passing it off as the food', () => {
+    const it_ = itemFromCatalog({ ...catalogFood, name: REAL_LONG_NAME }, 100);
+    expect(it_.name.endsWith('…')).toBe(true);
+  });
+
+  it('leaves a name that fits exactly alone', () => {
+    const exact = 'x'.repeat(MAX_NAME_RUNES);
+    expect(clampName(exact)).toBe(exact);
+    expect(clampName(exact).endsWith('…')).toBe(false);
+  });
+
+  it('clamps the brand-plus-name join too, not just the name', () => {
+    // 80-char brand + 120-char name is legal on each field and 201 joined.
+    const it_ = itemFromCatalog(
+      { ...catalogFood, brand: 'B'.repeat(80), name: 'N'.repeat(MAX_NAME_RUNES) },
+      100,
+    );
+    expect(Array.from(it_.name).length).toBeLessThanOrEqual(MAX_NAME_RUNES);
+  });
+
+  it('clamps a saved food the same way', () => {
+    const long = { ...savedFood, name: REAL_LONG_NAME };
+    expect(Array.from(itemFromSavedFood(long, 1).name).length)
+      .toBeLessThanOrEqual(MAX_NAME_RUNES);
+  });
+
+  it('refuses a recipe name over the limit', () => {
+    expect(recipeProblem(draftWith({ name: 'x'.repeat(MAX_NAME_RUNES + 1) }))).toBe('name_too_long');
+  });
+
+  it('refuses a portion label over the limit', () => {
+    expect(recipeProblem(draftWith({ serving_label: 'x'.repeat(MAX_LABEL_RUNES + 1) })))
+      .toBe('label_too_long');
+  });
+
+  /**
+   * The note is stored as `brand`, which the server caps in **bytes**
+   * (`len(f.Brand)`), not runes. A rune-based check here would pass a note of
+   * 80 accented characters that the server refuses at 160 bytes.
+   */
+  it('counts the note in bytes, as the server does', () => {
+    const asciiFits = 'a'.repeat(MAX_BRAND_BYTES);
+    expect(recipeProblem(draftWith({ brand: asciiFits }))).toBeNull();
+
+    // Same rune count, twice the bytes.
+    const accented = 'é'.repeat(MAX_BRAND_BYTES);
+    expect(recipeProblem(draftWith({ brand: accented }))).toBe('note_too_long');
+  });
+
+  /**
+   * A recipe pulled from the server, or written by an older build, can carry an
+   * item name this build would have clamped. Re-saving it must be refused with
+   * a reason rather than stranding the whole recipe on push.
+   */
+  it('refuses an ingredient name that arrived over the limit from elsewhere', () => {
+    const bad = item({ name: 'x'.repeat(MAX_NAME_RUNES + 1) });
+    expect(recipeProblem(draftWith({ items: [bad] }))).toBe('item_name_too_long');
+  });
+
+  /**
+   * A stated-but-too-large yield is not the same problem as an empty one, and
+   * "say how many portions this makes" is the wrong sentence for somebody who
+   * said, and said 5000.
+   */
+  it('separates a yield that is too big from one that is missing', () => {
+    expect(recipeProblem(draftWith({ yield_servings: 0 }))).toBe('no_yield');
+    expect(recipeProblem(draftWith({ yield_servings: MAX_YIELD }))).toBe('yield_too_large');
   });
 });
