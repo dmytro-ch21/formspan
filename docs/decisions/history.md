@@ -39873,6 +39873,74 @@ The properties that matter:
 
 Pure file reads throughout — no network in context assembly, by contract.
 
+## 2026-08-21 — N142: quality gates by risk class — real commands, distinguishable failures
+
+Sixth PR of the AI-SDLC initiative. `engine/internal/devengine/gates.go`
+gives the engine an executable gate registry and a selector; `runstate` gains
+`RecordGates`, which writes one lease-guarded step row per gate outcome.
+
+- **The always floor** (pinned by name, mutation-checkable): clean-tree
+  (`git status --porcelain` must print nothing — the OUTPUT is the failure,
+  exit 0 notwithstanding), acceptance-criteria, secrets-in-diff, and
+  `pnpm run verify`. Deliberately no re-derived lint/typecheck lists —
+  `verify` IS the repo's chain, and re-deriving it is exactly the drift the
+  ticket's non-regression forbids. A test enforces the non-regression the
+  other way too: every `pnpm run X` a gate names must exist in the root
+  package.json's scripts, so a renamed script goes red in the suite rather
+  than in a live run.
+- **Group sets** keyed on the context map's gate_vocabulary (a test pins
+  every registry key inside the real checked-in vocabulary): backend-db →
+  `test:api`; migrations → `cmd/migrate up` on a clean DB + the full suite
+  (cmd/migrate itself refuses gap/collision numbering — the repo's command
+  is the gate); mobile-native → `expo install --check` + config resolution;
+  api-contract → `lint:openapi`.
+- **Risk participates directly**: anything above low risk adds the
+  isolated-DB backend suite even when no backend path was touched — a
+  high-risk change is precisely the one whose blast radius the diff
+  underestimates. Selection is deterministic (fixed registry order, never
+  map iteration) and deduplicated.
+- **Each gate reports its own pass/fail + bounded output tail** (8 KB, tail
+  kept because that is where failures print); `RecordGates` makes each a
+  separate `gate:<name>` step row, so two failing gates are two
+  distinguishable failures — tested down to the Postgres rows, including
+  that a dispossessed engine cannot write gate history (AppendStep's lease
+  guard).
+- **The secrets gate names the pattern, never the match**: a planted
+  runtime-constructed key is caught and the test asserts the key's text
+  appears nowhere in the gate's output — copying the secret into the run
+  record would be the leak wearing an audit trail's clothes. Removed-line
+  secrets do not block the change that deletes them.
+
+Review hardening, each measured: gate children now receive an ALLOWLISTED
+environment (PATH/HOME/toolchain caches + CI=1 + explicit ExtraEnv grants) —
+command gates execute the change-under-gate's own code, so an inherited
+credential was readable by exactly the code being judged; the registry became
+ONE ordered slice after a mutation proved a second hand-maintained key list
+could silently strand a group, and a test now pins registry keys = the whole
+gate_vocabulary in both directions; the credential regexes gained the
+underscore-joined shapes review measured MISSED (CLERK_SECRET_KEY — this
+stack's actual auth provider — plus JWTs, gho_/ghs_, remote connection
+strings with embedded passwords, env-file assignments), with localhost
+connection strings and `.example` templates exempted because the real tree's
+only legitimate hits were the compose URL in the docs and placeholder
+template lines; the migrate gate was renamed to what it does (`migrate-up`)
+and documents that the runner must GRANT a throwaway database via ExtraEnv —
+the env scrub makes inheriting one impossible; the 8KB tail cut advances to a
+rune boundary because a mid-rune cut is invalid UTF-8, which Postgres
+rejects, aborting RecordGates at exactly the moment a gate produced a lot of
+output; RequireEmptyOutput judges stdout alone so a benign stderr warning
+cannot fail a clean tree; expo gates run through `pnpm exec` so a tree
+without node_modules cannot fetch an off-lockfile toolchain; migrations'
+suite entry shares backend-tests' name so dedup collapses the double run.
+
+One pre-existing find worth its own ticket: `expo install --check` is red on
+the repo baseline right now (jest-expo 57.0.3 vs expected ~57.0.4), so the
+mobile-native gate would block every run until that drift is fixed on main —
+a deliberate `expo install --fix` change per CLAUDE.md, not this PR's.
+
+Open: nothing executes these against a real worktree yet — N141's worker is
+the caller, and the FIXING loop's re-run policy is N143's.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
