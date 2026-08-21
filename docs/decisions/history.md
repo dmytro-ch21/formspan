@@ -39941,6 +39941,67 @@ a deliberate `expo install --fix` change per CLAUDE.md, not this PR's.
 Open: nothing executes these against a real worktree yet — N141's worker is
 the caller, and the FIXING loop's re-run policy is N143's.
 
+## 2026-08-21 — N143: the CI feedback loop's decision core — read checks the way this repo learned to, and never thrash
+
+Seventh PR of the AI-SDLC initiative. `cifeedback.go` is the engine's
+CI-reading discipline as pure, fixture-tested logic: `ReadChecks` turns raw
+check-run state into one of eight named verdicts, and only `green` means
+passed — every other state (`failed`, `running`, `zero_checks`,
+`incomplete`, `stale_green`, `sha_gone`, `mergeable_unknown`) says why not,
+so no caller can collapse them into "not failed".
+
+Every hard-won CI lesson from CLAUDE.md is a test fixture now:
+
+- **The #401 shape**: the raw check-runs API accumulates one entry per
+  workflow RUN, so a superseded failure sits beside its green re-run on the
+  same SHA — `latestPerName` reads like `gh pr checks`, and the fixture
+  proves both directions (superseded failure ≠ failure; newest failure =
+  failure).
+- **N65 / #395**: zero checks is never passing, CONFLICTING names the rebase
+  as the unblocking action, and green-but-CONFLICTING is `stale_green` — the
+  green describes a merge commit that no longer exists.
+- **#400**: a watcher whose SHA is no longer the branch head gets `sha_gone`
+  ("re-arm on the new head"), never a poll loop against a commit on no
+  branch — the confident-false-red trap.
+- **Skipped counts as not-checked** (`incomplete`) — absence wearing a green
+  tick — and `mergeable: UNKNOWN` is "ask again", not green.
+
+`ClassifyFailure` separates infrastructure from code failures by measured
+log signatures ("Failed to resolve action download info" took out three jobs
+on 2026-08-06; runner shutdowns; registry rate limits), and the DEFAULT is
+code on purpose: mislabeling a flake as code costs one bounded attempt,
+mislabeling broken code as infra retries it forever — the thrash the whole
+loop exists to prevent. `FixBudget` bounds code fixes at policy.json's
+`max_ci_fix_attempts` (the fourth failure produces the Blocked diagnosis
+naming what was tried and the human action); infrastructure retries never
+consume the budget but ARE counted, so a caller can surface "10 infra
+retries" as its own smell.
+
+Review hardening, both blockers measured with probes rather than argued:
+the dedup key moved from StartedAt to the check-run ID — GitHub's timestamps
+are second-granularity, so a retrigger in the same second made the verdict
+ORDER-DEPENDENT (same facts, green in one response order and failed in the
+other), and a queued re-run's zero StartedAt was invisible behind an old
+completed green; IDs are monotonic and both cases are regression tests in
+both orders now. Also from review: a failing check on a CONFLICTING PR is
+`stale_failed` — runs are never withdrawn, so stale failures exist exactly
+as stale greens do, and spending fix attempts on them repairs a merge commit
+that no longer exists (rebase is the free, correct action); a failing check
+OUTSIDE the declared list is no longer invisible (`(undeclared)` fold-in —
+the ci:checks set-disagreement principle applied here); infra retries gained
+their own bound (3× the code budget) — without one, a sticky runner failure
+or a misclassified code failure (and the substring classifier CAN misfire:
+this repo's llm package legitimately prints "i/o timeout" in red test
+output) retried forever, which is the thrash the CODE default was designed
+around; and the Blocked diagnosis now says the honest sentence — "3 code
+fixes pushed and a further failure occurred" — instead of counting the
+refusal as a fourth attempt. The empty-BranchHeadSHA escape hatch is now
+documented as caller-vouches-only: N141's contract must surface a FAILED
+branch resolution as its own branch-gone state, never as "".
+
+Open: the live loop (fetch failed logs, apply a fix, push) is N141's worker
+wiring; this is the decision layer it consults on every poll.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
