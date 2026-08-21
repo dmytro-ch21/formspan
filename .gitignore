@@ -54,3 +54,7 @@ __pycache__/
 # without a count on purpose — this said "four" one sound-wiring PR later.
 assets/audio/
 evals/bjj-dictation/pending/
+
+# The dev engine's shadow-mode decision log (engine/cmd/devengine) — an
+# append-only local observation record, never repo content.
+devengine-decisions.jsonl

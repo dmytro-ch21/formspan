@@ -39686,6 +39686,62 @@ R-001–R-013 from a section of the document not shared into the repo — those
 are not yet tickets and the epic notes it; and board *ordering* (where
 N136–N138 sit in the priority order) was deliberately left for the user.
 
+## 2026-08-21 — N137: the dev engine exists, in shadow mode, as its own Go module
+
+The second PR of the AI-SDLC initiative (N135–N147; see the N136 entry for the
+initiative itself). `engine/` is a new top-level Go module holding
+`cmd/devengine` and `internal/devengine`: a Phase-1 shadow-mode reconciler that
+polls the VOLA board over GraphQL, detects Todo → In Progress transitions, runs
+the dispatch preflight, and appends what it WOULD do to an append-only local
+JSONL decision log. It edits no code and writes nothing to GitHub, and there is
+deliberately no flag that changes that.
+
+**Why a separate module and not `backend/cmd/devengine`**: `backend/Dockerfile`
+builds every binary under `cmd/...` into the image Railway deploys, so engine
+code there would ship inside the product API image — the design's trust
+boundary forbids exactly that. The module is dependency-free (GitHub GraphQL
+over `net/http`, policy via `encoding/json` — the reason `.vola-agent/` is
+JSON), rides the Backend (Go) CI job as an added step (no new check-run name),
+and is wired into `verify` as `fmt:engine`/`vet:engine`/`build:engine`/
+`test:engine`. It moves to the private `vola-dev-engine` repo once the GitHub
+org and App exist (N145).
+
+Decisions and behaviors worth recording:
+
+- **The first snapshot is a BASELINE, never a dispatch.** Items already In
+  Progress at startup are humans mid-work; dispatching them would contest every
+  live claim on the board. A restart re-baselines rather than replaying — so a
+  shadow restart can never double-log, and durable catch-up is explicitly
+  N139's job, not this one's.
+- **Preflight refusals mirror the process rules that already exist**: no
+  acceptance criteria (ac-verifier's NO CRITERIA rule as a hard refusal), a
+  draft project item (a card is not an issue), and an assignee (the engine
+  never contests a human claim — in shadow mode the assignee IS the lease).
+  Every refusal is phrased as the human action that unblocks it.
+- **Risk is classified raise-only** from the ticket's own `## Risk` plus
+  label rules; `LoadConfig` refuses to start at all if `raise_only` is false —
+  a belt to the policy validator's braces. Path-based rules apply later, at
+  implementation time, when a diff exists.
+- **The context plan** selects `context-map.json` entries whose path prefixes
+  appear in the issue body (tickets name their owned paths in `## Scope` —
+  that is the ticket contract), deduplicated; an unmapped scope yields an
+  empty plan, not a guess.
+- **The GraphQL contract was verified live, not assumed** — the httptest
+  fixtures mirror a response measured against the real board on 2026-08-21
+  (161 items, pagination genuinely exercised: `hasNextPage` true at 100), and
+  `go run ./cmd/devengine --once` is the repeatable live check. This is the
+  "a stub built from an assumption cannot falsify it" rule applied on day one.
+- The decision log is opened O_APPEND per write and a test pins that a
+  pre-existing log is extended, never truncated — the log is the entire
+  evidence base for the shadow-vs-human comparison the ticket's NEEDS HUMAN
+  EVIDENCE criterion asks for, so losing history on restart would invalidate
+  the observation week silently.
+
+Open: the week of real shadow observation (the ticket's human-evidence
+criterion — the binary has to actually run while board activity happens);
+N138 deepens preflight into the full rule set; N139 gives runs durable state
+and leases, which is when the assignee-as-lease reading gets replaced.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

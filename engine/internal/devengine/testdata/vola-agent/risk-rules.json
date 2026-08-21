@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "default_risk": "low",
+  "raise_only": true,
+  "rules": [
+    { "risk": "high", "reason": "security label", "labels": ["security"] },
+    { "risk": "medium", "reason": "sync code", "paths": ["apps/mobile/lib/db.ts"] },
+    { "risk": "medium", "reason": "contract", "labels": ["area: api"] }
+  ]
+}

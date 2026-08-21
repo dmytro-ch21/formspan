@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "gate_vocabulary": ["backend", "mobile", "offline-sync", "api-contract"],
+  "entries": [
+    {
+      "paths": ["backend/**"],
+      "docs": ["docs/architecture/api-conventions.md"],
+      "traps": [],
+      "gates": ["backend"]
+    },
+    {
+      "paths": ["apps/mobile/lib/**"],
+      "docs": ["docs/testing/device-checks.md"],
+      "traps": ["T5", "T6"],
+      "gates": ["mobile", "offline-sync"]
+    },
+    {
+      "paths": ["contracts/**"],
+      "docs": ["docs/architecture/api-conventions.md"],
+      "traps": [],
+      "gates": ["api-contract"]
+    }
+  ]
+}

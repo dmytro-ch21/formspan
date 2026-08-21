@@ -8,6 +8,7 @@
   "scripts": {
     "build:admin": "pnpm --filter admin build",
     "build:api": "cd backend && go build -o bin/ ./cmd/...",
+    "build:engine": "cd engine && go build ./...",
     "build:web": "pnpm --filter web build",
     "check:agent-policy": "python3 scripts/check-agent-policy.py",
     "check:brand-copies": "node scripts/check-brand-copies.mjs",
@@ -33,6 +34,7 @@
     "dev:mobile": "pnpm --filter mobile start",
     "dev:web": "pnpm --filter web dev",
     "fmt:api": "cd backend && test -z \"$(gofmt -l .)\" || { gofmt -l .; exit 1; }",
+    "fmt:engine": "cd engine && test -z \"$(gofmt -l .)\" || { gofmt -l .; exit 1; }",
     "lint:admin": "pnpm --filter admin lint",
     "lint:mobile": "pnpm --filter mobile lint",
     "lint:openapi": "redocly lint contracts/public.openapi.yaml --config .redocly.yaml",
@@ -40,13 +42,15 @@
     "routes:mobile": "node scripts/generate_route_types.mjs",
     "test:admin": "pnpm --filter admin test",
     "test:api": "cd backend && go test -p 1 -timeout 3m ./...",
+    "test:engine": "cd engine && go test -timeout 3m ./...",
     "test:mobile": "pnpm --filter mobile test",
     "test:web": "pnpm --filter web test",
     "typecheck:admin": "pnpm --filter admin exec tsc --noEmit",
     "typecheck:mobile": "pnpm run routes:mobile && pnpm --filter mobile exec tsc --noEmit",
     "typecheck:web": "pnpm --filter web exec tsc --noEmit",
-    "verify": "pnpm run check:tasks && pnpm run check:verify-chain && pnpm run check:ci-detector && pnpm run check:pr-work && pnpm run check:evidence-latch && pnpm run check:agent-policy && pnpm run check:palette && pnpm run check:icons && pnpm run check:python && pnpm run check:grip-parity && pnpm run check:rate-parity && pnpm run check:telemetry-parity && pnpm run check:timeout-parity && pnpm run check:units && pnpm run check:unit-literals && pnpm run check:evals && pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run lint:mobile && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run check:brand-copies && pnpm run lint:web && pnpm run typecheck:web && pnpm run test:web && pnpm run lint:admin && pnpm run typecheck:admin && pnpm run test:admin",
-    "vet:api": "cd backend && go vet ./..."
+    "verify": "pnpm run check:tasks && pnpm run check:verify-chain && pnpm run check:ci-detector && pnpm run check:pr-work && pnpm run check:evidence-latch && pnpm run check:agent-policy && pnpm run check:palette && pnpm run check:icons && pnpm run check:python && pnpm run check:grip-parity && pnpm run check:rate-parity && pnpm run check:telemetry-parity && pnpm run check:timeout-parity && pnpm run check:units && pnpm run check:unit-literals && pnpm run check:evals && pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run fmt:engine && pnpm run vet:engine && pnpm run build:engine && pnpm run test:engine && pnpm run lint:openapi && pnpm run lint:mobile && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run check:brand-copies && pnpm run lint:web && pnpm run typecheck:web && pnpm run test:web && pnpm run lint:admin && pnpm run typecheck:admin && pnpm run test:admin",
+    "vet:api": "cd backend && go vet ./...",
+    "vet:engine": "cd engine && go vet ./..."
   },
   "devDependencies": {
     "@redocly/cli": "^2.41.0"
