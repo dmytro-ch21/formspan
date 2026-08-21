@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "base_branch": "main",
+  "max_ci_fix_attempts": 3,
+  "max_runtime_minutes": 60,
+  "require_clean_tree": true,
+  "require_acceptance_criteria": true,
+  "auto_merge": { "enabled": false, "allowed_risk": ["low"] },
+  "human_gate": {
+    "paths": ["backend/internal/platform/auth/**", "backend/migrations/**"],
+    "labels": ["security", "destructive", "billing"]
+  }
+}
