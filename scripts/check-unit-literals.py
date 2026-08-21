@@ -69,13 +69,24 @@ not to need the positional heuristic. `Math.abs(kg)` and
 `distanceInputUnit(units)` do not match, because the `(` must be preceded by
 whitespace or `>` rather than by an identifier character.
 
-**What is still not seen**, and what a future change should fix rather than
-rediscover: a bare unit token in multi-line JSX text that is not parenthesised,
-e.g. a `<Text>` whose content is `Weight` on one line and `kg` on the next.
-Catching that needs real JSX-aware parsing — tracking whether a position is
-inside an element body — which is a bigger change than this check justified at
-the time. The self-test vectors below pin what IS caught, so shrinking that set
-fails rather than passes quietly.
+**What is still not seen.** This list was WRONG when first written — it named
+one class and there are two, found by review probing the matchers rather than
+reading them. Both need real parsing (element-body tracking, or multi-line
+string state) which is a bigger change than this check justified:
+
+1. **A bare, unparenthesised unit in multi-line JSX text** — a `<Text>` whose
+   content is `Weight` on one line and `kg` on the next. Neither pattern fires:
+   the positional heuristic is same-line, and there are no parentheses.
+2. **The interior of a multi-line template literal** — a line reading
+   `You are 3 kg from your goal` inside a backtick string spanning several
+   lines has no quote character *on that line*, so the quoted heuristic never
+   fires. Realistic for `Alert.alert` bodies and long accessibility labels.
+   Single-line strings and multi-line JSX *attributes* are both caught; this is
+   specifically the multi-line backtick interior.
+
+The self-test vectors below pin what IS caught, so shrinking that set fails
+rather than passes quietly. If you widen the matchers to cover either class,
+add its vector to `MUST_MATCH` first and watch it fail.
 
 ## The allowlist
 
@@ -242,10 +253,52 @@ PAREN_UNITS = (
     r"|kilograms?|pounds?|inches|feet|centimet(?:er|re)s?|met(?:er|re)s?"
 )
 
-#: The `(` must follow whitespace, `>`, or the start of the line. That is what
-#: separates a LABEL — `Target weight (kg)` — from a CALL — `Math.abs(kg)`,
-#: `distanceInputUnit(units)` — where an identifier character precedes it.
-PAREN = re.compile(rf"(?:(?<=[\s>])|^)\((?:{PAREN_UNITS})\)")
+#: The subset that is unambiguous even with COMPANION WORDS after it. `in`,
+#: `ft`, `mi` and `L` are excluded here though they appear in `PAREN_UNITS`
+#: above: `(in progress)` is real English and would match a widened pattern,
+#: which is the wolf-cry that gets a check ignored.
+PAREN_UNAMBIGUOUS = (
+    r"kgs?|lbs?|cm|mm|km|yd|ml|fl oz"
+    r"|kilograms?|pounds?|inches|centimet(?:er|re)s?"
+)
+
+#: Two alternatives, and the split is deliberate.
+#:
+#: 1. **Exact** — `(kg)`, `( kg )` — for the full vocabulary, ambiguous tokens
+#:    included, because `(in)` alone is a unit and `(in progress)` is not.
+#: 2. **With companion words** — `(kg, optional)`, `(kg per side)` — for the
+#:    unambiguous subset only. That second form is the near-relative of the
+#:    bug this pattern was built for: `perSide` is a real concept in the
+#:    session logger, so `Weight (kg per side)` is a label somebody will write.
+#:
+#: Case-insensitive so `(Kg)` at the start of a label is caught.
+#:
+#: The `(` must follow whitespace, `>`, or the start of the line — that is what
+#: separates a LABEL, `Target weight (kg)`, from a CALL, `Math.abs(kg)` or
+#: `distanceInputUnit(units)`, where an identifier character precedes it.
+#: The companion text is restricted to LETTERS, SPACES AND COMMAS — not
+#: `[^)]*`. That was tried and immediately flagged
+#: `(1 - (kg - wLo) / wSpan)` in `NutritionChart.tsx`: parenthesised arithmetic
+#: on a variable named `kg`. A label reads `(kg per side)` or `(kg, optional)`;
+#: an expression contains operators, colons or digits. Excluding those is what
+#: separates the two without needing to know which is which.
+PAREN = re.compile(
+    rf"(?:(?<=[\s>])|^)\(\s*(?:(?:{PAREN_UNITS})\s*\)"
+    rf"|(?:{PAREN_UNAMBIGUOUS})\b(?:[,\s][A-Za-z ,]{{0,22}})?\))",
+    re.IGNORECASE,
+)
+
+#: `(` preceded by one of these is a CONDITION or a return, not a label —
+#: `if (kg)`, `switch (cm) {`, `return (ml);`. A variable named `kg` is
+#: commonplace in this codebase (`Math.abs(kg)` is itself a self-test vector),
+#: so this is the likeliest first false positive rather than a hypothetical.
+#:
+#: A guard in code rather than a lookbehind because Python's `re` requires
+#: fixed-width lookbehind, and these are not.
+PAREN_NOT_A_LABEL = re.compile(r"\b(?:if|while|switch|return|for|catch|await|typeof)\s*$")
+
+#: `(ml) => …` is an untyped single-parameter arrow function, not a label.
+PAREN_IS_ARROW = re.compile(r"^\s*=>")
 ATTR = re.compile(r"(className|style|testID|href|key|id|data-testid)\s*=\s*[\"'{][^\"']*$")
 
 
@@ -266,6 +319,12 @@ MUST_MATCH = [
     "      hint={`${b.weight_kg} kg on ${b.weight_measured_on}`}",
     "  <Text>Waist (cm)</Text>",
     '  <span>Distance (yd)</span>',
+    # Parenthesised WITH companion words — the near-relative of the bug line
+    # above, and realistic: `perSide` is a real concept in the session logger.
+    "          Target weight (kg, optional)",
+    "          <Text>Weight (kg per side)</Text>",
+    "          <Text>Height ( cm )</Text>",
+    "          <Text>Weight (Kg)</Text>",
 ]
 
 #: Lines that must stay silent. Every one of these is a shape that a careless
@@ -280,6 +339,17 @@ MUST_NOT_MATCH = [
     "    return `${minutes}m ago`;",
     "  const cm = toFeetInches(cm);",
     '    <path d="M 0 0 L 8 4 L 0 8 z" />',
+    # Parenthesised, and NOT labels. Every one of these was either found in the
+    # repo or named by review as the likeliest first false positive; a check
+    # that shouts at correct code is one somebody eventually silences.
+    "    yWeight: (kg: number) => PAD.top + plotH * (1 - (kg - wLo) / wSpan),",
+    "    if (kg) return null;",
+    "    if (cm == null) return '—';",
+    "    switch (cm) {",
+    "    return (kg);",
+    "    const toOz = (ml) => ml / 29.5735295625;",
+    "    while (ml > 0) {",
+    "    const scaled = (kg * 2) / total;",
 ]
 
 
@@ -287,8 +357,12 @@ def _reports(line: str) -> bool:
     """Whether the matchers would flag one line, ignoring the allowlist."""
     stripped = strip_noise(line)
     for pm in PAREN.finditer(stripped):
-        if not ATTR.search(stripped[: pm.start()]):
-            return True
+        before, after = stripped[: pm.start()], stripped[pm.end() :]
+        if ATTR.search(before):
+            continue
+        if PAREN_NOT_A_LABEL.search(before) or PAREN_IS_ARROW.match(after):
+            continue
+        return True
     for m in PAT.finditer(stripped):
         before, after = stripped[: m.start()], stripped[m.end() :]
         quoted = before.count("'") % 2 or before.count('"') % 2 or before.count("`") % 2
@@ -328,8 +402,11 @@ def violations() -> list[tuple[str, int, str, str]]:
                 # heuristic, so it sees the multi-line JSX the one below
                 # cannot. See "The blind spot" in the module docstring.
                 for pm in PAREN.finditer(line):
-                    tok = pm.group(0).strip("()")
-                    if ATTR.search(line[: pm.start()]):
+                    tok = pm.group(0).strip("() ")
+                    before, after = line[: pm.start()], line[pm.end() :]
+                    if ATTR.search(before):
+                        continue
+                    if PAREN_NOT_A_LABEL.search(before) or PAREN_IS_ARROW.match(after):
                         continue
                     if excused(rel, tok, line):
                         continue

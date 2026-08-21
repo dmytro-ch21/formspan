@@ -37072,6 +37072,40 @@ showed one failure — a clock reading 19:40 instead of 16:40 in
 jest read the flag as a path pattern, matching nothing. The form that works is
 `TZ=America/Los_Angeles pnpm exec jest --maxWorkers=3` from `apps/mobile`.
 
+### Two CLI reads that lie, both found on this branch
+
+**`mergeable: UNKNOWN` is not a state, it is GitHub saying "ask again".**
+`pnpm run ci:checks` reported all six checks passing and flagged `mergeable` as
+UNKNOWN; re-running gave **CONFLICTING**, because `main` had moved and the green
+described a merge commit that no longer existed. Taking the first reading would
+have marked a PR ready on a result that described nothing. Same shape as the
+check-COUNT versus absence-of-failures lesson the detector exists for, one field
+over.
+
+**`gh pr view` can report the OLD head after a push that succeeded.** After a
+force-push it returned the previous SHA and `CONFLICTING`, which is
+indistinguishable from a rejected push — and the natural response is to push
+again or start debugging the branch. `git ls-remote origin refs/heads/<branch>`
+showed the push had landed, and `gh api repos/.../pulls/N --jq .head.sha` gave
+the truth immediately. Worth filing next to the `gh pr edit` note in CLAUDE.md:
+both are the CLI **misreporting** rather than failing, which is the harder class,
+because an error tells you something is wrong and a stale read does not.
+
+The general rule both instances point at: **for anything that decides whether to
+merge, read it twice or read it from the API.**
+
+### A clean auto-merge is not evidence
+
+W10 (#500) landed on `app/(tabs)/goals.tsx` — the same screen this entry
+converts — while this branch was open, and the rebase merged both changes with
+**no conflict at all**; only `history.md` conflicted, for the third time that
+day. A clean auto-merge that silently drops behaviour is on file in this repo as
+a real failure, so the nine `formatWeight` call sites were verified present
+afterwards rather than inferred from the absence of a conflict marker. Same
+again for #498: `git diff origin/main -- docs/decisions/history.md` was checked
+to add exactly ONE heading, which is the cheap way to prove a rebase neither
+dropped somebody's entry nor duplicated one.
+
 ### Deliberately not done
 
 `g/kg` and `kcal/kg` stay as they are. Sports nutrition states protein in g/kg
