@@ -9,6 +9,7 @@
     "build:admin": "pnpm --filter admin build",
     "build:api": "cd backend && go build -o bin/ ./cmd/...",
     "build:web": "pnpm --filter web build",
+    "check:agent-policy": "python3 scripts/check-agent-policy.py",
     "check:brand-copies": "node scripts/check-brand-copies.mjs",
     "check:ci-detector": "python3 scripts/check-ci-checks.py --self-test",
     "check:evals": "python3 scripts/check-dictation-evals.py",
@@ -44,7 +45,7 @@
     "typecheck:admin": "pnpm --filter admin exec tsc --noEmit",
     "typecheck:mobile": "pnpm run routes:mobile && pnpm --filter mobile exec tsc --noEmit",
     "typecheck:web": "pnpm --filter web exec tsc --noEmit",
-    "verify": "pnpm run check:tasks && pnpm run check:verify-chain && pnpm run check:ci-detector && pnpm run check:pr-work && pnpm run check:evidence-latch && pnpm run check:palette && pnpm run check:icons && pnpm run check:python && pnpm run check:grip-parity && pnpm run check:rate-parity && pnpm run check:telemetry-parity && pnpm run check:timeout-parity && pnpm run check:units && pnpm run check:unit-literals && pnpm run check:evals && pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run lint:mobile && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run check:brand-copies && pnpm run lint:web && pnpm run typecheck:web && pnpm run test:web && pnpm run lint:admin && pnpm run typecheck:admin && pnpm run test:admin",
+    "verify": "pnpm run check:tasks && pnpm run check:verify-chain && pnpm run check:ci-detector && pnpm run check:pr-work && pnpm run check:evidence-latch && pnpm run check:agent-policy && pnpm run check:palette && pnpm run check:icons && pnpm run check:python && pnpm run check:grip-parity && pnpm run check:rate-parity && pnpm run check:telemetry-parity && pnpm run check:timeout-parity && pnpm run check:units && pnpm run check:unit-literals && pnpm run check:evals && pnpm run fmt:api && pnpm run vet:api && pnpm run build:api && pnpm run lint:openapi && pnpm run lint:mobile && pnpm run test:mobile && pnpm run typecheck:mobile && pnpm run check:brand-copies && pnpm run lint:web && pnpm run typecheck:web && pnpm run test:web && pnpm run lint:admin && pnpm run typecheck:admin && pnpm run test:admin",
     "vet:api": "cd backend && go vet ./..."
   },
   "devDependencies": {

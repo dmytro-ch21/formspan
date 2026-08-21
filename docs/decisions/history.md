@@ -39616,6 +39616,76 @@ compile error, against a baseline green in the same session.
   it is genuinely outstanding — nothing here has been exercised on a phone.
 
 
+## 2026-08-21 — AI-native SDLC: the dev engine gets a ticket set and its first artifact, the `.vola-agent/` policy contract (N136, part of N135–N147)
+
+The user brought a full architecture for an AI-native SDLC: moving a board
+ticket Todo → In Progress should dispatch a durable engine that claims the
+issue, implements it in an isolated environment, runs gates/reviews/CI-repair,
+opens a PR, and drives the ticket to one of four terminal outcomes — Done,
+Awaiting Evidence (merged but a NEEDS HUMAN EVIDENCE criterion is owed; the
+existing evidence latch stays the release mechanism), Blocked (a human decision
+is required, with the exact unblocking action named), or Failed (bounded
+attempts exhausted, diagnostics attached). The design deliberately turns this
+repo's existing process conventions — server-side claiming, ac-verifier's
+NO-CRITERIA-is-blocking rule, `ci:checks` counting semantics, the evidence
+latch — into an orchestrator rather than replacing them.
+
+**Thirteen tickets filed, N135–N147 (#558–#574).** N135 (#574) is the index;
+the rollout is phased on purpose: Phase 1 shadow mode (a reconciler polls the
+board, records what it WOULD do, edits nothing), Phase 2 autonomous branch with
+human merge, Phase 3 auto-merge for policy-approved low-risk classes only.
+Auth/security, destructive migrations, billing, privacy deletion and prod infra
+never auto-merge. N145 (#569) is the one only the user can do — GitHub
+organization, org-owned Project (user-owned projects don't usefully emit
+`projects_v2_item` webhooks), and a least-privilege GitHub App — so until then
+the engine's trigger is GraphQL polling of the current user project.
+
+**This entry's PR lands N136: the `.vola-agent/` policy contract** —
+`policy.json` (budgets, human-gated paths/labels, auto-merge posture),
+`risk-rules.json` (raise-only risk classification: rules may raise a ticket's
+risk, never lower what a human wrote), `context-map.json` (path →
+docs/T-traps/gate-groups for the engine's context builder, so an agent gets the
+relevant traps rather than CLAUDE.md plus 39k lines of history on every call),
+and `ticket-schema.md` (the sections a ticket must carry to be autonomously
+workable; a ticket without objective acceptance criteria is Blocked, not
+guessed at). Decisions worth recording:
+
+- **JSON, not the design doc's YAML.** The validator stays stdlib-only (the
+  `check:python` convention — no PyYAML), and the Go engine reads it with
+  `encoding/json`. Same structure, zero new dependencies on either side.
+- **`scripts/check-agent-policy.py` self-tests on EVERY run**, per the
+  verify-that-a-check-can-fail rule: it copies the real files into a temp
+  root, applies 11 mutations (dropped required key, invented risk level,
+  gated path that doesn't exist, deleted heading, `raise_only` flipped,
+  `auto_merge` enabled, malformed JSON…) and asserts each is caught before
+  validating the real files. Mutating copies of the live files rather than
+  fixtures means the self-test can't drift from what it protects.
+- **Two values are asserted, not just type-checked**: `auto_merge.enabled`
+  must be false until the circuit-breaker engine (N144) exists, and
+  `require_clean_tree`/`require_acceptance_criteria` must be true. Relaxing
+  any of them is a validator change somebody argues for in review, not a
+  config drift.
+- Wired as `check:agent-policy` into `verify` and as a step in the existing
+  `Scripts (Python)` CI job — deliberately not a new job, so the check-run
+  count (`EXPECTED_CHECK_RUNS`) is untouched.
+
+**Where the engine code will live, and why not `backend/cmd/`**: the design's
+trust boundary says the orchestrator and any future GitHub App key stay out of
+the product deployment — and `backend/Dockerfile` builds *every* binary under
+`cmd/...` into the image Railway runs, so `backend/cmd/devengine` would ship
+inside the API image by construction. The shadow-mode reconciler (N137) gets
+its own Go module instead, with its own verify/CI wiring, and moves to the
+private `vola-dev-engine` repo once N145 exists.
+
+Also observed while wiring the claim: the board already carries `Awaiting
+evidence` and `Blocked` status options, so the §10.9 status vocabulary needs no
+board surgery — only the engine's mapping onto it.
+
+Open questions this leaves: the design doc's Phase 0 references hardening items
+R-001–R-013 from a section of the document not shared into the repo — those
+are not yet tickets and the epic notes it; and board *ordering* (where
+N136–N138 sit in the priority order) was deliberately left for the user.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

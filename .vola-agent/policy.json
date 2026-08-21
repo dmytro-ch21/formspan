@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "notes": [
+    "Machine-readable policy for the VOLA dev engine (AI-SDLC). Reviewed in PRs like any code.",
+    "JSON, not YAML, deliberately: the validator (scripts/check-agent-policy.py) stays stdlib-only,",
+    "and the Go engine parses it with encoding/json — no dependency either side.",
+    "auto_merge.enabled stays false until the circuit-breaker/merge-policy engine exists;",
+    "the validator refuses true so flipping it is a deliberate two-file change, not a config drift."
+  ],
+  "base_branch": "main",
+  "max_ci_fix_attempts": 3,
+  "max_runtime_minutes": 60,
+  "require_clean_tree": true,
+  "require_acceptance_criteria": true,
+  "auto_merge": {
+    "enabled": false,
+    "allowed_risk": ["low"]
+  },
+  "human_gate": {
+    "paths": [
+      "backend/internal/platform/auth/**",
+      "backend/migrations/**",
+      "railway/**",
+      ".github/workflows/**",
+      "apps/mobile/eas.json"
+    ],
+    "labels": ["security", "destructive", "billing"]
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "notes": [
+    "Path-to-context mapping for the VOLA dev engine's context builder. For a set of",
+    "touched paths, the engine assembles: the issue + acceptance criteria, policy.json,",
+    "the docs listed here, the named T traps from docs/TASKS.md, and the direct",
+    "source/test files — NOT CLAUDE.md plus the whole history log on every call.",
+    "Trap ids reference the '**T<n>**' entries in docs/TASKS.md, which is an archive",
+    "and the live home of the traps. gate_vocabulary is the closed set of gate-group",
+    "names the entries may reference; the quality-gates engine maps them to commands."
+  ],
+  "gate_vocabulary": [
+    "backend",
+    "backend-db",
+    "mobile",
+    "mobile-native",
+    "offline-sync",
+    "web",
+    "admin",
+    "api-contract",
+    "migrations",
+    "scripts"
+  ],
+  "entries": [
+    {
+      "paths": ["backend/**"],
+      "docs": [
+        "docs/architecture/api-conventions.md",
+        "docs/architecture/deployment.md"
+      ],
+      "traps": [],
+      "gates": ["backend", "backend-db"]
+    },
+    {
+      "paths": ["backend/migrations/**"],
+      "docs": ["docs/architecture/deployment.md"],
+      "traps": [],
+      "gates": ["migrations"]
+    },
+    {
+      "paths": ["backend/internal/modules/profile/**"],
+      "docs": ["docs/architecture/api-conventions.md"],
+      "traps": ["T10"],
+      "gates": ["backend", "backend-db"]
+    },
+    {
+      "paths": ["backend/internal/modules/exercise/**"],
+      "docs": ["docs/architecture/api-conventions.md"],
+      "traps": ["T2"],
+      "gates": ["backend", "backend-db"]
+    },
+    {
+      "paths": ["backend/internal/modules/session/**", "backend/internal/modules/workout/**"],
+      "docs": ["docs/architecture/api-conventions.md"],
+      "traps": ["T1", "T3"],
+      "gates": ["backend", "backend-db"]
+    },
+    {
+      "paths": ["backend/internal/modules/bjj/**"],
+      "docs": ["docs/architecture/api-conventions.md"],
+      "traps": ["T9"],
+      "gates": ["backend", "backend-db"]
+    },
+    {
+      "paths": ["apps/mobile/lib/**"],
+      "docs": ["docs/testing/device-checks.md"],
+      "traps": ["T3", "T4", "T5", "T6", "T7", "T8"],
+      "gates": ["mobile", "offline-sync"]
+    },
+    {
+      "paths": ["apps/mobile/app.json", "apps/mobile/package.json"],
+      "docs": ["docs/testing/device-checks.md"],
+      "traps": [],
+      "gates": ["mobile", "mobile-native"]
+    },
+    {
+      "paths": ["apps/mobile/app/**"],
+      "docs": ["docs/testing/device-checks.md"],
+      "traps": [],
+      "gates": ["mobile"]
+    },
+    {
+      "paths": ["apps/web/**"],
+      "docs": ["docs/architecture/api-conventions.md"],
+      "traps": ["T9"],
+      "gates": ["web"]
+    },
+    {
+      "paths": ["apps/admin/**"],
+      "docs": ["docs/architecture/api-conventions.md"],
+      "traps": [],
+      "gates": ["admin"]
+    },
+    {
+      "paths": ["contracts/**"],
+      "docs": ["docs/architecture/api-conventions.md"],
+      "traps": [],
+      "gates": ["api-contract"]
+    },
+    {
+      "paths": ["scripts/**"],
+      "docs": [],
+      "traps": [],
+      "gates": ["scripts"]
+    }
+  ]
+}

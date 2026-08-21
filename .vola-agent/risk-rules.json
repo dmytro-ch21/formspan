@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "notes": [
+    "Risk classification rules for the VOLA dev engine. A run's risk starts at the",
+    "issue's explicit '## Risk' value (or default_risk when absent) and each matching",
+    "rule may only RAISE it. raise_only is asserted by the validator: an agent may",
+    "never lower a risk a human wrote on the ticket."
+  ],
+  "default_risk": "low",
+  "raise_only": true,
+  "rules": [
+    {
+      "risk": "high",
+      "reason": "auth / security boundary — human-gated, see policy.json human_gate",
+      "paths": ["backend/internal/platform/auth/**"],
+      "labels": ["security"]
+    },
+    {
+      "risk": "high",
+      "reason": "schema migration present — silent-skip and collision hazards are documented in CLAUDE.md; destructive migrations are human-gated",
+      "paths": ["backend/migrations/**"]
+    },
+    {
+      "risk": "high",
+      "reason": "deploy / CI configuration — a wrong edit here disarms the gates themselves",
+      "paths": ["railway/**", ".github/workflows/**"]
+    },
+    {
+      "risk": "high",
+      "reason": "destructive or billing work by label",
+      "labels": ["destructive", "billing"]
+    },
+    {
+      "risk": "medium",
+      "reason": "offline-first sync and reconciliation — the T5–T8 trap family lives here; races pass tests and lose athlete data",
+      "paths": [
+        "apps/mobile/lib/db.ts",
+        "apps/mobile/lib/sessionStore.ts",
+        "apps/mobile/lib/plan.ts",
+        "apps/mobile/lib/activities.ts"
+      ]
+    },
+    {
+      "risk": "medium",
+      "reason": "public API contract — breaking changes strand installed mobile builds",
+      "paths": ["contracts/**"]
+    },
+    {
+      "risk": "medium",
+      "reason": "native dependency / app config — permission traps and stale-binary hazards only surface in a built binary",
+      "paths": ["apps/mobile/app.json", "apps/mobile/package.json"]
+    }
+  ]
+}
