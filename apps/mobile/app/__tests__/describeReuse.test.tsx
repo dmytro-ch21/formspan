@@ -218,9 +218,102 @@ describe('a reused draft', () => {
     });
   });
 
+  // The escape hatch must not recreate the pile it exists to escape. Asking for
+  // a fresh reading of a food you have saved is a request to REPLACE it, so the
+  // confirm writes back over the same id.
+  it('replaces the stored food rather than saving a second one under the same name', async () => {
+    mockDescribe.mockResolvedValue(reused());
+    await draft();
+
+    mockDescribe.mockResolvedValue(generated());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('describe-regenerate'));
+    });
+    await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('describe-log'));
+    });
+
+    await waitFor(() => expect(mockSaveFood).toHaveBeenCalledTimes(1));
+    expect(mockSaveFood.mock.calls[0][1].id).toBe('food-abc');
+  });
+
+  // …and an UNRELATED description afterwards must not overwrite it. The id is
+  // carried by the regenerate, not held until something happens to use it.
+  it('does not carry the replaced id into a later unrelated draft', async () => {
+    mockDescribe.mockResolvedValue(reused());
+    await draft();
+
+    mockDescribe.mockResolvedValue(generated());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('describe-regenerate'));
+    });
+    // A fresh, ordinary description — reuse on, nothing being replaced.
+    fireEvent.changeText(screen.getByTestId('describe-input'), 'Flatbread');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('describe-submit'));
+    });
+    await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('describe-log'));
+    });
+
+    await waitFor(() => expect(mockSaveFood).toHaveBeenCalledTimes(1));
+    expect(mockSaveFood.mock.calls[0][1].id).toBeUndefined();
+  });
+
+  // The client must not trust an undocumented single-item invariant. If a
+  // `match` ever arrives beside several items, keying on its presence alone
+  // would point every entry at one food and save none of the others.
+  it('only reuses the matched id for the row that actually is that food', async () => {
+    mockDescribe.mockResolvedValue({
+      estimate: {
+        ...reused().estimate,
+        items: [item({ name: 'Pork Shashlik', servings: 1 }), item({ name: 'Flatbread' })],
+      },
+      quota: { used: 1, limit: 25, remaining: 24, resets_at: null },
+    });
+    await draft();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('describe-log'));
+    });
+
+    await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(2));
+    expect(mockLogFood.mock.calls[0][1].source_food_id).toBe('food-abc');
+    // The second item is a different food and gets saved on its own.
+    expect(mockSaveFood).toHaveBeenCalledTimes(1);
+    expect(mockSaveFood.mock.calls[0][1].name).toBe('Flatbread');
+  });
+
   it('says whether the stored numbers were drafted or measured', async () => {
     mockDescribe.mockResolvedValue(reused({ food_source: 'user' }));
     await draft();
     expect(screen.getByTestId('describe-reused').props.children.join('')).toContain('saved by you');
+  });
+});
+
+// The mirror of the race the screen's own `locked` docstring describes, which
+// that guard did not close: Log stayed tappable while a regenerate was in
+// flight, so the STALE draft was logged and the fresh estimate — already paid
+// for — landed on a screen that had been popped.
+it('cannot log a stale draft while a fresh estimate is in flight', async () => {
+  mockDescribe.mockResolvedValue(reused());
+  await draft();
+
+  let release: (v: unknown) => void = () => {};
+  mockDescribe.mockReturnValue(new Promise((r) => { release = r; }));
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('describe-regenerate'));
+  });
+
+  const log = screen.getByTestId('describe-log');
+  expect(log.props.accessibilityState).toEqual({ disabled: true });
+  await act(async () => {
+    fireEvent.press(log);
+  });
+  expect(mockLogFood).not.toHaveBeenCalled();
+
+  await act(async () => {
+    release(generated());
   });
 });

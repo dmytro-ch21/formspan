@@ -554,7 +554,92 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
   /** Set once the connection is gone, so the second queue is not even read. */
   let stalled = false;
 
-  const rows = await db.getAllAsync<EntryRow & { remote: number }>(
+  // **FOODS FIRST, AND THIS ORDER IS A CORRECTNESS CONSTRAINT, NOT A
+  // PREFERENCE (N114).**
+  //
+  // `nutrition_entries` carries a composite foreign key
+  // `(user_id, source_food_id) -> nutrition_foods (user_id, id)`. Until N114
+  // every drafted meal pushed `source_food_id: null`, so the order of these two
+  // queues could not matter and entries went first. Confirming a draft now
+  // saves the food and points the entry at it, so an entry sent first names a
+  // row the server has never seen.
+  //
+  // **And the loss is permanent, not a retry.** The server maps the 23503 to
+  // `invalid_input` and answers 400; `classify` reads a 400 as a permanent
+  // rejection and clears `dirty` — correctly in general, a 4xx will not become
+  // a 2xx — so the entry leaves the outbox, the meal lives only on the phone,
+  // and nothing anywhere says so. Pinned by
+  // `savedFoods.test.ts`'s "sends the food BEFORE the entry that references it"
+  // and by the consequence test beside it.
+  const foods = await db.getAllAsync<Food & { updated_at: string }>(
+    `SELECT id, kind, name, brand, serving_label, serving_grams,
+            kcal, protein_g, carb_g, fat_g, fibre_g, source, updated_at
+       FROM foods WHERE user_id = ? AND dirty = 1 AND deleted_at IS NULL`,
+    userId,
+  );
+  for (const f of foods) {
+    try {
+      await api.saveFood(getToken, f.id, {
+        kind: f.kind, name: f.name, brand: f.brand,
+        serving_label: f.serving_label, serving_grams: f.serving_grams,
+        kcal: f.kcal, protein_g: f.protein_g, carb_g: f.carb_g, fat_g: f.fat_g, fibre_g: f.fibre_g,
+        // Sent on EVERY push, not only when it changed. The server keeps what
+        // it stores when this is absent, which is the right default for an old
+        // client — but this one knows the answer, and a row whose provenance
+        // only exists on the phone is one a reinstall loses.
+        //
+        // Restricted to what a client may claim: the server refuses anything
+        // outside {user, ai} with a 400, which would strand the row as a
+        // permanent rejection. A pulled row carrying a vocabulary this build
+        // does not know (a future value, or `usda`/`off` from an importer) is
+        // therefore sent as nothing at all — "keep what you have" — rather than
+        // coerced to `user`, which would DESTROY the very distinction it is
+        // being sent to preserve.
+        // Written as nested ternaries rather than `a || b ? f.source : …`
+        // because `FoodSource` includes `(string & {})` — the open arm that
+        // keeps a server-added value from being coerced — and TypeScript will
+        // not narrow that arm down to a literal through a disjunction. The
+        // narrow form yields the literal types the wire contract asks for.
+        source: f.source === 'ai' ? 'ai' : f.source === 'user' ? 'user' : undefined,
+      });
+      await db.runAsync(
+        `UPDATE foods SET dirty = 0, remote = 1, last_error = NULL
+          WHERE id = ? AND user_id = ? AND updated_at = ?`,
+        f.id, userId, f.updated_at,
+      );
+      result.pushed += 1;
+    } catch (err) {
+      const kind = classify(err);
+      const message = err instanceof Error ? err.message : 'could not be sent';
+      result.failed += 1;
+      result.error = result.error ?? message;
+      result.errorKind = worseKind(result.errorKind, kind);
+      await db.runAsync(
+        `UPDATE foods SET last_error = ? WHERE id = ? AND user_id = ? AND updated_at = ?`,
+        message, f.id, userId, f.updated_at,
+      );
+      if (kind === 'permanent') {
+        await db.runAsync(
+          `UPDATE foods SET dirty = 0 WHERE id = ? AND user_id = ? AND updated_at = ?`,
+          f.id, userId, f.updated_at,
+        );
+      }
+      if (kind === 'offline') {
+        // Sets `stalled` as well as breaking, so the ENTRY queue below is not
+        // even read — the same reasoning the entry loop has always carried,
+        // now on the queue that runs first.
+        stalled = true;
+        break;
+      }
+    }
+  }
+
+  // Entries SECOND — see the note on the foods queue above. Skipped entirely
+  // when that queue found no connection: an entry whose food has not left the
+  // phone would be refused, and refused permanently.
+  const rows = stalled
+    ? []
+    : await db.getAllAsync<EntryRow & { remote: number }>(
     `SELECT * FROM food_entries WHERE user_id = ? AND dirty = 1 ORDER BY logged_at`, userId,
   );
 
@@ -618,60 +703,6 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
         stalled = true;
         break;
       }
-    }
-  }
-
-  const foods = stalled
-    ? []
-    : await db.getAllAsync<Food & { updated_at: string }>(
-    `SELECT id, kind, name, brand, serving_label, serving_grams,
-            kcal, protein_g, carb_g, fat_g, fibre_g, source, updated_at
-       FROM foods WHERE user_id = ? AND dirty = 1 AND deleted_at IS NULL`,
-    userId,
-  );
-  for (const f of foods) {
-    try {
-      await api.saveFood(getToken, f.id, {
-        kind: f.kind, name: f.name, brand: f.brand,
-        serving_label: f.serving_label, serving_grams: f.serving_grams,
-        kcal: f.kcal, protein_g: f.protein_g, carb_g: f.carb_g, fat_g: f.fat_g, fibre_g: f.fibre_g,
-        // Sent on EVERY push, not only when it changed. The server keeps what
-        // it stores when this is absent, which is the right default for an old
-        // client — but this one knows the answer, and a row whose provenance
-        // only exists on the phone is one a reinstall loses.
-        //
-        // Restricted to what a client may claim: the server refuses anything
-        // outside {user, ai} with a 400, which would strand the row as a
-        // permanent rejection. A pulled row carrying a vocabulary this build
-        // does not know (a future value, or `usda`/`off` from an importer) is
-        // therefore sent as nothing at all — "keep what you have" — rather than
-        // coerced to `user`, which would DESTROY the very distinction it is
-        // being sent to preserve.
-        source: f.source === 'user' || f.source === 'ai' ? f.source : undefined,
-      });
-      await db.runAsync(
-        `UPDATE foods SET dirty = 0, remote = 1, last_error = NULL
-          WHERE id = ? AND user_id = ? AND updated_at = ?`,
-        f.id, userId, f.updated_at,
-      );
-      result.pushed += 1;
-    } catch (err) {
-      const kind = classify(err);
-      const message = err instanceof Error ? err.message : 'could not be sent';
-      result.failed += 1;
-      result.error = result.error ?? message;
-      result.errorKind = worseKind(result.errorKind, kind);
-      await db.runAsync(
-        `UPDATE foods SET last_error = ? WHERE id = ? AND user_id = ? AND updated_at = ?`,
-        message, f.id, userId, f.updated_at,
-      );
-      if (kind === 'permanent') {
-        await db.runAsync(
-          `UPDATE foods SET dirty = 0 WHERE id = ? AND user_id = ? AND updated_at = ?`,
-          f.id, userId, f.updated_at,
-        );
-      }
-      if (kind === 'offline') break;
     }
   }
 

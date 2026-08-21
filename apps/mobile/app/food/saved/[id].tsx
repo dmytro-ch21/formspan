@@ -103,6 +103,19 @@ export default function EditSavedFoodScreen() {
       setProblem('Give it a name — that is what a later entry of it matches on.');
       return;
     }
+    // **A malformed number is REFUSED, not coerced to zero** — and this screen
+    // is the one place that matters most. `parse` reads "12..5" or a stray
+    // paste as 0, and a stored 0 kcal comes back with the athlete's own
+    // authority behind it, on the row every future log is made from. The entry
+    // editor next door can afford the coercion; a saved food cannot. Raised in
+    // review.
+    const bad = ['kcal', 'protein_g', 'carb_g', 'fat_g', 'fibre_g'].find(
+      (k) => !readable(draft[k]),
+    );
+    if (bad) {
+      setProblem('One of those numbers cannot be read. Fix it, or clear it to leave it unrecorded.');
+      return;
+    }
     setSaving(true);
     setProblem(null);
     try {
@@ -261,6 +274,20 @@ export default function EditSavedFoodScreen() {
       </View>
     </KeyboardAwareScrollView>
   );
+}
+
+/**
+ * Whether a field holds something this screen may save.
+ *
+ * Blank is fine — it means "not recorded", which is a real state for fibre and
+ * reads as 0 for the four required macros. Anything non-blank has to be an
+ * actual non-negative number; `parse` below would silently turn it into 0.
+ */
+function readable(raw: string | undefined): boolean {
+  const t = raw?.trim() ?? '';
+  if (t === '') return true;
+  const n = Number(t.replace(',', '.'));
+  return Number.isFinite(n) && n >= 0;
 }
 
 /** Blank, a stray comma, or nonsense reads as 0 rather than NaN. */

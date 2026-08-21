@@ -103,13 +103,35 @@ export default function DescribeMealScreen() {
    */
   const [singleFood, setSingleFood] = useState(false);
   const [saving, setSaving] = useState(false);
+  /**
+   * The saved food a REGENERATE is replacing, if this draft came from one.
+   *
+   * "Not right? Estimate it again" is the escape hatch from a stored food whose
+   * numbers are wrong. Without this, confirming the fresh draft saves a SECOND
+   * food under the same name — so the athlete escapes the bad numbers by
+   * growing exactly the pile of duplicate rows N114 was reported about, minus
+   * the cost. Carrying the id forward makes the regenerate an overwrite, which
+   * is what "estimate it again" means. Raised in review.
+   *
+   * Cleared whenever a draft arrives that is NOT a regenerate of that food, so
+   * a later unrelated description cannot overwrite it.
+   */
+  const [replacing, setReplacing] = useState<string | null>(null);
 
-  const receive = useCallback((res: { estimate: MealEstimate; quota: EstimateQuota }) => {
-    setEstimate(res.estimate);
-    setRows(res.estimate.items.map(toDraft));
-    setSingleFood(res.estimate.items.length === 1);
-    setQuota(res.quota);
-  }, []);
+  const receive = useCallback(
+    (res: { estimate: MealEstimate; quota: EstimateQuota }, replaces?: string | null) => {
+      setEstimate(res.estimate);
+      setRows(res.estimate.items.map(toDraft));
+      setSingleFood(res.estimate.items.length === 1);
+      setQuota(res.quota);
+      // A regenerate carries the id it is replacing; anything else clears it,
+      // so an unrelated description later cannot overwrite somebody's food.
+      // Only meaningful for a ONE-item answer: a regenerate that comes back as
+      // three components is not a replacement for one row.
+      setReplacing(replaces && res.estimate.items.length === 1 ? replaces : null);
+    },
+    [],
+  );
 
   /**
    * Busy OR saving. Both mean "an operation owns this screen", and the two
@@ -133,16 +155,22 @@ export default function DescribeMealScreen() {
    */
   const describe = useCallback(async (reuse = true) => {
     if (!description.trim() || locked) return;
+    // Read BEFORE the await: `estimate` is replaced by `receive`, and this is
+    // the food the request is being made against.
+    const replaces = reuse ? null : (estimate?.match?.food_id ?? null);
     setBusy(true);
     setError(null);
     try {
-      receive(await describeMeal(getToken, { description: description.trim(), meal, reuse }));
+      receive(
+        await describeMeal(getToken, { description: description.trim(), meal, reuse }),
+        replaces,
+      );
     } catch (err) {
       setError(messageFor(err));
     } finally {
       setBusy(false);
     }
-  }, [description, locked, getToken, meal, receive]);
+  }, [description, locked, getToken, meal, receive, estimate]);
 
   const photograph = useCallback(
     async (fromCamera: boolean) => {
@@ -263,7 +291,21 @@ export default function DescribeMealScreen() {
    * idempotency key does not protect a client-side replay. Raised in review.
    */
   const logAll = useCallback(async () => {
-    if (!userId || rows.length === 0 || saving) return;
+    // **`locked`, not `saving`** — the mirror of the race the `locked`
+    // docstring above describes, which that guard did NOT close. Tap "Estimate
+    // it again" and then Log while the request is in flight: this loop logs the
+    // STALE reused draft from its own closure, `router.back()` pops the screen,
+    // and the fresh estimate lands on nothing — one allowance slice spent for a
+    // draft nobody ever sees. Raised in review.
+    //
+    // **The DEFENCE that is pinned is the button's own `disabled={locked}`**,
+    // not this line: mutate the prop and `describeReuse.test.tsx`'s "cannot log
+    // a stale draft" goes red; mutate this line alone and it stays green,
+    // because a disabled Pressable never fires. Recorded rather than deleted,
+    // because "the tests still pass without it" is a persuasive argument for
+    // removing something load-bearing — this is the backstop for any future
+    // caller that is not that button, and the two must not drift apart.
+    if (!userId || rows.length === 0 || locked) return;
     setSaving(true);
     setError(null);
     try {
@@ -293,8 +335,27 @@ export default function DescribeMealScreen() {
          * Local only — `requestSync` below flushes both queues, and the food's
          * push is ordered ahead of the entry's inside it.
          */
+        // A reused draft already came from a saved row, so it reuses that id
+        // rather than minting a duplicate under the same name.
+        //
+        // **Matched on the NAME rather than trusting a single-item invariant.**
+        // The server only ever sets `match` on a one-item draft today, and this
+        // file treats the server's vocabulary as extensible everywhere else —
+        // so if a future `match` arrives beside several items, keying on
+        // presence alone would point every entry at one food and silently save
+        // none of the others. Raised in review.
+        const reusedId =
+          estimate?.match && NORMALIZE(estimate.match.name) === NORMALIZE(item.name)
+            ? estimate.match.food_id
+            : null;
         const savedId =
-          estimate?.match?.food_id ?? (await saveFoodLocally(userId, savedFoodFrom(item)));
+          reusedId ??
+          (await saveFoodLocally(userId, {
+            ...savedFoodFrom(item),
+            // Present only on a regenerate, where it makes the save an
+            // OVERWRITE of the food this draft was asked to replace.
+            ...(replacing ? { id: replacing } : {}),
+          }));
         await logFood(userId, {
           eaten_on: date,
           meal,
@@ -355,7 +416,7 @@ export default function DescribeMealScreen() {
     } finally {
       setSaving(false);
     }
-  }, [userId, rows, saving, date, meal, router, params.barcode, singleFood, estimate]);
+  }, [userId, rows, locked, date, meal, router, params.barcode, singleFood, estimate, replacing]);
 
   const updateRow = (key: string, patch: Partial<DraftRow>) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -614,11 +675,13 @@ export default function DescribeMealScreen() {
 
           <Pressable
             onPress={() => void logAll()}
-            style={[styles.primary, { backgroundColor: accent.accent }, saving && styles.off]}
+            style={[styles.primary, { backgroundColor: accent.accent }, locked && styles.off]}
             accessibilityRole="button"
             accessibilityLabel={`Log ${rows.length} items`}
-            disabled={saving}
-            accessibilityState={{ disabled: saving }}
+            // `locked`, matching `logAll`'s own guard — and on BOTH props, so
+            // VoiceOver never announces an enabled button that ignores taps.
+            disabled={locked}
+            accessibilityState={{ disabled: locked }}
             testID="describe-log"
           >
             <Text style={[styles.primaryText, { color: accent.on }]}>
@@ -720,6 +783,20 @@ type DraftRow = EstimatedItem & {
   kcalText: string;
   proteinText: string;
 };
+
+/**
+ * Case- and whitespace-insensitive name identity, for comparing a `match.name`
+ * with a draft item's name.
+ *
+ * **Not a reimplementation of the server's matching rule**, and it must not
+ * grow into one — the whole point of doing the lookup server-side is that there
+ * is one rule in one place. Both strings here came from the SAME response, so
+ * this is an identity check between two server-produced values, not a decision
+ * about whether an athlete's typing matches a stored food.
+ */
+function NORMALIZE(s: string): string {
+  return s.trim().toLowerCase().split(/\s+/).join(' ');
+}
 
 let draftKeySeq = 0;
 

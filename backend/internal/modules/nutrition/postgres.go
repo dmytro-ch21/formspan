@@ -393,8 +393,40 @@ func (r *PostgresRepository) GetFood(ctx context.Context, userID, id string) (Fo
 // meant it agreed with a copy of the rule rather than with the rule, and drift
 // in this line passed it. Measured: changing the constant left that test green.
 func normalizedNameSQL(expr string) string {
-	return `regexp_replace(btrim(lower(` + expr + `)), '\s+', ' ', 'g')`
+	return `btrim(regexp_replace(lower(` + expr + `), '` + whitespaceClassSQL + `', ' ', 'g'))`
 }
+
+// whitespaceClassSQL is what Go's `strings.Fields` treats as a separator,
+// spelled for Postgres — and it is NOT `\s`.
+//
+// Measured 2026-08-21 against this database, after review pointed at it. Go's
+// `unicode.IsSpace` folds every one of these; Postgres' `[:space:]` folds only
+// some, and the ones it misses are reachable:
+//
+//	U+00A0 NBSP              Go folds · SQL did NOT   <- iOS keyboards insert it
+//	U+1680 OGHAM SPACE       Go folds · SQL did NOT
+//	U+202F NARROW NBSP       Go folds · SQL did NOT
+//	U+0085 U+2002 U+3000     both fold
+//
+// A food saved with an internal NBSP was therefore permanently unmatchable —
+// which is precisely the complaint N114 exists to fix, surviving inside the
+// fix, for that row, forever. The failure direction was safe (a Go-normalised
+// query can never contain one, so a mismatch is a MISSED reuse rather than a
+// wrong substitution), and safe is not the same as right.
+//
+// **The BTRIM MOVED OUTWARDS in the same change, and that is the second half.**
+// It used to run before the collapse, and `btrim` with no explicit character
+// set removes ordinary spaces only — so a stored name with a leading TAB or
+// NEWLINE normalised to `' pork shashlik '` and matched nothing. Collapsing
+// first turns every edge separator into a plain space, which is exactly what
+// `btrim` then removes. Measured: tab-edge, newline-edge and NBSP-edge all
+// failed before and all pass now.
+//
+// The remaining known divergence is `lower()` versus `strings.ToLower` on
+// exotic scripts, which is locale-dependent in Postgres and not in Go. Left
+// alone: closing it means carrying a case-folding table, and no vector anybody
+// has produced reaches it.
+const whitespaceClassSQL = `[[:space:]\u00a0\u0085\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+`
 
 // FindFoodByNormalizedName is N114's reuse lookup: the caller's own saved food
 // whose name normalises to exactly this string.

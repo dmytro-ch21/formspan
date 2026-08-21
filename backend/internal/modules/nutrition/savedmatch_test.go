@@ -379,3 +379,51 @@ func TestAHandlerWithNoFoodStoreJustGenerates(t *testing.T) {
 		t.Fatalf("want one generation, got %d", est.calls)
 	}
 }
+
+// A deploy with no provider key must still serve a reuse: it needs no provider.
+// README.md states this in as many words, so the code and the README are
+// checked against each other here rather than left to agree by accident —
+// which they did NOT, before review moved the nil check below the lookup.
+func TestAReuseIsServedOnADeployWithNoProviderKey(t *testing.T) {
+	h := NewEstimateHandler(nil, &memUsage{}, withFood("Pork Shashlik"))
+
+	w := call(t, h, `{"description":"Pork Shashlik"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a reuse needs no key, got %d %s", w.Code, w.Body)
+	}
+	var got estimateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Estimate.Match == nil {
+		t.Fatal("want a reused draft")
+	}
+
+	// And the contrast, so the 503 is still real rather than removed.
+	if w := call(t, h, `{"description":"something never saved"}`); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("a GENERATION with no key must still be 503, got %d", w.Code)
+	}
+}
+
+// A usage read that fails must not cost the athlete a free answer, and must not
+// look like a spent allowance either. `limit: 0` is the contract's "unknown".
+func TestAReuseIsStillServedWhenTheUsageReadFails(t *testing.T) {
+	usage := &memUsage{quotaErr: errNotAvailable}
+	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, usage, withFood("Pork Shashlik"))
+
+	w := call(t, h, `{"description":"Pork Shashlik"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("the draft cost nothing and should still be served, got %d %s", w.Code, w.Body)
+	}
+	var got estimateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Estimate.Match == nil {
+		t.Fatal("want a reused draft")
+	}
+	if got.Quota.Limit != 0 {
+		t.Fatalf("limit = %d, want 0 — the contract's 'unknown', so a client does not read remaining:0 as at-cap",
+			got.Quota.Limit)
+	}
+}

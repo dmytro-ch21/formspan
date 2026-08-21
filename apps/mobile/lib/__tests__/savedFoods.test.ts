@@ -9,6 +9,7 @@
  */
 
 import { savedFoodFrom, type EstimatedItem } from '../estimateApi';
+import { ApiError } from '../apiError';
 import {
   localEntries,
   localFood,
@@ -16,6 +17,7 @@ import {
   logFood,
   recentsFor,
   saveFoodLocally,
+  syncFood,
 } from '../foodLog';
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 
@@ -33,9 +35,15 @@ jest.mock('../db', () => {
 });
 jest.mock('expo-crypto', () => ({ randomUUID: () => `uuid-${++mockUuidSeq}` }));
 
+const mockApi = jest.fn();
+jest.mock('../apiRequest', () => ({ apiRequest: (...a: unknown[]) => mockApi(...a) }));
+
+const token = async () => 'tok';
+
 beforeEach(async () => {
   mockUuidSeq = 0;
   mockFixture = await migratedFixture();
+  mockApi.mockReset().mockResolvedValue({});
 });
 
 function draftItem(over: Partial<EstimatedItem> = {}): EstimatedItem {
@@ -226,3 +234,99 @@ describe('logging a drafted food against the row it was saved as', () => {
     expect(entries[0].kcal).toBe(620);
   });
 });
+
+describe('pushing a drafted food and the entry that names it', () => {
+  /**
+   * **THE ORDERING THIS FEATURE DEPENDS ON, AND IT IS NOT A STYLE POINT.**
+   *
+   * `nutrition_entries` has a composite foreign key
+   * `(user_id, source_food_id) -> nutrition_foods (user_id, id)`. Before N114
+   * every entry the phone pushed carried `source_food_id: null` for a drafted
+   * meal, so the order of the two outbox queues could not matter. It does now:
+   * the entry names a food the server has never seen.
+   *
+   * And the failure is PERMANENT, not a retry. The server maps a 23503 to
+   * `invalid_input` and answers 400; `classify` reads a 400 as a permanent
+   * rejection and clears `dirty`, on the correct general reasoning that a 4xx
+   * will not become a 2xx. So the entry is dropped from the outbox, the lunch
+   * lives only on the phone, and nothing anywhere says so.
+   */
+  it('sends the food BEFORE the entry that references it', async () => {
+    const item = draftItem();
+    const foodId = await saveFoodLocally(USER, savedFoodFrom(item));
+    await logFood(USER, {
+      eaten_on: '2026-08-18',
+      meal: 'lunch',
+      name: item.name,
+      servings: item.servings,
+      serving_label: item.serving_label,
+      kcal: item.kcal,
+      protein_g: item.protein_g,
+      carb_g: item.carb_g,
+      fat_g: item.fat_g,
+      fibre_g: item.fibre_g,
+      source_food_id: foodId,
+    });
+
+    await syncFood(USER, token);
+
+    const paths = mockApi.mock.calls.map((c) => String(c[1]));
+    const foodAt = paths.findIndex((u) => u.startsWith('/nutrition/foods/'));
+    const entryAt = paths.findIndex((u) => u.startsWith('/nutrition/entries/'));
+    expect(foodAt).toBeGreaterThanOrEqual(0);
+    expect(entryAt).toBeGreaterThanOrEqual(0);
+    expect(foodAt).toBeLessThan(entryAt);
+  });
+
+  /**
+   * The same thing asserted through the CONSEQUENCE rather than through the
+   * call order, because the order is a proxy and this is the thing that is
+   * actually lost. A server that refuses an entry naming an unknown food must
+   * never be reached at all — and if it is, the entry must not be silently
+   * dropped from the outbox.
+   */
+  it('does not lose the entry to a server that has not heard of the food yet', async () => {
+    const seen = new Set<string>();
+    mockApi.mockImplementation(async (_t: unknown, url: string, init?: { method?: string }) => {
+      if (url.startsWith('/nutrition/foods/') && init?.method === 'PUT') {
+        seen.add(url.slice('/nutrition/foods/'.length));
+        return {};
+      }
+      if (url.startsWith('/nutrition/entries/')) {
+        // Exactly what the backend answers for a 23503 on this FK.
+        if (!seen.has(String(lastSourceFoodId))) {
+          throw new ApiError(
+            'source_food_id does not name a saved food',
+            'invalid_input',
+            400,
+          );
+        }
+        return {};
+      }
+      return { foods: [], entries: [] };
+    });
+
+    const item = draftItem();
+    const foodId = await saveFoodLocally(USER, savedFoodFrom(item));
+    lastSourceFoodId = foodId;
+    await logFood(USER, {
+      eaten_on: '2026-08-18',
+      meal: 'lunch',
+      name: item.name,
+      servings: item.servings,
+      serving_label: item.serving_label,
+      kcal: item.kcal,
+      protein_g: item.protein_g,
+      carb_g: item.carb_g,
+      fat_g: item.fat_g,
+      fibre_g: item.fibre_g,
+      source_food_id: foodId,
+    });
+
+    const result = await syncFood(USER, token);
+    expect(result.failed).toBe(0);
+    expect(result.error).toBeUndefined();
+  });
+});
+
+let lastSourceFoodId: string | null = null;

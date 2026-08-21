@@ -53,6 +53,9 @@ type memUsage struct {
 	rows    []EstimateRecord
 	quotaFn func() Quota
 	recErr  error
+	// quotaErr makes the usage READ fail, which is a different thing from the
+	// write failing and reaches a different branch.
+	quotaErr error
 	// lastCtxErr is the state of the context the meter was handed. A real
 	// Postgres write would fail on a cancelled one, so recording it here is
 	// how the test sees the bug without a database.
@@ -63,6 +66,9 @@ type memUsage struct {
 // test now: a photo consumes the same budget a description does, so a fake
 // still filtering by source would let a per-path regression pass.
 func (m *memUsage) Quota(_ context.Context, _ string, _ time.Time) (Quota, error) {
+	if m.quotaErr != nil {
+		return Quota{}, m.quotaErr
+	}
 	if m.quotaFn != nil {
 		return m.quotaFn(), nil
 	}

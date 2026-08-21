@@ -956,7 +956,16 @@ const styles = StyleSheet.create({
   rowKcal: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
   savedRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   savedTap: { flex: 1 },
-  rowEdit: { fontSize: 12, color: vola.textMuted, fontWeight: '600', paddingHorizontal: 6 },
+  // `paddingVertical` as well as the hitSlop: a 12pt text label is a small
+  // target beside a full-width row, and the two together bring it to a
+  // comfortable tap area without changing the row's height.
+  rowEdit: {
+    fontSize: 12,
+    color: vola.textMuted,
+    fontWeight: '600',
+    paddingHorizontal: 6,
+    paddingVertical: 10,
+  },
   empty: { fontSize: 13, color: vola.textMuted, paddingVertical: 8 },
   newRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
   newText: { fontSize: 14, fontWeight: '600' },

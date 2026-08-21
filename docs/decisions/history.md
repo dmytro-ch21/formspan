@@ -38436,7 +38436,7 @@ the failure looked exactly like a regression in a picker nothing had touched.
 **Not verified:** the device criterion — dictate with the network briefly
 interrupted and confirm it recovers with no visible error. That needs a phone
 and a flight-mode toggle, and it is left outstanding on the ticket.
-## 2026-08-20 — A food you described once is stored, and the second time costs nothing (N114)
+## 2026-08-21 — A food you described once is stored, and the second time costs nothing (N114)
 
 Reported from a device, in the athlete's own words: *"I entered Pork Shashlik 3
 times and every time it would generate a new item — it wasn't stored."*
@@ -38550,10 +38550,62 @@ figure. It deliberately does not send `source` back — a field a screen does no
 own, restated by a screen that happens to have read it, is the trap above with
 the sign flipped.
 
+**The write introduced an outbox ordering bug, and it was silent data loss.**
+`push()` drained the ENTRY queue first and the FOOD queue second, which was
+correct for as long as a drafted entry carried `source_food_id: null` — it did,
+until this change. `nutrition_entries` has a composite foreign key onto
+`nutrition_foods`, so an entry sent before its food names a row the server has
+never seen; the repository maps the 23503 to `invalid_input`, the handler
+answers **400**, and the phone's `classify` reads a 400 as a *permanent*
+rejection and clears `dirty`. Correct in general — a 4xx will not become a
+2xx — and here it meant the athlete's lunch left the outbox, stayed on the
+phone, and nothing anywhere said so.
+
+Found by asking the question rather than by anything going red: the suite was
+green, both reviewers were still running, and no existing test could see it
+because every drafted entry had always pushed a null. Reproduced first (two
+tests: one on the call ORDER, one on the consequence — `result.failed === 0`
+against a fake that refuses an entry naming an unknown food), then fixed by
+draining foods first, then confirmed by reverting the order and watching both
+go red. The `stalled` short-circuit moved with it, so a queue that finds no
+connection still stops the other from being read.
+
 **A side effect worth knowing about:** entries logged from a draft now carry
 `source_food_id`, and `recentsFor` groups on exactly that. Every AI-logged meal
 the app has ever made was invisible to the quick-add recents; from here they are
 not.
+
+**Review found three more, and two of them were the same class as everything
+else here — a rule spelled twice.**
+
+- **The SQL normalisation was not the analogue of the Go one that three
+  comments claimed it was.** Measured on a real database: Postgres' `[:space:]`
+  does **not** fold U+00A0 (NBSP), U+1680 or U+202F, and `btrim` applied
+  *before* the collapse removes ordinary spaces only, so a stored name with a
+  leading tab normalised to `' pork shashlik '`. Go folds all of them. A food
+  saved with an internal NBSP — which iOS keyboards insert — was therefore
+  permanently unmatchable: the N114 complaint surviving inside the N114 fix, for
+  that row, forever. The failure direction was safe (a missed reuse, never a
+  wrong substitution) and safe is not right. The class is explicit now, the
+  `btrim` moved outside the collapse, and the agreement test carries every
+  separator **built from code points rather than typed** — because the first
+  version of the probe had literal NBSPs in its source, they were folded to
+  ordinary spaces before the database saw them, and the broken expression
+  "passed" a case it could not handle.
+- **A keyless deploy refused a reuse.** The `estimator == nil` 503 sat above the
+  lookup, purely because it was written before the lookup existed — and
+  `README.md`, written the same day, states in as many words that the reuse
+  works with no key. It does now; the check moved below.
+- **The Log button stayed tappable during a regenerate**, so the stale reused
+  draft could be logged while the paid-for fresh estimate landed on a screen
+  that had already been popped. Both the button and `logAll` follow `locked`
+  now. Only the button is pinned — a disabled Pressable never fires, so
+  mutating the function's own guard leaves the test green, and that is written
+  beside it so nobody deletes it as dead code.
+
+Review also caught that "estimate it again" saved a *second* food under the same
+name — escaping bad numbers by growing the pile the ticket is about. A
+regenerate carries the id it is replacing, so it overwrites.
 
 **What this does NOT do.** A *multi-item* description is not reused — it is a
 meal, not a food, and #504 is where a meal becomes reusable as a unit. Its items

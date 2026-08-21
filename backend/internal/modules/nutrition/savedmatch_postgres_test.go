@@ -24,17 +24,39 @@ func aiFood(id, name string) Food {
 // would stay green.
 func TestTheSQLNormalisationAgreesWithTheGoOne(t *testing.T) {
 	pool := testPool(t)
+
+	// **Built from CODE POINTS, never typed.** The first version of this test
+	// carried literal NBSPs in the source and they were folded to ordinary
+	// spaces somewhere before the database ever saw them — so every "NBSP"
+	// vector was really a plain space, and the broken expression passed a case
+	// it could not handle. A vector you cannot see is a vector you have to
+	// construct.
+	sep := func(r rune) string { return "Pork" + string(r) + "Shashlik" }
+	edge := func(r rune) string { return string(r) + "Pork Shashlik" + string(r) }
+
 	vectors := []string{
 		"Pork Shashlik",
 		"  Pork Shashlik  ",
 		"PORK SHASHLIK",
 		"Pork  Shashlik",
-		"Pork\tShashlik",
 		"Pork Shashlik (spicy)",
 		"Skyr 0%",
 		"Café au lait",
 		"chicken breast, grilled",
 		"2 x 100 g rice",
+
+		// The separators Go folds. Measured 2026-08-21: Postgres' own
+		// `[:space:]` does NOT fold U+00A0, U+1680 or U+202F, so these three
+		// are the ones that caught the drift. The others are here so the class
+		// cannot be narrowed later without something going red.
+		sep('\t'), sep('\n'), sep('\v'), sep('\f'), sep('\r'),
+		sep('\u00a0'), sep('\u0085'), sep('\u1680'),
+		sep('\u2002'), sep('\u2028'), sep('\u202f'), sep('\u205f'), sep('\u3000'),
+
+		// EDGE whitespace, which is the other half and failed for a different
+		// reason: `btrim` with no character set removes ordinary spaces only,
+		// so trimming before the collapse left a tab behind as a space.
+		edge('\t'), edge('\n'), edge('\u00a0'), edge('\u3000'),
 	}
 	for _, v := range vectors {
 		var got string
@@ -48,7 +70,8 @@ func TestTheSQLNormalisationAgreesWithTheGoOne(t *testing.T) {
 			t.Fatalf("normalise %q: %v", v, err)
 		}
 		if want := NormalizeFoodName(v); got != want {
-			t.Errorf("%q: SQL gave %q, Go gave %q — the two halves of one rule have drifted", v, got, want)
+			t.Errorf("%q (% x): SQL gave %q, Go gave %q — the two halves of one rule have drifted",
+				v, v, got, want)
 		}
 	}
 }

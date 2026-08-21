@@ -121,14 +121,6 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if h.estimator == nil {
-		// No API key on this deploy. 503 rather than 500: the request was fine
-		// and a retry against a configured deploy would work.
-		apihttp.WriteError(w, http.StatusServiceUnavailable, apihttp.CodeInternal,
-			"meal estimation is not available")
-		return
-	}
-
 	in, err := parseEstimateRequest(w, r)
 	if err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
@@ -158,12 +150,35 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 		// that cost nothing — the draft is served with a zero quota rather
 		// than withheld, and the client shows no counter rather than a wrong
 		// one.
+		// A failure here is not worth failing a request that cost nothing, so
+		// the draft is served with a quota of `limit: 0` — which the contract
+		// documents as UNKNOWN, because a zero limit is not a state this
+		// endpoint can otherwise be in (the cap is a constant). Saying so on
+		// the wire matters: a client that greys its estimate button on
+		// `remaining == 0` would otherwise show at-cap after a request that
+		// proved nothing of the sort. Raised in review.
 		quota, err := h.usage.Quota(r.Context(), userID, now)
 		if err != nil {
 			httplog.FromContext(r.Context()).Warn("nutrition: quota read failed on a reused estimate",
 				"user_id", userID, "err", err)
 		}
 		apihttp.WriteJSON(w, http.StatusOK, estimateResponse{Estimate: est, Quota: quota})
+		return
+	}
+
+	// The no-key case, checked AFTER the reuse branch and not before it.
+	//
+	// A reuse needs no provider at all — it is a SELECT — so refusing one on a
+	// keyless deploy would withhold an answer we already have. Reordered on
+	// review; it was above the parse purely because it was written before the
+	// reuse path existed, and README.md now states in as many words that the
+	// reuse works with no key.
+	//
+	// 503 rather than 500 for the generation case: the request was fine, and a
+	// retry against a configured deploy would work.
+	if h.estimator == nil {
+		apihttp.WriteError(w, http.StatusServiceUnavailable, apihttp.CodeInternal,
+			"meal estimation is not available")
 		return
 	}
 

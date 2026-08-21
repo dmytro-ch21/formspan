@@ -7931,6 +7931,14 @@ history entry for results.
   on consecutive calls, which is the reported defect reproduced by its own fix.
 - **A food store that cannot answer falls back to GENERATING**, not to an
   error. The athlete's meal is still loggable.
+- **THE OUTBOX PUSHES THE FOOD BEFORE THE ENTRY THAT NAMES IT.** `source_food_id`
+  is a composite foreign key, so an entry sent first is refused with a **400** —
+  which the phone classifies as a permanent rejection and drops from the outbox.
+  The meal is then on the phone and nowhere else, silently. Assert the ORDER of
+  the two requests, and separately assert the consequence: a sync in which the
+  server would refuse an entry naming an unknown food must report no failures.
+  Every drafted entry pushed a null here until N114, so no older scenario can
+  see this.
 - **The screen must not present a reuse and a generation identically.** Assert
   on what is DRAWN — a `match` field that arrives and is never rendered
   satisfies the type and not the athlete.

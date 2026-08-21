@@ -234,8 +234,19 @@ components:
     EstimateQuota:
       type: object
       description: >
-        The athlete's estimate usage over a rolling 24 hours. **One budget
-        covers both paths** — a photograph and a description draw on the same
+        The athlete's estimate usage over a rolling 24 hours.
+
+
+        **`limit: 0` means UNKNOWN, not "no estimates allowed".** The cap is a
+        server constant and is never zero, so a zero can only mean the usage
+        read failed — which happens on a REUSED draft, where the answer cost
+        nothing and is worth serving anyway rather than failing. A client must
+        not read `remaining: 0` as at-cap when `limit` is 0; check `limit > 0`
+        before rendering or acting on a counter. Without this, a transient
+        database blip on a free request would grey out the estimate button.
+
+
+        **One budget covers both paths** — a photograph and a description draw on the same
         allowance.
 
 
@@ -10237,6 +10248,12 @@ paths:
             failure, revoked key, upstream error status — or estimation is not
             configured on this deploy (no key for the selected provider).
             Every other nutrition route is unaffected.
+
+
+            **A REUSE is served even on a deploy with no key**, because it
+            needs no provider — the not-configured case is checked after the
+            saved-food lookup, deliberately. So a 503 here always means the
+            description did not match anything stored.
 
 
             **Read the `code` to tell them apart, and only the code** — the
