@@ -11133,6 +11133,110 @@ Reading the diff cannot settle any of these. They need a build.
     The `+` and the settings button are 44pt; the cups are 34 × 44. If the cups
     still feel unhittable, that is a real finding and the row idiom needs
     rethinking rather than the numbers nudging.
+
+## Coffee — the same row, counting up rather than toward a goal (N77)
+
+No new screen, no new endpoint and no new component: coffee is a second seeded
+preset of the tracker above, so **everything in that section applies to it
+unchanged** and is not repeated here. What follows is only what is different
+about a count with a ceiling, plus the inheritance that has to be exercised
+again rather than assumed.
+
+> **NOT REACHABLE YET, and every scenario below is therefore written for the
+> build N78 lands, not for today's.** Coffee ships `Default: false`, so nothing
+> provisions it; `POST /v1/trackers` exists but no screen calls it, and the
+> handler blanks `preset` on the way in so a client cannot claim one. It is
+> deliberately not a default, because archiving is unwired — an athlete who does
+> not drink coffee could not remove the card. **N78 owns both halves** (the
+> create path and the archiving screen); when it lands, run this section.
+>
+> Until then the only things exercisable are the model and the card, which the
+> mobile suite covers directly.
+
+### Happy path
+
+- **Coffee arrives with no target** — a plain count, not a goal.
+- The value line reads the **count first**: `3 cups`. No `of`, no goal line
+  underneath, no progress implied.
+- The foot line reads **`last at 16:40`** — the time of the newest entry, in the
+  device's zone. Water shows it too; it is not coffee-specific.
+- Tap to add, tap a filled cup to remove — the same gestures, because it is the
+  same component.
+
+### With a limit set
+
+- Setting a target on the card's settings screen turns the same row into a
+  ceiling. Nothing else about the card changes shape.
+- **Cups past the limit log normally.** The fifth cup of a three-cup ceiling
+  logs, draws, syncs and removes exactly like the first.
+- Past-the-limit cups **render distinctly by SHAPE, not colour** — a smaller
+  fill inside the same outline, in the tracker's own colour. Nothing turns red,
+  amber or bold.
+- The foot line states the arithmetic: `2 past your target of 3 · last at
+  16:40`. Exactly at the target it reads `Target 3 reached`; below it, `2 to go`.
+- **Clearing the target returns it to a plain count** with no ceiling implied.
+
+### Edge cases & errors
+
+- **No target is a real state, not a missing one.** `target` is `null` on the
+  wire and in the column; it must never read back as `0`, which would render
+  `0 of 0 cups`.
+- **An empty glyph never appears beside an over-target one.** The row draws
+  `max(target, count)` slots, so once any cup is past the target every slot is
+  filled — which is what lets the over marking be a *smaller* fill without
+  reading as "not logged". If this ever stops holding the marking is ambiguous.
+- **Past twelve cups the row becomes a bar**, as water's does. Coffee ships
+  `render_style: auto` precisely so a fifteen-cup day is not a wall of glyphs.
+- A patch that does not mention `target` must not touch it — the partial-write
+  guarantee, exercised on this row rather than in the abstract.
+
+### Copy
+
+- **Read every string the card can produce and find no verdict.** No "too much",
+  no "careful", no warning colour, no exclamation mark — and no praise either,
+  which is the same mechanism wearing a friendlier face. "Over your limit" is
+  as forbidden as "well done".
+
+### Auth/security
+
+- Nothing new. Coffee is a row in `daily_trackers`, so every scoping and
+  ownership scenario in the N76 section covers it unchanged, including the
+  derived-preset-id squatting guard (`t_` is refused on create, and provisioning
+  tolerates a taken id).
+
+### For the user to check on a device
+
+Reading the diff cannot settle any of these.
+
+**None of these can be run until N78 lands the create path** — there is no way
+to obtain a coffee card. Written now so the list exists on the day there is.
+
+1. **It is there.** Add coffee. It sits below water, brown, reading `0 cups`,
+   with no goal line.
+2. **Three cups.** Tap `+` three times. The line reads `3 cups` and the foot
+   reads `last at HH:MM` — check the time matches when you actually tapped, not
+   UTC and not the previous entry.
+3. **A limit.** Open the card's settings, set the target to 3, save. Log a
+   fourth. It logs. The fourth cup is visibly different from the first three at
+   a glance, from arm's length, without having to count. **If you have to
+   compare them side by side to see it, that is a real finding** — the marking
+   is a smaller fill and it may be too subtle at 26pt.
+4. **Nothing scolds.** Read the whole card at 5 of 3. Nothing on it should feel
+   like a telling-off, and nothing should feel like congratulation either.
+5. **Remove the limit.** Clear the target field. The card goes back to a plain
+   count with nothing to reach.
+6. **Both cards together.** Water and coffee on one screen — the teal and the
+   brown must be tellable apart. Then Settings → Accessibility → Color Filters →
+   Color Blind (each of the three) and check again. `check:palette` asserts
+   ΔE 23.4 numerically; this is whether the number was the right number.
+7. **Midnight.** Log a cup at 23:58 local. It belongs to that day, and the row
+   resets after midnight.
+8. **Offline.** Airplane mode: log two coffees, force-quit, reopen, restore the
+   network. Two, not four.
+9. **VoiceOver.** Add and remove a cup. The label must say **Coffee**, not
+   Water, and a past-the-limit cup must announce as `Coffee, cup 4 of 5,
+   filled, past your target` — still *filled*, because a double-tap removes it.
+
 ### Today's Fuel card (added after the first audit missed it)
 
 - **Nutrition off**: the Fuel slot shows a **dashed** placeholder naming the

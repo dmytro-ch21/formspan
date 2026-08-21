@@ -2,9 +2,12 @@ import {
   MAX_GLYPHS,
   addLabel,
   amountLine,
+  footLine,
   formatClock,
+  glyphHint,
   glyphLabel,
   glyphSlots,
+  glyphState,
   lastLoggedAt,
   loggedAmount,
   loggedCount,
@@ -37,6 +40,16 @@ const coffee: Tracker = {
   id: 't_coffee', preset: 'coffee', name: 'Coffee', icon: '☕', color_key: 'coffee',
   unit: 'cup', increment: 1, target: null, render_style: 'auto', sort_order: 20,
 };
+
+/**
+ * The same coffee, with a limit set — N77's step 2.
+ *
+ * There is no second column for this. A ceiling and a goal are one `target`
+ * read two ways, so this fixture differs from `coffee` by one number and from
+ * `water` by its unit, and everything the card says about it has to be true
+ * under both readings.
+ */
+const ceiling: Tracker = { ...coffee, name: 'Coffee', target: 3 };
 
 /** N78's motivating example: 5 g, once a day. */
 const creatine: Tracker = {
@@ -141,13 +154,30 @@ describe('crossing the target is not an end state', () => {
       'behind', 'you should', 'try harder', 'only', 'just', '!',
     ];
     const strings: string[] = [];
-    for (const t of [water, coffee, creatine, capsules]) {
+    for (const t of [water, coffee, creatine, capsules, ceiling]) {
       for (const n of [0, 1, 4, 8, 10, 31]) {
         const e = taps(t, n);
         strings.push(valueLine(t, e), addLabel(t));
-        strings.push(glyphLabel(t, 0, Math.max(n, 1), n > 0));
+        // The foot line is N77's, and it is enumerated here rather than
+        // spot-checked because it is where a judgement would actually be
+        // tempting: it is the string that knows the athlete went past a target.
+        const foot = footLine(t, e);
+        if (foot) strings.push(foot);
+        // EVERY glyph in the row, not just the first — the over-target label is
+        // only reachable at an index past the target, so a loop that read index
+        // 0 would never see the one string this ticket added.
+        const slots = glyphSlots(t, n);
+        for (let i = 0; i < slots; i++) {
+          const state = glyphState(t, i, n);
+          strings.push(glyphLabel(t, i, slots, state), glyphHint(state));
+        }
       }
     }
+    // The apparatus, not the subject: an enumeration that produced nothing
+    // would pass this test in silence, and so would one that never reached an
+    // over-target glyph.
+    expect(strings.length).toBeGreaterThan(100);
+    expect(strings.some((s) => s.includes('past your target'))).toBe(true);
     for (const s of strings) {
       for (const word of JUDGEMENTS) {
         expect(s.toLowerCase()).not.toContain(word);
@@ -228,20 +258,20 @@ describe('VoiceOver', () => {
     // Eight identically-labelled shapes are unusable even though every one of
     // them is technically labelled: somebody swiping the row cannot tell where
     // they are or what a double-tap will change.
-    expect(glyphLabel(water, 2, 8, true)).toBe('Water, cup 3 of 8, filled');
-    expect(glyphLabel(water, 7, 8, false)).toBe('Water, cup 8 of 8, empty');
+    expect(glyphLabel(water, 2, 8, 'filled')).toBe('Water, cup 3 of 8, filled');
+    expect(glyphLabel(water, 7, 8, 'empty')).toBe('Water, cup 8 of 8, empty');
   });
 
   it('names the tracker, so a rotor jump lands somewhere legible', () => {
     // N78's stated format is "creatine, 1 of 1, taken" — the tracker's name
     // first, which is what makes several rows on Today distinguishable by ear.
-    expect(glyphLabel(creatine, 0, 1, true)).toContain('Creatine');
+    expect(glyphLabel(creatine, 0, 1, 'filled')).toContain('Creatine');
     expect(addLabel(water)).toBe('Add a cup of Water');
   });
 
   it('falls back to a word rather than an empty one for a bare count', () => {
     const bare: Tracker = { ...coffee, unit: '', name: 'Cold showers' };
-    expect(glyphLabel(bare, 0, 1, false)).toBe('Cold showers, item 1 of 1, empty');
+    expect(glyphLabel(bare, 0, 1, 'empty')).toBe('Cold showers, item 1 of 1, empty');
   });
 });
 
@@ -267,5 +297,92 @@ describe('the last logged time — N77 needs it and water does not', () => {
         { id: 'x', tracker_id: 't', logged_on: '2026-08-20', logged_at: 'not a time', amount: 1 },
       ]),
     ).toBeNull();
+  });
+});
+
+describe('N77: a count with a ceiling, and the cups past it', () => {
+  it('logs past the target rather than refusing, and draws every one', () => {
+    // The criterion is "cups past the limit log normally". Nothing in the model
+    // may cap, clamp or drop the fifth cup of a three-cup ceiling.
+    const five = taps(ceiling, 5);
+    expect(loggedCount(five)).toBe(5);
+    expect(valueLine(ceiling, five)).toBe('5 of 3 cups');
+    expect(glyphSlots(ceiling, 5)).toBe(5);
+  });
+
+  it('marks the glyphs past the target and only those', () => {
+    // Indices 0..2 are the target; 3 and 4 are past it. An off-by-one here is
+    // the difference between "your third cup was over" and the truth.
+    const states = Array.from({ length: 5 }, (_, i) => glyphState(ceiling, i, 5));
+    expect(states).toEqual(['filled', 'filled', 'filled', 'over', 'over']);
+  });
+
+  it('never marks anything over when there is no target at all', () => {
+    // Coffee's shipped default. With no ceiling there is nothing to be past,
+    // and an athlete who declined a target must not be shown one implicitly.
+    expect(Array.from({ length: 4 }, (_, i) => glyphState(coffee, i, 4))).toEqual([
+      'filled',
+      'filled',
+      'filled',
+      'filled',
+    ]);
+    expect(footLine(coffee, taps(coffee, 4))).toBe('last at 01:00');
+  });
+
+  it('never draws an empty glyph beside an over one', () => {
+    // The whole reason the over-target glyph can be drawn subtractively (a
+    // smaller fill) rather than in a warning colour. If this ever stops
+    // holding, `OVER_INSET` becomes ambiguous with "not logged".
+    let sawOver = false;
+    for (const t of [water, ceiling, creatine, capsules]) {
+      for (let count = 0; count <= 40; count++) {
+        const slots = glyphSlots(t, count);
+        const states = Array.from({ length: slots }, (_, i) => glyphState(t, i, count));
+        if (states.includes('over')) {
+          sawOver = true;
+          expect(states).not.toContain('empty');
+        }
+      }
+    }
+    // The apparatus: a sweep that never reached an over-target row would pass
+    // this test without testing anything.
+    expect(sawOver).toBe(true);
+  });
+
+  it('an over glyph is still removable, because it is still a logged cup', () => {
+    expect(glyphHint(glyphState(ceiling, 4, 5))).toBe('Double tap to remove it');
+    expect(glyphHint(glyphState(ceiling, 0, 5))).toBe('Double tap to remove it');
+    expect(glyphHint(glyphState(water, 7, 4))).toBe('Double tap to add it');
+  });
+
+  it('says how far past, and says it without a verdict', () => {
+    expect(footLine(ceiling, taps(ceiling, 5))).toBe('2 past your target of 3 · last at 01:00');
+    // Exactly at the target is not "past" it, and not an event either.
+    expect(footLine(ceiling, taps(ceiling, 3))).toBe('Target 3 reached · last at 01:00');
+    expect(footLine(ceiling, taps(ceiling, 1))).toBe('2 to go · last at 01:00');
+  });
+
+  it('names the over state to VoiceOver in the same words the card uses', () => {
+    expect(glyphLabel(ceiling, 3, 5, glyphState(ceiling, 3, 5))).toBe(
+      'Coffee, cup 4 of 5, filled, past your target',
+    );
+    // Still announced as filled — a VoiceOver user has to know a double-tap
+    // removes something rather than adds it.
+    expect(glyphLabel(ceiling, 3, 5, 'over')).toContain('filled');
+  });
+
+  it('is silent when there is nothing at all to say', () => {
+    // No target, nothing logged: no goal line, no clock, no empty-state prose.
+    expect(footLine(coffee, [])).toBeNull();
+    // A target with nothing logged still has arithmetic to state.
+    expect(footLine(water, [])).toBe('8 to go');
+  });
+
+  it('reads the clock in the DEVICE zone, not UTC', () => {
+    // 23:58 in Los Angeles is 06:58 the next day in UTC. A card that formatted
+    // the stored instant in UTC would show tomorrow morning's time against
+    // today's cups, and would pass in a UTC-run suite.
+    const late = taps(ceiling, 1, '2026-08-21T06:58:00.000Z');
+    expect(footLine(ceiling, late)).toContain('last at 23:58');
   });
 });

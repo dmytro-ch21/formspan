@@ -23,8 +23,34 @@ type Preset struct {
 	// Key is the stable provisioning key stored in daily_trackers.preset.
 	Key string
 	// Default provisions this preset for every athlete on first list. Water is
-	// on because the whole point of N76 is not forgetting; coffee, when it
-	// lands, is a thing the athlete adds, not one we assume they drink.
+	// on because the whole point of N76 is not forgetting; coffee is a thing
+	// the athlete adds, not one we assume they drink.
+	//
+	// **N77 tried `true` and it was reverted, which is worth recording because
+	// the argument for it is genuinely good and still wrong.** The argument: no
+	// athlete can reach a preset that is not a default, so N77 ships a struct
+	// literal whose own steps to test cannot be performed. That is true, and
+	// the precise form of it is worth stating because the loose form is wrong.
+	// `lib/trackers.ts`'s outbox DOES call `POST /v1/trackers`, for any local
+	// row with `remote = 0` — but the only code that inserts a local tracker
+	// row is `cacheTrackers`, which writes `dirty = 0, remote = 1`, so that
+	// branch never fires until N78 ships a create screen. And the handler
+	// blanks `preset` on the way in, so even when it does fire it cannot claim
+	// one. Both halves are needed; "nothing calls the endpoint" is the tempting
+	// short version and it is false.
+	//
+	// What it leaves out is the exit. **Archiving is not wired**:
+	// `app/trackers/[id].tsx` shows the control as unavailable pending N78, and
+	// `lib/trackers.ts` has no archive call at all. So `Default: true` gives
+	// every athlete a coffee counter on Today that they genuinely cannot
+	// remove, and coffee is not a neutral thing to count — people give it up.
+	// An unremovable daily coffee card for someone who quit is not a ticket
+	// they file, it is an app they delete.
+	//
+	// So the reachability gap is real and it is **N78's gap** — that ticket
+	// owns both the create path (a `POST` with `preset: ""`) and the archiving
+	// screen. Coffee waits for it. That is an honest partial: the model half is
+	// proven here, the reach half belongs to the ticket that can also undo it.
 	Default bool
 	// Fields is everything else, and it is the ordinary create payload.
 	Fields New
@@ -53,12 +79,47 @@ var presets = []Preset{
 			SortOrder:   10,
 		},
 	},
-	// N77 adds coffee here — Key "coffee", Default false, Target nil (a count
-	// with no ceiling), ColorKey "coffee", Unit "cup", Increment 1. The colour
-	// is already in the mobile palette and already measured by
-	// `scripts/validate_palette.mjs` against the water blue, so that PR does not
-	// have to discover its hue is unusable. If it needs anything in this package
-	// beyond a literal here, the model did not generalise.
+	// Coffee (N77), and it is a literal — nothing else in this package changed
+	// to admit it, which was the ticket's own test of whether N76 generalised.
+	//
+	// **`Target: nil` is the whole difference, and it is a value rather than a
+	// mode.** Water counts toward 2 litres; coffee counts, full stop. A nil
+	// target is a real end-to-end state — nullable column, three-state `Patch`
+	// field, `targetCount` returning null rather than zero — so the card draws
+	// a row that grows with no goal line, and an athlete who wants a ceiling
+	// sets one on the same screen water uses. Neither reading is privileged
+	// here, because one column cannot mean "goal" for one row and "limit" for
+	// another without a `target_kind` that would be a migration.
+	//
+	// `RenderAuto`, not `RenderGlyphs`: with no target the row is sized by what
+	// was logged, so a fifteen-cup day has to be allowed to become a bar. An
+	// explicit style wins over that choice, which is right for an athlete's
+	// override and wrong as a seeded default here.
+	//
+	// The colour was measured into `trackerColors` by N76 before anything drew
+	// it — ΔE 23.4 against the water teal under protanopia — so this row is a
+	// key lookup rather than a colour search.
+	//
+	// **`Default: false`, so nothing provisions this yet and no athlete can
+	// reach it until N78 lands the create path.** Stated here rather than only
+	// in a PR, because a preset nothing instantiates looks like dead code to
+	// the next reader. See the note on `Default` for why the obvious fix —
+	// turning it on — is the wrong one while archiving is unwired.
+	{
+		Key:     "coffee",
+		Default: false,
+		Fields: New{
+			Preset:      "coffee",
+			Name:        "Coffee",
+			Icon:        "☕",
+			ColorKey:    "coffee",
+			Unit:        "cup",
+			Increment:   1,
+			Target:      nil,
+			RenderStyle: RenderAuto,
+			SortOrder:   20,
+		},
+	},
 }
 
 func ptr[T any](v T) *T { return &v }

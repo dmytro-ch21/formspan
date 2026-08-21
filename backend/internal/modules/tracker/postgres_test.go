@@ -2,9 +2,11 @@ package tracker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -349,6 +351,192 @@ func TestEnsureDefaultsIsIdempotentAndSurvivesArchiving(t *testing.T) {
 		if tr.ID == id {
 			t.Fatal("an archived tracker was re-provisioned — the athlete cannot get rid of it")
 		}
+	}
+}
+
+// provisionPreset provisions ONE named preset through the real provisioning
+// path, regardless of whether it is a default.
+//
+// Coffee ships `Default: false` — it is unreachable until N78 lands the create
+// path — so `DefaultsFor` deliberately does not return it. Testing it through
+// this helper rather than through `DefaultsFor` is the point: **the preset has
+// to be exercised on the path it will actually take when N78 turns it on**, not
+// on a shortcut that would stop resembling it. The only thing borrowed from
+// provisioning is the derived id, which is what `DefaultsFor` itself does.
+func provisionPreset(t *testing.T, repo *PostgresRepository, userID, key string) *Tracker {
+	t.Helper()
+	ctx := context.Background()
+	var in New
+	found := false
+	for _, p := range Presets() {
+		if p.Key == key {
+			in, found = p.Fields, true
+		}
+	}
+	if !found {
+		t.Fatalf("no preset %q — this test is asserting against a preset that does not exist", key)
+	}
+	in.ID = PresetID(userID, key)
+	if err := repo.EnsureDefaults(ctx, userID, []New{in}); err != nil {
+		t.Fatalf("provision %q: %v", key, err)
+	}
+	list, err := repo.List(ctx, userID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for i := range list {
+		if list[i].Preset == key {
+			return &list[i]
+		}
+	}
+	t.Fatalf("preset %q did not survive provisioning", key)
+	return nil
+}
+
+// Coffee is NOT provisioned, and that is a decision rather than an oversight.
+//
+// Pinned by a test so flipping it goes red and the next session has to read the
+// reasoning on `Preset.Default` before shipping the change. The argument for
+// turning it on is good — an unreachable preset performs none of N77's own
+// steps to test — and it is outweighed by there being **no way to remove the
+// card**: archiving is unwired until N78, and coffee is not neutral to count at
+// somebody who has given it up.
+func TestCoffeeIsNotProvisionedWhileArchivingIsUnwired(t *testing.T) {
+	for _, p := range Presets() {
+		if p.Key == "coffee" && p.Default {
+			t.Fatal("coffee is a default again — an athlete cannot remove it until N78 " +
+				"wires archiving. See the note on Preset.Default before changing this.")
+		}
+	}
+	// The apparatus: a loop over an empty or renamed set would pass in silence.
+	if len(Presets()) < 2 {
+		t.Fatalf("%d preset(s) — this test cannot distinguish anything", len(Presets()))
+	}
+}
+
+// N77's whole backend surface, end to end: coffee provisions as a count with no
+// ceiling, and the nil target survives the round trip.
+//
+// **A `nil` in the preset literal is not the claim.** The claim is that NULL
+// comes back out of Postgres as a nil pointer and reaches the client as JSON
+// `null` — because a zero read back as `0` would render "0 of 0 cups" at an
+// athlete who asked for no ceiling, which is what a nullable column exists to
+// prevent. The whole path is checked here rather than the literal, since the
+// literal is the one part that cannot be wrong in an interesting way.
+func TestCoffeeProvisionsAsACountWithNoCeiling(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	coffee := provisionPreset(t, repo, userA, "coffee")
+	if coffee.Target != nil {
+		t.Fatalf("coffee provisioned with target %v, want nil — a ceiling is the "+
+			"athlete's to set, and 'more is better' is the wrong reading of a coffee count",
+			*coffee.Target)
+	}
+	// And it reaches the CLIENT as null, which is the half the pointer check
+	// above does not cover. Asserted rather than asserted-in-a-comment: the
+	// claim recorded next to a test should be the claim the test measures.
+	wire, err := json.Marshal(coffee)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(wire), `"target":null`) {
+		t.Fatalf("coffee serialises without a null target — the client would read a "+
+			"missing ceiling as zero and render \"0 of 0 cups\".\n  %s", wire)
+	}
+	if coffee.ID != PresetID(userA, "coffee") {
+		t.Fatalf("coffee id %q is not derived — two devices would each believe a "+
+			"different id is the coffee tracker", coffee.ID)
+	}
+	if coffee.Unit != "cup" || coffee.Increment != 1 {
+		t.Fatalf("coffee counts in %q at %v a tap, want one cup", coffee.Unit, coffee.Increment)
+	}
+	// `auto`, not `glyphs`: with no target the row is sized by what was logged,
+	// so a fifteen-cup day has to be free to become a bar rather than an
+	// uncountable row of fifteen identical glyphs.
+	if coffee.RenderStyle != RenderAuto {
+		t.Fatalf("coffee render_style = %q, want %q", coffee.RenderStyle, RenderAuto)
+	}
+
+	// And the athlete can set a ceiling and take it away again — the three-state
+	// patch field, exercised on the row this ticket ships rather than in the
+	// abstract. `Null` and "absent" are different wire shapes and only one of
+	// them clears a target.
+	if _, err := repo.Update(ctx, userA, coffee.ID, Patch{Target: Of(3.0)}); err != nil {
+		t.Fatalf("set a ceiling: %v", err)
+	}
+	withCeiling, err := repo.getOwned(ctx, userA, coffee.ID)
+	if err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if withCeiling.Target == nil || *withCeiling.Target != 3 {
+		t.Fatalf("ceiling did not stick: %v", withCeiling.Target)
+	}
+	// An unrelated patch must not disturb it — the partial-write guarantee.
+	if _, err := repo.Update(ctx, userA, coffee.ID, Patch{SortOrder: Of(25)}); err != nil {
+		t.Fatalf("unrelated patch: %v", err)
+	}
+	stillThere, _ := repo.getOwned(ctx, userA, coffee.ID)
+	if stillThere.Target == nil || *stillThere.Target != 3 {
+		t.Fatalf("a patch that never mentioned target changed it to %v", stillThere.Target)
+	}
+	if _, err := repo.Update(ctx, userA, coffee.ID, Patch{Target: Null[float64]()}); err != nil {
+		t.Fatalf("clear the ceiling: %v", err)
+	}
+	cleared, _ := repo.getOwned(ctx, userA, coffee.ID)
+	if cleared.Target != nil {
+		t.Fatalf("clearing the ceiling left %v — an athlete who removes a limit "+
+			"must not keep being shown one", *cleared.Target)
+	}
+}
+
+// EVERY preset provisions exactly once and coexists with the others — a sweep
+// over all of them, not just the defaults.
+//
+// **All of them, deliberately.** The interesting property is several presets
+// living side by side under one athlete: the `(user_id, preset)` partial unique
+// index has to hold them apart, and each has to survive a repeat pass. Scoping
+// this to defaults would make it a one-row test today and would silently stop
+// covering coffee the moment it left the default set — which is exactly what
+// just happened.
+func TestEveryPresetProvisionsExactlyOnceAndCoexists(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	all := Presets()
+	if len(all) < 2 {
+		// The apparatus: with one preset this test would pass without ever
+		// exercising the thing it is about, which is several coexisting.
+		t.Fatalf("%d preset(s) — this test cannot observe coexistence", len(all))
+	}
+	// Twice, to prove the repeat pass is a no-op rather than a second row.
+	for pass := 0; pass < 2; pass++ {
+		for _, p := range all {
+			in := p.Fields
+			in.ID = PresetID(userA, p.Key)
+			if err := repo.EnsureDefaults(ctx, userA, []New{in}); err != nil {
+				t.Fatalf("provision %q pass %d: %v", p.Key, pass, err)
+			}
+		}
+	}
+	list, err := repo.List(ctx, userA)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	seen := map[string]int{}
+	for _, tr := range list {
+		if tr.Preset != "" {
+			seen[tr.Preset]++
+		}
+	}
+	for _, p := range all {
+		if seen[p.Key] != 1 {
+			t.Fatalf("preset %q provisioned %d times, want exactly 1", p.Key, seen[p.Key])
+		}
+	}
+	if len(seen) != len(all) {
+		t.Fatalf("%d distinct presets on the athlete, want %d — two presets collided "+
+			"on one row", len(seen), len(all))
 	}
 }
 

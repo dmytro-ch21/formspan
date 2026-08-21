@@ -1,0 +1,236 @@
+/**
+ * The tracker card's render path, and specifically the two things N77 added to
+ * it.
+ *
+ * **A component test rather than a logic one, deliberately, and the reason is
+ * the ticket's own criterion.** `lib/__tests__/trackerModel.test.ts` already
+ * proves `footLine` composes the right sentence and `glyphState` marks the
+ * right glyphs — but a model function nothing renders is exactly the shape
+ * #406 shipped: `lastLoggedAt` and `formatClock` were written, tested and
+ * correct, and the card did not display either of them for a whole ticket. A
+ * second opinion about the arithmetic here would be two tests disagreeing;
+ * what is worth asserting is that the card is WIRED to the model at all.
+ *
+ * So every assertion below is about the render path and nothing else, and each
+ * one fails if the corresponding line in `TrackerCard.tsx` is deleted.
+ *
+ * What this cannot tell you: whether the smaller fill actually reads as
+ * "past your target" to a human eye at 26pt, or whether VoiceOver speaks these
+ * labels in the order they are written. Both need a device. `L1` tracks that
+ * gap and this ticket does not close it.
+ */
+
+import { StyleSheet } from 'react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
+
+import { TrackerCard } from '../TrackerCard';
+import type { Tracker, TrackerEntry } from '@/lib/trackerModel';
+
+/** The shipped coffee preset, field for field. See `tracker/presets.go`. */
+const coffee: Tracker = {
+  id: 'cof',
+  preset: 'coffee',
+  name: 'Coffee',
+  icon: '☕',
+  color_key: 'coffee',
+  unit: 'cup',
+  increment: 1,
+  target: null,
+  render_style: 'auto',
+  sort_order: 20,
+};
+
+const water: Tracker = {
+  id: 'wat',
+  preset: 'water',
+  name: 'Water',
+  icon: '💧',
+  color_key: 'water',
+  unit: 'ml',
+  increment: 250,
+  target: 2000,
+  render_style: 'glyphs',
+  sort_order: 10,
+};
+
+/** Cups, one an hour, ending at the time the assertions read back. */
+function taps(t: Tracker, n: number, lastAt = '2026-08-20T23:40:00.000Z'): TrackerEntry[] {
+  const end = Date.parse(lastAt);
+  return Array.from({ length: n }, (_, i) => ({
+    id: `e${i}`,
+    tracker_id: t.id,
+    logged_on: '2026-08-20',
+    logged_at: new Date(end - (n - 1 - i) * 3_600_000).toISOString(),
+    amount: t.increment,
+  }));
+}
+
+function renderCard(
+  tracker: Tracker,
+  entries: TrackerEntry[],
+  over: Partial<React.ComponentProps<typeof TrackerCard>> = {},
+) {
+  const onAdd = jest.fn();
+  const onRemove = jest.fn();
+  render(
+    <TrackerCard
+      tracker={tracker}
+      entries={entries}
+      units="metric"
+      unitsReady
+      onAdd={onAdd}
+      onRemove={onRemove}
+      onEdit={() => {}}
+      {...over}
+    />,
+  );
+  return { onAdd, onRemove };
+}
+
+/** The margin the fill is drawn with — the channel that marks an over cup. */
+function fillInset(glyphTestID: string): number {
+  const fill = screen.getByTestId(`${glyphTestID}-fill`);
+  const flat = StyleSheet.flatten(fill.props.style) as { margin?: number };
+  return flat.margin ?? 0;
+}
+
+describe('the card shows when the last one was', () => {
+  it('renders the clock, which is the reading N77 was written around', () => {
+    // The suite runs under TZ=America/Los_Angeles, so 23:40 UTC is 16:40 local
+    // — the exact string the ticket asks for.
+    renderCard(coffee, taps(coffee, 3));
+    expect(screen.getByTestId('tracker-foot-cof')).toHaveTextContent(/last at 16:40/);
+  });
+
+  it('shows it for water too, because the card does not know what coffee is', () => {
+    // A branch on `tracker.preset` anywhere in this component would be the
+    // CoffeeCard the ticket forbids. The clock is unconditional.
+    renderCard(water, taps(water, 2));
+    expect(screen.getByTestId('tracker-foot-wat')).toHaveTextContent(/last at 16:40/);
+  });
+
+  it('says nothing at all when there is no target and nothing logged', () => {
+    // An athlete who declined a ceiling is not handed an empty goal line.
+    renderCard(coffee, []);
+    expect(screen.queryByTestId('tracker-foot-cof')).toBeNull();
+  });
+});
+
+describe('the count, and the limit if one is set', () => {
+  it('reads the count first when there is no ceiling', () => {
+    renderCard(coffee, taps(coffee, 3));
+    expect(screen.getByTestId('tracker-value-cof')).toHaveTextContent('3 cups');
+  });
+
+  it('states the limit second once one exists, and never refuses a cup past it', () => {
+    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+    expect(screen.getByTestId('tracker-value-cof')).toHaveTextContent('5 of 3 cups');
+    expect(screen.getByTestId('tracker-foot-cof')).toHaveTextContent(
+      /2 past your target of 3/,
+    );
+    // Five cups logged is five glyphs drawn. A row that stopped at the ceiling
+    // would be telling the athlete their last two cups did not happen.
+    expect(screen.getByTestId('tracker-glyph-cof-4')).toBeTruthy();
+  });
+});
+
+describe('cups past the limit render distinctly', () => {
+  it('draws the ones past the target with a different fill and the rest alike', () => {
+    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+    const within = [0, 1, 2].map((i) => fillInset(`tracker-glyph-cof-${i}`));
+    const past = [3, 4].map((i) => fillInset(`tracker-glyph-cof-${i}`));
+    // Within the target they are identical to each other...
+    expect(new Set(within).size).toBe(1);
+    // ...and the ones past it are drawn differently from those.
+    expect(new Set(past).size).toBe(1);
+    expect(past[0]).not.toBe(within[0]);
+  });
+
+  it('changes the SHAPE, never the colour — nothing here reads as an error', () => {
+    // The criterion is "visually distinct without being coloured as an error".
+    // Every glyph on the card carries the tracker's own fill, over or not.
+    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+    const colours = [0, 1, 2, 3, 4].map((i) => {
+      const flat = StyleSheet.flatten(
+        screen.getByTestId(`tracker-glyph-cof-${i}-fill`).props.style,
+      ) as { backgroundColor?: string };
+      return flat.backgroundColor;
+    });
+    expect(new Set(colours).size).toBe(1);
+  });
+
+  it('marks nothing when there is no target to be past', () => {
+    // Coffee's shipped default. Five cups, no ceiling, five identical glyphs.
+    renderCard(coffee, taps(coffee, 5));
+    const insets = [0, 1, 2, 3, 4].map((i) => fillInset(`tracker-glyph-cof-${i}`));
+    expect(new Set(insets).size).toBe(1);
+  });
+
+  it('an over-target cup still un-taps, by its own entry id', () => {
+    // "Cups past the limit log normally" — a cup you cannot remove is not
+    // logged normally. The id, not the index: two quick taps on one glyph must
+    // not remove two cups.
+    const entries = taps(coffee, 5);
+    const { onRemove } = renderCard({ ...coffee, target: 3 }, entries);
+    fireEvent.press(screen.getByTestId('tracker-glyph-cof-4'));
+    expect(onRemove).toHaveBeenCalledWith(entries[4].id);
+  });
+});
+
+describe('VoiceOver names coffee, not water', () => {
+  it('labels the add control and every glyph with the tracker it belongs to', () => {
+    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+    expect(screen.getByLabelText('Add a cup of Coffee')).toBeTruthy();
+    expect(screen.getByLabelText('Coffee, cup 1 of 5, filled')).toBeTruthy();
+    // The over state is spoken, so a VoiceOver user learns from the label what
+    // the sighted user learns from the smaller fill.
+    expect(screen.getByLabelText('Coffee, cup 4 of 5, filled, past your target')).toBeTruthy();
+  });
+
+  it('never says the tracker is empty when a cup is past the target', () => {
+    // The subtractive fill is only unambiguous because empty and over cannot
+    // coexist. If that ever breaks, this is the assertion that says so.
+    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+    expect(screen.queryByLabelText(/empty/)).toBeNull();
+  });
+});
+
+describe('no praise, no scolding, anywhere on the card', () => {
+  it('reads every rendered string and finds no verdict', () => {
+    const JUDGEMENTS = [
+      'great', 'well done', 'nice', 'good job', 'amazing', 'keep it up', 'smashed',
+      'too much', 'too many', 'over the limit', 'careful', 'warning', 'failed',
+      'behind', 'you should', 'try harder', 'only', 'just', '!',
+    ];
+    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+    const rendered = screen.root ? collectText(screen.root) : [];
+    // The apparatus, not the subject: a walk that collected nothing would pass
+    // this test in silence.
+    expect(rendered.join(' ')).toContain('past your target of 3');
+    for (const s of rendered) {
+      for (const word of JUDGEMENTS) {
+        expect(s.toLowerCase()).not.toContain(word);
+      }
+    }
+  });
+});
+
+/** Every string the tree renders, including accessibility labels and hints. */
+function collectText(node: { children?: unknown[]; props?: Record<string, unknown> }): string[] {
+  const out: string[] = [];
+  const visit = (n: unknown) => {
+    if (typeof n === 'string') {
+      out.push(n);
+      return;
+    }
+    if (!n || typeof n !== 'object') return;
+    const el = n as { children?: unknown[]; props?: Record<string, unknown> };
+    for (const key of ['accessibilityLabel', 'accessibilityHint']) {
+      const v = el.props?.[key];
+      if (typeof v === 'string') out.push(v);
+    }
+    for (const child of el.children ?? []) visit(child);
+  };
+  visit(node);
+  return out;
+}
