@@ -92,7 +92,10 @@ jobs:
       # backend/: this Dockerfile builds every binary under backend/cmd/... into
       # the image Railway deploys, so engine code there would ship inside the
       # product API image — the AI-SDLC trust boundary (N137, #559) forbids
-      # exactly that. Same toolchain as the backend; no Postgres needed.
+      # exactly that. Same toolchain as the backend, and since N139 the
+      # runstate tests use this job's Postgres via the job-level
+      # TEST_DATABASE_URL — they SKIP silently if that env ever moves to
+      # step level, so keep it on the job.
       - name: Engine (gofmt, vet, build, test)
         working-directory: engine
         run: |

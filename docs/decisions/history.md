@@ -39774,6 +39774,72 @@ Scope note, same as N137's: the ticket said `backend/internal/devengine`; the
 code lives in the `engine/` module for the trust-boundary reason recorded in
 the N137 entry.
 
+## 2026-08-21 — N139: the engine gets durable memory — runs, leases and a state machine in Postgres
+
+Fourth PR of the AI-SDLC initiative. `engine/internal/runstate` holds the four
+tables the design named (`agent_runs`, `agent_steps`, `agent_events`,
+`agent_artifacts`), the internal state machine (QUEUED → … → MERGING →
+EVIDENCE_WAIT|DONE, side terminals BLOCKED/FAILED/CANCELLED), and the lease
+that makes "two engines can never work the same ticket" a database property
+rather than an application belief.
+
+Decisions worth recording:
+
+- **The lease is a partial unique index, not application logic**:
+  `agent_runs_one_active_per_issue ON (issue_number) WHERE state NOT IN
+  (terminals)`. Claiming is one INSERT — either the row lands and you own it,
+  or the index refuses. Eight concurrent claimers → exactly one winner,
+  tested against real Postgres. The terminal-state list exists in two
+  languages (Go's `Terminal()` and the SQL predicate), and a test extracts
+  the NOT IN list from the SQL and pins both against each other, so neither
+  can drift alone.
+- **A crashed engine needs no cleanup process**: heartbeats extend the TTL;
+  when they stop, the lease expires and `TakeOver` succeeds — and only then
+  (`WHERE lease_expires_at <= now()`), so a live owner can never be
+  dispossessed. A dispossessed owner's late heartbeat returns `ErrLeaseLost`
+  rather than resurrecting the lease.
+- **Illegal transitions are refused AND recorded** — a `transition_refused`
+  event with from/to/error, in the same transaction that leaves the state
+  untouched. A refusal that leaves no trace is a refusal nobody debugs.
+- **`trigger_delivery_id` is UNIQUE (nullable)** — webhook dedupe (N146)
+  rides on the constraint; polling runs carry NULL, which never collides.
+- **BLOCKED is terminal.** Unblocking produces a NEW run rather than
+  resuming, so history stays linear and the lease frees the issue — tested:
+  an issue is re-claimable the moment its run goes terminal.
+- **The engine has its own migrations, embedded** — a ~40-line versioned
+  migrator (`engine_schema_version`), deliberately not golang-migrate and
+  deliberately not `backend/migrations/`: the engine database has a
+  different owner, and sharing the product's migration sequence would put
+  engine schema one typo away from a product deploy. `backend/` is untouched
+  on this branch.
+- **Tests isolate by schema, not by advisory lock**: each test run creates a
+  random `engine_test_<hex>` schema with `search_path` pinned, and drops it
+  verified on cleanup. The backend's testdb lock exists because its packages
+  share tables; these tests share only a database, so two binaries cannot
+  trample each other by construction. Skips without `TEST_DATABASE_URL`
+  (backend convention); CI's Backend (Go) job exports it, so the engine step
+  there always runs them.
+- The engine module gains its first real dependency (pgx v5) — the go.mod
+  note updated from "dependency-free" to "minimal" honestly.
+
+Review hardening, all measured rather than argued: the expiry guards in
+Heartbeat/Transition were mutation-invisible (deleting both passed the whole
+suite, because post-takeover the owner check alone rejects the old owner) — a
+test now covers the expired-but-not-yet-taken-over window for heartbeat,
+transition AND step, and the same mutation goes red. TakeOver is atomic
+(lease + audit event in one tx) and refuses terminal runs. Illegal
+transitions carry an `ErrIllegalTransition` sentinel. AppendStep requires the
+live lease — it was the one write path a dispossessed engine could still use
+— which is also what makes its max(seq)+1 serial by construction. Migrate
+runs in one tx under an advisory xact lock, so concurrent replicas queue
+instead of racing the version table. And the both-constraints-violated case
+(webhook redelivery during an active run) is pinned to read as
+ErrDuplicateDelivery — Postgres decides by index-creation order, the ordering
+is load-bearing for N146, and only that test holds it.
+
+Open: nothing consumes the store yet — Phase 2's worker (N141) claims through
+it, and the reconciler stays memory-baselined until then.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
