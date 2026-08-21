@@ -34,7 +34,7 @@ Counts at the time of the sweep: **26 web routes, 46 mobile routes.**
 | 1 | Type your own calorie/macro target | `nutrition/targets` | `(tabs)/goals.tsx` had **zero `TextInput`** | **fixed by N72** |
 | 2 | See and accept the weekly adjustment (N27) | `targets/AdjustmentCard.tsx` | `lib/nutritionApi.ts` had no `fetchAdjustment` | **fixed by N72** |
 | 3 | Target history; a backdated effective date; delete a target | targets page | mobile `saveTarget` only, always for today | **fixed by N86 ([#530](https://github.com/dmytro-ch21/formspan/pull/530))** — and the row was wrong about deletion: `apps/web` has carried `deleteTarget` in its wire layer since the endpoint landed and calls it from **nowhere**, so deletion was available on neither surface. The phone is the first to offer it. |
-| 4 | Author a multi-ingredient recipe | `nutrition/recipes/new`, `/[id]` | mobile `FoodInput` has no `items[]`; single foods only | open |
+| 4 | Author a multi-ingredient recipe | `nutrition/recipes/new`, `/[id]` | mobile `FoodInput` has no `items[]`; single foods only | **closed by N87 ([#529](https://github.com/dmytro-ch21/formspan/pull/529))** |
 | 5 | Manage saved foods — list, edit, delete | `nutrition/recipes` | mobile `deleteFood` is documented as having *"No production caller yet"* | open |
 | 6 | The nutrition analytical surface — intake vs bodyweight vs training load, 7-day mean, adherence % | `/dashboard/nutrition` | none | open |
 | 7 | Author a weekly training theme | `/dashboard/calendar` (`setTheme`) | `lib/themes.ts`: *"read-only on the phone… no write path here on purpose"* | open |
@@ -120,7 +120,7 @@ Each is superseded on the exclusivity, not on the design.
 
 | Doc | Assignment |
 |---|---|
-| `nutrition-design.md` §4 | "Build a recipe from scratch — ✗ mobile / ✅ web" |
+| `nutrition-design.md` §4 | "Build a recipe from scratch — ✗ mobile / ✅ web" — **corrected on the exclusivity by N87 ([#529](https://github.com/dmytro-ch21/formspan/pull/529))**: both surfaces build one now, and the phone's is the one with catalog search behind it |
 | `nutrition-design.md` §4 | "Set / explain the target — **read-only** mobile" — N72 closed the read-only half for TODAY's target; **N86 ([#530](https://github.com/dmytro-ch21/formspan/pull/530)) closed the rest**: history, correcting or removing a past target, and filing one for a day already gone. The row is corrected in that doc. |
 | `nutrition-design.md` §4 | "Intake vs weight vs training load — ✗ / ✅" |
 | `nutrition-design.md` §5 | "one web screen with three sections" — `CLAUDE.md` already rules this "one screen on each"; N69 delivered the feasibility section on both, the other two are still web-only |
