@@ -286,6 +286,21 @@ describe('draftErrorMessage', () => {
     expect(draftErrorMessage(providerDown())).toMatch(/none of your daily drafts/i);
   });
 
+  it('does NOT pass through a status it has no branch for', () => {
+    // The fall-through used to be `err.message`, which quietly re-opened the
+    // door this function exists to close for every status the backend grows
+    // next. Raised in review; the doc claimed two exceptions and the code meant
+    // all of them.
+    for (const err of [
+      new ApiError('server prose', 'forbidden', 403),
+      new ApiError('server prose', 'already_exists', 409),
+      new ApiError('server prose', 'teapot', 418),
+    ]) {
+      expect(draftErrorMessage(err)).not.toContain('server prose');
+      expect(draftErrorMessage(err)).toMatch(/still here/i);
+    }
+  });
+
   it('keeps the server’s wording for a quota, which carries the reset', () => {
     // Deliberate, and the same call `estimateApi` documents: a mapped "you're
     // out of drafts" would throw away "one more in about 3 hours", which is

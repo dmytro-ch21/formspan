@@ -45,7 +45,14 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
@@ -77,6 +84,15 @@ import { useAuthToken } from '@/lib/useAuthToken';
 /** The fallback when the athlete never said what kind of session it was. */
 const DEFAULT_KIND: Kind = 'class';
 
+/**
+ * What a retry in progress says, in one place.
+ *
+ * Shared by the rendered line and the VoiceOver announcement so the two cannot
+ * drift — a screen reader hearing something the screen does not say is its own
+ * small bug.
+ */
+const RETRY_NOTICE = 'Still working on it — trying again.';
+
 export default function DictateReflectionScreen() {
   const router = useRouter();
   const accent = useAccent();
@@ -89,6 +105,14 @@ export default function DictateReflectionScreen() {
   // of N118: what the athlete met was a failure they were asked to fix, at a
   // moment the app was perfectly capable of fixing it itself.
   const [retrying, setRetrying] = useState(false);
+  // A live region is Android-only, so VoiceOver needs telling directly — the
+  // pattern `app/sign-in.tsx` and `app/forgot-password.tsx` already use. Said
+  // once per attempt: this is reassurance that work is still happening, and
+  // repeating it over a two-attempt sequence would be chatter.
+  const announceRetry = useCallback(() => {
+    setRetrying(true);
+    AccessibilityInfo.announceForAccessibility(RETRY_NOTICE);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [quota, setQuota] = useState<DraftQuota | null>(null);
@@ -142,7 +166,7 @@ export default function DictateReflectionScreen() {
       // dictation survives every failure and every retry. Re-recording is not
       // a recovery anybody should be asked for.
       const res = await draftReflection(getToken, said, {
-        onRetry: () => setRetrying(true),
+        onRetry: () => announceRetry(),
       });
       setDraft(res.draft);
       setQuota(res.quota);
@@ -286,8 +310,12 @@ export default function DictateReflectionScreen() {
               case never sees it. Not styled as an error, because it is not one
               — the athlete has nothing to do and nothing has gone wrong yet. */}
           {retrying && (
-            <Text style={styles.muted} testID="dictate-retrying">
-              Still working on it — trying again.
+            <Text
+              style={styles.muted}
+              testID="dictate-retrying"
+              accessibilityLiveRegion="polite"
+            >
+              {RETRY_NOTICE}
             </Text>
           )}
         </>

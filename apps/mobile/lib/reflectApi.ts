@@ -395,11 +395,19 @@ export async function draftReflection(
  * then a switch on the status and the code — never on the message, per the API
  * conventions.
  *
- * **Two statuses deliberately keep the server's sentence**, for the reason
+ * **Exactly two statuses keep the server's sentence**, for the reason
  * `estimateApi` records: they carry something this file cannot reconstruct. A
  * 429 states when the next draft is available, and substituting "you're out of
  * drafts" would throw the reset away; a 400 names the actual limit that was
  * broken. Neither is a diagnosis of how the athlete spoke.
+ *
+ * **Two, and not "everything unmatched".** An earlier version fell through to
+ * `err.message` for any status it had no branch for, which quietly re-opened
+ * the door this function exists to close: 403, 409 and every status the backend
+ * grows next would have reached the screen verbatim, written for an API
+ * consumer. An unrecognised answer gets the neutral line instead. Raised in
+ * review, and the comment was the thing that made it visible — it claimed two
+ * and the code meant all.
  *
  * Every branch says the words are still there, because they are — nothing on
  * any failure path clears the input — and because "do I have to say all that
@@ -426,7 +434,9 @@ export function draftErrorMessage(err: unknown): string {
     return 'Reading a dictation isn’t working right now. What you said is still here — try again later, or log it by hand.';
   }
 
-  return err.message || 'That didn’t work. What you said is still here — try again, or log it by hand.';
+  if ((err.status === 429 || err.status === 400) && err.message) return err.message;
+
+  return 'That didn’t work. What you said is still here — try again, or log it by hand.';
 }
 
 /**

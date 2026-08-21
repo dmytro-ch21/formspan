@@ -57,8 +57,10 @@ import (
 // their default sampling temperature and identical input does not imply
 // identical output — measured in the field on the bjj dictation route, where a
 // refused sentence was resent unchanged and drafted fine. The old claim came
-// from the truncation case below, which really is deterministic, and was
-// generalised to every refusal without being checked.
+// from the truncation case below, which RELIABLY RECURS — length is driven by
+// what the model has to say rather than by one sampled token, so a retry
+// truncates again in practice — and was generalised to every refusal without
+// being checked.
 //
 // What survives is the instruction to callers, for the cost reason rather than
 // the futility one: a metered caller must BOUND any retry of a refusal, because

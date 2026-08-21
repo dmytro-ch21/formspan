@@ -7437,8 +7437,11 @@ paths:
         model is called. Refused calls count, because a refusal is a billed
         answer and a caller could otherwise loop on a dictation the model keeps
         declining. Because the gate runs before any token is spent, a client
-        retrying a refusal can never spend past the allowance — the retry comes
-        back `429` instead. Exhaustion is `429` with `rate_limited` and a `Retry-After`
+        retrying a refusal SEQUENTIALLY gets a `429` once the allowance is
+        used rather than a further billed call. Note the gate is advisory
+        under concurrency, as `reflect_quota.go` records — simultaneous
+        requests can overshoot by the in-flight count — so this is a bound on
+        a retry loop, not an absolute. Exhaustion is `429` with `rate_limited` and a `Retry-After`
         header in seconds; the reset is also stated in the message as a
         relative duration, never as a timestamp.
 
@@ -7512,6 +7515,13 @@ paths:
             So a client MAY retry a 422 — but it is billed, exactly like the
             first attempt, and it counts against the daily ten. One retry is
             defensible; a loop is what the metering below exists to prevent.
+
+
+            `/nutrition/estimate` and `/exercises/identify` still describe
+            their own 422s as deterministic. They run on the same
+            temperature-less `llm` platform, so those descriptions are
+            probably wrong for the same reason — left alone here because the
+            evidence is from this route, and filed rather than assumed.
             This is still the only failure here that both costs a draft and may
             never succeed, which is why it is not `503`.
           content:

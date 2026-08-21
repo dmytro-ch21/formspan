@@ -9985,6 +9985,11 @@ retries, bounded by the athlete's daily allowance rather than by wall time.
   spinner.
 - **A failed local save says so in the app's own words** — never raw SQLite
   text — and leaves the draft on screen.
+- **A status with no branch (403, 409, anything new) gets the neutral line**,
+  not the server's sentence. Only 429 and 400 pass their message through.
+- **VoiceOver is told a retry is happening**, in the same words the screen
+  shows. `accessibilityLiveRegion` is Android-only, so the announcement is what
+  carries it on iOS.
 
 ### Regression traps (N118)
 

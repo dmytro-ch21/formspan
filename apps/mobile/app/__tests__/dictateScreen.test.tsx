@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AccessibilityInfo } from 'react-native';
 
 import DictateReflectionScreen from '../bjj/dictate';
 import { ApiError } from '@/lib/apiError';
@@ -76,6 +77,8 @@ async function speak(text = 'Five rounds, caught an armbar') {
   fireEvent.changeText(screen.getByLabelText('What happened in the session'), text);
   fireEvent.press(screen.getByLabelText('Read what I said'));
 }
+
+jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -360,6 +363,17 @@ describe('when the draft fails', () => {
     });
     // A retry in flight is not a failure, so nothing red is on screen.
     expect(screen.queryByText(/couldn’t/i)).toBeNull();
+
+    // And VoiceOver is told, in the SAME words the screen shows.
+    //
+    // `accessibilityLiveRegion` is Android-only — the pattern `sign-in.tsx`
+    // and `forgot-password.tsx` already follow — so without the announcement a
+    // screen-reader user gets no signal that the app is still working, which
+    // is the entire reason this line exists. Raised in review, and it survived
+    // the first mutation pass with nothing red.
+    const spoken = (AccessibilityInfo.announceForAccessibility as jest.Mock).mock.calls.map((c) => c[0]);
+    expect(spoken).toHaveLength(1);
+    expect(screen.getByTestId('dictate-retrying')).toHaveTextContent(spoken[0]);
 
     // And it goes away when the retry lands, because the whole pre-draft block
     // it lives in does.

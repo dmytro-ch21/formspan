@@ -25,7 +25,7 @@ import (
 // Everything that tells somebody the failure was in how they spoke. Matched
 // against the message a client actually receives, not against a constant, so
 // a reworded string is checked rather than trusted.
-var blameWords = regexp.MustCompile(`(?i)articulat|plainer|clearly|more clearly|say it differently|speak (up|clearly)|your (words|wording)`)
+var blameWords = regexp.MustCompile(`(?i)articulat|plainer|clearly|say it differently|speak (up|clearly)|your (words|wording)`)
 
 func TestARefusalDoesNotBlameTheAthleteForHowTheySpoke(t *testing.T) {
 	h := NewDraftHandler(&fakeDrafter{err: ErrDraftRefused}, &memDraftUsage{})
@@ -64,22 +64,50 @@ func TestARefusalPromisesNothingItCannotKeep(t *testing.T) {
 	}
 }
 
-// Every failure a client can meet here, held to the same bar.
+// Every failure a client can meet on this route, held to the same bar — and
+// that means the ones the drafter never sees as well.
 //
-// A per-arm test would pass while a new arm shipped with the old wording — the
+// A per-arm test would pass while a new arm shipped with the old wording: the
 // message that started this was one branch of a switch nobody was checking.
+// Reviewed and widened for the same reason — the first version covered the
+// three drafter sentinels while its comment claimed everything, so a blaming
+// 400 or 429 would have shipped under a test asserting it could not.
 func TestNoDraftFailureBlamesTheAthlete(t *testing.T) {
+	exhausted := func() DraftQuota { return NewDraftQuota(DailyReflectionDrafts, nil) }
+
 	for _, tc := range []struct {
-		name string
-		err  error
+		name    string
+		handler func() *DraftHandler
+		body    string
 	}{
-		{"refused", ErrDraftRefused},
-		{"answered but unusable", ErrDraftUnavailable},
-		{"provider never answered", ErrDraftUnreachable},
+		{"refused", func() *DraftHandler {
+			return NewDraftHandler(&fakeDrafter{err: ErrDraftRefused}, &memDraftUsage{})
+		}, aDictation},
+		{"answered but unusable", func() *DraftHandler {
+			return NewDraftHandler(&fakeDrafter{err: ErrDraftUnavailable}, &memDraftUsage{})
+		}, aDictation},
+		{"provider never answered", func() *DraftHandler {
+			return NewDraftHandler(&fakeDrafter{err: ErrDraftUnreachable}, &memDraftUsage{})
+		}, aDictation},
+		{"nothing was said", func() *DraftHandler {
+			return NewDraftHandler(&fakeDrafter{out: goodDraft()}, &memDraftUsage{})
+		}, `{"dictation":"   "}`},
+		{"far too much was said", func() *DraftHandler {
+			return NewDraftHandler(&fakeDrafter{out: goodDraft()}, &memDraftUsage{})
+		}, `{"dictation":"` + strings.Repeat("a", MaxDictationRunes+1) + `"}`},
+		{"the allowance is gone", func() *DraftHandler {
+			return NewDraftHandler(&fakeDrafter{out: goodDraft()}, &memDraftUsage{quotaFn: exhausted})
+		}, aDictation},
+		{"the deploy has no provider", func() *DraftHandler {
+			return NewDraftHandler(nil, &memDraftUsage{})
+		}, aDictation},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := NewDraftHandler(&fakeDrafter{err: tc.err}, &memDraftUsage{})
-			msg := decodeDraftError(t, callDraft(t, h, aDictation).Body.Bytes()).Error.Message
+			w := callDraft(t, tc.handler(), tc.body)
+			if w.Code < 400 {
+				t.Fatalf("status %d is not a failure — this row is not exercising an error path", w.Code)
+			}
+			msg := decodeDraftError(t, w.Body.Bytes()).Error.Message
 			if msg == "" {
 				t.Fatal("empty message")
 			}

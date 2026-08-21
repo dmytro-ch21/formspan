@@ -38049,6 +38049,52 @@ free-attempt bound, the message mapping, the screen's raw-error path, and the
 retry indicator. The backend one was checked by putting the *old* sentence back:
 it names it.
 
+### What review changed
+
+Three findings, none blocking, all of them the same shape — a comment claiming
+more than the code did:
+
+- **`draftErrorMessage` fell through to `err.message` for any status it had no
+  branch for.** Its own doc said *two* statuses deliberately keep the server's
+  sentence (429's reset, 400's limit); the code meant every unmatched one, which
+  quietly re-opened the door the function exists to close for 403, 409 and
+  whatever the backend adds next. Restricted to the two, with a neutral line
+  otherwise.
+- **The retry line was visual-only.** `accessibilityLiveRegion` is Android-only
+  — `sign-in.tsx` and `forgot-password.tsx` already pair it with
+  `announceForAccessibility` — so a screen-reader user got no signal that the
+  app was still working, which is the entire reason the line exists. The
+  rendered text and the announcement now come from one constant, and a test
+  asserts they are the same string. **It survived the first mutation pass with
+  nothing red**, which is the only reason it was found at all.
+- **The OpenAPI edit had invented an absolute.** It said a retrying client "can
+  never spend past the allowance". `reflect_quota.go` records that the gate is
+  advisory under concurrency — simultaneous requests overshoot by the in-flight
+  count — so that is true of a sequential retry and not in general. Scoped.
+  Correcting one unchecked absolute with another would have been a good joke and
+  a bad contract.
+
+The blame table was widened at the same time: it covered the three drafter
+sentinels while its comment claimed every failure, so a blaming 400 or 429 could
+have shipped under a test asserting it could not. Seven rows now, each guarded
+by a `w.Code < 400` check so a row that stops exercising an error path fails
+rather than passes.
+
+**One residual, named rather than hidden.** `RequestDroppedError` is classed
+free and gets three attempts, and a connection that dies *after* the handler has
+entered the provider call is billed by the same mechanism as the timeout. So the
+"one extra draft per tap" bound has a corner where it is three. It needs the
+network to die mid-response specifically, `llm.go` already documents accepting
+that ambiguity in the same direction, and the alternative — treating every
+dropped request as billed — would stop retrying the brief interruption this
+ticket is about.
+
+**Left for a follow-up.** `/nutrition/estimate` and `/exercises/identify`
+describe their own 422s as deterministic, on the same temperature-less platform,
+so they are probably wrong for the same reason. Not corrected here: the evidence
+is from this route, and generalising an anecdote is how the original claim got
+in.
+
 **One collateral finding.** Adding a single state update to the dictate screen
 turned an unrelated picker test red. It was asserting the technique options
 **synchronously after** a `waitFor` on the prompt — the draft and the library
