@@ -80,6 +80,17 @@ def check_path_pattern(pattern: str, repo_root: Path, where: str, errors: list[s
     if not prefix:
         errors.append(f"{where}: pattern {pattern!r} has no literal prefix to check")
         return
+    # Exactly two pattern forms exist: a literal path, or `<dir>/**`. The Go
+    # engine's PathMatches implements only those two and treats ANY glob as
+    # "everything under the prefix" — so a pattern like `apps/mobile/*.json`
+    # would silently gate far more than it says. Rejecting other forms here is
+    # what turns that doc comment into a checked property. Found in review.
+    if pattern != prefix and pattern != prefix + "/**":
+        errors.append(
+            f"{where}: {pattern!r} — patterns must be a literal path or '<dir>/**'; "
+            "any other glob is read as the whole prefix by the engine"
+        )
+        return
     if not (repo_root / prefix).exists():
         # A gated path that does not exist gates nothing — the typo'd-glob hole.
         errors.append(f"{where}: {pattern!r} — {prefix!r} does not exist in the repo")
@@ -350,6 +361,9 @@ def self_test() -> list[str]:
             ("policy.json gates a path that does not exist",
              lambda: mutate_json(agent / "policy.json",
                                  lambda d: d["human_gate"]["paths"].append("backend/no-such-dir/**"))),
+            ("policy.json uses a glob form the engine cannot read",
+             lambda: mutate_json(agent / "policy.json",
+                                 lambda d: d["human_gate"]["paths"].append("backend/migrations/0000*.sql"))),
             ("risk-rules.json flips raise_only",
              lambda: mutate_json(agent / "risk-rules.json",
                                  lambda d: d.__setitem__("raise_only", False))),
@@ -400,7 +414,7 @@ def main() -> int:
             print(f"  {e}", file=sys.stderr)
         return 1
 
-    print("agent policy ok — 4 files valid, self-test caught all 11 mutations")
+    print("agent policy ok — 4 files valid, self-test caught all 12 mutations")
     return 0
 
 

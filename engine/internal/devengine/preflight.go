@@ -1,7 +1,6 @@
 package devengine
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -76,10 +75,17 @@ func ExplicitRisk(body string) string {
 }
 
 // Preflight decides whether the engine would take this ticket, and what it
-// would load. Every refusal is a Reason phrased as the human action that
-// unblocks it — a Blocked ticket that does not say what unblocks it is one
-// nobody unblocks.
+// would load, with no dispatch-time environment — the shadow-mode form.
+// (Shadow mode dispatches nothing, so it has no base to be stale and no diff
+// to classify by path; an assignee stands in for a lease until N139.)
 func Preflight(item Item, cfg Config, now time.Time, engineID string) Decision {
+	return PreflightEnv(item, cfg, Env{}, now, engineID)
+}
+
+// PreflightEnv runs every named rule (see Rules) and classifies risk. Every
+// rule runs — a ticket failing three ways names all three — and every refusal
+// is phrased as the human action that unblocks it.
+func PreflightEnv(item Item, cfg Config, env Env, now time.Time, engineID string) Decision {
 	d := Decision{
 		Time:   now.UTC(),
 		Issue:  item.IssueNumber,
@@ -88,24 +94,15 @@ func Preflight(item Item, cfg Config, now time.Time, engineID string) Decision {
 		Engine: engineID,
 	}
 
-	if item.IsDraft {
-		d.Reasons = append(d.Reasons,
-			"draft project item, not an issue — convert it to an issue with acceptance criteria")
-	}
-	if cfg.Policy.RequireAcceptanceCriteria && !item.IsDraft && !HasAcceptanceCriteria(item.Body) {
-		d.Reasons = append(d.Reasons,
-			"no acceptance criteria — add an '## Acceptance criteria' section with at least one checkbox (a ticket with zero criteria would pass the done-gate vacuously)")
-	}
-	if len(item.Assignees) > 0 {
-		// Shadow mode has no lease table yet (N139); an assignee is the
-		// human claim convention, and the engine never contests a claim.
-		d.Reasons = append(d.Reasons, fmt.Sprintf(
-			"already claimed by %s — the engine does not contest a claim; unassign to hand it over",
-			strings.Join(item.Assignees, ", ")))
+	for _, rule := range Rules() {
+		if reason := rule.Check(item, cfg, env); reason != "" {
+			d.Reasons = append(d.Reasons, reason)
+		}
 	}
 
-	d.Risk = ClassifyRisk(ExplicitRisk(item.Body), item.Labels, cfg.RiskRules)
-	d.HumanGated = labelsIntersect(item.Labels, cfg.Policy.HumanGate.Labels)
+	d.Risk = ClassifyRisk(ExplicitRisk(item.Body), item.Labels, env.TouchedPaths, cfg.RiskRules)
+	d.HumanGated = labelsIntersect(item.Labels, cfg.Policy.HumanGate.Labels) ||
+		pathsIntersect(env.TouchedPaths, cfg.Policy.HumanGate.Paths)
 	d.Context = PlanContext(item.Body, cfg.ContextMap)
 	d.WouldDispatch = len(d.Reasons) == 0
 	return d
