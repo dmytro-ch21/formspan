@@ -38901,6 +38901,181 @@ the animation on every cold start for somebody who asked not to see it.
 
 
 
+## 2026-08-21 — Custom trackers: creatine, and anything else the athlete names (N78)
+
+`POST /v1/trackers` with `preset: ""` was already the whole backend story — N76
+built the model so that N78 would write no new table — so this ticket is almost
+entirely the authoring UI, and it is on the phone. Four screens under
+`app/trackers/`: `index` (manage and reorder), `new` (create), `[id]` (edit and
+stop), `archived` (restore, and the only place anything is destroyed). One
+shared `TrackerForm`, because two copies of a nine-field form is two places for
+the colour picker to fall out of step with the palette — the #392 shape.
+
+What is new on the server is the *lifecycle* and one column.
+
+### The count noun is authored now, and a bigger lookup table was never the fix
+
+N76 derived the word for one tap from the unit and recorded the failure in the
+same comment that implemented it: 30 g of fibre in 5 g steps read **"6 doses"**,
+because `g` mapped to `dose`.
+
+The obvious repair is more rows in the mapping, and it cannot work. **The noun
+belongs to the substance and the unit does not carry it** — 5 g of creatine is a
+dose, 5 g of fibre is a serving, 30 g of protein is a scoop, and all three are
+`g`. No function of `{ml, g, mg, cup, dose, count}` separates them, because the
+distinguishing fact was never in the input. So migration `000074` adds
+`count_noun`, the athlete says it, and N76's table survives as `suggestedNoun`
+— the prefill in the create form, which is what it always really was. It is
+consulted at authoring time, where a wrong guess is one edit away from right,
+and never at render time, where a wrong guess is a card that lies. Backfilled on
+both sides (SQL, and local schema v22) so no existing water card silently loses
+its "cups" on deploy.
+
+### Archiving stopped being a one-way door
+
+N76 shipped the control showing as **unavailable** and said exactly why: *"a
+tracker with no way back is a trap, and the 'archived' list it needs is N78's
+screen."* That screen exists now, and with it `GET /v1/trackers?archived=true`,
+`POST /v1/trackers/{id}/restore`, and a genuinely destructive
+`DELETE /v1/trackers/{id}?purge=true`.
+
+The `purge` literal is read **exactly**. `?purge=1`, `?purge=TRUE` and
+`?purge=false` all archive, and the test that covers it uses those vectors
+rather than a happy path — `Query().Has`, `strconv.ParseBool` and a
+case-insensitive compare are each a reasonable thing to write and each one loses
+somebody's history. The safe outcome is the default; the destructive one has to
+be spelled out, in the URL, where a log can see it.
+
+A **provisioned** row (water) can be stopped but not destroyed. Not because
+water is privileged — it is the opposite: the `(user_id, preset)` index entry is
+what makes provisioning idempotent, so deleting the row deletes the record that
+provisioning happened and the next `GET /v1/trackers` hands it straight back.
+The destroy would appear to work and silently undo itself, which is worse than
+refusing it.
+
+### A stated cap, and a collapse, and they are different answers
+
+`MaxLiveTrackers = 8`, enforced **inside the insert statement** rather than as a
+round trip before it, on `Create` and on `Restore` — forgetting the second is
+the obvious hole, since archiving eight and restoring them one by one walks
+straight past the first. It never refuses an idempotent retry: a create that
+adds no row is answered with the athlete's existing tracker, because a 409 there
+classifies as permanent in the outbox and a lost response would become a
+dropped tracker.
+
+The count-then-insert is not serialisable and that is written down as a decision
+rather than left as an oversight — two devices at the same instant can land a
+ninth row, which costs one card too many and corrupts nothing.
+
+Separately, **Today draws three and collapses the rest**, because Today is a
+decision surface and eight tracker cards would push the session, the readiness
+and the week below the fold. Food draws all of them: Food is where trackers
+live. Which three is the athlete's choice, which is why reorder is in the same
+ticket — a cap plus a collapse without a reorder is the app choosing which of
+your trackers matter. Reorder is **up/down buttons, not drag**: VoiceOver cannot
+perform a drag, and a reorderable list behind a gesture no screen reader can
+produce is a list a blind athlete cannot reorder, on the screen that decides
+what appears on their Today.
+
+### The palette: five, and six was a coincidence rather than a design
+
+The picker had to be a fixed set — `validate_palette.mjs` measures contrast on
+two grounds, ink-on-fill, and CIEDE2000 separation from the app's categorical
+blue and from every other tracker colour, under normal vision plus three CVD
+simulations, and **none of that can run on a phone while somebody drags a colour
+wheel**. #406 had already measured the obvious water-cyan at ΔE 8.0 under
+tritanopia: a colour that looks excellent and is unreadable for a real fraction
+of the people this app is for.
+
+Searched over an sRGB grid under every constraint at once:
+
+- **Six is the ceiling**, and the best seventh sits at ΔE 13.9.
+- **Six has no margin**: the best feasible six measured **ΔE 15.12** against a
+  floor of 15, with two of its four hue families having pools of 2 and 4
+  admissible grid points. Clearing a gate by 0.12 is not a design.
+- **Five clears at ΔE 16.58**, with every pair but one at 20.3 or better.
+
+So five: `water`, `coffee`, `mint`, `amber`, `violet`. `mint` is pale because
+six deeper mints were measured and all of them collide with the water teal —
+neighbours on the hue circle, so the separation has to come from lightness,
+exactly as it did for water against `info`. The keys stay as provenance and the
+picker labels them Teal, Clay, Mint, Amber, Violet, because renaming a key means
+rewriting stored rows.
+
+**Monochrome drops the pairwise claim**, and that is the second place
+`validate_palette.mjs` admits a guarantee is weaker in mono rather than merely
+different. It is arithmetic: 4.5:1 on `surface` puts the achromatic floor at
+`#757f96`, white is the ceiling, and the band spans ΔE 34 — four gaps of 15 do
+not fit in 34, and the best spacing for five values is 6.58. Dropped rather than
+fudged with a lowered threshold, because a threshold nobody can state a reason
+for is how a gate stops meaning anything. What is still asserted: all three
+contrast floors per grey, an adjacent-step minimum, and ΔE 15 between the
+extremes so mono cannot collapse to one flat grey. Safe because a tracker card
+carries its **name and its icon** — the fill is redundant encoding, never the
+only channel. The coloured set keeps the pairwise check at 15.
+
+### F22's open question, answered here because N78 could not avoid it
+
+#516 found that the seeded water preset ships `render_style: 'glyphs'` while the
+fixture covering the glyph-vs-bar decision used `'auto'` — so the assertion
+passed against a record no athlete has, and the old
+`if (t.render_style !== 'auto') return t.render_style;` early return meant a
+fifteen-glass day drew fifteen identical glyphs. Green, covered, and covering
+something that does not ship.
+
+#516 left the product decision open and said it *"changes N78's override
+semantics"*. N78's criterion is unconditional — *"never render a row so long it
+wraps into an uncountable block"* — so the cap wins: **the override is a
+preference among readable renderings, not a licence.** Two ways a stored style
+can ask for something untrue and both now yield: `glyphs` past the cap becomes a
+bar, and `dose` when one tap is not the whole day becomes the ordinary
+glyphs-or-bar decision, because a single glyph says "taken" and drawing it for a
+thirty-capsule course reports the day done after the first capsule. Everything
+else the athlete picks is honoured.
+
+Nothing migrates `render_style`: nothing distinguishes "seeded default" from
+"athlete chose this", and with the cap enforced at render time that distinction
+stops mattering for correctness. The fixture now says what ships. #516's
+remaining criteria — whether the seed literal should be `auto` at all — are left
+to it.
+
+### Coffee
+
+N77 ships `Default: false` deliberately: an unremovable daily coffee counter
+handed to somebody who has just quit is not a neutral thing for a nutrition app
+to do. That made it unreachable until an athlete could turn it on, so
+`GET /v1/tracker-presets` and `POST /v1/tracker-presets/{presetKey}` exist here.
+The key is looked up in the **compiled** catalogue and every field comes from
+the literal, which is what lets that route mint an id in the reserved `t_`
+namespace that `POST /v1/trackers` refuses — the namespace guard is about a
+client *choosing* an id, and here nobody does. `AddPreset` restores rather than
+duplicating, because the unique index absorbs a second insert and a plain
+provision would leave the athlete tapping "Coffee" and watching nothing happen.
+
+A separate top-level path rather than `/v1/trackers/presets/{presetKey}`, and
+not for taste: that pattern and `/v1/trackers/{trackerID}/restore` overlap on
+`/v1/trackers/presets/restore` with neither more specific, which Go's ServeMux
+**panics** on at registration — the whole API failing to boot over a route
+nobody would call. Measured with a throwaway mux rather than reasoned about.
+
+### Evidence
+
+Forty-five guards mutation-tested, each with vectors chosen to separate a
+correct implementation from a plausible wrong one. Four rows of the battery
+initially proved nothing and the scripts said so rather than reporting a pass: a
+mutation that produced a compile error, a pattern that never matched, two guards
+that survived because no test put the code in the state where the right and
+wrong answers differ, and one where `'' || 'cup'` is `'cup'` in SQLite so the
+mutation was semantically a no-op. Those are fixed apparatus, not fixed
+findings — and the two surviving guards produced two new tests: the cap must
+report on live rows when an id is taken, and the archived list needs a live
+tracker in the fixture or "every row of mine" and "every archived row of mine"
+are the same list.
+
+**Not verified on a device.** The palette numbers are measured, the behaviour is
+tested, and nobody has looked at five swatches on a real screen or completed a
+dose with VoiceOver. That is the outstanding half.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

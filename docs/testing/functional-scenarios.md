@@ -11454,6 +11454,142 @@ to obtain a coffee card. Written now so the list exists on the day there is.
   to be the food-log one.
 - **A deployment with no food-log module at all**: nothing is offered.
 
+
+## Custom trackers — authoring one on the phone (N78)
+
+Backend `internal/modules/tracker` (`/v1/trackers`, `/v1/tracker-presets`),
+mobile `app/trackers/{index,new,[id],archived}.tsx`, `components/TrackerForm.tsx`,
+`components/TrackerList.tsx`.
+
+**The through-line: an athlete who never opens the web app must be able to run
+this whole feature.** There is no web counterpart, so every scenario below is a
+phone scenario.
+
+### Happy path
+
+- Create `Creatine · 5 g · once daily` on the phone. It appears on Today with a
+  **single dose glyph**, no further setup — that is the feature, not a
+  follow-up.
+- Tap it: it completes and reads as taken. Tap again: it un-completes.
+- Create a **30-capsule** tracker. It renders a bar with the number, never
+  thirty glyphs.
+- Create a tracker with water's shape (`ml`, 250, 2000, glyphs, "cup"). It
+  behaves identically to water — the proof the presets are not privileged.
+- Edit an existing tracker's name, icon, colour, unit, noun, increment, target
+  and shape. Each survives a reopen.
+- Reorder with the up/down buttons; Today's first three change to match.
+- Turn a preset on from the create screen; it appears on Today. Turning on one
+  already archived RESTORES it, with its history, rather than doing nothing.
+
+### Edge cases & errors
+
+- **The ninth tracker is refused**, and the message says to stop one first.
+  Stopping one makes room. Archived trackers do not count against the cap.
+- **Restoring past the cap is refused too** — otherwise archiving eight and
+  restoring them one at a time walks straight past the limit.
+- A create RETRIED at the cap (lost response, outbox retry) returns the existing
+  tracker, never the cap error. A 409 there classifies as permanent and the
+  device would drop a tracker the server already has.
+- Blank name, zero/negative increment, and a non-numeric target are each
+  rejected with copy naming the field.
+- Leaving the target blank gives a count with no ceiling; the card shows no
+  "N to go" line.
+- A noun longer than 24 characters, one containing a control character, and one
+  with a leading or trailing space are refused by the server. The client trims
+  before sending, so a trailing space never reaches it.
+
+### Archiving vs deleting
+
+- **Stop** a tracker: it leaves Today and Food, appears under Stopped trackers,
+  and every entry it recorded survives. Restore it and the entries are still
+  there.
+- **Delete** requires a HOLD, and the confirmation names what goes — the tracker
+  *and* every entry logged for it. Afterwards the entries are gone.
+- The two are never adjacent: stopping is on the tracker's own screen, deleting
+  only on the Stopped screen.
+- A tracker VOLA provisions (water) can be stopped but **not deleted**, and the
+  row says why rather than offering a control that would silently undo itself on
+  the next list.
+
+### Offline
+
+- Airplane mode: create a tracker, complete a dose, edit a target, stop a
+  tracker, restore one, delete one. All stick locally. Reconnect: each syncs
+  **once**, and the tracker list afterwards matches the phone.
+- A destroy made offline survives a restart: the row is a tombstone, not a local
+  delete, so the intent is not lost when the push fails.
+- Turning on a PRESET offline is the one thing that cannot work — its id is
+  derived server-side. The section is absent rather than offering a dead button,
+  and the error names the asymmetry.
+
+### Today's collapse
+
+- With five trackers, Today draws three plus one row saying how many are hidden
+  and how many of those still have something to log. Tapping expands in place.
+- With exactly three, there is no row. (`>` versus `>=`: the wrong one hides a
+  card behind "0 more".)
+- A tracker with no target never counts as outstanding — it can never be
+  finished, so it would make the row permanently urgent and therefore useless.
+- Food shows all of them, with no collapse.
+
+### Accessibility
+
+- Complete a dose with VoiceOver without looking: the label names the tracker —
+  `Creatine, dose 1 of 1, empty`, hint "Double tap to add it".
+- The colour swatches are a `radiogroup` of `radio`s, so the chosen one
+  announces as **selected**. A screen-reader user cannot see which colour is
+  picked by any other means.
+- The reorder buttons announce their DESTINATION — "Move Creatine up, to
+  position 2" — not "up". They are buttons rather than a drag precisely because
+  VoiceOver cannot perform a drag.
+- The card's icon is hidden from the accessibility tree: the name is the next
+  element, and "water droplet, Water" reads as a stutter.
+
+### Auth & security
+
+- Every `/v1/trackers` and `/v1/tracker-presets` route 401s without a token.
+- `POST /v1/tracker-presets/{key}` accepts only a key in the server's compiled
+  catalogue, and refuses a DEFAULT preset. An unknown key 404s and reaches no
+  write. **This is the one route that mints an id in the reserved `t_`
+  namespace**, so what stops it being a way around `POST /v1/trackers`'s
+  namespace guard is that no client-supplied field reaches the row.
+- Restore, destroy and the archived list are owner-scoped; another athlete's
+  tracker 404s or is silently untouched, never confirmed to exist.
+
+### Regression traps
+
+- **Only the exact literal `?purge=true` destroys.** `?purge=1`, `?purge=TRUE`,
+  `?purge=false`, `?purge=`, and a bare `?purge` must all ARCHIVE.
+  `Query().Has`, `strconv.ParseBool` and a case-insensitive compare are each a
+  plausible implementation and each one loses somebody's history. Same for
+  `?archived=true` on the list.
+- **`cacheArchivedTrackers` must not sweep.** `cacheTrackers` archives
+  everything the response did not contain, which is correct for the LIVE list
+  and catastrophic against a response that deliberately contains only archived
+  rows — it would archive the athlete's entire Today from opening a read-only
+  screen.
+- **The push order is load-bearing.** A destroy takes precedence over every
+  other pending change on the row; a restore goes BEFORE the patch (a PATCH does
+  not un-archive anything); an archive goes AFTER it; and a tracker the server
+  has never seen must be CREATED before it can be archived, or the DELETE 404s
+  and classifies as permanent.
+- **The count noun is read, never derived.** A fallback to the unit's
+  suggestion re-creates the exact bug the column exists to end: 30 g of fibre
+  reading "6 doses". The suggestion belongs to the create form only.
+- **The countability cap outranks a stored `render_style`.** The seeded water
+  preset ships `glyphs`, so an early return on an explicit style draws fifteen
+  glyphs for a fifteen-glass day. A stored `dose` on a tracker whose target is
+  not one likewise reports the day done after one tap. Test fixtures must match
+  the record that SHIPS — the mismatch was the actual bug in F22 (#516); the
+  render behaviour was the symptom.
+- **Adding a tracker colour means bumping the expected count in
+  `validate_palette.mjs`.** That count is what forces the measurement. The gate
+  currently rejects, verified by mutation: the vivid water-cyan (ΔE 8.0 under
+  tritanopia), a sixth colour added without updating the count, a mint deep
+  enough to collide with water, and a monochrome set collapsed to one grey.
+- **`MAX_LIVE_TRACKERS` is written down twice** — Go and TypeScript — and
+  `trackerCap.test.ts` reads the Go source rather than restating the number.
+
 ## Weight trend — the card and the full page (N56)
 
 `components/TrendCard` + `WeightTrendCard` (top of Goals), `app/goals/trend.tsx`
