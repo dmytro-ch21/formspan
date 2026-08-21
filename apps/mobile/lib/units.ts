@@ -98,6 +98,57 @@ export function formatWeight(kg: number | null | undefined, u: UnitSystem): stri
 }
 
 /**
+ * A rate of change — "−0.7kg per week", "+1.5lb per week".
+ *
+ * A rate scales linearly, so this is `formatWeight` on the magnitude with the
+ * direction stated separately. The **sign is the whole point**: a phase's rate
+ * arrives signed from the server and the difference between losing and gaining
+ * three quarters of a kilogram a week is the difference between two training
+ * blocks. Rendering the magnitude alone is a real bug, not a cosmetic one.
+ *
+ * Three details, each of which was a difference between the two platforms
+ * before this existed:
+ *
+ *  - **A true minus sign (U+2212), not a hyphen.** Web already used one; mobile
+ *    printed the ASCII hyphen the server sent. At small sizes a hyphen beside a
+ *    tabular figure reads as a dash rather than as arithmetic.
+ *  - **Zero is unsigned.** "−0kg" is not a direction, and a rate of zero means
+ *    the weight is being held — which is a state the caller usually wants to
+ *    say in words instead. The threshold is half of imperial's own display
+ *    precision, so a rate that rounds to nothing cannot render as a signed
+ *    quantity that rounds to nothing.
+ *  - **A space before the unit is NOT added here**, because `formatWeight` does
+ *    not add one. Two spellings of one unit is exactly the drift this module
+ *    exists to prevent, so the period ("per week") is the caller's to append.
+ *
+ * This lives here rather than in a screen because both platforms render it, and
+ * a private copy in one of them is how they came to disagree in the first
+ * place: web had `signedKg` inside `Derivation.tsx` and mobile had no sign at
+ * all.
+ *
+ * **Mobile is the only caller so far, and web's private copies still exist.**
+ * N106 added this and wired the mobile screen to it; it deliberately did not
+ * migrate `apps/web`, which is a different screen and a different ticket. So
+ * the two platforms are still capable of disagreeing, and on one case they
+ * actually do: web's `signedKg` calls anything under **0.005 kg** zero, while
+ * this calls anything under **≈0.0227 kg** zero (half of imperial's 0.1 lb
+ * step). A rate between those two renders `+0.01kg` on web and `0kg` here.
+ * Known, narrow, and out of scope — recorded so the next person deletes web's
+ * copies against this behaviour rather than assuming they already match.
+ */
+export function formatWeightRate(
+  kgPerWeek: number | null | undefined,
+  u: UnitSystem,
+): string {
+  if (kgPerWeek == null) return '—';
+  // Half of imperial's 0.1 lb display step, expressed in kg, so "rounds to
+  // zero" means the same thing in both systems rather than in kilograms only.
+  const negligible = 0.05 / LB_PER_KG;
+  if (Math.abs(kgPerWeek) < negligible) return formatWeight(0, u);
+  return `${kgPerWeek > 0 ? '+' : '−'}${formatWeight(Math.abs(kgPerWeek), u)}`;
+}
+
+/**
  * Cumulative load — "volume" in the UI — which lives at a different order of
  * magnitude than a single set.
  *

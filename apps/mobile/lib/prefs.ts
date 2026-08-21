@@ -342,3 +342,22 @@ export async function adoptLegacyOwedFlags(userID: string): Promise<void> {
     }
   }
 }
+
+/**
+ * Which sections of the Goals screen the athlete has folded away.
+ *
+ * A comma-separated list of section ids, device-local and deliberately not
+ * `owed`: this is how this phone is arranged, not a fact about the athlete, and
+ * there is no server field for it.
+ *
+ * **It exists because the default cannot be conditional on text size.** The
+ * screen opens with everything expanded, which matches the design reference and
+ * is one viewport at ordinary text sizes. At accessibility sizes the same
+ * content is several viewports (#484 measured the old screen at twelve to
+ * fifteen), and the honest answer there is to let the athlete fold what they do
+ * not need and have it stay folded. Deriving a default from `PixelRatio
+ * .getFontScale()` instead is the trap `workouts.tsx` documents: it is a
+ * `Dimensions` snapshot, a module-scope const freezes it at bundle load, and
+ * iOS does not restart the JS bundle when you change text size and come back.
+ */
+export const PREF_GOALS_COLLAPSED = 'goals_collapsed';

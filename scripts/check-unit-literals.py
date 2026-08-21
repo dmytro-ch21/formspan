@@ -166,11 +166,25 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "Same coefficient as the mobile card above, same deliberate exception.",
     ),
     (
-        "apps/mobile/app/(tabs)/goals.tsx",
+        "apps/mobile/lib/macroModel.ts",
         "kg",
         "g per kg",
         "`protein_g_per_kg` and `fat_g_per_kg` — the mobile mirror of the web "
-        "derivation below, and the same product decision — N111 (#494).",
+        "derivation below, and the same product decision — N111 (#494). It moved "
+        "here from `app/(tabs)/goals.tsx` in N106 (#485), when the four macros "
+        "became one model shared by the tiles, the donut and the legend; the "
+        "exception followed the string rather than being re-argued.",
+    ),
+    (
+        "apps/mobile/app/(tabs)/goals.tsx",
+        "kilogram",
+        "set per kilogram of bodyweight",
+        "The MACROS explanation sheet, explaining the `2.2 g per kg` coefficient "
+        "shown beside it — which is itself allowlisted two entries up. Sports "
+        "nutrition states these in g/kg universally, including in the US, so the "
+        "prose has to name the unit the rule is actually expressed in or it is "
+        "explaining a different number. Same product decision, N111 (#494); this "
+        "entry goes when that one does.",
     ),
     (
         "apps/web/src/app/dashboard/nutrition/targets/Derivation.tsx",

@@ -21,19 +21,42 @@ export function SectionHeader({
   label,
   action,
   onAction,
+  info,
+  trailing,
   testID,
 }: {
   label: string;
   /** The link's words, e.g. "All". Omit for a plain label. */
   action?: string;
   onAction?: () => void;
+  /**
+   * A mark that sits WITH the label rather than opposite it — in practice an
+   * `InfoMark`. It belongs beside the words it qualifies, not in the corner
+   * where the way-out lives, because it is not a way out: tapping it explains
+   * this section instead of leaving it.
+   */
+  info?: React.ReactNode;
+  /**
+   * A static badge at the right — the reference's `g per day` pill, which
+   * states the unit the section is drawn in.
+   *
+   * Deliberately separate from `action`, which is a LINK and renders a chevron.
+   * Passing a non-interactive badge as an action would draw an arrow pointing
+   * nowhere, which is the exact broken promise `action`'s own note forbids.
+   * Ignored when an action is present, so one header cannot claim both corners.
+   */
+  trailing?: React.ReactNode;
   testID?: string;
 }) {
   const accent = useAccent();
 
   return (
     <RNView style={styles.head}>
-      <Text style={styles.label}>{label.toUpperCase()}</Text>
+      <RNView style={styles.labelWrap}>
+        <Text style={styles.label}>{label.toUpperCase()}</Text>
+        {info}
+      </RNView>
+      {!(action && onAction) && trailing}
       {action && onAction && (
         <Pressable
           onPress={onAction}
@@ -59,11 +82,16 @@ const styles = StyleSheet.create({
     gap: 12,
     minHeight: 20,
   },
+  // `flexShrink` on the wrapper rather than the text: an uppercase tracked
+  // label at accessibility sizes is wider than the row, and without this the
+  // trailing badge is pushed off the right edge instead of the label wrapping.
+  labelWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   label: {
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.2,
     color: vola.textDim,
+    flexShrink: 1,
   },
   action: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   // Colour is set inline, from the chosen accent — this is a way out of the

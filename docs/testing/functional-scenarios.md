@@ -11483,3 +11483,105 @@ the seven callers, and only the first draws a rule:
     screenshot at the header's bottom edge is the cheap objective check: on
     `Goals` at accessibility XXXL the row at 150.0pt is `#1A2230` across 100% of
     the width, between two rows of `#080B12`.
+
+## N106 — the Goals screen, rebuilt to a design reference (`app/(tabs)/goals.tsx`)
+
+A rebuild rather than a restyle: the authority card, the four macro tiles, the
+fourteen-day confidence block, three movement cards, the derivation ladder, the
+macro donut and the primary action. The parts most worth testing are the ones
+where the picture can be *wrong while looking right*.
+
+### Happy path
+
+- With a complete profile and a recent weigh-in the card leads with the figure,
+  the four tiles carry the macros, the ladder adds up to the footer's result,
+  and the donut's four arcs match the legend's four values.
+- `Use this target` saves, the card's number moves to the saved one, and the
+  provenance line changes to `worked out below`.
+- `Edit target` opens the typed-target form seeded with what is in force; saving
+  it changes the provenance to `you typed this one` and the ladder is **not**
+  redescribed as its working.
+- Pressing a movement card recomputes the ladder and the result, and the choice
+  survives leaving the tab and coming back (#434 — the regression to guard).
+- Each of the three ⓘ marks opens a sheet with real prose and closes again.
+- Folding `Calorie breakdown` or `Macros` and leaving the tab returns to them
+  still folded.
+
+### The confidence block — three states that must not collapse
+
+- A day with **no entries** is an outline dot and does not count.
+- A day whose entries total **under half the target that was in force on that
+  day** is a half dot, and **does not count toward `N of 14`**. The trap: a
+  fortnight of breakfasts must not satisfy "10 of the last 14".
+- A day at or above that line is a filled dot and counts.
+- **The yardstick is per-day, not global.** 1,200 kcal against a 2,000 target is
+  a logged day; the same 1,200 against a 3,000 target is partial. A fixed kcal
+  floor passes both and is wrong on one.
+- A day with entries but **no target in force** counts as logged — there is no
+  yardstick, so no shortfall is claimed.
+- A day whose entries total **zero** is partial, not empty: it has rows. A falsy
+  check (`if (!kcal)`) folds it into empty and is the bug to mutate for.
+- The window is exactly 14 days ending today, with no duplicates, across a month
+  boundary and across a leap day.
+
+### Honest empty states — no zero presented as an achievement
+
+- No profile → the card says the target is not worked out yet **in words, not as
+  a giant em dash**, every tile shows `—` rather than `0 g`, and the screen names
+  the missing fields and offers the form that fixes them.
+- Nothing logged → `0 of 14 days logged` with the denominator beside it, and the
+  ring reads `0`. The zero is stated, not hidden and not congratulated.
+- **Nothing trained in 28 days → the `Training` row reads `0 kcal` in plain
+  type**, not `+0 kcal` in the accent, and its hint says nothing was logged. A
+  plus sign and an accent colour on a zero is credit for training that did not
+  happen.
+- No goal weight or no live phase → the feasibility line renders **nothing**.
+  An all-clear there is a claim nobody checked.
+- The live target read **failing** must render differently from there genuinely
+  being none. Both are zero rows; reporting the first as the second tells an
+  athlete who set a target last week to set it again.
+
+### Units (#483)
+
+- Every weight, and the phase's rate, follow the athlete's preference. Switching
+  to imperial changes the resting-rate hint and the rate line to pounds without
+  a reload.
+- The rate carries its **sign** and a true minus sign, and a rate that rounds to
+  nothing renders unsigned rather than as `−0`.
+- Nothing on the screen contains a hardcoded `kg`/`lb`. The two `g per kg`
+  strings are macro coefficients, are on the unit-literal allowlist, and are
+  N111's to change.
+
+### Colour (`pnpm run check:palette`)
+
+- The four macro colours are one set, used by the tiles, the donut and the
+  legend — asserted by there being a single source, not by comparing hexes at
+  three render sites.
+- `check:palette` must **fail** if a macro colour is changed to one that
+  collapses under simulated colour blindness, and must **throw** if a fifth
+  macro is added without registering it. Both are the gate's whole purpose;
+  verify by mutation, not by reading it.
+
+### Accessibility
+
+- The row of dots is one labelled element saying how many and how many are only
+  part-logged, not fourteen unlabelled ones.
+- A movement card that the derivation merely **assumed** reports
+  `selected: false` and says "assumed" in its label; the chosen one reports
+  `selected: true`.
+- Saving announces imperatively — iOS has no live regions, and the button keeps
+  focus, so a rendered receipt alone is silence to VoiceOver. Both the success
+  and the failure paths announce.
+- Every ⓘ is a button with a label naming its section; "info button" three times
+  on one screen tells a screen-reader user nothing.
+
+### Needs a device — none of this is reachable from the suite
+
+- The fourteen dots fit on **one row** at default text size. They wrapped 12 + 2
+  in the first build; jest renders no layout.
+- The ⓘ sheet is **dark**. A `Modal` is not on the app's ground and iOS gives a
+  `pageSheet` the system's white background by default.
+- At accessibility text sizes the ladder's label does **not** shred into three
+  narrow lines beside its value — the value wraps below it instead (#484).
+- The `Edit target` pill does not run past the card's right edge at those sizes.
+- Both unit settings, against the reference.

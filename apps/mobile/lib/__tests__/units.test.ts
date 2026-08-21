@@ -4,6 +4,7 @@ import {
   formatGirth,
   formatHeight,
   formatWeight,
+  formatWeightRate,
   fromDisplayDistance,
   fromDisplayFluid,
   fromDisplayGirth,
@@ -243,5 +244,58 @@ describe('fluid', () => {
       checked += 1;
     }
     expect(checked).toBeGreaterThan(150);
+  });
+});
+
+/**
+ * A rate of change — the phase line on Goals, and the one figure on that screen
+ * whose SIGN is the whole message.
+ *
+ * Added with `formatWeightRate` in N106 (#485). Before it existed web had a
+ * private `signedKg` inside `Derivation.tsx` and mobile printed the server's
+ * raw value with no sign handling at all, so one rate rendered two ways
+ * depending on which app was open — the exact drift this module is generated
+ * rather than duplicated to prevent.
+ */
+describe('formatWeightRate', () => {
+  it('converts, because a rate scales linearly', () => {
+    // −0.7 kg a week is −1.5 lb a week. An imperial athlete reading kilograms
+    // on the screen that shows them their own arithmetic is the bug #483 closed.
+    expect(formatWeightRate(-0.7, 'metric')).toBe('−0.7kg');
+    expect(formatWeightRate(-0.7, 'imperial')).toBe('−1.5lb');
+  });
+
+  it('states the direction with a true minus sign, not a hyphen', () => {
+    // U+2212. At small sizes beside a tabular figure an ASCII hyphen reads as a
+    // dash rather than as arithmetic, and web already used the real character.
+    expect(formatWeightRate(-0.5, 'metric')).toBe('−0.5kg');
+    expect(formatWeightRate(-0.5, 'metric').charCodeAt(0)).toBe(0x2212);
+  });
+
+  it('signs a gain, so a bulk cannot be read as a cut', () => {
+    expect(formatWeightRate(0.35, 'metric')).toBe('+0.35kg');
+    expect(formatWeightRate(0.35, 'imperial')).toBe('+0.8lb');
+  });
+
+  it('leaves zero unsigned — it is a state, not a direction', () => {
+    expect(formatWeightRate(0, 'metric')).toBe('0kg');
+    expect(formatWeightRate(0, 'imperial')).toBe('0lb');
+  });
+
+  it('does not render a signed quantity that rounds to nothing', () => {
+    // The trap this guard exists for: 0.02 kg is 0.044 lb, which displays as
+    // 0.0 — so without the threshold an imperial athlete sees `+0lb`, a sign
+    // attached to no quantity. The threshold is expressed in the IMPERIAL step
+    // so "rounds to zero" means the same thing in both systems.
+    expect(formatWeightRate(0.02, 'imperial')).toBe('0lb');
+    expect(formatWeightRate(-0.02, 'imperial')).toBe('0lb');
+    // Just above it, the sign comes back.
+    expect(formatWeightRate(0.05, 'imperial')).toBe('+0.1lb');
+  });
+
+  it('reports an absent rate as absent, not as zero', () => {
+    // A phase with no rate and a phase holding weight are different facts.
+    expect(formatWeightRate(null, 'metric')).toBe('—');
+    expect(formatWeightRate(undefined, 'imperial')).toBe('—');
   });
 });

@@ -332,7 +332,7 @@ describe('the saved receipt', () => {
  */
 async function openManualForm() {
   await waitFor(() => expect(screen.queryByText('Working it out…')).toBeNull());
-  fireEvent.press(await screen.findByTestId('manual-toggle'));
+  fireEvent.press(await screen.findByTestId('target-edit'));
   return screen.findByTestId('manual-form');
 }
 
@@ -448,7 +448,7 @@ describe('typing your own target', () => {
     // target from scratch, which is not something anybody does standing up.
     mockList.mockResolvedValue([target({ kcal: 2700 })]);
     render(<GoalsScreen />);
-    await screen.findByTestId('live-target');
+    await screen.findByTestId('target-card');
     await openManualForm();
 
     expect(screen.getByTestId('manual-kcal').props.value).toBe('2700');
@@ -459,7 +459,7 @@ describe('typing your own target', () => {
     // 2,700 — which reads as the save not having worked.
     mockList.mockResolvedValue([target({ kcal: 2700 })]);
     render(<GoalsScreen />);
-    await screen.findByTestId('live-target');
+    await screen.findByTestId('target-card');
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
     await openManualForm();
 
@@ -479,7 +479,7 @@ describe('typing your own target', () => {
     } as unknown as Awaited<ReturnType<typeof suggestedTarget>>);
     render(<GoalsScreen />);
 
-    expect(await screen.findByTestId('manual-toggle')).toBeTruthy();
+    expect(await screen.findByTestId('target-edit')).toBeTruthy();
     await openManualForm();
     expect(screen.getByTestId('manual-kcal')).toBeTruthy();
   });
@@ -490,7 +490,7 @@ describe('what you are eating to', () => {
     mockList.mockResolvedValue([target({ source: 'manual', kcal: 2000 })]);
     render(<GoalsScreen />);
 
-    expect(await screen.findByTestId('live-target')).toBeTruthy();
+    expect(await screen.findByTestId('target-card')).toBeTruthy();
     expect(screen.getByText(/you typed this one/)).toBeTruthy();
   });
 
@@ -500,15 +500,15 @@ describe('what you are eating to', () => {
     mockList.mockRejectedValue(new Error('offline'));
     render(<GoalsScreen />);
 
-    expect(await screen.findByTestId('live-target-unknown')).toBeTruthy();
-    expect(screen.queryByTestId('live-target-none')).toBeNull();
+    expect(await screen.findByTestId('target-provenance-unknown')).toBeTruthy();
+    expect(screen.queryByTestId('target-provenance-none')).toBeNull();
   });
 
   it('says none when the read succeeded and there genuinely is none', async () => {
     mockList.mockResolvedValue([]);
     render(<GoalsScreen />);
 
-    expect(await screen.findByTestId('live-target-none')).toBeTruthy();
+    expect(await screen.findByTestId('target-provenance-none')).toBeTruthy();
   });
 });
 
@@ -1023,5 +1023,64 @@ describe('with nutrition turned off', () => {
 
     expect(screen.queryByTestId('goals-disabled')).toBeNull();
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+  });
+});
+
+/**
+ * The promise the screen makes in its own words.
+ *
+ * "Your target is not saved until you tap that" is copy that makes a claim
+ * about behaviour, and N106's acceptance criteria say it has to be **true**.
+ * Nothing asserted it before: every existing test that touches `saveTarget`
+ * does so after pressing something, so a screen that quietly persisted its
+ * suggestion on arrival would have passed all of them.
+ */
+describe('nothing is written before the button', () => {
+  it('derives, renders the whole ladder, and writes no target', async () => {
+    render(<GoalsScreen />);
+
+    // Wait for the derivation to have actually landed, or this asserts on a
+    // screen that has not done anything yet — the vacuous-pass shape.
+    await waitFor(() => expect(screen.queryByText('Working it out…')).toBeNull());
+    expect(await screen.findByTestId('target-accept')).toBeTruthy();
+    expect(screen.getByTestId('target-ladder')).toBeTruthy();
+
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it('still writes nothing after moving a movement card, which recomputes it', async () => {
+    // The one action that changes the number without accepting it. A screen
+    // that saved on recompute would look identical.
+    render(<GoalsScreen />);
+    await waitFor(() => expect(screen.queryByText('Working it out…')).toBeNull());
+
+    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(2));
+
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it('writes exactly once, and only when the button is pressed', async () => {
+    render(<GoalsScreen />);
+    fireEvent.press(await screen.findByTestId('target-accept'));
+
+    await waitFor(() => expect(mockSave).toHaveBeenCalledTimes(1));
+    // `derived`, with the workings attached — the frozen arithmetic that lets
+    // this page still answer the question months from now.
+    expect(mockSave.mock.calls[0][2].source).toBe('derived');
+    expect(mockSave.mock.calls[0][2].basis).toBeTruthy();
+  });
+
+  it('says the promise in words that are true of the TARGET, not of the screen', async () => {
+    // "Nothing is saved until you tap that" — the reference's line — is false
+    // here: a movement card writes the level to the device and to the account,
+    // and the screen says so itself a few rows up. Two lines contradicting each
+    // other about whether anything saved is worse than a longer sentence.
+    render(<GoalsScreen />);
+    // `findByText` rather than reading `props.children`: a JSX text node with no
+    // interpolation in it is a STRING, not an array, so the first version of
+    // this threw `join is not a function` — an assertion that fails for a
+    // reason that has nothing to do with the copy it is checking.
+    expect(await screen.findByText(/Your target is not saved until you tap that/)).toBeTruthy();
   });
 });
