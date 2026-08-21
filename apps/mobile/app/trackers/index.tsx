@@ -8,7 +8,12 @@ import { Icon } from '@/components/ui/Icon';
 import { trackerFill, vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { request as requestSync } from '@/lib/sync';
-import { localTrackers, reorderTrackers, MAX_LIVE_TRACKERS } from '@/lib/trackers';
+import {
+  localTrackers,
+  reorderTrackers,
+  MAX_LIVE_TRACKERS,
+  type TrackerView,
+} from '@/lib/trackers';
 import { unitNoun, pluralise, targetCount, type Tracker } from '@/lib/trackerModel';
 
 /**
@@ -41,20 +46,35 @@ export default function TrackersScreen() {
   const router = useRouter();
   const accent = useAccent();
   const { userId } = useAuth();
-  const [trackers, setTrackers] = useState<Tracker[] | null>(null);
+  /**
+   * `null` while the first read is in flight, then the SAME union `localTrackers`
+   * returns — never flattened to an array.
+   *
+   * **This screen collapsed `unknown` into `[]` and that was a real defect.**
+   * `unknown` means this device has never successfully listed; `ready: []` means
+   * it asked and the answer is none. Rendering the first as "Nothing is being
+   * tracked yet." tells an athlete with a water card and a month of history that
+   * they track nothing — and this screen has no fetch and no pull-to-refresh, so
+   * nothing on it could ever correct the claim. `TrackerList` gets this right
+   * and says why; flattening it here undid that one screen over.
+   */
+  const [view, setView] = useState<TrackerView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const trackers = view?.state === 'ready' ? view.trackers : null;
 
   const load = useCallback(async () => {
     if (!userId) return;
-    const view = await localTrackers(userId);
-    setTrackers(view.state === 'ready' ? view.trackers : []);
+    setView(await localTrackers(userId));
   }, [userId]);
 
   useFocusEffect(
     useCallback(() => {
       let live = true;
       void load().catch(() => {
-        if (live) setTrackers([]);
+        // A failed READ is not an empty list either. Leave the view unknown and
+        // say so, rather than asserting something this device cannot support.
+        if (live) setError('Your trackers could not be read from this device.');
       });
       return () => {
         live = false;
@@ -63,14 +83,18 @@ export default function TrackersScreen() {
   );
 
   async function move(index: number, by: -1 | 1) {
-    if (!userId || !trackers) return;
+    // `busy` serialises the arrows. `reorderTrackers` is transactional now, so
+    // the DATA is safe either way; this stops the optimistic array being rebuilt
+    // from a stale render between a double-tap's two writes.
+    if (!userId || !trackers || busy) return;
     const to = index + by;
     if (to < 0 || to >= trackers.length) return;
+    setBusy(true);
     // Reordered in the local array first and rendered from that, so the row
     // moves under the thumb rather than after a round trip to SQLite.
     const next = [...trackers];
     [next[index], next[to]] = [next[to], next[index]];
-    setTrackers(next);
+    setView({ state: 'ready', trackers: next });
     try {
       await reorderTrackers(
         userId,
@@ -82,6 +106,8 @@ export default function TrackersScreen() {
       // Re-read rather than trusting the optimistic array: if the write failed
       // the screen must show what is actually stored, not what was attempted.
       await load().catch(() => {});
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -90,6 +116,9 @@ export default function TrackersScreen() {
       <Stack.Screen options={{ title: 'Trackers' }} />
       <ScrollView contentContainerStyle={styles.container}>
         {trackers === null ? (
+          // Covers BOTH "still reading" and "this device has never listed", and
+          // deliberately says the same neutral thing for each: neither is a
+          // claim about how many trackers the athlete has.
           <Text style={styles.note} testID="trackers-manage-loading">
             Loading…
           </Text>
@@ -127,7 +156,11 @@ export default function TrackersScreen() {
                   style={[styles.arrow, i === 0 && styles.arrowOff]}
                   accessibilityRole="button"
                   accessibilityState={{ disabled: i === 0 }}
-                  accessibilityLabel={`Move ${t.name} up, to position ${i}`}
+                  accessibilityLabel={
+                    i === 0
+                      ? `${t.name} is already first`
+                      : `Move ${t.name} up, to position ${i}`
+                  }
                   testID={`tracker-up-${t.id}`}
                 >
                   <Text style={styles.arrowText}>↑</Text>

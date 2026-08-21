@@ -26,7 +26,7 @@ import { randomUUID } from 'expo-crypto';
 import type { SQLiteBindValue } from 'expo-sqlite';
 
 import { dayString } from './calendar';
-import { isOffline, isPermanentRejection } from './apiError';
+import { ApiError, isOffline, isPermanentRejection } from './apiError';
 import { getDb, withTransaction } from './db';
 import type { RenderStyle, Tracker, TrackerEntry, TrackerUnit } from './trackerModel';
 import * as api from './trackersApi';
@@ -64,6 +64,7 @@ type TrackerRow = {
   render_style: string;
   sort_order: number;
   count_noun: string;
+  provisioned: number;
   archived_at: string | null;
   restore_pending: number;
   destroyed_at: string | null;
@@ -85,6 +86,7 @@ function toTracker(r: TrackerRow): Tracker {
     render_style: r.render_style as RenderStyle,
     sort_order: r.sort_order,
     count_noun: r.count_noun,
+    provisioned: r.provisioned === 1,
   };
 }
 
@@ -196,6 +198,26 @@ export async function cacheArchivedTrackers(
   await withTransaction(db, () => upsertTrackers(db, userId, trackers));
 }
 
+/**
+ * Store ONE tracker the server just handed back, without the live-list sweep.
+ *
+ * For a response that is a single row rather than a list — turning a preset on,
+ * which is the one write in this feature that cannot happen offline because the
+ * server derives the id.
+ *
+ * **Without this, `POST /tracker-presets/{key}` lands nowhere the athlete can
+ * see.** `requestSync` only PUSHES; there is no pull. So the athlete taps
+ * "Coffee", the server creates it, the screen navigates back to a list that
+ * reads SQLite — and coffee is not in it, until some other screen happens to
+ * refetch. It also would not count against the local cap until then. That is
+ * the acceptance criterion "a created tracker appears on Today without further
+ * setup" failing on the first screen they actually look at.
+ */
+export async function cacheTracker(userId: string, tracker: api.WireTracker): Promise<void> {
+  const db = await getDb();
+  await withTransaction(db, () => upsertTrackers(db, userId, [tracker]));
+}
+
 async function upsertTrackers(
   db: Awaited<ReturnType<typeof getDb>>,
   userId: string,
@@ -205,19 +227,20 @@ async function upsertTrackers(
     await db.runAsync(
       `INSERT INTO daily_trackers (
          id, user_id, preset, name, icon, color_key, unit, increment, target,
-         render_style, sort_order, count_noun, archived_at, updated_at, dirty, remote)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+         render_style, sort_order, count_noun, provisioned, archived_at, updated_at,
+         dirty, remote)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
        ON CONFLICT(id) DO UPDATE SET
          preset = excluded.preset, name = excluded.name, icon = excluded.icon,
          color_key = excluded.color_key, unit = excluded.unit,
          increment = excluded.increment, target = excluded.target,
          render_style = excluded.render_style, sort_order = excluded.sort_order,
-         count_noun = excluded.count_noun,
+         count_noun = excluded.count_noun, provisioned = excluded.provisioned,
          archived_at = excluded.archived_at, remote = 1
        WHERE daily_trackers.dirty = 0`,
       t.id, userId, t.preset, t.name, t.icon, t.color_key, t.unit, t.increment,
-      t.target, t.render_style, t.sort_order, t.count_noun ?? '', t.archived_at,
-      t.updated_at,
+      t.target, t.render_style, t.sort_order, t.count_noun ?? '',
+      t.provisioned ? 1 : 0, t.archived_at, t.updated_at,
     );
   }
 }
@@ -446,9 +469,20 @@ export async function destroyTrackerLocally(userId: string, id: string): Promise
  * renumber.
  */
 export async function reorderTrackers(userId: string, orderedIds: string[]): Promise<void> {
-  for (let i = 0; i < orderedIds.length; i++) {
-    await updateTrackerLocally(userId, orderedIds[i], { sort_order: (i + 1) * 10 });
-  }
+  const db = await getDb();
+  // **ONE transaction, not N statements.** Two things go wrong without it, and
+  // the second is the one an athlete meets: a throw part-way through (a row
+  // swept to archived by a concurrent pull, say) leaves a HALF-renumbered order
+  // already marked dirty and pushed as-is — an order nobody chose; and a rapid
+  // double-tap on the arrows starts two of these whose per-row writes
+  // interleave, so what is stored is a mix of two arrays while the screen shows
+  // the second. The screen also serialises its own calls, but a lock on the
+  // data is the one that holds when a second screen appears.
+  await withTransaction(db, async () => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await updateTrackerLocally(userId, orderedIds[i], { sort_order: (i + 1) * 10 });
+    }
+  });
 }
 
 /**
@@ -670,7 +704,22 @@ async function push(userId: string, getToken: TokenGetter): Promise<TrackerSyncR
         // `remote === 0` means the server never saw it, so there is nothing to
         // destroy — skipping the request is not an optimisation, it is the
         // difference between 204 and a 404 that classifies as permanent.
-        if (d.remote === 1) await api.destroyTracker(getToken, d.id);
+        if (d.remote === 1) {
+          try {
+            await api.destroyTracker(getToken, d.id);
+          } catch (err) {
+            // **A 404 means it is already gone, which is success.** The server
+            // answers 204 to a repeat destroy, so this is the other device
+            // having destroyed it first — or a row that never existed. Falling
+            // through to the generic handler would mark the row `dirty = 0` and
+            // leave the tombstone in place forever: invisible on every screen,
+            // never retried, and unrecoverable because `cacheTrackers`' upsert
+            // does not clear `destroyed_at`. That is the one lifecycle state
+            // with no exit, so it is closed here rather than left as a shape
+            // nobody would find again.
+            if (!(err instanceof ApiError && err.status === 404)) throw err;
+          }
+        }
         // Hard-deleted only once the server confirms. Until then the tombstone
         // IS the record that a destroy is owed — same rule as a removed tap.
         await db.runAsync(

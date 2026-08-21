@@ -97,7 +97,10 @@ export default function TrackerSettingsScreen() {
 
   async function save() {
     if (!tracker || !userId || !form) return;
-    const read = readDraft(form, units);
+    // `tracker` is passed so a field the athlete did not touch is written back
+    // byte-for-byte. Without it, an imperial athlete pressing Save with no edits
+    // round-trips 250 ml through 8.5 fl oz and stores 251.37.
+    const read = readDraft(form, units, tracker);
     if ('error' in read) {
       setError(read.error);
       return;

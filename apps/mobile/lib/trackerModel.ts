@@ -41,6 +41,17 @@ export type Tracker = {
    * card reads "4 of 8" with no noun. See `unitNoun`.
    */
   count_noun: string;
+  /**
+   * Whether VOLA would re-create this tracker if it were deleted.
+   *
+   * **Computed by the SERVER, never inferred here.** The phone knows a
+   * tracker's `preset` key but not which keys provisioning covers, so
+   * `archived.tsx` gated its delete control on `preset !== ''` and told the
+   * athlete a preset "would come back" — true of water, false of coffee, which
+   * ships off by default and is opted into. One boolean from the authority
+   * beats two copies of a rule that can disagree.
+   */
+  provisioned: boolean;
 };
 
 export type TrackerEntry = {
@@ -372,7 +383,21 @@ export function glyphLabel(
   index: number,
   total: number,
   state: GlyphState,
+  /** True only when the card drew ONE large glyph — `resolveRenderStyle` said `dose`. */
+  single = false,
 ): string {
+  // A SINGLE DOSE is a different sentence, and the ticket writes it out:
+  // `creatine, 1 of 1, taken`. "Filled" is the right word for a cup in a row of
+  // eight and the wrong one for a supplement you either took or did not — and
+  // "dose 1 of 1" is a noun doing no work when there is only one of them.
+  //
+  // Keyed on the RENDER STYLE, not on `total === 1`. Those differ, and the
+  // suite caught it: a count-with-no-ceiling on zero taps also draws one glyph,
+  // and "Cold showers, 1 of 1, not taken" is both wrong and quietly implies a
+  // target that tracker does not have.
+  if (single) {
+    return `${t.name}, 1 of 1, ${state === 'empty' ? 'not taken' : 'taken'}`;
+  }
   const noun = unitNoun(t) || 'item';
   // "filled, past your target" rather than a separate word, so a VoiceOver user
   // hears the same vocabulary the visible foot line uses — and so an over-target
@@ -381,8 +406,14 @@ export function glyphLabel(
   return `${t.name}, ${noun} ${index + 1} of ${total}, ${said}`;
 }
 
-/** What a double-tap on that glyph will do, spoken as a verb. */
-export function glyphHint(state: GlyphState): string {
+/**
+ * What a double-tap on that glyph will do, spoken as a verb.
+ *
+ * `single` so the verb matches the noun the label just used — you do not "add"
+ * a dose you either took or did not.
+ */
+export function glyphHint(state: GlyphState, single = false): string {
+  if (single) return state === 'empty' ? 'Double tap to mark it taken' : 'Double tap to undo it';
   return state === 'empty' ? 'Double tap to add it' : 'Double tap to remove it';
 }
 

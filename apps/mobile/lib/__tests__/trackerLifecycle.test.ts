@@ -1,7 +1,9 @@
 import type { Tracker } from '../trackerModel';
+import { ApiError } from '../apiError';
 import {
   archiveTrackerLocally,
   cacheArchivedTrackers,
+  cacheTracker,
   cacheTrackers,
   createTrackerLocally,
   destroyTrackerLocally,
@@ -285,6 +287,71 @@ describe('the push', () => {
     await syncTrackers(USER, token);
     const patched = JSON.parse(mockApi.mock.calls[0][2].body as string);
     expect(patched.count_noun).toBe('scoop');
+  });
+});
+
+describe('turning a preset on', () => {
+  it("caches the server's row, so the next screen can see it", async () => {
+    // `requestSync` only PUSHES -- there is no pull -- and every tracker screen
+    // reads SQLite. Without caching the response the athlete taps "Coffee",
+    // lands back on the list they came from, and it is not there.
+    const row = wire({ id: 't_coffee', preset: 'coffee', name: 'Coffee', provisioned: false });
+    await cacheTracker(USER, row as never);
+
+    const view = await localTrackers(USER);
+    expect(view.state === 'ready' && view.trackers.map((t) => t.name)).toEqual(['Coffee']);
+    // And it is NOT owed to the server -- it came from there.
+    expect(await defRow('t_coffee')).toMatchObject({ dirty: 0, remote: 1 });
+  });
+
+  it('carries whether VOLA would re-create it, rather than guessing from the key', async () => {
+    // The phone knows a preset KEY but not which keys provisioning covers, so
+    // `preset !== ''` told an athlete that coffee "would come back" -- false,
+    // and it made coffee undeletable for no reason. The server sends the answer.
+    await cacheTracker(USER, wire({ id: 't_w', preset: 'water', provisioned: true }) as never);
+    await cacheTracker(
+      USER,
+      wire({ id: 't_c', preset: 'coffee', name: 'Coffee', provisioned: false }) as never,
+    );
+    const view = await localTrackers(USER);
+    const byId = Object.fromEntries(
+      (view.state === 'ready' ? view.trackers : []).map((t) => [t.id, t.provisioned]),
+    );
+    expect(byId).toEqual({ t_w: true, t_c: false });
+  });
+});
+
+describe('a destroy the server says is already gone', () => {
+  it('removes the tombstone rather than stranding it forever', async () => {
+    await cacheTrackers(USER, [wire()] as never);
+    await destroyTrackerLocally(USER, 't_water');
+    // 404: another device destroyed it first. The server answers 204 to a
+    // repeat destroy, so this is success wearing an error's clothes.
+    mockApi.mockRejectedValueOnce(new ApiError('no such tracker', 'not_found', 404));
+
+    await syncTrackers(USER, token);
+
+    // Without this the generic handler marks the row `dirty = 0` and leaves the
+    // tombstone in place: invisible on every screen, never retried, and beyond
+    // the reach of `cacheTrackers` (whose upsert does not clear `destroyed_at`).
+    // That was the one lifecycle state with no exit.
+    expect(await defRow('t_water')).toBeNull();
+  });
+
+  it('keeps owing the destroy when the server merely fails', async () => {
+    // The discriminating case: a 500 is NOT "already gone". The tombstone has
+    // to survive, or a transient failure silently becomes a tracker that stays
+    // on the server forever while this device has forgotten it.
+    await cacheTrackers(USER, [wire()] as never);
+    await destroyTrackerLocally(USER, 't_water');
+    mockApi.mockRejectedValueOnce(new ApiError('boom', 'internal', 500));
+
+    await syncTrackers(USER, token);
+
+    const row = await defRow('t_water');
+    expect(row).not.toBeNull();
+    expect(row?.destroyed_at).not.toBeNull();
+    expect(row?.dirty).toBe(1);
   });
 });
 

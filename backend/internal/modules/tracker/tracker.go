@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -96,12 +97,29 @@ const MaxLiveTrackers = 8
 // this is still "we will not do that, and here is why".
 var ErrTooMany = errors.New("tracker: too many live trackers")
 
-// The longest an athlete-authored count noun may be.
+// The longest an athlete-authored count noun may be, **in runes**.
 //
 // "capsule", "scoop", "serving", "sachet" — the words that actually appear here
 // are short. Twenty-four leaves room for a compound ("half serving") without
 // letting the value line become a paragraph.
+//
+// **Runes, because three layers were counting three different things.** This
+// was `len(v)`, which is BYTES; the column's CHECK is `length(count_noun) <= 24`,
+// which Postgres counts in CHARACTERS; and the contract says `maxLength: 24`,
+// which OpenAPI defines as code points. Go being strictest meant nothing could
+// ever violate the CHECK — so the mismatch was invisible from the database's
+// side — but a client sending nine emoji (36 bytes, 9 characters) got a 400 the
+// contract does not predict. A rune count is code points, so all three now
+// agree on the same number.
 const maxCountNoun = 24
+
+// MaxArchived is how many stopped trackers one request returns.
+//
+// `MaxLiveTrackers` bounds the live set and nothing bounded this one:
+// create-and-archive is a cycle an athlete can repeat indefinitely. Generous
+// enough that nobody reaches it by using the feature, and finite so a single
+// request can never be asked for every row an athlete has ever stopped.
+const maxArchivedTrackers = 200
 
 // Tracker is one athlete's daily tracker.
 //
@@ -140,6 +158,20 @@ type Tracker struct {
 	// it, so the athlete says it, and the client offers the old table as the
 	// SUGGESTION it always really was.
 	CountNoun string `json:"count_noun"`
+
+	// Whether provisioning would re-create this row if it were deleted.
+	//
+	// **Derived, never stored** — it is `preset` looked up in the compiled
+	// catalogue and asked whether it is a default. It is on the wire because the
+	// CLIENT needs it and cannot compute it: the phone knows a tracker's preset
+	// key but not which keys `DefaultsFor` covers, and guessing produces exactly
+	// the divergence this field was added to end. `archived.tsx` gated its
+	// delete control on `preset !== ''` and told the athlete a preset "would
+	// come back" — true of water, false of coffee, and the phone had no way to
+	// tell them apart.
+	//
+	// One boolean computed by the authority beats two copies of a rule.
+	Provisioned bool `json:"provisioned"`
 
 	ArchivedAt *time.Time `json:"archived_at"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -330,8 +362,10 @@ func (p Patch) Validate() error {
 // Three separate rules, because they fail for three different reasons and a
 // caller deserves to know which:
 //
-//   - **Length.** It is pluralised and concatenated into "4 of 8 <noun>s" on a
-//     narrow card and into a VoiceOver label; a long one truncates the number.
+//   - **Length, counted in RUNES.** It is pluralised and concatenated into
+//     "4 of 8 <noun>s" on a narrow card and into a VoiceOver label; a long one
+//     truncates the number. Runes rather than bytes so this agrees with the
+//     column's CHECK and with the contract — see `maxCountNoun`.
 //   - **Control characters.** The noun is interpolated into the accessibility
 //     label VoiceOver speaks and into the value line. A newline there does not
 //     render as anything an athlete can see, so a tracker could be authored
@@ -341,7 +375,7 @@ func (p Patch) Validate() error {
 //     value receiver and cannot mutate — a validator that silently repaired
 //     its input would be lying about what got stored.
 func validateCountNoun(v string) error {
-	if len(v) > maxCountNoun {
+	if utf8.RuneCountInString(v) > maxCountNoun {
 		return fmt.Errorf("%w: count_noun is too long", ErrInvalidInput)
 	}
 	if strings.ContainsFunc(v, unicode.IsControl) {
@@ -406,6 +440,18 @@ func (n New) Validate() error {
 		return fmt.Errorf("%w: that id prefix is reserved", ErrInvalidInput)
 	}
 	return n.validateFields()
+}
+
+// provisioningWouldRecreate reports whether deleting this row would be undone
+// by the next `GET /v1/trackers`.
+//
+// True only for a preset in the DEFAULT set. A `Default: false` preset (coffee)
+// is opted into, is not in `DefaultsFor`, and therefore stays deleted — and a
+// preset key no longer in the catalogue at all stays deleted too, which is the
+// same answer for the same reason.
+func provisioningWouldRecreate(preset string) bool {
+	p, ok := PresetByKey(preset)
+	return ok && p.Default
 }
 
 // validateFields is everything about a New EXCEPT who is allowed to mint its id.

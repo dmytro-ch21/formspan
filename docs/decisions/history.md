@@ -38946,12 +38946,31 @@ case-insensitive compare are each a reasonable thing to write and each one loses
 somebody's history. The safe outcome is the default; the destructive one has to
 be spelled out, in the URL, where a log can see it.
 
-A **provisioned** row (water) can be stopped but not destroyed. Not because
-water is privileged — it is the opposite: the `(user_id, preset)` index entry is
-what makes provisioning idempotent, so deleting the row deletes the record that
-provisioning happened and the next `GET /v1/trackers` hands it straight back.
-The destroy would appear to work and silently undo itself, which is worse than
-refusing it.
+A row **provisioning would re-create** can be stopped but not destroyed: the
+`(user_id, preset)` index entry is what makes provisioning idempotent, so
+deleting it deletes the record that provisioning happened and the next
+`GET /v1/trackers` hands it straight back. The destroy would appear to work and
+silently undo itself, which is worse than refusing it.
+
+**That rule first shipped as `preset != ""`, and review was right to reject
+it.** The mechanical argument is only true of a `Default: true` preset, because
+only those are in `DefaultsFor`. Coffee (N77) ships `Default: false` precisely
+so it is not — so for coffee neither half of the refusal held: it was not set up
+automatically and it would not come back. The rule was doing nothing except
+privileging preset rows, which is the thing this ticket exists to forbid. And
+the consequence was not cosmetic: an athlete who tried coffee for a month and
+quit could archive that history and never delete it, while an identical tracker
+they named themselves could be purged. **Same data, same athlete, different
+deletability, decided by whether we happened to ship a literal for it** — which
+is a privacy answer nobody would defend if asked directly.
+
+It is scoped to `Default: true` now, and the fact moved onto the wire as
+`provisioned`. It has to: the phone knows a tracker's preset key but not which
+keys provisioning covers, and `archived.tsx` had duplicated the bad inference —
+gating its delete control on `preset !== ''` and telling the athlete a preset
+"would come back". One boolean computed by the authority beats two copies of a
+rule that can disagree, and the reflection guard in `patch_test.go` immediately
+demanded a reason for the new field being immutable, which is the guard working.
 
 ### A stated cap, and a collapse, and they are different answers
 
@@ -39058,9 +39077,51 @@ not for taste: that pattern and `/v1/trackers/{trackerID}/restore` overlap on
 **panics** on at registration — the whole API failing to boot over a route
 nobody would call. Measured with a throwaway mux rather than reasoned about.
 
+### What review changed, which is most of what is worth reading here
+
+The three reviewers and the coordinator's ruling changed real behaviour, not
+comments. Recorded because the *pattern* is the finding: every one of these was
+a correct-looking mechanism whose problem only appears when you ask what it does
+to a person.
+
+- **The Destroy rule** (above), which is the coordinator's ruling and the
+  sharpest instance.
+- **Turning a preset on landed nowhere the athlete could see it.** `requestSync`
+  only pushes — there is no pull — so tapping "Coffee" POSTed successfully, the
+  screen navigated back to a list that reads SQLite, and coffee was not in it.
+  Green, correct, and the acceptance criterion ("appears without further setup")
+  failing on the first screen anybody looks at. The response row is cached now.
+- **The manage screen rendered `unknown` as "Nothing is being tracked yet."** It
+  flattened the union `localTrackers` returns — the exact distinction
+  `TrackerList` carries a comment about — so a fresh install opened offline told
+  an athlete with a water card and a month of history that they track nothing,
+  on a screen with no fetch and no pull-to-refresh that could ever correct it.
+- **Save with no edits was not a no-op for an imperial athlete.** `toDisplayFluid`
+  rounds to 0.1 fl oz, so 250 ml → "8.5" → 251.37, and the target recomputed as
+  count × increment turned 2000 into 2010.98. An untouched field is now written
+  back byte-for-byte.
+- **A destroy the server refused permanently stranded an invisible tombstone**
+  — the one lifecycle state with no exit. A 404 (another device got there first)
+  now completes the delete; anything else keeps owing it.
+- **Three layers counted length three different ways**: Go in bytes, Postgres in
+  characters, OpenAPI in code points. Nothing could violate the CHECK, so it was
+  invisible from the database's side, and nine emoji got a 400 the contract does
+  not predict.
+- **The collapse was a one-shot.** Today never unmounts, so one tap on "2 more
+  trackers" defeated it for every day after, tomorrow included.
+- **`ListArchived` was unbounded** — the cap bounds live rows, and
+  create-archive is a cycle that grows the archived set without limit.
+
+And one finding was **kept rather than fixed**: `Destroy` scopes by owner twice.
+The single-clause mutation survives the suite, which is exactly how a real guard
+gets deleted for "reading as dead code" — but tracker ids are client-chosen, so
+between the lookup and the DELETE a racing retry can free the id and another
+athlete can mint one on it. The comment now says that, and the battery mutates
+both clauses together.
+
 ### Evidence
 
-Forty-five guards mutation-tested, each with vectors chosen to separate a
+Fifty-six guards mutation-tested, each with vectors chosen to separate a
 correct implementation from a plausible wrong one. Four rows of the battery
 initially proved nothing and the scripts said so rather than reporting a pass: a
 mutation that produced a compile error, a pattern that never matched, two guards

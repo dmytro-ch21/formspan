@@ -52,7 +52,7 @@ const TODAY = '2026-08-20';
 const water: Tracker = {
   id: 't_water', preset: 'water', name: 'Water', icon: '💧', color_key: 'water',
   unit: 'ml', increment: 250, target: 2000, render_style: 'auto', sort_order: 10,
-  count_noun: 'cup',
+  count_noun: 'cup', provisioned: true,
 };
 
 const wire = (over: Partial<Record<string, unknown>> = {}) => ({

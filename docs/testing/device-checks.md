@@ -635,6 +635,58 @@ watch for a search box still showing a query it has already cleared, and for
 
 ---
 
+### D26 — A custom tracker, with VoiceOver, one-handed
+
+**Do:** Food → **Manage trackers** → **Track something new**. Create
+`Creatine`, unit `g`, one tap adds `5`, target `1`. Turn VoiceOver on, curtain
+the screen, and complete the dose from Today without looking. Then swipe to the
+colour swatches on the edit screen.
+
+**Should:** The dose glyph announces `Creatine, 1 of 1, not taken`, with the
+hint `Double tap to mark it taken` — the tracker is NAMED, so you know what a
+double-tap will change before you make it. After the tap it reads `taken`. Each
+colour swatch announces a colour name (`Teal`, `Mint`, …) and the chosen one
+announces **selected**. The reorder arrows announce a destination —
+`Move Creatine up, to position 2` — not "up".
+
+**Failure looks like:** A row of identically-labelled shapes with no position in
+them, which is the trap a labelled-but-indistinguishable row always is. A swatch
+row where nothing says which colour is picked — colour being, by definition, the
+one channel unavailable here. Arrows that say only "up" and "down", leaving you
+unable to tell what moved. Or the emoji icon being announced before the name, so
+every card starts with a stutter (`water droplet, Water`).
+
+**Why no test reaches it:** VoiceOver's announcement ORDER and what it collapses
+into one element are properties of the running accessibility tree, not of the
+props. The suite asserts the strings; only a phone says them.
+
+---
+
+### D27 — The five tracker colours, on a real screen, both palettes
+
+**Do:** Create four or five trackers, one in each colour. Look at Today. Then
+turn the monochrome setting on and look again. Try it once outdoors.
+
+**Should:** Five cards you can tell apart at a glance, each legible against the
+card — and in monochrome, five greys that are all readable even though they are
+no longer all *distinguishable*.
+
+**Failure looks like:** Two fills that read as the same colour; a pale one
+(`mint` is deliberately the palest) washing out in daylight; a fill that
+disappears against `surface`; or the value line — which renders in the tracker's
+own colour — being harder to read than the body text beside it.
+
+**Why no test reaches it:** Every number here is measured and none of them has
+been LOOKED at. `check:palette` proves contrast ratios and CIEDE2000 separation
+under three CVD simulations; it cannot tell you that a colour is ugly, that a
+pale mint vanishes on a sunlit screen, or that two hues a formula separates look
+the same to you. **The monochrome set is the one to look hardest at** — its
+pairwise separation claim was deliberately dropped as arithmetically impossible
+(the achromatic band spans ΔE 34; four gaps of 15 do not fit), so what is
+promised there is contrast and two distinguishable extremes, not five telling
+apart. If they read as one grey soup, that is a finding worth having.
+
+
 ## What is deliberately not here
 
 - **Anything a fixture test already exercises against real SQLite.** The sync,

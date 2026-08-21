@@ -110,9 +110,12 @@ func TestOneFieldSetProducesExactlyOneColumn(t *testing.T) {
 func TestPatchCoversEveryMutableTrackerField(t *testing.T) {
 	// Immutable by design, each for a stated reason:
 	immutable := map[string]string{
-		"ID":         "the identity; changing it is creating a different tracker",
-		"UserID":     "ownership, set from the verified claims and never from a body",
-		"Preset":     "the provisioning key; renaming it would provision a second copy",
+		"ID":     "the identity; changing it is creating a different tracker",
+		"UserID": "ownership, set from the verified claims and never from a body",
+		"Preset": "the provisioning key; renaming it would provision a second copy",
+		"Provisioned": "DERIVED, not stored — the preset key answered against the compiled " +
+			"catalogue. There is no column to patch, and a client that could set it " +
+			"would be telling the server whether its own rows are re-provisioned",
 		"ArchivedAt": "moved by Archive, which is a distinct verb with distinct copy",
 		"CreatedAt":  "a fact about the past",
 		"UpdatedAt":  "maintained by the write path itself",

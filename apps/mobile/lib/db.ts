@@ -433,6 +433,10 @@ const CREATE_DAILY_TRACKERS = `
     -- unit: 5 g of creatine is a dose and 5 g of fibre is a serving, and the
     -- unit cannot tell them apart. See lib/trackerModel.ts.
     count_noun TEXT NOT NULL DEFAULT '',
+    -- Server-computed: would provisioning re-create this row if it were
+    -- deleted? Cached so the archived screen can decide whether to offer a
+    -- delete control with no network. See lib/trackerModel.ts.
+    provisioned INTEGER NOT NULL DEFAULT 0,
     archived_at TEXT,
     -- Set when the athlete un-archived a tracker the SERVER still has archived,
     -- and cleared once the restore is pushed.
@@ -979,6 +983,14 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await addColumnIfMissing(db, 'daily_trackers', 'count_noun', `TEXT NOT NULL DEFAULT ''`);
     await addColumnIfMissing(db, 'daily_trackers', 'restore_pending', 'INTEGER NOT NULL DEFAULT 0');
     await addColumnIfMissing(db, 'daily_trackers', 'destroyed_at', 'TEXT');
+    await addColumnIfMissing(db, 'daily_trackers', 'provisioned', 'INTEGER NOT NULL DEFAULT 0');
+    // Seed it CONSERVATIVELY from what this device already knows: treat any
+    // preset row as re-provisioned until the server says otherwise. That is the
+    // pre-N78 behaviour, so an upgrade never briefly offers to delete somebody's
+    // water; the first pull replaces the guess with the server's answer.
+    await db.execAsync(
+      `UPDATE daily_trackers SET provisioned = 1 WHERE preset <> '' AND provisioned = 0;`,
+    );
     // Backfill the noun EXACTLY as the client used to derive it, so nobody's
     // existing water card loses its "cups" on upgrade. Scoped to rows that have
     // not already been given one by a fetch from a server that has the

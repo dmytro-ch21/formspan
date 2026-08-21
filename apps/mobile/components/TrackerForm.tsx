@@ -127,9 +127,29 @@ export function emptyForm(): TrackerFormState {
   };
 }
 
+/**
+ * How an increment is WRITTEN in the field, given the athlete's unit preference.
+ *
+ * Shared by `formFor` and `readDraft` so the two agree by construction. They did
+ * not, and the drift was visible: `toDisplayFluid` rounds to 0.1 fl oz, so an
+ * imperial athlete opening the edit screen and pressing Save with no edits sent
+ * 250 ml → "8.5" → 251.37 ml, and the target was recomputed as count ×
+ * increment, turning water's 2000 into 2010.98. A no-op save that marks a row
+ * dirty and pushes a patch is the kind of thing that later reads as sync
+ * corruption.
+ */
+function displayIncrement(t: { unit: TrackerUnit; increment: number }, units: UnitSystem): string {
+  return t.unit === 'ml' ? String(toDisplayFluid(t.increment, units)) : String(t.increment);
+}
+
+/** How many taps make up a stored target. `null` when there is no target. */
+function storedCount(t: { target: number | null; increment: number }): number | null {
+  return t.target != null && t.increment > 0 ? Math.ceil(t.target / t.increment) : null;
+}
+
 /** The form, filled from a tracker that already exists. */
 export function formFor(t: Tracker, units: UnitSystem): TrackerFormState {
-  const count = t.target != null && t.increment > 0 ? Math.ceil(t.target / t.increment) : null;
+  const count = storedCount(t);
   return {
     name: t.name,
     icon: t.icon,
@@ -140,8 +160,7 @@ export function formFor(t: Tracker, units: UnitSystem): TrackerFormState {
     // athlete's answer — even an empty one — and changing the unit on an edit
     // screen must not quietly overwrite a word they chose months ago.
     nounTouched: true,
-    incrementText:
-      t.unit === 'ml' ? String(toDisplayFluid(t.increment, units)) : String(t.increment),
+    incrementText: displayIncrement(t, units),
     countText: count == null ? '' : String(count),
     shape: t.render_style,
   };
@@ -155,6 +174,14 @@ export function formFor(t: Tracker, units: UnitSystem): TrackerFormState {
 export function readDraft(
   f: TrackerFormState,
   units: UnitSystem,
+  /**
+   * The tracker being EDITED, when there is one.
+   *
+   * Present so an untouched field can be written back byte-for-byte instead of
+   * round-tripped through the display unit — see `displayIncrement`. Absent on
+   * the create screen, where there is nothing to preserve.
+   */
+  original?: Tracker,
 ): { draft: TrackerDraft } | { error: string } {
   const name = f.name.trim();
   if (!name) return { error: 'Give it a name.' };
@@ -164,7 +191,18 @@ export function readDraft(
   if (!Number.isFinite(typedIncrement) || typedIncrement <= 0) {
     return { error: 'A tap has to add something. Enter a number greater than zero.' };
   }
-  const increment = f.unit === 'ml' ? fromDisplayFluid(typedIncrement, units) : typedIncrement;
+  // UNTOUCHED means unchanged. If the field still reads exactly what `formFor`
+  // put in it, write the stored number back rather than the one that survives a
+  // conversion and a rounding.
+  const untouchedIncrement =
+    original !== undefined &&
+    original.unit === f.unit &&
+    f.incrementText.trim() === displayIncrement(original, units);
+  const increment = untouchedIncrement
+    ? original.increment
+    : f.unit === 'ml'
+      ? fromDisplayFluid(typedIncrement, units)
+      : typedIncrement;
 
   let target: number | null = null;
   const typedCount = f.countText.trim();
@@ -173,7 +211,17 @@ export function readDraft(
     if (!Number.isFinite(count) || count <= 0) {
       return { error: 'Enter how many you are aiming for, or leave it blank for no target.' };
     }
-    target = count * increment;
+    // A target is entered in whole taps. `number-pad` does not stop a paste, and
+    // 2.5 glasses is not a thing an athlete means.
+    if (!Number.isInteger(count)) {
+      return { error: 'Enter a whole number, or leave it blank for no target.' };
+    }
+    // Same rule for the target: unchanged count AND unchanged increment means
+    // the stored target stands. Recomputing it as count × increment would round
+    // any server-authored target that is not a whole multiple — `Math.ceil` in
+    // `formFor` rounds UP to display it, and multiplying back bakes that in.
+    const untouchedCount = original !== undefined && String(storedCount(original) ?? '') === typedCount;
+    target = untouchedIncrement && untouchedCount ? original.target : count * increment;
   }
 
   // Trimmed here rather than rejected, because a trailing space is a typing

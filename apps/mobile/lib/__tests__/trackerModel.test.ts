@@ -43,14 +43,14 @@ import {
 const water: Tracker = {
   id: 't_water', preset: 'water', name: 'Water', icon: '💧', color_key: 'water',
   unit: 'ml', increment: 250, target: 2000, render_style: 'glyphs', sort_order: 10,
-  count_noun: 'cup',
+  count_noun: 'cup', provisioned: true,
 };
 
 /** N77's shape, today, with no coffee tracker anywhere in the app. */
 const coffee: Tracker = {
   id: 't_coffee', preset: 'coffee', name: 'Coffee', icon: '☕', color_key: 'coffee',
   unit: 'cup', increment: 1, target: null, render_style: 'auto', sort_order: 20,
-  count_noun: 'cup',
+  count_noun: 'cup', provisioned: false,
 };
 
 /**
@@ -67,14 +67,14 @@ const ceiling: Tracker = { ...coffee, name: 'Coffee', target: 3 };
 const creatine: Tracker = {
   id: 't_creatine', preset: '', name: 'Creatine', icon: '🥄', color_key: 'water',
   unit: 'g', increment: 5, target: 5, render_style: 'auto', sort_order: 30,
-  count_noun: 'dose',
+  count_noun: 'dose', provisioned: false,
 };
 
 /** N78's other example: the one that must never be a row of glyphs. */
 const capsules: Tracker = {
   id: 't_caps', preset: '', name: 'Capsules', icon: '💊', color_key: 'coffee',
   unit: 'dose', increment: 1, target: 30, render_style: 'auto', sort_order: 40,
-  count_noun: 'capsule',
+  count_noun: 'capsule', provisioned: false,
 };
 
 let seq = 0;
@@ -362,6 +362,33 @@ describe('VoiceOver', () => {
     // first, which is what makes several rows on Today distinguishable by ear.
     expect(glyphLabel(creatine, 0, 1, 'filled')).toContain('Creatine');
     expect(addLabel(water)).toBe('Add a cup of Water');
+  });
+
+  /*
+   * A single dose is its own sentence, and the ticket writes it out:
+   * `creatine, 1 of 1, taken`.
+   *
+   * The vectors are BOTH shapes, because that is what separates "the dose case
+   * is special-cased" from "everything says taken now" — an implementation that
+   * dropped the row wording entirely would pass a test that only checked the
+   * dose.
+   */
+  it('says taken, not filled, when one tap is the whole day', () => {
+    expect(glyphLabel(creatine, 0, 1, true, true)).toBe('Creatine, 1 of 1, taken');
+    expect(glyphLabel(creatine, 0, 1, false, true)).toBe('Creatine, 1 of 1, not taken');
+    // And a tracker that merely HAPPENS to be drawing one glyph is not a dose:
+    // a count with no ceiling on zero taps draws one, and "not taken" would
+    // imply a target it does not have. The suite caught this.
+    const showers: Tracker = { ...coffee, name: 'Cold showers', unit: '', count_noun: '' };
+    expect(glyphLabel(showers, 0, 1, false)).toBe('Cold showers, item 1 of 1, empty');
+    expect(glyphHint(false, true)).toBe('Double tap to mark it taken');
+    expect(glyphHint(true, true)).toBe('Double tap to undo it');
+  });
+
+  it('still counts cups in a row, where position is what a listener needs', () => {
+    expect(glyphLabel(water, 2, 8, true)).toBe('Water, cup 3 of 8, filled');
+    expect(glyphLabel(water, 7, 8, false)).toBe('Water, cup 8 of 8, empty');
+    expect(glyphHint(false)).toBe('Double tap to add it');
   });
 
   it('falls back to a word rather than an empty one for a bare count', () => {

@@ -5220,7 +5220,7 @@ components:
         wire and pounds on the screen.
       required:
         [id, user_id, preset, name, icon, color_key, unit, increment,
-         render_style, sort_order, count_noun, created_at, updated_at]
+         render_style, sort_order, count_noun, provisioned, created_at, updated_at]
       properties:
         id: { type: string }
         user_id: { type: string }
@@ -5276,6 +5276,25 @@ components:
             is what the athlete said. Must not contain control characters or
             start or end with a space — it is pluralised and concatenated into
             the card copy and into the VoiceOver label.
+        provisioned:
+          type: boolean
+          description: >
+            Whether VOLA would re-create this tracker if it were deleted — true
+            only for a preset every athlete is given automatically.
+
+
+            **Derived server-side, and on the wire because a client cannot
+            compute it.** A client knows a tracker's `preset` key but not which
+            keys provisioning covers, and inferring "has a preset key" is wrong
+            the moment a preset ships opt-in: coffee is not provisioned, does
+            not come back, and deletes like any other tracker. A client that
+            guesses will tell an athlete something false about their own data.
+
+
+            The only thing it governs: `DELETE …?purge=true` refuses a
+            provisioned tracker (the delete would silently undo itself on the
+            next list), so a client should offer archiving instead of a delete
+            control that cannot work. It is not a permission and grants nothing.
         archived_at:
           type: string
           format: date-time

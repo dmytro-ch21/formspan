@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
 
 import { TrackerList } from '@/components/TrackerList';
 import type { Tracker, TrackerEntry } from '@/lib/trackerModel';
@@ -28,6 +28,7 @@ const tracker = (id: string, over: Partial<Tracker> = {}): Tracker => ({
   render_style: 'auto',
   sort_order: 10,
   count_noun: 'dose',
+  provisioned: false,
   ...over,
 });
 
@@ -125,4 +126,33 @@ it('says nothing at all when this device has never been told', () => {
   // happened, on the screen whose whole job is the reminder.
   expect(screen.queryByTestId('today-trackers-empty')).toBeNull();
   expect(screen.queryByTestId('today-trackers-more')).toBeNull();
+});
+
+/*
+ * Today NEVER UNMOUNTS — it stays mounted for the life of the process, which is
+ * the same fact `dayAtTap` exists for. So a plain `useState` here is a one-shot:
+ * tap "2 more trackers" once and the collapse is defeated for every day after,
+ * including tomorrow's, and the feature quietly stops existing for anyone who
+ * ever expanded it.
+ *
+ * The vectors are what separate "keyed" from "sticky": expand, re-render with
+ * the SAME key (must stay open — this is not a control that fights you), then
+ * re-render with a NEW one (must collapse). A test that only checked the second
+ * would pass against a component that collapsed on every render.
+ */
+it('stays expanded within a day and collapses when the day changes', () => {
+  const ts = ['a', 'b', 'c', 'd', 'e'].map((id) => tracker(id));
+  const { rerender } = render(
+    <TrackerList day={day(ts)} collapseAfter={3} collapseKey="2026-08-20" {...props} />,
+  );
+  expect(screen.queryByTestId('tracker-card-e')).toBeNull();
+
+  fireEvent.press(screen.getByTestId('today-trackers-more'));
+  expect(screen.getByTestId('tracker-card-e')).toBeTruthy();
+
+  rerender(<TrackerList day={day(ts)} collapseAfter={3} collapseKey="2026-08-20" {...props} />);
+  expect(screen.getByTestId('tracker-card-e')).toBeTruthy();
+
+  rerender(<TrackerList day={day(ts)} collapseAfter={3} collapseKey="2026-08-21" {...props} />);
+  expect(screen.queryByTestId('tracker-card-e')).toBeNull();
 });

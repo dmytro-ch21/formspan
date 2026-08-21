@@ -1721,6 +1721,10 @@ export default function TodayScreen() {
           // the athlete's own choice, which is why reorder is part of the same
           // ticket. Food renders all of them: that is where trackers live.
           collapseAfter={3}
+          // Expanding is a decision about TODAY. Today never unmounts, so
+          // without a key the first tap on "2 more" would leave the list
+          // expanded for every day after it.
+          collapseKey={todayKey}
           testID="today-trackers"
         />
 

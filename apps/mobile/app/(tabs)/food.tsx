@@ -415,7 +415,10 @@ function trimZero(n: number): string {
 const styles = StyleSheet.create({
   // A quiet row, not a button: authoring is the rare gesture here and logging
   // is the common one, so it must not compete with the cards above it.
-  manageTrackers: { paddingVertical: 12, alignItems: 'center' },
+  // 13 + 13 + ~18pt of text is 44 — the minimum this diff holds its other
+  // controls to. At 12 it was ~42, which is the kind of near-miss the glyph
+  // row's own note is about.
+  manageTrackers: { paddingVertical: 13, alignItems: 'center' },
   manageTrackersText: { fontSize: 13, fontWeight: '700', color: vola.textMuted },
   screen: { flex: 1, backgroundColor: vola.bg },
   headerLink: { fontSize: 13, fontWeight: '700' },

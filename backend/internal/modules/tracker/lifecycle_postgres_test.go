@@ -266,6 +266,81 @@ func TestDestroyIsOwnerScopedIdempotentAndRefusesAPreset(t *testing.T) {
 	}
 }
 
+// **Only a preset that provisioning would RE-CREATE is undeletable**, which is
+// a much narrower set than "carries a preset key".
+//
+// This is the vector that separates the rule from the one it replaced. The
+// first version refused `preset != ""` on a mechanical-sounding argument —
+// "provisioning would hand it back" — and that argument is only true of a
+// `Default: true` preset, because only those are in `DefaultsFor`. Coffee (N77)
+// ships `Default: false` precisely so it is not, so for coffee neither half of
+// the refusal was true and the rule was doing nothing but privileging preset
+// rows. The consequence was a privacy answer nobody would defend: an athlete
+// who tried coffee for a month and quit could archive that history and never
+// delete it, while an identical tracker they named themselves could be purged.
+//
+// The synthetic preset is registered on the package's own catalogue for the
+// duration of the test rather than waiting for coffee to merge — the rule is
+// about the `Default` FLAG, and a test that could only run once somebody else's
+// branch landed would be a rule with no coverage today.
+func TestOnlyAPresetProvisioningWouldRecreateIsUndeletable(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+	user := userA + "_deletable"
+
+	original := presets
+	t.Cleanup(func() { presets = original })
+	presets = append(append([]Preset{}, original...), Preset{
+		Key:     "optional_thing",
+		Default: false,
+		Fields: New{
+			Preset: "optional_thing", Name: "Optional", Icon: "☕",
+			ColorKey: "coffee", Unit: "cup", Increment: 1,
+			RenderStyle: RenderAuto, CountNoun: "cup",
+		},
+	})
+	// The catalogue has to actually contain it, or every assertion below passes
+	// through the "unknown key" branch and proves nothing about `Default`.
+	if p, ok := PresetByKey("optional_thing"); !ok || p.Default {
+		t.Fatal("the synthetic preset did not register as a non-default one")
+	}
+
+	optional := presetFields(t, "optional_thing")
+	optional.ID = PresetID(user, "optional_thing")
+	if _, err := repo.AddPreset(ctx, user, optional); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := repo.Destroy(ctx, user, optional.ID); err != nil {
+		t.Fatalf("a preset nobody is given by default was refused deletion: %v.\n"+
+			"Nothing re-provisions it, so the refusal privileges the row for no "+
+			"reason — which is exactly what this ticket forbids.", err)
+	}
+	if _, err := repo.getOwned(ctx, user, optional.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("it survived the destroy: %v", err)
+	}
+
+	// Water, which IS provisioned by default, stays undeletable — and the copy
+	// stays true for it.
+	if err := repo.EnsureDefaults(ctx, user, DefaultsFor(user)); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	err := repo.Destroy(ctx, user, PresetID(user, "water"))
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("water was deletable (%v) — the next list would hand it straight "+
+			"back, so the destroy silently undoes itself", err)
+	}
+}
+
+// presetFields is PresetByKey's payload, with a fatal instead of a bool.
+func presetFields(t *testing.T, key string) New {
+	t.Helper()
+	p, ok := PresetByKey(key)
+	if !ok {
+		t.Fatalf("no preset %q", key)
+	}
+	return p.Fields
+}
+
 // The archived list is its own list: owner-scoped, and disjoint from the live
 // one. A tracker must never be on both.
 func TestArchivedListIsSeparateAndOwnerScoped(t *testing.T) {

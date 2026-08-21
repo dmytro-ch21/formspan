@@ -49,7 +49,6 @@ export default function ArchivedTrackersScreen() {
   const { userId } = useAuth();
   const getToken = useAuthToken();
   const [trackers, setTrackers] = useState<Tracker[] | null>(null);
-  const [presets, setPresets] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -75,7 +74,6 @@ export default function ArchivedTrackersScreen() {
           // that deliberately contains only archived rows would archive the
           // athlete's entire Today.
           await cacheArchivedTrackers(userId, rows);
-          setPresets(Object.fromEntries(rows.map((r) => [r.id, r.preset])));
           if (live) await load();
         })
         .catch(() => {
@@ -127,11 +125,13 @@ export default function ArchivedTrackersScreen() {
           </Text>
         ) : (
           trackers.map((t) => {
-            // A preset row is one VOLA provisions. Read from the SERVER's
-            // answer where we have it and from the cached row otherwise —
-            // `preset` is on both, and this is only deciding whether to offer a
-            // control, never a permission.
-            const provisioned = (presets[t.id] ?? t.preset) !== '';
+            // **The SERVER's answer, cached on the row — not `preset !== ''`.**
+            // That inference was wrong the moment a preset shipped
+            // `Default: false`: coffee is opted into, provisioning does not
+            // cover it, and it deletes like any other tracker. The phone cannot
+            // compute this — it knows the preset key, not which keys
+            // `DefaultsFor` covers — so the server sends it.
+            const provisioned = t.provisioned;
             return (
               <RNView key={t.id} style={styles.card}>
                 <RNView style={styles.head}>
@@ -158,8 +158,8 @@ export default function ArchivedTrackersScreen() {
 
                 {provisioned ? (
                   <Text style={styles.locked} testID={`tracker-undeletable-${t.id}`}>
-                    {`VOLA sets ${t.name} up for you, so it cannot be deleted — it would come `+
-                      `back. Leaving it stopped keeps it off Today.`}
+                    {`VOLA sets ${t.name} up for you automatically, so deleting it would `+
+                      `only bring it back. Leaving it stopped keeps it off Today.`}
                   </Text>
                 ) : (
                   <HoldToConfirm

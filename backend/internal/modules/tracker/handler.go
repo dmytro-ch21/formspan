@@ -44,13 +44,6 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 	return true
 }
 
-// List returns the athlete's trackers, provisioning the defaults first.
-//
-// Provisioning on a GET is a write on a read, which is worth being explicit
-// about rather than hiding: it is idempotent, it is the only moment we know an
-// athlete exists, and the alternative — a "set up my trackers" call the client
-// has to remember to make — is a step that gets skipped and leaves Today empty.
-// It is safe to repeat and safe to race; see EnsureDefaults.
 // The exact query values that switch a request onto its non-default behaviour.
 //
 // Literal `"true"`, not "anything truthy": `?archived=0` and `?purge=false` must
@@ -58,6 +51,13 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 // A missing parameter is the safe answer in both cases.
 const explicitYes = "true"
 
+// List returns the athlete's trackers, provisioning the defaults first.
+//
+// Provisioning on a GET is a write on a read, which is worth being explicit
+// about rather than hiding: it is idempotent, it is the only moment we know an
+// athlete exists, and the alternative — a "set up my trackers" call the client
+// has to remember to make — is a step that gets skipped and leaves Today empty.
+// It is safe to repeat and safe to race; see EnsureDefaults.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFrom(w, r)
 	if !ok {

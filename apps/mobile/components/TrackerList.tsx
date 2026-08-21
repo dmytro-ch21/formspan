@@ -23,6 +23,7 @@ export function TrackerList({
   units,
   unitsReady,
   collapseAfter,
+  collapseKey,
   testID,
 }: {
   day: TrackerDay;
@@ -70,9 +71,24 @@ export function TrackerList({
    * not forgetting the ones you have not.
    */
   collapseAfter?: number;
+  /**
+   * Changing this collapses the list again.
+   *
+   * **Today never unmounts** — it stays mounted for the life of the process,
+   * which is the same fact `dayAtTap` exists for — so a `useState` here is a
+   * ONE-SHOT: tap "2 more trackers" once and the collapse is defeated for
+   * every day after, including tomorrow's. Today passes its own day key, so
+   * expanding is a decision about today rather than a permanent setting.
+   *
+   * Derived during render rather than reset in an effect: an effect that calls
+   * `setState` is a `react-hooks/set-state-in-effect` warning, and the ratchet
+   * has zero headroom.
+   */
+  collapseKey?: string;
   testID?: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const expanded = openFor !== null && openFor === (collapseKey ?? '');
 
   if (day.view.state === 'unknown') {
     // Deliberately says nothing rather than "you have no trackers". This device
@@ -118,7 +134,7 @@ export function TrackerList({
       ))}
       {collapsed ? (
         <Pressable
-          onPress={() => setExpanded(true)}
+          onPress={() => setOpenFor(collapseKey ?? '')}
           style={styles.more}
           accessibilityRole="button"
           accessibilityLabel={moreLabel(hidden.length, outstanding)}

@@ -15,7 +15,7 @@ import { trackerFill, vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { isOffline } from '@/lib/apiError';
 import { request as requestSync } from '@/lib/sync';
-import { createTrackerLocally, MAX_LIVE_TRACKERS } from '@/lib/trackers';
+import { cacheTracker, createTrackerLocally, MAX_LIVE_TRACKERS } from '@/lib/trackers';
 import * as api from '@/lib/trackersApi';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -95,10 +95,16 @@ export default function NewTrackerScreen() {
   }
 
   async function turnOn(preset: api.TrackerPreset) {
-    if (saving) return;
+    if (saving || !userId) return;
     setSaving(true);
     try {
-      await api.addTrackerPreset(getToken, preset.preset);
+      const row = await api.addTrackerPreset(getToken, preset.preset);
+      // **Cache the response before navigating.** `requestSync` only PUSHES —
+      // there is no pull — and the screen we return to reads SQLite, so without
+      // this the athlete taps "Coffee", lands back on the list they came from,
+      // and it is not there. The row the server just handed us is the answer;
+      // asking for it again would be a second request for something we hold.
+      await cacheTracker(userId, row);
       requestSync('tracker preset added');
       router.back();
     } catch (err) {

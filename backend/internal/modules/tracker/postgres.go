@@ -42,6 +42,10 @@ func scanTracker(row pgx.Row) (*Tracker, error) {
 		}
 		return nil, err
 	}
+	// Derived here rather than selected, because it is not a column: it is the
+	// preset key answered against the compiled catalogue. Set in the ONE scanner
+	// every query in this file goes through, so no read path can forget it.
+	t.Provisioned = provisioningWouldRecreate(t.Preset)
 	return &t, nil
 }
 
@@ -287,8 +291,29 @@ func (r *PostgresRepository) AddPreset(ctx context.Context, userID string, in Ne
 	if !errors.Is(err, ErrNotFound) {
 		return nil, translatePgError(err)
 	}
-	// Nothing inserted. Either the cap refused it, or the derived id was
-	// squatted by another athlete — the hazard `DefaultsFor` documents, which
+	// **Nothing inserted — RE-READ before concluding why**, exactly as Create
+	// does after its own ON CONFLICT.
+	//
+	// The window is small and real: two taps on "Coffee" from two devices, or a
+	// double-tap through a slow response, both find no row at the `getOwned`
+	// above, and one of them loses the insert. Without this re-read the loser is
+	// told the id is taken — a 409 for a row that is their own, on a button
+	// whose entire job is idempotence. Skipped here originally purely because
+	// this path is rare, which is the wrong reason: rare is when nobody is
+	// looking.
+	if existing, getErr := r.getOwned(ctx, userID, in.ID); getErr == nil {
+		if existing.ArchivedAt == nil {
+			return existing, nil
+		}
+		if err := r.Restore(ctx, userID, in.ID); err != nil {
+			return nil, err
+		}
+		return r.getOwned(ctx, userID, in.ID)
+	} else if !errors.Is(getErr, ErrNotFound) {
+		return nil, getErr
+	}
+	// Still not ours. Either the cap refused it, or the derived id was squatted
+	// by another athlete — the hazard `DefaultsFor` documents, which
 	// `New.Validate`'s namespace guard makes unreachable from a request body but
 	// which is still worth answering rather than reporting as a phantom success.
 	full, capErr := r.atCap(ctx, userID)
@@ -408,6 +433,13 @@ func (r *PostgresRepository) Archive(ctx context.Context, userID, id string) err
 // you just stopped — the mis-tap on a destructive-adjacent control, and the
 // "actually I do still want that" ten seconds later.
 //
+// **BOUNDED, unlike List.** `MaxLiveTrackers` bounds the live set, and nothing
+// bounds this one: create-and-archive is a cycle an athlete can repeat without
+// limit, and each turn leaves a row here forever. Small today and unbounded is
+// still unbounded — the ordering makes the cap the right shape too, since what
+// falls off the end is the oldest thing stopped, which is the least likely to
+// be wanted back.
+//
 // Not merged into List behind a flag on the same slice: a screen that shows
 // both would have to decide what an archived card's `+` button does, and the
 // honest answer is that an archived tracker has no `+`. Two calls, two screens.
@@ -416,7 +448,8 @@ func (r *PostgresRepository) ListArchived(ctx context.Context, userID string) ([
 		SELECT `+trackerCols+`
 		  FROM daily_trackers
 		 WHERE user_id = $1 AND archived_at IS NOT NULL
-		 ORDER BY archived_at DESC, id`, userID)
+		 ORDER BY archived_at DESC, id
+		 LIMIT $2`, userID, maxArchivedTrackers)
 	if err != nil {
 		return nil, translatePgError(err)
 	}
@@ -490,14 +523,26 @@ func (r *PostgresRepository) Restore(ctx context.Context, userID, id string) err
 // case, and a 404 on the second attempt puts a failure on the sync screen for
 // something that landed.
 //
-// **A PROVISIONED row is refused, and this is not water being privileged.** The
-// (user_id, preset) index entry is what makes EnsureDefaults idempotent, so
-// deleting the row deletes the record that provisioning already happened and
-// the next GET /v1/trackers hands water straight back. The destroy would appear
-// to work and then silently undo itself, which is worse than refusing it — and
-// the honest alternative, archiving, does exactly what the athlete wanted. The
-// preset flag is doing its documented job here (provisioning key) rather than
-// becoming a discriminator anything else branches on.
+// **A row that PROVISIONING WOULD RE-CREATE is refused — and that is a much
+// narrower set than "has a preset key".** Only a `Default: true` preset is in
+// `DefaultsFor`, so only that one comes back: deleting it deletes the
+// (user_id, preset) index entry that makes EnsureDefaults idempotent, and the
+// next GET /v1/trackers hands it straight back. The destroy would appear to
+// work and silently undo itself, which is worse than refusing it.
+//
+// **This checked `preset != ""` and that was wrong.** It read as mechanical and
+// was not: coffee (N77) ships `Default: false` precisely so it is NOT in that
+// set, so for coffee neither half of the refusal was true — it was not set up
+// automatically and it would not come back. The rule was doing nothing except
+// privileging preset rows, which is the thing this ticket exists to forbid, and
+// the consequence is a privacy answer nobody would defend: an athlete who tried
+// coffee for a month and quit could archive that history and never delete it,
+// while an identical tracker they named "coffee" themselves could be purged.
+// Same data, same athlete, different deletability, decided by whether we
+// happened to ship a literal for it.
+//
+// A key that is no longer in the catalogue at all is destroyable too, and for
+// the same reason: nothing will re-provision it.
 func (r *PostgresRepository) Destroy(ctx context.Context, userID, id string) error {
 	// Scoped by user_id, so this cannot report on somebody else's row.
 	var preset string
@@ -509,17 +554,25 @@ func (r *PostgresRepository) Destroy(ctx context.Context, userID, id string) err
 		}
 		return translatePgError(err)
 	}
-	if preset != "" {
-		return fmt.Errorf("%w: %q is set up for you automatically and would come "+
-			"back — stop tracking it instead", ErrInvalidInput, preset)
+	if provisioningWouldRecreate(preset) {
+		p, _ := PresetByKey(preset)
+		return fmt.Errorf("%w: %s is set up for you automatically and would come "+
+			"back — stop tracking it instead", ErrInvalidInput, p.Fields.Name)
 	}
-	// `user_id = $2` here is DELIBERATELY REDUNDANT with the lookup above, which
-	// already returned early for a row that is not the caller's. Kept, and
-	// recorded as kept, because a surviving mutation on this clause reads as
-	// dead code and "the tests still pass without it" is a persuasive argument
-	// for deleting the last thing standing between a client-supplied id and
-	// somebody else's row. The scoped lookup is what the cross-user test
-	// exercises; this is the second lock on the same door.
+	// **`user_id = $2` here closes a TOCTOU, and is not merely belt-and-braces.**
+	//
+	// It looks redundant with the lookup above — that already returned early for
+	// a row that is not the caller's — and a single-clause mutation of it
+	// survives the suite, which is exactly how a real guard gets deleted for
+	// "reading as dead code". It is not dead. **Tracker ids are CLIENT-CHOSEN**,
+	// so between the SELECT and this DELETE a racing retry of this same destroy
+	// can free the id and another athlete can immediately mint a tracker on it.
+	// Without this clause the second statement would then delete THEIR row,
+	// having authorised against a row that no longer exists.
+	//
+	// A race is not something the suite can pin down, so the mutation battery
+	// removes both clauses together and this comment carries the reason the
+	// single-clause mutation is expected to survive.
 	if _, err := r.pool.Exec(ctx,
 		`DELETE FROM daily_trackers WHERE id = $1 AND user_id = $2`, id, userID); err != nil {
 		return translatePgError(err)
