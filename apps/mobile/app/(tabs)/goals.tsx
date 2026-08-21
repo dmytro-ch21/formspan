@@ -196,6 +196,22 @@ const INFO = {
   ],
 } as const;
 
+/**
+ * What the link to the target record says, given what we know.
+ *
+ * Three answers for three states, and the third is the point: `null` is both
+ * "not read yet" and "the read failed", so neither of the other two labels is
+ * true there. "Target history" would promise a list that may not exist and
+ * "Set a target for a day already past" would assert there is nothing — the
+ * empty-versus-unknown collapse, in six words on a link.
+ */
+function historyLinkLabel(targets: Target[] | null): string {
+  if (targets === null) return 'Past targets';
+  return targets.length > 0
+    ? 'Target history — correct or remove a past one'
+    : 'Set a target for a day already past';
+}
+
 // `refusalOrWeather` and `draftFrom` moved to `lib/manualTarget.ts` when the
 // history screen grew the same three write paths. Two copies of the
 // refusal-versus-weather split is two chances for one of them to drift back
@@ -946,6 +962,9 @@ export default function TargetScreen() {
             // to edit whenever there is anything at all to open on.
             seed={live ? draftFrom(live) : s ? draftFrom(s) : null}
             on={on}
+            // This screen writes today and only today; correcting a past target
+            // is `app/goals/history.tsx`, which passes the other answer.
+            effect="from_today"
             saving={writing === 'manual'}
             failed={writeFailed?.which === 'manual' ? writeFailed.message : null}
             onSave={(input) => void saveManual(input)}
@@ -962,26 +981,30 @@ export default function TargetScreen() {
           filed under the 5th, or removing it, is a different operation on a
           different row, and N86 is the screen that owns them.
 
-          Offered whenever the read succeeded, INCLUDING when there are no
-          targets at all: filing the first one under the day you actually
-          started is exactly what somebody in that state needs, and hiding the
-          door until they have used it is the shape of gap this ticket closes.
+          **Always offered, in every state including a failed read**, and the
+          last of those is the one worth arguing. `targets === null` here is
+          both "not fetched yet" and "the fetch failed" — the same two-into-one
+          this screen's own ticket is about — so gating the door on it would
+          shut an athlete out of the destination precisely when something has
+          gone wrong, and the destination is the screen that can actually say
+          what. It states its own five states honestly; the label simply stops
+          claiming to know which one it will find.
+
+          Offered when there are NO targets too: filing the first one under the
+          day you actually started is exactly what somebody in that state needs,
+          and hiding the door until they have used it is this gap's own shape.
         */}
-        {targets !== null ? (
-          <Pressable
-            onPress={() => router.push('/goals/history')}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Target history — correct or remove a past target"
-            testID="target-history-link"
-          >
-            <Text style={[styles.historyLink, { color: accent.accent }]}>
-              {targets.length > 0
-                ? 'Target history — correct or remove a past one'
-                : 'Set a target for a day already past'}
-            </Text>
-          </Pressable>
-        ) : null}
+        <Pressable
+          onPress={() => router.push('/goals/history')}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={historyLinkLabel(targets)}
+          testID="target-history-link"
+        >
+          <Text style={[styles.historyLink, { color: accent.accent }]}>
+            {historyLinkLabel(targets)}
+          </Text>
+        </Pressable>
 
         {adjustment ? (
           <AdjustmentCard

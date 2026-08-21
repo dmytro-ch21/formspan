@@ -19,11 +19,14 @@ import {
   SCHEDULE_DAYS,
   buildHistory,
   canBackdateTo,
+  canStepWeek,
   deletionEffect,
   editCost,
   historyRows,
   historyWindow,
   sourceLabel,
+  stepWeek,
+  weekStrip,
   type TargetRead,
 } from '../targetHistory';
 
@@ -234,6 +237,100 @@ describe('canBackdateTo', () => {
     const first = historyWindow(ON).from;
     expect(canBackdateTo(first, ON)).toBe(true);
     expect(canBackdateTo(addDays(first, -1), ON)).toBe(false);
+  });
+
+  it('honours a floor from the read that DISAGREES with the computed one', () => {
+    // The midnight case, in the direction that actually loses data.
+    //
+    // `on` is re-read on FOCUS, so a screen held open across midnight keeps
+    // yesterday's `on` — while a reload after a write refetches with the real
+    // today, so `read.from` moves forward and `on` does not. The screen's
+    // oldest chip is then a day the list it is looking at can no longer show,
+    // and a target saved there becomes invisible: this ticket's own defect,
+    // arriving through the bound meant to prevent it.
+    const stale = ON; // what the screen still thinks today is
+    const refetched = historyWindow(addDays(ON, 1)).from; // what the reload asked for
+    const computed = historyWindow(stale).from;
+    // The vector is only meaningful if the two genuinely differ — asserted, so
+    // this cannot quietly become a test of one value against itself.
+    expect(refetched > computed).toBe(true);
+
+    // Left to compute its own floor, it allows a day the list cannot show.
+    expect(canBackdateTo(computed, stale)).toBe(true);
+    // Handed the floor that was actually read, it refuses it.
+    expect(canBackdateTo(computed, stale, refetched)).toBe(false);
+    // …and still allows the true edge of what the list holds.
+    expect(canBackdateTo(refetched, stale, refetched)).toBe(true);
+  });
+
+  it('still refuses tomorrow however low the floor is dropped', () => {
+    // The ceiling is not the floor's business. A `floor` threaded through a
+    // single combined comparison could relax both ends at once.
+    expect(canBackdateTo(addDays(ON, 1), ON, addDays(ON, -3650))).toBe(false);
+  });
+});
+
+describe('the week strip can always reach today again', () => {
+  /**
+   * The strip is the seven days ENDING at an anchor, and the anchor steps by a
+   * week — clamped to today rather than refused for overshooting it.
+   *
+   * The first version anchored on the SELECTION, which made forward travel
+   * impossible: choosing `today-3` slid the strip to `today-9..today-3`, the
+   * forward arrow disabled because `today+4` is not backdatable, and the last
+   * three days became unreachable with no way back except leaving the screen.
+   * This is that fault in one assertion — walk back a few weeks, then walk
+   * forward, and today must be on the strip again.
+   */
+  // The REAL functions, not a copy of their arithmetic. A test that
+  // reimplements what it is checking proves the maths and says nothing about
+  // the screen — the same reason SQL behaviour here belongs in a fixture rather
+  // than a regex over the query string.
+  const step = (anchor: string) => stepWeek(anchor, ON, 'forward');
+  const week = weekStrip;
+
+  it('returns to today from any anchor, and lands ON it rather than past it', () => {
+    for (const back of [1, 2, 3, 9, 40]) {
+      let anchor = addDays(ON, -7 * back);
+      // The loop bound is the guard against a step that does not advance.
+      for (let i = 0; i < back + 2 && anchor < ON; i++) anchor = step(anchor);
+      expect(anchor).toBe(ON);
+      expect(week(anchor)).toContain(ON);
+    }
+  });
+
+  it('reaches a day three back from today without stranding the ones after it', () => {
+    // The exact reported vector: an anchor that is NOT a whole week from today.
+    const stranded = addDays(ON, -3);
+    expect(step(stranded)).toBe(ON);
+    expect(week(step(stranded))).toEqual(
+      expect.arrayContaining([addDays(ON, -2), addDays(ON, -1), ON]),
+    );
+  });
+
+  it('never puts a future day on the strip', () => {
+    for (const anchor of [ON, addDays(ON, -1), addDays(ON, -6)]) {
+      expect(week(anchor).every((d) => d <= ON)).toBe(true);
+    }
+  });
+
+  it('offers the forward control whenever the anchor is behind today, and not once it is on it', () => {
+    // The disabled state is what made the dead end silent, so it is asserted
+    // separately from the step. A control gated on "a whole week fits" reports
+    // false for every one of the first three.
+    expect(canStepWeek(addDays(ON, -1), ON, 'forward')).toBe(true);
+    expect(canStepWeek(addDays(ON, -3), ON, 'forward')).toBe(true);
+    expect(canStepWeek(addDays(ON, -6), ON, 'forward')).toBe(true);
+    expect(canStepWeek(ON, ON, 'forward')).toBe(false);
+  });
+
+  it('stops offering the backward control at the edge of what can be written', () => {
+    const floor = historyWindow(ON).from;
+    // An anchor whose previous week's newest day is exactly the floor: still
+    // offered. One day earlier: refused. Both sides, so an off-by-one either
+    // way fails.
+    expect(canStepWeek(addDays(floor, 7), ON, 'back')).toBe(true);
+    expect(canStepWeek(addDays(floor, 6), ON, 'back')).toBe(false);
   });
 });
 

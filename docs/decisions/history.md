@@ -39284,15 +39284,74 @@ The date is chosen a week at a time — seven chips and two arrows, the idiom
 Today already uses — rather than by a stepper (thirty taps to backdate a month)
 or a native calendar (a native dependency, and a rebuild).
 
+### What review caught, and it was two real bugs
+
+Both were things a green check suite says nothing about, and both were on the
+screen's own subject matter.
+
+**A footnote that asserted the opposite of what the screen does.**
+`ManualTarget` carried a constant sentence — *"It takes effect from today
+forward. Past days keep the target they were judged against."* True on Goals,
+which only ever writes today, and the component was written when that was its
+only caller. Reusing it on the history screen made it **flatly false, directly
+under the Save button, at the moment of a backdated write**, contradicting the
+screen's own intro and its spoken receipt. It is now a required `effect` prop
+with no default: a default is what let one call site silently inherit the
+other's claim, and a third caller should have to answer the question rather
+than get the older answer for free.
+
+**A forward dead end in the date strip.** The strip is the seven days *ending*
+at its anchor, and the anchor was the SELECTED day — so nothing newer than the
+selection was ever a chip, and the forward arrow disabled as soon as the
+selection came within a week of today. Tapping `today-3` stranded the athlete
+three days short of the present, with no way back except leaving the screen,
+which nothing said. Fixed by separating navigation from selection (the anchor is
+its own state, as in any calendar) and by **clamping the forward step to today**
+rather than refusing it for overshooting.
+
+Three smaller ones, all taken: a slow read could land on top of a newer one
+(`load` after a write discards its own cleanup, so the fix is a sequence counter
+— only the newest answer may set state); the offline sentence said *"Could not
+save it"* for a failed **delete** and a failed **undo**, so the verb is a
+parameter now; and the removal receipt named only a date, which mattered because
+a second delete overwrites the single undo slot and the first row's numbers then
+existed nowhere — it carries the figure and says Undo exists.
+
+One bound was rederived as a result. `canBackdateTo`'s floor now comes from the
+window that was **actually read** rather than being recomputed from `on`. The
+two agree except in one sliver: `on` refreshes on FOCUS, but the reload after a
+write refetches with the real today — so a screen held open across midnight
+would offer a chip one day older than the list it is looking at, and a target
+saved there would be invisible. That is this ticket's own defect arriving
+through the bound built to prevent it.
+
+The backend review found nothing blocking and one thing worth pinning: the
+mobile window is **exactly** the widest the endpoint serves, with no slack, and
+the constant is named `maxDayWindowDays = 366` while the largest *difference*
+accepted is 365. `window_test.go` now holds both sides of that boundary — 365
+accepted, 366 refused with `invalid_input` — because a client is standing on it
+and nothing said so.
+
 ### Verification
 
-28 tests on the pure module, and **all fourteen guards mutation-tested**: each
+35 tests on the pure module, and **every guard mutation-tested — nineteen in the
+TypeScript, three on the backend rail**: each
 mutation applied to one guard at a time, each confirmed to turn the suite red,
 with a baseline re-run green in the same session and the file restored and
 re-verified afterwards. The mutation harness checks its own pattern matched and
-matched exactly once — one of the fourteen did not apply on the first attempt
-and was reported as *apparatus failed* rather than passing quietly, which is the
-whole reason that check is in the script.
+matched exactly once — one mutation did not apply on the first attempt and was
+reported as *apparatus failed* rather than passing quietly, which is the whole
+reason that check is in the script. The Go harness additionally distinguishes a
+compile error from a test failure, since both are a non-zero exit and only one
+of them proves anything.
+
+Two of those mutations reproduce the dead end review found, on the real
+functions. That is a second correction worth recording: the first version of
+those tests **reimplemented the strip arithmetic inside the test file**, so
+mutating it proved the maths and said nothing about the screen. `weekStrip` and
+`stepWeek` moved into `lib/targetHistory.ts` and both the screen and the test
+now call them — the same rule this repo already applies to SQL, where a regex
+over a query string is not a test of what the database does.
 
 The vectors are deliberately shaped so a plausible wrong implementation fails:
 spans are unevenly spaced, rows are handed to `buildHistory` out of order,
@@ -39316,7 +39375,11 @@ been able to return; it was undocumented while the endpoint had no callers.
 - **`apps/web`'s targets page still has the empty-versus-unknown collapse**, and
   still has no client-side rails on kcal or macros (its form submits `1` and
   `99999` alike, for the server to refuse), and still no delete. Out of scope
-  here; filed separately.
+  here; filed as **N127 (#531)**.
+- **The undo holds one row.** Deleting a second overwrites the slot, and the
+  first row's numbers then exist nowhere but the spoken receipt. Argued rather
+  than overlooked: a stack is more machinery than the case warrants, and the
+  receipt now carries the figure. Revisit if anybody reports losing one.
 - The phone still cannot hand-schedule a future target. Deliberate, and argued
   above rather than overlooked.
 

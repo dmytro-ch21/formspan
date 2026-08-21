@@ -260,9 +260,69 @@ export function historyWindow(on: string): { from: string; to: string } {
  * month is a decision with no surface anywhere that explains what it will do to
  * the days in between, and this screen is the correction surface, not a
  * planning one. Reading forward and writing forward are different permissions.
+ *
+ * **`floor` should be the window that was actually READ**, not the one this
+ * function would compute. They agree except across midnight: a screen held
+ * focused overnight recomputes a floor one day earlier than the list was
+ * fetched with, and the oldest chip then writes a target that list can no
+ * longer show — the defect this bound exists to prevent, arriving through the
+ * bound itself. The default is the computed window so a caller with no read to
+ * hand still gets the right answer.
  */
-export function canBackdateTo(day: string, on: string): boolean {
-  return day >= historyWindow(on).from && day <= on;
+export function canBackdateTo(day: string, on: string, floor = historyWindow(on).from): boolean {
+  return day >= floor && day <= on;
+}
+
+/**
+ * The seven days a date strip shows, ending at `anchor`.
+ *
+ * Here rather than inline in the screen because {@link stepWeek} below is where
+ * a real bug lived, and a test that reimplements the arithmetic it is checking
+ * proves the arithmetic and not the screen. Same rule this repo already applies
+ * to SQL: assert the behaviour, not a copy of it.
+ */
+export function weekStrip(anchor: string): string[] {
+  return Array.from({ length: 7 }, (_, i) => addDays(anchor, i - 6));
+}
+
+/**
+ * Move the strip a week, and CLAMP the forward step to today.
+ *
+ * The clamp is the whole function. The first version of the picker anchored the
+ * strip on the SELECTED day and stepped forward by a bare seven, which made the
+ * days just before today unreachable: choose `today-3`, the strip becomes
+ * `today-9 … today-3`, and a forward step to `today+4` is refused for
+ * overshooting — so `today-2`, `today-1` and today itself could not be got back
+ * to without leaving the screen, which nothing said. Found in review.
+ *
+ * Two things fix it and both are here. The anchor is separate from the
+ * selection, so paging never depends on what is chosen; and the forward step
+ * lands ON today rather than being refused for wanting to pass it.
+ *
+ * Backwards is unclamped — {@link canBackdateTo} is what stops the strip
+ * walking off the start of the record, and the caller disables the control
+ * rather than silently pinning it, so a dead end reads as one.
+ */
+export function stepWeek(anchor: string, on: string, direction: 'back' | 'forward'): string {
+  if (direction === 'back') return addDays(anchor, -7);
+  const forward = addDays(anchor, 7);
+  return forward > on ? on : forward;
+}
+
+/** Whether the strip has anywhere left to go in that direction. */
+export function canStepWeek(
+  anchor: string,
+  on: string,
+  direction: 'back' | 'forward',
+  floor = historyWindow(on).from,
+): boolean {
+  // Forward is "not already at today", never "a whole week fits" — gating on a
+  // whole week is precisely what stranded the last few days.
+  if (direction === 'forward') return anchor < on;
+  // Backward is "the newest day of the previous week is still choosable", so
+  // the control dies exactly when the strip runs out of writable days rather
+  // than a week early or a week late.
+  return canBackdateTo(stepWeek(anchor, on, 'back'), on, floor);
 }
 
 /**

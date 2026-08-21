@@ -67,7 +67,7 @@
  */
 
 import { Stack, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { AccessibilityInfo, ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { HoldToConfirm } from '@/components/HoldToConfirm';
@@ -76,7 +76,7 @@ import { Text } from '@/components/Themed';
 import { ManualTarget } from '@/components/nutrition/ManualTarget';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { addDays, formatDayLong } from '@/lib/history';
+import { formatDayLong } from '@/lib/history';
 import {
   draftFrom,
   refusalOrWeather,
@@ -92,11 +92,14 @@ import {
 import {
   buildHistory,
   canBackdateTo,
+  canStepWeek,
   deletionEffect,
   editCost,
   historyRows,
   historyWindow,
   sourceLabel,
+  stepWeek,
+  weekStrip,
   type DeletionEffect,
   type HistoryRow,
   type TargetHistory,
@@ -128,26 +131,70 @@ export default function TargetHistoryScreen() {
   const [on, setOn] = useState(todayString);
   const [open, setOpen] = useState<Open>(null);
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  /**
+   * Why the last write failed, and WHICH write.
+   *
+   * Tagged rather than a bare string, because the two land in different
+   * places: a save belongs in the open form's own slot, where the athlete is
+   * looking, and a delete or an undo has no form to land in. Untagged, a
+   * failed delete rendered under `ManualTarget`'s "why the last save failed"
+   * heading — a true sentence filed under a false one.
+   */
+  const [problem, setProblem] = useState<{ where: 'save' | 'row'; message: string } | null>(null);
   /** The last row removed, held so it can be put straight back. */
   const [undoable, setUndoable] = useState<StoredTarget | null>(null);
   /** The day a new backdated target would be filed under. */
   const [pick, setPick] = useState(todayString);
+  /**
+   * The last day on the week strip — navigation, kept SEPARATE from the choice.
+   *
+   * The first version anchored the strip on `pick` itself, which made moving
+   * forward impossible: the strip is the seven days *ending* at its anchor, so
+   * nothing newer than the anchor is ever a chip, and with the anchor tied to
+   * the selection the forward arrow disabled the moment `pick` came within a
+   * week of today. Tapping `today-3` therefore stranded the athlete three days
+   * from the present with no way back except leaving the screen — which nothing
+   * told them. Found in review.
+   *
+   * Separating the two is what fixes it, and it is also how a calendar behaves:
+   * paging the view does not change what is selected, and `From …` below the
+   * strip keeps the selection visible while it is off-screen.
+   */
+  const [anchor, setAnchor] = useState(todayString);
+
+  /**
+   * Which read is the newest, so a slow one cannot land on top of it.
+   *
+   * A per-call `live` flag is enough for the focus cleanup and NOT enough here,
+   * because the reload after a write discards its own cleanup — there is
+   * nowhere to hang it. Without this, a focus-time `listTargets` that resolves
+   * *after* a post-delete reload puts the pre-delete list back on screen: the
+   * row the athlete just removed renders as present, directly beneath a banner
+   * saying it was removed. Nothing is written from it and the next focus
+   * repairs it, which is exactly what makes it the kind of thing that ships.
+   *
+   * A counter rather than an AbortController: `apiRequest` takes no signal, and
+   * the fix needed is about which ANSWER is allowed to land, not about stopping
+   * a request that is already paid for.
+   */
+  const reads = useRef(0);
 
   const load = useCallback(
     (day: string) => {
+      const seq = ++reads.current;
       let live = true;
       const win = historyWindow(day);
+      const newest = () => live && seq === reads.current;
       listTargets(getToken, win)
         .then((targets) => {
-          if (live) setRead({ status: 'read', targets, from: win.from });
+          if (newest()) setRead({ status: 'read', targets, from: win.from });
         })
         .catch(() => {
           // `unavailable`, never an empty array. An empty array here would make
           // a request that never returned render as "you have never set a
           // target" — a positive claim about somebody's data, next to a delete
           // button. `apps/web`'s targets page still does exactly that.
-          if (live) setRead({ status: 'unavailable' });
+          if (newest()) setRead({ status: 'unavailable' });
         });
       return () => {
         live = false;
@@ -161,6 +208,7 @@ export default function TargetHistoryScreen() {
       const day = todayString();
       setOn(day);
       setPick(day);
+      setAnchor(day);
       return load(day);
     }, [load]),
   );
@@ -168,9 +216,28 @@ export default function TargetHistoryScreen() {
   const history = buildHistory(read, on);
   const rows = historyRows(history);
 
+  /**
+   * The earliest day a target may be filed under — taken from the window that
+   * was ACTUALLY READ where there is one, not recomputed from `on`.
+   *
+   * The two agree except across midnight, and that sliver is the whole reason.
+   * A screen held focused overnight would compute a floor one day earlier than
+   * the list was fetched with, so the oldest chip would write a target this
+   * screen can no longer show — the precise defect `BACKDATE_DAYS` exists to
+   * prevent, arriving through the constant meant to prevent it. Deriving it
+   * from the read makes the bound the form enforces the bound the list can
+   * actually display, by construction rather than by the two staying in step.
+   */
+  const floor = read.status === 'read' ? read.from : historyWindow(on).from;
+
   /** Every write funnels here, so the receipt and the failure copy are one. */
   const write = useCallback(
-    async (job: () => Promise<void>, spoken: string) => {
+    async (
+      job: () => Promise<void>,
+      spoken: string,
+      where: 'save' | 'row',
+      verb: 'save' | 'remove' | 'put it back',
+    ) => {
       if (busy) return false;
       setBusy(true);
       setProblem(null);
@@ -183,8 +250,8 @@ export default function TargetHistoryScreen() {
         AccessibilityInfo.announceForAccessibility(spoken);
         return true;
       } catch (e) {
-        const why = refusalOrWeather(e);
-        setProblem(why);
+        const why = refusalOrWeather(e, verb);
+        setProblem({ where, message: why });
         AccessibilityInfo.announceForAccessibility(why);
         return false;
       } finally {
@@ -200,6 +267,8 @@ export default function TargetHistoryScreen() {
         () =>
           saveTarget(getToken, day, { ...input, source: 'manual', basis: null }).then(() => {}),
         `Saved. ${input.kcal} kcal from ${formatDayLong(day)}. Days measured against it have been restated.`,
+        'save',
+        'save',
       );
       if (ok) setOpen(null);
     },
@@ -210,7 +279,16 @@ export default function TargetHistoryScreen() {
     async (row: HistoryRow) => {
       const ok = await write(
         () => deleteTarget(getToken, row.from),
-        `Removed the target from ${formatDayLong(row.from)}.`,
+        // The NUMBERS are in the receipt, not just the date, and Undo is named.
+        // Focus stays on the hold button, so a VoiceOver user is told what was
+        // removed and that it can come back — otherwise they have to stumble
+        // onto a banner they were never told about. The figure also survives
+        // the one state where it exists nowhere else: a second delete
+        // overwrites the single undo slot, and the first row's numbers are then
+        // gone from the screen, the server and the record alike.
+        `Removed the ${row.target.kcal} kcal target from ${formatDayLong(row.from)}. Undo is above the list.`,
+        'row',
+        'remove',
       );
       // Held only on success. Offering to restore a row the server never
       // removed would put a button on screen that undoes nothing.
@@ -238,6 +316,8 @@ export default function TargetHistoryScreen() {
           basis: t.basis ?? null,
         }).then(() => {}),
       `Put back. ${t.kcal} kcal from ${formatDayLong(t.effective_on)}.`,
+      'row',
+      'put it back',
     );
     if (ok) setUndoable(null);
   }, [getToken, undoable, write]);
@@ -252,27 +332,27 @@ export default function TargetHistoryScreen() {
           target live on the day it is showing.
         </Text>
 
-        {/* The banner is for failures with no form on screen — a delete or an
-            undo. When a form IS open its own slot carries the message, because
-            that is where the athlete is looking; saying it twice reads as two
-            different problems. */}
-        {problem && !open ? (
+        {/* The banner carries a delete or an undo, which have no form to land
+            in. A failed SAVE goes to the open form's own slot instead, because
+            that is where the athlete is looking — and saying it in both places
+            reads as two different problems. */}
+        {problem?.where === 'row' ? (
           <Text style={styles.problem} testID="history-problem">
-            {problem}
+            {problem.message}
           </Text>
         ) : null}
 
         {undoable ? (
           <View style={styles.undo}>
             <Text style={styles.undoText}>
-              Removed the target from {formatDayLong(undoable.effective_on)}.
+              Removed {undoable.kcal} kcal from {formatDayLong(undoable.effective_on)}.
             </Text>
             <Pressable
               onPress={undo}
               disabled={busy}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel={`Put back the target from ${formatDayLong(undoable.effective_on)}`}
+              accessibilityLabel={`Put back the ${undoable.kcal} kcal target from ${formatDayLong(undoable.effective_on)}`}
               testID="history-undo"
             >
               <Text style={[styles.undoAction, { color: accent.accent }]}>Undo</Text>
@@ -285,7 +365,7 @@ export default function TargetHistoryScreen() {
           rows={rows}
           open={open}
           busy={busy}
-          failed={problem}
+          failed={problem?.where === 'save' ? problem.message : null}
           onOpen={setOpen}
           onSave={saveOn}
           onRemove={remove}
@@ -303,11 +383,14 @@ export default function TargetHistoryScreen() {
         {history.kind === 'unread' || history.kind === 'unavailable' ? null : (
           <AddEarlier
             on={on}
+            floor={floor}
             pick={pick}
             setPick={setPick}
+            anchor={anchor}
+            setAnchor={setAnchor}
             open={open?.what === 'add'}
             busy={busy}
-            failed={problem}
+            failed={problem?.where === 'save' ? problem.message : null}
             existing={rows.some((r) => r.from === pick)}
             onToggle={() => setOpen(open?.what === 'add' ? null : { what: 'add' })}
             onSave={(input) => saveOn(pick, input)}
@@ -479,6 +562,10 @@ function Row({
           <ManualTarget
             seed={draftFrom(t)}
             on={row.from}
+            // A row's own date is by definition not in the future for a past or
+            // live row, and a scheduled one governs no elapsed day yet — so the
+            // claim is only made where it is true.
+            effect={row.phase === 'scheduled' ? 'from_today' : 'restates_past_days'}
             saving={busy}
             failed={failed}
             onSave={onSave}
@@ -527,8 +614,11 @@ function Row({
  */
 function AddEarlier({
   on,
+  floor,
   pick,
   setPick,
+  anchor,
+  setAnchor,
   open,
   busy,
   failed,
@@ -537,8 +627,12 @@ function AddEarlier({
   onSave,
 }: {
   on: string;
+  /** Earliest day that may be chosen — the window that was actually read. */
+  floor: string;
   pick: string;
   setPick: (d: string) => void;
+  anchor: string;
+  setAnchor: (d: string) => void;
   open: boolean;
   busy: boolean;
   failed: string | null;
@@ -547,11 +641,14 @@ function AddEarlier({
   onSave: (input: ManualTargetInput) => void;
 }) {
   const accent = useAccent();
-  // The seven days ending on `pick`, so the chosen day is always on the strip
-  // and stepping back a week keeps it there.
-  const week = Array.from({ length: 7 }, (_, i) => addDays(pick, i - 6));
-  const canGoBack = canBackdateTo(addDays(pick, -7), on);
-  const canGoForward = canBackdateTo(addDays(pick, 7), on);
+  // The seven days ENDING at the anchor. The anchor is navigation and `pick` is
+  // the choice; conflating them is what stranded the strip three days short of
+  // today — see the `anchor` state for the full account.
+  const week = weekStrip(anchor);
+  const back = stepWeek(anchor, on, 'back');
+  const forward = stepWeek(anchor, on, 'forward');
+  const canGoBack = canStepWeek(anchor, on, 'back', floor);
+  const canGoForward = canStepWeek(anchor, on, 'forward', floor);
 
   return (
     <View style={styles.add}>
@@ -571,18 +668,19 @@ function AddEarlier({
         <>
           <View style={styles.strip}>
             <Pressable
-              onPress={() => setPick(addDays(pick, -7))}
+              onPress={() => setAnchor(back)}
               disabled={!canGoBack}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Previous week"
+              accessibilityState={{ disabled: !canGoBack }}
               testID="history-week-back"
             >
               <Text style={[styles.arrow, !canGoBack && styles.arrowOff]}>◀</Text>
             </Pressable>
 
             {week.map((day) => {
-              const allowed = canBackdateTo(day, on);
+              const allowed = canBackdateTo(day, on, floor);
               const chosen = day === pick;
               return (
                 <Pressable
@@ -613,17 +711,21 @@ function AddEarlier({
             })}
 
             <Pressable
-              onPress={() => setPick(addDays(pick, 7))}
+              onPress={() => setAnchor(forward)}
               disabled={!canGoForward}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Next week"
+              accessibilityState={{ disabled: !canGoForward }}
               testID="history-week-forward"
             >
               <Text style={[styles.arrow, !canGoForward && styles.arrowOff]}>▶</Text>
             </Pressable>
           </View>
 
+          {/* The choice, always visible. The strip may have been paged away
+              from it, and a selection you cannot see is one you cannot check
+              before saving. */}
           <Text style={styles.pick} testID="history-pick">
             From {formatDayLong(pick)}
           </Text>
@@ -637,7 +739,14 @@ function AddEarlier({
             </Text>
           ) : null}
 
-          <ManualTarget seed={null} on={pick} saving={busy} failed={failed} onSave={onSave} />
+          <ManualTarget
+            seed={null}
+            on={pick}
+            effect={pick < on ? 'restates_past_days' : 'from_today'}
+            saving={busy}
+            failed={failed}
+            onSave={onSave}
+          />
         </>
       ) : null}
     </View>

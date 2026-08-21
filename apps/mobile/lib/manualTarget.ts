@@ -46,12 +46,22 @@ export type ManualParse =
 /**
  * The one offline sentence, said the same way wherever a target write fails.
  *
- * Lifted out of `app/(tabs)/goals.tsx` when a second screen — the history — grew
- * the same three write paths. Two copies of this sentence is two chances for
- * one of them to drift back into blaming the network for a refusal.
+ * Lifted out of `app/(tabs)/goals.tsx` when a second screen — the history —
+ * grew the same write paths. Two copies of this sentence is two chances for one
+ * of them to drift back into blaming the network for a refusal.
+ *
+ * **The verb is a parameter, because the history screen removes as well as
+ * saves.** It read "Could not save it" unconditionally, which was returned for
+ * a failed DELETE and a failed UNDO too — telling somebody a save failed when
+ * they had pressed Remove. Found in review.
  */
-export const OFFLINE_MESSAGE =
-  'Could not save it — this one needs a connection. Nothing has changed; try again when you have signal.';
+export function offlineMessage(verb: 'save' | 'remove' | 'put it back' = 'save'): string {
+  const what = verb === 'save' ? 'save it' : verb === 'remove' ? 'remove it' : 'put it back';
+  return `Could not ${what} — this one needs a connection. Nothing has changed; try again when you have signal.`;
+}
+
+/** The default phrasing, for the callers that only ever save. */
+export const OFFLINE_MESSAGE = offlineMessage();
 
 /**
  * Why the last write failed, in the words the athlete needs.
@@ -66,9 +76,9 @@ export const OFFLINE_MESSAGE =
  * else — `OfflineError`, a dropped socket — means nothing was answered at all,
  * and only then is "try again when you have signal" true.
  */
-export function refusalOrWeather(e: unknown): string {
+export function refusalOrWeather(e: unknown, verb: 'save' | 'remove' | 'put it back' = 'save'): string {
   if (e instanceof ApiError) return e.message;
-  return OFFLINE_MESSAGE;
+  return offlineMessage(verb);
 }
 
 /**
