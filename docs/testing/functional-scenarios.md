@@ -11356,6 +11356,54 @@ to obtain a coffee card. Written now so the list exists on the day there is.
 22. The selected range chip announces itself as selected, and its label reads
     as a period rather than as "1W".
 
+### W12 — the chart is readable, and nothing sits on anything
+
+Added after a second device report: *"The trend graphs are broken and ugly,
+overlapping and not understandable."* Every one of these is a **look at the
+picture** check; none of them can be answered from a number.
+
+23. **A dot and the line agree about a value.** Find a day where a reading and
+    the seven-day mean are close, and confirm the dot sits at that height on
+    the line rather than somewhere else vertically. The reported symptom was a
+    207.4 lb reading drawn below a line averaging ~207.
+24. **A distant goal does not flatten the readings.** Set a target 15+ lb away
+    and open `1W`. The week's readings must still spread across a readable part
+    of the chart. If they collapse into a band at one edge, the goal is owning
+    the axis again — the defect this ticket was filed for.
+25. **An off-scale goal is NAMED, not dropped.** In that same state there is no
+    goal line, and there must be a marker at the edge it lies beyond
+    (`▼ goal 190.0`). A chart with nothing is indistinguishable from a chart
+    with no goal set, which is a different fact about the athlete.
+26. **A sparse window does not collapse into a corner.** With a fortnight of
+    readings, open `3M`, `6M`, `1Y`. The series must fill most of the width,
+    the x-axis must name the day the plot actually starts on, and a sentence
+    below must say there are no readings before it. Measured before the fix:
+    every mark inside the right-hand 15% of the width.
+27. **A TRAILING gap still shows as empty.** The mirror of 26, and it must not
+    have been "fixed" too: stop logging for six weeks, open `3M`, and the last
+    reading must sit where its date falls with empty space to its right — never
+    at the right edge under a tick labelled `Today`.
+28. **The y-axis is readable.** Three values down the left, outside the plot,
+    in the athlete's own unit, legible against the dark ground. Without it a
+    4 lb week and a 40 lb year draw identically.
+29. **Nothing overlaps, at every window.** `1W 1M 3M 6M 1Y All Plan`, with a
+    goal and a projection: no value label may cover the line, the projection,
+    the goal line or the other label. Check the two extremes especially — the
+    oldest reading's label is clamped against the left edge and the newest
+    one's against the right.
+30. **Every label is joined to its point.** A short leader runs from each
+    callout to its own dot. A number floating near the x-axis with nothing
+    connecting it was the second reported defect.
+31. **One reading, and none.** With a single weigh-in in the window: one
+    labelled dot, an axis stating a range, no line. With none: the sentence for
+    *which* absence it is (8–11 above), never an empty box.
+32. **A projection toward an off-scale goal stays inside the plot** — it exits
+    an edge still travelling and never runs under the date ticks.
+33. **The reporter's three screenshots, re-taken.** `1W`, `1M` and `3M` on a
+    real phone with the real account. This is the only check that closes the
+    ticket; a Simulator with synthetic data can show the geometry is right and
+    cannot show that it reads right.
+
 ## W10 — the scrolling region has a visible top edge (`components/ScreenHeader.tsx`)
 
 Covers the hairline `ScreenHeader` draws when its own bottom edge is the top of

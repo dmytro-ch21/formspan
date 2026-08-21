@@ -7,10 +7,12 @@ import { TrendChart } from '@/components/TrendChart';
 import { emptyCopy } from '@/components/TrendCard';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { shiftDate } from '@/lib/anthropometry';
 import { type Checkin } from '@/lib/body';
-import { dayString } from '@/lib/calendar';
+import { dayString, shortDate } from '@/lib/calendar';
 import { suggestedTarget, type Projection as PlanProjectionWire } from '@/lib/nutritionApi';
-import { RANGES, type Projection, type TrendRangeKey } from '@/lib/trendSeries';
+import { plotWindow } from '@/lib/trendChartLayout';
+import { RANGES, type Projection, type TrendRangeKey, type TrendSeries } from '@/lib/trendSeries';
 import { useWeightTrend } from '@/lib/useWeightTrend';
 import { toDisplayWeight, weightUnit, type UnitSystem } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -166,11 +168,18 @@ export default function WeightTrendScreen() {
                 format={fmt}
                 minSpan={MIN_SPAN_KG}
                 height={200}
-                axisLabels={[short(series.from), short(midpoint(series.from, series.to)), 'Today']}
+                formatDate={shortDate}
                 accessibilityLabel={`Weight over ${rangeLabel(range)}, ${series.readings.length} readings`}
                 testID="trend-chart"
               />
             )}
+
+            {/* The chart tightens its left edge onto the data when the window
+                is mostly empty — twelve readings in a 3M window used to draw
+                every mark inside the right-hand tenth of the width, which reads
+                as broken (W12). Tightening it silently would be its own lie, so
+                the axis dates say where it starts and this says why. */}
+            <ClipNote series={series} />
 
             <Pressable
               // The check-in for TODAY. `/checkin` is not a route — the typed
@@ -196,6 +205,24 @@ export default function WeightTrendScreen() {
         )}
       </ScrollView>
     </>
+  );
+}
+
+/**
+ * Why the chart does not start where the chip says.
+ *
+ * Rendered from the SAME function the chart lays itself out with, so the
+ * sentence cannot drift from the drawing. Computing "is it clipped" a second
+ * time here is how a caption ends up describing a chart nobody is looking at.
+ */
+function ClipNote({ series }: { series: TrendSeries }) {
+  const win = plotWindow(series);
+  if (!win.clipped || win.firstDataDay == null) return null;
+  return (
+    <Text style={styles.note} testID="trend-clipped">
+      No readings in this range before {shortDate(shiftDate(series.from, win.firstDataDay))}, so the
+      chart starts where your data does.
+    </Text>
   );
 }
 
@@ -377,12 +404,6 @@ function rangeLabel(key: TrendRangeKey): string {
   }
 }
 
-/** `2026-08-19` → `19 Aug`. Parsed as UTC, matching how the dates are stored. */
-function short(on: string): string {
-  const d = new Date(`${on}T00:00:00Z`);
-  return `${d.getUTCDate()} ${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}`;
-}
-
 function longDate(on: string): string {
   const d = new Date(`${on}T00:00:00Z`);
   return d.toLocaleDateString('en-US', {
@@ -392,12 +413,6 @@ function longDate(on: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   });
-}
-
-function midpoint(from: string, to: string): string {
-  const a = Date.parse(`${from}T00:00:00Z`);
-  const b = Date.parse(`${to}T00:00:00Z`);
-  return new Date(a + (b - a) / 2).toISOString().slice(0, 10);
 }
 
 function round1(v: number): number {

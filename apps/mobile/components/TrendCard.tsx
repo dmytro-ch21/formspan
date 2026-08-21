@@ -48,7 +48,8 @@ export type TrendCardProps = {
   /** How the window reads in the delta line — "past year". */
   periodLabel: string;
   minSpan: number;
-  axisLabels?: [string, string, string];
+  /** Formats a `YYYY-MM-DD` for an x-axis tick. See `TrendChart`. */
+  formatDate?: (on: string) => string;
   /** The primary action, bottom right. */
   actionLabel: string;
   onAction: () => void;
@@ -72,7 +73,7 @@ export function TrendCard({
   unit,
   periodLabel,
   minSpan,
-  axisLabels,
+  formatDate,
   actionLabel,
   onAction,
   onOpen,
@@ -124,7 +125,7 @@ export function TrendCard({
             format={format}
             minSpan={minSpan}
             height={140}
-            axisLabels={axisLabels}
+            formatDate={formatDate}
             accessibilityLabel={chartLabel(title, series, delta, unit, format, periodLabel)}
             testID="trend-card-chart"
           />

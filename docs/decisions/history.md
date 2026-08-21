@@ -37934,6 +37934,160 @@ round trip and the derived-estimate guard are all covered by the suite, but
 "enter a girth, leave, come back, same number" against the real API is the
 reporter's own check and is left outstanding on the ticket.
 
+## 2026-08-21 — W12: the trend's dots and line always shared a scale; there was no room left on it
+
+The second report about this screen, from a device, with three screenshots:
+*"The trend graphs are broken and ugly, overlapping and not understandable. I
+sent you quite a few screenshots of what we need to achieve and still it's
+ugly."* The headline defect was that **the reading dots and the seven-day
+average line looked like they were on two different y-scales** — a 207.4 lb
+reading rendering visibly below a line averaging ~207.
+
+They were never on two scales. Both have gone through one `y()` since #340, and
+a test now proves it to the pixel. What was true is the thing that made that
+reading the honest one: **the chart had no room left on its scale, and no axis
+to check it against.**
+
+### What was measured, before touching anything
+
+Rendered `TrendChart` with the reporter's own numbers — readings across
+206.0–207.8 lb against a 190 lb goal, 1W, on a 200px chart — and read the
+coordinates back off the elements:
+
+- **Every dot and the whole line landed inside y 31.7–46.1.** The plot band is
+  y 18–182, so 1.8 lb of real movement got **14 px**, under callout boxes 16 px
+  tall. The cause was `trendBounds` stretching the domain to include a goal
+  7.7 kg away: the data's share of the axis was whatever the goal left it.
+- **At 3M with a fortnight of readings, every mark sat between x=273 and
+  x=320** — 15% of the width, 90% of the chart empty. The reporter's "squeezed
+  into the right-hand tenth", to the pixel.
+- **The axis text and the raw dots were drawn in `vola.line`** (`#222B3A`), the
+  hairline colour, on `#080B12`. Roughly 1.6:1 — the dots were nearly invisible
+  against the ground they were supposed to be read against.
+
+### What changed
+
+Placement moved out of the component into **`apps/mobile/lib/trendChartLayout.ts`**,
+which is pure arithmetic over numbers and has its own test file. The drawing
+does no geometry now; `lib/trendSeries.ts` still owns what the numbers mean.
+
+- **`plotBounds` caps how much of the axis a goal may take.** The data's padded
+  domain keeps at least half the height; a goal further away than that is drawn
+  as an off-scale marker at the edge it lies beyond (`▼ goal 190.0`) rather than
+  by moving the axis. It is **marked, never dropped** — a missing goal line
+  reads as "no goal set", which is a different fact about the athlete.
+  `trendBounds` is deleted; two functions that disagree about a domain is how
+  this comes back.
+- **`plotWindow` tightens the LEFT edge onto the data** when the window is more
+  than half empty. Only the left edge ever moves: a *trailing* gap is the
+  information for a lapsed logger, and shrinking onto their last weigh-in would
+  put a tick labelled "Today" on a reading weeks old — the exact bug #462 fixed.
+  Both directions are asserted.
+- **A y-axis.** Three gridlines with their values, in the left gutter, outside
+  the plot — which is what makes "labels never cover the line" a property of the
+  frame rather than something the placer has to keep re-winning. Without it a
+  4 lb week and a 40 lb year drew identically, and the distance between a dot
+  and the line meant nothing.
+- **`placeLabels` puts every value label where it covers nothing.** Candidates
+  are a *ladder*, nearest rung first, not a fixed rosette of eight positions.
+  The rosette was the first version and it left the oldest reading's label lying
+  on the line at 3M, 6M, 1Y and All at once: that label is clamped against the
+  left edge, so a wide one spans a quarter of the plot, and a line leaving the
+  same point crosses all eight offers. The ladder steps away in half-label
+  increments until it finds clear air, so the failure mode degrades to "further
+  from the point" instead of "on top of the line".
+- **Each label is joined to its point by a leader**, which is what makes
+  "attached" true rather than merely nearby. The report's second defect was a
+  `205.2` near the x-axis with nothing connecting it to anything.
+- **The projection is clipped to the plot.** With an off-scale goal its far end
+  used to run under the date ticks and out of the box.
+- **`axisLabels` became `formatDate`.** Three finished strings computed by the
+  caller from the window's nominal start would now print dates the drawing does
+  not use — the axis-labels-lie failure with the sign flipped. `shortDate` moved
+  to `lib/calendar.ts`; the screen states in words when the left edge moved.
+
+Measured after, same scenarios: the 1W-with-distant-goal dots spread over
+**73 px instead of 14**, and the sparse 3M series occupies **93% of the plot
+width instead of 15%**.
+
+### The tests, and why they are shaped the way they are
+
+A geometry bug is exactly what a test asserting "a path string was produced"
+cannot see. So the rendered assertions read coordinates back off the elements
+and check them against **the scale the chart printed on its own axis** — dot,
+line vertex and axis label all measured against the same third thing, rather
+than against a recomputation of the code under test. Two of them answer the
+criterion directly: one builds a fortnight of identical weigh-ins so the mean
+*is* each reading and asserts the dot and the line vertex land on the same
+pixel; the other measures pixels-per-kilogram off the dots and off the line
+independently and asserts the two numbers are equal.
+
+### The one this branch got wrong, and review caught
+
+**The tick labelled "Today" was drawn at the right-hand edge.** That is correct
+only while the x-domain ends at today — and it does not, the moment a projection
+extends it by `futureDays`. Measured by the reviewer on a 1M window with an
+arrival 83 days out: today's reading drew at x≈171.6 while a tick reading
+"Today" sat at x=314, a month of future under a label saying now.
+
+It is the same class as an axis that ends at the last reading (#462), arrived at
+from the other side, and it is the **common** case rather than an edge one:
+both callers pass a projection, so anybody with a goal set saw it. Two things
+about how it survived until review are worth keeping:
+
+- **The old code was right and this branch broke it.** It drew each tick at
+  `x(t.at)`; moving to fixed anchors was a legibility tidy-up that quietly
+  assumed something the same file's own `daysAway` comment warns about.
+- **The docstring asserted the opposite of the code.** *"the right edge never
+  moves"* sat two lines above the bug — the "partial clamp with a comment
+  claiming completeness" failure, in the file that documents it.
+
+Ticks are drawn at `x(t.at)` again, "Today" centres on its own day when a
+projection is showing, and the strip to its right is deliberately left
+unlabelled: it is the future, the dashed line is already in it, and the arrival
+date is stated in words below the chart. A fourth tick would be the drawing
+making its own claim about when. Covered by a test that compares the tick's x
+against today's own dot, and mutation-checked by putting the fixed anchors back.
+
+Three pieces of apparatus in this area do not work and cost time:
+
+- **`RNSVGText` carries its string on a `content` prop of a nested
+  `RNSVGTSpan`.** `props.children` is a React element — `String(…)` on it is
+  `[object Object]` — and walking the child instances finds no strings at all.
+  Both wrong readings stringify happily and compare unequal to everything, so
+  every text assertion passes vacuously. This is why the older test in this file
+  matched against `JSON.stringify(screen.toJSON())` rather than reading nodes.
+- **The label-width estimate is a guess and has to be a generous one.**
+  `react-native-svg` gives no synchronous text metrics, and a chart that waits
+  for a measurement pass flashes at the wrong size on first render. An
+  underestimate is what puts a label's tail back over the line the placer just
+  moved it off.
+- **Four suites — `goalsScreen`, `sharedScreen`, `dictateScreen`,
+  `bjjSessionScreen` — failed during this work at load average 89–139**, and
+  `goalsScreen` fails identically on a clean `origin/main` worktree. That
+  baseline is the only thing that separates "my change broke it" from the
+  documented under-scheduling flake; running one without the other proves
+  nothing in either direction.
+
+### What is not fixed
+
+- **Nothing has been seen on the reporter's device**, which is the criterion the
+  ticket is actually about. Simulator screenshots are attached to the PR; the
+  three original screenshots were 1W, 1M and 3M on a real phone with real data,
+  and only that comparison closes it.
+- **The label placer can still fail.** `PlacedBox.clear` is false when no rung
+  was free, and the drawing then takes the least-bad position rather than
+  refusing. The tests assert `clear` across a matrix of windows and data shapes
+  so a regression is loud, but a genuinely uncrowdable chart — a very long
+  formatted value on a very short chart — would still overlap.
+- **Reading dots can be covered by a label.** Only the line, the projection and
+  the goal line are obstacles; adding 365 dots to the obstacle set on a 1Y chart
+  would make every position collide and turn `clear` into noise.
+- **The `1W` line still sits above the recent dots for anyone losing weight**,
+  because a trailing seven-day mean lags a falling series. That is arithmetic,
+  not a defect, and it was probably half of what the report was reacting to —
+  the y-axis is what makes it readable as lag rather than as two scales.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.

@@ -3,7 +3,6 @@ import {
   fromPlanProjection,
   projectToGoal,
   RANGE_DAYS,
-  trendBounds,
   type Reading,
   type TrendSeries,
 } from '../trendSeries';
@@ -211,34 +210,6 @@ test('readings dated in the future are dropped', () => {
   const s = buildTrend({ readings, today: TODAY, range: '1M' });
   expect(s.readings).toHaveLength(1);
   expect(s.high).toBe(100);
-});
-
-// ---------------------------------------------------------------------------
-// Bounds
-// ---------------------------------------------------------------------------
-
-// A body-mass line starting at zero puts a year of work in the top 5% of the
-// box and reads as flat.
-test('bounds are not zero-based', () => {
-  const b = trendBounds({ low: 95, high: 105 }, { minSpan: 1 });
-  expect(b!.min).toBeGreaterThan(0);
-  expect(b!.min).toBeLessThan(95);
-});
-
-// Otherwise the dashed goal line is drawn off the top of the chart and the
-// projection heads for nothing visible.
-test('a goal outside the data widens the axis to include it', () => {
-  const b = trendBounds({ low: 95, high: 105 }, { minSpan: 1, goal: 80 });
-  expect(b!.min).toBeLessThanOrEqual(80);
-});
-
-test('a flat series gets a minimum span rather than dividing by zero', () => {
-  const b = trendBounds({ low: 100, high: 100 }, { minSpan: 1 });
-  expect(b!.max - b!.min).toBeCloseTo(1);
-});
-
-test('no data means no bounds', () => {
-  expect(trendBounds({ low: null, high: null }, { minSpan: 1 })).toBeNull();
 });
 
 // ---------------------------------------------------------------------------
