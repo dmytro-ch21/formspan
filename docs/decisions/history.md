@@ -37933,6 +37933,125 @@ back: it goes red and names the file.
 round trip and the derived-estimate guard are all covered by the suite, but
 "enter a girth, leave, come back, same number" against the real API is the
 reporter's own check and is left outstanding on the ticket.
+## 2026-08-20 — N122: the roadmap was right and the screen never said so
+
+**Reported from a device:** *"I activated a roadmap and added the counts of how
+many times I have done each, and none got counted towards the roadmap — they
+just don't appear there."* The ticket listed four candidate breaks in the chain
+Roadmap → `bjj_focus` → reflection chips → technique-tagged events → completion
+criteria, and asked that the broken link be established by measurement before
+anything was changed. That order mattered: three of the four candidates would
+have been fixed in the backend, and the backend turned out to be correct.
+
+### What was measured
+
+A scratch database (`vola_test_n122`), migrated and seeded from `origin/main`,
+then the reported scenario driven through the **real** `curriculum` repository —
+`Enroll(user, "white-belt-basics", "America/Los_Angeles")`, a session logged
+now, `drilled` and `scored` tags written the way `PutDetail` writes them, then
+`Get`. The payload came back:
+
+```
+grappling-stance-motion  criteria{target_drilled_sessions:10}  progress{drilled_sessions:1}
+double-leg-takedown      criteria{target_scored:12,...}        progress{scored:3, attempts:7, sessions:1, hit_rate:0.43}
+```
+
+**The derivation works.** So do the three links under it, each checked
+separately: every technique id on all nine seeded curricula exists in
+`techniques` and is `status='published'`, so nothing on a roadmap is unloggable
+(`0` missing, `0` unpublished, across 465 technique items); the tag write path
+carries a real `technique_id`; and `curriculum_enrollments.started_on` is
+already localised — `Enroll` selects `(now() AT TIME ZONE $3)::date` and both
+the mobile and web clients send `?tz=`.
+
+**A false positive worth recording, because it nearly became the answer.** The
+first reproduction inserted the enrollment by hand with the column's SQL
+`DEFAULT`, which is `CURRENT_DATE` — the *server's* date, UTC. At 20:23 in Los
+Angeles that is tomorrow, so the window excluded every session logged that
+evening and all counts read zero. Convincing, reproducible, and about a code
+path no client uses: the Go repository does the right thing and the SQL default
+is only reachable by hand. That is the *stub built from an assumption* trap
+aimed at a database, and the only thing that caught it was re-running through
+the real repository.
+
+### The two links that were actually broken, both on the client
+
+**1. Nothing refreshed the roadmap after the push.** A reflection is written to
+SQLite; `finish()` calls `requestSync()`, which is fire-and-forget by design,
+and immediately `router.back()`s. Every roadmap surface read the server on
+FOCUS only — so the refetch fired at the moment of navigation, *before* the
+outbox push, and then never again. Today re-read its sessions and its plan when
+`lastSyncAt` moved and did not re-read the roadmaps; `curriculum/[id].tsx` and
+`RoadmapSummary` had no sync subscription at all. The athlete watched a figure
+that could not move until they left the screen and came back — which reads
+exactly like "it did not count".
+
+All three now subscribe. Note the shape: a **subscription**, not
+`useSyncState()` plus an effect keyed on the value. The latter is a synchronous
+setState in an effect body, which `react-hooks/set-state-in-effect` flags and
+the `--max-warnings` ratchet then refuses — it took the mobile lint from 53 to
+55 on the first attempt. The rule's own guidance names the subscription as the
+correct shape, and it is the better fit anyway: a sync landing is an event, not
+a render.
+
+**2. Drilling a live-measured technique produced evidence the screen drew
+nowhere.** `drilled_sessions` arrives on EVERY item, and `measuresOf` renders it
+only where `target_drilled_sessions` is non-null. Counted across the authored
+roadmaps, the items where that is null and the criteria are live-only:
+
+| roadmap | technique items | drilling counts | live only |
+|---|---|---|---|
+| white-belt-basics | 81 | 20 | **61** |
+| blue-belt-basics | 75 | 19 | **56** |
+| purple-belt-basics | 44 | 4 | **40** |
+| brown-belt-basics | 34 | 5 | **29** |
+| novice-fundamentals | 10 | 10 | 0 |
+
+So for 61 of white belt's 81 items, an athlete who drilled a technique in ten
+classes saw ten classes of evidence rendered as nothing — under a state line
+reading *"Under way — your record has evidence for this"*, because `startedOf`
+reads the same `drilled_sessions` the measures ignore. Both sentences were true.
+Together they read as a broken counter, and that is what was reported.
+
+`evidenceNoteOf` is the fix, and it is #446's lesson rather than a new one: the
+honest answer at the lesson level is **what would count**. *"Drilled in 6
+classes. Drilling is not counted here — to move this one, land it in a live
+round."* The clause naming what counts is built from the criteria rather than
+authored per curriculum, so it cannot disagree with the thresholds printed above
+it. It stays silent in four cases, each a claim it must not make: not enrolled,
+a concept, an item whose drilled criterion already draws that number, and no
+drilled evidence at all.
+
+**Nothing about the criteria moved and nothing became tickable.** Migration
+000034's invariant holds — progress is still derived on every read, and the
+screen explains itself precisely *because* it may not offer a checkbox.
+
+### Verification
+
+Sixteen new tests across `roadmapView` and the roadmap screen. Mutation-checked
+one at a time, each caught by its own assertion and no other: neutering
+`evidenceNoteOf`, dropping each of its four guards, dropping the
+singular/plural branch, removing the sync subscription (which is the reported
+bug, and the test hangs to its 10s `waitFor` before failing), and dropping the
+already-seen guard. The mutation harness asserts its own search string applied
+before running, so a mutation that silently missed would fail loudly rather than
+read as "the test passed".
+
+One harness bug fixed while doing it, and it had been quietly manufacturing
+fetches: `roadmapScreen.test.tsx` mocked `useAuthToken` as `() => () =>
+Promise.resolve('token')`, a fresh closure per render, so `load`'s identity
+changed on every re-render and the mocked `useFocusEffect` re-fired each time.
+Any test counting reads was measuring the mock. Stabilised.
+
+### Not verified
+
+`refreshRoadmaps()` on Today and `RoadmapSummary`'s subscription have no test of
+their own — `roadmapScreen.test.tsx` covers the identical mechanism on the
+screen the athlete is most likely to be looking at, and the other two are the
+same three lines. And the whole thing is unconfirmed on a device: the ticket's
+last criterion is to log against an active roadmap and watch the figure move,
+which no test in this repo can reach.
+
 
 ## Open items / known gaps as of this entry
 

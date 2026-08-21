@@ -86,8 +86,44 @@ jest.mock('@/lib/bjjFocus', () => ({
   setFocus: (...a: unknown[]) => mockSetFocus(...a),
 }));
 
+// STABLE across renders, deliberately. `useAuthToken` returning a fresh
+// closure each render changes `load`'s identity, which re-fires the mocked
+// `useFocusEffect` on every re-render — so the harness manufactured extra
+// fetches and nothing could distinguish those from the screen's own. Any test
+// counting reads is measuring this mock unless it is stable.
+const stableToken = () => Promise.resolve('token');
 jest.mock('@/lib/useAuthToken', () => ({
-  useAuthToken: () => () => Promise.resolve('token'),
+  useAuthToken: () => stableToken,
+}));
+
+/**
+ * The sync clock, driven by the test — N122.
+ *
+ * The screen SUBSCRIBES rather than reading a hook value, so the fake has to
+ * be a real little broadcaster: `syncState()` for the value it starts from and
+ * `subscribeSync` for the changes. `landSync()` is what an outbox push
+ * finishing looks like from in here — which is the moment the reflection the
+ * athlete just wrote becomes visible to the server, and strictly after this
+ * screen's focus refetch has already been and gone.
+ */
+const mockSyncListeners = new Set<(s: { lastSyncAt: number | null }) => void>();
+const mockSyncClock = { lastSyncAt: null as number | null };
+function landSync() {
+  mockSyncClock.lastSyncAt = (mockSyncClock.lastSyncAt ?? 0) + 1000;
+  for (const l of mockSyncListeners) l({ ...mockSyncClock });
+}
+jest.mock('@/lib/sync', () => ({
+  ...jest.requireActual('@/lib/sync'),
+  syncState: () => ({ ...mockSyncClock }),
+  subscribeSync: (fn: (s: { lastSyncAt: number | null }) => void) => {
+    mockSyncListeners.add(fn);
+    // The real one calls back immediately on subscribe. Reproduced, because
+    // the screen's "have I seen this value" guard is what stops that immediate
+    // call becoming a second cold-mount fetch — a fake that stayed silent
+    // would leave that guard untested.
+    fn({ ...mockSyncClock });
+    return () => mockSyncListeners.delete(fn);
+  },
 }));
 
 function technique(id: string, name: string, phase: number, scored: number): CurriculumItem {
@@ -159,6 +195,8 @@ const WHITE: Curriculum = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockSyncClock.lastSyncAt = null;
+  mockSyncListeners.clear();
   mockGetCurriculum.mockResolvedValue(WHITE);
   mockFetchFocus.mockResolvedValue([]);
 });
@@ -464,5 +502,82 @@ describe('the summary cards', () => {
       'Not started — nothing is being counted yet',
     );
     expect(screen.getByTestId('curriculum-enrollment')).toBeTruthy();
+  });
+});
+
+/**
+ * N122 — logging has to advance the roadmap the athlete is looking at.
+ *
+ * The backend half was measured correct against a real database: enrol through
+ * the repository, write `drilled`/`scored` tags, and `GET /v1/curricula/{id}`
+ * returns the counts. What was broken is on this side, and in two places.
+ *
+ * These are the ones a render test can reach. Neither is visible by reading the
+ * screen: an effect that never fires and an effect that fires look identical in
+ * source, which is the same argument the file header makes about a collapsed
+ * section.
+ */
+describe('a session logged while the roadmap is open', () => {
+  it('re-reads when the sync lands, so the figure moves without leaving', async () => {
+    await open();
+    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+    const detail = () => within(screen.getByTestId('roadmap-lesson-detail-scissor-sweep'));
+    expect(detail().getByText('3 / 15')).toBeTruthy();
+
+    // The reflection lands on the server: two more scored. This is exactly what
+    // the outbox push produces, and it happens AFTER the wizard navigated back,
+    // so the focus refetch has already been and gone.
+    mockGetCurriculum.mockResolvedValue({
+      ...WHITE,
+      items: WHITE.items.map((i) =>
+        i.technique_id === 'scissor-sweep' && i.progress
+          ? { ...i, progress: { ...i.progress, scored: 5 } }
+          : i,
+      ),
+    });
+
+    landSync();
+
+    // The number moves, and the milestone stays open around it — the point of
+    // expanding in place is that a refresh does not cost your position.
+    await waitFor(() => expect(detail().getByText('5 / 15')).toBeTruthy());
+  });
+
+  it('does not re-read on a cold mount, where the focus read already fired', async () => {
+    // `lastSyncAt` starts null and an effect keyed on it runs once regardless.
+    // Without the null guard every arrival costs two identical round trips.
+    await open();
+    expect(mockGetCurriculum).toHaveBeenCalledTimes(1);
+  });
+
+  it('says what would count where the athlete drilled something measured live', async () => {
+    // 61 of white belt's 81 technique items are measured on live rounds. The
+    // API sends `drilled_sessions` for every one of them and the measure list
+    // draws it for none — so ten classes of work rendered as a column of
+    // zeros. The criteria are untouched; the screen explains itself instead.
+    mockGetCurriculum.mockResolvedValue({
+      ...WHITE,
+      items: WHITE.items.map((i) =>
+        i.technique_id === 'scissor-sweep' && i.progress
+          ? {
+              ...i,
+              progress: { ...i.progress, scored: 0, attempts: 0, hit_rate: null, drilled_sessions: 6 },
+            }
+          : i,
+      ),
+    });
+    await open();
+    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+
+    const note = screen.getByTestId('roadmap-evidence-scissor-sweep');
+    expect(note).toHaveTextContent(/Drilled in 6 classes/);
+    expect(note).toHaveTextContent(/land it in a live round/);
+
+    // And still no checkbox. Migration 000034's invariant is what this whole
+    // explanation exists to keep — the screen says what would count precisely
+    // because it may not offer a way to declare it done.
+    expect(screen.queryByTestId('roadmap-complete-scissor-sweep')).toBeNull();
   });
 });

@@ -3186,6 +3186,63 @@ is no cosmetic case here.**
 - Un-enrolment is self-scoped: no request can name another athlete.
 - Unauthenticated → 401, and no focus rows are released.
 
+### Logging advances an active roadmap (`app/curriculum/[id].tsx`, `/curricula/{id}`)
+
+The loop the whole roadmap feature rests on: log a technique a roadmap names, and
+the roadmap moves. It broke in two places at once (N122), and each half needs its
+own scenario because each looks fine while the other is broken.
+
+**Happy path**
+
+- Enrol in a roadmap, log a session tagging a technique it names as `scored`,
+  and the item's "Landed live" figure moves — **without leaving the screen and
+  coming back.** The write is local-first and the push is asynchronous, so a
+  test that navigates away and returns passes against the bug. Stay on the
+  screen and wait for the sync.
+- The milestone stays expanded across that refresh. Losing your place in a
+  93-lesson roadmap is most of the cost of a re-read.
+- Today's roadmap line and the You tab's roadmap summary move on the same sync,
+  from the same evidence. All three read one server answer; a build where they
+  disagree is showing at least one cached copy.
+- The counts start at enrolment, not at the beginning of the athlete's history —
+  a session logged **before** the enrolment date counts for nothing, and the
+  screen says so rather than leaving it to be discovered.
+
+**What would count, where the evidence is the wrong kind**
+
+- Drill a technique whose criteria are `target_scored` / `min_hit_rate` — the
+  majority of every belt roadmap — and the lesson **says what was drilled and
+  what would move it**. The zeros beside it are correct; the explanation is what
+  makes them readable. Without it the screen asserts "your record has evidence
+  for this" over a column of zeros, which is the reported bug.
+- Drill a technique whose criterion IS `target_drilled_sessions` and there is no
+  such note — the measure already shows that number, and a second sentence about
+  it would contradict the figure directly above.
+- The note names the right thing to do: "land it live" for an offensive-only
+  item, "stop theirs" where the criterion is defensive, both where both exist.
+  Assert against an item of each shape — a single hard-coded sentence passes the
+  first and is wrong for the other two.
+- Not enrolled → no note anywhere, and no zero-filled progress. Browsing shows
+  what a roadmap asks of you; working it shows how far along you are.
+
+**Edge cases and errors**
+
+- A session logged **offline** and synced later moves the roadmap when the sync
+  lands, not when the reflection was written.
+- A failed sync leaves the last known figures on screen rather than blanking
+  them. An unreadable answer is not "you are on no roadmap".
+- Deleting a session takes its contribution back — progress is derived on every
+  read, so mastery can go down. A build where it cannot has stored something.
+
+**The invariant**
+
+- **Nothing on this screen may mark a technique complete.** No checkbox, no
+  long-press, no "mark done" behind an overflow menu — at any zoom level, on any
+  lesson, mastered or not. Migration 000034 refuses it in the schema, and the
+  whole "what would count" explanation exists precisely because the honest
+  alternative is not available. This is the assertion to keep if only one
+  survives.
+
 ### The technique funnel, read back (`GET /v1/bjj/proficiency`, `/dashboard/proficiency`)
 
 **Happy path**

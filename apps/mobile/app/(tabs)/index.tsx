@@ -543,10 +543,20 @@ export default function TodayScreen() {
       })
       .catch(() => {});
     refreshPlan();
+    // The roadmaps too, and this is N122. A BJJ reflection is written into
+    // SQLite and pushed by the outbox, so the tags that advance a roadmap
+    // reach the server strictly AFTER `finish()` calls `requestSync` and
+    // navigates away. The focus effect below refetched `/curricula/working`
+    // at that moment — before the push — and then never again, so an athlete
+    // who logged a technique their roadmap names watched the figure stay put
+    // and reasonably concluded nothing had counted. Sessions and the plan
+    // were already re-read here for exactly this reason; the roadmaps were
+    // the one live-server read left out.
+    refreshRoadmaps();
     return () => {
       alive = false;
     };
-  }, [lastSyncAt, userId, refreshPlan]);
+  }, [lastSyncAt, userId, refreshPlan, refreshRoadmaps]);
 
   const startPlanned = useCallback(
     (p: { sport: string; workoutId: string | null }) => {
