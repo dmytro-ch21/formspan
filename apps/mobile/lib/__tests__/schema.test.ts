@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(22);
+  expect(row.user_version).toBe(23);
 });
 
 it('a fresh install has the sequences outbox', async () => {
@@ -122,7 +122,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 23 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -156,7 +156,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 23 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -177,7 +177,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 23 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
@@ -331,7 +331,7 @@ it('upgrading a v15-shaped database does not mark every cached name as owed', as
     .prepare(`SELECT name_dirty FROM workout_cache WHERE id = 'w1'`)
     .get() as { name_dirty: number };
   expect(row.name_dirty).toBe(0);
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 23 });
 });
 
 it('a fresh install has the food log', async () => {
@@ -411,7 +411,7 @@ it('upgrades a v17-shaped database by adding the food log', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 23 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -436,7 +436,7 @@ it('upgrades a v18-shaped database by adding the target cache', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 23 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -457,7 +457,7 @@ it('upgrades a v19-shaped database by adding the barcode cache', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 23 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -543,7 +543,7 @@ it('a device already stamped 21 gains foods.source', async () => {
     (c) => c.name,
   );
   expect(cols).toContain('source');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 23 });
 });
 
 it('re-running the source migration is not an error', async () => {
@@ -589,7 +589,11 @@ it('the tracker entries are indexed on the read the card runs', async () => {
 });
 
 
-it('upgrades a v21-shaped database by adding the N78 tracker columns', async () => {
+it('upgrades a pre-N78 database by adding the tracker columns', async () => {
+  // Stamped 21 so BOTH later blocks run — N114's `foods.source` at 22 and
+  // N78's tracker columns at 23. The version this branch adds moved from 22 to
+  // 23 during a rebase, because N114 took 22 while it was open.
+  //
   // **A REAL ALTER, unlike the v18/v19/v20 cases above.** Those are no-ops
   // against the unconditional CREATE section and only the version bump is
   // load-bearing. This one is not: a device already stamped 21 HAS
@@ -635,7 +639,7 @@ it('upgrades a v21-shaped database by adding the N78 tracker columns', async () 
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 23 });
   const cols = (
     db.raw.prepare('PRAGMA table_info(daily_trackers)').all() as { name: string }[]
   ).map((c) => c.name);

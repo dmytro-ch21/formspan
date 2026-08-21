@@ -374,21 +374,24 @@ describe('VoiceOver', () => {
    * dose.
    */
   it('says taken, not filled, when one tap is the whole day', () => {
-    expect(glyphLabel(creatine, 0, 1, true, true)).toBe('Creatine, 1 of 1, taken');
-    expect(glyphLabel(creatine, 0, 1, false, true)).toBe('Creatine, 1 of 1, not taken');
+    expect(glyphLabel(creatine, 0, 1, 'filled', true)).toBe('Creatine, 1 of 1, taken');
+    expect(glyphLabel(creatine, 0, 1, 'empty', true)).toBe('Creatine, 1 of 1, not taken');
+    // N77's third state collapses into "taken" here rather than inventing a
+    // fourth word: a dose logged twice is still a dose you took.
+    expect(glyphLabel(creatine, 0, 1, 'over', true)).toBe('Creatine, 1 of 1, taken');
     // And a tracker that merely HAPPENS to be drawing one glyph is not a dose:
     // a count with no ceiling on zero taps draws one, and "not taken" would
     // imply a target it does not have. The suite caught this.
     const showers: Tracker = { ...coffee, name: 'Cold showers', unit: '', count_noun: '' };
-    expect(glyphLabel(showers, 0, 1, false)).toBe('Cold showers, item 1 of 1, empty');
-    expect(glyphHint(false, true)).toBe('Double tap to mark it taken');
-    expect(glyphHint(true, true)).toBe('Double tap to undo it');
+    expect(glyphLabel(showers, 0, 1, 'empty')).toBe('Cold showers, item 1 of 1, empty');
+    expect(glyphHint('empty', true)).toBe('Double tap to mark it taken');
+    expect(glyphHint('filled', true)).toBe('Double tap to undo it');
   });
 
   it('still counts cups in a row, where position is what a listener needs', () => {
-    expect(glyphLabel(water, 2, 8, true)).toBe('Water, cup 3 of 8, filled');
-    expect(glyphLabel(water, 7, 8, false)).toBe('Water, cup 8 of 8, empty');
-    expect(glyphHint(false)).toBe('Double tap to add it');
+    expect(glyphLabel(water, 2, 8, 'filled')).toBe('Water, cup 3 of 8, filled');
+    expect(glyphLabel(water, 7, 8, 'empty')).toBe('Water, cup 8 of 8, empty');
+    expect(glyphHint('empty')).toBe('Double tap to add it');
   });
 
   it('falls back to a word rather than an empty one for a bare count', () => {

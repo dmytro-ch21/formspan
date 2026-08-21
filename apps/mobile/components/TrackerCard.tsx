@@ -260,13 +260,8 @@ function Glyphs({
             state={state}
             fill={fill}
             size={size}
-<<<<<<< HEAD
-            label={glyphLabel(tracker, i, slots, state)}
-            hint={glyphHint(state)}
-=======
-            label={glyphLabel(tracker, i, slots, filled, single)}
-            hint={glyphHint(filled, single)}
->>>>>>> 2ac1ee25 (N78 review round: the Destroy rule is scoped to presets that come back)
+            label={glyphLabel(tracker, i, slots, state, single)}
+            hint={glyphHint(state, single)}
             testID={`tracker-glyph-${tracker.id}-${i}`}
             hitSlop={single ? 4 : GLYPH_SLOP}
             // A filled glyph removes ITS OWN tap; an empty one adds.
