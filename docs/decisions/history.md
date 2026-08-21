@@ -36917,6 +36917,108 @@ It does not stop anyone running `psql` against staging, and it does not stop
 anyone typing the staging DSN as `DATABASE_URL`. It makes `migrate` refuse. The
 guard makes the consequence legible and the action impossible **through this
 tool only**; every other route to that database is unchanged.
+## 2026-08-20 — The evidence latch attested to itself (N456, part 2)
+
+#492 landed and worked: merging it reopened **#456** through the mechanism #456
+asked for, labelled and listing its one outstanding criterion. That is the
+demonstration the ticket demanded, and it is worth keeping because it is rare —
+the change was caught by itself.
+
+**Then the first real backfill re-closed every ticket it reopened.** Within
+thirteen seconds each, #409, #433 and #446 went reopened → labelled →
+commented → **unlabelled, commented and closed by `github-actions[bot]`**.
+
+### The defect
+
+`render_latch_comment` shows the reader a worked example of the exit gesture:
+
+```
+    /evidence ran it on the 15 Pro, both belts — labels stay above the keyboard
+```
+
+`ATTEST_RE` was anchored `^[ \t]*/evidence`, tolerating leading whitespace. The
+example is indented as a code block. **So the latch's own instructions parse as
+an attestation**, and the observation it extracted was the example sentence,
+word for word.
+
+**Why it survived review, CI, fourteen mutations and a full lifecycle
+demonstration**: comments written by `GITHUB_TOKEN` do not retrigger workflows,
+so on the ordinary path the bot's own comment is inert and the loop cannot
+close. The backfill is the path that differs — it posts under a **human** token,
+and human comments do retrigger. The masked case was the demonstrated one; the
+unmasked case was the first one run in anger.
+
+That is the general shape worth remembering: **a loop that is broken by an
+accident of the platform rather than by a guard in the code is not broken, it is
+dormant.** The reason GITHUB_TOKEN behaves that way is a GitHub property, not an
+invariant of this repo — and it is exactly the kind of thing a later change (a
+PAT, an app token, a different caller) removes without touching the code that
+depends on it. The workflow already carried a comment saying the `edited` path
+relied on that property alone. The comment path turned out to rely on it too.
+
+### The fix, in two independent layers
+
+- **`ATTEST_RE` anchors at column zero.** The tolerance for leading whitespace
+  read as ordinary politeness and was the whole bug. Indented or quoted
+  instructions can no longer attest, which is why the example stays indented.
+- **`LATCH_SENTINEL`** — an HTML comment stamped into every comment the script
+  writes, and refused on the way back in. This covers the *template changing*: an
+  author who reformats the example without indenting it would otherwise re-arm
+  the loop with nothing looking wrong.
+
+The vector that would have caught it is now the first thing in that part of the
+self-test, and it is embarrassingly simple: **feed `render_latch_comment`'s own
+output back into `parse_attestation` and require `None`.** Each guard is asserted
+separately so neither can rot behind the other, and with both removed the defect
+reproduces exactly — `Attestation(kind='evidence', observation='ran it on the 15
+Pro, both belts — labels stay above the keyboard')`.
+
+**The lesson is narrower than "test more".** Every mutation tested a guard that
+existed. None asked the question this needed: *what does this program do when
+handed its own output?* Anything that both writes and reads the same channel —
+a bot commenting on issues it watches, a formatter reading formatted files, a
+log parser that logs — should have a round-trip vector, and it costs one line.
+
+### Two more from the same ticket, recorded because the shapes recur
+
+**An automation that acts on user-supplied text needs an authorisation check
+even when the repo feels small.** This one is public. `issue_comment` fires for
+any GitHub account, and the workflow lends its `issues: write` token to whatever
+the comment says — so the first version would have let a drive-by
+`/evidence xxxxxxxx` tick a maintainer's criteria, **rewrite the issue body** and
+close the ticket. The body edit is the worst of it, since the whole mechanism
+rests on those checkboxes being an honest record. Releasing the latch now needs
+write access, checked against the collaborator API and failing closed;
+`CONTRIBUTOR` is not write access and is refused.
+
+**A `concurrency` group can discard work, and "cancel-in-progress: false" does
+not say what it sounds like.** It was added to serialise runs per issue, which
+looks obviously correct. GitHub cancels runs already **pending** in a group when
+a new one queues — `cancel-in-progress` governs the *running* one, not the
+queued one. So `/evidence` followed by any second event would have silently
+dropped the attestation: a safety mechanism discarding the one gesture the
+design depends on, which is worse than no safety mechanism. Removed. Overlapping
+runs are the cheaper failure, because every decision is made against a fresh
+read and the worst outcome is a duplicated comment.
+
+### Board state
+
+The backfill is done and narrowed to three. **#388 and #402 were deliberately
+left closed**: the maintainer had written the evidence out in a comment on each
+and said so plainly, so only the checkbox was unticked. A count of unticked boxes
+would have reopened both — **an unticked box is not the same as absent
+evidence, and no parser can tell them apart.** Reading the threads is what
+distinguishes them, which is why `--backfill` now takes `--only` and refuses to
+act without `--execute`.
+
+Those two comments are also the strongest evidence for the design: they are the
+`/evidence` gesture performed freehand, unprompted, before the mechanism existed.
+
+**Criterion 2 of #456 remains NOT MET and is not being laundered.** No PAT was
+created, so there is no board `Status` for this state — only the label. The
+zero-credential version is a saved board view filtered on
+`label:evidence-outstanding`; it is a ten-second UI action and it is the board
+owner's to take.
 
 ## Open items / known gaps as of this entry
 
