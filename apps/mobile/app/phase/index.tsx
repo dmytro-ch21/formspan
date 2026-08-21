@@ -43,7 +43,9 @@ import { useAccent } from '@/lib/AccentProvider';
 import { RATE_TARGETS, type PhaseKind } from '@/lib/anthropometry';
 import { PHASE_LABELS, createPhase, endPhase, listPhases, type Phase } from '@/lib/body';
 import { dayString } from '@/lib/calendar';
+import { formatWeight, fromDisplayWeight, weightUnit, weightUnitName } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { useUnits } from '@/lib/useUnits';
 
 const KINDS: PhaseKind[] = ['cut', 'lean_bulk', 'recomposition', 'maintenance', 'making_weight'];
 
@@ -51,6 +53,7 @@ export default function PhaseScreen() {
   const router = useRouter();
   const accent = useAccent();
   const getToken = useAuthToken();
+  const { units, unitsReady } = useUnits();
 
   const [live, setLive] = useState<Phase | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -83,8 +86,17 @@ export default function PhaseScreen() {
   useEffect(() => refresh(), [refresh]);
 
   const start = async () => {
-    if (busy) return;
-    const weight = Number(targetWeight.trim().replace(',', '.'));
+    // `unitsReady` gates the WRITE, not just the label. Until the cache has
+    // been consulted `units` reads `metric`, so a submission landing in that
+    // window would store a pounds figure as kilograms — the very bug this
+    // conversion exists to close, just narrowed to one frame.
+    if (busy || !unitsReady) return;
+    // What was typed is in the athlete's OWN units; `target_weight_kg` is
+    // kilograms, always. Without this conversion an imperial athlete typing
+    // 175 stored 175 **kg** — not a mislabelled field but a wrong number, and
+    // one the rate band and the calorie target then derive from silently.
+    const typed = Number(targetWeight.trim().replace(',', '.'));
+    const weight = typed > 0 ? fromDisplayWeight(typed, units) : typed;
     // Making weight is the only kind where these are load-bearing, so it is the
     // only kind that insists on them. Asking everyone for a goal weight is how
     // you get a made-up number that later reads as a commitment.
@@ -141,7 +153,7 @@ export default function PhaseScreen() {
             <Text style={styles.big}>{PHASE_LABELS[live.kind].label}</Text>
             <Text style={styles.note}>
               Started {live.started_on}
-              {live.target_weight_kg ? ` · aiming for ${live.target_weight_kg} kg` : ''}
+              {live.target_weight_kg ? ` · aiming for ${formatWeight(live.target_weight_kg, units)}` : ''}
               {live.target_on ? ` by ${live.target_on}` : ''}
             </Text>
             <Text style={styles.note}>{rateSentence(live.kind)}</Text>
@@ -191,7 +203,8 @@ export default function PhaseScreen() {
             <View style={styles.fields}>
               <View style={styles.field}>
                 <Text style={styles.fieldLabel}>
-                  Target weight (kg){kind === 'making_weight' ? '' : ' — optional'}
+                  Target weight ({weightUnit(units)})
+                  {kind === 'making_weight' ? '' : ' — optional'}
                 </Text>
                 <TextInput
                   style={styles.input}
@@ -201,7 +214,7 @@ export default function PhaseScreen() {
                   inputMode="decimal"
                   placeholder="—"
                   placeholderTextColor={vola.textDim}
-                  accessibilityLabel="Target weight in kilograms"
+                  accessibilityLabel={`Target weight in ${weightUnitName(units)}`}
                   testID="phase-weight"
                 />
               </View>
@@ -225,7 +238,11 @@ export default function PhaseScreen() {
 
             <Pressable
               onPress={() => void start()}
-              style={[styles.primary, { backgroundColor: accent.accent }, busy && styles.off]}
+              style={[
+                styles.primary,
+                { backgroundColor: accent.accent },
+                (busy || !unitsReady) && styles.off,
+              ]}
               accessibilityRole="button"
               accessibilityLabel="Start this phase"
               testID="phase-start"

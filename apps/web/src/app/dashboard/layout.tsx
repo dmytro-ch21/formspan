@@ -9,6 +9,11 @@ import { auth } from "@clerk/nextjs/server";
 // listModules() from the server".
 import { listModules, type Module } from "@/lib/modules";
 import { ModulesProvider } from "@/lib/ModulesProvider";
+// Same server/client boundary reason as `modules` above: `fetchUnitSystem`
+// lives in its own directiveless module because `api.ts`'s `getProfile` is a
+// client reference and calling it from here throws at runtime.
+import { fetchUnitSystem } from "@/lib/unitSystem";
+import { UnitsProvider } from "@/lib/UnitsProvider";
 import { DashboardNav } from "./DashboardNav";
 import { ThemeToggle } from "../ThemeToggle";
 import { VolaLockup } from "../Brand";
@@ -40,41 +45,49 @@ export default async function DashboardLayout({
   } catch {
     /* nav falls back to ungated below */
   }
+  // Read here for the same reason `modules` is: awaited before anything
+  // renders, so no unit-bearing number is ever painted in a unit we have not
+  // established. `fetchUnitSystem` never throws — it degrades to `metric`,
+  // which is what a new account gets — so this needs no catch of its own and
+  // must not share the one above, whose `[]` fallback is about the nav.
+  const unitSystem = await fetchUnitSystem(getToken);
   return (
     <ModulesProvider initial={modules}>
-      <div className="flex min-h-screen bg-bg">
-        <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-line-soft bg-surface">
-          <Link
-            href="/dashboard"
-            className="flex justify-center px-5 py-6"
-            aria-label="VOLA, dashboard"
-          >
-            {/* The wordmark takes `currentColor`, so it is white on the dark
-                theme and near-black on the light one without this file knowing
-                which is active. */}
-            <VolaLockup width={92} />
-          </Link>
+      <UnitsProvider initial={unitSystem}>
+        <div className="flex min-h-screen bg-bg">
+          <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-line-soft bg-surface">
+            <Link
+              href="/dashboard"
+              className="flex justify-center px-5 py-6"
+              aria-label="VOLA, dashboard"
+            >
+              {/* The wordmark takes `currentColor`, so it is white on the dark
+                  theme and near-black on the light one without this file knowing
+                  which is active. */}
+              <VolaLockup width={92} />
+            </Link>
 
-          <DashboardNav />
+            <DashboardNav />
 
-          <div className="mt-auto flex flex-col gap-1 border-t border-line-soft p-3">
-            <ThemeToggle />
-          </div>
+            <div className="mt-auto flex flex-col gap-1 border-t border-line-soft p-3">
+              <ThemeToggle />
+            </div>
 
-          <div className="flex items-center gap-3 border-t border-line-soft px-5 py-4">
-            {/* Clerk's widget renders its own surface, so it needs telling
-              about the dark ground or it drops a white popover onto it. */}
-            <UserButton
-              appearance={{ variables: { colorBackground: "#10151f" } }}
-            />
-            <span className="text-sm text-text-muted">Account</span>
-          </div>
-        </aside>
+            <div className="flex items-center gap-3 border-t border-line-soft px-5 py-4">
+              {/* Clerk's widget renders its own surface, so it needs telling
+                about the dark ground or it drops a white popover onto it. */}
+              <UserButton
+                appearance={{ variables: { colorBackground: "#10151f" } }}
+              />
+              <span className="text-sm text-text-muted">Account</span>
+            </div>
+          </aside>
 
-        <main className="min-w-0 flex-1">
-          <div className="mx-auto max-w-6xl px-8 py-10">{children}</div>
-        </main>
-      </div>
+          <main className="min-w-0 flex-1">
+            <div className="mx-auto max-w-6xl px-8 py-10">{children}</div>
+          </main>
+        </div>
+      </UnitsProvider>
     </ModulesProvider>
   );
 }

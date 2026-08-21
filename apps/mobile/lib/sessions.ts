@@ -747,7 +747,10 @@ export function swapSuggestions(
  */
 export function describeSet(
   s: LoggedSet,
-  units: UnitSystem = 'metric',
+  // Required — see the note on `summariseTargets` in lib/workouts.ts. The
+  // `duration` default below stays: a seconds/minutes display mode cannot
+  // render the wrong unit SYSTEM, which is the failure being closed here.
+  units: UnitSystem,
   duration: DurationUnit = 'seconds',
 ): string {
   const parts: string[] = [];

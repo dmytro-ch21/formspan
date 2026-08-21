@@ -10,7 +10,9 @@ import { isNotFound } from '@/lib/apiError';
 import { setModules } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { getProfile, updateProfile, type ProfilePatch } from '@/lib/profile';
+import { fromFeetInches, heightUnit, toFeetInches, type UnitSystem } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { useUnits } from '@/lib/useUnits';
 
 /**
  * Editing who you are — as distinct from how the app behaves, which is
@@ -19,10 +21,17 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * The split matters because these fields are *inputs to the product*, not
  * preferences: which sports you do decides what the app offers you, and date
  * of birth feeds the calorie and heart-rate maths later. Getting them wrong
- * changes answers, where getting units wrong only changes labels.
+ * changes answers.
+ *
+ * That last clause used to read "where getting units wrong only changes
+ * labels", and N105 disproved it twice over: height is stored in centimetres
+ * and feeds BMR, so an imperial athlete entering 5'11" into a box that wanted
+ * centimetres would distort their own calorie target — and the phase screen
+ * was storing pounds as kilograms outright.
  */
 export default function EditProfileScreen() {
   const accent = useAccent();
+  const { units } = useUnits();
   const getToken = useAuthToken();
   const router = useRouter();
 
@@ -242,18 +251,10 @@ export default function EditProfileScreen() {
             about the athlete that does not move week to week, and asking for it
             per check-in would both nag and let rows disagree. Waist-to-height
             and the body-fat estimate are both unavailable without it. */}
-        <Field
-          label="Height (cm)"
-          value={patch.height_cm != null ? String(patch.height_cm) : ''}
-          onChangeText={(v) => {
-            const n = Number(v.replace(',', '.'));
-            setPatch((p) => ({
-              ...p,
-              height_cm: v.trim() === '' || !Number.isFinite(n) ? null : n,
-            }));
-          }}
-          placeholder="180"
-          testID="profile-height"
+        <HeightField
+          cm={patch.height_cm ?? null}
+          units={units}
+          onChange={(cm) => setPatch((p) => ({ ...p, height_cm: cm }))}
         />
 
         <Text style={styles.sectionLabel}>Sex</Text>
@@ -320,6 +321,110 @@ export default function EditProfileScreen() {
   );
 }
 
+/**
+ * Height, in whichever units the athlete thinks in.
+ *
+ * **Height had no unit support anywhere before N105**: `height_cm` ran from the
+ * Postgres column through `profile.go` and `lib/profile.ts` onto a box labelled
+ * "Height (cm)", whatever the profile said. That is not only a label problem —
+ * BMR derives from height, so an athlete who typed something sensible to them
+ * got a distorted calorie target out of the other end.
+ *
+ * ## Why imperial gets two boxes
+ *
+ * Nobody says "70.9 inches"; they say 5'11". A single inches field would be a
+ * faithful unit conversion and an unusable control, so imperial gets feet and
+ * inches side by side and metric keeps its one box.
+ *
+ * ## Why there is no local state
+ *
+ * The displayed values are DERIVED from `cm` on every render rather than held in
+ * their own `useState` and synced by an effect. Partly correctness — one source
+ * of truth, so the two boxes cannot disagree with the value being saved — and
+ * partly the lint budget: `react-hooks/set-state-in-effect` is a warning held by
+ * `--max-warnings`, which sits exactly at its limit, so the effect-and-sync shape
+ * could not be added without raising the ratchet this repo uses as enforcement.
+ *
+ * Round-tripping is exact in the direction that matters: 5'11" stores 180.3 and
+ * reads back as 5'11", verified across every whole-inch height the column's
+ * CHECK admits (1'8" to 8'6"). The units module's header explains why the other
+ * direction cannot be.
+ */
+function HeightField({
+  cm,
+  units,
+  onChange,
+}: {
+  cm: number | null;
+  units: UnitSystem;
+  onChange: (cm: number | null) => void;
+}) {
+  if (units !== 'imperial') {
+    return (
+      <Field
+        label={`Height (${heightUnit(units)})`}
+        value={cm != null ? String(cm) : ''}
+        onChangeText={(v) => {
+          const n = Number(v.replace(',', '.'));
+          onChange(v.trim() === '' || !Number.isFinite(n) ? null : n);
+        }}
+        placeholder="180"
+        testID="profile-height"
+      />
+    );
+  }
+
+  const parts = cm != null ? toFeetInches(cm) : null;
+  // An empty box reads as zero for the other half's arithmetic, and a TOTAL of
+  // zero clears the value rather than storing 0 cm — which the column rejects
+  // anyway, and which would mean "I am 0 tall" rather than "I have not said".
+  //
+  // Keyed on the total rather than on both boxes being blank, because with
+  // derived values the blank-blank state is UNREACHABLE: clearing inches leaves
+  // feet showing 5, and clearing feet then passes the sibling's derived '0'
+  // rather than ''. So the field could never be emptied once set. Found by the
+  // test, not by reading it.
+  const commit = (feet: string, inches: string) => {
+    const f = Number(feet.replace(',', '.'));
+    const i = Number(inches.replace(',', '.'));
+    const totalInches = (Number.isFinite(f) ? f : 0) * 12 + (Number.isFinite(i) ? i : 0);
+    if (totalInches <= 0) return onChange(null);
+    onChange(fromFeetInches(Number.isFinite(f) ? f : 0, Number.isFinite(i) ? i : 0));
+  };
+
+  return (
+    <View style={styles.field}>
+      <Text style={styles.sectionLabel}>Height</Text>
+      <View style={styles.heightRow}>
+        <TextInput
+          style={[styles.input, styles.heightBox]}
+          value={parts ? String(parts.feet) : ''}
+          onChangeText={(v) => commit(v, parts ? String(parts.inches) : '')}
+          keyboardType="number-pad"
+          inputMode="numeric"
+          placeholder="5"
+          placeholderTextColor={vola.textDim}
+          accessibilityLabel="Height, feet"
+          testID="profile-height-feet"
+        />
+        <Text style={styles.heightUnit}>ft</Text>
+        <TextInput
+          style={[styles.input, styles.heightBox]}
+          value={parts ? String(parts.inches) : ''}
+          onChangeText={(v) => commit(parts ? String(parts.feet) : '', v)}
+          keyboardType="number-pad"
+          inputMode="numeric"
+          placeholder="11"
+          placeholderTextColor={vola.textDim}
+          accessibilityLabel="Height, inches"
+          testID="profile-height-inches"
+        />
+        <Text style={styles.heightUnit}>in</Text>
+      </View>
+    </View>
+  );
+}
+
 function Field({
   label,
   value,
@@ -360,6 +465,9 @@ function Field({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  heightRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  heightBox: { flex: 1 },
+  heightUnit: { color: vola.textMuted, fontSize: 15 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
   unavailable: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
   unavailableHint: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },

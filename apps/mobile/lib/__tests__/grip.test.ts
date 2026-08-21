@@ -272,13 +272,13 @@ describe('a grip the server would refuse', () => {
 
 describe('showing it back', () => {
   it('names the grip on the row', () => {
-    expect(describeSet(set())).toBe('10 × 30kg · Neutral');
+    expect(describeSet(set(), 'metric')).toBe('10 × 30kg · Neutral');
   });
 
   it('says nothing when it was never recorded', () => {
     // The whole discipline in one assertion: silence stays silence. Rendering
     // "Regular" here would be the app answering a question nobody asked.
-    expect(describeSet(set({ grip: undefined }))).toBe('10 × 30kg');
+    expect(describeSet(set({ grip: undefined }), 'metric')).toBe('10 × 30kg');
   });
 });
 

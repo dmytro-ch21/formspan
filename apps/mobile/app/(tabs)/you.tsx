@@ -15,7 +15,7 @@ import { isNotFound } from '@/lib/apiError';
 import { playSound } from '@/lib/sounds';
 import { anyArrived, getPendingCounts } from '@/lib/friends';
 import { getProfile, type Profile } from '@/lib/profile';
-import { UNIT_SYSTEMS } from '@/lib/units';
+import { DEFAULT_UNIT_SYSTEM, unitSystemDetail } from '@/lib/units';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -348,8 +348,11 @@ export default function YouScreen() {
               <Row
                 label="Units"
                 value={
-                  UNIT_SYSTEMS.find((u) => u.key === profile?.unit_system)?.detail ??
-                  'kilograms · metres'
+                  // Falls back to the DEFAULT SYSTEM's own description rather
+                  // than a copy of its words. The literal here said
+                  // 'kilograms · metres' and the table said the same thing
+                  // twice — the shape that let the two units modules drift.
+                  unitSystemDetail(profile?.unit_system ?? DEFAULT_UNIT_SYSTEM)
                 }
               />
               {profile?.date_of_birth && <Row label="Born" value={profile.date_of_birth} />}

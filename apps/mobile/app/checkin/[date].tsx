@@ -23,7 +23,7 @@ import {
   type GirthKey,
 } from '@/lib/body';
 import { getProfile, type Profile } from '@/lib/profile';
-import { fromDisplayWeight, toDisplayWeight, weightUnit } from '@/lib/units';
+import { fromDisplayWeight, toDisplayWeight, weightUnit, weightUnitName } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 
@@ -264,7 +264,7 @@ export default function CheckinScreen() {
           inputMode="decimal"
           placeholder="—"
           placeholderTextColor={vola.textDim}
-          accessibilityLabel={`Weight in ${units === 'imperial' ? 'pounds' : 'kilograms'}`}
+          accessibilityLabel={`Weight in ${weightUnitName(units)}`}
           testID="checkin-weight"
         />
         <Text style={styles.hint}>

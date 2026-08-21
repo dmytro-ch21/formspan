@@ -4,7 +4,7 @@ import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
 import type { Exercise } from './exercises';
-import { formatWeight, type UnitSystem } from './units';
+import { formatDistance, formatWeight, type UnitSystem } from './units';
 import { newTraceId, traceparent } from './trace';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
@@ -118,7 +118,16 @@ export function withTarget(
 }
 
 /** A one-line human summary of an item's targets, e.g. "3 × 5 · 100kg". */
-export function summariseTargets(item: WorkoutItem, units: UnitSystem = 'metric'): string {
+/**
+ * `units` is REQUIRED, deliberately.
+ *
+ * It defaulted to `'metric'`, which means a call site that forgets it renders
+ * kilograms to an imperial athlete AND TYPECHECKS. That is the silent-metric
+ * failure this whole change exists to remove — a default here quietly reopens
+ * it for every future caller, and no check can see it: the literal `kg` never
+ * appears in the source, it comes out of `formatWeight`.
+ */
+export function summariseTargets(item: WorkoutItem, units: UnitSystem): string {
   const parts: string[] = [];
   if (item.target_sets && item.target_reps) parts.push(`${item.target_sets} × ${item.target_reps}`);
   else if (item.target_sets) parts.push(`${item.target_sets} sets`);
@@ -129,13 +138,11 @@ export function summariseTargets(item: WorkoutItem, units: UnitSystem = 'metric'
     const s = item.target_seconds % 60;
     parts.push(m ? `${m}m${s ? ` ${s}s` : ''}` : `${s}s`);
   }
-  if (item.target_distance_m) {
-    parts.push(
-      item.target_distance_m >= 1000
-        ? `${(item.target_distance_m / 1000).toFixed(1)}km`
-        : `${item.target_distance_m}m`,
-    );
-  }
+  // `formatDistance` rather than a local km/m split: it already switches unit
+  // by magnitude in BOTH systems, so an imperial athlete gets miles and yards
+  // instead of the kilometres this hand-rolled version printed regardless of
+  // preference — on a function that was already being handed `units`.
+  if (item.target_distance_m) parts.push(formatDistance(item.target_distance_m, units));
   return parts.join(' · ') || 'No targets set';
 }
 

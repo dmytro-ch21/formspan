@@ -67,6 +67,7 @@ import {
   toDisplayDistance,
   toDisplayWeight,
   weightUnit,
+  weightUnitName,
   type UnitSystem,
 } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
@@ -1444,9 +1445,9 @@ export default function SessionScreen() {
                     hitSlop={10}
                     style={styles.unitChip}
                     accessibilityRole="button"
-                    accessibilityLabel={`${exercise?.name ?? 'This exercise'} is in ${
-                      unitFor(g.exerciseID) === 'imperial' ? 'pounds' : 'kilograms'
-                    }. Switch.`}
+                    accessibilityLabel={`${exercise?.name ?? 'This exercise'} is in ${weightUnitName(
+                      unitFor(g.exerciseID),
+                    )}. Switch.`}
                     testID={`unit-${g.exerciseID}`}
                   >
                     <Text style={styles.unitChipText}>{weightUnit(unitFor(g.exerciseID))}</Text>
@@ -2675,11 +2676,20 @@ function Field({
   );
 }
 
+/**
+ * Measure NAMES, deliberately carrying no unit.
+ *
+ * `weight` read `Weight kg` and `distance` read `Metres`, which were dead
+ * defaults: the only call site resolves those two from the athlete's
+ * preference itself and falls through to this table for `reps` alone. A unit
+ * baked into an unused default is how the wrong one eventually gets rendered,
+ * so the names are unit-free and the units are resolved where they are known.
+ */
 const MEASURE_LABEL: Record<Measure, string> = {
   reps: 'Reps',
-  weight: 'Weight kg',
+  weight: 'Weight',
   seconds: 'Seconds',
-  distance: 'Metres',
+  distance: 'Distance',
 };
 const MEASURE_KEY: Record<Measure, keyof LoggedSet> = {
   reps: 'reps',

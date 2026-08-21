@@ -27,8 +27,12 @@ import {
   type WorkoutItem,
 } from "@/lib/api";
 import {
+  distanceInputUnit,
+  formatDistance,
   formatWeight,
+  fromDisplayDistance,
   fromDisplayWeight,
+  toDisplayDistance,
   toDisplayWeight,
   weightUnit,
   type UnitSystem,
@@ -618,17 +622,33 @@ function ItemRow({
       {editable ? (
         <div className="flex shrink-0 items-end gap-2">
           {fields.map((f) => {
-            const label = f === "weight" ? weightUnit(units) : FIELD_LABEL[f];
+            // **Label and value move together, or not at all.** An earlier
+            // pass of N105 gave `distance` the imperial LABEL here and left
+            // the value in metres, which recreated the exact bug the ticket
+            // exists to close: a stored 100 m displayed as "100" under a "yd"
+            // header, and an athlete typing "100" meaning yards stored 100
+            // metres. The old "Metres" label was at least truthful.
+            //
+            // A unit label is a claim about the number beside it. Adding one
+            // without converting the number is worse than leaving both metric.
+            const label =
+              f === "weight"
+                ? weightUnit(units)
+                : f === "distance"
+                  ? distanceInputUnit(units)
+                  : FIELD_LABEL[f];
             const stored = item[FIELD_KEY[f]] as number | null;
-            // Shown in the athlete's units, stored in kilograms — the same
-            // rule the session logger follows, so a template written in
-            // pounds and performed in kilograms is still the same plan.
+            // Shown in the athlete's units, stored in kilograms and metres —
+            // the same rule the session logger follows, so a template written
+            // in pounds and performed in kilograms is still the same plan.
             const shown =
               stored == null
                 ? ""
                 : f === "weight"
                   ? toDisplayWeight(stored, units)
-                  : stored;
+                  : f === "distance"
+                    ? toDisplayDistance(stored, units)
+                    : stored;
             return (
               <label key={f} className="flex flex-col gap-1">
                 <span className="eyebrow text-[0.625rem]">{label}</span>
@@ -646,12 +666,16 @@ function ItemRow({
                       onChange({ ...item, [FIELD_KEY[f]]: null });
                       return;
                     }
+                    // Converted back before it is stored — the database only
+                    // ever sees kilograms and metres.
                     onChange({
                       ...item,
                       [FIELD_KEY[f]]:
                         f === "weight"
                           ? fromDisplayWeight(n, units)
-                          : Math.round(n),
+                          : f === "distance"
+                            ? Math.round(fromDisplayDistance(n, units))
+                            : Math.round(n),
                     });
                   }}
                   placeholder="—"
@@ -704,7 +728,15 @@ function targetSummary(i: WorkoutItem, units: UnitSystem): string {
     p.push(`${i.target_sets}×${i.target_reps}`);
   if (i.target_weight_kg) p.push(formatWeight(i.target_weight_kg, units));
   if (i.target_seconds) p.push(`${i.target_seconds}s`);
-  if (i.target_distance_m) p.push(`${i.target_distance_m}m`);
+  // `formatDistance`, not `${…}m`. This is the READ-ONLY twin of the edit row
+  // above, so a raw metre figure here would contradict the yards that row
+  // shows for the same item the moment the athlete clicks Edit.
+  //
+  // `check-unit-literals` can never catch this one: `m` is deliberately
+  // outside its vocabulary, because this app renders minutes and seconds as
+  // `m` and `s` in a dozen places. A checker with an ambiguous token in it is
+  // one somebody eventually silences.
+  if (i.target_distance_m) p.push(formatDistance(i.target_distance_m, units));
   return p.join(" · ") || "—";
 }
 

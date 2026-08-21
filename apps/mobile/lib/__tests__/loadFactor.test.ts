@@ -83,14 +83,14 @@ describe('swapping an exercise', () => {
  */
 describe('saying so on the row', () => {
   it('shows the total when a pair of dumbbells doubles it', () => {
-    expect(describeSet(set())).toBe('10 × 30kg (60kg total)');
+    expect(describeSet(set(), 'metric')).toBe('10 × 30kg (60kg total)');
   });
 
   it('says nothing at all when the weight is the whole story', () => {
     // A barbell, a machine, or one kettlebell held in two hands. An annotation
     // here would be noise on the overwhelming majority of sets — 620 of the
     // catalog's 762 — and noise is how a real signal stops being read.
-    expect(describeSet(set({ exercise_id: 'bench-press', weight_kg: 100, load_factor: 1 }))).toBe(
+    expect(describeSet(set({ exercise_id: 'bench-press', weight_kg: 100, load_factor: 1 }), 'metric')).toBe(
       '10 × 100kg',
     );
   });
@@ -101,7 +101,7 @@ describe('saying so on the row', () => {
     // moves, so "60kg total" here would be a straight lie. This is the case
     // that forces the input hint and this annotation onto different flags.
     expect(
-      describeSet(set({ exercise_id: 'one-arm-dumbbell-row', weight_kg: 40, load_factor: 1 })),
+      describeSet(set({ exercise_id: 'one-arm-dumbbell-row', weight_kg: 40, load_factor: 1 }), 'metric'),
     ).toBe('10 × 40kg');
   });
 
@@ -110,8 +110,8 @@ describe('saying so on the row', () => {
     // factor. `totalWeightKg` reads absent as one, so the annotation must
     // vanish with it — inventing "(30kg total)" would state a fact this row
     // does not have.
-    expect(describeSet(set({ load_factor: undefined }))).toBe('10 × 30kg');
-    expect(describeSet(set({ load_factor: 0 }))).toBe('10 × 30kg');
+    expect(describeSet(set({ load_factor: undefined }), 'metric')).toBe('10 × 30kg');
+    expect(describeSet(set({ load_factor: 0 }), 'metric')).toBe('10 × 30kg');
   });
 
   it('converts both numbers, not just the one that was typed', () => {
@@ -132,19 +132,19 @@ describe('saying so on the row', () => {
     // `load_factor === 2` are indistinguishable, which makes the simpler,
     // narrower form look like a free simplification to whoever reads this
     // next. It is not: it would go silent on the first factor nobody planned.
-    expect(describeSet(set({ load_factor: 3 }))).toBe('10 × 30kg (90kg total)');
+    expect(describeSet(set({ load_factor: 3 }), 'metric')).toBe('10 × 30kg (90kg total)');
   });
 
   it('annotates a weight logged with no reps', () => {
     // The weight-only branch is a separate line of code from the reps × weight
     // one, so it needs its own proof rather than an assumption of symmetry.
-    expect(describeSet(set({ reps: null }))).toBe('30kg (60kg total)');
+    expect(describeSet(set({ reps: null }), 'metric')).toBe('30kg (60kg total)');
   });
 
   it('keeps the rest of the summary intact around it', () => {
     // The annotation attaches to the weight, inside that ` · `-joined part —
     // not as a segment of its own, where it would read as another measure
     // alongside RIR.
-    expect(describeSet(set({ rir: 2 }))).toBe('10 × 30kg (60kg total) · 2 RIR');
+    expect(describeSet(set({ rir: 2 }), 'metric')).toBe('10 × 30kg (60kg total) · 2 RIR');
   });
 });
