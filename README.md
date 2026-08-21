@@ -37,6 +37,7 @@ to empty, and that emptiness is the signal.
 docker compose up -d              # local Postgres on :5432
 cd backend && go run ./cmd/migrate up
 cd backend && go run ./cmd/seed   # reference content (exercises, techniques, curricula, public workout plans); idempotent
+cd backend && go run ./cmd/migrate status   # read-only: which database, what version, what is pending
 
 pnpm run dev:api                  # backend API on :8080
 pnpm run dev:web                  # web app on :3000

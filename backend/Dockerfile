@@ -9,7 +9,27 @@ COPY go.mod go.sum* ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o /app/bin/ ./cmd/...
+
+# The -X stamps the deploy attestation into cmd/migrate.
+#
+# cmd/migrate REFUSES to apply migrations to a database that is not local
+# unless it can prove the migration set is what origin/main holds. Inside this
+# image there is no git and no repository to compare against, so the proof is
+# this link-time stamp instead: the image was built by the deploy pipeline from
+# the ref that pipeline is wired to, and its /app/migrations is whatever that
+# ref contained.
+#
+# This is what keeps the legitimate path free. A real deploy sets no
+# environment variable, answers no prompt and disables nothing — the binary
+# already carries the attestation. There is deliberately no env-var equivalent:
+# anything readable from a shell would be exported in a shell profile within a
+# fortnight, and the guard would be decoration. Forging this locally takes a
+# deliberate ldflags invocation, which is not something anyone does by accident.
+#
+# See backend/internal/platform/migrateguard and issue #465.
+RUN CGO_ENABLED=0 go build \
+      -ldflags "-X github.com/dmytro-ch21/vola/backend/internal/platform/migrateguard.BuildChannel=deploy" \
+      -o /app/bin/ ./cmd/...
 
 FROM alpine:3.20
 
