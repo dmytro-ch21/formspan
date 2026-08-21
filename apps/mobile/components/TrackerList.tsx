@@ -1,8 +1,10 @@
-import { StyleSheet } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { TrackerCard } from '@/components/TrackerCard';
 import { vola } from '@/constants/Colors';
+import { targetCount } from '@/lib/trackerModel';
 import type { TrackerDay } from '@/lib/useTrackerDay';
 import type { UnitSystem } from '@/lib/units';
 
@@ -20,6 +22,7 @@ export function TrackerList({
   dayAtTap,
   units,
   unitsReady,
+  collapseAfter,
   testID,
 }: {
   day: TrackerDay;
@@ -44,8 +47,33 @@ export function TrackerList({
   dayAtTap: () => string;
   units: UnitSystem;
   unitsReady: boolean;
+  /**
+   * Draw at most this many cards, and put the rest behind one disclosure row.
+   *
+   * **Today passes a number; Food does not.** N78 asks for "a stated cap or a
+   * collapse behaviour, and it is a deliberate decision rather than whatever
+   * happens", and this is both halves of that answer:
+   *
+   * - The CAP is server-side and absolute (eight live trackers). It exists
+   *   because a list you scroll to reorder stops being reorderable one-handed.
+   * - The COLLAPSE is per-screen and is about what Today is FOR. Today is a
+   *   decision surface, and eight tracker cards on it would push the session,
+   *   the readiness and the week below the fold — a feature crowding out the
+   *   screen it was added to.
+   *
+   * Food gets no collapse because Food is where trackers LIVE: an athlete who
+   * went there went there to look at them.
+   *
+   * The disclosure row is not a plain "3 more". It says how many of the hidden
+   * ones still have something to do, because a tracker you have already
+   * finished is not a reason to expand and the whole point of being on Today is
+   * not forgetting the ones you have not.
+   */
+  collapseAfter?: number;
   testID?: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   if (day.view.state === 'unknown') {
     // Deliberately says nothing rather than "you have no trackers". This device
     // has not been told yet — the server provisions water on the first list —
@@ -60,9 +88,23 @@ export function TrackerList({
       </Text>
     );
   }
+
+  const all = day.view.trackers;
+  const limit = collapseAfter ?? all.length;
+  const collapsed = !expanded && all.length > limit;
+  const shown = collapsed ? all.slice(0, limit) : all;
+  const hidden = collapsed ? all.slice(limit) : [];
+  // "still to do" rather than "not finished": a tracker with no target can
+  // never be finished, so counting it as outstanding forever would make the row
+  // always urgent and therefore never informative. Only a target can be unmet.
+  const outstanding = hidden.filter((t) => {
+    const target = targetCount(t);
+    return target != null && day.entriesFor(t.id).length < target;
+  }).length;
+
   return (
     <>
-      {day.view.trackers.map((t) => (
+      {shown.map((t) => (
         <TrackerCard
           key={t.id}
           tracker={t}
@@ -74,10 +116,48 @@ export function TrackerList({
           onEdit={() => day.openSettings(t)}
         />
       ))}
+      {collapsed ? (
+        <Pressable
+          onPress={() => setExpanded(true)}
+          style={styles.more}
+          accessibilityRole="button"
+          accessibilityLabel={moreLabel(hidden.length, outstanding)}
+          testID={testID ? `${testID}-more` : 'trackers-more'}
+        >
+          {/* Text only. `assets/brand/icons/` has no chevron, and adding one
+              means an SVG in the brand kit plus a regenerate — a change to the
+              identity, made in passing, for a disclosure row. The label already
+              says what tapping does. */}
+          <Text style={styles.moreText}>{moreLabel(hidden.length, outstanding)}</Text>
+        </Pressable>
+      ) : null}
     </>
   );
 }
 
+/**
+ * The disclosure copy. States the arithmetic and stops.
+ *
+ * No "don't forget!", no exclamation mark, and nothing different about three
+ * outstanding than about one — the same rule the card's own copy follows. An
+ * athlete who wants to act on it can see the number.
+ */
+function moreLabel(hidden: number, outstanding: number): string {
+  const noun = hidden === 1 ? 'tracker' : 'trackers';
+  if (outstanding === 0) return `${hidden} more ${noun}, all done`;
+  return `${hidden} more ${noun}, ${outstanding} still to log`;
+}
+
 const styles = StyleSheet.create({
   empty: { fontSize: 13, color: vola.textDim },
+  more: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    // 44pt tall: it is the only route to a tracker Today is hiding, so it is
+    // not a control to make small.
+    paddingVertical: 13,
+  },
+  moreText: { fontSize: 13, fontWeight: '700', color: vola.textMuted },
 });

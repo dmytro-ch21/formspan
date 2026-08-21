@@ -4,20 +4,18 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
-import { SelectAllTextInput } from '@/components/SelectAllTextInput';
+import {
+  TrackerForm,
+  formFor,
+  readDraft,
+  type TrackerFormState,
+} from '@/components/TrackerForm';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuth } from '@clerk/clerk-expo';
-import { localTrackers, updateTrackerLocally } from '@/lib/trackers';
-import {
-  inputUnitLabel,
-  targetCount,
-  unitNoun,
-  pluralise,
-  type Tracker,
-} from '@/lib/trackerModel';
+import { archiveTrackerLocally, localTrackers, updateTrackerLocally } from '@/lib/trackers';
+import { type Tracker } from '@/lib/trackerModel';
 import { request as requestSync } from '@/lib/sync';
-import { fromDisplayFluid, toDisplayFluid } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
 
 /**
@@ -27,27 +25,33 @@ import { useUnits } from '@/lib/useUnits';
  * detail view: *"everything should be managable on the phone"*. The failure
  * that rule was written from is exactly this shape — `nutrition-design.md` put
  * target-setting on "one web screen", so an athlete looking at a target on
- * their phone could see the reasoning and had no way to disagree with it. A
- * water target you can only change at a desk would be the same defect, a
- * feature later.
+ * their phone could see the reasoning and had no way to disagree with it.
  *
  * There is no web counterpart yet, and that is fine in this direction: the rule
  * forbids phone-impossible, not web-absent.
  *
+ * ## It edits EVERY field now, not two
+ *
+ * N76 shipped this with a target and an increment, because those were the only
+ * two fields water had that an athlete might disagree with. N78 lets them name
+ * the thing, so the name, icon, colour, unit and the word for one tap are all
+ * theirs to change — through the same `TrackerForm` the create screen uses, so
+ * the two cannot drift.
+ *
  * ## It writes locally first
  *
  * `updateTrackerLocally` marks the row dirty and the outbox pushes it, so
- * changing a target works with no signal — the same guarantee a tap has. The
+ * changing anything works with no signal — the same guarantee a tap has. The
  * screen never awaits the network.
  *
- * ## The target is entered in TAPS, not in millilitres
+ * ## Stopping it is real now
  *
- * "Eight glasses" is the sentence an athlete says; "two thousand millilitres"
- * is the sentence a database says. So the field takes a count and multiplies by
- * the increment, and the millilitre figure is shown underneath as a
- * consequence. The increment gets its own field in the athlete's display unit
- * (`ml` or `fl oz`), because that is the one number where the actual volume is
- * what you know — a bottle says 500 ml or 16.9 fl oz on the side of it.
+ * N76 showed this control as unavailable and said why: *"a tracker with no way
+ * back is a trap, and the 'archived' list it needs is N78's screen"*. That
+ * screen is `app/trackers/archived.tsx`, so stopping one is now reversible and
+ * the control does what it says. **Deleting is deliberately NOT here** — it
+ * lives on the archived screen, one step further from the thing an athlete
+ * opens to change a number, because the two must not sit side by side.
  */
 export default function TrackerSettingsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -57,15 +61,14 @@ export default function TrackerSettingsScreen() {
   const { units, unitsReady } = useUnits();
 
   const [tracker, setTracker] = useState<Tracker | null>(null);
+  const [form, setForm] = useState<TrackerFormState | null>(null);
   const [missing, setMissing] = useState(false);
-  const [countText, setCountText] = useState('');
-  const [incrementText, setIncrementText] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       let live = true;
-      if (!userId || !id) return;
+      if (!userId || !id || !unitsReady) return;
       void localTrackers(userId).then((view) => {
         if (!live) return;
         const found = view.state === 'ready' ? view.trackers.find((t) => t.id === id) : undefined;
@@ -79,13 +82,7 @@ export default function TrackerSettingsScreen() {
         // because the `missing` branch renders before `tracker` is consulted.
         setMissing(false);
         setTracker(found);
-        const target = targetCount(found);
-        setCountText(target == null ? '' : String(target));
-        setIncrementText(
-          found.unit === 'ml'
-            ? String(toDisplayFluid(found.increment, units))
-            : String(found.increment),
-        );
+        setForm(formFor(found, units));
       });
       return () => {
         live = false;
@@ -93,42 +90,25 @@ export default function TrackerSettingsScreen() {
       // `units` is in the deps because the increment field is rendered in the
       // athlete's display unit: switching the preference while this screen is
       // open must re-derive the number rather than reinterpret 500 ml as 500
-      // fl oz.
-    }, [userId, id, units]),
+      // fl oz. `unitsReady` too, so the form is never built from a default that
+      // is about to change.
+    }, [userId, id, units, unitsReady]),
   );
 
   async function save() {
-    if (!tracker || !userId) return;
-    const trimmed = countText.trim();
-    const incrementValue = Number(incrementText.trim());
-    if (!Number.isFinite(incrementValue) || incrementValue <= 0) {
-      setError('A tap has to add something. Enter a number greater than zero.');
+    if (!tracker || !userId || !form) return;
+    const read = readDraft(form, units);
+    if ('error' in read) {
+      setError(read.error);
       return;
     }
-    const increment =
-      tracker.unit === 'ml' ? fromDisplayFluid(incrementValue, units) : incrementValue;
-
-    // An empty target field means NO target — a count with no ceiling, which is
-    // a real thing to want and the state N77's coffee card is built on. It is
-    // sent as an explicit `null`, which the patch distinguishes from "leave it
-    // alone"; a `?? undefined` here would silently make clearing impossible.
-    let target: number | null = null;
-    if (trimmed !== '') {
-      const count = Number(trimmed);
-      if (!Number.isFinite(count) || count <= 0) {
-        setError('Enter how many you are aiming for, or leave it blank for no target.');
-        return;
-      }
-      target = count * increment;
-    }
-
     try {
-      // Only the two fields this screen edits. The name, icon, colour and unit
-      // are not in the patch and are therefore not written — the whole point of
-      // the partial write path, and the reason an edit here cannot blank
-      // something a later screen authored.
-      await updateTrackerLocally(userId, tracker.id, { increment, target });
-      requestSync('tracker target changed');
+      // Every field this form edits, and nothing else. `preset`, `sort_order`,
+      // `archived_at` and the identity are absent from the patch and are
+      // therefore not written — the partial-write path is what stops an edit
+      // here reordering somebody's Today or un-archiving a stopped tracker.
+      await updateTrackerLocally(userId, tracker.id, read.draft);
+      requestSync('tracker changed');
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That could not be saved.');
@@ -136,23 +116,27 @@ export default function TrackerSettingsScreen() {
   }
 
   function confirmArchive() {
-    if (!tracker) return;
+    if (!tracker || !userId) return;
     Alert.alert(
       `Stop tracking ${tracker.name}?`,
-      // Says what survives, because "delete" and "archive" mean different
-      // things and only one of them is happening here.
-      'It leaves Today and Food. Everything you have already logged is kept.',
+      // Says what survives and where it goes, because "stop" and "delete" mean
+      // different things and only one of them is happening here.
+      'It leaves Today and Food. Everything you have already logged is kept, and you ' +
+        'can start it again from Stopped trackers.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Stop tracking',
           style: 'destructive',
           onPress: () => {
-            // Deliberately not implemented in this ticket: archiving is a
-            // one-line call, but a tracker with no way back is a trap, and the
-            // "archived" list it needs is N78's screen. Shown as unavailable
-            // rather than hidden, so the capability is legible.
-            setError('Stopping a tracker arrives with custom trackers.');
+            void archiveTrackerLocally(userId, tracker.id)
+              .then(() => {
+                requestSync('tracker stopped');
+                router.back();
+              })
+              .catch((err: unknown) => {
+                setError(err instanceof Error ? err.message : 'That could not be stopped.');
+              });
           },
         },
       ],
@@ -170,7 +154,7 @@ export default function TrackerSettingsScreen() {
     );
   }
 
-  if (!tracker || !unitsReady) {
+  if (!tracker || !form || !unitsReady) {
     return (
       <ScreenShell title="Tracker">
         <Text style={styles.note} testID="tracker-settings-loading">
@@ -180,53 +164,9 @@ export default function TrackerSettingsScreen() {
     );
   }
 
-  const noun = unitNoun(tracker);
-  const unitLabel = inputUnitLabel(tracker, units);
-
   return (
     <ScreenShell title={tracker.name}>
-      <Text style={styles.label}>
-        {`Daily target${noun ? `, in ${pluralise(noun, 2)}` : ''}`}
-      </Text>
-      <SelectAllTextInput
-        style={styles.input}
-        value={countText}
-        onChangeText={(t) => {
-          setCountText(t);
-          setError(null);
-        }}
-        keyboardType="number-pad"
-        placeholder="No target"
-        placeholderTextColor={vola.textDim}
-        // Labelled explicitly: a visible `Text` above a field is not associated
-        // with it, so VoiceOver read this one as its PLACEHOLDER ("No target")
-        // and the one below as bare digits — on the only screen in the app that
-        // can change a target.
-        accessibilityLabel={`Daily target for ${tracker.name}${
-          noun ? `, in ${pluralise(noun, 2)}` : ''
-        }`}
-        testID="tracker-target-input"
-      />
-      <Text style={styles.hint}>
-        Leave it blank to just count, with nothing to reach.
-      </Text>
-
-      <Text style={styles.label}>
-        {`One tap adds${unitLabel ? ` (${unitLabel})` : ''}`}
-      </Text>
-      <SelectAllTextInput
-        style={styles.input}
-        value={incrementText}
-        onChangeText={(t) => {
-          setIncrementText(t);
-          setError(null);
-        }}
-        keyboardType="decimal-pad"
-        accessibilityLabel={`One tap adds, for ${tracker.name}${
-          unitLabel ? `, in ${unitLabel}` : ''
-        }`}
-        testID="tracker-increment-input"
-      />
+      <TrackerForm value={form} onChange={setForm} units={units} />
 
       {error ? (
         <Text style={styles.error} testID="tracker-settings-error">
@@ -235,7 +175,7 @@ export default function TrackerSettingsScreen() {
       ) : null}
 
       <Pressable
-        onPress={save}
+        onPress={() => void save()}
         style={[styles.save, { backgroundColor: accent.accent }]}
         accessibilityRole="button"
         testID="tracker-settings-save"
@@ -247,17 +187,10 @@ export default function TrackerSettingsScreen() {
         onPress={confirmArchive}
         style={styles.secondary}
         accessibilityRole="button"
-        // Stated as unavailable UP FRONT rather than after a destructive-styled
-        // confirm that then refuses. The capability stays legible — an athlete
-        // can see stopping a tracker is coming — without the dialog promising
-        // something this build cannot do.
-        accessibilityState={{ disabled: true }}
-        accessibilityHint="Not available yet — arrives with custom trackers"
+        accessibilityHint="It leaves Today. Everything you logged is kept."
         testID="tracker-settings-archive"
       >
-        <Text style={[styles.secondaryText, { color: vola.textDim }]}>
-          Stop tracking {tracker.name}
-        </Text>
+        <Text style={styles.secondaryText}>Stop tracking {tracker.name}</Text>
       </Pressable>
     </ScreenShell>
   );
@@ -267,7 +200,7 @@ function ScreenShell({ title, children }: { title: string; children: React.React
   return (
     <View style={styles.screen}>
       <Stack.Screen options={{ title }} />
-      {/* The shared container, not a bare ScrollView: two number fields here
+      {/* The shared container, not a bare ScrollView: the number fields here
           sit low enough on a small phone that the keyboard covers them, and
           `keyboardCoverage.test.ts` enforces the import precisely because
           twelve screens out of thirteen once reinvented some fraction of this
@@ -284,24 +217,11 @@ function ScreenShell({ title, children }: { title: string; children: React.React
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vola.bg },
-  container: { padding: 20, gap: 10, paddingBottom: 60 },
-  label: { fontSize: 12, fontWeight: '800', letterSpacing: 1.2, color: vola.textMuted, marginTop: 8 },
-  input: {
-    borderWidth: 1,
-    borderColor: vola.line,
-    borderRadius: 12,
-    backgroundColor: vola.surface,
-    color: vola.text,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  hint: { fontSize: 12, color: vola.textDim },
+  container: { padding: 20, paddingBottom: 60 },
   note: { fontSize: 14, color: vola.textMuted },
-  error: { fontSize: 13, color: vola.danger, fontWeight: '600' },
-  save: { borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
+  error: { fontSize: 13, color: vola.danger, fontWeight: '600', marginTop: 12 },
+  save: { borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 20 },
   saveText: { fontSize: 15, fontWeight: '800' },
   secondary: { paddingVertical: 14, alignItems: 'center' },
-  secondaryText: { fontSize: 14, fontWeight: '700' },
+  secondaryText: { fontSize: 14, fontWeight: '700', color: vola.textMuted },
 });

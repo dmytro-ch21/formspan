@@ -587,3 +587,71 @@ it('the tracker entries are indexed on the read the card runs', async () => {
   ).map((i) => i.name);
   expect(idx).toContain('tracker_entries_user_day_idx');
 });
+
+
+it('upgrades a v21-shaped database by adding the N78 tracker columns', async () => {
+  // **A REAL ALTER, unlike the v18/v19/v20 cases above.** Those are no-ops
+  // against the unconditional CREATE section and only the version bump is
+  // load-bearing. This one is not: a device already stamped 21 HAS
+  // `daily_trackers`, so its CREATE IF NOT EXISTS does nothing and the three
+  // columns can only arrive through `addColumnIfMissing`.
+  //
+  // Which means this is also the test that covers the fresh-install hazard that
+  // helper exists for — a fresh database gets all three from the CREATE, and
+  // the ALTERs must then do nothing rather than throwing and leaving
+  // `user_version` unstamped, which wedges `getDb()` for the life of the
+  // install. Every other test in this file reaching version 22 is that half.
+  const db = await migratedFixture();
+  db.raw.exec(`
+    DROP TABLE daily_trackers;
+    CREATE TABLE daily_trackers (
+      id TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT NOT NULL,
+      preset TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL,
+      icon TEXT NOT NULL DEFAULT '',
+      color_key TEXT NOT NULL,
+      unit TEXT NOT NULL DEFAULT '',
+      increment REAL NOT NULL,
+      target REAL,
+      render_style TEXT NOT NULL DEFAULT 'auto',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      archived_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT '',
+      dirty INTEGER NOT NULL DEFAULT 0,
+      remote INTEGER NOT NULL DEFAULT 1,
+      last_error TEXT
+    );
+    PRAGMA user_version = 21;
+  `);
+  // Three rows in the v21 shape, one per backfill branch: the water every
+  // athlete already has, a gram tracker, and one that counts bare.
+  db.raw.exec(`
+    INSERT INTO daily_trackers (id, user_id, preset, name, color_key, unit, increment)
+    VALUES ('t_w', 'u1', 'water', 'Water', 'water', 'ml', 250),
+           ('c1', 'u1', '', 'Creatine', 'water', 'g', 5),
+           ('c2', 'u1', '', 'Cold showers', 'water', '', 1);
+  `);
+
+  await migrate(db as never);
+
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+  const cols = (
+    db.raw.prepare('PRAGMA table_info(daily_trackers)').all() as { name: string }[]
+  ).map((c) => c.name);
+  expect(cols).toEqual(expect.arrayContaining(['count_noun', 'restore_pending', 'destroyed_at']));
+
+  // The BACKFILL, which is the half a column check cannot see. Without it every
+  // existing card silently loses its noun on upgrade — water's "4 of 8 cups"
+  // becomes "4 of 8" — because the noun is read off the row now rather than
+  // derived at render time. The bare-count row must stay empty, so this cannot
+  // pass by filling everything in.
+  const nouns = Object.fromEntries(
+    (
+      db.raw
+        .prepare('SELECT id, count_noun FROM daily_trackers ORDER BY id')
+        .all() as { id: string; count_noun: string }[]
+    ).map((r) => [r.id, r.count_noun]),
+  );
+  expect(nouns).toEqual({ t_w: 'cup', c1: 'dose', c2: '' });
+});
