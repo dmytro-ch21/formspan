@@ -49,8 +49,20 @@ import (
 // ErrRefused means the provider declined to answer.
 //
 // A refusal is a successful call, and the distinction from ErrUnavailable is
-// the one callers act on: a refusal will happen again for the same input, so
-// nothing should retry it. Detecting one is per-provider and stays inside each
+// the one callers act on: a refusal was BILLED, so anything retrying it pays
+// again.
+//
+// **It is not, however, deterministic, and this comment said it was until
+// N118.** No Request carries a temperature, so both providers are called at
+// their default sampling temperature and identical input does not imply
+// identical output — measured in the field on the bjj dictation route, where a
+// refused sentence was resent unchanged and drafted fine. The old claim came
+// from the truncation case below, which really is deterministic, and was
+// generalised to every refusal without being checked.
+//
+// What survives is the instruction to callers, for the cost reason rather than
+// the futility one: a metered caller must BOUND any retry of a refusal, because
+// every attempt spends. Detecting one is per-provider and stays inside each
 // implementation — Anthropic reports it as a stop reason on an HTTP 200, OpenAI
 // as a `refusal` field on the message, and code ported between them without
 // reading the API treats the other's refusal as an empty response and reports

@@ -7436,7 +7436,9 @@ paths:
         **Quota: 10 per athlete over a rolling 24 hours**, checked BEFORE the
         model is called. Refused calls count, because a refusal is a billed
         answer and a caller could otherwise loop on a dictation the model keeps
-        declining. Exhaustion is `429` with `rate_limited` and a `Retry-After`
+        declining. Because the gate runs before any token is spent, a client
+        retrying a refusal can never spend past the allowance — the retry comes
+        back `429` instead. Exhaustion is `429` with `rate_limited` and a `Retry-After`
         header in seconds; the reset is also stated in the message as a
         relative duration, never as a timestamp.
 
@@ -7494,9 +7496,24 @@ paths:
         "422":
           description: >
             The request was well formed and the model declined it. Distinct
-            from 400 — there is nothing in the request to correct — and from
-            503, because a refusal is deterministic: retrying the same words
-            only spends the quota again.
+            from 400 — there is nothing in the request to correct.
+
+
+            **A refusal is not a verdict on the words, and this description
+            said the opposite until N118.** It claimed a refusal was
+            deterministic and that retrying the same sentence only spent the
+            quota again. Neither provider is called with a temperature, so
+            identical input does not imply identical output, and the report
+            this was corrected from is a refusal reversing itself on an
+            unchanged resend. That claim was inherited from TRUNCATION, which
+            maps onto the same condition and genuinely is deterministic.
+
+
+            So a client MAY retry a 422 — but it is billed, exactly like the
+            first attempt, and it counts against the daily ten. One retry is
+            defensible; a loop is what the metering below exists to prevent.
+            This is still the only failure here that both costs a draft and may
+            never succeed, which is why it is not `503`.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

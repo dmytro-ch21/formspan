@@ -224,12 +224,27 @@ func (h *DraftHandler) Draft(w http.ResponseWriter, r *http.Request) {
 //
 // A refusal is **422, not 400**: the request was well-formed and was processed,
 // and the answer is "I could not read that as a session". A 400 would tell the
-// client to fix its request, which is not the remedy — saying it differently is.
+// client to fix its request, and there is nothing in the request to correct.
+//
+// **The 422's message no longer recommends rewording, and that is N118.** It
+// used to read "try saying what happened in plainer terms", which does two
+// wrong things at once: it tells the athlete they spoke badly, and it names a
+// remedy that is not the remedy. The report it was filed from — *"I first got
+// an error that it's not articulated correctly and then I just resent again"* —
+// is a refusal reversing itself on the identical sentence, which is what you
+// would expect from a provider called at its default sampling temperature.
+// `llm.Request` has no temperature field, so that is how both providers are
+// called.
+//
+// Nothing here promises a retry will work, because it may not: a TRUNCATED
+// response maps onto the same sentinel and really is deterministic. The message
+// states what happened and leaves the client to choose, which is what the
+// mobile app now does with a single bounded retry.
 func writeDraftError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrDraftRefused):
 		apihttp.WriteError(w, http.StatusUnprocessableEntity, apihttp.CodeInvalidInput,
-			"could not read that as a session — try saying what happened in plainer terms")
+			"could not turn that into a session this time — the same words may well work on another try")
 	case errors.Is(err, ErrInvalidInput):
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, draftValidationMessage(err))
 	case errors.Is(err, ErrDraftUnreachable):

@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import DictateReflectionScreen from '../bjj/dictate';
-import type { Draft, DraftResponse } from '@/lib/reflectApi';
+import { ApiError } from '@/lib/apiError';
+import { draftReflection, type Draft, type DraftResponse } from '@/lib/reflectApi';
 import { saveLocalBjjDetail } from '@/lib/sessionStore';
 
 /**
@@ -96,13 +97,20 @@ it('offers a choice for an unresolved phrase and adds NO tag for it', async () =
 
   await speak();
 
-  // The prompt appears...
+  // The prompt appears, offering more than one — because narrowing to one IS
+  // the guess.
+  //
+  // All three inside the `waitFor`, deliberately. The draft and the technique
+  // library arrive on two independent timers, and asserting the options
+  // synchronously after waiting only for the PROMPT passes when those two
+  // happen to flush together and fails when anything adds a render between
+  // them. It did: N118 added one state update to this screen and turned this
+  // into a red test about a picker it never touched.
   await waitFor(() => {
     expect(screen.getByText(/which one\?/i)).toBeTruthy();
+    expect(screen.getByText('Armbar from Guard')).toBeTruthy();
+    expect(screen.getByText('Armbar from Mount')).toBeTruthy();
   });
-  // ...offering more than one, because narrowing to one IS the guess.
-  expect(screen.getByText('Armbar from Guard')).toBeTruthy();
-  expect(screen.getByText('Armbar from Mount')).toBeTruthy();
 
   // And saving without answering writes no technique at all. This is the
   // assertion the whole file exists for: an auto-selected top match would
@@ -287,4 +295,78 @@ it('says how many are left even when the draft came back empty', async () => {
   });
   expect(screen.getByTestId('dictate-quota')).toBeTruthy();
   expect(screen.getByText(/last one for today/i)).toBeTruthy();
+});
+
+/**
+ * What the athlete is left holding when it does not work (N118).
+ *
+ * The report: *"I first got an error that it's not articulated correctly and
+ * then I just resent again."* Two things are wrong in that sentence and only
+ * one of them is the wording — the other is that resending worked, so the app
+ * could have done it.
+ *
+ * The retry itself is pinned in `lib/__tests__/dictateRetry.test.ts`, where the
+ * quota consequence can be counted. What is here is what the SCREEN does with
+ * the outcome, which no pure test can see.
+ */
+describe('when the draft fails', () => {
+  const asMock = () => draftReflection as jest.Mock;
+
+  it('keeps every word the athlete said', async () => {
+    asMock().mockRejectedValueOnce(new ApiError('server prose', 'invalid_input', 422));
+
+    const said = 'Hour of gi. Drilled the knee cut, then five rounds.';
+    await speak(said);
+
+    await waitFor(() => {
+      expect(screen.getByText(/couldn’t turn that into a session/i)).toBeTruthy();
+    });
+    // Re-recording is not a recovery. The field still holds it, and the button
+    // that sends it is still there.
+    expect(screen.getByLabelText('What happened in the session').props.value).toBe(said);
+    expect(screen.getByLabelText('Read what I said')).toBeTruthy();
+  });
+
+  it('does not tell the athlete they spoke badly, and does not echo the server', async () => {
+    asMock().mockRejectedValueOnce(
+      new ApiError('could not read that as a session — try saying what happened in plainer terms', 'invalid_input', 422),
+    );
+
+    await speak();
+
+    await waitFor(() => {
+      expect(screen.getByText(/couldn’t turn that into a session/i)).toBeTruthy();
+    });
+    // The exact accusation, gone — and gone because the screen writes its own
+    // line, not because the server happens to word it differently today.
+    expect(screen.queryByText(/plainer terms/i)).toBeNull();
+    expect(screen.queryByText(/articulat/i)).toBeNull();
+  });
+
+  it('says it is still working while it retries, without showing an error', async () => {
+    let release: (() => void) | null = null;
+    asMock().mockImplementationOnce(async (_t: unknown, _d: string, opts: { onRetry?: (attempt: number) => void }) => {
+      opts?.onRetry?.(1);
+      await new Promise<void>((r) => {
+        release = r;
+      });
+      return mockResponse;
+    });
+
+    await speak();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dictate-retrying')).toBeTruthy();
+    });
+    // A retry in flight is not a failure, so nothing red is on screen.
+    expect(screen.queryByText(/couldn’t/i)).toBeNull();
+
+    // And it goes away when the retry lands, because the whole pre-draft block
+    // it lives in does.
+    release!();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Save this session')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('dictate-retrying')).toBeNull();
+  });
 });
