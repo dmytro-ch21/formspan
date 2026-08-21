@@ -12062,3 +12062,102 @@ Fresh account, nothing logged, nothing scheduled, no weight recorded:
 - The momentum card and any other nutrition surface must agree on today's
   calories; `PROGRESS` and the Goals trend must agree on the weight. Two answers
   on one screen is the W2/W4 shape.
+
+## Recipe authoring on the phone (N87 — `app/food/recipe/[id].tsx`, `components/food/IngredientPicker.tsx`, `components/food/CatalogCard.tsx`)
+
+Multi-ingredient recipes were web-only; this is the mobile half. The web
+scenarios above still apply to the web editor — these are additional, not a
+replacement.
+
+### Happy path
+- From the Food tab → `Add` → the `Recipes` scope, `+ Build a recipe` opens a
+  blank editor with a client-generated id and `fresh=1`.
+- Name, "makes how many portions", "one portion is", then at least one
+  ingredient, saves and the recipe appears under `Recipes`.
+- `+ Add an ingredient` → type → a catalog card → tap the body → the grams/oz
+  control → `Add to recipe` puts the weighed ingredient in the list.
+- An ingredient can also come from the athlete's own saved foods, with a
+  quantity against that food's own serving label.
+- The per-portion block equals sum(item × quantity) ÷ yield, live, as fields
+  change. The **server recomputes on write**, so a test that matters asserts the
+  stored row rather than only the preview.
+- Tapping `Edit` on a recipe row opens this editor with its ingredients loaded;
+  saving writes back to the same id.
+- Swiping an ingredient row removes it, and the per-portion figures follow.
+- Logging a portion afterwards logs the recipe's per-serving macros, once, from
+  the quick-add list.
+
+### Edge cases & errors
+- **Four load states, and they must stay four.** Before SQLite answers, the
+  screen says `Loading…` and must NOT say the recipe is missing. An id that is
+  genuinely absent says so and does not open a blank form. A `fresh=1` open
+  never queries at all. A saved food that is not a recipe is refused here — it
+  belongs to `food/saved/[id]`.
+- **Nothing typed is not "no results".** With an empty ingredient search box the
+  picker offers a prompt and has made no request; only a query that came back
+  empty may say the catalog does not have something.
+- **The five catalog outcomes stay distinct**: `no_match`, `query_unusable`,
+  `market_not_covered`, `catalog_empty` and an unrecognised value each read
+  differently, and a transport failure (a sixth case, outside the enum) says the
+  catalog could not be reached rather than that the food does not exist.
+- **A fully-deduped answer renders nothing**, not a failure message. Save a food,
+  search for it, and the catalog row that collides with it is suppressed while
+  the empty-state copy stays absent — the answer was `ok`.
+- A recipe with no ingredients is refused, with a reason, and the save button is
+  disabled. Same for a missing name, a missing portion description, and a yield
+  of 0 (which must not render `Infinity`).
+- **Fibre**: with no ingredient stating fibre the per-portion line reads *fibre
+  not stated*, never `0`.
+- A recipe is not offered as an ingredient for another recipe.
+- Over 100 ingredients is refused on the phone before the server sees it, which
+  is what makes the refusal work offline.
+
+### Offline
+- Saving writes to SQLite first and returns immediately; the push is fire and
+  forget. Airplane-mode: build a recipe, kill the network, save, and it is in the
+  `Recipes` list and loggable.
+- **The push must carry `items` AND `yield_servings`.** The server refuses
+  `kind: recipe` without a yield with a 400, which the outbox classifies as
+  PERMANENT — the row leaves the queue and the recipe lives only on the phone.
+  Assert the payload and assert the row is still dirty-free and intact after a
+  sync.
+- A recipe authored on the web and pulled down keeps its ingredients; editing it
+  on the phone and pushing back does not empty them.
+
+### Regression traps
+- **Editing a recipe must NOT change a meal already logged from it.** Log a
+  portion, edit the recipe's ingredients, reload the day: the logged entry's
+  numbers are byte-identical. This is the ticket's headline decision, and the
+  editor says so in `recipe-history-note` — assert the sentence is present, since
+  removing it leaves the behaviour intact and undiscoverable.
+- **A recipe's `Edit` must not open `food/saved/[id]`.** That screen drops the
+  yield and the push becomes a permanent 400. Assert BOTH directions: a recipe
+  goes to the recipe editor and a plain food still goes to the food editor.
+- **An ingredient taken from the catalog records `source_food_id: null`**; one
+  taken from a saved food records that food's id. A catalog slug is a different
+  id space and would dangle.
+- **The ingredient card has no `+` circle** — there is no honest default amount
+  for an ingredient. If one appears, it is guessing 100 g silently.
+- The quantity control's button says `Add to recipe`, not `Log`; nothing has been
+  logged at that point.
+- **The saved-food editor must refuse a recipe.** Reach `food/saved/[id]` with a
+  recipe's id — from the Edit control, and from the AI-draft screen's "fix these
+  numbers for next time", which passes whatever the server's saved-food match
+  returned and CAN return a recipe. Both must land in the recipe editor instead.
+  Assert the plain-food case still opens the saved-food editor, or a guard that
+  redirects everything passes while breaking the screen it protects.
+- **The redirect must fire once.** `useRouter()` returns a new object per render,
+  so an effect-driven `replace` re-navigates forever; the first version of this
+  guard exhausted the test worker's memory rather than failing. A count, not a
+  "was called".
+- **72 of the catalog's 12,651 foods have names over the server's 120-rune
+  limit** (longest 184). Add one as an ingredient: the name is clamped and marked
+  as clipped, and the recipe saves and syncs. Without the clamp this is a
+  permanent 400 and a lost recipe.
+- **The note is capped in BYTES, not runes** — the server checks `brand` with a
+  bare `len()`. 80 accented characters must be refused on the phone.
+- **An ingredient the catalog lacks is not a dead end**: "Not in the catalog?
+  Type it in" is offered before any search has failed, carries the typed query
+  across, and adds the ingredient without logging anything as a meal.
+- Blank fibre on the by-hand form stays *not stated*; a typed `0` stays `0`. A
+  number that cannot be read disables the button rather than being taken as zero.

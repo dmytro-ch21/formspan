@@ -38,10 +38,20 @@ export function FoodQuantity({
   food,
   onLog,
   busy,
+  cta = 'Log',
 }: {
   food: CatalogFood;
   onLog: (grams: number) => void;
   busy?: boolean;
+  /**
+   * What the button DOES, in the athlete's words.
+   *
+   * Defaulted to `Log` because that is what every caller meant before N87
+   * needed the same control to add an ingredient to a recipe — where "Log"
+   * would claim a meal had been recorded when nothing had. The default keeps
+   * the existing callers honest rather than making them restate themselves.
+   */
+  cta?: string;
 }) {
   const { foodUnit, setFoodUnit } = useUnits();
   const options = useMemo(() => quantityOptions(food, food.portions), [food]);
@@ -178,7 +188,7 @@ export function FoodQuantity({
         testID="food-quantity-log"
         style={[styles.log, (!valid || busy) && styles.logOff]}
       >
-        <Text style={styles.logText}>Log</Text>
+        <Text style={styles.logText}>{cta}</Text>
       </Pressable>
     </View>
   );

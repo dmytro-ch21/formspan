@@ -70,6 +70,23 @@ export type Entry = Macros & {
  */
 export type FoodSource = 'user' | 'ai' | (string & {});
 
+/**
+ * One component of a recipe — "2 × 100 g of basmati rice".
+ *
+ * **Its macros are a COPY, taken when the ingredient was added, and they are
+ * per ONE `serving_label`** (so the item contributes `kcal × quantity`). The
+ * copy is the same rule a logged entry follows, one level down: correcting a
+ * saved "chicken thigh" next month must not silently rewrite a recipe built
+ * from it today. `source_food_id` is provenance — it answers "where did this
+ * come from" — and nothing that returns nutrition may follow it.
+ */
+export type RecipeItem = Macros & {
+  name: string;
+  quantity: number;
+  serving_label: string;
+  source_food_id: string | null;
+};
+
 export type Food = Macros & {
   id: string;
   kind: 'food' | 'recipe';
@@ -77,6 +94,20 @@ export type Food = Macros & {
   brand: string;
   serving_label: string;
   serving_grams: number | null;
+  /**
+   * Recipes only — "this makes 6 portions". Null for a plain food, and the
+   * server enforces that biconditional in both directions: a recipe without
+   * one and a food with one are each a 400.
+   */
+  yield_servings: number | null;
+  /**
+   * A recipe's components, in the order they were entered. **Empty for a plain
+   * food, never absent** — a food having no ingredients is a fact about it
+   * rather than something nobody has looked up yet, and a consumer that has to
+   * decide for itself what `undefined` meant is where the empty-vs-unknown
+   * collapse starts.
+   */
+  items: RecipeItem[];
   /**
    * Optional on the TYPE because rows pulled by a build that predates N114 do
    * not carry it, and because the server treats an absent source on an update

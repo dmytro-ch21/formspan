@@ -33,6 +33,8 @@ jest.mock('@/lib/foodLog', () => ({
 jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
 
 const mockBack = jest.fn();
+const mockReplace = jest.fn();
+const mockRedirect = jest.fn();
 jest.mock('expo-router', () => ({
   __esModule: true,
   // **Required, and its absence is a silent screen-wide crash.**
@@ -42,8 +44,14 @@ jest.mock('expo-router', () => ({
   // problem and is a missing mock.
   useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
   useLocalSearchParams: () => ({ id: 'food-abc' }),
-  useRouter: () => ({ push: jest.fn(), back: mockBack, replace: jest.fn() }),
+  useRouter: () => ({ push: jest.fn(), back: mockBack, replace: mockReplace }),
   Stack: { Screen: () => null },
+  // Rendered, not called — the screen redirects declaratively so that a
+  // fresh `useRouter()` object cannot drive an infinite navigation loop.
+  Redirect: (props: { href: unknown }) => {
+    mockRedirect(props.href);
+    return null;
+  },
 }));
 
 function saved(over: Record<string, unknown> = {}) {
@@ -74,6 +82,61 @@ beforeEach(() => {
   mockLocalFood.mockReset();
   mockSaveFood.mockReset().mockResolvedValue('food-abc');
   mockBack.mockReset();
+  mockReplace.mockReset();
+  mockRedirect.mockReset();
+});
+
+/**
+ * **A recipe must never be edited by this screen (N87).**
+ *
+ * This form knows about per-serving macros and nothing about a yield or an
+ * ingredient list, so saving a recipe through it writes an empty `items` and a
+ * null `yield_servings`. The local upsert REPLACES both rather than COALESCEing
+ * them — deliberately, since that is the only way to take an ingredient out of
+ * a recipe — so the athlete's ingredient list is wiped without ever being on
+ * screen. The push then sends `kind: 'recipe'` with no yield, the server
+ * refuses it 400, and a 400 is classified as permanent: `dirty` is cleared and
+ * the correction is gone with nothing saying so.
+ *
+ * The guard lives HERE rather than on each caller because review found a second
+ * one: `describe.tsx`'s "fix these numbers for next time" passes whatever the
+ * server's saved-food match returned, and that match really does return recipes
+ * (`TestReusingARecipeGivesOnePortionOfIt` pins it server-side). A per-caller
+ * guard is one somebody forgets to add.
+ */
+it('sends a recipe to the recipe editor instead of editing it here', async () => {
+  mockLocalFood.mockResolvedValue(saved({ kind: 'recipe', yield_servings: 4, items: [] }));
+  render(<EditSavedFoodScreen />);
+
+  await waitFor(() =>
+    expect(mockRedirect).toHaveBeenCalledWith({
+      pathname: '/food/recipe/[id]',
+      params: { id: 'food-abc' },
+    }),
+  );
+  // **Once, not once per render.** The first version of this guard called
+  // `router.replace()` from an effect that depended on `router` — which
+  // `useRouter()` rebuilds every render — so it re-navigated forever and took
+  // the test runner out of memory rather than failing an assertion. A count is
+  // what tells a working redirect from a loop; a plain "was called" cannot.
+  expect(mockRedirect).toHaveBeenCalledTimes(1);
+  // And it must not render the form on the way past — a frame of editable macro
+  // fields over a recipe invites the very save this prevents.
+  expect(screen.queryByTestId('saved-name')).toBeNull();
+  expect(mockSaveFood).not.toHaveBeenCalled();
+});
+
+/**
+ * The other direction, so the guard cannot be satisfied by redirecting
+ * everything — which would make this screen unreachable for the plain saved
+ * foods it exists to correct.
+ */
+it('still edits a plain saved food here', async () => {
+  mockLocalFood.mockResolvedValue(saved());
+  render(<EditSavedFoodScreen />);
+
+  await waitFor(() => expect(screen.getByTestId('saved-name')).toBeTruthy());
+  expect(mockRedirect).not.toHaveBeenCalled();
 });
 
 it('says what a correction changes and what it leaves alone', async () => {

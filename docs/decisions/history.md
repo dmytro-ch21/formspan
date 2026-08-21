@@ -39383,6 +39383,239 @@ been able to return; it was undocumented while the endpoint had no callers.
 - The phone still cannot hand-schedule a future target. Deliberate, and argued
   above rather than overlooked.
 
+## 2026-08-21 — N87: recipes can be built on a phone, and a logged meal keeps its numbers
+
+Multi-ingredient recipes were web-only (`nutrition/recipes/new`, `/[id]`).
+Mobile's wire type had no `items[]` and no `yield_servings`, its SQLite `foods`
+table had neither column, and no screen anywhere could author one. So the meal an
+athlete eats most often — the one they assemble themselves — was the one they
+could not describe on the phone: four separate foods, every time, or give up.
+Audit row 4, filed as [#412](https://github.com/dmytro-ch21/formspan/issues/412).
+
+**The server needed no change.** `PUT /v1/nutrition/foods/{id}` has accepted
+`kind: recipe` with `items` and `yield_servings` since the web editor shipped,
+derives the per-serving macros from them at write time, and stores the answer.
+The whole gap was client-side, which is worth recording because the first
+instinct on a phone-impossible row is to reach for the backend.
+
+### The decision the ticket asked for: editing a recipe does NOT rewrite history
+
+**A meal already logged from a recipe keeps the numbers it was logged with,
+permanently. The edit changes what the next portion logs and nothing already in
+the diary.**
+
+This is not new policy so much as the existing one followed one level up. *A
+logged row owns its numbers* — `nutrition_entries` and `nutrition_recipe_items`
+both copy the macros they were created with, `source_food_id` is provenance, and
+no query returning nutrition may follow it. Recipes are the third instance.
+
+Two alternatives were live and both were refused:
+
+- **Recompute a logged entry from its recipe.** Genuinely tempting: fix a typo
+  today and every meal it ever spoiled is fixed too. Refused because the same
+  mechanism, pointed at the ordinary case, silently restates every day the
+  athlete has already used to judge whether their cut is working — and leaves
+  nothing to compare against, so nothing ever looks wrong. Same shape as
+  backdating a target, and the same answer.
+- **Version the recipe**, so old entries keep pointing at the version they were
+  logged from. It answers a question copying has already answered — the entry
+  HAS its numbers, nothing needs to point anywhere — and charges the athlete a
+  list full of versions they never asked for.
+
+**What we traded**: an athlete who realises the chicken was 600 g and not 60 g
+does not get last month's dinners corrected by fixing the recipe. That cost is
+paid in copy rather than absorbed silently — `recipe-history-note` says it on
+the editor, where the decision is being made, and a test pins the sentence.
+Correcting an individual past meal is still `food/entry/[id]`, which is where it
+belongs: one wrong meal is one wrong row.
+
+### A live bug found on the way in, and it was the worse half
+
+**Editing a recipe on the phone was already a permanent outbox rejection.** The
+phone could not author a recipe but it could PULL one authored on the web, and
+`app/food/add.tsx` rendered an `Edit` affordance for every own row including
+those. That opened `food/saved/[id]`, which edits per-serving macros and knows
+nothing about a yield — so the push sent `kind: 'recipe'` with no
+`yield_servings`, the server's biconditional refused it with a 400, `classify`
+read the 400 as PERMANENT, `dirty` was cleared, and the row left the queue. The
+edit lived only on that phone and nothing anywhere said so.
+
+A recipe's `Edit` now opens the recipe editor. The test asserts **both**
+directions, because routing everything to the new screen satisfies half of it
+and breaks every plain saved food.
+
+### Local storage: a JSON blob, and the precedent is in the same file
+
+`foods` gained `yield_servings REAL` and `items TEXT NOT NULL DEFAULT '[]'`
+(schema v23). A blob rather than a `food_items` table, which is the call
+`local_sessions` already makes about sets: the API replaces the whole ordered
+list in one call and the editor edits it as one array, so nothing anywhere
+touches a single ingredient in isolation. Rows would buy a join and a
+reconciliation step and nothing else.
+
+`'[]'` rather than nullable, deliberately — **a plain food having no ingredients
+is a fact about it, not a question nobody has asked yet**, and SQLite writes the
+default into existing rows as part of the `ALTER`, so every pre-N87 food
+backfills to a real answer rather than a null each caller would have to
+interpret.
+
+### Six write paths, and the test was written before the code
+
+`foods` has six places that name their columns by hand: `saveFoodLocally`'s
+upsert, `localFoods`, `localFood`, `recentsFor`, `cacheFoods`'s pull upsert, and
+`push`'s SELECT-plus-payload. Adding a column to a shared write path has silently
+blanked data three times in this repo, each caught in review and never by the
+suite, so `recipeStore.test.ts` was written first and against a real migrated
+database.
+
+`recentsFor` is the one worth naming. It typed its rows `Food` while its SELECT
+never asked for the new columns — **a generic is an assertion about what a query
+returns, not a check of it** — so every recipe in the quick-add list would have
+carried `items: undefined` with nothing going red. One `FOOD_COL_NAMES` array
+now feeds every read, and `hydrate` is the single place a row becomes a `Food`.
+
+One asymmetry, stated because it looks like an inconsistency: `items` uses
+`excluded` in the upsert while `source` uses a `COALESCE`. An absent source means
+"I am not claiming a provenance", so the stored one survives; an absent
+ingredient list means the athlete took everything out of the recipe, and there is
+no other way for them to say that. A defensive-looking `COALESCE` there would
+make an ingredient impossible to remove.
+
+### The phone's recipe editor is better than the web one, and that is allowed
+
+`apps/web`'s `RecipeEditor` composes an ingredient by typing a name and five
+macro numbers by hand. That was correct when it shipped — there was no catalog to
+search, and a thin picker then would have been something N42 had to replace
+rather than land in. There are **12,651 foods and 29,634 household portions**
+now, and this is the first authoring surface built on them: an ingredient is
+searched for and weighed (reusing N90's grams/oz control, whose button label is a
+prop now — "Log" would claim a meal had been recorded when nothing had), not
+transcribed. Typing the numbers stays available on web, and a catalog with an
+honest not-found answer still has to let somebody add what it does not have.
+
+The mobile-first rule is satisfied in the direction it actually sets — an athlete
+with only a phone can now do this — and web being *less* good at one thing is not
+a violation of it. Filed as its own follow-up rather than fixed here.
+
+### The five-meanings discipline, on two new surfaces
+
+Both new state models were built with it, because a recipe list and an
+ingredient search have exactly the shape that has collapsed twice in this app in
+a single day.
+
+- **The editor has four load states**, not three: `loading`, `fresh`, `editing`,
+  `missing`. Folding `loading` into `missing` tells somebody their recipe is gone
+  during the millisecond before SQLite answers; folding `missing` into `fresh`
+  opens a blank form under the id of a recipe that was deleted, and the athlete
+  never learns the first one went. `fresh` is an explicit route param rather than
+  inferred from "not found", which is what keeps those two apart at all.
+- **The ingredient picker keeps the catalog's `outcome` enum intact** — five
+  values plus `unknown`, plus a sixth case outside the enum for a transport
+  failure — and adds a seventh the enum cannot express: **nothing typed yet**.
+  Its empty state gates on the ANSWER's emptiness, never the post-dedupe list,
+  which is the bug this repo already shipped and fixed once on the quick-add
+  sheet.
+
+`CatalogCard` was extracted from `add.tsx` so both surfaces render one card. The
+extraction carries four rules that were each arrived at by being wrong first —
+glyph from category never the name, glyph hidden from the accessibility tree,
+two lines then truncate, brand omitted rather than empty — and `add.tsx`'s 21
+existing tests were the check that it was faithful.
+
+**The ingredient card deliberately has no `+` circle.** On the quick-add sheet
+that circle logs one reference serving, a sensible default for a meal. There is
+no honest default for an ingredient — "some chicken" is not a recipe — so it
+would either guess 100 g silently or do nothing, and this repo already refuses
+"a chip that filters nothing".
+
+### What was measured
+
+37 mutations applied and each confirmed to produce a **test** failure against a
+baseline green in the same session, with the apparatus checked both ways: a
+mutation that failed to apply, or a `-t` filter matching no tests, is reported as
+broken rather than as a pass.
+
+**One survived, and it was the useful one.** Removing the `problem` check from
+inside the editor's `save()` left every test green — because a disabled
+`Pressable` never fires `onPress`, so pressing it proves the button is disabled
+and says nothing about the guard behind it. The disabled STATE is asserted
+separately now, in both directions, so a button that stopped tracking the problem
+and a button that is always disabled each go red.
+
+### What review found, and two of them were the same failure this ticket is about
+
+**[blocking] A second route into the saved-food editor, which the new upsert
+turned from a stranded push into a local wipe.** This branch guarded
+`add.tsx`'s `Edit`, and `describe.tsx`'s *"fix these numbers for next time"*
+pushes the same screen with whatever the server's saved-food match returned —
+and that match really does return recipes (`TestReusingARecipeGivesOnePortionOfIt`
+pins it server-side). Saving a recipe through a form that knows nothing about a
+yield writes an empty `items`, and because the local upsert REPLACES rather than
+COALESCEs — deliberately, since that is the only way to take an ingredient out —
+the ingredient list was destroyed locally without ever being on screen. Then the
+push 400-ed permanently, as before.
+
+**The guard moved to `saved/[id]` itself**, which is the half that matters: a
+per-caller check is one somebody forgets to add, and this diff is the proof —
+the guard was written and a second caller was missed on the same day.
+
+**And the first attempt at it was worse than the bug.** `router.replace()` from
+an effect that lists `router` as a dependency re-navigates on every render,
+because `useRouter()` returns a new object each time. It did not fail a test; it
+took the jest worker out of memory. It renders a declarative `<Redirect>` now,
+which has no dependency to get wrong, and the test asserts the redirect fires
+**once** — a plain "was called" cannot tell a working redirect from a loop.
+
+**[blocking] 72 of the catalog's 12,651 foods have names the server refuses.**
+Measured, not estimated: `validateName` caps a name at 120 **runes**, and the
+longest catalog name is 184 ("Chicken or turkey, breaded, fried, garden salad
+with bacon and cheese, …"). `itemFromCatalog` copied the name verbatim, so
+adding one of those 72 produced a recipe that passed every client check and then
+400-ed permanently on push — the exact stranded-recipe failure this ticket
+exists to close, arriving through the feature that closes it.
+
+Names are clamped at construction and the limits are mirrored in
+`recipeProblem`, **in the server's own units**: runes for names and labels,
+**bytes** for the note, because the server checks that one with a bare `len()`
+on a Go string. A rune-based check there would pass 80 accented characters that
+the server refuses at 160 bytes. Checking on the client is also what makes the
+refusal work offline, where the server's answer is not available at all.
+
+**[suggestion, taken] The picker had no way to type an ingredient in**, while
+this file's own docblock claimed it did. An ingredient the catalog lacks was a
+dead end in flow: the only way out was to leave for the quick-add sheet and
+create the food there, which **logs it as a meal** on the way past. A catalog of
+12,651 foods still does not contain somebody's grandmother's sauce, so the
+by-hand route is offered always rather than only after a search fails — someone
+adding their own sauce should not have to prove the catalog lacks it first.
+
+### The instrument was wrong before the code was
+
+The mutation harness asked `'0 total' in summary` to detect a `-t` filter that
+matched nothing. `'0 total'` is a substring of `'40 total'`, so it reported
+**APPARATUS BROKEN on five guards that were working perfectly** — the substring
+trap this project keeps recording, arriving inside the tool built to catch it.
+It parses the count now. Worth stating because the failure was in the safe
+direction only by luck: the same check could as easily have read a broken run as
+a passing one.
+
+**37 mutations in total**, each confirmed to produce a test failure rather than a
+compile error, against a baseline green in the same session.
+
+### Left open
+
+- **Deleting a recipe from the phone** — `deleteFood` still has no production
+  caller. That is [#413](https://github.com/dmytro-ch21/formspan/issues/413)
+  (N79, audit row 5), not this ticket, and it is the natural next one.
+- **A recipe cannot contain another recipe.** The picker filters them out rather
+  than offering one and failing on save: it would need the server to derive one
+  set of figures from another's already-derived ones, and nothing models that.
+- **Web still has no catalog search**, so its recipe editor is the one that now
+  looks thin. Its own ticket.
+- **No device evidence yet.** #412 carries a `NEEDS HUMAN EVIDENCE` criterion and
+  it is genuinely outstanding — nothing here has been exercised on a phone.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

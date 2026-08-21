@@ -65,19 +65,35 @@ logs, web authors and analyses.**
 |---|---|---|
 | Log an item, edit an entry | ✅ | ✅ (correcting a past day is desk work) |
 | Save a food from what you just ate | ✅ | ✅ |
-| Build a recipe from scratch | ✗ | ✅ |
+| Build a recipe from scratch | ✅ | ✅ |
 | Set / explain the target | ✅ | ✅ |
 | Correct or remove a PAST target | ✅ | partly — the list is inert; no delete anywhere |
 | Intake vs weight vs training load | ✗ | ✅ |
 
-**Those two rows read `read-only` and `✗` until 2026-08-21.** N72 gave the
-phone manual entry and N86 gave it the record — history, editing a past row,
-removing one, and filing a target for a day already gone. Superseded on the
-**exclusivity**, not on the design: the split this table describes is still the
-right description of where each surface is strongest, and web's version may
-still be richer. It may not be the only one. Web's own half is now the weaker
-one — its history list is inert and neither surface offered deletion before the
-phone did.
+**Three of those rows read `✗` or `read-only` until 2026-08-21**, and two
+separate tickets corrected them on the **exclusivity**, not on the design.
+
+**The target rows (N72, then N86).** N72 gave the phone manual entry and N86 gave
+it the record — history, editing a past row, removing one, and filing a target
+for a day already gone. The split this table describes is still the right
+description of where each surface is strongest, and web's version may still be
+richer. It may not be the only one. Web's own half is now the weaker one — its
+history list is inert and neither surface offered deletion before the phone did.
+
+**The recipe row (N87, #529).** "Build a recipe from scratch" was `✗ mobile /
+✅ web`, which the mobile-first rule in `CLAUDE.md` forbids. The phone can now
+build and correct one, and the rest of that row's reasoning survives — a
+two-pane builder with the catalog always visible is still better with a
+keyboard. What changed is that the phone's version is not smaller in the way
+that was assumed: `apps/web`'s editor composes an ingredient by typing five
+macro numbers by hand, because it predates the food catalog, while the phone's
+searches 12,651 foods and weighs a portion. Making web's the richer of the two
+is now a web ticket, not a mobile one.
+
+**Editing a recipe does not rewrite meals already logged from it.** They keep the
+numbers they were logged with; the edit changes what the next portion logs. Same
+rule as `nutrition_entries` and `nutrition_targets` — see the N87 entry in
+`history.md` for the two alternatives that were refused.
 
 **Mobile gets no chart.** Each candidate was tested against the N5 carve-out and
 each fails on its own terms: 7-day calorie bars fail "the decision is made away

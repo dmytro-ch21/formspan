@@ -42,6 +42,7 @@
  */
 
 import { useAuth } from '@clerk/clerk-expo';
+import { randomUUID } from 'expo-crypto';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -60,8 +61,8 @@ import {
   fetchCatalogFood,
 } from '@/lib/catalogApi';
 import { FoodQuantity } from '@/components/FoodQuantity';
-import { glyphFor } from '@/lib/foodGlyph';
-import { localFoods, logFood, recentsFor, saveFoodLocally } from '@/lib/foodLog';
+import { CatalogCard, spokenName } from '@/components/food/CatalogCard';
+import { localFoods, logFood, recentsFor, saveFoodLocally, type FoodDraft } from '@/lib/foodLog';
 import { macrosForGrams, servingBasisGrams, servingsForGrams } from '@/lib/foodQuantity';
 import {
   MEALS,
@@ -95,10 +96,6 @@ type CatalogState = { forQuery: string; result: CatalogSearch | 'unreachable' };
  * halves comparable — a number without its unit is the thing that makes a list
  * of foods unscannable.
  */
-function servingLine(food: CatalogFood): string {
-  return `${Math.round(food.kcal)} cals per ${food.serving_label}`;
-}
-
 /**
  * The key two food lists are compared on.
  *
@@ -119,13 +116,6 @@ function foodKey(f: { name: string; brand: string }): string {
  * while the log recorded brand-plus-name, so an athlete tapped a row saying one
  * thing and found another in their diary. Raised in review.
  */
-function catalogName(food: CatalogFood): string {
-  if (!food.brand) return food.name;
-  return food.name.toLowerCase().includes(food.brand.toLowerCase())
-    ? food.name
-    : `${food.brand} ${food.name}`;
-}
-
 /** The scopes with data behind them. See the note on `scope`. */
 const SCOPES = [
   { key: 'all', label: 'All' },
@@ -379,7 +369,7 @@ export default function AddFoodScreen() {
       await logFood(userId, {
         eaten_on: date,
         meal,
-        name: catalogName(food),
+        name: spokenName(food),
         servings: servingsForGrams(food, grams),
         serving_label: food.serving_label,
         ...macrosForGrams(food, grams),
@@ -424,7 +414,13 @@ export default function AddFoodScreen() {
         onSave={async (draft) => {
           if (!userId) return;
           const id = await saveFoodLocally(userId, draft);
-          await log({ ...draft, id }, 1);
+          // A draft may leave the recipe fields unsaid; a `Food` may not.
+          // `NewFood` only ever builds a plain food, so the answer is the
+          // same one the store just wrote.
+          await log(
+            { ...draft, id, yield_servings: draft.yield_servings ?? null, items: draft.items ?? [] },
+            1,
+          );
         }}
       />
     );
@@ -512,7 +508,18 @@ export default function AddFoodScreen() {
               correctable, which is what stops a stored wrong number coming
               back forever, so the affordance has to be visible. */}
           <Pressable
-            onPress={() => router.push({ pathname: '/food/saved/[id]', params: { id: f.id } })}
+            onPress={() =>
+              // **A recipe must NOT open the saved-food editor (N87).** That
+              // screen edits per-serving macros and knows nothing about a yield
+              // or an ingredient list, so saving a recipe through it pushed
+              // `kind: 'recipe'` with no `yield_servings` — which the server
+              // refuses with a 400, which the outbox classifies as a PERMANENT
+              // rejection. The row left the queue, the edit lived only on the
+              // phone, and nothing anywhere said so.
+              f.kind === 'recipe'
+                ? router.push({ pathname: '/food/recipe/[id]', params: { id: f.id } })
+                : router.push({ pathname: '/food/saved/[id]', params: { id: f.id } })
+            }
             accessibilityRole="button"
             accessibilityLabel={`Edit ${f.name}`}
             hitSlop={8}
@@ -522,6 +529,29 @@ export default function AddFoodScreen() {
           </Pressable>
         </View>
       ))}
+
+      {scope === 'recipes' ? (
+        <Pressable
+          onPress={() =>
+            // A client-generated UUID, which is what makes the save idempotent
+            // — the same id sent twice is the same row. `fresh` is explicit so
+            // the editor never has to infer "new" from "not found", which is
+            // how a deleted recipe reopens as a blank form under its own id.
+            router.push({
+              pathname: '/food/recipe/[id]',
+              params: { id: randomUUID(), fresh: '1' },
+            })
+          }
+          accessibilityRole="button"
+          accessibilityLabel="Build a recipe"
+          style={[styles.newRecipe, { borderColor: accent.accent }]}
+          testID="add-new-recipe"
+        >
+          <Text style={[styles.newRecipeText, { color: accent.ink }]}>
+            + Build a recipe
+          </Text>
+        </Pressable>
+      ) : null}
 
       {shown.length === 0 && (
         <Text style={styles.empty}>
@@ -540,79 +570,29 @@ export default function AddFoodScreen() {
         <>
           <SectionHeader label="From the food catalog" />
           {catalogOnly.map((f) => (
-            <Pressable
+            <CatalogCard
               key={f.id}
-              style={styles.card}
-              onPress={() => void openQuantity(f)}
-              accessibilityRole="button"
-              // N58 renders the card; N90 owns what a tap DOES. The label has to
-              // follow the action, not the card — a row that says "Log X" and
-              // then opens a quantity sheet is lying to a screen reader.
-              accessibilityLabel={`Choose how much ${catalogName(f)} to log from the food catalog`}
-              testID={`add-catalog-row-${f.id}`}
-            >
-              {/* Derived from the CATEGORY, never the name — see `foodGlyph`.
-                  A wrong glyph is worse than none, and name matching is what
-                  puts a steak on a beef-flavoured tofu. */}
-              {/* Hidden from the accessibility tree. It is decoration — the
-                  name carries the meaning — and a screen reader announcing
-                  "seedling, Beef-flavoured tofu" before every row is noise in
-                  the one place a list has to be fast to move through. */}
-              <Text
-                style={styles.cardGlyph}
-                testID={`add-catalog-glyph-${f.id}`}
-                // `aria-hidden`, which React Native maps to BOTH
-                // `accessibilityElementsHidden` (iOS) and
-                // `importantForAccessibility="no-hide-descendants"` (Android).
-                // The first version paired the iOS prop with the weaker
-                // Android `"no"`, and RNTL only treats the strong forms as
-                // hidden — so the Android half was both weaker AND invisible
-                // to the test that claimed to cover it. Raised in review.
-                aria-hidden
-              >
-                {glyphFor(f.category)}
-              </Text>
-
-              <View style={styles.cardMain}>
-                {/* Two lines, then truncate. A catalog name is a USDA
-                    description and routinely long; one line hides the half
-                    that distinguishes it from its neighbour. */}
-                <Text style={styles.cardName} numberOfLines={2}>
-                  {f.name}
-                </Text>
-                {/* Omitted entirely when absent rather than rendered empty —
-                    every seeded USDA food is generic and has no brand, so an
-                    empty line would be the common case. */}
-                {f.brand ? <Text style={styles.cardBrand}>{f.brand}</Text> : null}
-                <Text style={styles.cardServing}>{servingLine(f)}</Text>
-              </View>
-
-              {/* **The split N58 predicted has now happened (N90).** Its note
-                  read: "when a detail screen exists the body's press becomes
-                  'open' and the `+` keeps meaning 'log' — that is the whole
-                  point of a quick-add affordance, and it should not have to be
-                  re-added then." It did not have to be.
-
-                  So the body opens the quantity sheet and this stays a ONE-TAP
-                  log, at the food's own reference serving — which is the exact
-                  behaviour a tap had before N90, preserved for the athlete who
-                  does not want to be asked. `servingBasisGrams` rather than a
-                  literal 100 because a food may state a different basis, and a
-                  hardcoded 100 would silently mis-log that one. */}
-              <Pressable
-                onPress={() => void logCatalog(f, servingBasisGrams(f))}
-                style={[styles.cardAdd, { borderColor: accent.accent }]}
-                accessibilityRole="button"
-                accessibilityLabel={`Add ${catalogName(f)}`}
-                // Bigger than it looks. The circle is 32pt and a thumb is not,
-                // and this sits at the edge of the screen where a miss scrolls
-                // the list instead.
-                hitSlop={10}
-                testID={`add-catalog-${f.id}`}
-              >
-                <Text style={[styles.cardAddText, { color: accent.ink }]}>+</Text>
-              </Pressable>
-            </Pressable>
+              food={f}
+              testIDPrefix="add-catalog"
+              onOpen={() => void openQuantity(f)}
+              // N58 renders the card; N90 owns what a tap DOES. The label has
+              // to follow the action, not the card — a row that says "Log X"
+              // and then opens a quantity sheet is lying to a screen reader.
+              openLabel={`Choose how much ${spokenName(f)} to log from the food catalog`}
+              // **The split N58 predicted has now happened (N90).** Its note
+              // read: "when a detail screen exists the body's press becomes
+              // 'open' and the `+` keeps meaning 'log'". It did not have to be
+              // re-added. So the body opens the quantity sheet and this stays a
+              // ONE-TAP log at the food's own reference serving — the exact
+              // behaviour a tap had before N90, kept for the athlete who does
+              // not want to be asked. `servingBasisGrams` rather than a literal
+              // 100, because a food may state a different basis and a hardcoded
+              // 100 would silently mis-log that one.
+              onQuickAdd={() => void logCatalog(f, servingBasisGrams(f))}
+              quickAddLabel={`Add ${spokenName(f)}`}
+              accentBorder={accent.accent}
+              accentText={accent.ink}
+            />
           ))}
           {/* Honest about the cap. "20 of 63" beats a list that silently
               stops and implies it is everything. */}
@@ -716,7 +696,7 @@ function NewFood({
 }: {
   initialName: string;
   onCancel: () => void;
-  onSave: (draft: Omit<Food, 'id'>) => Promise<void>;
+  onSave: (draft: FoodDraft) => Promise<void>;
 }) {
   const accent = useAccent();
   const [name, setName] = useState(initialName);
@@ -959,6 +939,16 @@ const styles = StyleSheet.create({
   // `paddingVertical` as well as the hitSlop: a 12pt text label is a small
   // target beside a full-width row, and the two together bring it to a
   // comfortable tap area without changing the row's height.
+  newRecipe: {
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  newRecipeText: { fontSize: 15, fontWeight: '600' },
   rowEdit: {
     fontSize: 12,
     color: vola.textMuted,

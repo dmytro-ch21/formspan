@@ -250,6 +250,8 @@ describe('quick add', () => {
     carb_g: 60,
     fat_g: 8,
     fibre_g: 10,
+    yield_servings: null,
+    items: [],
   };
 
   it('offers the ranked foods as one-tap chips', () => {

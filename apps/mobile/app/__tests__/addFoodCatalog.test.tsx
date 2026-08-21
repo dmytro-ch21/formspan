@@ -36,6 +36,7 @@ jest.mock('@/lib/catalogApi', () => {
   };
 });
 
+const mockPush = jest.fn();
 const mockLocalFoods = jest.fn();
 const mockLogFood = jest.fn();
 jest.mock('@/lib/foodLog', () => ({
@@ -52,7 +53,7 @@ jest.mock('expo-router', () => ({
   // `KeyboardAwareScrollView` uses this.
   useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
   useLocalSearchParams: () => ({ meal: 'lunch', date: '2026-08-19' }),
-  useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({ push: mockPush, back: jest.fn(), replace: jest.fn() }),
   Stack: { Screen: () => null },
 }));
 
@@ -80,6 +81,7 @@ function answer(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   jest.useFakeTimers();
+  mockPush.mockReset();
   mockLocalFoods.mockReset().mockResolvedValue([]);
   mockLogFood.mockReset().mockResolvedValue('entry-1');
   mockSearchCatalog.mockReset().mockResolvedValue(answer());
@@ -472,6 +474,62 @@ describe('the scope row', () => {
     });
     expect(screen.queryByTestId('add-catalog-usda-1')).toBeNull();
     expect(screen.getByTestId('add-food-mine-food')).toBeTruthy();
+  });
+
+  /**
+   * **A recipe's Edit must not open the saved-food editor (N87).**
+   *
+   * That screen edits per-serving macros and knows nothing about a yield or an
+   * ingredient list, so saving a recipe through it pushed `kind: 'recipe'` with
+   * no `yield_servings` — which the server refuses with a 400, which the outbox
+   * classifies as a PERMANENT rejection. The row left the queue, the edit lived
+   * only on the phone, and nothing anywhere said so.
+   *
+   * The pair of assertions is the guard: routing everything to the recipe
+   * editor would satisfy the first half and break every plain saved food.
+   */
+  it('sends a recipe to the recipe editor and a food to the food editor', async () => {
+    await search('o');
+    await waitFor(() => expect(screen.getByTestId('add-food-edit-mine-recipe')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('add-food-edit-mine-recipe'));
+    expect(mockPush).toHaveBeenLastCalledWith({
+      pathname: '/food/recipe/[id]',
+      params: { id: 'mine-recipe' },
+    });
+
+    fireEvent.press(screen.getByTestId('add-food-edit-mine-food'));
+    expect(mockPush).toHaveBeenLastCalledWith({
+      pathname: '/food/saved/[id]',
+      params: { id: 'mine-food' },
+    });
+  });
+
+  /**
+   * Recipe authoring has to be REACHABLE, which is the acceptance criterion the
+   * whole ticket turns on. It sits under `Recipes`, where somebody looking for
+   * one already is, and nowhere else — an entry point on every scope would put
+   * "build a recipe" under a search for yoghurt.
+   */
+  it('offers a way to build one, under Recipes', async () => {
+    await search('o');
+    await waitFor(() => expect(screen.getByTestId('add-food-mine-food')).toBeTruthy());
+    expect(screen.queryByTestId('add-new-recipe')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('add-scope-recipes'));
+    });
+    expect(screen.getByTestId('add-new-recipe')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('add-new-recipe'));
+    const [target] = mockPush.mock.calls[mockPush.mock.calls.length - 1];
+    expect(target.pathname).toBe('/food/recipe/[id]');
+    // `fresh` is explicit rather than inferred from "not found", which is how a
+    // deleted recipe reopens as a blank form under its own id.
+    expect(target.params.fresh).toBe('1');
+    // A client-generated id is what makes the save idempotent.
+    expect(target.params.id).toEqual(expect.any(String));
+    expect(target.params.id.length).toBeGreaterThan(0);
   });
 
   /** Recipes reads the STORED kind rather than guessing from the name. */
