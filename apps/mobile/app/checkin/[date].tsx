@@ -23,7 +23,16 @@ import {
   type GirthKey,
 } from '@/lib/body';
 import { getProfile, type Profile } from '@/lib/profile';
-import { fromDisplayWeight, toDisplayWeight, weightUnit, weightUnitName } from '@/lib/units';
+import {
+  fromDisplayGirth,
+  fromDisplayWeight,
+  girthUnit,
+  girthUnitName,
+  toDisplayGirth,
+  toDisplayWeight,
+  weightUnit,
+  weightUnitName,
+} from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 
@@ -100,7 +109,7 @@ export default function CheckinScreen() {
         }
         for (const s of GIRTH_SITES) {
           const v = today[s.key];
-          if (v != null) next[s.key] = String(v);
+          if (v != null) next[s.key] = String(toDisplayGirth(v as number, units));
         }
         setDraft(next);
         setNotes(today.notes);
@@ -133,9 +142,25 @@ export default function CheckinScreen() {
     return Number.isFinite(n) && n > 0 ? n : undefined;
   };
 
-  const waist = num('waist_cm') ?? checkin?.waist_cm ?? null;
-  const hips = num('hips_cm') ?? checkin?.hips_cm ?? null;
-  const neck = num('neck_cm') ?? checkin?.neck_cm ?? null;
+  /**
+   * A typed girth as CENTIMETRES, whatever the field is labelled.
+   *
+   * The draft holds what the athlete typed — inches on an imperial profile —
+   * while `checkin` holds storage, which is always centimetres. The formulas
+   * below take centimetres. Reading `num` directly here would feed inches
+   * into the Navy estimate for as long as a field is dirty and centimetres
+   * again the moment it is saved: a body-fat figure that moves when nothing
+   * about the body did, and no error anywhere. Hence one converting reader.
+   */
+  const girthCM = (key: GirthKey): number | null => {
+    const typed = num(key);
+    if (typed !== undefined) return fromDisplayGirth(typed, units);
+    return checkin?.[key] ?? null;
+  };
+
+  const waist = girthCM('waist_cm');
+  const hips = girthCM('hips_cm');
+  const neck = girthCM('neck_cm');
   const heightCM = profile?.height_cm ?? null;
 
   /** A field that loaded with a value and has been blanked. */
@@ -164,9 +189,11 @@ export default function CheckinScreen() {
       // Converted back to kilograms on the way in — storage is always metric,
       // whatever the field is labelled.
       if (w !== undefined) input.weight_kg = fromDisplayWeight(w, units);
+      // Converted back to centimetres on the way in, for the same reason the
+      // weight above is: storage is metric whatever the field is labelled.
       for (const s of GIRTH_SITES) {
         const v = num(s.key);
-        if (v !== undefined) input[s.key] = v;
+        if (v !== undefined) input[s.key] = fromDisplayGirth(v, units);
       }
       await saveCheckin(getToken, date, input);
       router.back();
@@ -289,12 +316,14 @@ export default function CheckinScreen() {
       {openGirths && (
         <View style={styles.block}>
           <Text style={styles.hint}>
-            Centimetres, tape snug but not compressing. Once a week is plenty —
-            they move slower than the tape’s own error.
+            In {girthUnitName(units)}, tape snug but not compressing. Once a week
+            is plenty — they move slower than the tape’s own error.
           </Text>
           {GIRTH_SITES.map((s) => (
             <View key={s.key} style={styles.field}>
-              <Text style={styles.label}>{s.label}</Text>
+              <Text style={styles.label}>
+                {s.label} ({girthUnit(units)})
+              </Text>
               <TextInput
                 style={styles.input}
                 value={draft[s.key] ?? ''}
@@ -303,7 +332,7 @@ export default function CheckinScreen() {
                 inputMode="decimal"
                 placeholder="—"
                 placeholderTextColor={vola.textDim}
-                accessibilityLabel={`${s.label} in centimetres`}
+                accessibilityLabel={`${s.label} in ${girthUnitName(units)}`}
                 accessibilityHint={GIRTH_HOW[s.key as GirthKey]}
                 testID={`checkin-${s.key}`}
               />

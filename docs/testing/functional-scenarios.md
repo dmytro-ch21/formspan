@@ -942,7 +942,14 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 
 **Deliberate exceptions, which should NOT be "fixed" without a product decision.**
 - `g/kg` and `kcal/kg` stay in kilograms in both derivations. Sports nutrition states these in g/kg universally, including in the US.
-- Check-in **girths** stay in centimetres. The primitives exist; the screen is a separate ticket. Relabelling it "inches" while still showing centimetres would be worse.
+- ~~Check-in **girths** stay in centimetres.~~ **Done (N112).** The nine fields now take and show the athlete's own unit; storage is still centimetres. Scenarios below.
+
+**Check-in girths (`apps/mobile/app/checkin/[date].tsx`), N112.**
+- All **nine** sites — neck, shoulders, chest, waist, hips, upper arm, forearm, thigh, calf — carry the unit in their visible label and in the spoken one. Nine is the number to check, not one: the previous version was uniform and a partial conversion would not be.
+- **Storage stays centimetres.** Enter a girth on an imperial profile, leave the screen, come back, and the same number is there. Flip the preference to metric and it becomes the same body in centimetres — not the same digits relabelled.
+- **The spoken label uses the word.** VoiceOver says "in" as a word and "cm" as two letters, so the accessibility label is built from `girthUnitName`, never `girthUnit`. Listening to it is the only way to check this; reading the code is not.
+- **The derived estimates must not move when a field is merely touched.** Waist-to-height and the Navy body-fat figure take centimetres. Open an imperial check-in that already has girths, retype the waist value that is already shown, and confirm neither number changes — the body did not. A reader that took the draft straight would swing waist-to-height from 0.47 to 0.18 on that keystroke, and both readings render as "under the 0.5 guide", so the words agree and only the number betrays it.
+- The **stale-allowlist guard** in `check-unit-literals.py` is what retires the exception: leave the `[date].tsx` entry in `ALLOW` after converting the screen and the check goes red, naming it. Verified by putting the entry back.
 
 ## Library filter and search memory (`apps/mobile` Library tab)
 

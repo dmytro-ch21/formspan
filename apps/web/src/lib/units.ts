@@ -245,6 +245,19 @@ export function fromDisplayGirth(v: number, u: UnitSystem): number {
   return u === 'imperial' ? round(v * CM_PER_INCH, 1) : round(v, 1);
 }
 
+/**
+ * The girth unit as a screen reader should SAY it.
+ *
+ * `girthUnit` returns the abbreviation a sighted athlete reads next to the
+ * field; VoiceOver pronounces "in" as the word "in" and "cm" as two letters,
+ * so a label built from the abbreviation reads out wrong in both systems.
+ * Same reasoning as `weightUnitName`, and the same reason it is a function
+ * rather than a literal at the call site.
+ */
+export function girthUnitName(u: UnitSystem): string {
+  return u === 'imperial' ? 'inches' : 'centimetres';
+}
+
 export function formatGirth(cm: number | null | undefined, u: UnitSystem): string {
   if (cm == null) return '—';
   return `${trim(toDisplayGirth(cm, u))} ${girthUnit(u)}`;
