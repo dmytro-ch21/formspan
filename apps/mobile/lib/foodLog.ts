@@ -218,6 +218,41 @@ export async function localLoggedDays(
 }
 
 /**
+ * Each day in `[from, to]` that has entries, with what those entries add up to.
+ *
+ * The stronger half of {@link localLoggedDays}, and it exists because "did you
+ * log that day" and "did you log that day *properly*" are different questions.
+ * N106's confidence block has to draw a day that was half-logged differently
+ * from one that was logged and one that was not touched at all — a single
+ * breakfast is not fourteen days of evidence, and a target judged against it is
+ * judged against a fiction.
+ *
+ * Returns the SUM rather than a verdict, for the same reason `localLoggedDays`
+ * returns days rather than a count: the rule about what counts as a full day
+ * needs a yardstick this query cannot see (the target that was in force), and
+ * it lives in `confidence.ts` where it is pure and testable. A CASE expression
+ * here would put that rule in a second place, where it could disagree with the
+ * first.
+ *
+ * Tombstones excluded, same as everywhere else here, so a day whose only entry
+ * was deleted correctly stops appearing rather than appearing as a zero.
+ */
+export async function localLoggedDayKcal(
+  userId: string,
+  from: string,
+  to: string,
+): Promise<{ day: string; kcal: number }[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ eaten_on: string; kcal: number }>(
+    `SELECT eaten_on, SUM(kcal) AS kcal FROM food_entries
+      WHERE user_id = ? AND eaten_on BETWEEN ? AND ? AND deleted_at IS NULL
+      GROUP BY eaten_on`,
+    userId, from, to,
+  );
+  return rows.map((r) => ({ day: r.eaten_on, kcal: r.kcal ?? 0 }));
+}
+
+/**
  * One entry by id, tombstones excluded.
  *
  * Scoped by `user_id` like every other read here. A row is not addressable

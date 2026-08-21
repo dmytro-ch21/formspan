@@ -351,6 +351,12 @@ function loadPalette() {
     // an unmeasured fill.
     TRACKER: block('trackerColors', 2),
     MONO_TRACKER: block('monoTrackerColors', 2),
+    // Four, and four is the frontier rather than a starting point — see the
+    // section below and the note on `macroColors` in Colors.ts. The asserted
+    // count is what makes a fifth macro a colour search instead of a line in
+    // an object.
+    MACRO: block('macroColors', 4),
+    MONO_MACRO: block('monoMacroColors', 4),
     MONO: {
       rest: monoOne('gridRest'),
       ramp: monoRamp,
@@ -368,7 +374,7 @@ function loadPalette() {
   };
 }
 
-const { S, P, BELT, BELT_ON, ACCENTS, SPORTS, MONOGRAM, MONOGRAM_INK, MONO, MONO_MEDAL, MONO_BELT, MONO_BELT_ON, TRACKER, MONO_TRACKER } =
+const { S, P, BELT, BELT_ON, ACCENTS, SPORTS, MONOGRAM, MONOGRAM_INK, MONO, MONO_MEDAL, MONO_BELT, MONO_BELT_ON, TRACKER, MONO_TRACKER, MACRO, MONO_MACRO } =
   loadPalette();
 
 heading('Text');
@@ -581,6 +587,71 @@ for (let i = 0; i < monoTrackers.length; i++) {
     );
   }
 }
+
+/*
+  The four macros — the densest categorical set in the app, and the one whose
+  reference design this file had to overrule.
+
+  N106's Goals screen draws protein, fat, carbs and fibre three times over: a
+  row of tiles, a four-segment donut, and a colour-dotted legend. The donut is
+  the reason the full pairwise claim is asserted here rather than waived the way
+  the belts' is — a segment carries no label, so colour is the ONLY channel
+  telling one arc from the next.
+
+  The supplied reference's own four values were sampled from the PNG and
+  measured here first: protein #5C9BFA / fat #FBC410 / carbs #B8FF2C /
+  fibre #B16AF6. Two of the six pairs fail under deuteranopia — blue vs violet
+  at ΔE 8.50, and amber vs lime at ΔE 9.78 — so what ships is the nearest set
+  that clears this gate rather than the reference's literal hues. Two of the
+  four are unchanged; the two that moved are exactly the two the arithmetic
+  forbids. The binding pairs now measure ~15.6, so this is a frontier: a
+  "nicer" gold or a bluer violet fails, and the failure is the point.
+*/
+heading('Macro colours — four categories, three renderings, one screen');
+const macros = Object.entries(MACRO);
+for (const [name, hex] of macros) {
+  ratio(`${name} on surface`, hex, S.surface, 4.5, 'The legend value renders in this colour, at 13pt.');
+  ratio(`${name} on raised`, hex, S.raised, 4.5, 'The tile label sits on a raised card, same size.');
+  ratio(`${name} — ink on a filled glyph`, S.bg, hex, 4.5);
+}
+for (let i = 0; i < macros.length; i++) {
+  for (let j = i + 1; j < macros.length; j++) {
+    separation(`${macros[i][0]} vs ${macros[j][0]}`, macros[i][1], macros[j][1]);
+  }
+}
+
+/*
+  The macros in monochrome, and the second place this file admits a WEAKER
+  guarantee rather than a different one.
+
+  Same arithmetic as the library tiles above: four achromatic values cannot be
+  ΔE 15 apart while all four also clear 4.5:1. Measured by search over the grey
+  ramp, the ceiling is ΔE 11.24 — at which point the darkest step is already at
+  4.52:1 on `raised`. So the pairwise claim is dropped here too.
+
+  It is a worse trade than the tiles', and worth saying so: a tile carries its
+  own three-letter code, and a donut segment carries nothing. What mono keeps is
+  ORDER — the ramp runs brightest to dimmest in the order the legend lists — and
+  the legend beside it carries the names. What is still asserted is contrast,
+  and that the ramp has not collapsed: the two ENDS must stay genuinely apart,
+  so a later edit cannot quietly flatten four steps into one grey.
+*/
+heading('Macro colours in monochrome — order survives, hue does not');
+const monoMacros = Object.entries(MONO_MACRO);
+if (monoMacros.length !== macros.length) {
+  failures.push(
+    `Macro colours in monochrome — ${monoMacros.length} greys for ${macros.length} ` +
+      `colours. A macro with no mono twin stays coloured in a black-and-white app.`,
+  );
+}
+for (const [name, hex] of monoMacros) {
+  if (!(name in MACRO)) {
+    failures.push(`Macro colours in monochrome — '${name}' has no coloured original`);
+  }
+  ratio(`mono ${name} on surface`, hex, S.surface, 4.5);
+  ratio(`mono ${name} on raised`, hex, S.raised, 4.5);
+}
+separation('mono macros keep their two ends apart', monoMacros[0][1], monoMacros[monoMacros.length - 1][1]);
 
 heading('Belt accents — the rank card and the belt-syllabus cards');
 for (const [belt, hex] of Object.entries(BELT)) {

@@ -518,6 +518,87 @@ export const monoTrackerColors = {
 
 export type TrackerColor = keyof typeof trackerColors;
 
+/**
+ * The four macros, as four colours — and the two of them that could not be the
+ * ones the design asked for.
+ *
+ * N106's reference draws protein, fat, carbs and fibre as a row of tiles, a
+ * four-segment donut and a colour-dotted legend, so this is a genuine
+ * categorical set: four hues side by side, carrying a reading. Same rule as
+ * `sportColors` — **fixed regardless of the accent**, because a measurement
+ * whose colour depends on a preference is a measurement nobody can learn to
+ * read.
+ *
+ * ## Two of the reference's four are exact and two could not be
+ *
+ * The reference's own values were sampled out of the supplied PNG — protein
+ * `#5C9BFA`, fat `#FBC410`, carbs `#B8FF2C`, fibre `#B16AF6` — and run through
+ * `scripts/validate_palette.mjs`'s CIEDE2000 + CVD maths. **Two of the six
+ * pairs collapse**, both under deuteranopia:
+ *
+ *  - **protein blue vs fibre violet: ΔE 8.50.** Predicted, in this very file:
+ *    `info`'s note already records "violet measured ΔE 2.0 for a deuteranope
+ *    against this blue".
+ *  - **fat amber vs carbs lime: ΔE 9.78.** Yellow and yellow-green are the same
+ *    colour without the red-green axis.
+ *
+ * So the palette is the NEAREST set to the reference that clears the gate, and
+ * it sits on a real four-colour frontier — the binding pairs measure 15.56,
+ * 15.7 and 15.9, and every prettier variant tried (a brighter gold, an orange
+ * fat, a bluer violet, a lighter orchid) fails at least one of them.
+ *
+ *  - `protein` — **exactly the reference.**
+ *  - `carbs` — **exactly the reference**, which is the brand lime.
+ *  - `fat` — the reference's amber, deepened. Separation from lime has to come
+ *    from LIGHTNESS once the hue axis is gone, which is the same argument
+ *    `trackerColors.water` records against `info`.
+ *  - `fibre` — the reference's violet, rotated toward orchid until it clears
+ *    the blue.
+ *
+ * Worst pair **ΔE 15.56**; 5.05:1 on `surface` and 4.62:1 on `surfaceRaised` at
+ * the dimmest, so all four are legible as small text and as fills.
+ *
+ * **A fifth macro is not free space.** Four hues pairwise at ΔE 15 under three
+ * simulations is already the frontier; adding one is a colour search, not a
+ * line in this object, and the count asserted in `validate_palette.mjs` is what
+ * makes you do it.
+ */
+export const macroColors = {
+  protein: '#5C9BFA',
+  fat: '#CAA021',
+  carbs: '#B8FF2C',
+  fibre: '#D657AA',
+} as const;
+
+/**
+ * The monochrome twin, and it **deliberately does not meet the ΔE 15 floor.**
+ *
+ * Lightness is the only axis left, and four achromatic values cannot be 15
+ * apart while all four also clear 4.5:1 — measured by search over the grey
+ * ramp, the ceiling is **ΔE 11.24**, at which point the darkest step is already
+ * at 4.52:1 on `surfaceRaised`. That is the same wall the mono library tiles
+ * hit and record, and the same one `monoSport` documents by giving every sport
+ * one grey rather than four bad ones.
+ *
+ * Four steps rather than one grey, because unlike a sport chip a **donut
+ * segment carries no label** — one grey there is a ring with nothing in it. So
+ * the honest trade in mono is an ordered ramp that is reliably *ordered* even
+ * where two adjacent steps are not reliably *told apart*, with the legend
+ * beside it carrying the names. `validate_palette.mjs` asserts the contrast and
+ * states the dropped pairwise claim out loud rather than omitting the set.
+ *
+ * Ordered brightest → dimmest in the macro order the screen renders, so the
+ * ramp reads as a sequence rather than as four arbitrary greys.
+ */
+export const monoMacroColors = {
+  protein: '#F3F6FA',
+  fat: '#CED2DE',
+  carbs: '#A4A7B1',
+  fibre: '#82858C',
+} as const;
+
+export type MacroColor = keyof typeof macroColors;
+
 export type AccentName = keyof typeof accents;
 export type Accent = (typeof accents)[AccentName];
 
@@ -720,6 +801,19 @@ export function trackerFill(key: string): string {
   const set: Record<string, string> = isMono ? monoTrackerColors : trackerColors;
   return set[key] ?? (isMono ? monoTrackerColors.water : trackerColors.water);
 }
+
+/**
+ * The macro palette this build actually draws with.
+ *
+ * Same shape as `activeSportColors`: the two literals stay parseable by
+ * `validate_palette.mjs`, and the mode switch happens here rather than at each
+ * of the dozen render sites — a screen that reached for `macroColors` directly
+ * would keep its colour in monochrome mode and quietly be the one card that
+ * ignores the setting.
+ */
+export const activeMacroColors: Record<MacroColor, string> = isMono
+  ? monoMacroColors
+  : macroColors;
 
 export default {
   light: scheme,

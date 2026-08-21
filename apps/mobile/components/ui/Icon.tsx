@@ -50,6 +50,27 @@ const EXTRA = {
   /** Dismiss. Chrome, like the chevrons — the kit has no close glyph. */
   close: [{ t: 'p', d: 'M6 6l12 12M18 6L6 18' }],
   /**
+   * Edit, and safety. Both chrome in the same sense as the chevrons: the kit
+   * draws things the product is *about* — a barbell, a belt, a route — and
+   * these two are the universal affordance glyphs, drawn by every operating
+   * system rather than by a brand. N106's design reference asks for both by
+   * name (a pencil on `Edit target`, a padlock beside "nothing is saved until
+   * you tap that"), and substituting a gear for the padlock says "settings"
+   * where the copy says "your data is safe".
+   *
+   * Stroked and closed like everything else here — this renderer sets
+   * `fill="none"` for the whole set, so a shape expecting a fill comes out as
+   * an outline.
+   */
+  pencil: [
+    { t: 'p', d: 'M4 20h4L19.5 8.5a2.12 2.12 0 0 0-3-3L5 17v3Z' },
+    { t: 'p', d: 'M14.5 6.5l3 3' },
+  ],
+  lock: [
+    { t: 'r', x: 5, y: 11, w: 14, h: 9, rx: 2 },
+    { t: 'p', d: 'M8 11V8a4 4 0 0 1 8 0v3' },
+  ],
+  /**
    * Transport controls for the timer.
    *
    * Chrome rather than iconography, same as the chevrons: the kit draws things
