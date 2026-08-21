@@ -13,14 +13,16 @@ import { trackerFill, vola } from '@/constants/Colors';
 import {
   addLabel,
   amountLine,
+  footLine,
   glyphHint,
   glyphLabel,
   glyphSlots,
+  glyphState,
   loggedCount,
   progress,
   resolveRenderStyle,
-  targetCount,
   valueLine,
+  type GlyphState,
   type Tracker,
   type TrackerEntry,
 } from '@/lib/trackerModel';
@@ -52,9 +54,16 @@ import type { UnitSystem } from '@/lib/units';
  *
  * ## What the copy never does
  *
- * There is no praise and no scolding anywhere in here, and nothing renders
- * differently at ten of eight than at four of eight except the number. Crossing
- * a target is not an event; it is a larger number.
+ * There is no praise and no scolding anywhere in here. Crossing a target
+ * changes the arithmetic on the foot line and the shape of the glyphs past it,
+ * and changes nothing else: no colour shift, no exclamation mark, no word about
+ * whether that was a good idea.
+ *
+ * **N77 added two things here and nothing else** — the foot line now carries
+ * `last at 16:40`, and a glyph logged past the target draws a smaller fill. Both
+ * are unconditional, driven by the record rather than by which preset it is; a
+ * branch on `tracker.preset` anywhere in this file would be the CoffeeCard the
+ * first paragraph promises not to grow.
  */
 export function TrackerCard({
   tracker,
@@ -80,7 +89,7 @@ export function TrackerCard({
   const count = loggedCount(entries);
   const style = resolveRenderStyle(tracker, count);
   const fill = trackerFill(tracker.color_key);
-  const target = targetCount(tracker);
+  const foot = footLine(tracker, entries);
   const amount = unitsReady ? amountLine(tracker, entries, units) : null;
 
   return (
@@ -151,10 +160,14 @@ export function TrackerCard({
         )}
       </RNView>
 
-      {target == null ? null : (
+      {foot == null ? null : (
         <Text style={styles.foot} testID={`tracker-foot-${tracker.id}`}>
-          {/* States the arithmetic and stops. No "keep going", no "you did it". */}
-          {count >= target ? `Target ${target} reached` : `${target - count} to go`}
+          {/* States the arithmetic and when the last one was, and stops. No
+              "keep going", no "you did it". The copy is assembled in
+              `trackerModel` rather than here so the test that enumerates every
+              string this feature can produce and checks none of them carries a
+              verdict can actually see it. */}
+          {foot}
         </Text>
       )}
     </View>
@@ -221,15 +234,15 @@ function Glyphs({
   return (
     <RNView style={styles.glyphs}>
       {Array.from({ length: slots }, (_, i) => {
-        const filled = i < count;
+        const state = glyphState(tracker, i, count);
         return (
           <Glyph
             key={i}
-            filled={filled}
+            state={state}
             fill={fill}
             size={size}
-            label={glyphLabel(tracker, i, slots, filled)}
-            hint={glyphHint(filled)}
+            label={glyphLabel(tracker, i, slots, state)}
+            hint={glyphHint(state)}
             testID={`tracker-glyph-${tracker.id}-${i}`}
             hitSlop={single ? 4 : GLYPH_SLOP}
             // A filled glyph removes ITS OWN tap; an empty one adds.
@@ -241,10 +254,14 @@ function Glyphs({
             // row the athlete actually pointed at, so the second tap is a no-op.
             //
             // Empty glyphs ADD rather than being disabled. A disabled glyph made
-            // `glyphHint(false)` unreachable — the hint was suppressed exactly
-            // when it applied — and left a VoiceOver user with no add affordance
-            // where they already were, forcing a swipe back to the `+`.
-            onPress={filled ? () => onRemove(entries[i].id) : onAdd}
+            // the empty hint unreachable — it was suppressed exactly when it
+            // applied — and left a VoiceOver user with no add affordance where
+            // they already were, forcing a swipe back to the `+`.
+            //
+            // An OVER-target glyph removes like any other. "Cups past the limit
+            // log normally" is an acceptance criterion, and a cup you cannot
+            // untap is not logged normally.
+            onPress={state === 'empty' ? onAdd : () => onRemove(entries[i].id)}
           />
         );
       })}
@@ -253,16 +270,55 @@ function Glyphs({
 }
 
 /**
+ * How far the fill is inset from the border.
+ *
+ * `FILL_INSET` is the ordinary one — a hairline, so a filled glyph reads as
+ * solid. `OVER_INSET` is what draws a cup logged PAST the target: the same
+ * colour, at the same opacity, in a smaller square, leaving a ring of surface
+ * inside the border.
+ *
+ * **Shape rather than colour, and deliberately not a warning hue.** N77's
+ * criterion is that past-the-limit cups are "visually distinct without being
+ * coloured as an error" — `vola.danger` here would be the shame-based
+ * messaging this project does not do, wearing a colour instead of a word. It is
+ * also not opacity alone, which is one weak channel and the first thing to
+ * disappear on a bright screen or under a colour-blind simulation; a size
+ * difference survives both, and survives the monochrome palette too.
+ *
+ * **Not a dashed border**, which was the other candidate — but not for the
+ * reason first written here, and the correction is worth keeping. The claim was
+ * that React Native falls back to a solid border when `borderStyle` meets
+ * `borderRadius` on iOS. That was a real defect historically and **review found
+ * it is not true of the version this app ships**: in RN 0.86.2's Fabric renderer
+ * `useCoreAnimationBorderRendering` requires a solid border, so a dashed one
+ * takes the image path — and `RCTGetDashedOrDottedBorderImage` handles corner
+ * radii. So the fallback would not have happened, and the sentence was a
+ * remembered bug asserted as a measurement.
+ *
+ * The decision stands on the argument that survives: a dash pattern inside a
+ * 26pt rounded glyph with a 1.5pt border is mush at that scale, and the row can
+ * hold twelve of them. A size difference is legible where a dash pattern is
+ * texture.
+ *
+ * It cannot be confused with an EMPTY glyph, and that is arithmetic rather than
+ * hope: the row draws `max(target, count)` slots, so the moment one glyph is
+ * over the target every slot is filled and there is no empty one on screen to
+ * confuse it with. See `glyphState`.
+ */
+const FILL_INSET = 1.5;
+const OVER_INSET = 5;
+
+/**
  * One glyph, filling on a spring.
  *
- * The animation is driven from `filled` rather than fired on press, so a glyph
+ * The animation is driven from `state` rather than fired on press, so a glyph
  * that fills because the day was re-read from SQLite — or because another
  * device logged it — animates identically to one the athlete just tapped.
  * `useNativeDriver` because opacity and scale are both compositor properties;
  * this row can be tapped four times in a second and must not go through JS.
  */
 function Glyph({
-  filled,
+  state,
   fill,
   size,
   label,
@@ -271,7 +327,7 @@ function Glyph({
   testID,
   hitSlop,
 }: {
-  filled: boolean;
+  state: GlyphState;
   fill: string;
   size: number;
   label: string;
@@ -280,6 +336,8 @@ function Glyph({
   testID: string;
   hitSlop: PressableProps['hitSlop'];
 }) {
+  const filled = state !== 'empty';
+  const inset = state === 'over' ? OVER_INSET : FILL_INSET;
   // `useState` with a lazy initialiser rather than `useRef`, and the difference
   // is not cosmetic: reading `.current` during render is what `react-hooks/refs`
   // flags, and this app holds its lint warnings on a ratchet precisely so a new
@@ -323,15 +381,21 @@ function Glyph({
         ]}
       >
         <Animated.View
+          // `margin` and `borderRadius` are not animated: an over-target glyph
+          // is a different thing rather than a state the same glyph passes
+          // through, and animating the inset would read as the fill shrinking
+          // away — which is the "you overdid it" flinch this card must not do.
           style={[
             styles.glyphFill,
             {
               backgroundColor: fill,
-              borderRadius: size / 3 - 2,
+              margin: inset,
+              borderRadius: Math.max(1, size / 3 - inset),
               opacity: t,
               transform: [{ scaleY: t }],
             },
           ]}
+          testID={`${testID}-fill`}
         />
       </RNView>
     </Pressable>
@@ -412,7 +476,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     overflow: 'hidden',
   },
-  glyphFill: { flex: 1, margin: 1.5 },
+  // No `margin` here: it is per-glyph, because an over-target one insets
+  // further. See FILL_INSET / OVER_INSET.
+  glyphFill: { flex: 1 },
   barTrack: {
     flex: 1,
     height: 10,

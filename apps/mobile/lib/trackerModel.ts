@@ -227,6 +227,71 @@ export function formatClock(at: Date): string {
 }
 
 /**
+ * The line under the row — the arithmetic, and when the last one was.
+ *
+ * **One line for both readings of a target, because there is only one target
+ * column.** Water's 2 litres is a goal you are heading for; coffee's three cups
+ * is a ceiling you would rather not cross. Distinguishing them in copy would
+ * need a `target_kind` on the row, which is a migration — so instead every
+ * phrasing here is true under both readings: `4 to go` states a remainder,
+ * `2 past your target of 3` states a difference, and neither says whether that
+ * is good.
+ *
+ * `last at 16:40` is appended whenever anything has been logged, for every
+ * tracker rather than for coffee. It is the number N77 was written around —
+ * what matters to somebody training in the evening is *when* the last cup was,
+ * not that it happened — and it is equally true of water, so a branch on the
+ * preset here would be the card learning what coffee is.
+ *
+ * Null when there is nothing to say at all: no target, nothing logged.
+ */
+export function footLine(t: Tracker, entries: TrackerEntry[]): string | null {
+  const parts: string[] = [];
+  const count = loggedCount(entries);
+  const target = targetCount(t);
+  if (target != null) {
+    if (count > target) parts.push(`${count - target} past your target of ${target}`);
+    else if (count === target) parts.push(`Target ${target} reached`);
+    else parts.push(`${target - count} to go`);
+  }
+  const at = lastLoggedAt(entries);
+  if (at) parts.push(`last at ${formatClock(at)}`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+/**
+ * What one glyph in the row is.
+ *
+ * Three states rather than a boolean, and the third is N77's: a cup logged
+ * PAST the target. It still happened, it is still removable, and it has to be
+ * distinguishable at a glance from the ones inside the target — otherwise the
+ * row tells an athlete with a three-cup ceiling that their fifth cup is the
+ * same event as their first.
+ *
+ * `empty` and `over` never appear on the same row, which is arithmetic rather
+ * than luck: `glyphSlots` draws `max(target, count)`, so the moment any glyph
+ * is over the target every slot is filled. That is what lets the drawn
+ * difference be subtractive (a smaller fill) without reading as "not logged".
+ *
+ * **Two render styles cannot show `over`, and both are deliberate rather than
+ * missed.** `dose` draws a single glyph at index 0, and a one-dose target puts
+ * the boundary at index 1 — so a second creatine scoop past a one-scoop target
+ * looks like the first. `bar` clamps `progress` at 1 for the same reason a bar
+ * cannot draw past its end. In both cases the FOOT LINE still states the fact
+ * (`1 past your target of 1`), so the information is on the card; it is the
+ * glyph channel that does not participate. Worth knowing before reading either
+ * as a bug — N78's creatine is exactly the `dose` case.
+ */
+export type GlyphState = 'empty' | 'filled' | 'over';
+
+export function glyphState(t: Tracker, index: number, count: number): GlyphState {
+  if (index >= count) return 'empty';
+  const target = targetCount(t);
+  if (target != null && index >= target) return 'over';
+  return 'filled';
+}
+
+/**
  * What VoiceOver reads for one glyph.
  *
  * **A row of eight identical shapes is an accessibility trap**, and the trap is
@@ -240,16 +305,19 @@ export function glyphLabel(
   t: Tracker,
   index: number,
   total: number,
-  filled: boolean,
+  state: GlyphState,
 ): string {
   const noun = unitNoun(t) || 'item';
-  const state = filled ? 'filled' : 'empty';
-  return `${t.name}, ${noun} ${index + 1} of ${total}, ${state}`;
+  // "filled, past your target" rather than a separate word, so a VoiceOver user
+  // hears the same vocabulary the visible foot line uses — and so an over-target
+  // cup is still announced as logged, which is what a double-tap will undo.
+  const said = state === 'over' ? 'filled, past your target' : state;
+  return `${t.name}, ${noun} ${index + 1} of ${total}, ${said}`;
 }
 
 /** What a double-tap on that glyph will do, spoken as a verb. */
-export function glyphHint(filled: boolean): string {
-  return filled ? 'Double tap to remove it' : 'Double tap to add it';
+export function glyphHint(state: GlyphState): string {
+  return state === 'empty' ? 'Double tap to add it' : 'Double tap to remove it';
 }
 
 export function addLabel(t: Tracker): string {

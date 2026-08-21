@@ -37682,6 +37682,205 @@ only. That is the more common action and the one the ticket describes, but
 "change the grams" is a fair reading of the edit path too.
 
 
+## 2026-08-20 — N77: coffee is a struct literal, and the model held
+
+N76 shipped a generic `daily_tracker` with water as a seeded preset, and staked
+a claim on it: *if coffee needs new plumbing, the model did not generalise and
+that is the bug to fix first.* N77 is the falsification attempt. **The claim
+held, and the line count did not.**
+
+### What coffee actually cost
+
+**Backend: one `Preset` struct literal.** No migration, no endpoint, no column,
+no branch. `contracts/public.openapi.yaml` is **byte-identical** on this branch,
+which is the sharpest available statement of "no new plumbing" — the wire
+contract already said *the default presets* rather than *water*, and it was
+already right.
+
+**Mobile: two edits to the ONE shared card**, which #406's report understated
+when it said "~12 lines". Both are unconditional and neither knows what coffee
+is:
+
+- **The foot line now renders `last at 16:40`.** `lastLoggedAt` and
+  `formatClock` were written, tested and correct in #406 — and nothing
+  displayed them, for a whole ticket. A model function no screen calls is the
+  quieter half of the same failure this project keeps finding: it is green, it
+  is covered, and it does not exist to the athlete.
+- **A cup logged past the target draws a smaller fill.** Over-target glyphs used
+  to render identically to the ones inside the target, which is *correct for
+  water* — crossing 2 litres is not an event — and wrong for a ceiling, where it
+  tells the athlete their fifth cup is the same thing as their first.
+
+`presets.go`, `trackerModel.ts` and `TrackerCard.tsx` are the only non-test files
+touched. There is no `CoffeeCard`, no `coffee` branch anywhere, and no second
+model.
+
+### Three decisions worth the words
+
+**`Default: false` — coffee is unreachable, and shipping it that way is the
+decision.** This was `true` for most of the branch, and the reversal is the most
+useful thing in the entry.
+
+The argument for `true` is good: nothing in the app calls `POST /v1/trackers`,
+and the handler blanks `preset` on the way in precisely so a client cannot claim
+one, so a preset that is not a default is reachable by **nobody** — `false`
+ships a struct literal and no coffee card, and none of N77's own steps to test
+can be performed. All of that is true and none of it was disputed.
+
+What it left out is **the exit**. Archiving is not wired: `app/trackers/[id].tsx`
+shows the control as unavailable pending N78, and `lib/trackers.ts` has no
+archive call at all. So `Default: true` gives every athlete a coffee counter on
+Today that they **cannot remove**, and coffee is not a neutral thing to count —
+people give it up. An unremovable daily coffee card for someone who quit is not
+a ticket they file; it is an app they delete. The reachability gap is real and
+it is **N78's gap**: that ticket owns the create path *and* the archiving
+screen, so it is the one place that can both turn coffee on and let somebody
+turn it off.
+
+Two process notes, because the shape recurs. First, **#406's author had written
+the intended value into the file, as a comment, at the line being edited** —
+`Default false` — and it was read as a stale guess rather than as the model's
+author specifying the second instance while designing the generality. Second,
+the backend reviewer read the `true` version and **agreed with it**, having
+checked `EnsureDefaults`, the partial unique index and the squatting guard. It
+was right about all of those: the mechanism was sound. The objection was never
+mechanical, and a review that is asked about mechanism will answer about
+mechanism. Being unable to *delete* a card is not a property any test or
+reviewer was looking at.
+
+So this ships as an honest partial: **the model half is proven here, the reach
+half belongs to N78.** The ticket does not close.
+
+**One `target` column, read two ways, and no `target_kind`.** Water's 2 litres is
+a goal; coffee's three cups is a ceiling. Distinguishing them in the data would
+be a migration — so instead **every string the card can produce is true under
+both readings**: `4 to go` states a remainder, `2 past your target of 3` states a
+difference, and neither says whether that was a good idea. `Target 8 reached`
+survives from #406 for the exact-match case. This is why the copy moved into
+`trackerModel.ts` rather than living in the component: the enumeration test that
+reads every string this feature can emit and checks none carries a verdict can
+only see functions, and a foot line assembled in JSX would have been invisible
+to it.
+
+**The over-target marking is a SHAPE, not a colour.** The ticket asks for
+"visually distinct without being coloured as an error", and `vola.danger` here
+would be shame-based messaging wearing a colour instead of a word. It is also
+not opacity alone — one weak channel, the first thing to vanish under a
+colour-blind simulation.
+
+**A dashed border was the other candidate, and the reason first written down for
+rejecting it was wrong** — which is worth more than the decision. The comment
+said React Native falls back to a solid border when `borderStyle` meets
+`borderRadius` on iOS. That was a real defect historically, and **the frontend
+reviewer read the installed RN 0.86.2 source and found it does not hold here**:
+`useCoreAnimationBorderRendering` requires a solid border, so a dashed one takes
+the image path, and `RCTGetDashedOrDottedBorderImage` handles corner radii. The
+fallback would not have happened. A remembered bug had been asserted as a
+measurement, in a comment, as the load-bearing reason — the same failure as
+every entry in *Verify that a check can fail*, arriving as a citation rather
+than as a test. The decision stands on the argument that survives: a dash
+pattern inside a 26pt rounded glyph with a 1.5pt border is texture, not a
+signal, and the row can hold twelve of them.
+
+It cannot be confused with an *unlogged* cup, and that is arithmetic rather than
+hope: the row draws `max(target, count)` slots, so the moment one glyph is past
+the target every slot is filled and there is no empty one on screen. That
+property is asserted directly (`never draws an empty glyph beside an over one`,
+swept over four trackers × 41 counts) because the whole design rests on it.
+
+### The colour cost nothing, which was the point
+
+`trackerColors.coffee` was measured into the palette by N76 **before anything
+rendered it** — ΔE 23.4 against the water teal under protanopia — specifically so
+this PR would be a key lookup rather than a colour search. It was. `check:palette`
+passes with no palette change at all. That is the cheapest thing in this entry
+and it is worth noticing why: the expensive discovery was moved to the ticket
+that had slack for it.
+
+### Numbers
+
+`pnpm run verify` green. `lint:mobile` **53 warnings, unchanged** — the ceiling
+is 53 and this branch sits exactly on it. Backend tracker package green,
+including two new integration tests. Mobile: `trackerModel.test.ts` 36 tests, and
+a new `components/__tests__/trackerCard.test.tsx` at 12. **No migration**, so no
+number claimed.
+
+**Twenty-two mutations, twenty-two reds**, baseline green in the same session
+before and after, and the tree verified restored afterwards. The harness
+asserted each edit actually matched a **unique** site before running anything —
+the "mutation that never applied" trap — and classified a compile error as *not*
+a pass. Backend: coffee becoming a default again; coffee shipped with a ceiling;
+coffee pinned to `glyphs`; coffee counting in doses; `target` marshalling as `0`
+rather than `null`; `PresetID` ignoring the preset key; coffee claiming water's
+key. Model: the over state collapsed to `filled`; the boundary off by one in
+**both** directions; a null target still marking cups over; the clock dropped
+from the foot line (the exact defect this ticket repairs); over-target
+congratulated with `Target reached`; the clock formatted in UTC; an over glyph
+announced as `empty`; an over glyph offering to *add*. Card: the foot line never
+rendered; the inset never applied; the state recomputed as a bare boolean; the
+over glyph coloured `danger` instead of reshaped.
+
+**One mutation survived, and it was the mutation that was wrong.** Renaming
+coffee's `Name` to "Water" changed nothing red, which reads as a missing
+coexistence guard and is not: identity is the `preset` key, not the display
+name, so two trackers may legitimately share a name. The genuine hazard is a
+*derived id* that stops depending on the key — every preset for one athlete
+landing on one primary key — and mutating `PresetID` to drop `presetKey` turns
+`TestEveryPresetProvisionsExactlyOnceAndCoexists` and
+`TestPresetIDIsStableAndPerAthlete` red together. Worth recording because the
+first reading of a survivor is "the code is unguarded" and the second is "the
+vector was not the thing", and here it was the second. **That guard was also
+untestable until this ticket**: with one preset, "two presets collide" has no
+input that can express it.
+
+Two of those deserve naming. **The "never judges" test was extended from reading
+glyph index 0 to walking every glyph in the row**, because the over-target label
+is only reachable at an index past the target — the old loop could never have
+seen the one string this ticket added. That is the same lesson as "a guard is
+only exercised by the input it is meant to reject", arriving as an *enumeration*
+that had quietly stopped enumerating the interesting case. And both enumeration
+tests now assert their own apparatus: that the walk collected something, and
+that it reached an over-target row at all. A sweep that produced nothing would
+have passed in silence.
+
+### One thing found and deliberately not fixed
+
+**The seeded water preset pins `render_style: 'glyphs'`, and the test fixture
+for water uses `'auto'`.** So `resolveRenderStyle(water, 15) === 'bar'` is
+asserted and passing against a record that is not the one that ships — the real
+water row would draw fifteen glyphs, the uncountable block N78 forbids. It is
+pre-existing, it belongs to water rather than coffee, and fixing it properly
+means migrating stored rows, so it is not in this branch. Coffee ships `auto`
+for exactly this reason. Filed rather than patched in passing.
+
+### Open questions this leaves
+
+- **Coffee is not reachable, so N77 does not close.** The card cannot be seen,
+  logged to, or checked on a device until N78 ships the create path. Everything
+  above is the model half; the ticket stays open on the reach half, and its
+  steps to test cannot be performed by anyone yet. **N78 should know this is
+  load-bearing rather than incidental** — coffee is the first thing waiting on
+  its `POST`.
+- **Nothing has run on a device, and cannot.** Whether the smaller fill actually
+  reads as "past your target" at 26pt, from arm's length, is the one criterion
+  no test can reach — and it is the criterion the ticket is about. If it is too
+  subtle the marking needs a second channel, which is a design change rather
+  than a tweak. `docs/testing/device-checks.md` tracks this class.
+- **The over marking is invisible in two render styles**, and both are
+  deliberate: `dose` draws a single glyph at index 0, so a second scoop past a
+  one-scoop target looks like the first — which is N78's creatine, the most
+  common case — and `bar` clamps at full. The foot line still states the fact in
+  both. Recorded in `glyphState`'s doc comment so it is not read as a bug.
+- **The value line still says `5 of 3 cups` for a ceiling**, which reads as a
+  goal you overshot. The foot line carries the honest phrasing. Repairing the
+  value line needs the model to know which reading applies — the `target_kind`
+  column this ticket declined to add.
+- **Migration 000068's header comment says coffee ships `glyphs`**; it ships
+  `auto`. Comment drift in an already-applied migration, spotted in review and
+  deliberately not edited, because `cmd/migrate` compares migration files
+  byte-for-byte against `origin/main` and rewriting an applied one to fix a
+  comment is a bad trade.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.
