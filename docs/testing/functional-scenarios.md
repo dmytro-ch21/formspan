@@ -11771,3 +11771,96 @@ where the picture can be *wrong while looking right*.
   narrow lines beside its value — the value wraps below it instead (#484).
 - The `Edit target` pill does not run past the card's right edge at those sizes.
 - Both unit settings, against the reference.
+## Today — the reshaped screen (N108)
+
+`app/(tabs)/index.tsx` plus `components/today/*`. The rings, the week strip, the
+`UP NEXT` row, `PROGRESS` and the two mini cards. Most of what can go wrong here
+is a **claim the screen is not entitled to make**, so the scenarios are grouped
+by the claim rather than by the component.
+
+### The rings
+
+- **Under target.** Protein 71 / 205g → the ring draws just over a third, the row
+  reads `34%` in protein's own colour, and no `Over target` pill appears.
+- **Exactly 100%.** The ring closes and **no pill appears** — `over` is false at
+  the boundary and true only past it. A pill at exactly-on-target is the scold
+  this project does not do.
+- **Over target — the wrap.** Carbs 130 / 90g → `144%`, the ring draws a full lap
+  **plus a visible second pass** starting at 12 o'clock, and the row carries an
+  `Over target` pill. **Compare it against a 100% ring side by side: they must
+  not look the same.** That is the whole reason the wrap exists.
+- **Over 200%.** The ring stops distinguishing (two full laps) and the row's
+  number is the authority. Confirm the number still reads the true percentage.
+- **No target set.** Every ring draws an **empty track and no sweep**, and each
+  row reads `—` rather than `0%`. A ring at zero is a claim the athlete ate
+  nothing.
+- **Day could not be read** (`EatenView.unavailable`) → the centre says so; it
+  must not say `0 kcal left`.
+- **Animation.** Values change → the rings sweep rather than jump. With **Reduce
+  Motion ON** they arrive at the value with no sweep — and they still show the
+  value. Reduce Motion is a request not to be moved, not a request to see
+  nothing.
+- **Cold start with Reduce Motion ON must not animate even once.** The OS answers
+  asynchronously; the rings hold at zero until it does. This is the one that
+  regresses silently, because it is a single frame.
+
+### Ring configuration
+
+- `Macros target ⚙` → toggles for all four. Turning `fat` off removes **that
+  ring and that row**, and the remaining rings **re-nest without changing each
+  other's order**.
+- The setting **persists** across a cold start.
+- **The last ring on cannot be turned off** — its toggle is inert and says why.
+- A stored value naming a ring this build does not know keeps the ones it does.
+
+### Units — run every weight scenario at BOTH settings
+
+- `PROGRESS` reads kilograms on a metric profile and pounds on an imperial one,
+  for **both** the weight and the weekly delta. Switch the setting and return:
+  the figures change.
+- **Nothing shows a number before `unitsReady`** — a single frame of kilograms to
+  an imperial athlete is the bug #483 closed.
+- VoiceOver reads "pounds", never "L B".
+
+### Honest empty states — the whole screen, nothing logged
+
+Fresh account, nothing logged, nothing scheduled, no weight recorded:
+
+- `PROGRESS` says to weigh in for a few days; it does **not** show `0` or `—` as
+  a headline.
+- `TRAINING` says nothing was logged in the last 28 days; it does **not** render
+  `0` in the big figure.
+- `LOGGING` shows `0 / 7` with seven dots, of which the ones **after today are
+  pending, not missed**.
+- The momentum card shows no `On track` pill — an achievement claimed from an
+  absence.
+- The week strip's summary counts against **days elapsed**, not seven, so Monday
+  morning does not read `0 of 7`.
+
+### The week strip
+
+- Today's date is ringed; past logged days are filled and ticked; future days are
+  hollow and dimmer. **A past day with nothing logged is an open ring — never a
+  cross and never red.**
+- The progress bar spans **elapsed** days only.
+- Crossing midnight with the app open moves the ring.
+
+### `UP NEXT`
+
+- A planned BJJ session shows **the brand kit's `bjj` mark** in a flat tinted
+  disc, the sport's colour down the leading edge, and a `Log` button.
+- **A past unmet plan is inert**: no press target, `Not logged` in words, and
+  VoiceOver must not append "dimmed".
+- The card must accommodate a **hint line** (#447) without reflowing the rest.
+
+### No glow, anywhere
+
+- Screenshot the FAB, the rings, the streak bar and today's ring on the strip.
+  **No bloom, no drop shadow, no elevation** — on iOS *and* Android, where
+  `elevation` draws regardless of colour.
+
+### Regression: two cards, one fact
+
+- The momentum card and any other nutrition surface must agree on today's
+  calories; `PROGRESS` and the Goals trend must agree on the weight. Two answers
+  on one screen is the W2/W4 shape.
