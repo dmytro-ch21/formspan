@@ -36,10 +36,11 @@ func newTestRepo(t *testing.T) (*PostgresRepository, *pgxpool.Pool) {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		// FK order: entries reference trackers.
-		_, _ = pool.Exec(ctx, `DELETE FROM tracker_entries WHERE user_id = ANY($1)`,
-			[]string{userA, userB})
-		_, _ = pool.Exec(ctx, `DELETE FROM daily_trackers WHERE user_id = ANY($1)`,
-			[]string{userA, userB})
+		// LIKE rather than a two-element list: the restore-path test gives every
+		// subtest its own athlete (see there), so the set of user ids this
+		// package writes is no longer enumerable. The prefix is test-only.
+		_, _ = pool.Exec(ctx, `DELETE FROM tracker_entries WHERE user_id LIKE 'tr_test_user_%'`)
+		_, _ = pool.Exec(ctx, `DELETE FROM daily_trackers WHERE user_id LIKE 'tr_test_user_%'`)
 	})
 	return NewPostgresRepository(pool), pool
 }
@@ -55,6 +56,13 @@ func fixture() New {
 		Target:      ptr(2000.0),
 		RenderStyle: RenderGlyphs,
 		SortOrder:   10,
+		// NON-EMPTY on purpose. Every field here has to differ from its zero
+		// value or the restore-path test below cannot see it being blanked: if
+		// the fixture's count_noun were "" and a patch on `name` wiped the
+		// column, before and after would both be "" and the assertion would pass
+		// on exactly the bug it exists to catch. That is the same shape as the
+		// `exercise.updateWithin` blanking this whole module is built around.
+		CountNoun: "cup",
 	}
 }
 
@@ -103,6 +111,10 @@ func oneOf(t *testing.T, field string) Patch {
 		p.RenderStyle = Of(RenderBar)
 	case "SortOrder":
 		p.SortOrder = Of(99)
+	case "CountNoun":
+		// Differs from fixture()'s "cup", and is the word the whole column
+		// exists for: no table over units could have produced it.
+		p.CountNoun = Of("serving")
 	default:
 		// Reached the moment somebody adds a Patch field, which is exactly when
 		// this test must be extended rather than silently skipping it.
@@ -120,11 +132,19 @@ func TestUpdateLeavesUnmentionedFieldsAlone(t *testing.T) {
 	for i := 0; i < pt.NumField(); i++ {
 		field := pt.Field(i).Name
 		t.Run(field, func(t *testing.T) {
+			// **One athlete per subtest**, which is not tidiness: this test
+			// creates one tracker per Patch field under a single account, and
+			// N78's MaxLiveTrackers cap refuses the ninth. Sharing `userA` made
+			// the whole test fail the moment the ninth patch field was added —
+			// so the number of fields this module has would silently be bounded
+			// by a product limit. Isolating the athlete keeps the two
+			// independent, and it is better isolation regardless.
+			user := userA + "_" + strings.ToLower(field)
 			in := fixture()
 			in.ID = "tr_fx_" + field
-			before := mustCreate(t, repo, userA, in)
+			before := mustCreate(t, repo, user, in)
 
-			after, err := repo.Update(ctx, userA, in.ID, oneOf(t, field))
+			after, err := repo.Update(ctx, user, in.ID, oneOf(t, field))
 			if err != nil {
 				t.Fatalf("update %s: %v", field, err)
 			}

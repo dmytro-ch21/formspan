@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var (
@@ -68,6 +69,40 @@ var units = map[string]bool{
 // than rendering something illegible.
 var colorKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
 
+// MaxLiveTrackers is how many un-archived trackers one athlete may hold.
+//
+// **A stated cap, which is what N78 asks for** — "several trackers on Today do
+// not crowd out what Today is for; there is a stated cap or a collapse
+// behaviour, and it is a deliberate decision rather than whatever happens."
+// Eight, because Today shows the first few and collapses the rest (see
+// `TrackerList`'s `collapseAfter`), and a list you have to scroll to reorder
+// stops being reorderable one-handed somewhere around there.
+//
+// **Enforced on the CREATE path and not as a LIMIT on List.** Truncating a list
+// hides a tracker somebody is looking for; refusing the ninth tells them.
+//
+// The count-then-insert is deliberately NOT atomic, and that is a decision
+// rather than an oversight: two devices creating at the same instant can both
+// see seven and land a ninth row. The cost of that race is one card too many on
+// a screen — it corrupts nothing, the athlete can archive one, and the next
+// create is refused. Making it airtight needs a lock or SERIALIZABLE on a path
+// that runs whenever somebody names a tracker, which is a real cost for a
+// guardrail rather than an invariant.
+const MaxLiveTrackers = 8
+
+// ErrTooMany is the cap being hit. Kept distinct from ErrInvalidInput at the
+// domain layer — nothing about the request is malformed — and mapped onto the
+// contract's `invalid_input` at the edge, because the code set is closed and
+// this is still "we will not do that, and here is why".
+var ErrTooMany = errors.New("tracker: too many live trackers")
+
+// The longest an athlete-authored count noun may be.
+//
+// "capsule", "scoop", "serving", "sachet" — the words that actually appear here
+// are short. Twenty-four leaves room for a compound ("half serving") without
+// letting the value line become a paragraph.
+const maxCountNoun = 24
+
 // Tracker is one athlete's daily tracker.
 //
 // **Every mutable field here has a matching field in Patch**, and
@@ -90,6 +125,21 @@ type Tracker struct {
 	Target      *float64 `json:"target"`
 	RenderStyle string   `json:"render_style"`
 	SortOrder   int      `json:"sort_order"`
+
+	// The word for ONE tap, singular — "cup", "capsule", "scoop", or empty for
+	// a tracker that just counts.
+	//
+	// **Stored, not derived, and that is the whole point of the column.** N76
+	// derived it from the unit and recorded the failure in the same breath: 30 g
+	// of fibre in 5 g steps read "6 doses", because `g` mapped to `dose`. The
+	// obvious repair is a bigger lookup table, and it does not work — the noun
+	// is a property of the SUBSTANCE, not of the unit. Grams of creatine are
+	// doses, grams of fibre are servings, grams of protein are scoops, and no
+	// table over `{ml, g, mg, cup, dose, count}` can tell those apart because
+	// the distinguishing fact is not in the unit at all. Only the athlete knows
+	// it, so the athlete says it, and the client offers the old table as the
+	// SUGGESTION it always really was.
+	CountNoun string `json:"count_noun"`
 
 	ArchivedAt *time.Time `json:"archived_at"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -159,6 +209,7 @@ type Patch struct {
 	Target      Field[float64] `json:"target"`
 	RenderStyle Field[string]  `json:"render_style"`
 	SortOrder   Field[int]     `json:"sort_order"`
+	CountNoun   Field[string]  `json:"count_noun"`
 }
 
 // patchColumn is one column the patch actually names.
@@ -193,6 +244,7 @@ func patchColumns(p Patch) []patchColumn {
 	add("target", p.Target.Set, p.Target.Value)
 	add("render_style", p.RenderStyle.Set, deref(p.RenderStyle.Value))
 	add("sort_order", p.SortOrder.Set, deref(p.SortOrder.Value))
+	add("count_noun", p.CountNoun.Set, deref(p.CountNoun.Value))
 	return cols
 }
 
@@ -259,6 +311,45 @@ func (p Patch) Validate() error {
 	if p.SortOrder.Set && p.SortOrder.Value == nil {
 		return fmt.Errorf("%w: sort_order cannot be null", ErrInvalidInput)
 	}
+	if p.CountNoun.Set {
+		if p.CountNoun.Value == nil {
+			// Empty is the legal way to say "no noun" — "4 of 8" with nothing
+			// after it. Null would be a second spelling of the same state, and
+			// the column is NOT NULL.
+			return fmt.Errorf("%w: count_noun cannot be null; use an empty string", ErrInvalidInput)
+		}
+		if err := validateCountNoun(*p.CountNoun.Value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateCountNoun refuses anything that would not read as a word on a card.
+//
+// Three separate rules, because they fail for three different reasons and a
+// caller deserves to know which:
+//
+//   - **Length.** It is pluralised and concatenated into "4 of 8 <noun>s" on a
+//     narrow card and into a VoiceOver label; a long one truncates the number.
+//   - **Control characters.** The noun is interpolated into the accessibility
+//     label VoiceOver speaks and into the value line. A newline there does not
+//     render as anything an athlete can see, so a tracker could be authored
+//     whose card silently reads differently from its stored name.
+//   - **Surrounding whitespace.** `pluralise` appends an "s"; " cup " would
+//     become " cup s". Rejected rather than trimmed because Validate has a
+//     value receiver and cannot mutate — a validator that silently repaired
+//     its input would be lying about what got stored.
+func validateCountNoun(v string) error {
+	if len(v) > maxCountNoun {
+		return fmt.Errorf("%w: count_noun is too long", ErrInvalidInput)
+	}
+	if strings.ContainsFunc(v, unicode.IsControl) {
+		return fmt.Errorf("%w: count_noun cannot contain control characters", ErrInvalidInput)
+	}
+	if strings.TrimSpace(v) != v {
+		return fmt.Errorf("%w: count_noun cannot start or end with a space", ErrInvalidInput)
+	}
 	return nil
 }
 
@@ -284,6 +375,7 @@ type New struct {
 	Target      *float64 `json:"target"`
 	RenderStyle string   `json:"render_style"`
 	SortOrder   int      `json:"sort_order"`
+	CountNoun   string   `json:"count_noun"`
 }
 
 // Validate reuses the patch validator by expressing New as a complete patch, so
@@ -330,6 +422,7 @@ func (n New) validateFields() error {
 		Increment:   Of(n.Increment),
 		RenderStyle: Of(n.RenderStyle),
 		SortOrder:   Of(n.SortOrder),
+		CountNoun:   Of(n.CountNoun),
 	}
 	if n.Target != nil {
 		p.Target = Of(*n.Target)
@@ -384,8 +477,26 @@ type Repository interface {
 	EnsureDefaults(ctx context.Context, userID string, presets []New) error
 	// List returns the athlete's live trackers, archived ones excluded.
 	List(ctx context.Context, userID string) ([]Tracker, error)
+	// ListArchived returns the ones they stopped, newest-archived first. This
+	// is what makes archiving reversible rather than a one-way door — N76 left
+	// the control showing as unavailable precisely because there was nowhere
+	// for an archived tracker to be seen from.
+	ListArchived(ctx context.Context, userID string) ([]Tracker, error)
+	// Restore un-archives. Restoring one that was never archived is not an
+	// error; restoring past MaxLiveTrackers is ErrTooMany.
+	Restore(ctx context.Context, userID, id string) error
+	// Destroy removes a tracker AND every entry it ever held. The genuinely
+	// destructive path, distinct from Archive, and the reason the client's copy
+	// has to say what it takes with it.
+	Destroy(ctx context.Context, userID, id string) error
 	// Create stores a new tracker. Idempotent on the client-supplied id.
 	Create(ctx context.Context, userID string, in New) (*Tracker, error)
+	// AddPreset turns a seeded preset on for an athlete who was not given it by
+	// default. Idempotent, and it RESTORES rather than duplicating when the
+	// athlete archived it earlier — the row still holds the (user_id, preset)
+	// index entry, so a second insert can never happen and a plain provision
+	// would appear to do nothing.
+	AddPreset(ctx context.Context, userID string, in New) (*Tracker, error)
 	// Update applies a partial patch. Fields the patch does not name are left
 	// exactly as they are — the guarantee this whole module is built around.
 	Update(ctx context.Context, userID, id string, p Patch) (*Tracker, error)

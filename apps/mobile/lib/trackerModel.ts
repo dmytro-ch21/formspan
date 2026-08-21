@@ -36,6 +36,11 @@ export type Tracker = {
   target: number | null;
   render_style: RenderStyle;
   sort_order: number;
+  /**
+   * The singular word for one tap, authored by the athlete. Empty means the
+   * card reads "4 of 8" with no noun. See `unitNoun`.
+   */
+  count_noun: string;
 };
 
 export type TrackerEntry = {
@@ -95,15 +100,52 @@ export function loggedCount(entries: TrackerEntry[]): number {
  * of eight must not be handed an uncountable block. That is a property of the
  * day, not of the definition, so it cannot be resolved once at authoring time.
  *
- * An explicitly stored style always wins: the athlete's override is a decision,
- * not a hint.
+ * ## The override is a preference among READABLE renderings, not a licence
+ *
+ * This used to open `if (t.render_style !== 'auto') return t.render_style;` —
+ * "an explicitly stored style always wins: the athlete's override is a
+ * decision, not a hint." That is the wrong shape, and F22 (#516) is the proof:
+ * **the seeded water preset ships `glyphs`, not `auto`**, so the early return
+ * fires for the row every athlete actually has, and a fifteen-glass day drew
+ * fifteen identical glyphs — the exact uncountable block `MAX_GLYPHS` exists to
+ * prevent. The fixture said `auto` and the assertion passed; green, covered,
+ * and covering something that does not ship.
+ *
+ * N78's criterion is unconditional — *"Never render a row so long it wraps into
+ * an uncountable block — that is the failure mode this criterion exists to
+ * prevent"* — so the cap is a FLOOR the override cannot go under, and #516's
+ * open question ("which wins") is answered here: the cap does.
+ *
+ * Two ways a stored style can ask for something untrue, and both yield:
+ *
+ * - **`glyphs` past the cap** becomes a bar. The athlete asked for countable;
+ *   thirty glyphs is not countable, so the bar is closer to what they meant.
+ * - **`dose` when one tap is NOT the whole day** becomes the ordinary
+ *   glyphs-or-bar decision. A single glyph says "taken"; drawing it for a
+ *   thirty-capsule tracker would report the day done after one capsule, which
+ *   is not a rendering preference, it is a wrong number.
+ *
+ * Everything else the athlete chooses is honoured — `bar` for a two-cup target
+ * is merely unusual, and unusual is theirs to pick.
+ *
+ * **What this does NOT do** is change any stored row. Nothing migrates
+ * `render_style`, because nothing distinguishes "seeded default" from "athlete
+ * chose this" — and with the cap enforced here that distinction stops mattering
+ * for correctness. #516's remaining criteria are about the seed literal and its
+ * fixture, and are left to it.
  */
 export function resolveRenderStyle(t: Tracker, count: number): Exclude<RenderStyle, 'auto'> {
-  if (t.render_style !== 'auto') return t.render_style;
   const target = targetCount(t);
-  if (target === 1) return 'dose';
-  if (glyphSlots(t, count) > MAX_GLYPHS) return 'bar';
-  return 'glyphs';
+  const wanted: Exclude<RenderStyle, 'auto'> =
+    t.render_style === 'auto' ? (target === 1 ? 'dose' : 'glyphs') : t.render_style;
+
+  // A single dose glyph is only TRUE when one tap completes the day. `auto`
+  // never picks it otherwise; a stored `dose` can, and must not.
+  if (wanted === 'dose' && target !== 1) {
+    return glyphSlots(t, count) > MAX_GLYPHS ? 'bar' : 'glyphs';
+  }
+  if (wanted === 'glyphs' && glyphSlots(t, count) > MAX_GLYPHS) return 'bar';
+  return wanted;
 }
 
 /**
@@ -120,19 +162,43 @@ export function glyphSlots(t: Tracker, count: number): number {
 }
 
 /**
- * The noun for one tap, singular.
+ * The noun for one tap, singular — "cup", "capsule", "scoop", or nothing.
  *
- * Derived from the unit rather than stored, so choosing a unit chooses the
- * word: `ml` and `cup` are glassfuls, `g`/`mg`/`dose` are doses, a bare count
- * has no noun at all and reads "4 of 8".
+ * **Read off the record, never computed.** N76 derived it from the unit and
+ * wrote the failure down in the same breath: 30 g of fibre in 5 g steps read
+ * *"6 doses"*, because `g` mapped to `dose`.
  *
- * **A known limitation rather than a hidden one:** an athlete tracking 30 g of
- * fibre in 5 g steps gets "6 doses", which is not what they would say. The fix
- * is an authored noun on the tracker, and that belongs to N78 (which is where
- * arbitrary trackers arrive) rather than being guessed at here.
+ * The tempting repair is a bigger table, and it cannot work — the noun belongs
+ * to the SUBSTANCE and the unit does not carry it. 5 g of creatine is a dose,
+ * 5 g of fibre is a serving, 30 g of protein is a scoop; all three are `g`, so
+ * no function of `{ml, g, mg, cup, dose, count}` can separate them. The
+ * distinguishing fact was never in the input.
+ *
+ * So the athlete says it (N78), the column stores it, and the old table
+ * survives below as `suggestedNoun` — the prefilled starting point in the
+ * create form, which is what it always really was.
+ *
+ * Empty is a real answer, not a missing one: a tracker that counts cold showers
+ * reads "4 of 8" and should.
  */
 export function unitNoun(t: Tracker): string {
-  switch (t.unit) {
+  return t.count_noun;
+}
+
+/**
+ * What to PREFILL the noun field with when the athlete picks a unit.
+ *
+ * This is N76's derivation, kept exactly, and demoted to what it can actually
+ * do: guess well enough that most athletes never touch the field. It is offered
+ * at authoring time — where a wrong guess is one edit away from right — and
+ * never consulted at render time, where a wrong guess is a card that lies.
+ *
+ * Deliberately NOT called from `unitNoun` as a fallback. A fallback would put
+ * "6 doses" back on the fibre card for anyone whose stored noun is empty, and
+ * empty is a choice the athlete is allowed to make.
+ */
+export function suggestedNoun(unit: TrackerUnit): string {
+  switch (unit) {
     case 'ml':
     case 'cup':
       return 'cup';

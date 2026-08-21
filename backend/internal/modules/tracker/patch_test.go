@@ -210,6 +210,25 @@ func TestPatchValidate(t *testing.T) {
 		{"upper case colour key", `{"color_key":"Water"}`, false},
 		{"palette key", `{"color_key":"water"}`, true},
 		{"null sort order", `{"sort_order":null}`, false},
+
+		// The authored count noun (N78). Empty is a real value — a tracker that
+		// just counts reads "4 of 8" with no word after it — so the interesting
+		// vectors are the ones that are NOT empty and NOT a plain word.
+		{"an authored noun", `{"count_noun":"capsule"}`, true},
+		{"empty noun means no noun at all", `{"count_noun":""}`, true},
+		{"null noun", `{"count_noun":null}`, false},
+		// `pluralise` appends an "s", so " cup " would render as " cup s".
+		{"leading space", `{"count_noun":" cup"}`, false},
+		{"trailing space", `{"count_noun":"cup "}`, false},
+		// The noun is interpolated into the value line AND into the VoiceOver
+		// label. A newline there is invisible on screen, so a card could read
+		// differently from what is stored.
+		{"newline", `{"count_noun":"cup\ndose"}`, false},
+		{"bell character", "{\"count_noun\":\"cup\\u0007\"}", false},
+		// The length boundary, both sides. One side alone cannot tell `>` from
+		// `>=`, which is the off-by-one this pair exists to catch.
+		{"24 characters is the limit", `{"count_noun":"123456789012345678901234"}`, true},
+		{"25 characters is over it", `{"count_noun":"1234567890123456789012345"}`, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
