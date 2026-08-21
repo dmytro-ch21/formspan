@@ -39156,6 +39156,170 @@ are the same list.
 tested, and nobody has looked at five swatches on a real screen or completed a
 dose with VoiceOver. That is the outstanding half.
 
+## 2026-08-21 — N86: a phone could set a target and never correct yesterday's
+
+N72 put manual target entry on the phone. It wrote for **today and only today**,
+because `saveTarget` was always called with `todayString()`. So an athlete who
+mis-keyed a target had the wrong number in front of them and no way to fix the
+record from the device they typed it on: the history, a backdated effective
+date, and deletion all lived on a laptop.
+
+That is the mobile-first rule's own failure shape, one step on from the one that
+produced the rule. The rule came from a target screen where *the reasoning was
+reachable and the action was not*. N72 made the action reachable. The
+**correction** still was not.
+
+`app/goals/history.tsx` is the screen; `lib/targetHistory.ts` is the logic, kept
+pure so the span arithmetic and the consequences of a delete are testable with
+no renderer. `lib/nutritionApi.ts` gains `deleteTarget`.
+
+### The question the ticket made us answer: what happens to numbers already derived
+
+**Recomputed. Everywhere. And that turned out not to be a design choice at all —
+it is what the data model already is.**
+
+Nothing caches a target. `nutrition_targets` holds one row per effective date
+and every consumer resolves *the target live on day X* at read time: the day
+totals endpoint does it with a lateral join per day, the weekly adjustment
+recomputes adherence as a query rather than reading a stored counter, and the
+phone's own confidence block calls `targetOn(targets, day)` for each of the last
+fourteen days. There is no second copy anywhere to leave stale, and nothing to
+mark *superseded*.
+
+It is also right on its own terms. A target **is** the yardstick a day was
+measured against, so correcting a typo has to move the yardstick — leaving
+yesterday's remaining-calories line measured against a number nobody meant
+preserves the mistake and calls it history. The alternative worth naming, since
+it was the plausible one: storing what a day was *shown* at the time. That means
+inventing a derived number the system has never stored, a second source of truth
+for "what was my target", and the first thing it would do is disagree with the
+web app, which resolves from the row like everything else.
+
+**What is not recomputed is the `basis`** — the frozen arithmetic on a derived
+row. It stays frozen, for the reason it always was: weight, phase and training
+history all move, so a live explanation is a confident lie about a past
+decision. So a corrected target changes what every day MEANS and changes no
+explanation of how any target was DERIVED. That is also why typing over a
+derived row drops its basis: the arithmetic no longer produced the number, and
+keeping it attached would be a lie with a full audit trail behind it.
+
+The consequence is surprising enough that the screen says it rather than leaving
+it in a comment.
+
+### The audit row was wrong about deletion, and the direction is the interesting part
+
+Row 3 of `phone-impossible-audit.md` listed *delete a target* as web-only.
+`apps/web` has carried `deleteTarget` in its wire layer since the endpoint
+landed and **calls it from nowhere** — its history rows are inert, with no click
+target, no edit and no delete. Deletion was available on neither surface. The
+audit was reading the contract, not the product.
+
+So the phone is the first surface anywhere with a delete, and the corrected row
+says so. Same for the exclusivity table in `nutrition-design.md` §4: the `Set /
+explain the target — read-only mobile` row is now `✅ / ✅`, with a second row
+for correcting a past one where **web is the weaker half.**
+
+### Five states, because a target history keeps the shape that collapses
+
+Two bugs shipped in one day recently from a union with fewer kinds than reality
+has — a trend card telling an athlete with two years of data to start logging, a
+tracker screen telling someone with a month of history that they track nothing.
+Both times the missing kind was *not answered yet*.
+
+`apps/web`'s targets page still has it. On a failed load `targets` stays `[]`,
+`live` stays `null`, and it renders **"No target yet. Derive one below, or type
+your own."** — a positive claim about somebody's data made from a request that
+never returned, while the History section vanishes entirely, so a load failure
+looks identical to a brand-new account. Every sibling nutrition screen on web
+was explicitly fixed for this and carries a `loaded` flag; that page is the
+outlier.
+
+So `TargetHistory` enumerates rather than infers: `unread`, `unavailable`,
+`none`, `complete`, `partial`. The last pair is a real distinction and not
+padding. `GET /nutrition/targets` returns the rows in `[from,to]` **plus the one
+row live at `from`**, so an oldest row dated on or after `from` proves there is
+nothing before it — the query would have carried one in. An oldest row dated
+*before* `from` **is** that carry-in and says nothing about what sits behind it.
+Collapsing those two prints "3 targets" over an account with thirty.
+
+The same split reappears inside the destructive path, which is where it matters
+most. `deletionEffect`'s `then` is three kinds: an earlier target takes over,
+nothing does, or — for a carried-in oldest row — **we cannot see far enough back
+to know.** Claiming "you will have no target" there would be the collapse
+relocated into a confirmation dialog.
+
+### Undo, because that is the question the gates do not ask
+
+A delete has no server-side undo, so the removed row is held and offered
+straight back. It restores `source` and `basis` verbatim rather than re-filing
+as a typed target — which would strip a derivation the athlete never chose to
+discard, through the button that exists to protect them. `listTargets` and
+`saveTarget` were widened to a `StoredTarget` (`Target` plus its frozen basis)
+to make that exact rather than approximate; `Target` itself still omits `basis`
+because the local SQLite cache has no column for it.
+
+The confirmation also states the cost *before* the hold, from the same function
+that renders the screen-reader body — one implementation, so the dialog cannot
+come to describe an action nobody is taking.
+
+### Three bounds that are derived rather than chosen
+
+- **Backdating stops at the read window**, and the two are one function. A
+  target written outside what the list can show is one the athlete can never see
+  or correct again — this ticket's defect, recreated by its own fix.
+- **Writing stops at today**, while **reading goes 30 days forward.** Accepting
+  a weekly adjustment stores a target dated tomorrow, so a window ending today
+  would hide the row an athlete is most likely to have just got wrong; and
+  `apps/web`'s date field has no upper bound at all, so a target dated weeks
+  ahead is reachable from a browser today and has to be correctable here.
+  Hand-scheduling one from the phone is not offered: reading forward and writing
+  forward are different permissions.
+- **The forward days come out of the backward allowance**, because the handler
+  refuses `daysBetween(from, to) >= 366`. One day wider is a 400, which this
+  screen can only render as `unavailable` — the history permanently missing for
+  everybody, and no fixture test of the list logic would ever notice. There is a
+  test on the arithmetic for exactly that.
+
+The date is chosen a week at a time — seven chips and two arrows, the idiom
+Today already uses — rather than by a stepper (thirty taps to backdate a month)
+or a native calendar (a native dependency, and a rebuild).
+
+### Verification
+
+28 tests on the pure module, and **all fourteen guards mutation-tested**: each
+mutation applied to one guard at a time, each confirmed to turn the suite red,
+with a baseline re-run green in the same session and the file restored and
+re-verified afterwards. The mutation harness checks its own pattern matched and
+matched exactly once — one of the fourteen did not apply on the first attempt
+and was reported as *apparatus failed* rather than passing quietly, which is the
+whole reason that check is in the script.
+
+The vectors are deliberately shaped so a plausible wrong implementation fails:
+spans are unevenly spaced, rows are handed to `buildHistory` out of order,
+`deletionEffect` is asked about the middle of a list and not only its ends, and
+the `unknown` and `nothing` branches differ by one field.
+
+Two helpers — `refusalOrWeather` and `draftFrom` — moved from
+`app/(tabs)/goals.tsx` into `lib/manualTarget.ts` rather than being copied. Two
+copies of the refusal-versus-weather split is two chances for one of them to
+drift back into telling somebody with a permanently refused 700 kcal to find
+better signal.
+
+The contract gained the `400` that `DELETE /nutrition/targets/{date}` has always
+been able to return; it was undocumented while the endpoint had no callers.
+
+### What this leaves
+
+- **No device evidence.** Not built or run on a phone — device builds route
+  through the user, and a worktree build ships a keyless bundle. The ticket's
+  `NEEDS HUMAN EVIDENCE` criterion is genuinely outstanding.
+- **`apps/web`'s targets page still has the empty-versus-unknown collapse**, and
+  still has no client-side rails on kcal or macros (its form submits `1` and
+  `99999` alike, for the server to refuse), and still no delete. Out of scope
+  here; filed separately.
+- The phone still cannot hand-schedule a future target. Deliberate, and argued
+  above rather than overlooked.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

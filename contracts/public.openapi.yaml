@@ -11016,7 +11016,17 @@ paths:
     delete:
       operationId: deleteNutritionTarget
       summary: Undo a target set on a date
-      description: 204 whether or not it was there.
+      description: >
+        204 whether or not it was there, so a retry against a row another
+        device already removed resolves rather than 404-ing.
+
+
+        **This is the only way a target filed under the wrong DAY leaves the
+        record.** The date is the identity, so a PUT can correct a target's
+        numbers and can never move it — clients offering a correction surface
+        need both verbs. Removing a row means the previous target takes over
+        the span it governed, or, if it was the oldest, that the span has no
+        target at all; there is no undo, so say which before doing it.
       tags: [Nutrition]
       parameters:
         - name: date
@@ -11025,6 +11035,10 @@ paths:
           schema: { type: string, format: date }
       responses:
         "204": { description: "Gone, or never there." }
+        # Documented because the handler validates the path date itself rather
+        # than letting Postgres raise 22007 as a 500. It was missing here while
+        # the endpoint had no callers; the phone is the first.
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /admin/users:

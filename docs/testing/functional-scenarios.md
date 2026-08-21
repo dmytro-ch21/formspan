@@ -7667,6 +7667,68 @@ this section.
   their phase, and a target set last month still explains itself with the
   numbers that produced it.
 
+### Correcting the record from a phone (N86 — `app/goals/history.tsx`, `lib/targetHistory.ts`)
+
+The screen that makes a target's history, a backdated effective date and
+deletion reachable without a laptop. `PUT` and `DELETE /nutrition/targets/{date}`
+both already existed; **nothing anywhere called the DELETE** until this landed,
+web included.
+
+Happy path:
+
+- **The list shows every target with the span it governed** — `from` to the day
+  *before* the next one starts, and open-ended for the newest. Two rows must
+  never claim the same day.
+- **Editing a row PUTs to that row's own date**, not to today. This is the
+  ticket in one sentence: before it, a mis-keyed target could only be corrected
+  from a browser.
+- **Removing a row is the only way a target filed under the wrong DAY leaves the
+  record.** A PUT can fix numbers and can never move one.
+- **A removed row can be put straight back**, with its `source` and its frozen
+  `basis` intact — not re-filed as a typed target, which would strip a
+  derivation nobody chose to discard.
+- **A target may be filed for an earlier day**, back as far as the list can show
+  and no further.
+
+Edge cases and errors — the five states are the point:
+
+- **A failed read must NOT render as "you have never set a target."** Kill the
+  network and open the screen: it says it could not ask. An empty array standing
+  in for a failure is a positive claim about somebody's data made next to a
+  delete button, and `apps/web`'s targets page still does exactly that.
+- **"Not read yet" and "read, and there is nothing" are also distinct.** Four
+  conditions, four sentences; a `Target[] | null` cannot hold them.
+- **A history whose oldest row was carried in from before the window says so.**
+  The endpoint returns the rows in range *plus* the one live at `from`, so an
+  oldest row dated before `from` proves nothing about what precedes it. Printing
+  "3 targets" over an account with thirty is the same overstatement, quieter.
+- **The delete confirmation names what takes over** — the earlier target and its
+  date, or that the span will have no target at all, or, for a carried-in oldest
+  row, that we cannot see far enough back to know. All three, before the hold
+  completes.
+- **Backdating is bounded on both sides.** The floor is the read window: a
+  target written outside it can never be seen or corrected again, which is this
+  ticket's own defect recreated by its fix. The ceiling is today — the weekly
+  adjustment is the only thing that legitimately dates a target forward, and the
+  list shows scheduled rows the form cannot create.
+- **The window stays under the endpoint's 366-day cap.** One day wider is a 400,
+  which renders as "unavailable" — the history permanently missing for everyone,
+  and no fixture test of the list logic would notice.
+- **A mis-keyed number reports the server's refusal, not the weather.** 700 kcal
+  fails the 800–8,000 rail permanently; "try again when you have signal" is
+  advice that can never work.
+- **The date is resolved at WRITE time.** Leave the screen open past midnight and
+  it must not refuse today or allow tomorrow.
+- **Editing a derived row is announced before it happens**: the stored
+  arithmetic goes with it. An *adjustment* row must NOT carry the same warning —
+  it is saved with a null basis, so there is nothing to lose and the alarm would
+  be false.
+- **Changing a past target restates the days it governed.** Nothing caches a
+  target — day totals resolve it per day with a lateral join, adherence is a
+  query — so a correction moves the yardstick everywhere, which is what a
+  correction is for. Assert a day's `target_kcal` changes after a past target is
+  edited; assert no `basis` anywhere is recomputed.
+
 ### Deriving a target
 
 - **It is a proposal and stores nothing.** `GET /targets/suggested` twice

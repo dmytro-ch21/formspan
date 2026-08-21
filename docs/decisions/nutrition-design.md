@@ -66,8 +66,18 @@ logs, web authors and analyses.**
 | Log an item, edit an entry | ✅ | ✅ (correcting a past day is desk work) |
 | Save a food from what you just ate | ✅ | ✅ |
 | Build a recipe from scratch | ✗ | ✅ |
-| Set / explain the target | read-only | ✅ |
+| Set / explain the target | ✅ | ✅ |
+| Correct or remove a PAST target | ✅ | partly — the list is inert; no delete anywhere |
 | Intake vs weight vs training load | ✗ | ✅ |
+
+**Those two rows read `read-only` and `✗` until 2026-08-21.** N72 gave the
+phone manual entry and N86 gave it the record — history, editing a past row,
+removing one, and filing a target for a day already gone. Superseded on the
+**exclusivity**, not on the design: the split this table describes is still the
+right description of where each surface is strongest, and web's version may
+still be richer. It may not be the only one. Web's own half is now the weaker
+one — its history list is inert and neither surface offered deletion before the
+phone did.
 
 **Mobile gets no chart.** Each candidate was tested against the N5 carve-out and
 each fails on its own terms: 7-day calorie bars fail "the decision is made away
