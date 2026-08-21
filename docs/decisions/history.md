@@ -16327,133 +16327,7 @@ unasked: there is nothing left to gate.
 
 ### Unrelated, found while writing this
 
-The `## 2026-08-21 — Goals rebuilt to a reference, and the two colours the reference could not have (N106, #485)
-
-The user's verdict on the Goals screen was *"the design is terrible"*, and
-separately it was still being reported as *"infinite scrollable"* after #484
-landed the header edge. A design reference was supplied as a PNG and the
-instruction was to take it seriously — to treat a visual deviation as a defect
-rather than a judgement call.
-
-### The reference is one viewport, and that answers the length complaint
-
-#484 measured the old screen and found **no layout fault at all**: the scroll
-extent equals the content to the pixel in every state, at default and at
-accessibility text sizes. The length was the design's own — 1,662–2,179pt
-against a 666pt viewport ordinarily, and 7,759–9,492pt at accessibility sizes,
-twelve to fifteen screens.
-
-The ticket assumed the reference was "a long screen too" and asked for
-progressive disclosure on top of it. It is not: the file is **853×1844, which is
-exactly the 19.5:9 of the device it is drawn for**, status bar to tab bar. So
-reproducing it faithfully *is* the fix at ordinary text sizes, and the
-disclosure mechanism ships without the pre-folded default #446 used — see
-`CollapsibleSection`, which argues that at length. What was prose between the
-rows is now three `InfoMark` sheets; the argument is still there, it is
-available rather than always present.
-
-### Two of the reference's four macro colours are measurably unusable
-
-The screen renders protein, fat, carbs and fibre three times over — tiles, a
-four-segment donut, a colour-dotted legend — so it is a genuine categorical set,
-and the donut carries no labels, which makes colour its only channel.
-
-The four hues were sampled out of the supplied PNG and run through
-`scripts/validate_palette.mjs`'s own CIEDE2000 and Machado/Oliveira/Fernandes
-maths before anything was built. **Two of the six pairs collapse under
-deuteranopia**: protein blue against fibre violet at **ΔE 8.50**, and fat amber
-against carbs lime at **ΔE 9.78**. The first was predicted in `Colors.ts`
-already — `info`'s note records "violet measured ΔE 2.0 for a deuteranope
-against this blue" — and nobody had connected the two.
-
-So a pixel-exact reproduction was not available, and what ships is the nearest
-set that clears the gate, found by search over each reference hue's
-neighbourhood:
-
-| | value | drift |
-|---|---|---|
-| protein | `#5C9BFA` | **0 — exactly the reference** |
-| carbs | `#B8FF2C` | **0 — the reference, and the brand lime** |
-| fat | `#CAA021` | ΔE 11 — the same amber, deepened |
-| fibre | `#D657AA` | ΔE 16 — the violet rotated toward orchid |
-
-Worst pair **ΔE 15.56**, and that is a real frontier rather than a comfortable
-margin: every prettier variant tried (a brighter gold, an orange fat, a bluer
-violet, a lighter orchid) fails at least one pair. The two that moved are
-exactly the two the arithmetic forbids.
-
-`macroColors` and `monoMacroColors` are registered in `validate_palette.mjs`
-with an asserted entry count, because **the validator has no auto-discovery** —
-a block nobody registers is checked by nothing, and the count is what forces a
-fifth macro through a colour search instead of a line in an object. Both
-directions were mutation-checked: restoring the reference's violet fails with
-`ΔE 2.63 under deuteranopia`, and adding a fifth macro throws on the count.
-
-The mono twin **deliberately does not meet the ΔE 15 floor**, and says so.
-Measured by search over the grey ramp, four achromatic values that all clear
-4.5:1 cap out at **ΔE 11.24**. That is the same wall the mono library tiles
-record; the trade here is worse, because a tile carries its own three-letter
-code and a donut segment carries nothing. What mono keeps is *order*, and the
-gate still asserts contrast and that the two ends have not collapsed.
-
-### What the device found that no test could
-
-Verified on a booted iPhone 17 Pro against a real staging account, empty state
-and populated. Four defects, all invisible to jest, tsc and lint:
-
-- **The fourteen confidence dots wrapped 12 + 2.** They needed 219pt; the row
-  leaves 204 once the shield and ring have taken theirs.
-- **The em dash placeholder at 38pt is a solid white bar**, not a dash — it
-  reads as a loading skeleton. The absent state now has its own words at its own
-  size.
-- **The ⓘ sheet rendered white.** `View` from `Themed` paints no background by
-  design, and a `Modal` is not on the app's ground — iOS gives a `pageSheet` the
-  system background. Light-grey body text on white.
-- **`Desk job` drew the kit's `settings` gear**, which means *settings*
-  everywhere else and sat inches from the dev-client's own gear button.
-
-And one honesty defect the acceptance criteria name directly: with nothing
-logged, `Training` rendered **`+0 kcal` in the accent** — a zero drawn as a
-gain, credit for training that did not happen. It is plain type and unsigned
-now, and its hint says "Nothing logged in the last 28 days" rather than
-"0 sessions over 28 days, spread evenly".
-
-### What moved, behaviourally
-
-- **`Edit target` is the manual path.** Typing your own number used to live at
-  the bottom of the screen under its own heading, four viewports below the
-  figure it exists to disagree with — the same "the reasoning was reachable and
-  the action was not" failure the mobile-first rule was written from, in
-  miniature. It is now the pencil pill beside the number.
-- **The confidence block is real**, not a graphic. `lib/confidence.ts` reads the
-  last fourteen days from the local food log and classifies each day against
-  **the target that was in force on that day** — half of it is the line for
-  partial. A fixed kcal floor cannot work: 900 kcal is most of a day for a small
-  athlete cutting and a third of one for a heavyweight bulking. With no target
-  on a day there is no yardstick and none is invented; that day counts as
-  logged. **Partial days do not count toward the total**, because counting them
-  would let a fortnight of breakfasts satisfy the bar.
-- **`Row`'s collapsing label column is gone.** `flex: 1` beside a large tabular
-  value squeezed "Resting rate" onto three lines at accessibility sizes (#484).
-  The ladder row is now a `flexWrap` container with a `minWidth` on the label,
-  so the *value* drops to the next line rather than the label shredding.
-- **`formatWeightRate` is a shared export now.** Web had `signedKg` private
-  inside `Derivation.tsx` and mobile printed the server's ASCII hyphen with no
-  sign handling at all, so the two platforms rendered one rate differently.
-  Mobile is the source and web is generated.
-
-### Open
-
-- The reference draws a calendar glyph and a `•••` overflow in the header.
-  Neither has anywhere to go, and this repo's own rule is that a control
-  pointing at nothing is a broken promise, so neither shipped.
-- `formatWeight` emits no space before the unit (`93.08kg`), which is the
-  module's house style across the app; the reference reads `93.08 kg`. Left
-  alone rather than diverged from the shared formatter for one screen.
-- The check-in screen's weight placeholder has the same 38pt-em-dash-as-a-bar
-  problem this ticket fixed on the target card. Different screen, not touched.
-
-## Open items / known gaps as of this entry` heading had been lost in a
+The `## Open items / known gaps as of this entry` heading had been lost in a
 merge, leaving that whole list orphaned under the sharing entry's "Not
 verified" prose and reading as though those gaps belonged to sharing. Heading
 restored; the list is unchanged.
@@ -38264,6 +38138,132 @@ than at review time, and would have caught this one. Not built here because it
 belongs with the person who decides what else that check should assert about
 this file — but it is the obvious next step, and the fifth repair is the
 argument for it.
+
+## 2026-08-21 — Goals rebuilt to a reference, and the two colours the reference could not have (N106, #485)
+
+The user's verdict on the Goals screen was *"the design is terrible"*, and
+separately it was still being reported as *"infinite scrollable"* after #484
+landed the header edge. A design reference was supplied as a PNG and the
+instruction was to take it seriously — to treat a visual deviation as a defect
+rather than a judgement call.
+
+### The reference is one viewport, and that answers the length complaint
+
+#484 measured the old screen and found **no layout fault at all**: the scroll
+extent equals the content to the pixel in every state, at default and at
+accessibility text sizes. The length was the design's own — 1,662–2,179pt
+against a 666pt viewport ordinarily, and 7,759–9,492pt at accessibility sizes,
+twelve to fifteen screens.
+
+The ticket assumed the reference was "a long screen too" and asked for
+progressive disclosure on top of it. It is not: the file is **853×1844, which is
+exactly the 19.5:9 of the device it is drawn for**, status bar to tab bar. So
+reproducing it faithfully *is* the fix at ordinary text sizes, and the
+disclosure mechanism ships without the pre-folded default #446 used — see
+`CollapsibleSection`, which argues that at length. What was prose between the
+rows is now three `InfoMark` sheets; the argument is still there, it is
+available rather than always present.
+
+### Two of the reference's four macro colours are measurably unusable
+
+The screen renders protein, fat, carbs and fibre three times over — tiles, a
+four-segment donut, a colour-dotted legend — so it is a genuine categorical set,
+and the donut carries no labels, which makes colour its only channel.
+
+The four hues were sampled out of the supplied PNG and run through
+`scripts/validate_palette.mjs`'s own CIEDE2000 and Machado/Oliveira/Fernandes
+maths before anything was built. **Two of the six pairs collapse under
+deuteranopia**: protein blue against fibre violet at **ΔE 8.50**, and fat amber
+against carbs lime at **ΔE 9.78**. The first was predicted in `Colors.ts`
+already — `info`'s note records "violet measured ΔE 2.0 for a deuteranope
+against this blue" — and nobody had connected the two.
+
+So a pixel-exact reproduction was not available, and what ships is the nearest
+set that clears the gate, found by search over each reference hue's
+neighbourhood:
+
+| | value | drift |
+|---|---|---|
+| protein | `#5C9BFA` | **0 — exactly the reference** |
+| carbs | `#B8FF2C` | **0 — the reference, and the brand lime** |
+| fat | `#CAA021` | ΔE 11 — the same amber, deepened |
+| fibre | `#D657AA` | ΔE 16 — the violet rotated toward orchid |
+
+Worst pair **ΔE 15.56**, and that is a real frontier rather than a comfortable
+margin: every prettier variant tried (a brighter gold, an orange fat, a bluer
+violet, a lighter orchid) fails at least one pair. The two that moved are
+exactly the two the arithmetic forbids.
+
+`macroColors` and `monoMacroColors` are registered in `validate_palette.mjs`
+with an asserted entry count, because **the validator has no auto-discovery** —
+a block nobody registers is checked by nothing, and the count is what forces a
+fifth macro through a colour search instead of a line in an object. Both
+directions were mutation-checked: restoring the reference's violet fails with
+`ΔE 2.63 under deuteranopia`, and adding a fifth macro throws on the count.
+
+The mono twin **deliberately does not meet the ΔE 15 floor**, and says so.
+Measured by search over the grey ramp, four achromatic values that all clear
+4.5:1 cap out at **ΔE 11.24**. That is the same wall the mono library tiles
+record; the trade here is worse, because a tile carries its own three-letter
+code and a donut segment carries nothing. What mono keeps is *order*, and the
+gate still asserts contrast and that the two ends have not collapsed.
+
+### What the device found that no test could
+
+Verified on a booted iPhone 17 Pro against a real staging account, empty state
+and populated. Four defects, all invisible to jest, tsc and lint:
+
+- **The fourteen confidence dots wrapped 12 + 2.** They needed 219pt; the row
+  leaves 204 once the shield and ring have taken theirs.
+- **The em dash placeholder at 38pt is a solid white bar**, not a dash — it
+  reads as a loading skeleton. The absent state now has its own words at its own
+  size.
+- **The ⓘ sheet rendered white.** `View` from `Themed` paints no background by
+  design, and a `Modal` is not on the app's ground — iOS gives a `pageSheet` the
+  system background. Light-grey body text on white.
+- **`Desk job` drew the kit's `settings` gear**, which means *settings*
+  everywhere else and sat inches from the dev-client's own gear button.
+
+And one honesty defect the acceptance criteria name directly: with nothing
+logged, `Training` rendered **`+0 kcal` in the accent** — a zero drawn as a
+gain, credit for training that did not happen. It is plain type and unsigned
+now, and its hint says "Nothing logged in the last 28 days" rather than
+"0 sessions over 28 days, spread evenly".
+
+### What moved, behaviourally
+
+- **`Edit target` is the manual path.** Typing your own number used to live at
+  the bottom of the screen under its own heading, four viewports below the
+  figure it exists to disagree with — the same "the reasoning was reachable and
+  the action was not" failure the mobile-first rule was written from, in
+  miniature. It is now the pencil pill beside the number.
+- **The confidence block is real**, not a graphic. `lib/confidence.ts` reads the
+  last fourteen days from the local food log and classifies each day against
+  **the target that was in force on that day** — half of it is the line for
+  partial. A fixed kcal floor cannot work: 900 kcal is most of a day for a small
+  athlete cutting and a third of one for a heavyweight bulking. With no target
+  on a day there is no yardstick and none is invented; that day counts as
+  logged. **Partial days do not count toward the total**, because counting them
+  would let a fortnight of breakfasts satisfy the bar.
+- **`Row`'s collapsing label column is gone.** `flex: 1` beside a large tabular
+  value squeezed "Resting rate" onto three lines at accessibility sizes (#484).
+  The ladder row is now a `flexWrap` container with a `minWidth` on the label,
+  so the *value* drops to the next line rather than the label shredding.
+- **`formatWeightRate` is a shared export now.** Web had `signedKg` private
+  inside `Derivation.tsx` and mobile printed the server's ASCII hyphen with no
+  sign handling at all, so the two platforms rendered one rate differently.
+  Mobile is the source and web is generated.
+
+### Open
+
+- The reference draws a calendar glyph and a `•••` overflow in the header.
+  Neither has anywhere to go, and this repo's own rule is that a control
+  pointing at nothing is a broken promise, so neither shipped.
+- `formatWeight` emits no space before the unit (`93.08kg`), which is the
+  module's house style across the app; the reference reads `93.08 kg`. Left
+  alone rather than diverged from the shared formatter for one screen.
+- The check-in screen's weight placeholder has the same 38pt-em-dash-as-a-bar
+  problem this ticket fixed on the target card. Different screen, not touched.
 
 ## Open items / known gaps as of this entry
 

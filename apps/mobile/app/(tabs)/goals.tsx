@@ -478,20 +478,25 @@ export default function TargetScreen() {
 
   const toggleSection = useCallback(
     (key: SectionKey) => {
-      setCollapsed((prev) => {
-        const base = prev ?? { ...SECTIONS };
-        const next = { ...base, [key]: !base[key] };
-        if (userId) {
-          const folded = (Object.keys(next) as SectionKey[]).filter((k) => next[k]);
-          // Fire and forget: the toggle has to move under the thumb whether or
-          // not the write lands, and a failed preference write is not something
-          // to interrupt anybody about.
-          void writePref(userId, PREF_GOALS_COLLAPSED, folded.join(',')).catch(() => {});
-        }
-        return next;
-      });
+      // Computed from the RENDERED value, and the database write happens out
+      // here rather than inside a `setCollapsed` updater. An updater has to be
+      // pure — React may call it twice — and this file argues exactly that a
+      // hundred lines down, where `setManualSeq` is deliberately kept out of a
+      // `setManualOpen` updater for the same reason. Two screens breaking a
+      // rule the same file states is worse than the bug it causes, which here
+      // would only be a duplicate preference write.
+      const base = collapsed ?? SECTIONS;
+      const next = { ...base, [key]: !base[key] };
+      setCollapsed(next);
+      if (userId) {
+        const folded = (Object.keys(next) as SectionKey[]).filter((k) => next[k]);
+        // Fire and forget: the toggle has to move under the thumb whether or
+        // not the write lands, and a failed preference write is not something
+        // to interrupt anybody about.
+        void writePref(userId, PREF_GOALS_COLLAPSED, folded.join(',')).catch(() => {});
+      }
     },
-    [userId],
+    [collapsed, userId],
   );
 
   /**
@@ -924,7 +929,17 @@ export default function TargetScreen() {
             force has to be unmistakable and has to say where it came from. */}
         <TargetCard
           date={longDate(on)}
-          kcal={live ? live.kcal : (s?.kcal ?? null)}
+          /*
+            **Null when the live row could not be READ**, rather than falling
+            back to the suggestion. `live` is null in two different situations —
+            the read failed, and there genuinely is no target — and only the
+            second one may show the suggestion in the hero position. Under
+            "Could not read your target", a 2,470 that nobody has chosen is a
+            number being read as the number in force, which is the substitution
+            `TargetCard`'s own doc opens by forbidding. Same honesty failure as
+            the `+0 kcal` in the accent, one card up.
+          */
+          kcal={targets === null ? null : live ? live.kcal : (s?.kcal ?? null)}
           inForce={live !== null}
           provenance={live?.source ? SOURCE_LABEL[live.source] : null}
           known={targets !== null}

@@ -125,6 +125,16 @@ export function formatWeight(kg: number | null | undefined, u: UnitSystem): stri
  * a private copy in one of them is how they came to disagree in the first
  * place: web had `signedKg` inside `Derivation.tsx` and mobile had no sign at
  * all.
+ *
+ * **Mobile is the only caller so far, and web's private copies still exist.**
+ * N106 added this and wired the mobile screen to it; it deliberately did not
+ * migrate `apps/web`, which is a different screen and a different ticket. So
+ * the two platforms are still capable of disagreeing, and on one case they
+ * actually do: web's `signedKg` calls anything under **0.005 kg** zero, while
+ * this calls anything under **≈0.0227 kg** zero (half of imperial's 0.1 lb
+ * step). A rate between those two renders `+0.01kg` on web and `0kg` here.
+ * Known, narrow, and out of scope — recorded so the next person deletes web's
+ * copies against this behaviour rather than assuming they already match.
  */
 export function formatWeightRate(
   kgPerWeek: number | null | undefined,

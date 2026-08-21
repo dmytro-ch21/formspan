@@ -18,6 +18,7 @@ import {
   editEntry,
   cacheTargets,
   localEntries,
+  localLoggedDayKcal,
   localLoggedDays,
   localEntry,
   localFoods,
@@ -628,5 +629,91 @@ describe('localLoggedDays', () => {
   it('does not see another athlete’s days', async () => {
     await logFood('someone-else', meal());
     expect(await localLoggedDays(USER, '2026-08-12', TODAY)).toEqual([]);
+  });
+});
+
+/**
+ * `localLoggedDayKcal` — the same query, carrying what the day added up to.
+ *
+ * The stronger half of `localLoggedDays`, and it feeds the Goals screen's
+ * confidence block, where "did you log that day" and "did you log that day
+ * *properly*" are different questions: a single breakfast is not a day's
+ * evidence, and a target judged against fourteen of them is judged against a
+ * fiction.
+ *
+ * A fixture test for the same reason its sibling above is one — **SQL
+ * behaviour belongs against a real database**. Every claim here is one the
+ * doc comment on the function makes, and each was previously a claim in a
+ * comment and nothing else: the SUM, the DISTINCT-by-day grouping, the
+ * tombstone exclusion, the range, and the user scope.
+ */
+describe('localLoggedDayKcal', () => {
+  const on = (rows: { day: string; kcal: number }[], day: string) =>
+    rows.find((r) => r.day === day);
+
+  it('sums a day rather than returning a row per entry', async () => {
+    await logFood(USER, meal({ kcal: 180 }));
+    await logFood(USER, meal({ name: 'Rice', kcal: 320 }));
+    const rows = await localLoggedDayKcal(USER, '2026-08-12', TODAY);
+    expect(rows).toHaveLength(1);
+    expect(on(rows, TODAY)?.kcal).toBe(500);
+  });
+
+  it('keeps days separate', async () => {
+    await logFood(USER, meal({ kcal: 180 }));
+    await logFood(USER, meal({ eaten_on: '2026-08-16', kcal: 2100 }));
+    const rows = await localLoggedDayKcal(USER, '2026-08-12', TODAY);
+    expect(rows).toHaveLength(2);
+    expect(on(rows, '2026-08-16')?.kcal).toBe(2100);
+    expect(on(rows, TODAY)?.kcal).toBe(180);
+  });
+
+  it('OMITS a day with no entries rather than reporting it as zero', async () => {
+    // The distinction the whole three-state confidence rule rests on. `stateFor`
+    // reads `undefined` as empty and a real `0` as partial, so a query that
+    // helpfully filled gaps with zeroes would turn every untouched day into a
+    // day the athlete part-logged.
+    await logFood(USER, meal());
+    const rows = await localLoggedDayKcal(USER, '2026-08-12', TODAY);
+    expect(rows.map((r) => r.day)).toEqual([TODAY]);
+  });
+
+  it('stops reporting a day whose only entry was deleted', async () => {
+    // The tombstone half, which is what `deleted_at IS NULL` is for. A deleted
+    // day must DISAPPEAR, not come back as a zero — a zero is "you logged
+    // almost nothing", and the athlete has just undone exactly that.
+    const id = await logFood(USER, meal());
+    expect(await localLoggedDayKcal(USER, '2026-08-12', TODAY)).toHaveLength(1);
+    await removeEntry(USER, id);
+    expect(await localLoggedDayKcal(USER, '2026-08-12', TODAY)).toEqual([]);
+  });
+
+  it('subtracts only the deleted entry from a day that has others', async () => {
+    await logFood(USER, meal({ kcal: 180 }));
+    const id = await logFood(USER, meal({ name: 'Rice', kcal: 320 }));
+    await removeEntry(USER, id);
+    const rows = await localLoggedDayKcal(USER, '2026-08-12', TODAY);
+    expect(on(rows, TODAY)?.kcal).toBe(180);
+  });
+
+  it('is inclusive at both ends and excludes what is outside', async () => {
+    await logFood(USER, meal({ eaten_on: '2026-08-11', kcal: 999 }));
+    await logFood(USER, meal({ eaten_on: '2026-08-12', kcal: 100 }));
+    await logFood(USER, meal({ eaten_on: TODAY, kcal: 200 }));
+    const rows = await localLoggedDayKcal(USER, '2026-08-12', TODAY);
+    expect(rows.map((r) => r.day).sort()).toEqual(['2026-08-12', TODAY]);
+  });
+
+  it('reports a genuine zero-calorie day, because it still has entries', async () => {
+    // Black coffee. `stateFor` needs to tell this from "no rows at all", so the
+    // query must return the day with 0 rather than dropping it.
+    await logFood(USER, meal({ kcal: 0 }));
+    const rows = await localLoggedDayKcal(USER, '2026-08-12', TODAY);
+    expect(rows).toEqual([{ day: TODAY, kcal: 0 }]);
+  });
+
+  it('does not see another athlete’s days', async () => {
+    await logFood('someone-else', meal({ kcal: 2000 }));
+    expect(await localLoggedDayKcal(USER, '2026-08-12', TODAY)).toEqual([]);
   });
 });

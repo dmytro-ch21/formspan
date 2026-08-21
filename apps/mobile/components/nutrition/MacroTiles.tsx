@@ -78,7 +78,15 @@ export function MacroTiles({ rows, testID }: { rows: readonly MacroRow[]; testID
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
           >
-            {r.grams != null && most > 0 ? (
+            {/*
+              **`r.grams > 0`, not `!= null`.** The 6% floor exists so the
+              smallest real macro is still visible as a bar rather than as a
+              hairline — but applied to a genuine zero it draws a visible share
+              of a plan that contains none of that macro, which is the same
+              "no zeroes presented as achievements" rule the Training row
+              already had to learn. A zero macro gets an empty track.
+            */}
+            {r.grams != null && r.grams > 0 && most > 0 ? (
               <RNView
                 style={[
                   styles.fill,

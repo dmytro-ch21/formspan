@@ -75,7 +75,11 @@ export function MovementChoice({
   const accent = useAccent();
 
   return (
-    <RNView style={styles.row}>
+    // `radiogroup`, so the three cards are announced as one choice of three
+    // rather than as three unrelated radios. Without it VoiceOver gives no
+    // position-in-set at all, and an athlete has to explore every card to find
+    // out how many there are.
+    <RNView style={styles.row} accessibilityRole="radiogroup">
       {options.map((o) => {
         const isOn = chosen === o.key;
         const isAssumed = chosen === null && assumed === o.key;
