@@ -353,3 +353,47 @@ func contains(xs []string, want string) bool {
 	}
 	return false
 }
+
+func TestRecordGatesWritesOneDistinguishableStepPerGate(t *testing.T) {
+	store, pool := newTestStore(t)
+	ctx := context.Background()
+	run, err := store.Claim(ctx, 1000, "engine-a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code3 := 3
+	outcomes := []GateOutcome{
+		{Name: "verify", Passed: true, ExitCode: new(int)},
+		{Name: "backend-tests", Passed: false, Output: "TestX failed", ExitCode: &code3},
+		{Name: "secrets-in-diff", Passed: false, Output: "added diff line 4 matches a GitHub PAT"},
+	}
+	if err := store.RecordGates(ctx, run.ID, "engine-a", outcomes); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pool.Query(ctx,
+		`SELECT step_type, summary FROM agent_steps WHERE run_id = $1 ORDER BY seq`, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var types, summaries []string
+	for rows.Next() {
+		var st, sum string
+		if err := rows.Scan(&st, &sum); err != nil {
+			t.Fatal(err)
+		}
+		types = append(types, st)
+		summaries = append(summaries, sum)
+	}
+	if len(types) != 3 || types[0] != "gate:verify" || types[1] != "gate:backend-tests" || types[2] != "gate:secrets-in-diff" {
+		t.Fatalf("step types = %v, want one per gate in order", types)
+	}
+	// Two failing gates are two distinguishable failures.
+	if summaries[1] == summaries[2] || !contains(summaries, "fail: TestX failed") {
+		t.Fatalf("summaries not distinguishable: %v", summaries)
+	}
+	// A dispossessed engine cannot write gate history.
+	if err := store.RecordGates(ctx, run.ID, "engine-x", outcomes[:1]); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("non-owner RecordGates: %v, want ErrLeaseLost", err)
+	}
+}
