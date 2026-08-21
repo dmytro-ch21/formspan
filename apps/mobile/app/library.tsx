@@ -794,7 +794,12 @@ export default function LibraryScreen() {
 
   return (
     <View style={styles.container} testID="library-screen">
-      <ScreenHeader title="Library" />
+      {/* No bottom rule: the search field and filter chips below sit between
+          the header and the list, so nothing scrolls under the header. The real
+          clip edge is beneath those controls and is still unmarked — W10's
+          mechanism at a different boundary, filed separately rather than fixed
+          by putting the rule in the wrong place. Raised in review. */}
+      <ScreenHeader title="Library" contentScrollsUnder={false} />
 
       <View style={styles.controls}>
         <TextInput
