@@ -193,6 +193,21 @@ const WHITE: Curriculum = {
   ],
 };
 
+/**
+ * `WHITE`'s items, narrowed.
+ *
+ * `Curriculum.items` is OPTIONAL in the contract — absent on list responses,
+ * present on a single read — which is the lazy rule the API deliberately
+ * follows, so the type cannot know this fixture has them. Throws rather than
+ * defaulting to `[]`: a fixture that quietly lost its items would make every
+ * assertion built on it vacuous, which is the failure mode this suite exists
+ * to avoid.
+ */
+function whiteItems(): CurriculumItem[] {
+  if (!WHITE.items) throw new Error('WHITE fixture has no items');
+  return WHITE.items;
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockSyncClock.lastSyncAt = null;
@@ -530,7 +545,7 @@ describe('a session logged while the roadmap is open', () => {
     // so the focus refetch has already been and gone.
     mockGetCurriculum.mockResolvedValue({
       ...WHITE,
-      items: WHITE.items.map((i) =>
+      items: whiteItems().map((i) =>
         i.technique_id === 'scissor-sweep' && i.progress
           ? { ...i, progress: { ...i.progress, scored: 5 } }
           : i,
@@ -558,7 +573,7 @@ describe('a session logged while the roadmap is open', () => {
     // zeros. The criteria are untouched; the screen explains itself instead.
     mockGetCurriculum.mockResolvedValue({
       ...WHITE,
-      items: WHITE.items.map((i) =>
+      items: whiteItems().map((i) =>
         i.technique_id === 'scissor-sweep' && i.progress
           ? {
               ...i,
