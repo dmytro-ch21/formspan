@@ -1,3 +1,5 @@
+import { activeMacroColors, isMono, kcalRingColor } from '@/constants/Colors';
+
 import type { Macros, Target } from './nutrition';
 
 /**
@@ -75,6 +77,29 @@ export function parseRings(raw: string | null | undefined): readonly RingKey[] {
 
 export function serialiseRings(keys: readonly RingKey[]): string {
   return JSON.stringify(RING_KEYS.filter((k) => keys.includes(k)));
+}
+
+/**
+ * The colour a ring draws in, or **null when this mode does not draw it**.
+ *
+ * Single source of truth for the three render sites (the rings, the row dots,
+ * the configuration screen's swatches), so they cannot drift — which is the
+ * bug `activeMacroColors` was introduced on Goals to prevent.
+ *
+ * The three macros come from `activeMacroColors`, so **Today and Goals show the
+ * same colour for the same macro**, in colour and in monochrome alike. That
+ * shared set is N106's, arrived at by its own gamut search; N108 adopted it
+ * rather than landing a second palette a day later.
+ *
+ * `kcal` is the exception at both ends: it is not a macro, so it takes the
+ * bright neutral {@link kcalRingColor} in colour mode — and it returns **null**
+ * in monochrome, where the four-grey ramp is already below the separation floor
+ * and a fifth step would make it worse. A null ring is simply not drawn; the
+ * calorie figure is the number in the middle of them.
+ */
+export function ringColor(key: RingKey): string | null {
+  if (key !== 'kcal') return activeMacroColors[key];
+  return isMono ? null : kcalRingColor;
 }
 
 /**

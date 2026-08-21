@@ -599,6 +599,32 @@ export const monoMacroColors = {
   fibre: '#82858C',
 } as const;
 
+/**
+ * The CALORIE ring on Today, which is not a macro and deliberately not in
+ * {@link macroColors}.
+ *
+ * N108 draws calories as the outermost of four concentric rings, with the three
+ * macros inside it. Calories is the **total** those macros add up to, not a
+ * fourth category beside them — so it takes a bright neutral rather than a hue,
+ * and the coloured rings read as parts of the white one.
+ *
+ * That is also what makes the arithmetic work. #106 had already spent the
+ * four-hue budget (see the note above: four pairwise at ΔE 15 under three
+ * simulations is the frontier), so a fifth HUE was not available. This value is
+ * `text`'s, and it clears every macro comfortably — worst pair `carbs` at
+ * **ΔE 16.87**, measured, with the rest between 27 and 32. `validate_palette.mjs`
+ * asserts all four separations.
+ *
+ * **There is no monochrome twin, and that is a refusal rather than an
+ * oversight.** `monoMacroColors` already runs from #F3F6FA down, so a mono
+ * calorie ring would either collide with `protein` at the top of that ramp or
+ * add a fifth step to a set that the file records as *already* below the ΔE 15
+ * floor at four. Monochrome therefore draws the three macro rings and no
+ * calorie ring; the calorie figure is the large number in the middle of them,
+ * in words, which is where it is legible anyway.
+ */
+export const kcalRingColor = '#F3F6FA';
+
 export type MacroColor = keyof typeof macroColors;
 
 export type AccentName = keyof typeof accents;

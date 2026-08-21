@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Animated, Easing, StyleSheet, View as RNView } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
 
-import { isMono, macroColors, monoMacroRing, vola } from '@/constants/Colors';
-import { sweepFor, type RingReading } from '@/lib/macroRings';
+import { vola } from '@/constants/Colors';
+import { ringColor, sweepFor, type RingReading } from '@/lib/macroRings';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -82,10 +82,22 @@ export function MacroRings({
           own rotation to get wrong.
         */}
         <G rotation={-90} origin={`${size / 2}, ${size / 2}`}>
-          {readings.map((reading, i) => (
+          {/*
+            Rings whose colour is null are not drawn AT ALL — monochrome's
+            calorie ring is the only such case today. Filtering here rather than
+            returning null inside `Ring` keeps the radius step contiguous: the
+            index feeding the radius is the index among DRAWN rings, so a hidden
+            outer ring closes up instead of leaving a gap where it would have
+            been.
+          */}
+          {readings
+            .map((reading) => ({ reading, colour: ringColor(reading.key) }))
+            .filter((r): r is { reading: RingReading; colour: string } => r.colour !== null)
+            .map(({ reading, colour }, i) => (
             <Ring
               key={reading.key}
               reading={reading}
+              colour={colour}
               size={size}
               stroke={stroke}
               // Outermost first: index 0 sits at the full radius and each
@@ -103,17 +115,18 @@ export function MacroRings({
 
 function Ring({
   reading,
+  colour,
   size,
   stroke,
   radius,
 }: {
   reading: RingReading;
+  colour: string;
   size: number;
   stroke: number;
   radius: number;
 }) {
   const sweep = sweepFor(reading.percent);
-  const colour = isMono ? monoMacroRing : macroColors[reading.key];
   const circumference = 2 * Math.PI * radius;
 
   const reduced = useReducedMotion();

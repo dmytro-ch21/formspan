@@ -5,8 +5,9 @@ import { Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native'
 
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
-import { macroColors, monoMacroRing, vola, isMono } from '@/constants/Colors';
+import { vola } from '@/constants/Colors';
 import {
+  ringColor,
   DEFAULT_RINGS,
   MIN_RINGS,
   RING_KEYS,
@@ -113,7 +114,7 @@ export default function MacroRingsScreen() {
                   <RNView
                     style={[
                       styles.swatch,
-                      { backgroundColor: isMono ? monoMacroRing : macroColors[key] },
+                      { backgroundColor: ringColor(key) ?? vola.textDim },
                       !on && styles.swatchOff,
                     ]}
                   />

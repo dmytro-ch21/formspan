@@ -3,8 +3,8 @@ import { Pressable, StyleSheet, View as RNView } from 'react-native';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { MacroRings } from '@/components/today/MacroRings';
-import { macroColors, monoMacroRing, vola, isMono } from '@/constants/Colors';
-import { readRings, RING_SHORT, type RingKey } from '@/lib/macroRings';
+import { vola } from '@/constants/Colors';
+import { readRings, ringColor, RING_SHORT, type RingKey } from '@/lib/macroRings';
 import {
   viewTarget,
   viewTotals,
@@ -307,7 +307,9 @@ function Entries({ eaten }: { eaten: EatenView }) {
 }
 
 function MacroRow({ reading }: { reading: ReturnType<typeof readRings>[number] }) {
-  const colour = isMono ? monoMacroRing : macroColors[reading.key];
+  // A macro row always has a colour; only `kcal` can be undrawn, and `kcal`
+  // never renders as a row.
+  const colour = ringColor(reading.key) ?? vola.textMuted;
   const pct = reading.percent;
   const over = pct !== null && pct > 100;
 
