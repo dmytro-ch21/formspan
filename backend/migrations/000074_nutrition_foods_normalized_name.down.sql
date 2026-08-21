@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS nutrition_foods_user_normalized_name_idx;

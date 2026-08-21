@@ -152,6 +152,24 @@ type EstimateInput struct {
 	// context for portion sizing — a breakfast portion of oats and a dinner one
 	// differ. It never constrains what the model may return.
 	Meal Meal
+	// ReuseSaved allows this request to be answered from a food the athlete has
+	// already saved instead of generating one. Set from the request by
+	// `parseEstimateRequest`, which defaults it to TRUE — reuse is the point of
+	// N114, and a client that says nothing gets it.
+	//
+	// **The zero value is therefore the opposite of the default, and that is
+	// deliberate.** A value constructed in Go rather than parsed from a request
+	// — a test fixture, a future internal caller — generates rather than
+	// reuses. Generating when we could have reused costs an allowance slice;
+	// reusing when we should not have puts a different food's numbers in
+	// somebody's log. Only one of those is recoverable, so the zero value falls
+	// to the recoverable side.
+	//
+	// The escape hatch exists because a saved food can be WRONG. Without it, an
+	// athlete who saved a bad "Pork Shashlik" would get it back forever with no
+	// way to ask for a fresh reading — the feature would have replaced one
+	// complaint with a worse one.
+	ReuseSaved bool
 }
 
 // Source reports which quota this input draws on.
@@ -231,6 +249,13 @@ type Estimate struct {
 	Model string `json:"model"`
 	// Source is which path was used, echoed so the client need not infer it.
 	Source EstimateSource `json:"source"`
+	// Match is set when this draft was NOT generated — it came from a food the
+	// athlete had already saved, and no model was called and no allowance
+	// spent. Nil for every generated draft.
+	//
+	// The presence of this field is the whole discriminator, and it carries its
+	// own explanation rather than a bare flag: see SavedMatch in savedmatch.go.
+	Match *SavedMatch `json:"match,omitempty"`
 }
 
 // MaxEstimatedItems bounds a single draft.

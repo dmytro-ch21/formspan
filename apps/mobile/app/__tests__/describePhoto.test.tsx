@@ -46,7 +46,7 @@ jest.mock('@/lib/barcodeCache', () => ({
   rememberBarcode: jest.fn(),
   cachedBarcode: jest.fn(),
 }));
-jest.mock('@/lib/foodLog', () => ({ logFood: jest.fn() }));
+jest.mock('@/lib/foodLog', () => ({ logFood: jest.fn(), saveFoodLocally: jest.fn() }));
 jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
 
 const mockLaunchCamera = jest.fn();

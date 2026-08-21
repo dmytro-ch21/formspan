@@ -45,7 +45,7 @@ func decodeError(t *testing.T, body []byte) errorBody {
 func TestAProviderThatNeverAnsweredDoesNotSpendAnEstimate(t *testing.T) {
 	est := &fakeEstimator{err: fmt.Errorf("%w: %v", ErrEstimateUnreachable, llm.ErrUnreachable)}
 	usage := &memUsage{}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	w := call(t, h, `{"description":"two eggs"}`)
 
@@ -93,7 +93,7 @@ func TestARefusalStillSpendsAnEstimateWhileAnOutageDoesNot(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			usage := &memUsage{}
-			h := NewEstimateHandler(&fakeEstimator{err: tc.err}, usage)
+			h := NewEstimateHandler(&fakeEstimator{err: tc.err}, usage, nil)
 
 			w := call(t, h, `{"description":"two eggs"}`)
 
@@ -120,14 +120,14 @@ func TestARefusalStillSpendsAnEstimateWhileAnOutageDoesNot(t *testing.T) {
 // the endpoint.
 func TestAnOutageAndAnExhaustedAllowanceAreDistinguishableByCode(t *testing.T) {
 	outage := func() (int, string) {
-		h := NewEstimateHandler(&fakeEstimator{err: ErrEstimateUnreachable}, &memUsage{})
+		h := NewEstimateHandler(&fakeEstimator{err: ErrEstimateUnreachable}, &memUsage{}, nil)
 		w := call(t, h, `{"description":"two eggs"}`)
 		return w.Code, decodeError(t, w.Body.Bytes()).Error.Code
 	}
 	exhausted := func() (int, string) {
 		h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, &memUsage{
 			quotaFn: func() Quota { return NewQuota(DailyEstimates, nil) },
-		})
+		}, nil)
 		w := call(t, h, `{"description":"two eggs"}`)
 		return w.Code, decodeError(t, w.Body.Bytes()).Error.Code
 	}
@@ -158,7 +158,7 @@ func TestAnOutageAndAnExhaustedAllowanceAreDistinguishableByCode(t *testing.T) {
 func TestAFullOutageLeavesTheAllowanceIntactWhenServiceReturns(t *testing.T) {
 	est := &fakeEstimator{err: ErrEstimateUnreachable}
 	usage := &memUsage{}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	for i := range 20 {
 		w := call(t, h, `{"description":"two eggs"}`)
@@ -199,7 +199,7 @@ func TestAnUnreachableProviderLeaksNoUpstreamText(t *testing.T) {
 		// default arm and prove nothing about this branch — the mistake the
 		// sibling leak test in this package records having made.
 		err: fmt.Errorf("%w: %s", ErrEstimateUnreachable, secret),
-	}, &memUsage{})
+	}, &memUsage{}, nil)
 
 	w := call(t, h, `{"description":"two eggs"}`)
 

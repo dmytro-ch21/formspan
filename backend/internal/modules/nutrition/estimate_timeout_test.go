@@ -70,7 +70,7 @@ func (b *blockingEstimator) Estimate(ctx context.Context, _ EstimateInput) (Esti
 // handlerWithTimeout is the shipped constructor with only the deadline moved,
 // so nothing else about the handler differs from production.
 func handlerWithTimeout(est Estimator, usage EstimateUsageRepository, d time.Duration) *EstimateHandler {
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 	h.timeout = d
 	return h
 }
@@ -80,7 +80,7 @@ func TestTheShippedTimeoutIsTheOneCallersGet(t *testing.T) {
 	// the only thing using it. Without this, `h.timeout` could default to zero
 	// — every call instantly timing out — and every other test here would
 	// still pass, because they all set it themselves.
-	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, &memUsage{})
+	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, &memUsage{}, nil)
 	if h.timeout != estimateTimeout {
 		t.Fatalf("constructed handler has timeout %s, want %s", h.timeout, estimateTimeout)
 	}

@@ -103,7 +103,7 @@ func callAs(t *testing.T, h *EstimateHandler, userID, body string) *httptest.Res
 func TestASuccessfulEstimateWritesNoEntryAndReturnsADraft(t *testing.T) {
 	est := &fakeEstimator{out: goodEstimate()}
 	usage := &memUsage{}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	w := call(t, h, `{"description":"two eggs"}`)
 	if w.Code != http.StatusOK {
@@ -133,7 +133,7 @@ func TestTheQuotaIsCheckedBEFORETheModelIsCalled(t *testing.T) {
 	usage := &memUsage{quotaFn: func() Quota {
 		return NewQuota(DailyEstimates, nil) // already at the cap
 	}}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	w := call(t, h, `{"description":"two eggs"}`)
 	if w.Code != http.StatusTooManyRequests {
@@ -149,7 +149,7 @@ func TestAFailedCallIsStillMetered(t *testing.T) {
 	// on input the model keeps declining and pay for every attempt.
 	est := &fakeEstimator{err: ErrEstimateRefused}
 	usage := &memUsage{}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	w := call(t, h, `{"description":"a photo of my desk"}`)
 	if w.Code != http.StatusUnprocessableEntity {
@@ -183,7 +183,7 @@ func TestARefusalIs422AndAnOutageIs502(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			h := NewEstimateHandler(&fakeEstimator{err: tc.err}, &memUsage{})
+			h := NewEstimateHandler(&fakeEstimator{err: tc.err}, &memUsage{}, nil)
 			w := call(t, h, `{"description":"two eggs"}`)
 			if w.Code != tc.want {
 				t.Fatalf("status %d, want %d", w.Code, tc.want)
@@ -203,7 +203,7 @@ func TestUpstreamErrorTextNeverReachesTheClient(t *testing.T) {
 	// testing is the only thing that found that.
 	h := NewEstimateHandler(&fakeEstimator{
 		err: fmt.Errorf("%w: %s", ErrEstimateUnavailable, secret),
-	}, &memUsage{})
+	}, &memUsage{}, nil)
 
 	w := call(t, h, `{"description":"two eggs"}`)
 	if w.Code != http.StatusBadGateway {
@@ -228,7 +228,7 @@ func TestAnUnconfiguredDeployFailsOnlyThisRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
-	h := NewEstimateHandler(est, &memUsage{})
+	h := NewEstimateHandler(est, &memUsage{}, nil)
 	w := call(t, h, `{"description":"two eggs"}`)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status %d, want 503", w.Code)
@@ -241,7 +241,7 @@ func TestSpendIsMeteredEvenWhenTheCallerDisconnects(t *testing.T) {
 	// spend-somebody-else's-money shape the quota exists to bound.
 	est := &fakeEstimator{out: goodEstimate()}
 	usage := &memUsage{}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	ctx, cancel := context.WithCancel(
 		auth.ContextWithClaims(context.Background(), &auth.Claims{UserID: "eater"}))
@@ -264,7 +264,7 @@ func TestSpendIsMeteredEvenWhenTheCallerDisconnects(t *testing.T) {
 
 func TestAnEmptyRequestNeverReachesTheModel(t *testing.T) {
 	est := &fakeEstimator{out: goodEstimate()}
-	h := NewEstimateHandler(est, &memUsage{})
+	h := NewEstimateHandler(est, &memUsage{}, nil)
 	w := call(t, h, `{}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", w.Code)
@@ -290,7 +290,7 @@ func TestAPhotoIsBilledToThePhotoQuota(t *testing.T) {
 
 	est := &fakeEstimator{out: goodEstimate()}
 	usage := &memUsage{}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	r := httptest.NewRequest(http.MethodPost, "/v1/nutrition/estimate", &buf)
 	r.Header.Set("Content-Type", mw.FormDataContentType())
@@ -318,7 +318,7 @@ func TestAMeterWriteFailureDoesNotCostTheAthleteTheirDraft(t *testing.T) {
 	// They have already paid for it. Failing the request here would charge
 	// them and give them nothing.
 	est := &fakeEstimator{out: goodEstimate()}
-	h := NewEstimateHandler(est, &memUsage{recErr: errors.New("meter is down")})
+	h := NewEstimateHandler(est, &memUsage{recErr: errors.New("meter is down")}, nil)
 	w := call(t, h, `{"description":"two eggs"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200 — a meter failure lost a paid-for draft", w.Code)
@@ -341,7 +341,7 @@ func TestAnExhaustedQuotaSaysWhenInAWayBothHalvesCanUse(t *testing.T) {
 	usage := &memUsage{quotaFn: func() Quota {
 		return NewQuota(DailyEstimates, &oldest)
 	}}
-	w := call(t, NewEstimateHandler(est, usage), `{"description":"two eggs"}`)
+	w := call(t, NewEstimateHandler(est, usage, nil), `{"description":"two eggs"}`)
 
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("status %d, want 429", w.Code)
@@ -452,7 +452,7 @@ func TestUsageIsMeteredEvenWhenTheEstimateFails(t *testing.T) {
 		meta: CallMeta{Model: "gpt-5.6-luna", Usage: Usage{InputTokens: 1337, OutputTokens: 12, CachedInputTokens: 1334}},
 	}
 	usage := &memUsage{}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	call(t, h, `{"description":"two eggs"}`)
 
@@ -476,7 +476,7 @@ func TestUsageIsMeteredOnASuccessfulEstimate(t *testing.T) {
 		meta: CallMeta{Model: "gpt-5.6-luna", Usage: Usage{InputTokens: 1837, OutputTokens: 726, CachedInputTokens: 1334, ImageTokens: int64Ptr(500)}},
 	}
 	usage := &memUsage{}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	call(t, h, `{"description":"two eggs"}`)
 
@@ -496,7 +496,7 @@ func TestTheResponseBodyDoesNotLeakTokenUsage(t *testing.T) {
 		out:  Estimate{Items: []EstimatedItem{}, Model: "gpt-5.6-luna"},
 		meta: CallMeta{Model: "gpt-5.6-luna", Usage: Usage{InputTokens: 1837, OutputTokens: 726}},
 	}
-	h := NewEstimateHandler(est, &memUsage{})
+	h := NewEstimateHandler(est, &memUsage{}, nil)
 
 	w := call(t, h, `{"description":"two eggs"}`)
 
@@ -521,7 +521,7 @@ func TestARefusalRecordsTheModelThatChargedForIt(t *testing.T) {
 		meta: CallMeta{Model: "gpt-5.6-luna", Usage: Usage{InputTokens: 1337, OutputTokens: 12}},
 	}
 	usage := &memUsage{}
-	h := NewEstimateHandler(est, usage)
+	h := NewEstimateHandler(est, usage, nil)
 
 	call(t, h, `{"description":"two eggs"}`)
 

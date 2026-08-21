@@ -375,6 +375,72 @@ func (r *PostgresRepository) GetFood(ctx context.Context, userID, id string) (Fo
 	return f, nil
 }
 
+// normalizedNameSQL is the SQL half of NormalizeFoodName.
+//
+// **These two are one rule spelled twice, and they must not be allowed to
+// drift.** `TestTheSQLNormalisationAgreesWithTheGoOne` runs the same vectors
+// through both against a real database; if you change either, change both and
+// watch that test go red first.
+//
+// `regexp_replace(btrim(lower(x)), '\s+', ' ', 'g')` is the exact analogue of
+// `strings.Join(strings.Fields(strings.ToLower(x)), " ")`: lowercase, trim the
+// ends, collapse internal runs. All three functions are IMMUTABLE, which is
+// what lets migration 000074 index this expression.
+// A FUNCTION of the expression to normalise rather than a constant naming the
+// column, so a test can put the same rule over a literal and compare it with
+// NormalizeFoodName. A constant hardcoding `name` can only be exercised through
+// a row, and the test that tried inlined the expression by hand instead — which
+// meant it agreed with a copy of the rule rather than with the rule, and drift
+// in this line passed it. Measured: changing the constant left that test green.
+func normalizedNameSQL(expr string) string {
+	return `regexp_replace(btrim(lower(` + expr + `)), '\s+', ' ', 'g')`
+}
+
+// FindFoodByNormalizedName is N114's reuse lookup: the caller's own saved food
+// whose name normalises to exactly this string.
+//
+// **Scoped to user_id inside the WHERE, and that predicate is the security
+// property** — the same one SaveFood's conflict clause carries. Without it this
+// method answers "does any athlete have a food called X", and a reuse would
+// hand one athlete another's numbers.
+//
+// Served by `nutrition_foods_user_normalized_name_idx` (migration 000074),
+// whose expression must stay byte-identical to `normalizedNameSQL` or Postgres
+// will not use it and this degrades to a scan of the athlete's whole food list.
+//
+// **Ordered, because a match must be reproducible.** Nothing stops an athlete
+// having two saved foods that normalise the same way — two devices offline,
+// two client-generated ids, one name — and an unordered LIMIT 1 would then
+// return whichever row the plan happened to reach first, so the same
+// description could yield different numbers on consecutive calls. That is the
+// defect N114 was reported for, reproduced by the fix for it. Newest wins,
+// which is the athlete's most recent correction, with `id` breaking a tie so
+// the answer is total rather than merely usually-stable.
+func (r *PostgresRepository) FindFoodByNormalizedName(ctx context.Context, userID, normalized string) (Food, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT `+foodCols+`
+		FROM nutrition_foods
+		WHERE user_id = $1 AND `+normalizedNameSQL("name")+` = $2
+		ORDER BY updated_at DESC, id
+		LIMIT 1`, userID, normalized)
+	f, err := scanFood(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Food{}, ErrNotFound
+	}
+	if err != nil {
+		return Food{}, translate(err)
+	}
+	items, err := r.itemsFor(ctx, []string{f.ID})
+	if err != nil {
+		return Food{}, err
+	}
+	f.Items = items[f.ID]
+	if f.Items == nil {
+		f.Items = []RecipeItem{}
+	}
+	return f, nil
+}
+
 // SaveFood writes the parent and its items atomically, recomputing a recipe's
 // per-serving macros from its items on the way through.
 //
@@ -401,7 +467,8 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
 			yield_servings, source, external_id, barcode)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-		        $13, $14, $15, $16, $17, $18, $19, $20, $21)
+		        $13, $14, $15, $16, $17, $18,
+		        COALESCE(NULLIF($19::text, ''), 'user'), $20, $21)
 		ON CONFLICT (id) DO UPDATE SET
 			kind = EXCLUDED.kind,
 			name = EXCLUDED.name,
@@ -419,7 +486,25 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 			sodium_mg = EXCLUDED.sodium_mg,
 			cholesterol_mg = EXCLUDED.cholesterol_mg,
 			yield_servings = EXCLUDED.yield_servings,
-			source = EXCLUDED.source,
+			-- **NOT "EXCLUDED.source", and this is the whole of N114's
+			-- restore-path guard.**
+			--
+			-- An empty Source means the caller did not state one, and the right
+			-- answer to that on an UPDATE is the value already stored — not a
+			-- default. Adding a column to this SET clause has silently blanked
+			-- authored data three times in this repo ("load_mode", "implements",
+			-- "note" on "exercises"); making an EXISTING column client-settable
+			-- is the same hazard wearing different clothes, and it would land on
+			-- provenance, which is the one field here nothing downstream can
+			-- reconstruct. An athlete correcting the macros of an AI-drafted
+			-- food would have relabelled it as something they measured.
+			--
+			-- "$19" rather than "EXCLUDED.source" because EXCLUDED holds the
+			-- row that WOULD have been inserted — i.e. after the COALESCE in
+			-- VALUES above has already turned '' into 'user'. Reading EXCLUDED
+			-- here compiles, looks right, and can never see the empty case.
+			-- Pinned by "TestEditingAFoodWithoutSayingItsSourceKeepsIt".
+			source = COALESCE(NULLIF($19::text, ''), nutrition_foods.source),
 			external_id = EXCLUDED.external_id,
 			barcode = EXCLUDED.barcode,
 			updated_at = now()

@@ -24,6 +24,17 @@ import (
 type EstimateHandler struct {
 	estimator Estimator
 	usage     EstimateUsageRepository
+	// saved is the reuse half (N114): a food the athlete has already stored is
+	// answered from storage rather than generated again.
+	//
+	// A POSITIONAL constructor argument rather than an option, so a deploy that
+	// forgets to wire it does not compile. The alternative — a setter — makes
+	// "nobody called it" indistinguishable from "nobody has saved a food",
+	// which is the absence-reads-as-an-answer shape this repo keeps paying for.
+	// Nil is still tolerated at RUNTIME (see reuseSaved) because a test rig
+	// legitimately has no food store, and a nil check is cheaper than a null
+	// object nobody would remember to use.
+	saved SavedFoodFinder
 	// now is injectable so the quota window is testable without waiting a day.
 	now func() time.Time
 	// timeout is injectable for the same reason `now` is: the deadline it
@@ -34,8 +45,8 @@ type EstimateHandler struct {
 	timeout time.Duration
 }
 
-func NewEstimateHandler(est Estimator, usage EstimateUsageRepository) *EstimateHandler {
-	return &EstimateHandler{estimator: est, usage: usage, now: time.Now, timeout: estimateTimeout}
+func NewEstimateHandler(est Estimator, usage EstimateUsageRepository, saved SavedFoodFinder) *EstimateHandler {
+	return &EstimateHandler{estimator: est, usage: usage, saved: saved, now: time.Now, timeout: estimateTimeout}
 }
 
 // maxEstimateBody bounds the whole request.
@@ -130,6 +141,31 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 
 	src := in.Source()
 	now := h.now()
+
+	// REUSE, BEFORE THE GATE — and the order is the measurable half of N114.
+	//
+	// Answering from storage above the quota check is what makes "log the same
+	// food three times and the allowance moves once" true. Below it, a reuse
+	// would still be refused at 25 and the athlete would have paid an
+	// allowance slice for a lookup that spent nothing, which is the F16 shape
+	// (#367) arriving from a different direction: charged for tokens nobody
+	// bought.
+	//
+	// Nothing is metered here and nothing is written. A reuse is a SELECT.
+	if est, ok := h.reuseSaved(r, userID, in); ok {
+		// The quota is READ so the client can still render the counter, and a
+		// read cannot move it. A failure here is not worth failing a request
+		// that cost nothing — the draft is served with a zero quota rather
+		// than withheld, and the client shows no counter rather than a wrong
+		// one.
+		quota, err := h.usage.Quota(r.Context(), userID, now)
+		if err != nil {
+			httplog.FromContext(r.Context()).Warn("nutrition: quota read failed on a reused estimate",
+				"user_id", userID, "err", err)
+		}
+		apihttp.WriteJSON(w, http.StatusOK, estimateResponse{Estimate: est, Quota: quota})
+		return
+	}
 
 	// THE GATE, BEFORE ANY TOKEN IS SPENT. Checking after the call would meter
 	// spend that has already happened, which is not a quota — it is a receipt.
@@ -321,6 +357,37 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, estimateResponse{Estimate: est, Quota: after})
 }
 
+// reuseSaved answers from the athlete's own saved foods, or reports that it
+// could not.
+//
+// **A lookup failure is not an error to the caller.** If the food store is
+// unreachable, the honest fallback is to generate — which is what would have
+// happened anyway a moment ago — rather than to fail a request the athlete can
+// still be served. It is logged, because a permanently broken lookup would
+// otherwise present as this feature silently never working, which is exactly
+// the kind of silence that survives for months here.
+//
+// ErrNotFound is the ordinary case and is not logged. Most descriptions are
+// meals, not the name of a saved food.
+func (h *EstimateHandler) reuseSaved(r *http.Request, userID string, in EstimateInput) (Estimate, bool) {
+	if h.saved == nil {
+		return Estimate{}, false
+	}
+	norm, ok := in.Matchable()
+	if !ok {
+		return Estimate{}, false
+	}
+	f, err := h.saved.FindFoodByNormalizedName(r.Context(), userID, norm)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			httplog.FromContext(r.Context()).Error("nutrition: saved-food lookup failed, generating instead",
+				"user_id", userID, "err", err)
+		}
+		return Estimate{}, false
+	}
+	return DraftFromSavedFood(f, in, norm), true
+}
+
 // writeEstimateError maps the domain errors to status codes.
 //
 // A refusal is 422 rather than 400: the request was well-formed and the model
@@ -428,6 +495,11 @@ func parseEstimateRequest(w http.ResponseWriter, r *http.Request) (EstimateInput
 type estimateBody struct {
 	Description string `json:"description"`
 	Meal        Meal   `json:"meal"`
+	// Reuse is a POINTER so that absent and `false` stay different things.
+	// Absent means the caller has no opinion and gets the default (reuse);
+	// `false` is a deliberate "generate this again, I know what I saved".
+	// A plain bool would make every client that predates N114 opt out of it.
+	Reuse *bool `json:"reuse"`
 }
 
 func parseJSONEstimate(r *http.Request) (EstimateInput, error) {
@@ -435,7 +507,10 @@ func parseJSONEstimate(r *http.Request) (EstimateInput, error) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		return EstimateInput{}, errors.New("invalid JSON body")
 	}
-	return EstimateInput{Description: body.Description, Meal: body.Meal}, nil
+	return EstimateInput{
+		Description: body.Description, Meal: body.Meal,
+		ReuseSaved: body.Reuse == nil || *body.Reuse,
+	}, nil
 }
 
 func parseMultipartEstimate(r *http.Request) (EstimateInput, error) {
@@ -445,6 +520,11 @@ func parseMultipartEstimate(r *http.Request) (EstimateInput, error) {
 	in := EstimateInput{
 		Description: r.FormValue("description"),
 		Meal:        Meal(r.FormValue("meal")),
+		// Same default as the JSON path. A multipart body carrying only a
+		// description IS the text path, so it must be able to reuse; and an
+		// unset form value is absent, which is not `false` — only the literal
+		// string turns it off.
+		ReuseSaved: !isFalse(r.FormValue("reuse")),
 	}
 
 	file, _, err := r.FormFile("image")
@@ -469,6 +549,22 @@ func parseMultipartEstimate(r *http.Request) (EstimateInput, error) {
 	// there, at our expense rather than the caller's.
 	in.ImageMediaType = http.DetectContentType(raw)
 	return in, nil
+}
+
+// isFalse reads a form field as an explicit no.
+//
+// Only the spellings a client would actually send, and NOTHING ELSE is treated
+// as false — an unrecognised value means the caller said something we do not
+// understand, and the safe reading of that is the default rather than the
+// opt-out. `strconv.ParseBool` was the obvious alternative and is wrong here for
+// the same reason: it errors on `"no"` and on `""`, and a caller cannot tell
+// which of those two we meant.
+func isFalse(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no", "off":
+		return true
+	}
+	return false
 }
 
 // humaniseWait renders a duration the way somebody would say it.

@@ -310,6 +310,15 @@ const CREATE_FOODS = `
     carb_g REAL NOT NULL DEFAULT 0,
     fat_g REAL NOT NULL DEFAULT 0,
     fibre_g REAL,
+    -- How this row was produced: 'user' for one the athlete typed, 'ai' for one
+    -- saved from a draft they confirmed (N114). Pushed, unlike the two counters
+    -- below — the server holds the same column and a phone is the only thing in
+    -- a position to know which of the two a row is.
+    --
+    -- A default of 'user' rather than NULL, because an unknown provenance is
+    -- not a state worth carrying: every row that predates this column was typed
+    -- by hand, which is exactly what 'user' means.
+    source TEXT NOT NULL DEFAULT 'user',
     last_used_at TEXT,
     use_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -484,7 +493,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 21;
+const SCHEMA_VERSION = 22;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -905,6 +914,26 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // already stamped 20 reach the CREATEs at all.
     await db.execAsync(CREATE_DAILY_TRACKERS);
     await db.execAsync(CREATE_TRACKER_ENTRIES);
+  }
+
+  if (current < 22) {
+    // N114: `foods.source`.
+    //
+    // **A real ALTER, unlike 19/20/21's no-ops**, and the difference matters.
+    // Those three added whole TABLES, which the unconditional CREATEs above
+    // already handle for any device that reaches them. A COLUMN on an existing
+    // table has no such backstop: `CREATE TABLE IF NOT EXISTS` does nothing at
+    // all when the table is there, so a device stamped 21 would keep a `foods`
+    // table with no `source` column and every read of it would throw.
+    //
+    // Guarded on the column not already existing, because `migrate()` must be
+    // safe to re-enter — a run that failed after this statement and before the
+    // version stamp would otherwise hit `duplicate column name` forever, which
+    // is the every-offline-feature-dead-on-arrival case this file warns about.
+    const cols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(foods)`);
+    if (!cols.some((c) => c.name === 'source')) {
+      await db.execAsync(`ALTER TABLE foods ADD COLUMN source TEXT NOT NULL DEFAULT 'user';`);
+    }
   }
 
   // The day query the card runs on every render of Today.

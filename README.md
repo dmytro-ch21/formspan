@@ -49,7 +49,13 @@ pnpm --filter admin dev --port 3001   # admin console on :3001 (needs its own po
 `POST /v1/nutrition/estimate`, the describe-or-photograph meal draft, and
 `POST /v1/exercises/identify`, the point-the-camera-at-a-machine shortlist.
 Without it those routes serve 503 and everything else runs normally, so you only
-need a key if you are working on one of them. Set `ESTIMATE_PROVIDER=anthropic`
+need a key if you are working on one of them.
+
+**The estimate route does not always need a key, though** (N114). Describe a
+food whose name matches one the athlete has already saved and it is answered
+from `nutrition_foods` — no provider call, no allowance spent, and
+`estimate.match` on the response saying which stored row answered it. That path
+works on a deploy with no key at all. Set `ESTIMATE_PROVIDER=anthropic`
 or `IDENTIFY_PROVIDER=anthropic` (plus `ANTHROPIC_API_KEY`) to run either
 against Claude instead — the key read is always the one the selected provider
 names.

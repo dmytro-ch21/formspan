@@ -123,6 +123,79 @@ components:
         source:
           type: string
           enum: [text, photo]
+        match:
+          allOf:
+            - $ref: "#/components/schemas/SavedFoodMatch"
+          description: >
+            Present ONLY when this draft was not generated — it came from a
+            food the athlete had already saved. Absent means a model produced
+            it. **The presence of this object is the discriminator**, and a
+            client must render the two differently: reusing a stored item and
+            inventing a new one are not the same claim, and presenting them
+            identically is what N114 was reported for.
+
+
+            When it is present, `model` is empty (nothing produced this),
+            `note` is empty, and every item's `portion_confidence` is `high`
+            with an empty `assumption` — the quantity is the athlete's own
+            serving definition rather than a model's reading of a plate.
+
+
+            **No estimate allowance was spent.** `quota` is the live figure,
+            unchanged by this call.
+
+    SavedFoodMatch:
+      type: object
+      description: >
+        Why a draft was answered from storage rather than generated, in enough
+        detail to be checked from the response alone.
+
+
+        **The rule is exact, not fuzzy.** The description and the stored name
+        are each lowercased, trimmed, and their internal whitespace runs
+        collapsed; a match is string equality of the two results and nothing
+        else. So "Pork Shashlik" matches a saved `Pork  shashlik`, and "Pork
+        Shashlik (spicy)" matches nothing — brackets, punctuation, digits and
+        plurals are all left alone, because they are usually the only thing
+        distinguishing two foods an athlete keeps apart. A regeneration costs
+        an allowance slice; a wrong substitution puts another meal's numbers in
+        somebody's log, so the rule falls to the recoverable side.
+
+
+        A photo is never answered from storage, and `reuse: false` on the
+        request skips the lookup entirely.
+      required: [food_id, name, rule, normalized, food_source, saved_at]
+      properties:
+        food_id:
+          type: string
+          format: uuid
+          description: >
+            The saved row this came from. Log the entry with it as
+            `source_food_id` so the reuse joins the quick-add recents.
+        name:
+          type: string
+          description: The STORED name, verbatim — not the query, and not a normalised form.
+        rule:
+          type: string
+          enum: [exact_name]
+          description: >
+            Which rule fired. One value today; a client must treat an unseen
+            one as "matched somehow" rather than assuming this one.
+        normalized:
+          type: string
+          description: The string both sides were compared as, so a surprising match is checkable.
+          example: pork shashlik
+        food_source:
+          type: string
+          enum: [user, seed, usda, off, ai]
+          description: >
+            How the STORED row was itself produced — `ai` for one saved from an
+            earlier draft, `user` for one the athlete typed. Different things to
+            trust, so they stay tellable apart.
+        saved_at:
+          type: string
+          format: date-time
+          description: When the stored row last changed, so a screen can say how old these numbers are.
 
     EstimatedItem:
       type: object
@@ -529,10 +602,10 @@ components:
               items: { $ref: "#/components/schemas/NutritionRecipeItem" }
             source:
               type: string
-              enum: [user, seed, usda, off]
+              enum: [user, seed, usda, off, ai]
               description: >
-                Where the row came from. Not settable by a client — everything
-                written through the API is `user`.
+                Where the row came from. A client may set `user` or `ai` and
+                nothing else — see `NutritionFoodInput.source`.
             external_id: { type: string, nullable: true }
             barcode: { type: string, nullable: true }
             created_at: { type: string, format: date-time }
@@ -568,6 +641,28 @@ components:
           maxItems: 100
           items: { $ref: "#/components/schemas/NutritionRecipeItem" }
         barcode: { type: string, nullable: true }
+        source:
+          type: string
+          enum: [user, ai]
+          description: >
+            How this row was produced. **Only `user` and `ai` may be sent**;
+            anything else is a `400` rather than a silent coercion. `usda` and
+            `off` are written by the importers that fetch them and by nothing
+            else — Open Food Facts data is ODbL, and a client able to write or
+            strip that label would undo the separation the value exists for.
+
+
+            `ai` means a food saved from a draft the athlete confirmed rather
+            than one anybody measured. It has to stay permanently tellable apart
+            from a measured row: a model cannot reliably say which of its own
+            numbers to distrust, so nothing downstream could weight them
+            differently once the distinction is lost.
+
+
+            **OMITTING IT ON AN UPDATE KEEPS WHAT IS STORED** — it does not
+            reset the row to `user`. That is deliberate: correcting a food's
+            macros must not silently relabel an AI-drafted row as one the
+            athlete measured. On a NEW row, omitting it means `user`.
 
     NutritionDay:
       allOf:
@@ -10020,12 +10115,38 @@ paths:
                     Context for portion sizing only — a breakfast portion of
                     oats and a dinner one differ. It never constrains what the
                     model may return.
+                reuse:
+                  type: boolean
+                  default: true
+                  description: >
+                    Whether this description may be answered from a food the
+                    athlete has already saved. **Omitting it means yes** — every
+                    client written before this field existed gets the reuse, by
+                    design.
+
+
+                    Send `false` to force a fresh reading. That is the escape
+                    hatch for a saved food whose numbers are wrong; without it
+                    the athlete could never ask for the food to be estimated
+                    again. A forced generation costs an estimate; a reuse does
+                    not.
           multipart/form-data:
             schema:
               type: object
               properties:
                 description: { type: string, maxLength: 600 }
                 meal: { type: string }
+                reuse:
+                  type: string
+                  description: >
+                    `false`, `0`, `no` or `off` turns reuse off; anything else,
+                    including omitting the field, leaves it on. An unrecognised
+                    value is NOT read as false — a value we do not understand is
+                    not a request to change behaviour.
+
+
+                    Only meaningful on a multipart body carrying no image: a
+                    photo is never answered from storage.
                 image:
                   type: string
                   format: binary
@@ -10035,7 +10156,14 @@ paths:
                     Content-Type.
       responses:
         '200':
-          description: A draft. Nothing has been written.
+          description: >
+            A draft. Nothing has been written.
+
+
+            It was either GENERATED — a model was called and one estimate was
+            spent — or REUSED from a food the athlete had already saved, in
+            which case no model was called, no allowance moved, and
+            `estimate.match` explains which stored row answered it and why.
           content:
             application/json:
               schema:

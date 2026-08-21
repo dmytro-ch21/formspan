@@ -29,6 +29,20 @@ export type FoodInput = Macros & {
   brand?: string;
   serving_label: string;
   serving_grams?: number | null;
+  /**
+   * How this row was produced (N114).
+   *
+   * Only `user` and `ai` may be sent — the server answers 400 for anything
+   * else, because `usda` and `off` are written by the importers that fetch
+   * them and a client able to claim or strip `off` would undo the ODbL
+   * separation that value exists for.
+   *
+   * **Omitting it on an update KEEPS what the server has stored**, and is
+   * therefore the right thing to send when a screen has no opinion — not
+   * `'user'`, which is a positive claim that would relabel an AI-drafted food
+   * as one the athlete measured. On a new row, omitting it means `user`.
+   */
+  source?: 'user' | 'ai';
 };
 
 export function listEntries(

@@ -406,12 +406,25 @@ export async function localFoods(userId: string, q = ''): Promise<Food[]> {
   const like = `%${escaped}%`;
   return db.getAllAsync<Food>(
     `SELECT id, kind, name, brand, serving_label, serving_grams,
-            kcal, protein_g, carb_g, fat_g, fibre_g
+            kcal, protein_g, carb_g, fat_g, fibre_g, source
        FROM foods
       WHERE user_id = ? AND deleted_at IS NULL AND lower(name) LIKE ? ESCAPE '\\'
       ORDER BY lower(name)`,
     userId, like,
   );
+}
+
+/** One saved food, for the screen that corrects it. Null when it is not here. */
+export async function localFood(userId: string, id: string): Promise<Food | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<Food>(
+    `SELECT id, kind, name, brand, serving_label, serving_grams,
+            kcal, protein_g, carb_g, fat_g, fibre_g, source
+       FROM foods
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    id, userId,
+  );
+  return row ?? null;
 }
 
 /** Save a food locally: owed to the server, and usable immediately. */
@@ -424,17 +437,30 @@ export async function saveFoodLocally(
   await db.runAsync(
     `INSERT INTO foods (
        id, user_id, kind, name, brand, serving_label, serving_grams,
-       kcal, protein_g, carb_g, fat_g, fibre_g, created_at, updated_at,
+       kcal, protein_g, carb_g, fat_g, fibre_g, source, created_at, updated_at,
        dirty, remote, cached_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,?)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,?)
      ON CONFLICT(id) DO UPDATE SET
        kind = excluded.kind, name = excluded.name, brand = excluded.brand,
        serving_label = excluded.serving_label, serving_grams = excluded.serving_grams,
        kcal = excluded.kcal, protein_g = excluded.protein_g, carb_g = excluded.carb_g,
        fat_g = excluded.fat_g, fibre_g = excluded.fibre_g,
+       -- **NOT "excluded.source"**, and this is the same guard the server's own
+       -- upsert carries. A caller that says nothing about provenance is editing
+       -- the macros, not relabelling the row: "COALESCE" keeps what is stored,
+       -- so correcting an AI-drafted food's calories cannot silently turn it
+       -- into one the athlete measured. "excluded.source" is what the row WOULD
+       -- have been inserted as, i.e. already defaulted, so reading it here can
+       -- never see the absent case — exactly the trap postgres.go documents.
+       source = COALESCE(?, foods.source),
        dirty = 1, updated_at = excluded.updated_at, last_error = NULL`,
     id, userId, input.kind, input.name, input.brand, input.serving_label, input.serving_grams,
-    input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g, now, now, now,
+    input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
+    input.source ?? 'user', now, now, now,
+    // The same value again, as its own binding for the COALESCE above — and
+    // `?? null` rather than `?? 'user'`, because on an UPDATE "unstated" must
+    // fall through to the stored value rather than to a default.
+    input.source ?? null,
   );
   return id;
 }
@@ -599,7 +625,7 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
     ? []
     : await db.getAllAsync<Food & { updated_at: string }>(
     `SELECT id, kind, name, brand, serving_label, serving_grams,
-            kcal, protein_g, carb_g, fat_g, fibre_g, updated_at
+            kcal, protein_g, carb_g, fat_g, fibre_g, source, updated_at
        FROM foods WHERE user_id = ? AND dirty = 1 AND deleted_at IS NULL`,
     userId,
   );
@@ -609,6 +635,19 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
         kind: f.kind, name: f.name, brand: f.brand,
         serving_label: f.serving_label, serving_grams: f.serving_grams,
         kcal: f.kcal, protein_g: f.protein_g, carb_g: f.carb_g, fat_g: f.fat_g, fibre_g: f.fibre_g,
+        // Sent on EVERY push, not only when it changed. The server keeps what
+        // it stores when this is absent, which is the right default for an old
+        // client — but this one knows the answer, and a row whose provenance
+        // only exists on the phone is one a reinstall loses.
+        //
+        // Restricted to what a client may claim: the server refuses anything
+        // outside {user, ai} with a 400, which would strand the row as a
+        // permanent rejection. A pulled row carrying a vocabulary this build
+        // does not know (a future value, or `usda`/`off` from an importer) is
+        // therefore sent as nothing at all — "keep what you have" — rather than
+        // coerced to `user`, which would DESTROY the very distinction it is
+        // being sent to preserve.
+        source: f.source === 'user' || f.source === 'ai' ? f.source : undefined,
       });
       await db.runAsync(
         `UPDATE foods SET dirty = 0, remote = 1, last_error = NULL
@@ -692,21 +731,45 @@ async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
       await db.runAsync(
         `INSERT INTO foods (
            id, user_id, kind, name, brand, serving_label, serving_grams,
-           kcal, protein_g, carb_g, fat_g, fibre_g,
+           kcal, protein_g, carb_g, fat_g, fibre_g, source,
            created_at, updated_at, cached_at, dirty, remote)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind, name = excluded.name, brand = excluded.brand,
            serving_label = excluded.serving_label, serving_grams = excluded.serving_grams,
            kcal = excluded.kcal, protein_g = excluded.protein_g,
            carb_g = excluded.carb_g, fat_g = excluded.fat_g, fibre_g = excluded.fibre_g,
+           -- The server is authoritative here, unlike in "saveFoodLocally":
+           -- this branch only ever runs for a row with "dirty = 0", so there is
+           -- no local claim to protect. A server that sends nothing (an older
+           -- deploy, mid-rollout) leaves the stored value rather than blanking
+           -- it.
+           --
+           -- **Its own "?", not "excluded.source".** "excluded" is the row that
+           -- WOULD have been inserted, and the VALUES list above has already
+           -- turned an absent source into "'user'" — it has to, because the
+           -- column is NOT NULL and an explicit NULL is a constraint violation
+           -- rather than a fall-through to the DEFAULT. So "excluded.source"
+           -- can never be null here, and reading it would quietly overwrite a
+           -- stored "ai" with "user" on every pull from an older deploy.
+           source = COALESCE(?, foods.source),
            cached_at = excluded.cached_at, remote = 1,
            -- The row now holds the server's numbers, so a reason that described
            -- the local ones is no longer about anything in it.
            last_error = NULL
          WHERE foods.dirty = 0 AND foods.deleted_at IS NULL`,
         f.id, userId, f.kind, f.name, f.brand, f.serving_label, f.serving_grams,
-        f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g, now, now, now,
+        f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g,
+        // The INSERT arm: a real value, because the column is NOT NULL and an
+        // explicitly-bound NULL does NOT fall through to a column DEFAULT in
+        // SQLite — it fails the constraint. A brand-new row we are being told
+        // nothing about is the athlete's own, which is what `user` means.
+        f.source ?? 'user',
+        now, now, now,
+        // The UPDATE arm's own binding, nullable: silence means "keep what is
+        // stored", which is the opposite of the default above and the reason
+        // these are two bindings rather than one.
+        f.source ?? null,
       );
     }
   });

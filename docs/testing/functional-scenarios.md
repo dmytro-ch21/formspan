@@ -7752,6 +7752,13 @@ this section.
 - **Failed and refused calls count toward the quota.** They cost tokens.
 - **The window rolls.** A call ages out 24 hours later and one more becomes
   available; `resets_at` names when.
+- **A REUSE COSTS NOTHING, AND IS NOT REFUSED AT THE CAP** (N114). Describe a
+  food whose name matches one already saved and the response is a draft with
+  `estimate.match` set, no model call, and a `quota` that has not moved. The
+  measurable version is the ticket's own: **log the same food three times and
+  the allowance moves once.** Run it AT the cap as well — a reuse spends
+  nothing, so a 429 there is the reuse being checked in the wrong order, and a
+  scenario that only runs below the cap passes against exactly that bug.
 
 **Edge cases and errors**
 
@@ -7869,6 +7876,68 @@ history entry for results.
   asked what was in it.
 - **Nothing recognisable yields an empty list plus a note**, never an invented
   meal — checked with gibberish text and with an image containing no food.
+
+### Reusing a saved food instead of generating it again (N114)
+
+**Happy path**
+
+- **Confirming a draft SAVES the food, not just the entry.** After logging a
+  described meal there is a `nutrition_foods` row per item, `source = 'ai'`,
+  with macros PER SERVING — and the entry points at it through
+  `source_food_id`. A scenario that only checks the entry passes against the
+  bug this ticket was filed for.
+- **The second entry of the same food is reused.** Same description, no model
+  call, `estimate.match` present, quota unchanged.
+- **A reused food reaches the quick-add recents**, because the entry now names
+  it. Drafted meals were invisible there before.
+- **A saved food is editable, from the reuse banner and from the quick-add
+  list** (`/food/saved/{id}`), and the screen states what an edit does and does
+  not touch.
+
+**The rules that must not break**
+
+- **Matching is EXACT on a normalised name** — lowercased, trimmed, internal
+  whitespace collapsed, and nothing else. `Pork  shashlik` matches; `Pork
+  Shashlik (spicy)`, `Pork Shashliks`, and `Skyr 10%` against `Skyr 0%`, must
+  not. A scenario asserting a near miss matches is asserting the failure the
+  rule exists to prevent: a regeneration costs an allowance slice, a wrong
+  substitution puts another meal's numbers in the athlete's log.
+- **A photo is never answered from storage.** The athlete is asking what is on
+  this plate, not repeating a name.
+- **`reuse: false` forces a fresh reading and DOES cost an estimate.** Without
+  it, a saved food with wrong numbers is one the athlete can never escape.
+- **Absent is not false.** A request with no `reuse` field reuses — every
+  client written before the field existed sends nothing, and reading that as an
+  opt-out ships the feature switched off for everyone who already has the app.
+- **The lookup is scoped to the caller.** One athlete's saved food must never
+  answer another's estimate; assert with two accounts and one name.
+- **Correcting a saved food changes what you log NEXT, never what you already
+  logged.** Edit the macros, then re-read a day logged before the edit: the
+  entry keeps its own numbers, and the next reuse gets the correction. This is
+  the rule the whole nutrition module rests on, and the reuse path is a new way
+  to reach the same write.
+- **An edit that says nothing about `source` KEEPS it.** PUT a food back with
+  corrected macros and no `source` field: it must still read `ai`. A scenario
+  that sends `source` on every write cannot see this, and it is the shape that
+  has silently blanked authored data three times in this repo.
+- **A client may only claim `user` or `ai`.** `off`, `usda` and `seed` are a
+  400 — not a silent coercion, which is how a wrong label becomes permanent.
+
+**Edge cases and errors**
+
+- **Two saved foods that normalise the same way resolve to the SAME one every
+  time** — the newest. Two offline devices can each save "Pork Shashlik" under
+  their own client-generated id; an unordered pick would give different numbers
+  on consecutive calls, which is the reported defect reproduced by its own fix.
+- **A food store that cannot answer falls back to GENERATING**, not to an
+  error. The athlete's meal is still loggable.
+- **The screen must not present a reuse and a generation identically.** Assert
+  on what is DRAWN — a `match` field that arrives and is never rendered
+  satisfies the type and not the athlete.
+- **A multi-item description is not reused**, because it is a meal rather than
+  a food. Its items are still each saved, so describing one of them alone later
+  does reuse. **#504** is where a meal becomes reusable as a unit; a scenario
+  asserting a four-item shake matches is asserting that ticket, not this one.
 
 ### The weekly target adjustment (N27)
 
