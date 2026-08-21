@@ -96,7 +96,6 @@ import {
   settleActivityChoice,
   type ActivityLevel,
 } from '@/lib/activityLevel';
-import { ApiError } from '@/lib/apiError';
 import { CONFIDENCE_DAYS, readConfidence, type Confidence } from '@/lib/confidence';
 import { localLoggedDayKcal } from '@/lib/foodLog';
 import { macroColor, macroRows, macroRowsFromTarget } from '@/lib/macroModel';
@@ -108,7 +107,12 @@ import { PREF_GOALS_COLLAPSED, readPref, writePref } from '@/lib/prefs';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { formatWeight, formatWeightRate, type UnitSystem } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
-import type { ManualDraft, ManualTargetInput } from '@/lib/manualTarget';
+import {
+  draftFrom,
+  OFFLINE_MESSAGE,
+  refusalOrWeather,
+  type ManualTargetInput,
+} from '@/lib/manualTarget';
 import { profileGap, todayString, type Target } from '@/lib/nutrition';
 import {
   fetchAdjustment,
@@ -156,9 +160,6 @@ const SAVED_MESSAGE = 'Saved. Food measures the day against this from now on.';
  */
 const HISTORY_DAYS = 365;
 
-/** The one offline sentence, said the same way wherever a write fails. */
-const OFFLINE_MESSAGE =
-  'Could not save it — this one needs a connection. Nothing has changed; try again when you have signal.';
 
 /**
  * The two foldable sections, and the one that starts folded.
@@ -196,43 +197,25 @@ const INFO = {
 } as const;
 
 /**
- * Why a save failed, in words that match what actually happened.
+ * What the link to the target record says, given what we know.
  *
- * **The distinction is the whole point, and getting it wrong is a dead end
- * dressed as weather.** Every write on this screen used to report the offline
- * sentence unconditionally, so an athlete who typed 700 kcal — a dropped digit
- * — got a permanent 400 from the server's 800–8,000 rail and was told to try
- * again when they had signal. It would fail identically forever, and the copy
- * sent them to look for a better connection.
- *
- * An `ApiError` means the server ANSWERED and refused: its message is written
- * for a human and is the most useful thing available, so it is shown. Anything
- * else — `OfflineError`, a dropped socket — means nothing was answered at all,
- * and only then is "try again when you have signal" true.
+ * Three answers for three states, and the third is the point: `null` is both
+ * "not read yet" and "the read failed", so neither of the other two labels is
+ * true there. "Target history" would promise a list that may not exist and
+ * "Set a target for a day already past" would assert there is nothing — the
+ * empty-versus-unknown collapse, in six words on a link.
  */
-function refusalOrWeather(e: unknown): string {
-  if (e instanceof ApiError) return e.message;
-  return OFFLINE_MESSAGE;
+function historyLinkLabel(targets: Target[] | null): string {
+  if (targets === null) return 'Past targets';
+  return targets.length > 0
+    ? 'Target history — correct or remove a past one'
+    : 'Set a target for a day already past';
 }
 
-/** What the typed-target form opens on, given a target. */
-function draftFrom(t: {
-  kcal: number;
-  protein_g: number;
-  carb_g: number;
-  fat_g: number;
-  fibre_g: number | null;
-}): ManualDraft {
-  return {
-    kcal: String(t.kcal),
-    protein_g: String(t.protein_g),
-    carb_g: String(t.carb_g),
-    fat_g: String(t.fat_g),
-    // Absent, not zero — seeding "0" would turn a target that never stated
-    // fibre into one that claims none, on the athlete's next save.
-    fibre_g: t.fibre_g == null ? '' : String(t.fibre_g),
-  };
-}
+// `refusalOrWeather` and `draftFrom` moved to `lib/manualTarget.ts` when the
+// history screen grew the same three write paths. Two copies of the
+// refusal-versus-weather split is two chances for one of them to drift back
+// into blaming the network for a permanent 400.
 
 export default function TargetScreen() {
   const router = useRouter();
@@ -979,11 +962,49 @@ export default function TargetScreen() {
             // to edit whenever there is anything at all to open on.
             seed={live ? draftFrom(live) : s ? draftFrom(s) : null}
             on={on}
+            // This screen writes today and only today; correcting a past target
+            // is `app/goals/history.tsx`, which passes the other answer.
+            effect="from_today"
             saving={writing === 'manual'}
             failed={writeFailed?.which === 'manual' ? writeFailed.message : null}
             onSave={(input) => void saveManual(input)}
           />
         ) : null}
+
+        {/*
+          The record, and the only way to correct it from a phone.
+
+          Under the card rather than under a heading of its own, for the reason
+          the form above it is here: the thing that disagrees with a number
+          belongs beside that number. This screen writes for TODAY and can only
+          ever write for today — the date is a target's identity, so fixing one
+          filed under the 5th, or removing it, is a different operation on a
+          different row, and N86 is the screen that owns them.
+
+          **Always offered, in every state including a failed read**, and the
+          last of those is the one worth arguing. `targets === null` here is
+          both "not fetched yet" and "the fetch failed" — the same two-into-one
+          this screen's own ticket is about — so gating the door on it would
+          shut an athlete out of the destination precisely when something has
+          gone wrong, and the destination is the screen that can actually say
+          what. It states its own five states honestly; the label simply stops
+          claiming to know which one it will find.
+
+          Offered when there are NO targets too: filing the first one under the
+          day you actually started is exactly what somebody in that state needs,
+          and hiding the door until they have used it is this gap's own shape.
+        */}
+        <Pressable
+          onPress={() => router.push('/goals/history')}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={historyLinkLabel(targets)}
+          testID="target-history-link"
+        >
+          <Text style={[styles.historyLink, { color: accent.accent }]}>
+            {historyLinkLabel(targets)}
+          </Text>
+        </Pressable>
 
         {adjustment ? (
           <AdjustmentCard
@@ -1325,6 +1346,7 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 20, paddingBottom: TAB_BAR_CLEARANCE + 20, gap: 12 },
   gap: { gap: 12 },
   note: { fontSize: 12, color: vola.textMuted, lineHeight: 17 },
+  historyLink: { fontSize: 14, fontWeight: '700', paddingVertical: 4 },
   problem: { fontSize: 12, color: vola.danger, lineHeight: 17 },
   saved: { fontSize: 12, color: vola.textDim, lineHeight: 17 },
   lock: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },

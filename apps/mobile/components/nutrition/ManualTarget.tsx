@@ -40,6 +40,7 @@ import { useCallback, useRef, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { useEnsureVisible } from '@/components/KeyboardAwareScroll';
+import { formatDayLong } from '@/lib/history';
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -62,6 +63,7 @@ const FIELDS: { key: keyof ManualDraft; label: string; suffix: string; optional?
 export function ManualTarget({
   seed,
   on,
+  effect,
   saving,
   failed,
   onSave,
@@ -69,10 +71,29 @@ export function ManualTarget({
   /** What to open on. Null opens blank — which is honest when there is neither
    *  a live target nor a derivable one. */
   seed: ManualDraft | null;
-  /** The day it takes effect. Today, and shown rather than chosen: a date
-   *  picker is the web form's affordance, and backdating a target is a
-   *  correction rather than a decision made standing up. */
+  /**
+   * The day it takes effect.
+   *
+   * Shown rather than chosen HERE — Goals writes for today and the history
+   * screen chooses the day outside this component, so a date control inside it
+   * would be a second way to answer a question already answered.
+   */
   on: string;
+  /**
+   * What the save does to days already gone, and it is a REQUIRED choice.
+   *
+   * The footnote used to be a constant: *"It takes effect from today forward.
+   * Past days keep the target they were judged against."* True on Goals, which
+   * only ever writes today. **Flatly false on the history screen**, which
+   * exists to write past dates — and the sentence sat directly under the Save
+   * button, contradicting that screen's own intro and its spoken receipt at
+   * the exact moment of a backdated write. Found in review.
+   *
+   * Not defaulted, deliberately: a default is what let one call site inherit
+   * the other's claim without anybody deciding, and a third caller should have
+   * to answer the question rather than get the older answer for free.
+   */
+  effect: 'from_today' | 'restates_past_days';
   saving: boolean;
   /**
    * Why the last save failed, or null.
@@ -154,11 +175,15 @@ export function ManualTarget({
         style={[styles.primary, { borderColor: accent.accent }, saving && styles.off]}
         accessibilityRole="button"
         accessibilityState={{ disabled: saving }}
-        accessibilityLabel={`Save this as your target from ${on}`}
+        // A readable date rather than the raw `YYYY-MM-DD`, which VoiceOver
+        // reads as three numbers. It matters more here than it did when this
+        // was always today: on the history screen the date IS the thing being
+        // confirmed.
+        accessibilityLabel={`Save this as your target from ${formatDayLong(on)}`}
         testID="manual-save"
       >
         <Text style={[styles.primaryText, { color: accent.ink }]}>
-          {saving ? 'Saving…' : `Use this from ${on}`}
+          {saving ? 'Saving…' : `Use this from ${formatDayLong(on)}`}
         </Text>
       </Pressable>
 
@@ -168,8 +193,10 @@ export function ManualTarget({
         </Text>
       ) : null}
 
-      <Text style={styles.footnote}>
-        It takes effect from today forward. Past days keep the target they were judged against.
+      <Text style={styles.footnote} testID="manual-footnote">
+        {effect === 'from_today'
+          ? 'It takes effect from today forward. Past days keep the target they were judged against.'
+          : 'It applies from that day onward, so the days it covers are restated — a target is the yardstick they were measured against. Later targets are untouched.'}
       </Text>
     </View>
   );

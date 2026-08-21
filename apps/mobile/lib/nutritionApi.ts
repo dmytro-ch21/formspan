@@ -109,12 +109,27 @@ export function deleteFood(getToken: TokenGetter, id: string): Promise<void> {
 export function listTargets(
   getToken: TokenGetter,
   range: { from: string; to: string },
-): Promise<Target[]> {
+): Promise<StoredTarget[]> {
   const q = new URLSearchParams({ from: range.from, to: range.to });
-  return apiRequest<{ targets: Target[] }>(getToken, `/nutrition/targets?${q}`).then(
+  return apiRequest<{ targets: StoredTarget[] }>(getToken, `/nutrition/targets?${q}`).then(
     (b) => b.targets ?? [],
   );
 }
+
+/**
+ * A target as the SERVER sends one, which is `Target` plus its frozen basis.
+ *
+ * `Target` itself omits `basis` because the local SQLite cache has no column
+ * for it, and most of this app only ever wants the numbers. But a screen that
+ * DELETES a row has to be able to put back exactly what it removed, and a
+ * restore that quietly dropped a derived target's arithmetic would strip an
+ * explanation the athlete never chose to discard — the same loss the edit path
+ * warns about, arriving through an undo button.
+ *
+ * Assignable to `Target`, so widening these two return types changes nothing
+ * for any existing caller.
+ */
+export type StoredTarget = Target & { basis?: Basis | null };
 
 /** The target live on a day: the newest row on or before it. */
 export function targetOn(targets: Target[], on: string): Target | null {
@@ -340,9 +355,30 @@ export function saveTarget(
     source: 'derived' | 'manual' | 'adjustment';
     basis: Basis | null;
   },
-): Promise<Target> {
-  return apiRequest<Target>(getToken, `/nutrition/targets/${date}`, {
+): Promise<StoredTarget> {
+  return apiRequest<StoredTarget>(getToken, `/nutrition/targets/${date}`, {
     method: 'PUT',
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * Remove the target set on a date.
+ *
+ * Not an undo of the last write — an undo of a ROW. Because the date is the
+ * identity, this is the only way a target filed under the wrong DAY comes back
+ * out of the record: typing over one can fix its numbers and never its date.
+ *
+ * **The phone is the first surface anywhere with a caller for this.**
+ * `apps/web` has carried the same function in its wire layer since the endpoint
+ * landed and calls it from nowhere, so the audit row listing deletion as
+ * web-only was describing the contract rather than the product — it was
+ * available on neither. What a delete costs, and how it is offered back, is
+ * `lib/targetHistory.ts`'s `deletionEffect` and `app/goals/history.tsx`.
+ *
+ * 204 whether or not the row was there, so a retry against a row another device
+ * already removed resolves rather than 404-ing.
+ */
+export function deleteTarget(getToken: TokenGetter, date: string): Promise<void> {
+  return apiRequest<void>(getToken, `/nutrition/targets/${date}`, { method: 'DELETE' });
 }

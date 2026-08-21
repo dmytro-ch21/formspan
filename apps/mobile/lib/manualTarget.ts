@@ -14,6 +14,7 @@
  * failure the mobile-first rule in `CLAUDE.md` was written to forbid.
  */
 
+import { ApiError } from './apiError';
 import { kcalLooksOff, type Macros } from './nutrition';
 
 /** The form as the athlete has it: five strings, any of them half-typed. */
@@ -41,6 +42,69 @@ export type ManualParse =
    *  reason: blaming an input for a form-level failure sends somebody to
    *  retype a field that was fine. */
   | { ok: false; field: keyof ManualDraft | null; problem: string };
+
+/**
+ * The one offline sentence, said the same way wherever a target write fails.
+ *
+ * Lifted out of `app/(tabs)/goals.tsx` when a second screen — the history —
+ * grew the same write paths. Two copies of this sentence is two chances for one
+ * of them to drift back into blaming the network for a refusal.
+ *
+ * **The verb is a parameter, because the history screen removes as well as
+ * saves.** It read "Could not save it" unconditionally, which was returned for
+ * a failed DELETE and a failed UNDO too — telling somebody a save failed when
+ * they had pressed Remove. Found in review.
+ */
+export function offlineMessage(verb: 'save' | 'remove' | 'put it back' = 'save'): string {
+  const what = verb === 'save' ? 'save it' : verb === 'remove' ? 'remove it' : 'put it back';
+  return `Could not ${what} — this one needs a connection. Nothing has changed; try again when you have signal.`;
+}
+
+/** The default phrasing, for the callers that only ever save. */
+export const OFFLINE_MESSAGE = offlineMessage();
+
+/**
+ * Why the last write failed, in the words the athlete needs.
+ *
+ * The distinction is the whole point, and it was arrived at by getting it
+ * wrong: a boolean `failed` flag made every failure share the offline copy, so
+ * an athlete whose mis-keyed 700 kcal the server had permanently refused was
+ * told to try again when they had signal. It would fail identically forever.
+ *
+ * An `ApiError` means the server ANSWERED and refused: its message is written
+ * for a human and is the most useful thing available, so it is shown. Anything
+ * else — `OfflineError`, a dropped socket — means nothing was answered at all,
+ * and only then is "try again when you have signal" true.
+ */
+export function refusalOrWeather(e: unknown, verb: 'save' | 'remove' | 'put it back' = 'save'): string {
+  if (e instanceof ApiError) return e.message;
+  return offlineMessage(verb);
+}
+
+/**
+ * What the typed-target form opens on, given a target.
+ *
+ * Structurally typed rather than taking a `Target`, so the history screen can
+ * seed the form from a stored row and Goals can seed it from a live suggestion
+ * without either having to fabricate an `effective_on` it does not mean.
+ */
+export function draftFrom(t: {
+  kcal: number;
+  protein_g: number;
+  carb_g: number;
+  fat_g: number;
+  fibre_g: number | null;
+}): ManualDraft {
+  return {
+    kcal: String(t.kcal),
+    protein_g: String(t.protein_g),
+    carb_g: String(t.carb_g),
+    fat_g: String(t.fat_g),
+    // Absent, not zero — seeding "0" would turn a target that never stated
+    // fibre into one that claims none, on the athlete's next save.
+    fibre_g: t.fibre_g == null ? '' : String(t.fibre_g),
+  };
+}
 
 /** Empty draft — what the form opens with when there is nothing to start from. */
 export const EMPTY_DRAFT: ManualDraft = {
