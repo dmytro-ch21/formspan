@@ -184,7 +184,9 @@ export function MomentumCard({
 function StatePill({ eaten, view }: { eaten: EatenView; view: TargetView }) {
   const totals = viewTotals(eaten);
   const target = viewTarget(view);
-  if (!totals || !target || target.kcal <= 0) return null;
+  // No pill for an unknown target either: `On track` against a target nobody
+  // could read is an achievement claimed from an absence.
+  if (!totals || !target || target.kcal <= 0 || view.state !== 'set') return null;
 
   const over = totals.kcal > target.kcal;
   return (
@@ -213,6 +215,19 @@ function Centre({ eaten, view }: { eaten: EatenView; view: TargetView }) {
   }
   if (eaten.state === 'unavailable') {
     return <Text style={styles.centreAbsent}>—</Text>;
+  }
+  // `unknown` is "we could not check your target", NOT "you have not set one".
+  // `viewTarget()` returns null for both, so branching on the null collapsed
+  // them — and telling an athlete who set a target on web that they have none
+  // is a false claim about their own account. `lib/nutrition.ts` names this
+  // prohibition and the `RemainingBlock` this card replaced honoured it.
+  if (view.state === 'unknown') {
+    return (
+      <>
+        <Text style={styles.centreBig}>{fmt(totals?.kcal ?? 0)}</Text>
+        <Text style={styles.centreUnit}>eaten</Text>
+      </>
+    );
   }
   if (!target || target.kcal <= 0) {
     return (
@@ -255,9 +270,15 @@ function CentreMeta({ eaten, view }: { eaten: EatenView; view: TargetView }) {
   return (
     <>
       <Text style={styles.centreMeta}>
-        {!target || target.kcal <= 0
-          ? 'kcal — no target set'
-          : `${fmt(Math.round(totals?.kcal ?? 0))} / ${fmt(target.kcal)} kcal`}
+        {view.state === 'unknown'
+          ? // The wording is `RemainingBlock`'s, deliberately: it says what
+            // failed AND that the athlete can carry on, because logging works
+            // offline and a target that cannot be checked must not read as a
+            // reason to stop.
+            'kcal — cannot check your target from here, logging still works'
+          : !target || target.kcal <= 0
+            ? 'kcal — no target set'
+            : `${fmt(Math.round(totals?.kcal ?? 0))} / ${fmt(target.kcal)} kcal`}
       </Text>
       <Entries eaten={eaten} />
     </>
@@ -299,12 +320,14 @@ function MacroRow({ reading }: { reading: ReturnType<typeof readRings>[number] }
 
       <RNView style={styles.rowFigures}>
         <Text style={styles.rowValue}>
-          {Math.round(reading.eaten)}
+          {/* Null is the day being unreadable, and it renders as an em dash.
+              A `0` here would contradict the centre, which says so in words. */}
+          {reading.eaten === null ? '—' : Math.round(reading.eaten)}
           {/* The denominator only appears when there is one. `MacroSplit`
               already refuses to invent it and so does this. */}
           {reading.goal !== null ? (
             <Text style={styles.rowGoal}> / {Math.round(reading.goal)}g</Text>
-          ) : (
+          ) : reading.eaten === null ? null : (
             <Text style={styles.rowGoal}>g</Text>
           )}
         </Text>

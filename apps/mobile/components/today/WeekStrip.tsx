@@ -4,6 +4,7 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { dayString } from '@/lib/calendar';
+import { viewLoggedDays, type LoggedDaysView } from '@/lib/nutrition';
 
 /**
  * The week strip: Mon–Sun, with each day's state as a ring beneath its date.
@@ -40,8 +41,16 @@ import { dayString } from '@/lib/calendar';
 export type WeekStripProps = {
   /** Any date inside the week to draw. */
   now: Date;
-  /** `YYYY-MM-DD` keys that count as logged. */
-  logged: ReadonlySet<string>;
+  /**
+   * Which days carry a food entry — as a {@link LoggedDaysView}, so the four
+   * states cannot be collapsed at the call site.
+   *
+   * It was a bare `ReadonlySet` and the caller wrote `?? new Set()`, which made
+   * every past day render as *nothing logged* — and say so to VoiceOver — while
+   * the read was still in flight, after a failed read, and for a deployment
+   * with no food log at all.
+   */
+  logged: LoggedDaysView;
   /** The seven days of the week, Monday first. */
   days: Date[];
   onWeekInReview: () => void;
@@ -52,13 +61,14 @@ const INITIALS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
 export function WeekStrip({ now, logged, days, onWeekInReview, testID }: WeekStripProps) {
   const todayKey = dayString(now);
-  const loggedCount = days.filter((d) => logged.has(dayString(d))).length;
+  const known = viewLoggedDays(logged);
+  const loggedCount = known ? days.filter((d) => known.has(dayString(d))).length : null;
 
   // The bar spans the days that have HAPPENED, filled by the ones that were
   // logged. A bar running the whole week would show a future the athlete has
   // not reached yet as a shortfall.
   const elapsed = days.filter((d) => dayString(d) <= todayKey).length;
-  const fill = elapsed > 0 ? (loggedCount / elapsed) * 100 : 0;
+  const fill = loggedCount !== null && elapsed > 0 ? (loggedCount / elapsed) * 100 : 0;
 
   return (
     <View style={styles.card} testID={testID}>
@@ -67,7 +77,7 @@ export function WeekStrip({ now, logged, days, onWeekInReview, testID }: WeekStr
           const key = dayString(d);
           const isToday = key === todayKey;
           const isFuture = key > todayKey;
-          const isLogged = logged.has(key);
+          const isLogged = known?.has(key) ?? false;
           return (
             <RNView
               key={key}
@@ -75,27 +85,50 @@ export function WeekStrip({ now, logged, days, onWeekInReview, testID }: WeekStr
               accessible
               accessibilityLabel={`${INITIALS[i]} ${d.getDate()}${
                 isToday ? ', today' : ''
-              }${isLogged ? ', logged' : isFuture ? ', still to come' : ', nothing logged'}`}
+              }${
+                // Only claim "nothing logged" when the days are actually known.
+                // Unknown days say nothing rather than saying zero.
+                known === null
+                  ? ''
+                  : isLogged
+                    ? ', logged'
+                    : isFuture
+                      ? ', still to come'
+                      : ', nothing logged'
+              }`}
               testID={`week-strip-${key}`}
             >
               <Text style={[styles.dow, isToday && styles.dowToday]}>{INITIALS[i]}</Text>
               <RNView style={[styles.dateWrap, isToday && styles.dateWrapToday]}>
                 <Text style={[styles.date, isFuture && styles.dateFuture]}>{d.getDate()}</Text>
               </RNView>
-              <Mark logged={isLogged} today={isToday} future={isFuture} />
+              <Mark
+                logged={isLogged}
+                today={isToday}
+                future={isFuture}
+                known={known !== null}
+              />
             </RNView>
           );
         })}
       </RNView>
 
       <RNView style={styles.track}>
-        <RNView style={[styles.fill, { width: `${fill}%` }]} />
+        {loggedCount !== null ? <RNView style={[styles.fill, { width: `${fill}%` }]} /> : null}
       </RNView>
 
       <RNView style={styles.foot}>
-        {/* A count, not a chain — see the header comment. */}
+        {/* A count, not a chain — see the header comment. And never a count at
+            all until the days are known: `0 of 5 days logged` from a pending
+            read is a confident, discouraging zero. */}
         <Text style={styles.summary} testID="week-strip-summary">
-          {loggedCount} of {elapsed} {elapsed === 1 ? 'day' : 'days'} logged
+          {logged.state === 'checking'
+            ? 'Checking…'
+            : logged.state === 'unavailable'
+              ? 'Could not read this week'
+              : logged.state === 'off'
+                ? ''
+                : `${loggedCount} of ${elapsed} ${elapsed === 1 ? 'day' : 'days'} logged`}
         </Text>
         <Pressable
           onPress={onWeekInReview}
@@ -121,7 +154,21 @@ export function WeekStrip({ now, logged, days, onWeekInReview, testID }: WeekStr
  * **not** marked with a cross or reddened, because "you did not train on
  * Tuesday" is a fact about a Tuesday and not a verdict.
  */
-function Mark({ logged, today, future }: { logged: boolean; today: boolean; future: boolean }) {
+function Mark({
+  logged,
+  today,
+  future,
+  known,
+}: {
+  logged: boolean;
+  today: boolean;
+  future: boolean;
+  /** False while the week's logged days are unknown — draw neither state. */
+  known: boolean;
+}) {
+  if (!known) {
+    return <RNView style={[styles.mark, today ? styles.markToday : styles.markUnknown]} />;
+  }
   if (logged) {
     return (
       <RNView style={[styles.mark, styles.markDone]}>
@@ -171,6 +218,7 @@ const styles = StyleSheet.create({
   markToday: { borderWidth: 1.5, borderColor: vola.lime },
   markFuture: { borderWidth: 1, borderColor: vola.line },
   markMissed: { borderWidth: 1, borderColor: vola.lineSoft },
+  markUnknown: { borderWidth: 1, borderColor: vola.lineSoft, opacity: 0.5 },
 
   track: { height: 3, borderRadius: 2, backgroundColor: vola.surfaceRaised, overflow: 'hidden' },
   fill: { height: 3, borderRadius: 2, backgroundColor: vola.lime },

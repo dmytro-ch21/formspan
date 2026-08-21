@@ -2,7 +2,6 @@ import { Pressable, StyleSheet, View as RNView } from 'react-native';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 
 import { Text } from '@/components/Themed';
-import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { daysBetween, shiftDate, trendWeight, type Measured } from '@/lib/anthropometry';
 import { PHASE_LABELS, type Checkin, type Phase } from '@/lib/body';
@@ -91,11 +90,21 @@ export function ProgressCard({
               <Text style={styles.deltaAbsent}>Not enough readings to compare</Text>
             ) : (
               <RNView style={styles.deltaRow}>
-                <Icon
-                  name={delta < 0 ? 'chevron-down' : 'chevron'}
-                  size={12}
-                  color={vola.textMuted}
-                />
+                {/*
+                  A TEXT arrow, not an icon, and that is the fix rather than a
+                  style choice. The icon set has `chevron-down` and no
+                  `chevron-up`, so a weight GAIN was rendering with the
+                  right-pointing disclosure chevron — direction-free, and read
+                  as a navigation affordance — while a loss got a real
+                  down-arrow. The direction of a measured number existed only
+                  in the accessibility label, for exactly one of the two
+                  directions.
+
+                  Deliberately uncoloured: up is not failure and down is not
+                  success, and which one an athlete wants depends on the phase
+                  sitting directly underneath this line.
+                */}
+                <Text style={styles.deltaArrow}>{delta < 0 ? '↓' : '↑'}</Text>
                 <Text style={styles.delta}>
                   {formatWeight(Math.abs(delta), units)} this week
                 </Text>
@@ -289,6 +298,7 @@ const styles = StyleSheet.create({
     lineHeight: 36,
   },
   deltaRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  deltaArrow: { fontSize: 13, color: vola.textMuted },
   delta: { fontSize: 13, color: vola.textMuted, fontVariant: ['tabular-nums'] },
   deltaAbsent: { fontSize: 12, color: vola.textDim },
   absent: { fontSize: 13, color: vola.textDim, maxWidth: 190 },

@@ -89,8 +89,18 @@ export function serialiseRings(keys: readonly RingKey[]): string {
 export type RingReading = {
   key: RingKey;
   label: string;
-  /** Grams, or kcal for `kcal`. Always a real measured quantity. */
-  eaten: number;
+  /**
+   * Grams, or kcal for `kcal`. **Null when the day could not be read** — never
+   * zero.
+   *
+   * This was `number` with an `eaten ?? 0` inside {@link readRings}, under a
+   * docstring claiming it returned 0 "only when totals are known and genuinely
+   * zero". It did not: a failed read produced `0`, so the card rendered `0g`
+   * macro rows beside a centre reading `Day unread` — two elements on one card
+   * disagreeing about the same fact, which is the W2/W4 shape. The type carries
+   * it now, so the row cannot render a number the app does not have.
+   */
+  eaten: number | null;
   /** The target, or null when none is set. */
   goal: number | null;
   /** eaten/goal as a percentage, or null when there is no goal. Never clamped. */
@@ -185,7 +195,7 @@ export function readRings(
     return {
       key,
       label: RING_LABELS[key],
-      eaten: eaten ?? 0,
+      eaten,
       goal,
       // A goal of zero would divide to Infinity, and a zero target is a target
       // nobody meant to set — treat it as absent rather than as a ring that is

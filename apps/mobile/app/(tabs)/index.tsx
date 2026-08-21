@@ -98,6 +98,7 @@ import {
   type TargetView,
   eatenFrom,
   type EatenView,
+  type LoggedDaysView,
 } from '@/lib/nutrition';
 import { listTargets, targetOn } from '@/lib/nutritionApi';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -609,7 +610,7 @@ export default function TodayScreen() {
    * below it — which is the W2/W4 shape: one question, two answers. Seen on a
    * device, which is the only place it was ever going to be obvious.
    */
-  const [foodDays, setFoodDays] = useState<ReadonlySet<string> | null>(null);
+  const [foodDays, setFoodDays] = useState<LoggedDaysView>({ state: 'checking' });
 
   /** Sessions and distinct days over the trailing 28. `null` until counted. */
   const [training, setTraining] = useState<{ sessions: number; days: number } | null>(null);
@@ -620,6 +621,17 @@ export default function TodayScreen() {
   // The module that WOULD carry the Fuel card, turned off. See the card's
   // render below — N61.
   const foodOff = moduleOffWithFoodLog(modules);
+
+  /**
+   * What the week strip's marks and the `LOGGING` card are allowed to claim.
+   *
+   * **Gated on the food module, like the Fuel card has always been.** Both
+   * render food-log data, and without this a deployment with no food log got a
+   * strip of empty marks and a card reading "0 of N days logged" forever —
+   * about a feature it does not have — with a press target pointing at a tab
+   * `tabHidden()` removes from the bar.
+   */
+  const loggedView: LoggedDaysView = foodEnabled ? foodDays : { state: 'off' };
 
   /**
    * The daily trackers, and the day they describe.
@@ -670,10 +682,11 @@ export default function TodayScreen() {
       : Promise.resolve<string[] | null>(null))
       .then((days) => {
         if (!live) return;
-        setFoodDays(days === null ? null : new Set(days));
+        setFoodDays(days === null ? { state: 'checking' } : { state: 'ready', days: new Set(days) });
       })
       .catch(() => {
-        if (live) setFoodDays(null);
+        // A failed read is NOT an empty week. See `LoggedDaysView`.
+        if (live) setFoodDays({ state: 'unavailable' });
       });
 
     // Ranked for the CURRENT slot, so the chips are porridge at breakfast and
@@ -1074,9 +1087,33 @@ export default function TodayScreen() {
     }
   }, [getToken, syncing, userId]);
 
+  /**
+   * "Week in review" scrolls to the `WeekReview` card on this screen.
+   *
+   * Two offsets, not one: `onLayout` reports a child's `y` relative to its
+   * PARENT, and the card sits inside `styles.body`, which itself sits below the
+   * header inside the scroll container. Using the card's `y` alone would land
+   * short by the height of everything above `body`.
+   *
+   * Both default to 0 and the press is a no-op until they are measured, which
+   * is one frame — a scroll to the wrong place is worse than a scroll that has
+   * not happened yet.
+   */
+  const scrollRef = useRef<ScrollView>(null);
+  const bodyY = useRef(0);
+  const weekReviewY = useRef<number | null>(null);
+  const scrollToWeekReview = useCallback(() => {
+    if (weekReviewY.current === null) return;
+    scrollRef.current?.scrollTo({
+      y: Math.max(0, bodyY.current + weekReviewY.current - 12),
+      animated: true,
+    });
+  }, []);
+
   return (
     <RNView style={styles.screen}>
     <ScrollView
+      ref={scrollRef}
       // The pill's clearance only when there is a pill; otherwise it is 64pt of
       // dead space under the last row.
       contentContainerStyle={[
@@ -1090,7 +1127,12 @@ export default function TodayScreen() {
           nothing passes under it — no bottom rule. See `ScreenHeader`. */}
       <ScreenHeader title="Today" contentScrollsUnder={false} />
 
-      <View style={styles.body}>
+      <View
+        style={styles.body}
+        onLayout={(e) => {
+          bodyY.current = e.nativeEvent.layout.y;
+        }}
+      >
         {/*
           The week strip (N108). It sits ABOVE the day switcher deliberately:
           the strip is the week, the switcher steps a day inside it, and the
@@ -1104,8 +1146,12 @@ export default function TodayScreen() {
         <WeekStrip
           now={now}
           days={weekDays(now)}
-          logged={foodDays ?? new Set<string>()}
-          onWeekInReview={() => router.push('/(tabs)/goals')}
+          logged={loggedView}
+          // Scrolls to the `WeekReview` card FURTHER DOWN THIS SCREEN, which is
+          // what "Week in review" actually names. It used to push
+          // `/(tabs)/goals`, whose header reads "Your target" — a link whose
+          // label and destination described different things.
+          onWeekInReview={scrollToWeekReview}
           testID="today-week-strip"
         />
 
@@ -1570,19 +1616,24 @@ export default function TodayScreen() {
         {/* TRAINING and LOGGING, the two small cards at the foot of the
             reference. Placed here rather than at the very bottom so the
             reporting blocks stay together. */}
+        {/* LOGGING only exists where a food log does. Without one, TRAINING
+            takes the row on its own rather than sitting beside a card that
+            reports on a feature this deployment does not have. */}
         <MiniCardRow>
           <TrainingCard
             training={training}
             onPress={() => router.push('/(tabs)/workouts')}
             testID="today-training"
           />
-          <LoggingCard
-            loggedDays={foodDays}
-            days={weekDays(now)}
-            now={now}
-            onPress={() => router.push('/(tabs)/food')}
-            testID="today-logging"
-          />
+          {foodEnabled ? (
+            <LoggingCard
+              loggedDays={loggedView}
+              days={weekDays(now)}
+              now={now}
+              onPress={() => router.push('/(tabs)/food')}
+              testID="today-logging"
+            />
+          ) : null}
         </MiniCardRow>
 
         {/* Fuel sits beside the check-in because both ASK for something rather
@@ -1676,12 +1727,18 @@ export default function TodayScreen() {
           says nothing on its own, and one tonnage figure hides whether the week
           was three lifts or three classes.
         */}
-        <WeekReview
-          review={review}
-          modules={modules}
-          units={units}
-          unitsReady={unitsReady}
-        />
+        <RNView
+          onLayout={(e) => {
+            weekReviewY.current = e.nativeEvent.layout.y;
+          }}
+        >
+          <WeekReview
+            review={review}
+            modules={modules}
+            units={units}
+            unitsReady={unitsReady}
+          />
+        </RNView>
 
         {recent.length > 0 && (
           <View style={styles.section}>

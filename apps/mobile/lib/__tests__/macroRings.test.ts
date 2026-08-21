@@ -108,6 +108,21 @@ describe('readRings — reading the day onto the rings', () => {
     for (const r of rings) expect(r.percent).toBeNull();
   });
 
+  it('reports EATEN as null when the day could not be read, never as zero', () => {
+    // The row renders this figure. A `0` here sat beside a centre reading
+    // "Day unread" — two elements on one card disagreeing about one fact.
+    const rings = readRings(RING_KEYS, null, target());
+    for (const r of rings) expect(r.eaten).toBeNull();
+  });
+
+  it('still reports a GENUINE zero as zero, so the two stay distinguishable', () => {
+    // The whole point of the null is that it means something else. A day that
+    // was read and holds nothing is a real 0 and must render as one.
+    const rings = readRings(RING_KEYS, macros({ kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0 }), target());
+    for (const r of rings) expect(r.eaten).toBe(0);
+    expect(rings.find((r) => r.key === 'protein')?.percent).toBe(0);
+  });
+
   it('treats a zero target as absent rather than as instantly-and-forever over', () => {
     // Dividing by it would give Infinity, and a ring pinned at "over" for a
     // goal nobody meant to set is worse than no ring.

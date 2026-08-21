@@ -5,6 +5,7 @@ import { Icon } from '@/components/ui/Icon';
 import { ProgressRing } from '@/components/ui/ProgressRing';
 import { vola } from '@/constants/Colors';
 import { dayString } from '@/lib/calendar';
+import { viewLoggedDays, type LoggedDaysView } from '@/lib/nutrition';
 
 /**
  * The two small cards at the foot of Today: `TRAINING` and `LOGGING`.
@@ -116,8 +117,8 @@ export function TrainingCard({ training, onPress, testID }: TrainingCardProps) {
 }
 
 export type LoggingCardProps = {
-  /** `YYYY-MM-DD` keys with a food entry. Null until the read settles. */
-  loggedDays: ReadonlySet<string> | null;
+  /** Which days carry a food entry, as a {@link LoggedDaysView}. */
+  loggedDays: LoggedDaysView;
   /** The seven days of the displayed week, Monday first. */
   days: Date[];
   now: Date;
@@ -128,26 +129,38 @@ export type LoggingCardProps = {
 const DOW = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 /**
- * `LOGGING` — days logged this week, as `n / 7` and a row of seven dots.
+ * `LOGGING` — days logged this week, as `n / elapsed` and a row of seven dots.
  *
- * The denominator is **seven**, not "days so far", and that is the opposite
- * choice from the week strip's summary line directly above. It is deliberate:
- * this card answers "how much of the week did I log" — a question about the
- * whole week, which is still in progress — whereas the strip's line reports
- * against the days that have actually happened. Two different questions, and
- * conflating them would make one of the two wrong. The dots make the difference
- * visible: the ones after today are drawn as *pending*, not as missed.
+ * ## The denominator is ELAPSED days, not seven
+ *
+ * It was seven, and that silently reversed a recorded decision. The
+ * `LOGGED_WINDOW_DAYS` comment this replaced said a rolling seven was chosen
+ * *specifically* because a Monday reset "would make Monday morning always say
+ * '0 of 7', which is the discouraging shape the no-shame rule avoids" — the
+ * same rule that struck the reference's day streak. Counting against elapsed
+ * days also makes this agree with the week strip above it, which is the other
+ * half of why the card's duplicate count was removed.
+ *
+ * The dots still show all seven: the ones after today are drawn **pending**,
+ * not missed, so the week's shape is visible without the count implying a
+ * shortfall the athlete has not had the chance to make up.
  */
 export function LoggingCard({ loggedDays, days, now, onPress, testID }: LoggingCardProps) {
   const todayKey = dayString(now);
-  const n = loggedDays == null ? null : days.filter((d) => loggedDays.has(dayString(d))).length;
+  const known = viewLoggedDays(loggedDays);
+  const n = known === null ? null : days.filter((d) => known.has(dayString(d))).length;
+  const elapsed = days.filter((d) => dayString(d) <= todayKey).length;
 
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={
-        n == null ? 'Logging, still loading' : `${n} of 7 days logged this week`
+        loggedDays.state === 'checking'
+          ? 'Logging, still loading'
+          : loggedDays.state === 'unavailable'
+            ? 'Logging, could not be read'
+            : `${n} of ${elapsed} days logged so far this week`
       }
       style={({ pressed }) => [styles.mini, pressed && styles.pressed]}
       testID={testID}
@@ -166,15 +179,17 @@ export function LoggingCard({ loggedDays, days, now, onPress, testID }: LoggingC
       */}
       <RNView style={styles.loggingBody}>
         <RNView style={styles.miniFigures}>
-          {n == null ? (
-            <Text style={styles.miniAbsent}>Checking…</Text>
+          {n === null ? (
+            <Text style={styles.miniAbsent}>
+              {loggedDays.state === 'unavailable' ? 'Could not read this week' : 'Checking…'}
+            </Text>
           ) : (
             <>
               <Text style={styles.miniValue}>
                 {n}
-                <Text style={styles.miniDenom}> / 7</Text>
+                <Text style={styles.miniDenom}> / {elapsed}</Text>
               </Text>
-              <Text style={styles.miniMeta}>days this week</Text>
+              <Text style={styles.miniMeta}>days so far this week</Text>
             </>
           )}
         </RNView>
@@ -182,7 +197,7 @@ export function LoggingCard({ loggedDays, days, now, onPress, testID }: LoggingC
         <RNView style={styles.dots}>
           {days.map((d, i) => {
             const key = dayString(d);
-            const done = loggedDays?.has(key) ?? false;
+            const done = known?.has(key) ?? false;
             const pending = key > todayKey;
             return (
               <RNView key={key} style={styles.dotCol}>
@@ -190,10 +205,19 @@ export function LoggingCard({ loggedDays, days, now, onPress, testID }: LoggingC
                 <RNView
                   style={[
                     styles.dot,
-                    done ? styles.dotDone : pending ? styles.dotPending : styles.dotMissed,
+                    // An unknown week draws neither done nor missed. Drawing
+                    // "missed" beside a figure reading "Checking…" is the same
+                    // confident zero the figure is carefully avoiding.
+                    known === null
+                      ? styles.dotUnknown
+                      : done
+                        ? styles.dotDone
+                        : pending
+                          ? styles.dotPending
+                          : styles.dotMissed,
                   ]}
                 >
-                  {done ? <Icon name="check" size={8} color={vola.bg} /> : null}
+                  {known !== null && done ? <Icon name="check" size={8} color={vola.bg} /> : null}
                 </RNView>
               </RNView>
             );
@@ -240,6 +264,7 @@ const styles = StyleSheet.create({
   dotDone: { backgroundColor: vola.lime },
   dotPending: { borderWidth: 1, borderColor: vola.lineSoft },
   dotMissed: { borderWidth: 1, borderColor: vola.line },
+  dotUnknown: { borderWidth: 1, borderColor: vola.lineSoft, opacity: 0.5 },
 });
 
 /** The two side by side, with Today's own `gap` between them. */

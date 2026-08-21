@@ -38,21 +38,37 @@ export function useReducedMotion(): boolean | null {
 
   useEffect(() => {
     let alive = true;
+    // The initial read and the subscription race, and the subscription can win.
+    // Turning Reduce Motion on during launch fires `reduceMotionChanged` before
+    // the promise settles, and the promise then overwrites the newer answer
+    // with the older one — leaving the hook asserting the opposite of the
+    // setting, permanently, until the next change event. That would quietly
+    // undo the whole `null`-state hold below.
+    let answered = false;
 
     AccessibilityInfo.isReduceMotionEnabled()
       .then((enabled) => {
-        if (alive) setReduced(enabled);
+        if (alive && !answered) {
+          answered = true;
+          setReduced(enabled);
+        }
       })
       // An OS that will not answer must not cost the caller its content. The
       // splash makes the same call for the same reason: falling back to `false`
       // shows the animation, and showing it to somebody who never asked either
       // way is a far smaller error than showing nothing to everybody.
       .catch(() => {
-        if (alive) setReduced(false);
+        if (alive && !answered) {
+          answered = true;
+          setReduced(false);
+        }
       });
 
     const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
-      if (alive) setReduced(enabled);
+      if (!alive) return;
+      // An event is always newer than the initial read, so it latches.
+      answered = true;
+      setReduced(enabled);
     });
 
     return () => {
