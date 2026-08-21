@@ -38774,7 +38774,7 @@ Three pieces of apparatus in this area do not work and cost time:
   not a defect, and it was probably half of what the report was reacting to —
   the y-axis is what makes it readable as lag rather than as two scales.
 
-## 2026-08-21 — N108: Today reshaped toward the reference, and four macro colours that had to be searched for
+## 2026-08-21 — N108: Today reshaped toward the reference, and a palette collision resolved by deleting my own
 
 The user supplied a reference image of a redesigned Today screen plus **four
 amendments overriding it**, three of which say *keep what we already have*.
@@ -38819,34 +38819,54 @@ from 400%. That is **recorded in the type** (`RingSweep.saturated`) rather than
 hidden, and the row's number stays the authority up there. Both halves are
 mutation-tested: making the ring stop at 100% turns two tests red.
 
-### Four macro colours do not exist by picking them
+### Four macro colours do not exist by picking them — and then N106 landed the same four
 
 The obvious set — the reference's lime, `#6BB6FF` blue, `#FFB020` amber and a
 pale violet — **fails the palette gate**, and instructively. `kcal` vs `carbs`
 measures **ΔE 7.54 under deuteranopia** (35.62 to normal vision); `protein` vs
-`fat` measures **1.69**. Both need 15.
+`fat` measures **ΔE 1.69**. Both need 15.
 
 **Lime and amber are the same hue to a deuteranope.** Red-green deficiency
-collapses the axis those two are separated on, so calories and carbs can only be
-told apart by *lightness* — which is why `carbs` shipped as a deeper amber
-(`#D49311`) rather than the reference's brighter yellow. A reader who cannot
-separate the outer two rings gets no information from either.
+collapses the axis those two are separated on, so two of the four rings can only
+be told apart by LIGHTNESS. A gamut search over 3,052 admissible colours, scored
+by closeness to the reference's intent, produced a set clearing ΔE 16.01.
 
-A gamut search over 3,052 admissible colours, scored by closeness to the
-reference's intent subject to clearing ΔE 16 pairwise under normal vision plus
-all three CVD simulations, produced the set. Worst pair now **16.01**; `protein`
-is within ΔE 4.0 of the hue the reference asked for.
+**And none of it shipped**, because N106 (#521) merged first having done the
+same search independently and reached the same wall — including the one for
+monochrome, where no four near-neutrals clear the floor at all. Two sessions,
+two searches, two correct answers, one concept. **The second one to merge
+deletes theirs**; the values were never the problem, having two sets was.
 
-**Monochrome gets ONE neutral, not four**, and that is a measured refusal: no
-four-set of near-neutrals clears the floor at all (1,237 candidates searched,
-none), which is the wall `monoSport` already records one colour earlier. The
-labelled rows carry the encoding there.
+What made this more than a revert is that the sets differ in MEMBERSHIP, because
+the screens do. Goals shows protein / fat / carbs / **fibre**; Today's rings show
+protein / carbs / fat plus **calories**. Worse, the two had independently
+assigned the same lime to different things — theirs to `carbs`, mine to `kcal`.
+One colour, two meanings, two screens: the W2/W4 shape arriving through the
+palette rather than through arithmetic.
 
-All of it is registered in `scripts/validate_palette.mjs` — **which matters more
-than the colours**. The gate is opt-in per block, so adding `macroColors`
-without a `block('macroColors', 4)` entry and a check loop would have satisfied
-"passes `check:palette`" while checking nothing. Verified it can fail by putting
-the reference's amber back: exit 1, `kcal vs carbs ΔE 7.54`.
+So the three shared macros now come from N106's `activeMacroColors`, which is
+mono-aware, and **Today and Goals agree by construction**. Calories takes a new
+`kcalRingColor` that is deliberately *not* a member of `macroColors`:
+
+- calories is the **total** the macros sum to, not a fourth category beside
+  them, so it is a bright neutral and the coloured rings read as parts of the
+  white one. A fifth hue was not available anyway — the budget was spent.
+- it is `#F3F6FA`, `text`'s value, and clears every macro: worst pair `carbs` at
+  **ΔE 16.87**, the rest 27–32. All four separations are asserted in the gate.
+- **there is no monochrome twin, by refusal.** `monoMacroColors` already starts
+  at that value and the file records that ramp as *already* below the ΔE 15
+  floor at four steps. Monochrome draws the three macro rings and no calorie
+  ring; the calorie figure is the large number in the middle, in words.
+
+`ringColor()` is the single source for all three render sites — rings, row dots,
+configuration swatches — so they cannot drift, which is the bug
+`activeMacroColors` was introduced on Goals to prevent.
+
+**The lasting lesson is about the gate, not the colours.** `check:palette` is
+opt-in per block: adding `macroColors` without a `block(...)` entry and a check
+loop satisfies "passes `check:palette`" while checking nothing. Both sessions
+registered their set, and both verified the check could fail. That is the only
+reason the collision was a merge conflict rather than a silent second palette.
 
 ### Three things the reference asks for that this app does not have
 
