@@ -514,3 +514,79 @@ func TestGetByUsername(t *testing.T) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }
+
+// **The regression test for trap T10** (raised in review, and the reviewer was
+// right to insist).
+//
+// A clean auto-merge on this branch bound `food_unit` AND `activity_level` both
+// to `$11` while `in.FoodUnit` sat at argument 12, so a PATCH setting the food
+// unit would have written "sedentary" into it. There was no conflict marker and
+// no failing test — each side's projection was correct in isolation.
+//
+// The next variant of that mistake is SILENT rather than loud: `unit_system` and
+// `food_unit` are both TEXT, so swapping their positions in the projection scans
+// without error and simply puts "metric" in `food_unit`. Nothing would fail;
+// the value would just be wrong.
+//
+// So this sets BOTH columns in ONE patch and asserts each round-trips to its own
+// value. It fails if the placeholders are crossed, if the projection order stops
+// matching scanProfile's destinations, or if either column is dropped from a
+// projection.
+func TestUpdateBindsFoodUnitAndActivityLevelToTheirOwnColumns(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+	userID := "t10_" + t.Name()
+
+	name := "T10"
+	if _, err := repo.Create(ctx, userID, NewProfile{DisplayName: &name}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := repo.pool.Exec(context.Background(),
+			`DELETE FROM profiles WHERE user_id = $1`, userID); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
+
+	// Deliberately DIFFERENT values, and from different vocabularies: if the two
+	// were bound to one placeholder, one column receives the other's word and
+	// the CHECK constraint or the assertion catches it. Two values from the same
+	// vocabulary could cross undetected.
+	foodUnit := "oz"
+	activity := "active"
+	unitSystem := "imperial"
+	got, err := repo.Update(ctx, userID, ProfileUpdate{
+		FoodUnit:      &foodUnit,
+		ActivityLevel: &activity,
+		UnitSystem:    &unitSystem,
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	if got.FoodUnit == nil || *got.FoodUnit != "oz" {
+		t.Errorf("food_unit = %v, want \"oz\" — the placeholder is crossed or the projection order drifted", got.FoodUnit)
+	}
+	if got.ActivityLevel == nil || *got.ActivityLevel != "active" {
+		t.Errorf("activity_level = %v, want \"active\"", got.ActivityLevel)
+	}
+	if got.UnitSystem != "imperial" {
+		t.Errorf("unit_system = %q, want \"imperial\" — food_unit sits next to it in every projection", got.UnitSystem)
+	}
+
+	// And it must survive a re-READ, which exercises Get's projection rather
+	// than Update's RETURNING — they are separate strings kept in step by hand.
+	reread, err := repo.Get(ctx, userID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if reread.FoodUnit == nil || *reread.FoodUnit != "oz" {
+		t.Errorf("after re-read food_unit = %v, want \"oz\" — Get's projection disagrees with Update's", reread.FoodUnit)
+	}
+	if reread.ActivityLevel == nil || *reread.ActivityLevel != "active" {
+		t.Errorf("after re-read activity_level = %v, want \"active\"", reread.ActivityLevel)
+	}
+	if reread.UnitSystem != "imperial" {
+		t.Errorf("after re-read unit_system = %q, want \"imperial\"", reread.UnitSystem)
+	}
+}

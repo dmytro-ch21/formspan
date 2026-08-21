@@ -2,7 +2,7 @@ import { ApiError, isNotFound } from './apiError';
 import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 import { newTraceId, traceparent } from './trace';
-import type { UnitSystem } from './units';
+import type { FoodUnit, UnitSystem } from './units';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 const API_BASE = `${API_URL}/v1`;
@@ -22,6 +22,8 @@ export type Profile = {
   /** Centimetres. What waist-to-height and the body-fat estimate need. */
   height_cm: number | null;
   unit_system: UnitSystem;
+  /** null until the athlete chooses — see PREF_FOOD_UNIT. */
+  food_unit: FoodUnit | null;
   track_effort: boolean;
   /**
    * The ONLY thing that makes this athlete's training readable by another
@@ -209,4 +211,28 @@ export async function updateUnitSystem(
     await request<Profile>(getToken, '/profile', { method: 'POST', body: JSON.stringify({}) });
     return patch();
   }
+}
+
+/**
+ * Persist the food-quantity unit on the account.
+ *
+ * Same PATCH endpoint as `updateUnitSystem`, and deliberately NOT its retry
+ * shape: that one catches a 404 and creates the profile first, because units
+ * can be set from onboarding before a profile row exists. The food unit is only
+ * reachable from the food log, which already requires a profile — so a 404 here
+ * means something is wrong rather than something is missing, and creating a
+ * profile as a side effect of a unit toggle would hide it.
+ *
+ * The earlier version of this comment claimed the retry shape was mirrored. It
+ * was not, and a comment asserting a property the code lacks is worse than no
+ * comment. Raised in review.
+ */
+export async function updateFoodUnit(
+  getToken: TokenGetter,
+  unit: FoodUnit,
+): Promise<Profile> {
+  return request<Profile>(getToken, '/profile', {
+    method: 'PATCH',
+    body: JSON.stringify({ food_unit: unit }),
+  });
 }

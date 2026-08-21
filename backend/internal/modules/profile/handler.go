@@ -178,7 +178,12 @@ type updateRequest struct {
 	Sex         *string  `json:"sex"`
 	HeightCM    *float64 `json:"height_cm"`
 	UnitSystem  *string  `json:"unit_system"`
-	TrackEffort *bool    `json:"track_effort"`
+	// FoodUnit is "g" or "oz". Absent means unchanged, like every other field
+	// here — and note that means a client cannot clear it back to null, i.e.
+	// back to "derive from unit_system". Deliberate: nothing in the UI offers
+	// that, and a tri-state toggle answers a question nobody asks.
+	FoodUnit    *string `json:"food_unit"`
+	TrackEffort *bool   `json:"track_effort"`
 	// Off by default and the only switch that makes training readable by
 	// another athlete. Absent means "leave it alone", like every other field
 	// here — a PATCH that omits it can never silently publish anything.
@@ -225,6 +230,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			"unit_system must be metric or imperial")
 		return
 	}
+	if req.FoodUnit != nil && !ValidFoodUnit(*req.FoodUnit) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"food_unit must be g or oz")
+		return
+	}
 
 	if req.ActivityLevel != nil && !ValidActivityLevel(*req.ActivityLevel) {
 		// Refused rather than silently coerced to the default. A PATCH that
@@ -248,6 +258,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Sex:                      req.Sex,
 		HeightCM:                 req.HeightCM,
 		UnitSystem:               req.UnitSystem,
+		FoodUnit:                 req.FoodUnit,
 		TrackEffort:              req.TrackEffort,
 		ShareTrainingWithFriends: req.ShareTrainingWithFriends,
 		ShareTrainingDetails:     req.ShareTrainingDetails,

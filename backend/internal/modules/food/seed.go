@@ -6,16 +6,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // The catalog lives in version-controlled JSON, like `exercises.json` and
 // `techniques.json`: content stays diffable and code-reviewed, deploys are
 // reproducible, and the console can edit a row without a deploy reverting it.
 //
-// Produced by `scripts/import_usda_foods.py` from USDA SR Legacy — a frozen,
-// public-domain dataset. Read that script's docstring before editing this file
-// by hand; the `external_id` on every row records which USDA row each number
-// came from, and hand-editing breaks the ability to check one.
+// Produced by `scripts/import_usda_foods.py` from USDA SR Legacy and FNDDS —
+// public-domain (CC0) datasets. Read that script's docstring before editing
+// this file by hand; the `external_id` on every row records which USDA row each
+// number came from, and hand-editing breaks the ability to check one.
+//
+// **12,651 rows since N88**, of which 177 are the hand-curated set the file used
+// to hold in full. At ~8.2 MB — 5.6 MB of foods plus N89's 29,634 portions in
+// the same file — this is by far the largest embedded asset in the
+// binary; `techniques.json` is 669 KB and `exercises.json` 382 KB.
 //
 // Embedded rather than read from disk so the binary is self-contained and a
 // deploy cannot fail on a container that did not copy a data directory.
@@ -26,14 +32,23 @@ var seedJSON []byte
 // seedFood is the JSON shape, which is deliberately NOT the domain shape.
 //
 // Two fields differ and both are on purpose. `serving_label` is not in the
-// file because every seeded row is per 100 g — repeating "100 g" 173 times
+// file because every seeded row is per 100 g — repeating "100 g" 12,651 times
 // would invite one of them to be wrong. `usda_description` is in the file and
 // not in the domain: it is there so a reviewer can see which USDA row a number
 // came from without fetching anything, and the API has no reason to serve it.
 type seedFood struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Category string   `json:"category"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	// RankTier is 0 for the 177 hand-curated foods and 1 for the bulk USDA
+	// import. Written by scripts/import_usda_foods.py, never by hand.
+	//
+	// NOT a pointer, and the zero value is load-bearing in the WRONG direction
+	// — an absent `rank_tier` in the JSON unmarshals to 0, which is the CURATED
+	// tier. `validate` therefore requires the field to be present rather than
+	// trusting the default, because a seed file that lost the field would
+	// silently promote all 12,651 rows to tier 0 and undo the ranking entirely.
+	RankTier *int     `json:"rank_tier"`
 	Aliases  []string `json:"aliases"`
 	KCal     float64  `json:"kcal"`
 	ProteinG float64  `json:"protein_g"`
@@ -41,14 +56,16 @@ type seedFood struct {
 	FatG     float64  `json:"fat_g"`
 	FibreG   *float64 `json:"fibre_g"`
 	// The label macros (N52). Nullable because USDA does not state every
-	// nutrient for every food — measured coverage over the 177 seeded rows is
-	// 172 saturated fat, 165 sugar, 175 sodium, 170 cholesterol. Absence is
-	// carried through as NULL rather than 0.
+	// nutrient for every food. Measured coverage across the two imported
+	// datasets (N88): SR Legacy states saturated fat on 96% of rows, sugar on
+	// 77%, sodium on 99% and cholesterol on 95%; FNDDS states all four on 100%.
+	// Absence is carried through as NULL rather than 0.
 	//
-	// `added_sugar_g` is deliberately NOT here: SR Legacy does not carry it at
-	// all, so it is null for every seeded food and populated only by Open Food
-	// Facts on a scan. A field in this struct that could never be non-nil
-	// would read as an import that silently never fires.
+	// `added_sugar_g` is deliberately NOT here: measured at N88, NOT ONE of the
+	// 13,620 rows across SR Legacy, FNDDS and Foundation states it. It is null
+	// for every seeded food and populated only by Open Food Facts on a scan. A
+	// field in this struct that could never be non-nil would read as an import
+	// that silently never fires.
 	SaturatedFatG   *float64 `json:"saturated_fat_g"`
 	SugarG          *float64 `json:"sugar_g"`
 	SodiumMG        *float64 `json:"sodium_mg"`
@@ -57,6 +74,17 @@ type seedFood struct {
 	Market          string   `json:"market"`
 	ExternalID      string   `json:"external_id"`
 	USDADescription string   `json:"usda_description"`
+	// Portions is absent on the 268 rows USDA states none for, which is a
+	// legitimate state — 100 g still works. Not a pointer, because unlike
+	// RankTier the zero value (nil) means exactly what an absent field means.
+	Portions []seedPortion `json:"portions"`
+}
+
+// seedPortion is one household measure, as it sits in the JSON.
+type seedPortion struct {
+	Seq   int     `json:"seq"`
+	Label string  `json:"label"`
+	Grams float64 `json:"grams"`
 }
 
 // SeedServingLabel is the serving every seeded row carries.
@@ -106,12 +134,29 @@ func SeedData() ([]Food, error) {
 			SodiumMG:       s.SodiumMG,
 			CholesterolMG:  s.CholesterolMG,
 			Market:         s.Market,
+			RankTier:       *s.RankTier,
+			Portions:       portionsOf(s),
 			Source:         SourceSeed,
 			ExternalID:     &externalID,
 			ExternalSource: &externalSource,
 		})
 	}
 	return foods, nil
+}
+
+// portionsOf converts one row's portions, preserving the file's order.
+//
+// Returns nil rather than an empty slice for a food with none, so the wire
+// omits the field entirely (see Food.Portions) instead of sending `[]`.
+func portionsOf(s seedFood) []Portion {
+	if len(s.Portions) == 0 {
+		return nil
+	}
+	out := make([]Portion, 0, len(s.Portions))
+	for _, p := range s.Portions {
+		out = append(out, Portion{Seq: p.Seq, Label: p.Label, Grams: p.Grams})
+	}
+	return out
 }
 
 // validSlug matches the column's own CHECK. Enforced here too so a bad id
@@ -153,12 +198,43 @@ func validate(foods []seedFood) error {
 			return fmt.Errorf("food: seed %q has no market", f.ID)
 		case f.ExternalID == "":
 			return fmt.Errorf("food: seed %q has no external_id — every number must be checkable against its source", f.ID)
+		case f.RankTier == nil:
+			// Absence is checked, not defaulted. An `int` here would read a
+			// missing field as 0 — the CURATED tier — so a seed file that lost
+			// the field would silently promote all 12,651 rows ahead of nothing
+			// and disable the ranking, with no error anywhere.
+			return fmt.Errorf("food: seed %q has no rank_tier", f.ID)
+		case *f.RankTier < 0:
+			return fmt.Errorf("food: seed %q has a negative rank_tier", f.ID)
 		case f.ServingGrams <= 0:
 			return fmt.Errorf("food: seed %q has a non-positive serving_grams", f.ID)
 		case f.KCal < 0 || f.ProteinG < 0 || f.CarbG < 0 || f.FatG < 0:
 			return fmt.Errorf("food: seed %q has a negative macro", f.ID)
 		}
 		seen[f.ID] = true
+
+		// Portions get their own pass rather than another switch arm, because
+		// each row has many and the error has to name which one.
+		seqs := make(map[int]bool, len(f.Portions))
+		for _, p := range f.Portions {
+			switch {
+			case p.Grams <= 0:
+				// The one rule that matters. A portion with no weight cannot be
+				// logged against a target, and FNDDS really does ship one
+				// (gramWeight 0 on "Milk, human"). The column CHECKs this too;
+				// failing here names the food instead of the constraint.
+				return fmt.Errorf("food: seed %q portion %q has a non-positive gram weight", f.ID, p.Label)
+			case strings.TrimSpace(p.Label) == "":
+				return fmt.Errorf("food: seed %q has a portion with no label", f.ID)
+			case p.Seq < 0:
+				return fmt.Errorf("food: seed %q portion %q has a negative seq", f.ID, p.Label)
+			case seqs[p.Seq]:
+				// seq is half the primary key, so a duplicate would be a
+				// constraint violation mid-deploy naming only the constraint.
+				return fmt.Errorf("food: seed %q has two portions at seq %d", f.ID, p.Seq)
+			}
+			seqs[p.Seq] = true
+		}
 	}
 	return nil
 }

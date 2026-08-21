@@ -136,6 +136,34 @@ type Food struct {
 	// migration — see Outcome below.
 	Market string `json:"market"`
 
+	// RankTier is search precedence, lowest first: 0 is the hand-curated set,
+	// 1 is the bulk USDA import. It is the PRIMARY sort key of a catalog
+	// search — see SearchRank — and it exists because 803 catalog rows contain
+	// the word "chicken" and neither lead position nor trigram similarity can
+	// tell the curated "Chicken breast" from FNDDS's "Chicken breast, fried,
+	// coated, skin / coating eaten, from pre-cooked".
+	//
+	// Served on the wire so a client can say WHY a row is where it is, and so
+	// that a future "generic foods only" filter needs no new field. Clients
+	// must treat unseen values as bulk rather than curated — the server owns
+	// this vocabulary and may extend it, and guessing in the confident
+	// direction is the trap N41 and N51 both hit.
+	RankTier int `json:"rank_tier"`
+
+	// Portions are the household ways this food is measured — "1 large" = 50 g
+	// on an egg, "1 cup" = 158 g on cooked rice. From USDA `foodPortions`;
+	// 98% of the catalog has at least one, 2.4 on average.
+	//
+	// **Populated by Get and left nil by Search, deliberately.** A search page
+	// of 25 foods would carry ~60 portions nobody has asked for yet, and a
+	// portion is only picked once a specific food has been chosen. `omitempty`
+	// so a list response does not carry 25 nulls.
+	//
+	// 100 g is NOT in here and never will be: it is always available from
+	// ServingGrams, so a client always has at least one way to measure a food
+	// even when this is empty.
+	Portions []Portion `json:"portions,omitempty"`
+
 	Source Source `json:"source"`
 	// ExternalID and ExternalSource record which upstream row the numbers came
 	// from, so any figure in this catalog can be checked against its origin.
@@ -399,4 +427,22 @@ func (f *Food) Validate() error {
 		return errors.New("food: fibre must not be negative")
 	}
 	return nil
+}
+
+// Portion is one household measure of a catalog food.
+//
+// A struct rather than a map because the ORDER matters: Seq is USDA's own
+// `sequenceNumber`, which lists the most representative portion first, and any
+// ordering we invented would be a guess dressed as editorial judgement.
+//
+// Grams is NOT nullable, unlike almost every other quantity in this package. A
+// portion whose weight is unknown cannot be logged against a calorie target, so
+// it is not a portion this catalog can carry — the importer drops those rather
+// than storing a null. That is the opposite of the rule for nutrients, where
+// absence is a fact worth recording, and the difference is that a null nutrient
+// still leaves a loggable food while a null gram weight does not.
+type Portion struct {
+	Seq   int     `json:"seq"`
+	Label string  `json:"label"`
+	Grams float64 `json:"grams"`
 }

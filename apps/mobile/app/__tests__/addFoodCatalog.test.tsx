@@ -26,9 +26,14 @@ jest.setTimeout(30_000);
 configure({ asyncUtilTimeout: 10_000 });
 
 const mockSearchCatalog = jest.fn();
+const mockFetchCatalogFood = jest.fn();
 jest.mock('@/lib/catalogApi', () => {
   const real = jest.requireActual('@/lib/catalogApi');
-  return { ...real, searchCatalog: (...a: unknown[]) => mockSearchCatalog(...a) };
+  return {
+    ...real,
+    searchCatalog: (...a: unknown[]) => mockSearchCatalog(...a),
+    fetchCatalogFood: (...a: unknown[]) => mockFetchCatalogFood(...a),
+  };
 });
 
 const mockLocalFoods = jest.fn();
@@ -78,6 +83,10 @@ beforeEach(() => {
   mockLocalFoods.mockReset().mockResolvedValue([]);
   mockLogFood.mockReset().mockResolvedValue('entry-1');
   mockSearchCatalog.mockReset().mockResolvedValue(answer());
+  // Rejects by default, which is the OFFLINE case — the quantity step must
+  // still work without portions, because 100 g is always offered. A test that
+  // needs portions overrides this.
+  mockFetchCatalogFood.mockReset().mockRejectedValue(new Error('offline'));
 });
 
 afterEach(() => {
@@ -98,6 +107,30 @@ async function search(text: string) {
  * The whole point of N51. On a fresh account the saved list is empty, and
  * before this the screen asked nothing else.
  */
+/**
+ * Tap a catalog CARD BODY and log through the quantity step.
+ *
+ * Two controls live on a card since N58 met N90, and they do different things:
+ * `add-catalog-row-<id>` is the body and opens the quantity sheet;
+ * `add-catalog-<id>` is the `+`, which logs one reference serving in a single
+ * tap. Press the wrong one and the assertion still passes for the wrong reason.
+ *
+ * The body's press opens the quantity step rather than logging outright, so a
+ * log through it is two presses. The default quantity is the
+ * first option offered, which for a food with no portions is 100 g — which is
+ * what the pre-N90 behaviour logged, so the macro assertions below still mean
+ * what they meant.
+ */
+async function logCatalogRow(testID: string) {
+  await act(async () => {
+    fireEvent.press(screen.getByTestId(testID));
+  });
+  await waitFor(() => expect(screen.getByTestId('food-quantity-log')).toBeTruthy());
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('food-quantity-log'));
+  });
+}
+
 it('searches the catalog, not only the athlete’s saved foods', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
@@ -117,9 +150,7 @@ it('logs a catalog row without claiming it as a saved food', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
-  await act(async () => {
-    fireEvent.press(screen.getByTestId('add-catalog-usda-1'));
-  });
+  await logCatalogRow('add-catalog-row-usda-1');
   const entry = mockLogFood.mock.calls[0][1];
   expect(entry.kcal).toBe(389);
   expect(entry.meal).toBe('lunch');
@@ -295,6 +326,43 @@ it('does not announce the glyph to a screen reader', async () => {
   // the glyph removed, the second alone would pass with it never rendered.
   expect(screen.queryByTestId('add-catalog-glyph-usda-1')).toBeNull();
   expect(screen.queryByText(glyphFor('grain'))).toBeNull();
+});
+
+/**
+ * The wiring N90 added, which neither the component test nor the logic test can
+ * see: that the grams chosen in the sheet reach `logFood` as a scaled entry.
+ *
+ * Before this, a tap logged one 100 g serving whatever the athlete ate.
+ */
+it('logs the quantity the athlete chose, scaled', async () => {
+  mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
+  // The single-food fetch is what carries portions; search never does.
+  mockFetchCatalogFood.mockResolvedValue({
+    ...CATALOG_OATS,
+    portions: [{ seq: 1, label: '1 cup', grams: 81 }],
+  });
+  await search('oats');
+  await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
+
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
+  });
+  // The portion arrives from the follow-up fetch, so it is not on screen at the
+  // moment of the tap.
+  await waitFor(() => expect(screen.getByTestId('food-portion-81')).toBeTruthy());
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('food-portion-81'));
+  });
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('food-quantity-log'));
+  });
+
+  const entry = mockLogFood.mock.calls[0][1];
+  // 81g of a per-100g food: 0.81 servings, and the macros scaled to match
+  // rather than the full 389 kcal the old code logged.
+  expect(entry.servings).toBeCloseTo(0.81, 2);
+  expect(entry.kcal).toBeCloseTo(315.1, 1);
+  expect(entry.kcal).toBeLessThan(CATALOG_OATS.kcal);
 });
 
 describe('an empty result says which kind of empty', () => {

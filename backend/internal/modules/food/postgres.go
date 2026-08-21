@@ -22,7 +22,7 @@ const selectColumns = `
 	f.id, f.name, f.brand, f.category, f.aliases, f.serving_label, f.serving_grams,
 	f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g,
 	f.saturated_fat_g, f.sugar_g, f.added_sugar_g, f.sodium_mg, f.cholesterol_mg,
-	f.market, f.source,
+	f.market, f.rank_tier, f.source,
 	f.external_id, f.external_source, f.created_at, f.updated_at`
 
 type scannable interface {
@@ -35,7 +35,7 @@ func scanFood(row scannable) (*Food, error) {
 		&f.ID, &f.Name, &f.Brand, &f.Category, &f.Aliases, &f.ServingLabel, &f.ServingGrams,
 		&f.KCal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG,
 		&f.SaturatedFatG, &f.SugarG, &f.AddedSugarG, &f.SodiumMG, &f.CholesterolMG,
-		&f.Market, &f.Source,
+		&f.Market, &f.RankTier, &f.Source,
 		&f.ExternalID, &f.ExternalSource, &f.CreatedAt, &f.UpdatedAt,
 	)
 	if err != nil {
@@ -69,7 +69,11 @@ func (r *PostgresRepository) Search(ctx context.Context, f SearchFilter) ([]Food
 		// market browse pages non-deterministically, repeating rows on one page
 		// and skipping them on the next. The query path has the same guard in
 		// SearchRank; this is the path it does not cover. Raised in review.
-		order = "f.name ASC, f.id ASC"
+		// rank_tier leads here too, so browsing a category shows the curated
+		// foods before the bulk import rather than whatever sorts first
+		// alphabetically — "Abiyuch, raw" is a real SR Legacy row and is not
+		// what anyone opening `category=fruit` is looking for.
+		order = "f.rank_tier ASC, f.name ASC, f.id ASC"
 	)
 
 	if f.Query != "" {
@@ -142,7 +146,7 @@ func (r *PostgresRepository) Search(ctx context.Context, f SearchFilter) ([]Food
 			&item.CarbG, &item.FatG, &item.FibreG,
 			&item.SaturatedFatG, &item.SugarG, &item.AddedSugarG,
 			&item.SodiumMG, &item.CholesterolMG,
-			&item.Market, &item.Source,
+			&item.Market, &item.RankTier, &item.Source,
 			&item.ExternalID, &item.ExternalSource, &item.CreatedAt, &item.UpdatedAt, &n,
 		)
 		if err != nil {
@@ -171,7 +175,46 @@ func (r *PostgresRepository) Get(ctx context.Context, id string) (*Food, error) 
 	if err != nil {
 		return nil, fmt.Errorf("food: get: %w", err)
 	}
+	// A second query rather than a JOIN. A join would repeat all 23 food
+	// columns once per portion — up to 18 times — and then need de-duplicating
+	// in Go. Two round trips on a single-food read is the cheaper mistake.
+	//
+	// Portions are loaded HERE and not in Search, deliberately: see
+	// Food.Portions for why a 25-row search page must not carry them.
+	portions, err := r.portionsFor(ctx, f.ID)
+	if err != nil {
+		return nil, err
+	}
+	f.Portions = portions
 	return f, nil
+}
+
+// portionsFor returns one food's portions in USDA's own sequence order.
+//
+// Returns nil, not an empty slice, when a food has none — 268 of the 12,651
+// catalog rows are in that state legitimately, and `omitempty` on the field
+// then keeps `portions` off the wire entirely rather than sending `[]`.
+func (r *PostgresRepository) portionsFor(ctx context.Context, foodID string) ([]Portion, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT seq, label, grams FROM food_catalog_portions
+		  WHERE food_id = $1 ORDER BY seq ASC`, foodID)
+	if err != nil {
+		return nil, fmt.Errorf("food: portions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Portion
+	for rows.Next() {
+		var p Portion
+		if err := rows.Scan(&p.Seq, &p.Label, &p.Grams); err != nil {
+			return nil, fmt.Errorf("food: scan portion: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("food: portion rows: %w", err)
+	}
+	return out, nil
 }
 
 // Coverage answers "what is actually in here".
@@ -245,7 +288,9 @@ func (r *PostgresRepository) CountMarket(ctx context.Context, market string) (in
 //     PATCH sets source='admin', and from then on a deploy skips the row. Drop
 //     this and the next deploy silently reverts every edit anybody made.
 //   - The `IS DISTINCT FROM` comparison stops a no-op deploy touching
-//     `updated_at` on 173 rows it did not change.
+//     `updated_at` on 12,651 rows it did not change. That mattered little at
+//     177 rows and matters a great deal now: seeding the full catalog takes
+//     ~9s measured, and without this every deploy would rewrite every row.
 //
 // **Both lists are EXPLICIT columns, and that is load-bearing rather than
 // stylistic.** A column left out of both is never written by a deploy and
@@ -258,8 +303,8 @@ const upsertSQL = `
 		id, name, brand, category, aliases, serving_label, serving_grams,
 		kcal, protein_g, carb_g, fat_g, fibre_g,
 		saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-		market, external_id, external_source
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+		market, rank_tier, external_id, external_source
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 	ON CONFLICT (id) DO UPDATE SET
 		name            = EXCLUDED.name,
 		brand           = EXCLUDED.brand,
@@ -278,6 +323,7 @@ const upsertSQL = `
 		sodium_mg       = EXCLUDED.sodium_mg,
 		cholesterol_mg  = EXCLUDED.cholesterol_mg,
 		market          = EXCLUDED.market,
+		rank_tier       = EXCLUDED.rank_tier,
 		external_id     = EXCLUDED.external_id,
 		external_source = EXCLUDED.external_source,
 		updated_at      = now()
@@ -288,7 +334,7 @@ const upsertSQL = `
 		food_catalog.fat_g, food_catalog.fibre_g,
 		food_catalog.saturated_fat_g, food_catalog.sugar_g, food_catalog.added_sugar_g,
 		food_catalog.sodium_mg, food_catalog.cholesterol_mg,
-		food_catalog.market,
+		food_catalog.market, food_catalog.rank_tier,
 		food_catalog.external_id, food_catalog.external_source
 	) IS DISTINCT FROM (
 		EXCLUDED.name, EXCLUDED.brand, EXCLUDED.category,
@@ -297,7 +343,7 @@ const upsertSQL = `
 		EXCLUDED.fat_g, EXCLUDED.fibre_g,
 		EXCLUDED.saturated_fat_g, EXCLUDED.sugar_g, EXCLUDED.added_sugar_g,
 		EXCLUDED.sodium_mg, EXCLUDED.cholesterol_mg,
-		EXCLUDED.market,
+		EXCLUDED.market, EXCLUDED.rank_tier,
 		EXCLUDED.external_id, EXCLUDED.external_source
 	)`
 
@@ -310,7 +356,7 @@ func upsertArgs(f Food) []any {
 		f.ID, f.Name, f.Brand, f.Category, aliases, f.ServingLabel, f.ServingGrams,
 		f.KCal, f.ProteinG, f.CarbG, f.FatG, f.FibreG,
 		f.SaturatedFatG, f.SugarG, f.AddedSugarG, f.SodiumMG, f.CholesterolMG,
-		f.Market,
+		f.Market, f.RankTier,
 		f.ExternalID, f.ExternalSource,
 	}
 }
@@ -339,6 +385,53 @@ func (r *PostgresRepository) UpsertAll(ctx context.Context, foods []Food) error 
 	if err := results.Close(); err != nil {
 		return fmt.Errorf("food: batch: %w", err)
 	}
+
+	// Portions are REPLACED wholesale for seed-owned foods, not diffed.
+	//
+	// The food upsert above goes to some trouble to avoid touching rows it did
+	// not change (`IS DISTINCT FROM`), and this deliberately does not: a portion
+	// row is four small columns with no `updated_at` and nothing downstream
+	// watches it, so the diffing machinery would buy nothing. Delete-then-insert
+	// is also the only shape that can REMOVE a portion USDA withdrew, which the
+	// food upsert itself cannot do for a withdrawn food.
+	//
+	// **Both halves are scoped to `source = 'seed'`**, which is what stops a
+	// deploy wiping the portions of a food the console has taken ownership of.
+	// Drop that from either statement and an admin edit loses its portions on
+	// the next deploy — silently, because the food row itself would be fine.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM food_catalog_portions p
+		 USING food_catalog f
+		 WHERE p.food_id = f.id AND f.source = 'seed'`); err != nil {
+		return fmt.Errorf("food: clear portions: %w", err)
+	}
+
+	pbatch := &pgx.Batch{}
+	queued := 0
+	for _, f := range foods {
+		for _, p := range f.Portions {
+			pbatch.Queue(`
+				INSERT INTO food_catalog_portions (food_id, seq, label, grams)
+				SELECT $1, $2, $3, $4
+				 WHERE EXISTS (SELECT 1 FROM food_catalog
+				                WHERE id = $1 AND source = 'seed')`,
+				f.ID, p.Seq, p.Label, p.Grams)
+			queued++
+		}
+	}
+	if queued > 0 {
+		presults := tx.SendBatch(ctx, pbatch)
+		for i := 0; i < queued; i++ {
+			if _, err := presults.Exec(); err != nil {
+				presults.Close() //nolint:errcheck // returning the more useful error
+				return fmt.Errorf("food: upsert portion %d: %w", i, err)
+			}
+		}
+		if err := presults.Close(); err != nil {
+			return fmt.Errorf("food: portion batch: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("food: commit: %w", err)
 	}

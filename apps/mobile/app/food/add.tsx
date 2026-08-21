@@ -57,9 +57,12 @@ import {
   searchCatalog,
   type CatalogFood,
   type CatalogSearch,
+  fetchCatalogFood,
 } from '@/lib/catalogApi';
+import { FoodQuantity } from '@/components/FoodQuantity';
 import { glyphFor } from '@/lib/foodGlyph';
 import { localFoods, logFood, recentsFor, saveFoodLocally } from '@/lib/foodLog';
+import { macrosForGrams, servingBasisGrams, servingsForGrams } from '@/lib/foodQuantity';
 import {
   MEALS,
   atwater,
@@ -296,6 +299,35 @@ export default function AddFoodScreen() {
     [matches, q],
   );
 
+  /**
+   * The catalog food whose quantity is being chosen, with its portions loaded.
+   *
+   * A step between tapping and logging, added by N90: a tap used to log one
+   * 100 g serving whatever the athlete ate. Held here rather than routed to a
+   * new screen so the search results are still behind it — picking the wrong
+   * row is one dismissal away from being fixed.
+   */
+  const [picking, setPicking] = useState<CatalogFood | null>(null);
+  const [pickBusy, setPickBusy] = useState(false);
+
+  const openQuantity = useCallback(
+    async (food: CatalogFood) => {
+      // Shown immediately from the search row, then upgraded with portions when
+      // they arrive — the search response deliberately does not carry them, and
+      // blocking the sheet on a network call would put a spinner between the
+      // tap and the number.
+      setPicking(food);
+      try {
+        const full = await fetchCatalogFood(getToken, food.id);
+        setPicking((cur) => (cur && cur.id === full.id ? full : cur));
+      } catch {
+        // Offline, or the food vanished. The sheet still works: 100 g is always
+        // offered, so the athlete can log by weight regardless.
+      }
+    },
+    [getToken],
+  );
+
   const log = useCallback(
     async (food: Food, servings = 1) => {
       if (!userId) return;
@@ -333,26 +365,56 @@ export default function AddFoodScreen() {
    * exists to be.
    */
   const logCatalog = useCallback(
-    async (food: CatalogFood) => {
+    async (food: CatalogFood, grams: number) => {
       if (!userId) return;
+      setPickBusy(true);
+      // try/finally, so a throw cannot strand the Log button disabled with
+      // nothing said. `logFood` is a local SQLite write and rarely fails, which
+      // is exactly why the failure path would never be exercised by hand.
+      // Raised in review.
+      // GRAMS are what the athlete chose; `servings` is how this food's own
+      // reference serving divides into them, and the macros are scaled to
+      // match. Nothing here points at a portion row — correcting a catalog
+      // portion later must not rewrite a meal already logged.
       await logFood(userId, {
         eaten_on: date,
         meal,
         name: catalogName(food),
-        servings: 1,
+        servings: servingsForGrams(food, grams),
         serving_label: food.serving_label,
-        kcal: food.kcal,
-        protein_g: food.protein_g,
-        carb_g: food.carb_g,
-        fat_g: food.fat_g,
-        fibre_g: food.fibre_g,
+        ...macrosForGrams(food, grams),
         source_food_id: null,
       });
-      request('catalog food logged');
-      router.back();
+      try {
+        request('catalog food logged');
+        router.back();
+      } finally {
+        setPickBusy(false);
+      }
     },
     [userId, date, meal, router],
   );
+
+  if (picking) {
+    return (
+      <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
+        <Stack.Screen options={{ title: 'How much?' }} />
+        <Pressable
+          onPress={() => setPicking(null)}
+          accessibilityRole="button"
+          accessibilityLabel="Back to search results"
+          testID="food-quantity-cancel"
+        >
+          <Text style={styles.rowServing}>← Back</Text>
+        </Pressable>
+        <FoodQuantity
+          food={picking}
+          busy={pickBusy}
+          onLog={(grams) => void logCatalog(picking, grams)}
+        />
+      </KeyboardAwareScrollView>
+    );
+  }
 
   if (creating) {
     return (
@@ -465,9 +527,12 @@ export default function AddFoodScreen() {
             <Pressable
               key={f.id}
               style={styles.card}
-              onPress={() => void logCatalog(f)}
+              onPress={() => void openQuantity(f)}
               accessibilityRole="button"
-              accessibilityLabel={`Log ${catalogName(f)} from the food catalog`}
+              // N58 renders the card; N90 owns what a tap DOES. The label has to
+              // follow the action, not the card — a row that says "Log X" and
+              // then opens a quantity sheet is lying to a screen reader.
+              accessibilityLabel={`Choose how much ${catalogName(f)} to log from the food catalog`}
               testID={`add-catalog-row-${f.id}`}
             >
               {/* Derived from the CATEGORY, never the name — see `foodGlyph`.
@@ -506,19 +571,20 @@ export default function AddFoodScreen() {
                 <Text style={styles.cardServing}>{servingLine(f)}</Text>
               </View>
 
-              {/* The `+` logs, and so does the card body — the SAME action for
-                  now. The saved-food rows directly above these cards log on a
-                  whole-row tap, and a list where the row above responds to a
-                  body tap and this one ignores it teaches a gesture it then
-                  refuses. Raised in review; the body was dead.
-
-                  Still a separate control rather than only a row press,
-                  because when a detail screen exists the body's press becomes
-                  "open" and the `+` keeps meaning "log" — that is the whole
+              {/* **The split N58 predicted has now happened (N90).** Its note
+                  read: "when a detail screen exists the body's press becomes
+                  'open' and the `+` keeps meaning 'log' — that is the whole
                   point of a quick-add affordance, and it should not have to be
-                  re-added then. */}
+                  re-added then." It did not have to be.
+
+                  So the body opens the quantity sheet and this stays a ONE-TAP
+                  log, at the food's own reference serving — which is the exact
+                  behaviour a tap had before N90, preserved for the athlete who
+                  does not want to be asked. `servingBasisGrams` rather than a
+                  literal 100 because a food may state a different basis, and a
+                  hardcoded 100 would silently mis-log that one. */}
               <Pressable
-                onPress={() => void logCatalog(f)}
+                onPress={() => void logCatalog(f, servingBasisGrams(f))}
                 style={[styles.cardAdd, { borderColor: accent.accent }]}
                 accessibilityRole="button"
                 accessibilityLabel={`Add ${catalogName(f)}`}
