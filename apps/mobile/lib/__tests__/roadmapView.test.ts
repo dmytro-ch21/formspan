@@ -1,6 +1,7 @@
 import type { Criteria, Curriculum, CurriculumItem, Progress } from '@/lib/curriculum';
 import {
   buildRoadmap,
+  evidenceNoteOf,
   goalOf,
   measuresOf,
   percent,
@@ -287,5 +288,125 @@ describe('percent', () => {
     expect(percent(0.001)).toBe(1);
     expect(percent(0.999)).toBe(99);
     expect(percent(0.5)).toBe(50);
+  });
+});
+
+/**
+ * N122 — "I activated a roadmap and added the counts of how many times I have
+ * done each, and none got counted towards the roadmap."
+ *
+ * The backend was measured correct: enrol through the real repository, log
+ * `drilled` and `scored` tags, and `GET /v1/curricula/{id}` returns
+ * `drilled_sessions: 1, scored: 3` against the right item. What the athlete
+ * could not see is the part these cover — 61 of white belt's 81 technique
+ * items are measured on LIVE rounds, so drilling them produced evidence the
+ * payload carried and the screen drew nowhere, under a state line reading
+ * "your record has evidence for this".
+ *
+ * Each assertion here fails when `evidenceNoteOf` is deleted or its guards are
+ * inverted; mutation-checked one at a time.
+ */
+describe('what would count — the drilled-against-a-live-criterion explanation', () => {
+  const phases = [{ order: 0, title: 'Start Standing', description: 'Begin safely.' }];
+
+  it('says what was drilled and what would move a live-measured item', () => {
+    const item = technique(
+      'armbar',
+      0,
+      { target_scored: 12, target_sessions: 10, min_hit_rate: 0.3 },
+      { drilled_sessions: 9 },
+    );
+    expect(evidenceNoteOf(item, true)).toBe(
+      'Drilled in 9 classes. Drilling is not counted here — to move this one, land it in a live round.',
+    );
+  });
+
+  it('names both halves when the item also measures defence', () => {
+    const item = technique(
+      'guard-pull-defence',
+      0,
+      { target_scored: 12, target_defended: 4 },
+      { drilled_sessions: 1 },
+    );
+    expect(evidenceNoteOf(item, true)).toContain('land it in a live round, or stop theirs');
+  });
+
+  it('says "stop theirs" alone where there is no offensive half', () => {
+    const item = technique('stop-the-pass', 0, { target_defended: 8 }, { drilled_sessions: 2 });
+    expect(evidenceNoteOf(item, true)).toContain('stop theirs in a live round');
+  });
+
+  it('singularises one class rather than saying "1 classes"', () => {
+    const item = technique('armbar', 0, { target_scored: 12 }, { drilled_sessions: 1 });
+    expect(evidenceNoteOf(item, true)).toContain('Drilled in 1 class.');
+    expect(evidenceNoteOf(item, true)).not.toContain('1 classes');
+  });
+
+  it('stays silent where drilling DOES count — the measure already shows it', () => {
+    const item = technique(
+      'breakfall',
+      0,
+      { target_drilled_sessions: 8 },
+      { drilled_sessions: 3 },
+    );
+    // Contradicting "Classes drilled in 3 / 8" directly above it would be worse
+    // than saying nothing.
+    expect(evidenceNoteOf(item, true)).toBeNull();
+  });
+
+  it('stays silent with no drilled evidence — there is no shortfall to invent', () => {
+    const item = technique('armbar', 0, { target_scored: 12 }, { drilled_sessions: 0 });
+    expect(evidenceNoteOf(item, true)).toBeNull();
+  });
+
+  it('stays silent for a concept, which is not a measurable that failed', () => {
+    expect(evidenceNoteOf(concept(0, 0, 'Position before submission'), true)).toBeNull();
+  });
+
+  it('stays silent for a MALFORMED concept that somehow carries criteria', () => {
+    // The ordinary concept path is covered above and exits on `criteria: null`,
+    // so it says nothing about the kind guard. This one has both, which the
+    // schema's `curriculum_items_kind_shape` forbids — and that is the point:
+    // the guard exists so this function is correct on its own terms rather
+    // than only while a constraint in another file holds.
+    const malformed: CurriculumItem = {
+      ...concept(0, 0, 'Position before submission'),
+      criteria: { ...NO_CRITERIA, target_scored: 12 },
+      progress: { ...NO_PROGRESS, drilled_sessions: 5 },
+    };
+    expect(evidenceNoteOf(malformed, true)).toBeNull();
+  });
+
+  it('stays silent when not enrolled — nothing is being counted at all', () => {
+    const item = technique('armbar', 0, { target_scored: 12 }, { drilled_sessions: 9 });
+    expect(evidenceNoteOf(item, false)).toBeNull();
+  });
+
+  it('keeps reporting the drilling once live evidence arrives', () => {
+    // "Landed live 2 / 12, drilled in 9 classes" is the athlete's real
+    // position. Hiding the drilling at the first round would make the note
+    // vanish exactly when it starts being encouraging.
+    const item = technique(
+      'armbar',
+      0,
+      { target_scored: 12 },
+      { drilled_sessions: 9, scored: 2, attempts: 5 },
+    );
+    expect(evidenceNoteOf(item, true)).toContain('Drilled in 9 classes');
+  });
+
+  it('reaches the lesson the screen actually draws', () => {
+    const c = curriculum({
+      phases,
+      items: [technique('armbar', 0, { target_scored: 12 }, { drilled_sessions: 4 })],
+    });
+    const lesson = buildRoadmap(c).milestones[0].lessons[0];
+    expect(lesson.evidenceNote).toContain('Drilled in 4 classes');
+    // The measures themselves are untouched: the criteria did not soften and
+    // nothing became tickable. This is the invariant migration 000034 states.
+    expect(lesson.measures).toEqual([
+      { label: 'Landed live', need: '12', have: '0', met: false },
+    ]);
+    expect(lesson.mastered).toBe(false);
   });
 });

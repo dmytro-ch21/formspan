@@ -1,5 +1,5 @@
 import { Link, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { SectionHeader } from '@/components/ui/Section';
@@ -9,6 +9,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { fetchFocus, type Focus } from '@/lib/bjjFocus';
 import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
 import { roadmapMilestone } from '@/lib/roadmapEntry';
+import { subscribeSync, syncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -54,6 +55,35 @@ export function RoadmapSummary() {
       void load();
     }, [load]),
   );
+
+  /**
+   * And whenever a sync lands — N122, same reason as the roadmap screen.
+   *
+   * `mastered_items` here is derived server-side from the tags the outbox
+   * pushes, so a reflection written and synced while this tab sat mounted
+   * moved the server's answer and not this block's copy of it. Focus alone
+   * corrects that only if the athlete leaves the tab and comes back, which is
+   * exactly the "it never counted" reading the ticket reports.
+   *
+   * A subscription rather than an effect keyed on `lastSyncAt`, for the reason
+   * spelled out on the roadmap screen: the latter is a setState in an effect
+   * body, which the lint ratchet refuses.
+   */
+  useEffect(() => {
+    let seen = syncState().lastSyncAt;
+    return subscribeSync((s) => {
+      // Sign-out emits `lastSyncAt: null`, which is not a sync — see the
+      // longer note on the roadmap screen. Re-arm and say nothing rather than
+      // fetching with no identity.
+      if (s.lastSyncAt === null) {
+        seen = null;
+        return;
+      }
+      if (s.lastSyncAt === seen) return;
+      seen = s.lastSyncAt;
+      void load();
+    });
+  }, [load]);
 
   // Nothing to say rather than an empty state. Someone on no roadmap with no
   // focus is not missing anything — this block is for people mid-syllabus, and

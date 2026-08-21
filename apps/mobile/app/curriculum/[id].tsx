@@ -1,5 +1,5 @@
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +25,7 @@ import {
 } from '@/lib/curriculum';
 import { proposeFocus, proposeOneFocus, type FocusProposal } from '@/lib/roadmapFocus';
 import { buildRoadmap, percent, type Lesson, type Milestone } from '@/lib/roadmapView';
+import { subscribeSync, syncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -135,6 +136,48 @@ export default function CurriculumScreen() {
       void load();
     }, [load]),
   );
+
+  /**
+   * And again whenever a sync lands — N122.
+   *
+   * Focus alone is not enough, and the gap is not a corner case: it is the
+   * ordinary path. A reflection is saved to SQLite, `requestSync` is
+   * fire-and-forget, and the wizard navigates back immediately — so this
+   * screen's focus refetch races the outbox push and reliably loses. The
+   * athlete then sits looking at pre-session numbers with no further trigger
+   * to correct them, which is precisely "I logged it and none of it counted".
+   *
+   * `lastSyncAt` is the moment the server's answer can have changed. Guarded
+   * against the value already seen, so a cold mount does not fire a second
+   * identical read on top of the focus one.
+   *
+   * A SUBSCRIPTION rather than `useSyncState()` plus an effect on the value,
+   * and that is not a style preference: the latter is a synchronous setState
+   * in an effect body, which `react-hooks/set-state-in-effect` flags and the
+   * `--max-warnings` ratchet then refuses. The rule's own guidance names this
+   * shape as the correct one — subscribe to an external system, set state from
+   * its callback — and it is the better fit anyway, since a sync landing is an
+   * event and not a render.
+   */
+  useEffect(() => {
+    let seen = syncState().lastSyncAt;
+    return subscribeSync((s) => {
+      // SIGN-OUT IS NOT A SYNC. `setSyncIdentity(null, null)` emits
+      // `lastSyncAt: null`, which a subscriber holding a number reads as a
+      // change — so this would fire `load()` with no identity and flash an
+      // error at an athlete who has just signed out, in the window before the
+      // layout unmounts the screen. Re-arm and say nothing. This project has
+      // had the signed-out-athlete-told-to-sign-in bug once already, across
+      // nine modules, when Clerk returned null offline.
+      if (s.lastSyncAt === null) {
+        seen = null;
+        return;
+      }
+      if (s.lastSyncAt === seen) return;
+      seen = s.lastSyncAt;
+      void load();
+    });
+  }, [load]);
 
   const view = useMemo(() => (curriculum ? buildRoadmap(curriculum) : null), [curriculum]);
 
@@ -758,6 +801,18 @@ function LessonRow({
                   </RNView>
                 ))}
                 <Text style={styles.lessonState}>{state}</Text>
+                {/* N122. The state line above can honestly say "your record
+                    has evidence for this" while every number beside it reads
+                    zero — that is what drilling a live-measured technique
+                    looks like, and it was reported as the counts simply not
+                    registering. Says what the evidence WAS and what would move
+                    these numbers, rather than offering a checkbox the data
+                    model refuses. */}
+                {l.evidenceNote !== null && (
+                  <Text style={styles.evidenceNote} testID={`roadmap-evidence-${l.key}`}>
+                    {l.evidenceNote}
+                  </Text>
+                )}
               </>
             )}
 
@@ -993,5 +1048,6 @@ const styles = StyleSheet.create({
   },
   lessonState: { color: vola.textDim, fontSize: 11, lineHeight: 16, marginTop: 2 },
   alreadyFocused: { color: vola.textDim, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  evidenceNote: { color: vola.textDim, fontSize: 11, lineHeight: 16, marginTop: 4 },
   chevronUp: { transform: [{ rotate: '180deg' }] },
 });

@@ -59,6 +59,24 @@ export type Lesson = {
   mastered: boolean;
   /** Any evidence at all, including drilling. Weaker than any criterion. */
   started: boolean;
+  /**
+   * Why the numbers above have not moved, when the athlete HAS logged
+   * something this item's criteria do not read. Null when there is nothing to
+   * explain — no evidence, or evidence that already shows up as a measure.
+   *
+   * **This is the whole of N122's display half.** `drilled_sessions` arrives on
+   * every item, and `measuresOf` draws it only where a drilled criterion reads
+   * it — so on the 61 of 81 white-belt items measured on live rounds, an
+   * athlete who had drilled a technique in ten classes saw ten classes of
+   * evidence rendered as nothing, under a state line reading "Under way — your
+   * record has evidence for this". Both statements were true and together they
+   * read as a broken counter, which is what was reported.
+   *
+   * The honest answer at this level is #446's: say what WOULD count. Not a
+   * checkbox, and not a softened threshold — the criteria are unchanged and
+   * mastery stays derived.
+   */
+  evidenceNote: string | null;
 };
 
 export type Milestone = {
@@ -219,6 +237,61 @@ export function measuresOf(item: CurriculumItem, enrolled: boolean): Measure[] |
   return out.length > 0 ? out : null;
 }
 
+/**
+ * What this item's criteria would accept, in the words an athlete would use.
+ *
+ * Built from the criteria rather than written per curriculum, so it cannot
+ * disagree with the thresholds beside it. The schema's
+ * `curriculum_items_criteria_anchored` guarantees at least one of scored,
+ * defended and drilled — but the fallback is here anyway rather than relying on
+ * a constraint in another file, the same argument `Met` makes for its rate
+ * branch.
+ */
+function whatWouldCount(c: NonNullable<CurriculumItem['criteria']>): string {
+  if (c.target_scored !== null && c.target_defended !== null)
+    return 'land it in a live round, or stop theirs';
+  if (c.target_scored !== null) return 'land it in a live round';
+  if (c.target_defended !== null) return 'stop theirs in a live round';
+  return 'use it in a live round';
+}
+
+/**
+ * The sentence that reconciles "you have logged this" with "these read zero".
+ *
+ * Returns null in every case where there is nothing to reconcile, and the
+ * cases are worth naming because each is a claim this must NOT make:
+ *
+ *  - not enrolled — nothing is being counted at all, which the screen says
+ *    once at the top rather than 93 times;
+ *  - no criteria — a concept, and a concept is not a measurable that failed;
+ *  - a drilled criterion — drilling counts here and `measuresOf` already draws
+ *    it as "Classes drilled in", so an explanation would contradict the number
+ *    directly above it;
+ *  - no drilled evidence — there is nothing the athlete did that we are
+ *    failing to show, and inventing a shortfall is what `have: null` exists to
+ *    avoid.
+ *
+ * Note it is deliberately reported even when live evidence EXISTS. "Landed
+ * live 2 / 12, drilled in 9 classes" is the athlete's real position, and
+ * hiding the drilling once a single round has happened would make the note
+ * flicker away at the moment it starts being encouraging.
+ */
+export function evidenceNoteOf(item: CurriculumItem, enrolled: boolean): string | null {
+  const c = item.criteria;
+  const p = item.progress;
+  // `item.kind === 'concept'` is checked HERE and not left to `c === null`,
+  // for the reason `measuresOf` states one function up: a concept carries no
+  // criteria BY DESIGN, and leaning on that makes this correct only while the
+  // schema's `curriculum_items_kind_shape` holds. The docstring above promises
+  // a concept is never explained; this is that promise being kept in code
+  // rather than borrowed from a constraint in another file.
+  if (!enrolled || item.kind === 'concept' || c === null || p == null) return null;
+  if (c.target_drilled_sessions !== null) return null;
+  if (p.drilled_sessions <= 0) return null;
+  const classes = p.drilled_sessions === 1 ? '1 class' : `${p.drilled_sessions} classes`;
+  return `Drilled in ${classes}. Drilling is not counted here — to move this one, ${whatWouldCount(c)}.`;
+}
+
 /** Any evidence at all — the same rule `hasEvidence` states, over one item. */
 function startedOf(item: CurriculumItem): boolean {
   const p = item.progress;
@@ -251,6 +324,7 @@ export function buildRoadmap(c: Curriculum): RoadmapView {
         measures,
         mastered: item.progress?.mastered ?? false,
         started: startedOf(item),
+        evidenceNote: evidenceNoteOf(item, c.enrolled),
       };
     });
     const countable = lessons.filter((l) => l.measures !== null).length;
