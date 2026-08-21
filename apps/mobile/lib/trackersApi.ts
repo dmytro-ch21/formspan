@@ -32,6 +32,27 @@ export type TrackerInput = {
   target?: number | null;
   render_style?: RenderStyle;
   sort_order?: number;
+  count_noun?: string;
+};
+
+/**
+ * One of the trackers an athlete can turn on — the server's own defaults for
+ * it, so the create screen can show what tapping it will produce.
+ *
+ * `preset` is the key to POST back. There is no "already added" flag: this
+ * device holds the athlete's trackers and can tell, and adding one they already
+ * have is idempotent anyway.
+ */
+export type TrackerPreset = {
+  preset: string;
+  name: string;
+  icon: string;
+  color_key: string;
+  unit: TrackerUnit;
+  increment: number;
+  target: number | null;
+  render_style: RenderStyle;
+  count_noun: string;
 };
 
 /**
@@ -53,6 +74,7 @@ export type TrackerPatch = {
   target?: number | null;
   render_style?: RenderStyle;
   sort_order?: number;
+  count_noun?: string;
 };
 
 export type EntryInput = {
@@ -94,6 +116,53 @@ export function patchTracker(
 
 export function archiveTracker(getToken: TokenGetter, id: string): Promise<void> {
   return apiRequest<void>(getToken, `/trackers/${id}`, { method: 'DELETE' });
+}
+
+/**
+ * Put an archived tracker back, with everything it kept while it was stopped.
+ *
+ * Answers 204 for a tracker that is already live, so a retry after a lost
+ * response is safe — which is what the outbox does.
+ */
+export function restoreTracker(getToken: TokenGetter, id: string): Promise<void> {
+  return apiRequest<void>(getToken, `/trackers/${id}/restore`, { method: 'POST' });
+}
+
+/**
+ * **Destroy a tracker and every entry it ever held.** There is no undo.
+ *
+ * A separate function from `archiveTracker` rather than a boolean argument on
+ * it, deliberately: `archiveTracker(getToken, id, true)` at a call site tells a
+ * reader nothing about which of the two just happened, and the two differ by
+ * whether the athlete's history survives. The server reads `purge=true` as an
+ * exact literal for the same reason.
+ */
+export function destroyTracker(getToken: TokenGetter, id: string): Promise<void> {
+  return apiRequest<void>(getToken, `/trackers/${id}?purge=true`, { method: 'DELETE' });
+}
+
+/** The trackers this athlete has stopped, newest first. */
+export function listArchivedTrackers(getToken: TokenGetter): Promise<WireTracker[]> {
+  return apiRequest<{ trackers: WireTracker[] }>(getToken, '/trackers?archived=true').then(
+    (b) => b.trackers ?? [],
+  );
+}
+
+/** The catalogue of trackers an athlete can turn on — coffee, and whatever follows. */
+export function listTrackerPresets(getToken: TokenGetter): Promise<TrackerPreset[]> {
+  return apiRequest<{ presets: TrackerPreset[] }>(getToken, '/tracker-presets').then(
+    (b) => b.presets ?? [],
+  );
+}
+
+/** Turn one on. Idempotent, and it restores rather than duplicating. */
+export function addTrackerPreset(
+  getToken: TokenGetter,
+  presetKey: string,
+): Promise<WireTracker> {
+  return apiRequest<WireTracker>(getToken, `/tracker-presets/${encodeURIComponent(presetKey)}`, {
+    method: 'POST',
+  });
 }
 
 export function listEntries(
