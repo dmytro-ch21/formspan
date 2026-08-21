@@ -115,16 +115,18 @@ func riskRank(risk string) int {
 }
 
 // ClassifyRisk starts from the ticket's explicit risk (or the default when
-// absent) and applies label-based rules, raising only. Path-based rules apply
-// at implementation time, when a diff exists; a shadow decision records what
-// can be known before any code is written.
-func ClassifyRisk(explicit string, labels []string, rules RiskRules) string {
+// absent) and applies matching rules, RAISING ONLY — a rule can never lower
+// what a human wrote on the ticket. A rule matches by label intersection or
+// by any touched path falling under one of its path patterns (which is how a
+// present migration raises risk: `backend/migrations/**` matches the new
+// file). Before a diff exists, touched is empty and only labels can match.
+func ClassifyRisk(explicit string, labels, touched []string, rules RiskRules) string {
 	risk := explicit
 	if risk == "" {
 		risk = rules.DefaultRisk
 	}
 	for _, rule := range rules.Rules {
-		if !labelsIntersect(labels, rule.Labels) {
+		if !labelsIntersect(labels, rule.Labels) && !pathsIntersect(touched, rule.Paths) {
 			continue
 		}
 		if riskRank(rule.Risk) > riskRank(risk) {
@@ -132,6 +134,17 @@ func ClassifyRisk(explicit string, labels []string, rules RiskRules) string {
 		}
 	}
 	return risk
+}
+
+func pathsIntersect(touched, patterns []string) bool {
+	for _, pattern := range patterns {
+		for _, p := range touched {
+			if PathMatches(pattern, p) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func labelsIntersect(have, want []string) bool {

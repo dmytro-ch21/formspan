@@ -114,20 +114,20 @@ func TestRiskIsRaisedByLabelAndNeverLowered(t *testing.T) {
 	rules := testConfig(t).RiskRules
 
 	// The security label raises an unstated risk to high.
-	if got := ClassifyRisk("", []string{"security"}, rules); got != "high" {
+	if got := ClassifyRisk("", []string{"security"}, nil, rules); got != "high" {
 		t.Fatalf("label raise: got %q, want high", got)
 	}
 	// An explicit high stays high even when only medium rules match — rules
 	// may never lower what a human wrote on the ticket.
-	if got := ClassifyRisk("high", []string{"area: api"}, rules); got != "high" {
+	if got := ClassifyRisk("high", []string{"area: api"}, nil, rules); got != "high" {
 		t.Fatalf("raise-only violated: got %q, want high", got)
 	}
 	// An explicit low is raised by a matching medium rule.
-	if got := ClassifyRisk("low", []string{"area: api"}, rules); got != "medium" {
+	if got := ClassifyRisk("low", []string{"area: api"}, nil, rules); got != "medium" {
 		t.Fatalf("got %q, want medium", got)
 	}
 	// No explicit risk, no matching labels: the default.
-	if got := ClassifyRisk("", nil, rules); got != "low" {
+	if got := ClassifyRisk("", nil, nil, rules); got != "low" {
 		t.Fatalf("got %q, want the default low", got)
 	}
 }

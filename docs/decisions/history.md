@@ -39742,6 +39742,38 @@ criterion — the binary has to actually run while board activity happens);
 N138 deepens preflight into the full rule set; N139 gives runs durable state
 and leases, which is when the assignee-as-lease reading gets replaced.
 
+## 2026-08-21 — N138: preflight becomes a named rule set, and risk learns to read a diff
+
+Third PR of the AI-SDLC initiative. The engine's dispatch decision layer
+(`engine/internal/devengine`) is restructured from inline checks into a named
+rule set (`Rules()` in `rules.go`): draft-item, acceptance-criteria,
+already-claimed, and two new refusals — **product-decision** (a `TBD` / "open
+question" / "needs decision" marker in the ticket means a human still has to
+choose, and the engine must never choose by implementing one side) and
+**stale-base** (a recorded base that is not origin/main's head refuses
+dispatch; shadow mode leaves it disarmed since it dispatches nothing). Each
+rule is table-driven tested with a pass and a refusal case, so disabling any
+single rule turns exactly its test red — run as the ticket's mutation check:
+the product-decision rule disabled → its case fails, restored → green.
+
+Risk classification now reads a diff: `ClassifyRisk` takes touched paths, and
+a rule matches by label OR by any touched path falling under its patterns
+(`PathMatches` — literal paths match themselves, `dir/**` matches anything
+under the prefix). "A migration is present" is therefore not a special
+mechanism: it is the `backend/migrations/**` path rule, and a test proves a
+new migration file classifies high **against the real checked-in
+risk-rules.json**, not a fixture. Raise-only is unchanged and re-tested from
+the path side: an explicit high is never lowered by a matching medium rule.
+Human-gating similarly extends to touched paths (`human_gate.paths`), still a
+merge property rather than a dispatch refusal. The `Env` struct (base SHA,
+remote head, touched paths) is the seam Phase 2 populates; shadow mode passes
+it empty, and the Decision/JSONL format is unchanged — rules only contribute
+strings to Reasons.
+
+Scope note, same as N137's: the ticket said `backend/internal/devengine`; the
+code lives in the `engine/` module for the trust-boundary reason recorded in
+the N137 entry.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
