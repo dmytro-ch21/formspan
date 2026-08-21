@@ -95,7 +95,26 @@ export function TrackerCard({
   return (
     <View style={styles.card} testID={testID ?? `tracker-card-${tracker.id}`}>
       <RNView style={styles.head}>
-        <RNView style={[styles.dot, { backgroundColor: fill }]} />
+        {/* The athlete's ICON, which N76 stored and never drew.
+            `importantForAccessibility="no"` because it is decoration: the name
+            is right beside it as text, and VoiceOver announcing "water droplet,
+            Water" reads as a stutter. An emoji with no textual twin would need
+            a label; this one is a duplicate of the next element.
+            The coloured dot stays as the fallback — the colour is how a card is
+            picked out of a stack of them, so it cannot depend on an icon the
+            athlete may not have chosen. */}
+        {tracker.icon ? (
+          <Text
+            style={styles.icon}
+            importantForAccessibility="no"
+            accessibilityElementsHidden
+            testID={`tracker-icon-${tracker.id}`}
+          >
+            {tracker.icon}
+          </Text>
+        ) : (
+          <RNView style={[styles.dot, { backgroundColor: fill }]} />
+        )}
         {/* Uppercased by STYLE, never by `.toUpperCase()`. VoiceOver spells out
             short all-caps strings letter by letter, so a transformed name reads
             as "W-A-T-E-R"; `textTransform` leaves the accessible string intact
@@ -241,8 +260,8 @@ function Glyphs({
             state={state}
             fill={fill}
             size={size}
-            label={glyphLabel(tracker, i, slots, state)}
-            hint={glyphHint(state)}
+            label={glyphLabel(tracker, i, slots, state, single)}
+            hint={glyphHint(state, single)}
             testID={`tracker-glyph-${tracker.id}-${i}`}
             hitSlop={single ? 4 : GLYPH_SLOP}
             // A filled glyph removes ITS OWN tap; an empty one adds.
@@ -440,6 +459,9 @@ const styles = StyleSheet.create({
   },
   head: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   dot: { width: 7, height: 7, borderRadius: 4 },
+  // No explicit lineHeight: an emoji's own metrics vary by platform, and a
+  // fixed one clips the tall ones (🥤, 💊) on Android.
+  icon: { fontSize: 14 },
   eyebrow: {
     fontSize: 11,
     fontWeight: '800',

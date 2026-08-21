@@ -502,21 +502,110 @@ export type MonogramColor = keyof typeof monogramColors;
  * colour is redundant encoding, and the honest answer at that point is fewer
  * colours rather than a lowered gate.
  */
+/*
+ * ## The three N78 added, and why they are those three (measured 2026-08-20)
+ *
+ * The picker an athlete authoring a tracker chooses from is this object, so its
+ * size is a product decision made by arithmetic. Searched over an 8-bit sRGB
+ * grid under every constraint below at once — 4.5:1 on `surface`, 3:1 on
+ * `raised`, 4.5:1 for the ground written on the fill, ΔE ≥ 15 from `info`, and
+ * ΔE ≥ 15 pairwise from every other entry, all four under normal vision plus
+ * three CVD simulations. What the search found:
+ *
+ * - **Six is the ceiling.** A greedy maximum-spread search seeded with water
+ *   and coffee stops at six, and the best seventh sits at ΔE 13.9.
+ * - **Six has no margin.** The best feasible six measured **ΔE 15.12** against
+ *   a floor of 15, and two of its four families had pools of 2 and 4 admissible
+ *   grid points. A palette that clears the gate by 0.12 is not a design, it is
+ *   a coincidence, and the next edit anywhere near it breaks the build.
+ * - **Five has margin.** These five measure **ΔE 16.58** at the closest pair
+ *   (water/violet), with every other pair 20.3 or better.
+ *
+ * So five. The doc above already says the honest answer is fewer colours rather
+ * than a lowered gate; this is that sentence being followed rather than quoted.
+ *
+ * Per colour, on `surface` / `raised` / ink-on-fill / vs `info`:
+ *
+ *     water   #408D96   4.76  4.35   5.13  16.14
+ *     coffee  #C08457   5.81  5.31   6.26  43.20
+ *     mint    #B0FCDC  15.49 14.16  16.69  15.21
+ *     amber   #F2D95E  12.93 11.82  13.93  41.68
+ *     violet  #806CEC   4.59  4.20   4.94  15.57
+ *
+ * **`mint` is pale because a deeper one collides with water.** Six deeper mints
+ * were measured and every one fell under ΔE 15 against the teal — they are
+ * neighbours on the hue circle, so the separation has to come from lightness,
+ * exactly as it did for water against `info`. Same wall, one hue over.
+ *
+ * The KEYS are provenance and the LABELS are colour names: `water` and `coffee`
+ * were named after the presets that first used them and cannot be renamed
+ * without rewriting stored rows, so the picker calls them Teal and Clay. See
+ * `TRACKER_COLOR_LABELS`.
+ */
 export const trackerColors = {
   water: '#408D96',
   coffee: '#C08457',
+  mint: '#B0FCDC',
+  amber: '#F2D95E',
+  violet: '#806CEC',
 } as const;
 
 /**
- * The monochrome twin. Lightness is the only axis left, so these are a bright
- * step and a mid step — 13.49:1 and 4.81:1 on `surface`, ΔE 25.7 apart.
+ * The monochrome twin.
+ *
+ * **Five greys, and unlike the colours they are NOT pairwise separable — that
+ * claim is dropped here deliberately rather than fudged with a lowered
+ * threshold.** It is arithmetic, not a failure of imagination, and it is the
+ * same wall `MONO_TILES` documents in `validate_palette.mjs`: 4.5:1 on
+ * `surface` puts the floor at `#757f96`, the ceiling is white, and the whole
+ * admissible band spans ΔE 34. Four gaps of 15 do not fit in 34. The best
+ * available spacing for five values is **ΔE 6.58 between adjacent steps**, with
+ * **26.18 between the extremes**.
+ *
+ * What is still asserted, and what the gate checks: every grey clears all three
+ * contrast floors, and the set keeps at least two genuinely distinguishable
+ * steps, so a later edit cannot collapse monochrome mode to one flat grey.
+ *
+ * That is defensible here for the reason the doc above already gives — **a
+ * tracker card carries its NAME and its ICON**, so the fill is redundant
+ * encoding rather than the only channel. It is not defensible for the coloured
+ * set, where the pairwise check stays at 15.
+ *
+ *     water   #D7DEE8  13.49:1
+ *     mint    #BBC3D1  10.30:1
+ *     amber   #A3ABBD   7.93:1
+ *     violet  #8C96AA   6.14:1
+ *     coffee  #79839A   4.81:1
+ *
+ * water's and coffee's values are N76's, unchanged: they were measured then and
+ * moving them would be churn on a claim that still holds.
  */
 export const monoTrackerColors = {
   water: '#D7DEE8',
+  mint: '#BBC3D1',
+  amber: '#A3ABBD',
+  violet: '#8C96AA',
   coffee: '#79839A',
 } as const;
 
-
+/**
+ * What the picker CALLS each colour.
+ *
+ * Separate from the keys because the keys are provenance — `water` and `coffee`
+ * are named after the presets that first used them, and renaming a key means
+ * rewriting every stored `color_key`. An athlete choosing a colour for their
+ * creatine tracker should not be offered "Water"; they are offered "Teal".
+ *
+ * Ordered as the picker renders them: the two that already existed first, so
+ * the swatch row does not reshuffle for anyone who had a preference.
+ */
+export const TRACKER_COLOR_LABELS: Record<TrackerColor, string> = {
+  water: 'Teal',
+  coffee: 'Clay',
+  mint: 'Mint',
+  amber: 'Amber',
+  violet: 'Violet',
+};
 
 export type TrackerColor = keyof typeof trackerColors;
 

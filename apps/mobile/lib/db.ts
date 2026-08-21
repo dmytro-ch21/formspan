@@ -429,7 +429,34 @@ const CREATE_DAILY_TRACKERS = `
     target REAL,
     render_style TEXT NOT NULL DEFAULT 'auto',
     sort_order INTEGER NOT NULL DEFAULT 0,
+    -- The athlete's own word for one tap. Authored, never derived from the
+    -- unit: 5 g of creatine is a dose and 5 g of fibre is a serving, and the
+    -- unit cannot tell them apart. See lib/trackerModel.ts.
+    count_noun TEXT NOT NULL DEFAULT '',
+    -- Server-computed: would provisioning re-create this row if it were
+    -- deleted? Cached so the archived screen can decide whether to offer a
+    -- delete control with no network. See lib/trackerModel.ts.
+    provisioned INTEGER NOT NULL DEFAULT 0,
     archived_at TEXT,
+    -- Set when the athlete un-archived a tracker the SERVER still has archived,
+    -- and cleared once the restore is pushed.
+    --
+    -- A separate flag rather than something inferred from archived_at IS NULL
+    -- AND dirty = 1, because those two cannot distinguish "put this back" from
+    -- "I edited an ordinary live tracker" — and the push has to know, since a
+    -- PATCH on an archived row leaves it archived. Inferring it would mean
+    -- calling restore on every definition push, which is a wasted request every
+    -- time somebody changes a target.
+    restore_pending INTEGER NOT NULL DEFAULT 0,
+    -- A TOMBSTONE for a destroy this device owes the server, exactly as
+    -- tracker_entries.deleted_at is for a tap. (No backticks anywhere in this
+    -- template literal -- one silently ends it, which is the trap this file
+    -- already records for the Go side and which cost a syntax error here.)
+    --
+    -- The row cannot simply be deleted locally: a destroy made in a dead spot
+    -- would then have nothing left carrying the intent, and the next pull would
+    -- hand the tracker back. It is hard-deleted once the server confirms.
+    destroyed_at TEXT,
     updated_at TEXT NOT NULL DEFAULT '',
     dirty INTEGER NOT NULL DEFAULT 0,
     remote INTEGER NOT NULL DEFAULT 1,
@@ -493,7 +520,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 23;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -934,6 +961,53 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     if (!cols.some((c) => c.name === 'source')) {
       await db.execAsync(`ALTER TABLE foods ADD COLUMN source TEXT NOT NULL DEFAULT 'user';`);
     }
+  }
+
+  if (current < 23) {
+    // N78: an athlete-authored tracker needs a word for one tap, and the
+    // archive/restore/destroy lifecycle needs somewhere to hold what this
+    // device owes the server.
+    //
+    // **23, not 22 — N114 took 22 while this branch was open.** Two different
+    // v22 blocks is the local-schema form of a duplicate migration number: a
+    // device stamped 22 by whichever landed first would never run the other's,
+    // silently, with no error anywhere. Caught at rebase, which is the only
+    // place it is visible.
+    //
+    // These are real ALTERs rather than no-ops against the CREATE above — a
+    // device already stamped 22 HAS the table and will not re-run its CREATE —
+    // which is exactly why `addColumnIfMissing` exists: a device creating the
+    // table for the first time gets all three columns from the CREATE, and
+    // these three statements must then do nothing rather than throwing and
+    // wedging `getDb()` for the life of the install.
+    await addColumnIfMissing(db, 'daily_trackers', 'count_noun', `TEXT NOT NULL DEFAULT ''`);
+    await addColumnIfMissing(db, 'daily_trackers', 'restore_pending', 'INTEGER NOT NULL DEFAULT 0');
+    await addColumnIfMissing(db, 'daily_trackers', 'destroyed_at', 'TEXT');
+    await addColumnIfMissing(db, 'daily_trackers', 'provisioned', 'INTEGER NOT NULL DEFAULT 0');
+    // Seed it CONSERVATIVELY from what this device already knows: treat any
+    // preset row as re-provisioned until the server says otherwise. That is the
+    // pre-N78 behaviour, so an upgrade never briefly offers to delete somebody's
+    // water; the first pull replaces the guess with the server's answer.
+    await db.execAsync(
+      `UPDATE daily_trackers SET provisioned = 1 WHERE preset <> '' AND provisioned = 0;`,
+    );
+    // Backfill the noun EXACTLY as the client used to derive it, so nobody's
+    // existing water card loses its "cups" on upgrade. Scoped to rows that have
+    // not already been given one by a fetch from a server that has the
+    // count_noun migration — those are already right, and re-deriving would
+    // overwrite an authored word with a guess.
+    await db.execAsync(`
+      UPDATE daily_trackers
+         SET count_noun = CASE unit
+             WHEN 'ml' THEN 'cup'
+             WHEN 'cup' THEN 'cup'
+             WHEN 'g' THEN 'dose'
+             WHEN 'mg' THEN 'dose'
+             WHEN 'dose' THEN 'dose'
+             ELSE ''
+         END
+       WHERE count_noun = '';
+    `);
   }
 
   // The day query the card runs on every render of Today.

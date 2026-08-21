@@ -1714,6 +1714,17 @@ export default function TodayScreen() {
           dayAtTap={() => dayString(new Date())}
           units={units}
           unitsReady={unitsReady}
+          // Three, then a disclosure row — N78's answer to "several trackers on
+          // Today do not crowd out what Today is for". The server caps an
+          // athlete at eight; three is what fits here without pushing the
+          // session, the readiness and the week below the fold. Which three is
+          // the athlete's own choice, which is why reorder is part of the same
+          // ticket. Food renders all of them: that is where trackers live.
+          collapseAfter={3}
+          // Expanding is a decision about TODAY. Today never unmounts, so
+          // without a key the first tap on "2 more" would leave the list
+          // expanded for every day after it.
+          collapseKey={todayKey}
           testID="today-trackers"
         />
 

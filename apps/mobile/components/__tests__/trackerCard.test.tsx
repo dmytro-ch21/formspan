@@ -38,6 +38,11 @@ const coffee: Tracker = {
   target: null,
   render_style: 'auto',
   sort_order: 20,
+  // Authored since N78 — `presets.go` carries the same literal. The noun used
+  // to be derived from `unit`, and this fixture said "field for field" while
+  // omitting the one field that decides what the card reads.
+  count_noun: 'cup',
+  provisioned: false,
 };
 
 const water: Tracker = {
@@ -51,6 +56,8 @@ const water: Tracker = {
   target: 2000,
   render_style: 'glyphs',
   sort_order: 10,
+  count_noun: 'cup',
+  provisioned: true,
 };
 
 /** Cups, one an hour, ending at the time the assertions read back. */

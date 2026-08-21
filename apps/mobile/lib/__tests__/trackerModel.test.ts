@@ -14,6 +14,7 @@ import {
   progress,
   resolveRenderStyle,
   targetCount,
+  suggestedNoun,
   unitNoun,
   valueLine,
   type Tracker,
@@ -30,15 +31,26 @@ import {
  * to `trackerModel.ts`, the model did not generalise and that is the finding.
  */
 
+/**
+ * **`render_style: 'glyphs'`, matching `presets.go`, and that is a FIX.**
+ *
+ * It said `'auto'` and the seeded preset ships `'glyphs'` — so the assertion
+ * that a fifteen-glass day renders as a bar passed against a record no athlete
+ * has (F22, #516). Green, covered, and covering something that does not ship.
+ * `resolveRenderStyle` now applies the countability cap to a stored style too,
+ * so the two agree; this fixture is what stops them silently diverging again.
+ */
 const water: Tracker = {
   id: 't_water', preset: 'water', name: 'Water', icon: '💧', color_key: 'water',
-  unit: 'ml', increment: 250, target: 2000, render_style: 'auto', sort_order: 10,
+  unit: 'ml', increment: 250, target: 2000, render_style: 'glyphs', sort_order: 10,
+  count_noun: 'cup', provisioned: true,
 };
 
 /** N77's shape, today, with no coffee tracker anywhere in the app. */
 const coffee: Tracker = {
   id: 't_coffee', preset: 'coffee', name: 'Coffee', icon: '☕', color_key: 'coffee',
   unit: 'cup', increment: 1, target: null, render_style: 'auto', sort_order: 20,
+  count_noun: 'cup', provisioned: false,
 };
 
 /**
@@ -55,12 +67,14 @@ const ceiling: Tracker = { ...coffee, name: 'Coffee', target: 3 };
 const creatine: Tracker = {
   id: 't_creatine', preset: '', name: 'Creatine', icon: '🥄', color_key: 'water',
   unit: 'g', increment: 5, target: 5, render_style: 'auto', sort_order: 30,
+  count_noun: 'dose', provisioned: false,
 };
 
 /** N78's other example: the one that must never be a row of glyphs. */
 const capsules: Tracker = {
   id: 't_caps', preset: '', name: 'Capsules', icon: '💊', color_key: 'coffee',
   unit: 'dose', increment: 1, target: 30, render_style: 'auto', sort_order: 40,
+  count_noun: 'capsule', provisioned: false,
 };
 
 let seq = 0;
@@ -119,10 +133,54 @@ describe('the render style, chosen from the record', () => {
     expect(resolveRenderStyle(water, MAX_GLYPHS + 1)).toBe('bar');
   });
 
-  it('an explicit style always wins over the automatic choice', () => {
-    // The athlete's override is a decision, not a hint. N78 offers it.
-    expect(resolveRenderStyle({ ...capsules, render_style: 'glyphs' }, 0)).toBe('glyphs');
+  it('an explicit style is honoured wherever it is readable', () => {
+    // The athlete's override is a decision, not a hint. N78 offers it, and
+    // everything that does not lie about the day is theirs to pick.
     expect(resolveRenderStyle({ ...water, render_style: 'bar' }, 0)).toBe('bar');
+    expect(resolveRenderStyle({ ...creatine, render_style: 'glyphs' }, 0)).toBe('glyphs');
+    expect(resolveRenderStyle({ ...creatine, render_style: 'dose' }, 0)).toBe('dose');
+  });
+
+  /*
+   * **The cap outranks the override**, and this test is the decision F22 (#516)
+   * asked somebody to make.
+   *
+   * The first case is not hypothetical: the seeded WATER preset ships
+   * `render_style: 'glyphs'`, so before this every athlete's real row took the
+   * "explicit style wins" early return and a fifteen-glass day drew fifteen
+   * identical glyphs — the uncountable block MAX_GLYPHS exists to prevent, on
+   * the one tracker everybody has. The old fixture said `'auto'`, so the suite
+   * agreed with itself and not with the app.
+   *
+   * The vectors are chosen to separate "the cap wins" from "auto wins": each
+   * one has an EXPLICIT style that a correct implementation must override.
+   */
+  it('yields to the countability cap, even when the athlete chose glyphs', () => {
+    // The shipped water record, past the cap. This is #516.
+    expect(water.render_style).toBe('glyphs'); // guards the fixture, not the code
+    expect(resolveRenderStyle(water, MAX_GLYPHS + 3)).toBe('bar');
+    // A thirty-capsule tracker whose owner asked for glyphs. The ticket's words:
+    // "a 30-dose tracker never renders 30 glyphs".
+    expect(resolveRenderStyle({ ...capsules, render_style: 'glyphs' }, 0)).toBe('bar');
+    // And below the cap the same override IS honoured, so the rule is a ceiling
+    // rather than a blanket refusal.
+    expect(resolveRenderStyle({ ...capsules, render_style: 'glyphs', target: 6 }, 0))
+      .toBe('glyphs');
+  });
+
+  /*
+   * A single dose glyph SAYS "taken". It may only be drawn when one tap really
+   * is the whole day, or the card reports a thirty-capsule course finished
+   * after the first capsule — which is a wrong number, not a style.
+   */
+  it('refuses a single dose glyph for a tracker that is not one dose', () => {
+    expect(resolveRenderStyle({ ...capsules, render_style: 'dose' }, 0)).toBe('bar');
+    expect(resolveRenderStyle({ ...capsules, render_style: 'dose', target: 4 }, 0))
+      .toBe('glyphs');
+    // No target at all is not one dose either — it is a count with no ceiling.
+    expect(resolveRenderStyle({ ...coffee, render_style: 'dose' }, 3)).toBe('glyphs');
+    // The genuine single-dose case still gets its big glyph.
+    expect(resolveRenderStyle({ ...creatine, render_style: 'dose' }, 0)).toBe('dose');
   });
 
   it('a count with no target still draws a row that grows', () => {
@@ -200,7 +258,7 @@ describe('the value line', () => {
   });
 
   it('drops the noun for a bare count', () => {
-    const sessions: Tracker = { ...coffee, unit: '', name: 'Cold showers' };
+    const sessions: Tracker = { ...coffee, unit: '', name: 'Cold showers', count_noun: '' };
     expect(valueLine(sessions, taps(sessions, 2))).toBe('2');
   });
 
@@ -209,11 +267,48 @@ describe('the value line', () => {
     expect(valueLine(creatine, taps(creatine, 1))).toBe('1 of 1 dose');
   });
 
-  it('derives the noun from the unit rather than from the tracker name', () => {
+  /*
+   * **The noun is READ, not derived** (N78), and these vectors are the ones
+   * that tell the two apart.
+   *
+   * N76 computed it from the unit and recorded the failure in the same comment:
+   * 30 g of fibre in 5 g steps read "6 doses", because `g` mapped to `dose`. A
+   * bigger table cannot fix that — the noun belongs to the substance, and 5 g
+   * of creatine, 5 g of fibre and 30 g of protein are all `g`.
+   *
+   * So the first case below is the whole ticket: a tracker whose unit is `g`
+   * and whose noun is "serving". Any implementation still consulting the unit
+   * returns "dose" for it.
+   */
+  it('reads the athlete\'s own noun rather than deriving one from the unit', () => {
+    const fibre: Tracker = {
+      ...creatine, name: 'Fibre', unit: 'g', increment: 5, target: 30,
+      count_noun: 'serving',
+    };
+    expect(unitNoun(fibre)).toBe('serving');
+    expect(valueLine(fibre, [])).toBe('0 of 6 servings');
+
     expect(unitNoun(water)).toBe('cup');
-    expect(unitNoun(coffee)).toBe('cup');
     expect(unitNoun(creatine)).toBe('dose');
-    expect(unitNoun({ ...coffee, unit: 'count' })).toBe('');
+    // Empty is a real answer and must not fall back to the unit's guess — an
+    // athlete who cleared the field asked for "4 of 8".
+    expect(unitNoun({ ...creatine, count_noun: '' })).toBe('');
+    expect(valueLine({ ...creatine, count_noun: '' }, [])).toBe('0 of 1');
+  });
+
+  /*
+   * The old derivation survives as the create form's PREFILL, where a wrong
+   * guess is one edit away from right — never at render time, where it is a
+   * card that lies.
+   */
+  it('still suggests a sensible noun from the unit while authoring', () => {
+    expect(suggestedNoun('ml')).toBe('cup');
+    expect(suggestedNoun('cup')).toBe('cup');
+    expect(suggestedNoun('g')).toBe('dose');
+    expect(suggestedNoun('mg')).toBe('dose');
+    expect(suggestedNoun('dose')).toBe('dose');
+    expect(suggestedNoun('count')).toBe('');
+    expect(suggestedNoun('')).toBe('');
   });
 });
 
@@ -269,8 +364,38 @@ describe('VoiceOver', () => {
     expect(addLabel(water)).toBe('Add a cup of Water');
   });
 
+  /*
+   * A single dose is its own sentence, and the ticket writes it out:
+   * `creatine, 1 of 1, taken`.
+   *
+   * The vectors are BOTH shapes, because that is what separates "the dose case
+   * is special-cased" from "everything says taken now" — an implementation that
+   * dropped the row wording entirely would pass a test that only checked the
+   * dose.
+   */
+  it('says taken, not filled, when one tap is the whole day', () => {
+    expect(glyphLabel(creatine, 0, 1, 'filled', true)).toBe('Creatine, 1 of 1, taken');
+    expect(glyphLabel(creatine, 0, 1, 'empty', true)).toBe('Creatine, 1 of 1, not taken');
+    // N77's third state collapses into "taken" here rather than inventing a
+    // fourth word: a dose logged twice is still a dose you took.
+    expect(glyphLabel(creatine, 0, 1, 'over', true)).toBe('Creatine, 1 of 1, taken');
+    // And a tracker that merely HAPPENS to be drawing one glyph is not a dose:
+    // a count with no ceiling on zero taps draws one, and "not taken" would
+    // imply a target it does not have. The suite caught this.
+    const showers: Tracker = { ...coffee, name: 'Cold showers', unit: '', count_noun: '' };
+    expect(glyphLabel(showers, 0, 1, 'empty')).toBe('Cold showers, item 1 of 1, empty');
+    expect(glyphHint('empty', true)).toBe('Double tap to mark it taken');
+    expect(glyphHint('filled', true)).toBe('Double tap to undo it');
+  });
+
+  it('still counts cups in a row, where position is what a listener needs', () => {
+    expect(glyphLabel(water, 2, 8, 'filled')).toBe('Water, cup 3 of 8, filled');
+    expect(glyphLabel(water, 7, 8, 'empty')).toBe('Water, cup 8 of 8, empty');
+    expect(glyphHint('empty')).toBe('Double tap to add it');
+  });
+
   it('falls back to a word rather than an empty one for a bare count', () => {
-    const bare: Tracker = { ...coffee, unit: '', name: 'Cold showers' };
+    const bare: Tracker = { ...coffee, unit: '', name: 'Cold showers', count_noun: '' };
     expect(glyphLabel(bare, 0, 1, 'empty')).toBe('Cold showers, item 1 of 1, empty');
   });
 });

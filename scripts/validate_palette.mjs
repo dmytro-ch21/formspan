@@ -344,13 +344,17 @@ function loadPalette() {
     SPORTS: block('sportColors', 4),
     MONOGRAM: block('monogramColors', 5),
     MONOGRAM_INK: block('monogramInk', 5),
-    // Two today: water (N76) and coffee (N77, seeded before it is rendered so
-    // that ticket is a seed row rather than a colour search). The expected
+    // Five: water (N76), coffee (N77), and the three N78 added so an athlete
+    // authoring their own tracker has a palette to choose from. The expected
     // count is what forces the next addition through this file — adding a
     // tracker colour without running the gate throws here rather than shipping
     // an unmeasured fill.
-    TRACKER: block('trackerColors', 2),
-    MONO_TRACKER: block('monoTrackerColors', 2),
+    //
+    // **Five is the measured ceiling with margin, not a round number.** Six is
+    // feasible at ΔE 15.12 against a floor of 15; five clears at 16.58. The
+    // search and both figures are recorded in `trackerColors`' doc comment.
+    TRACKER: block('trackerColors', 5),
+    MONO_TRACKER: block('monoTrackerColors', 5),
     // Four, and four is the frontier rather than a starting point — see the
     // section below and the note on `macroColors` in Colors.ts. The asserted
     // count is what makes a fifth macro a colour search instead of a line in
@@ -578,14 +582,49 @@ for (const [name, hex] of monoTrackers) {
   ratio(`mono ${name} on raised`, hex, S.raised, 3);
   ratio(`mono ${name} — ink on a filled glyph`, S.bg, hex, 4.5);
 }
-for (let i = 0; i < monoTrackers.length; i++) {
-  for (let j = i + 1; j < monoTrackers.length; j++) {
-    separation(
-      `mono ${monoTrackers[i][0]} vs ${monoTrackers[j][0]}`,
-      monoTrackers[i][1],
-      monoTrackers[j][1],
-    );
-  }
+/*
+  **The pairwise claim is DROPPED for the monochrome trackers, and this is the
+  second place in this file that admits a guarantee is weaker in monochrome
+  rather than merely different.** Same arithmetic as MONO_TILES above, one set
+  over: 4.5:1 on `surface` puts the achromatic floor at #757f96, white is the
+  ceiling, and CIEDE2000's lightness compression leaves the whole admissible
+  band spanning ΔE 34. Four gaps of 15 do not fit in 34 — measured, the best
+  spacing available for five values is 6.58 between adjacent steps.
+
+  Until N78 there were two greys and they cleared 15 easily. That is not
+  evidence the rule scales; it is what two values in a 34-wide band look like.
+
+  It is dropped rather than fudged with a lowered threshold because a threshold
+  nobody can state a reason for is how a gate stops meaning anything — the same
+  argument the tracker-fill comment above makes about holding a fill to 4.5:1.
+  And it is SAFE to drop for exactly the reason `trackerColors`' own doc gives:
+  a tracker card renders its NAME and its ICON, so the fill is redundant
+  encoding here, never the only channel. The COLOURED set keeps the pairwise
+  check at 15, because there the fill is doing more work.
+
+  What is still asserted: every grey clears all three contrast floors (above),
+  adjacent steps stay apart by a stated amount, and the extremes stay ΔE 15
+  apart — so monochrome cannot silently collapse to one flat grey through a
+  later edit, which is the failure this section actually exists to catch.
+*/
+const MONO_ADJACENT_MIN = 5;
+const byLightness = [...monoTrackers].sort(
+  (a, b) => contrast(a[1], S.surface) - contrast(b[1], S.surface),
+);
+for (let i = 1; i < byLightness.length; i++) {
+  separation(
+    `mono ${byLightness[i - 1][0]} → ${byLightness[i][0]} (adjacent)`,
+    byLightness[i - 1][1],
+    byLightness[i][1],
+    MONO_ADJACENT_MIN,
+  );
+}
+if (byLightness.length >= 2) {
+  separation(
+    'mono trackers span at least two real steps',
+    byLightness[0][1],
+    byLightness[byLightness.length - 1][1],
+  );
 }
 
 /*

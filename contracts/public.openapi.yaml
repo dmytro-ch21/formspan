@@ -5220,7 +5220,7 @@ components:
         wire and pounds on the screen.
       required:
         [id, user_id, preset, name, icon, color_key, unit, increment,
-         render_style, sort_order, created_at, updated_at]
+         render_style, sort_order, count_noun, provisioned, created_at, updated_at]
       properties:
         id: { type: string }
         user_id: { type: string }
@@ -5261,6 +5261,40 @@ components:
             row up to twelve, a bar beyond that, one large glyph for a single
             dose. A stored value overrides it.
         sort_order: { type: integer }
+        count_noun:
+          type: string
+          maxLength: 24
+          description: >
+            The singular word for one tap — "cup", "capsule", "scoop" — or empty
+            for a tracker that just counts and reads "4 of 8".
+
+
+            **Authored, never derived.** The noun belongs to the substance and
+            the unit cannot carry it: 5 g of creatine is a dose, 5 g of fibre is
+            a serving, 30 g of protein is a scoop, and all three are `g`. A
+            client may suggest one from the unit while authoring; what is stored
+            is what the athlete said. Must not contain control characters or
+            start or end with a space — it is pluralised and concatenated into
+            the card copy and into the VoiceOver label.
+        provisioned:
+          type: boolean
+          description: >
+            Whether VOLA would re-create this tracker if it were deleted — true
+            only for a preset every athlete is given automatically.
+
+
+            **Derived server-side, and on the wire because a client cannot
+            compute it.** A client knows a tracker's `preset` key but not which
+            keys provisioning covers, and inferring "has a preset key" is wrong
+            the moment a preset ships opt-in: coffee is not provisioned, does
+            not come back, and deletes like any other tracker. A client that
+            guesses will tell an athlete something false about their own data.
+
+
+            The only thing it governs: `DELETE …?purge=true` refuses a
+            provisioned tracker (the delete would silently undo itself on the
+            next list), so a client should offer archiving instead of a delete
+            control that cannot work. It is not a permission and grants nothing.
         archived_at:
           type: string
           format: date-time
@@ -5292,6 +5326,33 @@ components:
         target: { type: number, nullable: true }
         render_style: { type: string, enum: [auto, glyphs, bar, dose] }
         sort_order: { type: integer }
+        count_noun: { type: string, maxLength: 24 }
+
+    TrackerPreset:
+      type: object
+      description: >
+        A tracker the athlete can turn on, as the server ships it. Field for
+        field the defaults `POST /tracker-presets/{presetKey}` would provision —
+        exposed so a client can show what tapping it will produce rather than
+        creating something the athlete has not seen.
+
+
+        There is deliberately no "already added" flag: the client already holds
+        the athlete's trackers and can tell, the answer would be stale by the
+        time they tapped, and adding one they already have is idempotent anyway.
+      required: [preset, name, icon, color_key, unit, increment, render_style, count_noun]
+      properties:
+        preset:
+          type: string
+          description: The key to POST back. Stable; this is what identifies it.
+        name: { type: string }
+        icon: { type: string }
+        color_key: { type: string }
+        unit: { type: string, enum: ["", ml, g, mg, cup, dose, count] }
+        increment: { type: number }
+        target: { type: number, nullable: true }
+        render_style: { type: string, enum: [auto, glyphs, bar, dose] }
+        count_noun: { type: string }
 
     DailyTrackerPatch:
       type: object
@@ -11274,6 +11335,21 @@ paths:
         skipped and leaves Today empty. An edited target survives it, and a
         tracker the athlete archived is not handed back.
       tags: [Trackers]
+      parameters:
+        - name: archived
+          in: query
+          required: false
+          description: >
+            `true` — and only the exact literal `true` — returns the trackers
+            the athlete STOPPED instead of the live ones, newest-archived first.
+            Any other value, and the parameter's absence, return the live list.
+
+
+            Read strictly on purpose: `?archived=0` meaning "yes" would show an
+            athlete an empty Today. The archived branch deliberately does not
+            provision the default presets — handing somebody a water card while
+            they are looking at what they turned off would be a strange answer.
+          schema: { type: string, enum: ["true"] }
       responses:
         "200":
           description: The live trackers, in display order.
@@ -11294,6 +11370,15 @@ paths:
         Idempotent on the client-supplied `id`: sending it twice returns the
         original row rather than creating a second. An id that belongs to
         another athlete is reported as a conflict and never returned.
+
+
+        **There is a cap on how many trackers an athlete may have running at
+        once** (eight), because several cards on Today crowd out what Today is
+        for. Exceeding it is 409, and the message says so; archiving one makes
+        room, and archived trackers do not count against it. The cap never
+        refuses an idempotent retry — a create that adds no row is answered with
+        the existing tracker, so a lost response cannot become a permanent
+        rejection.
       tags: [Trackers]
       requestBody:
         required: true
@@ -11385,16 +11470,132 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       operationId: archiveTracker
-      summary: Archive a tracker
+      summary: Archive a tracker, or destroy it
       description: >
-        **Archives; does not destroy.** The tracker leaves the list and every
-        entry it recorded survives. Archiving twice is not an error, and an
-        archived preset is not re-provisioned on the next list.
+        **Archives by default; destroys only with `?purge=true`.** Archiving
+        takes the tracker off the list and every entry it recorded survives.
+        Archiving twice is not an error, and an archived preset is not
+        re-provisioned on the next list.
+
+
+        `?purge=true` is the genuinely destructive path: the tracker and every
+        entry it ever held are deleted, and there is no undo. The literal is
+        read EXACTLY — `?purge=1`, `?purge=TRUE` and `?purge=false` all archive
+        — so a client that gets the spelling wrong loses nothing. A client
+        offering this must say what it destroys before asking.
+
+
+        A tracker provisioned from a preset cannot be destroyed, only archived:
+        deleting the row deletes the record that provisioning happened, so the
+        next list would hand it straight back and the destroy would silently
+        undo itself.
       tags: [Trackers]
+      parameters:
+        - name: purge
+          in: query
+          required: false
+          description: >
+            `true`, exactly, destroys the tracker and all of its entries.
+            Anything else archives.
+          schema: { type: string, enum: ["true"] }
       responses:
-        "204": { description: Archived. }
+        "204": { description: "Archived, or destroyed." }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /trackers/{trackerID}/restore:
+    parameters:
+      - name: trackerID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: restoreTracker
+      summary: Put an archived tracker back
+      description: >
+        Un-archives, with every entry it kept while it was stopped. POST rather
+        than PATCH because this is a lifecycle transition, not a field write —
+        folding it into the partial-update body would put "stop tracking this"
+        one typo away from "change my target".
+
+
+        Restoring one that is already live is a no-op, so a retry after a lost
+        response is safe. Subject to the same live-tracker cap as creating one:
+        an athlete already at the limit is answered 409, because otherwise
+        archiving and restoring would walk straight past it.
+      tags: [Trackers]
+      responses:
+        "204": { description: "Restored, or already live." }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /tracker-presets:
+    get:
+      operationId: listTrackerPresets
+      summary: Trackers the athlete can turn on
+      description: >
+        The catalogue of seeded trackers that are NOT provisioned automatically
+        — the ones an athlete opts into. Coffee is the first: an unremovable
+        daily coffee counter handed to somebody who has just quit is not a
+        neutral thing for a nutrition app to do, so it ships off and this is how
+        it is reachable.
+
+
+        Presets every athlete is already given are deliberately absent: they are
+        provisioned by `GET /trackers`, and offering a second route onto the
+        same row would be confusing. An archived one is restored from the
+        archived list instead.
+      tags: [Trackers]
+      responses:
+        "200":
+          description: The optional presets. Possibly empty.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [presets]
+                properties:
+                  presets:
+                    type: array
+                    items: { $ref: "#/components/schemas/TrackerPreset" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /tracker-presets/{presetKey}:
+    parameters:
+      - name: presetKey
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: addTrackerPreset
+      summary: Turn a preset on
+      description: >
+        Provisions the named preset for the caller, or RESTORES it if they
+        stopped it earlier — the row still holds the provisioning key, so a
+        plain second insert would do nothing and the athlete would tap and see
+        no change.
+
+
+        There is no request body, and that is the security property rather than
+        a convenience: every field comes from the server's compiled catalogue
+        and the id is derived from the caller's own user id. That is what lets
+        this mint an id in the reserved namespace `POST /trackers` refuses.
+
+
+        Idempotent. An unknown key, or the key of a preset every athlete is
+        given by default, is 404. Subject to the live-tracker cap.
+      tags: [Trackers]
+      responses:
+        "200":
+          description: The tracker, live.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DailyTracker" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /trackers/{trackerID}/entries/{entryID}:
     parameters:

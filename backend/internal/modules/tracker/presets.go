@@ -77,6 +77,12 @@ var presets = []Preset{
 			Target:      ptr(2000.0),
 			RenderStyle: RenderGlyphs,
 			SortOrder:   10,
+			// The noun is AUTHORED now rather than derived from the unit (N78) —
+			// so water, whose unit is `ml`, has to say "cup" out loud. It read
+			// "cup" before because `ml` mapped to it in a table on the client;
+			// that table is now only a suggestion offered while authoring, and
+			// a preset that relied on it would silently read "0 of 8" here.
+			CountNoun: "cup",
 		},
 	},
 	// Coffee (N77), and it is a literal — nothing else in this package changed
@@ -118,6 +124,11 @@ var presets = []Preset{
 			Target:      nil,
 			RenderStyle: RenderAuto,
 			SortOrder:   20,
+			// Authored since N78, like water's. Coffee's unit is `cup`, which
+			// is what the old client-side derivation keyed on — so without this
+			// line the card reads "3" where it used to read "3 cups". The noun
+			// is a property of the substance now, and nothing infers it.
+			CountNoun: "cup",
 		},
 	},
 }
@@ -126,6 +137,43 @@ func ptr[T any](v T) *T { return &v }
 
 // Presets returns every known preset.
 func Presets() []Preset { return presets }
+
+// PresetByKey finds one, or reports that no such preset ships.
+//
+// **This lookup is the security boundary for AddPreset**, and it is why an
+// athlete can turn a preset on without `POST /v1/trackers`'s reserved-namespace
+// guard being weakened. A caller supplies a KEY, not a payload: the id, the
+// name, the unit, the increment and the colour all come from the literal above,
+// so the worst a hostile key can do is 404. There is no shape of request that
+// puts a client-chosen field on a `t_` id.
+func PresetByKey(key string) (Preset, bool) {
+	for _, p := range presets {
+		if p.Key == key {
+			return p, true
+		}
+	}
+	return Preset{}, false
+}
+
+// NonDefaultPresets are the ones an athlete turns on rather than being given.
+//
+// **This is what makes a `Default: false` preset reachable at all**, and N77
+// (coffee) is why it exists. Coffee deliberately ships `Default: false` — an
+// unremovable daily coffee counter handed to somebody who has just quit is not
+// a neutral thing for a nutrition app to do — so without a way to opt in, the
+// preset is written, tested, merged and reaches nobody.
+//
+// Deliberately NOT filtered by what the athlete already has. That question
+// belongs to the handler, which knows their rows; this is the catalogue.
+func NonDefaultPresets() []Preset {
+	out := make([]Preset, 0, len(presets))
+	for _, p := range presets {
+		if !p.Default {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 // DefaultsFor returns the presets an athlete starts with, as create payloads
 // carrying deterministic ids.

@@ -301,8 +301,28 @@ export default function FoodScreen() {
             dayAtTap={() => on}
             units={units}
             unitsReady={unitsReady}
+            // No `collapseAfter`. Today hides all but three because it is a
+            // decision surface with a session, a readiness reading and a week on
+            // it; Food is where trackers LIVE, and somebody who came here came
+            // to look at them.
             testID="food-trackers"
           />
+
+          {/* The way in to authoring — creating, editing, reordering, stopping.
+              N78 puts it in FOOD because that is where the ticket puts it ("In
+              Food, an athlete creates a tracker by naming...") and because it is
+              the screen an athlete is on when they think "I should be tracking
+              this too". Today deliberately gets no such control: it is a
+              decision surface, not a settings screen. */}
+          <Pressable
+            onPress={() => router.push('/trackers')}
+            style={styles.manageTrackers}
+            accessibilityRole="button"
+            accessibilityLabel="Manage your trackers — add, reorder or stop one"
+            testID="food-manage-trackers"
+          >
+            <Text style={styles.manageTrackersText}>Manage trackers</Text>
+          </Pressable>
 
           {/* The meal sections render ONLY on a real answer.
               Rendered while loading, or after a failed read, they are four
@@ -393,6 +413,13 @@ function trimZero(n: number): string {
 }
 
 const styles = StyleSheet.create({
+  // A quiet row, not a button: authoring is the rare gesture here and logging
+  // is the common one, so it must not compete with the cards above it.
+  // 13 + 13 + ~18pt of text is 44 — the minimum this diff holds its other
+  // controls to. At 12 it was ~42, which is the kind of near-miss the glyph
+  // row's own note is about.
+  manageTrackers: { paddingVertical: 13, alignItems: 'center' },
+  manageTrackersText: { fontSize: 13, fontWeight: '700', color: vola.textMuted },
   screen: { flex: 1, backgroundColor: vola.bg },
   headerLink: { fontSize: 13, fontWeight: '700' },
   container: { gap: 12 },

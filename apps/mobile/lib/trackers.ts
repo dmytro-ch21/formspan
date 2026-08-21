@@ -26,7 +26,7 @@ import { randomUUID } from 'expo-crypto';
 import type { SQLiteBindValue } from 'expo-sqlite';
 
 import { dayString } from './calendar';
-import { isOffline, isPermanentRejection } from './apiError';
+import { ApiError, isOffline, isPermanentRejection } from './apiError';
 import { getDb, withTransaction } from './db';
 import type { RenderStyle, Tracker, TrackerEntry, TrackerUnit } from './trackerModel';
 import * as api from './trackersApi';
@@ -63,7 +63,11 @@ type TrackerRow = {
   target: number | null;
   render_style: string;
   sort_order: number;
+  count_noun: string;
+  provisioned: number;
   archived_at: string | null;
+  restore_pending: number;
+  destroyed_at: string | null;
   updated_at: string;
   dirty: number;
   remote: number;
@@ -81,6 +85,8 @@ function toTracker(r: TrackerRow): Tracker {
     target: r.target,
     render_style: r.render_style as RenderStyle,
     sort_order: r.sort_order,
+    count_noun: r.count_noun,
+    provisioned: r.provisioned === 1,
   };
 }
 
@@ -102,7 +108,7 @@ export async function localTrackers(userId: string): Promise<TrackerView> {
   const db = await getDb();
   const rows = await db.getAllAsync<TrackerRow>(
     `SELECT * FROM daily_trackers
-      WHERE user_id = ? AND archived_at IS NULL
+      WHERE user_id = ? AND archived_at IS NULL AND destroyed_at IS NULL
       ORDER BY sort_order, id`,
     userId,
   );
@@ -111,11 +117,35 @@ export async function localTrackers(userId: string): Promise<TrackerView> {
   // (every tracker archived). Distinguished by whether ANY row exists for this
   // athlete, archived included — which is why archiving is a timestamp rather
   // than a delete on this side too.
+  //
+  // A tracker the athlete DESTROYED is not evidence either way and is excluded
+  // from both queries: its row survives only as a tombstone carrying a delete
+  // this device still owes, and counting it would make "I deleted my only
+  // tracker" render an empty list where "this device has not asked yet" is the
+  // truthful state — the exact confusion this union exists to prevent.
   const any = await db.getFirstAsync<{ n: number }>(
-    `SELECT count(*) AS n FROM daily_trackers WHERE user_id = ?`,
+    `SELECT count(*) AS n FROM daily_trackers WHERE user_id = ? AND destroyed_at IS NULL`,
     userId,
   );
   return (any?.n ?? 0) > 0 ? { state: 'ready', trackers: [] } : { state: 'unknown' };
+}
+
+/**
+ * The trackers this athlete has stopped, newest-archived first.
+ *
+ * Its own query rather than a flag on `localTrackers`, for the reason the
+ * backend gives: a screen showing both would have to decide what an archived
+ * card's `+` does, and the honest answer is that it has none.
+ */
+export async function localArchivedTrackers(userId: string): Promise<Tracker[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<TrackerRow>(
+    `SELECT * FROM daily_trackers
+      WHERE user_id = ? AND archived_at IS NOT NULL AND destroyed_at IS NULL
+      ORDER BY archived_at DESC, id`,
+    userId,
+  );
+  return rows.map(toTracker);
 }
 
 /**
@@ -143,24 +173,76 @@ export async function cacheTrackers(userId: string, trackers: api.WireTracker[])
           AND dirty = 0 AND remote = 1 AND archived_at IS NULL`,
       stamp(), userId, ...ids,
     );
-    for (const t of trackers) {
-      await db.runAsync(
-        `INSERT INTO daily_trackers (
-           id, user_id, preset, name, icon, color_key, unit, increment, target,
-           render_style, sort_order, archived_at, updated_at, dirty, remote)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
-         ON CONFLICT(id) DO UPDATE SET
-           preset = excluded.preset, name = excluded.name, icon = excluded.icon,
-           color_key = excluded.color_key, unit = excluded.unit,
-           increment = excluded.increment, target = excluded.target,
-           render_style = excluded.render_style, sort_order = excluded.sort_order,
-           archived_at = excluded.archived_at, remote = 1
-         WHERE daily_trackers.dirty = 0`,
-        t.id, userId, t.preset, t.name, t.icon, t.color_key, t.unit, t.increment,
-        t.target, t.render_style, t.sort_order, t.archived_at, t.updated_at,
-      );
-    }
+    await upsertTrackers(db, userId, trackers);
   });
+}
+
+/**
+ * Store a list of ARCHIVED trackers, without the sweep above.
+ *
+ * The sweep in `cacheTrackers` reads "anything the server did not return is
+ * gone", which is only true of a request for the LIVE list. Running it against
+ * a response that deliberately contains only archived rows would archive every
+ * live tracker the athlete has — the whole of Today, from opening a screen that
+ * only reads.
+ *
+ * Same upsert, no sweep. That is the entire difference, and it is why this is a
+ * separate function rather than a boolean argument: a boolean at the call site
+ * does not say which of those two things is about to happen.
+ */
+export async function cacheArchivedTrackers(
+  userId: string,
+  trackers: api.WireTracker[],
+): Promise<void> {
+  const db = await getDb();
+  await withTransaction(db, () => upsertTrackers(db, userId, trackers));
+}
+
+/**
+ * Store ONE tracker the server just handed back, without the live-list sweep.
+ *
+ * For a response that is a single row rather than a list — turning a preset on,
+ * which is the one write in this feature that cannot happen offline because the
+ * server derives the id.
+ *
+ * **Without this, `POST /tracker-presets/{key}` lands nowhere the athlete can
+ * see.** `requestSync` only PUSHES; there is no pull. So the athlete taps
+ * "Coffee", the server creates it, the screen navigates back to a list that
+ * reads SQLite — and coffee is not in it, until some other screen happens to
+ * refetch. It also would not count against the local cap until then. That is
+ * the acceptance criterion "a created tracker appears on Today without further
+ * setup" failing on the first screen they actually look at.
+ */
+export async function cacheTracker(userId: string, tracker: api.WireTracker): Promise<void> {
+  const db = await getDb();
+  await withTransaction(db, () => upsertTrackers(db, userId, [tracker]));
+}
+
+async function upsertTrackers(
+  db: Awaited<ReturnType<typeof getDb>>,
+  userId: string,
+  trackers: api.WireTracker[],
+): Promise<void> {
+  for (const t of trackers) {
+    await db.runAsync(
+      `INSERT INTO daily_trackers (
+         id, user_id, preset, name, icon, color_key, unit, increment, target,
+         render_style, sort_order, count_noun, provisioned, archived_at, updated_at,
+         dirty, remote)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+       ON CONFLICT(id) DO UPDATE SET
+         preset = excluded.preset, name = excluded.name, icon = excluded.icon,
+         color_key = excluded.color_key, unit = excluded.unit,
+         increment = excluded.increment, target = excluded.target,
+         render_style = excluded.render_style, sort_order = excluded.sort_order,
+         count_noun = excluded.count_noun, provisioned = excluded.provisioned,
+         archived_at = excluded.archived_at, remote = 1
+       WHERE daily_trackers.dirty = 0`,
+      t.id, userId, t.preset, t.name, t.icon, t.color_key, t.unit, t.increment,
+      t.target, t.render_style, t.sort_order, t.count_noun ?? '',
+      t.provisioned ? 1 : 0, t.archived_at, t.updated_at,
+    );
+  }
 }
 
 /**
@@ -204,6 +286,7 @@ export async function updateTrackerLocally(
   add('target', patch.target);
   add('render_style', patch.render_style);
   add('sort_order', patch.sort_order);
+  add('count_noun', patch.count_noun);
   if (sets.length === 0) return;
 
   const db = await getDb();
@@ -214,6 +297,192 @@ export async function updateTrackerLocally(
     ...args, stamp(), id, userId,
   );
   if (r.changes === 0) throw new Error('That tracker no longer exists on this device.');
+}
+
+/**
+ * How many trackers an athlete may have running at once.
+ *
+ * **Mirrors the server's `MaxLiveTrackers` and is checked here as well**, so an
+ * athlete who fills up offline is told at the moment they tap Create rather
+ * than by a 409 surfacing on a sync screen an hour later — by which time they
+ * have typed a name, a unit, a target and an increment, and the app throws it
+ * away.
+ *
+ * The server's copy is the one that decides. This one exists to be timely, and
+ * `trackerCap.test.ts` asserts the two numbers are equal by reading the Go
+ * constant, so they cannot drift.
+ */
+export const MAX_LIVE_TRACKERS = 8;
+
+/** What creating a tracker on this device needs. */
+export type NewTrackerInput = {
+  name: string;
+  icon: string;
+  color_key: string;
+  unit: TrackerUnit;
+  increment: number;
+  target: number | null;
+  render_style: RenderStyle;
+  count_noun: string;
+};
+
+/**
+ * Create a tracker, locally and now.
+ *
+ * **The id is generated HERE**, which is what makes the push idempotent: a
+ * create that reaches the server and whose response is lost is retried with the
+ * same id and answered with the original row. The same property every tap has.
+ *
+ * `sort_order` puts it at the end of the athlete's list rather than at 0 — a
+ * new tracker jumping to the top of Today, above the water they have been
+ * logging for a month, is not what "add one" means.
+ *
+ * Returns the new id so the caller can navigate to it.
+ */
+export async function createTrackerLocally(
+  userId: string,
+  input: NewTrackerInput,
+): Promise<string> {
+  const db = await getDb();
+  const live = await db.getFirstAsync<{ n: number }>(
+    `SELECT count(*) AS n FROM daily_trackers
+      WHERE user_id = ? AND archived_at IS NULL AND destroyed_at IS NULL`,
+    userId,
+  );
+  if ((live?.n ?? 0) >= MAX_LIVE_TRACKERS) {
+    throw new Error(
+      `You can track ${MAX_LIVE_TRACKERS} things at once. Stop one first — ` +
+        `everything it recorded is kept.`,
+    );
+  }
+  const next = await db.getFirstAsync<{ n: number | null }>(
+    `SELECT max(sort_order) AS n FROM daily_trackers WHERE user_id = ?`,
+    userId,
+  );
+  const id = randomUUID();
+  const now = stamp();
+  await db.runAsync(
+    `INSERT INTO daily_trackers (
+       id, user_id, preset, name, icon, color_key, unit, increment, target,
+       render_style, sort_order, count_noun, updated_at, dirty, remote)
+     VALUES (?,?,'',?,?,?,?,?,?,?,?,?,?,1,0)`,
+    id, userId, input.name, input.icon, input.color_key, input.unit,
+    input.increment, input.target, input.render_style, (next?.n ?? 0) + 10,
+    input.count_noun, now,
+  );
+  return id;
+}
+
+/**
+ * Stop a tracker. It leaves Today and Food; every entry it recorded stays.
+ *
+ * A timestamp rather than a delete on this side too, and for a second reason
+ * beyond mirroring the server: `localTrackers` distinguishes "this device has
+ * never asked" from "there are genuinely none" by whether ANY row exists, so a
+ * hard delete here would make an athlete who stopped their only tracker see a
+ * loading state forever.
+ */
+export async function archiveTrackerLocally(userId: string, id: string): Promise<void> {
+  const db = await getDb();
+  const now = stamp();
+  const r = await db.runAsync(
+    `UPDATE daily_trackers
+        SET archived_at = ?, restore_pending = 0, dirty = 1, updated_at = ?, last_error = NULL
+      WHERE id = ? AND user_id = ? AND archived_at IS NULL AND destroyed_at IS NULL`,
+    now, now, id, userId,
+  );
+  if (r.changes === 0) throw new Error('That tracker is not on this device.');
+}
+
+/**
+ * Put a stopped tracker back.
+ *
+ * `restore_pending` is what the push reads. It cannot be inferred from
+ * `archived_at IS NULL AND dirty = 1`, because that is also what an ordinary
+ * edit to a live tracker looks like — and a PATCH does not un-archive anything,
+ * so the restore would silently never happen and the card would come back on
+ * the next pull.
+ */
+export async function restoreTrackerLocally(userId: string, id: string): Promise<void> {
+  const db = await getDb();
+  const live = await db.getFirstAsync<{ n: number }>(
+    `SELECT count(*) AS n FROM daily_trackers
+      WHERE user_id = ? AND archived_at IS NULL AND destroyed_at IS NULL`,
+    userId,
+  );
+  if ((live?.n ?? 0) >= MAX_LIVE_TRACKERS) {
+    throw new Error(
+      `You are already tracking ${MAX_LIVE_TRACKERS} things. Stop one to make room.`,
+    );
+  }
+  const now = stamp();
+  const r = await db.runAsync(
+    `UPDATE daily_trackers
+        SET archived_at = NULL, restore_pending = 1, dirty = 1, updated_at = ?, last_error = NULL
+      WHERE id = ? AND user_id = ? AND archived_at IS NOT NULL AND destroyed_at IS NULL`,
+    now, id, userId,
+  );
+  if (r.changes === 0) throw new Error('That tracker is not stopped on this device.');
+}
+
+/**
+ * **Destroy a tracker and everything it ever recorded.** There is no undo.
+ *
+ * A TOMBSTONE rather than a local delete, exactly as `removeTap` uses one: a
+ * destroy made in a dead spot would otherwise leave nothing carrying the
+ * intent, the push would have no row to read, and the next pull would hand the
+ * tracker back. The row is hard-deleted once the server confirms.
+ *
+ * The local entries go immediately, because nothing needs them again — the
+ * server cascades its own, and any entry this device still owed is owed against
+ * a tracker that is being destroyed.
+ */
+export async function destroyTrackerLocally(userId: string, id: string): Promise<void> {
+  const db = await getDb();
+  await withTransaction(db, async () => {
+    const now = stamp();
+    const r = await db.runAsync(
+      `UPDATE daily_trackers
+          SET destroyed_at = ?, dirty = 1, updated_at = ?, last_error = NULL
+        WHERE id = ? AND user_id = ? AND destroyed_at IS NULL`,
+      now, now, id, userId,
+    );
+    if (r.changes === 0) throw new Error('That tracker is not on this device.');
+    await db.runAsync(
+      `DELETE FROM tracker_entries WHERE tracker_id = ? AND user_id = ?`,
+      id, userId,
+    );
+  });
+}
+
+/**
+ * Write a new display order.
+ *
+ * Takes the ids in the order the athlete wants them and renumbers all of them,
+ * rather than swapping two neighbours' values. Swapping is fine until two rows
+ * share a `sort_order` — which they do the moment anything is created while a
+ * reorder is unsynced — and then the tie is broken by id and the list appears
+ * to reorder itself.
+ *
+ * Each row goes through `updateTrackerLocally`, so every one is marked dirty
+ * and pushed. Ten apart so a later insert can land between two without a
+ * renumber.
+ */
+export async function reorderTrackers(userId: string, orderedIds: string[]): Promise<void> {
+  const db = await getDb();
+  // **ONE transaction, not N statements.** Two things go wrong without it, and
+  // the second is the one an athlete meets: a throw part-way through (a row
+  // swept to archived by a concurrent pull, say) leaves a HALF-renumbered order
+  // already marked dirty and pushed as-is — an order nobody chose; and a rapid
+  // double-tap on the arrows starts two of these whose per-row writes
+  // interleave, so what is stored is a mix of two arrays while the screen shows
+  // the second. The screen also serialises its own calls, but a lock on the
+  // data is the one that holds when a second screen appears.
+  await withTransaction(db, async () => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await updateTrackerLocally(userId, orderedIds[i], { sort_order: (i + 1) * 10 });
+    }
+  });
 }
 
 /**
@@ -427,24 +696,71 @@ async function push(userId: string, getToken: TokenGetter): Promise<TrackerSyncR
   );
   for (const d of defs) {
     try {
+      // **A DESTROY takes precedence over everything else on the row**, and the
+      // ordering is the point: a tracker the athlete deleted must not have its
+      // name, target or archive state pushed first. Those are edits to a thing
+      // that is going away, and one of them failing would strand the delete.
+      if (d.destroyed_at) {
+        // `remote === 0` means the server never saw it, so there is nothing to
+        // destroy — skipping the request is not an optimisation, it is the
+        // difference between 204 and a 404 that classifies as permanent.
+        if (d.remote === 1) {
+          try {
+            await api.destroyTracker(getToken, d.id);
+          } catch (err) {
+            // **A 404 means it is already gone, which is success.** The server
+            // answers 204 to a repeat destroy, so this is the other device
+            // having destroyed it first — or a row that never existed. Falling
+            // through to the generic handler would mark the row `dirty = 0` and
+            // leave the tombstone in place forever: invisible on every screen,
+            // never retried, and unrecoverable because `cacheTrackers`' upsert
+            // does not clear `destroyed_at`. That is the one lifecycle state
+            // with no exit, so it is closed here rather than left as a shape
+            // nobody would find again.
+            if (!(err instanceof ApiError && err.status === 404)) throw err;
+          }
+        }
+        // Hard-deleted only once the server confirms. Until then the tombstone
+        // IS the record that a destroy is owed — same rule as a removed tap.
+        await db.runAsync(
+          `DELETE FROM daily_trackers WHERE id = ? AND user_id = ?`, d.id, userId);
+        result.pushed += 1;
+        continue;
+      }
+
       if (d.remote === 0) {
         await api.createTracker(getToken, {
           id: d.id, name: d.name, icon: d.icon, color_key: d.color_key,
           unit: d.unit as TrackerUnit, increment: d.increment, target: d.target,
           render_style: d.render_style as RenderStyle, sort_order: d.sort_order,
+          count_noun: d.count_noun,
         });
+        // Created offline and then stopped before it ever reached the server.
+        // Uncommon, and silently wrong without this: the create alone would put
+        // a card the athlete already removed back on Today.
+        if (d.archived_at) await api.archiveTracker(getToken, d.id);
       } else {
+        // BEFORE the patch. A PATCH does not un-archive anything, so a restore
+        // that ran afterwards would be writing fields onto a row the server
+        // still considers stopped.
+        if (d.restore_pending) await api.restoreTracker(getToken, d.id);
         await api.patchTracker(getToken, d.id, {
           name: d.name, icon: d.icon, color_key: d.color_key,
           unit: d.unit as TrackerUnit, increment: d.increment, target: d.target,
           render_style: d.render_style as RenderStyle, sort_order: d.sort_order,
+          count_noun: d.count_noun,
         });
+        // AFTER the patch, so an edit made in the same offline stretch as the
+        // archive is not lost — the server accepts a patch on an archived row,
+        // but doing it in this order needs no such assumption.
+        if (d.archived_at) await api.archiveTracker(getToken, d.id);
       }
       // COMPARE-AND-SWAP on updated_at: an edit that landed while this push was
       // in flight leaves the row dirty for the next pass rather than being
       // silently marked sent.
       await db.runAsync(
-        `UPDATE daily_trackers SET dirty = 0, remote = 1, last_error = NULL
+        `UPDATE daily_trackers
+            SET dirty = 0, remote = 1, restore_pending = 0, last_error = NULL
           WHERE id = ? AND user_id = ? AND updated_at = ?`,
         d.id, userId, d.updated_at,
       );

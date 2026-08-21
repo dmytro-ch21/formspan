@@ -488,8 +488,23 @@ func main() {
 	mux.Handle("GET /v1/trackers", verifier.RequireAuth(http.HandlerFunc(trackerHandler.List)))
 	mux.Handle("POST /v1/trackers", verifier.RequireAuth(http.HandlerFunc(trackerHandler.Create)))
 	mux.Handle("GET /v1/trackers/entries", verifier.RequireAuth(http.HandlerFunc(trackerHandler.ListEntries)))
+	// The catalogue of trackers an athlete can turn on, and the switch. Without
+	// these a preset shipping `Default: false` (coffee, N77) reaches nobody.
+	//
+	// A SEPARATE top-level path rather than `/v1/trackers/presets/{presetKey}`,
+	// and not for taste: that pattern and `/v1/trackers/{trackerID}/restore`
+	// overlap on `/v1/trackers/presets/restore` with neither more specific than
+	// the other, which is a registration-time PANIC in Go's ServeMux — the whole
+	// API failing to start, at boot, on a route nobody would ever call. The
+	// catalogue is a different resource from an athlete's trackers anyway.
+	mux.Handle("GET /v1/tracker-presets", verifier.RequireAuth(http.HandlerFunc(trackerHandler.ListPresets)))
+	mux.Handle("POST /v1/tracker-presets/{presetKey}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.AddPreset)))
 	mux.Handle("PATCH /v1/trackers/{trackerID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.Update)))
+	// DELETE archives; DELETE ...?purge=true destroys, entries and all. One
+	// route rather than two, so a client cannot call the wrong one — see the
+	// handler.
 	mux.Handle("DELETE /v1/trackers/{trackerID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.Archive)))
+	mux.Handle("POST /v1/trackers/{trackerID}/restore", verifier.RequireAuth(http.HandlerFunc(trackerHandler.Restore)))
 	mux.Handle("PUT /v1/trackers/{trackerID}/entries/{entryID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.LogEntry)))
 	mux.Handle("DELETE /v1/trackers/{trackerID}/entries/{entryID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.DeleteEntry)))
 	// Literal before wildcard, which Go 1.22's mux resolves by specificity

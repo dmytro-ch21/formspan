@@ -44,6 +44,13 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 	return true
 }
 
+// The exact query values that switch a request onto its non-default behaviour.
+//
+// Literal `"true"`, not "anything truthy": `?archived=0` and `?purge=false` must
+// mean what they say, and a lenient parse turns a typo into a destroyed tracker.
+// A missing parameter is the safe answer in both cases.
+const explicitYes = "true"
+
 // List returns the athlete's trackers, provisioning the defaults first.
 //
 // Provisioning on a GET is a write on a read, which is worth being explicit
@@ -54,6 +61,20 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFrom(w, r)
 	if !ok {
+		return
+	}
+	// `?archived=true` reads the other list — the trackers this athlete stopped.
+	//
+	// Deliberately does NOT provision: EnsureDefaults on a request for archived
+	// rows would hand somebody a water card they never asked to see while they
+	// are looking at the ones they turned off.
+	if r.URL.Query().Get("archived") == explicitYes {
+		trackers, err := h.repo.ListArchived(r.Context(), userID)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		apihttp.WriteJSON(w, http.StatusOK, map[string]any{"trackers": trackers})
 		return
 	}
 	if err := h.repo.EnsureDefaults(r.Context(), userID, DefaultsFor(userID)); err != nil {
@@ -133,14 +154,136 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 //
 // The verb is DELETE because that is what the client means and what a REST
 // client expects; the effect is a timestamp, because a tracker you stop is not
-// a tracker whose past disappears. N78 adds a genuinely destructive path with
-// copy that says what it takes with it; there is deliberately none here.
+// a tracker whose past disappears.
+//
+// **`?purge=true` is the destructive path**, and the shape is chosen so the two
+// cannot be confused by accident in either direction:
+//
+//   - The DEFAULT is the safe one. A caller that forgets the parameter, sends
+//     it empty, or misspells it archives — the outcome that loses nothing.
+//   - The destructive one has to be spelled out in the URL, so it is visible in
+//     a log and in a proxy's access line rather than hidden in a body.
+//   - It is not a second route, because two routes onto one resource's removal
+//     is how a client ends up calling the wrong one; and it is not a field in
+//     the PATCH body, because archiving is a lifecycle transition rather than a
+//     field, and folding it into the partial-write path would put "delete
+//     everything I logged" one typo away from "change my target".
+//
+// N76 shipped this endpoint archiving only and said the destructive path was
+// N78's. This is it.
 func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFrom(w, r)
 	if !ok {
 		return
 	}
-	if err := h.repo.Archive(r.Context(), userID, r.PathValue("trackerID")); err != nil {
+	id := r.PathValue("trackerID")
+	var err error
+	if r.URL.Query().Get("purge") == explicitYes {
+		err = h.repo.Destroy(r.Context(), userID, id)
+	} else {
+		err = h.repo.Archive(r.Context(), userID, id)
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListPresets is the catalogue of trackers an athlete can turn on.
+//
+// **This endpoint is what makes a `Default: false` preset reachable.** N77's
+// coffee ships off — an unremovable daily coffee counter handed to somebody who
+// just quit is not a neutral thing for a nutrition app to do — so without a
+// catalogue it is code that reaches nobody. The create screen renders this
+// above the blank form: "Coffee" is one tap, and everything else is typed.
+//
+// It lists ONLY the non-default ones. A preset an athlete is given
+// automatically is not something to offer them; it is already on their Today,
+// or they archived it and it lives on the archived screen with a Restore.
+//
+// No `taken` flag, deliberately. The client already holds the athlete's
+// trackers (it renders them) and can tell; computing it here would mean a
+// second query on a request that is otherwise a compiled constant, and it would
+// go stale between this response and the tap anyway. `AddPreset` is idempotent,
+// so a tap on one they already have is harmless.
+func (h *Handler) ListPresets(w http.ResponseWriter, r *http.Request) {
+	if _, ok := userIDFrom(w, r); !ok {
+		return
+	}
+	type wire struct {
+		Preset      string   `json:"preset"`
+		Name        string   `json:"name"`
+		Icon        string   `json:"icon"`
+		ColorKey    string   `json:"color_key"`
+		Unit        string   `json:"unit"`
+		Increment   float64  `json:"increment"`
+		Target      *float64 `json:"target"`
+		RenderStyle string   `json:"render_style"`
+		CountNoun   string   `json:"count_noun"`
+	}
+	// Shaped explicitly rather than returning `Preset` — that struct carries
+	// `Default`, which is a provisioning decision and none of a client's
+	// business, and a `New` whose `ID` is empty here and would read as a bug.
+	out := []wire{}
+	for _, p := range NonDefaultPresets() {
+		f := p.Fields
+		out = append(out, wire{
+			Preset: p.Key, Name: f.Name, Icon: f.Icon, ColorKey: f.ColorKey,
+			Unit: f.Unit, Increment: f.Increment, Target: f.Target,
+			RenderStyle: f.RenderStyle, CountNoun: f.CountNoun,
+		})
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"presets": out})
+}
+
+// AddPreset turns one on, by key.
+//
+// The body is empty and the key is a path segment, because there is nothing for
+// a client to supply: every field comes from the compiled preset, and the id is
+// derived from the athlete's own user id. That is what lets this mint an id in
+// the `t_` namespace that `POST /v1/trackers` refuses — the namespace guard is
+// about a client CHOOSING an id, and here nobody does.
+//
+// An unknown key is 404 rather than 400: the client asked for a preset that
+// does not exist, which is the same shape as asking for a tracker that does
+// not exist.
+func (h *Handler) AddPreset(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFrom(w, r)
+	if !ok {
+		return
+	}
+	key := r.PathValue("presetKey")
+	p, found := PresetByKey(key)
+	if !found || p.Default {
+		// A DEFAULT preset is refused too, and not for tidiness: it is
+		// provisioned by List already, so "adding" it is either a no-op or a
+		// confusing second route onto the same row. Restoring an archived one is
+		// the archived screen's job, which is where an athlete would look.
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "no such tracker preset")
+		return
+	}
+	in := p.Fields
+	in.ID = PresetID(userID, p.Key)
+	t, err := h.repo.AddPreset(r.Context(), userID, in)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, t)
+}
+
+// Restore puts an archived tracker back, with its history.
+//
+// POST rather than PATCH because it is not a field write — see Archive. It
+// answers 204 on a tracker that was already live, so a retry after a lost
+// response is not an error.
+func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFrom(w, r)
+	if !ok {
+		return
+	}
+	if err := h.repo.Restore(r.Context(), userID, r.PathValue("trackerID")); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -251,6 +394,13 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, ErrAlreadyExists):
 		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists,
 			"that id is already in use")
+	case errors.Is(err, ErrTooMany):
+		// 409 with `already_exists`: the codes are a closed set (see
+		// docs/architecture/api-conventions.md) and this is a conflict with
+		// state the athlete already has, not a malformed request. The MESSAGE
+		// carries the number, and messages are not part of the contract — a
+		// client must branch on the status, never on this text.
+		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists, err.Error())
 	case errors.Is(err, ErrInvalidInput):
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, err.Error())
 	default:
