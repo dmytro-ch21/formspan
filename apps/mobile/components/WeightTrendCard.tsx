@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 
 import { TrendCard } from '@/components/TrendCard';
+import { shortDate } from '@/lib/calendar';
 import type { Projection as PlanProjectionWire } from '@/lib/nutritionApi';
 import { toDisplayWeight, weightUnit } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -57,6 +58,7 @@ export function WeightTrendCard({
       unit={weightUnit(units)}
       periodLabel="past year"
       minSpan={MIN_SPAN_KG}
+      formatDate={shortDate}
       actionLabel="Record Weight"
       onAction={() => router.push(`/checkin/${today}`)}
       onOpen={() => router.push('/goals/trend')}

@@ -302,39 +302,6 @@ function emptySeries(range: TrendRangeKey, from: string, to: string, empty: Tren
   return { range, from, to, readings: [], segments: [], low: null, high: null, delta: null, empty };
 }
 
-/**
- * Y-axis bounds.
- *
- * **Never zero-based, and that is a deliberate departure from the usual rule.**
- * A bar chart starting above zero exaggerates differences and is rightly
- * frowned on; a body-mass line starting at zero is worse, because an athlete's
- * whole year of work occupies the top 5% of the box and reads as flat. The
- * quantity has no meaningful zero — nobody is heading for 0 kg — so the axis
- * fits the data.
- *
- * A goal outside the data's range is included, or the dashed goal line would be
- * drawn off the top of the chart and the athlete would see a projection heading
- * for nothing.
- *
- * A completely flat series has zero height and would divide by zero when
- * scaled, so it is given `minSpan` and centred in it.
- */
-export function trendBounds(
-  series: Pick<TrendSeries, 'low' | 'high'>,
-  { minSpan, padFraction = 0.1, goal = null }: { minSpan: number; padFraction?: number; goal?: number | null },
-): { min: number; max: number } | null {
-  if (series.low == null || series.high == null) return null;
-  const low = goal == null ? series.low : Math.min(series.low, goal);
-  const high = goal == null ? series.high : Math.max(series.high, goal);
-  const span = high - low;
-  if (span < minSpan) {
-    const mid = (high + low) / 2;
-    return { min: mid - minSpan / 2, max: mid + minSpan / 2 };
-  }
-  const pad = span * padFraction;
-  return { min: low - pad, max: high + pad };
-}
-
 function round(v: number, places: number): number {
   const f = 10 ** places;
   return Math.round(v * f) / f;

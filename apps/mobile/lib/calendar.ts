@@ -36,6 +36,20 @@ export function dayString(d: Date): string {
 }
 
 /**
+ * `2026-08-19` → `19 Aug`, for an axis tick.
+ *
+ * Parsed as UTC and formatted as UTC, matching how a `YYYY-MM-DD` is STORED —
+ * the mirror of {@link dayString}'s rule rather than a contradiction of it.
+ * `new Date('2026-08-19')` is midnight UTC, so reading it back with the local
+ * getters renames it to the 18th for everybody west of Greenwich. That is the
+ * off-by-one-day bug the suite runs under `TZ=America/Los_Angeles` to catch.
+ */
+export function shortDate(on: string): string {
+  const d = new Date(`${on}T00:00:00Z`);
+  return `${d.getUTCDate()} ${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}`;
+}
+
+/**
  * Monday 00:00 in the device's own timezone — the week boundary the whole app uses.
  *
  * Monday because a training week is a training block and every programme anyone
