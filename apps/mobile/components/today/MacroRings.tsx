@@ -195,7 +195,7 @@ function Ring({
         same thing as a ring sitting at zero, which would be a claim that
         nothing was eaten.
       */}
-      <Circle {...common} stroke={colour} strokeOpacity={0.18} />
+      <Circle {...common} stroke={colour} strokeOpacity={sweep ? 0.16 : 0.1} />
       {sweep ? (
         <AnimatedCircle
           {...common}

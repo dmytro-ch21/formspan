@@ -93,18 +93,23 @@ export function TrainingCard({ training, onPress, testID }: TrainingCardProps) {
           )}
         </RNView>
 
-        <ProgressRing
-          percent={pct}
-          size={54}
-          stroke={5}
-          color={vola.lime}
-          label={
-            pct == null
-              ? 'Days trained, not yet known'
-              : `Trained on ${training?.days ?? 0} of the last ${TRAINING_WINDOW_DAYS} days`
-          }
-          testID="training-ring"
-        />
+        {/*
+          **No ring when there is nothing.** Seen on a device: an empty window
+          drew a ring labelled `0%`, which is a zero rendered as a score — the
+          exact failure the sentence beside it exists to avoid, restated in a
+          shape that looks like an achievement. The sentence carries the state
+          on its own; a 0% ring adds nothing and asserts something.
+        */}
+        {training != null && training.sessions > 0 ? (
+          <ProgressRing
+            percent={pct}
+            size={54}
+            stroke={5}
+            color={vola.lime}
+            label={`Trained on ${training.days} of the last ${TRAINING_WINDOW_DAYS} days`}
+            testID="training-ring"
+          />
+        ) : null}
       </RNView>
     </Pressable>
   );
@@ -152,7 +157,14 @@ export function LoggingCard({ loggedDays, days, now, onPress, testID }: LoggingC
         <Text style={styles.miniLabel}>LOGGING</Text>
       </RNView>
 
-      <RNView style={styles.miniBody}>
+      {/*
+          Stacked rather than side by side. Seen on a device: two mini cards
+          share a 390pt row, so `0 / 7` beside seven dots left the figure about
+          60pt of width and it wrapped one word per line — `0 /`, `7`, `days`,
+          `this`, `week`. The dots need the full card width, so they get their
+          own row.
+      */}
+      <RNView style={styles.loggingBody}>
         <RNView style={styles.miniFigures}>
           {n == null ? (
             <Text style={styles.miniAbsent}>Checking…</Text>
@@ -207,6 +219,7 @@ const styles = StyleSheet.create({
   miniHead: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   miniLabel: { fontSize: 10, letterSpacing: 0.9, color: vola.textMuted, fontWeight: '700' },
   miniBody: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  loggingBody: { gap: 10 },
   miniFigures: { flex: 1 },
   miniValue: {
     fontSize: 26,
@@ -216,10 +229,11 @@ const styles = StyleSheet.create({
   },
   miniDenom: { fontSize: 15, fontWeight: '600', color: vola.textDim },
   miniMeta: { fontSize: 11, color: vola.textMuted },
+  miniValueRow: { flexDirection: 'row', alignItems: 'baseline' },
   miniSub: { fontSize: 10, color: vola.textDim },
   miniAbsent: { fontSize: 11, color: vola.textDim },
 
-  dots: { flexDirection: 'row', gap: 3 },
+  dots: { flexDirection: 'row', justifyContent: 'space-between' },
   dotCol: { alignItems: 'center', gap: 3 },
   dotDow: { fontSize: 8, color: vola.textDim },
   dot: { width: 13, height: 13, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },

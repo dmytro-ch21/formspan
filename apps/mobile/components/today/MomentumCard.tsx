@@ -42,15 +42,6 @@ export type MomentumCardProps = {
   view: TargetView;
   rings: readonly RingKey[];
   /**
-   * The week's logged-day count, or null when it could not be read.
-   *
-   * **A count, not a chain** — N53's ruling, carried over from `NutritionCard`
-   * verbatim. Absent entirely when null: `0 of 7` from a failed read is the
-   * confident discouraging zero the whole `EatenView`/`TargetView` apparatus
-   * exists to prevent.
-   */
-  logged: { logged: number; considered: number } | null;
-  /**
    * Two-tap quick add, ranked for the current meal slot.
    *
    * **Carried over from `NutritionCard` rather than dropped.** The reference
@@ -70,7 +61,6 @@ export function MomentumCard({
   eaten,
   view,
   rings,
-  logged,
   quickAdd,
   onLog,
   onQuickAdd,
@@ -91,9 +81,23 @@ export function MomentumCard({
       <StatePill eaten={eaten} view={view} />
 
       <RNView style={styles.body}>
-        <MacroRings readings={readings} testID="today-macro-rings">
-          <Centre eaten={eaten} view={view} />
-        </MacroRings>
+        {/*
+          The rings, with only the headline figure INSIDE them.
+
+          **Four rings leave a centre hole about 34pt across** — outer radius
+          77.5 less three steps of (stroke + gap). That fits a number and one
+          short word and nothing else; the reference gets away with four lines
+          in the middle because its rings are thin and much larger, which is
+          exactly what amendment 4 rules out. So the supporting lines sit under
+          the stack rather than overflowing it, which they did on the first
+          device run.
+        */}
+        <RNView style={styles.ringColumn}>
+          <MacroRings readings={readings} testID="today-macro-rings">
+            <Centre eaten={eaten} view={view} />
+          </MacroRings>
+          <CentreMeta eaten={eaten} view={view} />
+        </RNView>
 
         <RNView style={styles.rows}>
           {macroRows.length > 0 ? (
@@ -105,14 +109,6 @@ export function MomentumCard({
           )}
         </RNView>
       </RNView>
-
-      {/* N28's denominator rule: the count is meaningless without the span it
-          was taken over, so the two are one sentence or neither is shown. */}
-      {logged ? (
-        <Text style={styles.logged} testID="today-momentum-logged">
-          {logged.logged} of {logged.considered} days logged this week
-        </Text>
-      ) : null}
 
       {quickAdd.length > 0 ? (
         <RNView style={styles.chips}>
@@ -199,7 +195,12 @@ function StatePill({ eaten, view }: { eaten: EatenView; view: TargetView }) {
   );
 }
 
-/** The number in the middle of the rings. */
+/**
+ * The headline figure, inside the rings.
+ *
+ * At most a number and one short word — see the note at the call site. Anything
+ * longer belongs in {@link CentreMeta}.
+ */
 function Centre({ eaten, view }: { eaten: EatenView; view: TargetView }) {
   const totals = viewTotals(eaten);
   const target = viewTarget(view);
@@ -208,18 +209,16 @@ function Centre({ eaten, view }: { eaten: EatenView; view: TargetView }) {
   // read your day" outranks "no target set" because it is the more surprising
   // of the two and the one the athlete can do nothing about.
   if (eaten.state === 'loading' || view.state === 'checking') {
-    return <Text style={styles.centreAbsent}>Checking…</Text>;
+    return <Text style={styles.centreAbsent}>…</Text>;
   }
   if (eaten.state === 'unavailable') {
-    return <Text style={styles.centreAbsent}>Day unread</Text>;
+    return <Text style={styles.centreAbsent}>—</Text>;
   }
   if (!target || target.kcal <= 0) {
     return (
       <>
         <Text style={styles.centreBig}>{fmt(totals?.kcal ?? 0)}</Text>
-        <Text style={styles.centreUnit}>kcal eaten</Text>
-        <Text style={styles.centreMeta}>No target set</Text>
-        <Entries eaten={eaten} />
+        <Text style={styles.centreUnit}>eaten</Text>
       </>
     );
   }
@@ -230,9 +229,35 @@ function Centre({ eaten, view }: { eaten: EatenView; view: TargetView }) {
       <Text style={styles.centreBig}>{fmt(Math.abs(Math.round(left)))}</Text>
       {/* "over" rather than a negative number: a minus sign in a big figure
           reads as an error, and the word is what an athlete would say. */}
-      <Text style={styles.centreUnit}>{left >= 0 ? 'kcal left' : 'kcal over'}</Text>
+      <Text style={styles.centreUnit}>{left >= 0 ? 'left' : 'over'}</Text>
+    </>
+  );
+}
+
+/**
+ * The lines under the rings: what the headline is made of, and how many entries
+ * it came from.
+ *
+ * Outside the stack because the centre hole cannot hold them, and **every one
+ * of them is still an absence-aware statement** rather than a zero.
+ */
+function CentreMeta({ eaten, view }: { eaten: EatenView; view: TargetView }) {
+  const totals = viewTotals(eaten);
+  const target = viewTarget(view);
+
+  if (eaten.state === 'loading' || view.state === 'checking') {
+    return <Text style={styles.centreMeta}>Checking…</Text>;
+  }
+  if (eaten.state === 'unavailable') {
+    return <Text style={styles.centreMeta}>Day unread</Text>;
+  }
+
+  return (
+    <>
       <Text style={styles.centreMeta}>
-        {fmt(Math.round(totals?.kcal ?? 0))} / {fmt(target.kcal)} kcal
+        {!target || target.kcal <= 0
+          ? 'kcal — no target set'
+          : `${fmt(Math.round(totals?.kcal ?? 0))} / ${fmt(target.kcal)} kcal`}
       </Text>
       <Entries eaten={eaten} />
     </>
@@ -344,22 +369,23 @@ const styles = StyleSheet.create({
   pillLabel: { fontSize: 12, color: vola.textMuted },
 
   body: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  ringColumn: { alignItems: 'center', gap: 4 },
   rows: { flex: 1, gap: 12 },
   absent: { fontSize: 13, color: vola.textDim },
 
   centreBig: {
-    fontSize: 38,
+    fontSize: 30,
     fontWeight: '800',
     color: vola.text,
     fontVariant: ['tabular-nums'],
     lineHeight: 42,
   },
-  centreUnit: { fontSize: 12, color: vola.textMuted },
+  centreUnit: { fontSize: 11, color: vola.textMuted },
   centreMeta: {
     fontSize: 11,
     color: vola.textDim,
     fontVariant: ['tabular-nums'],
-    marginTop: 2,
+    textAlign: 'center',
   },
   centreAbsent: { fontSize: 14, color: vola.textDim },
   entries: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
@@ -384,7 +410,6 @@ const styles = StyleSheet.create({
   overPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
   overLabel: { fontSize: 10, fontWeight: '600' },
 
-  logged: { fontSize: 11, color: vola.textDim },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
     flexDirection: 'row',

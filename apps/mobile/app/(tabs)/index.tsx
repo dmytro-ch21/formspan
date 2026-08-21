@@ -96,7 +96,6 @@ import {
   type Entry,
   type Food,
   type TargetView,
-  daysLogged,
   eatenFrom,
   type EatenView,
 } from '@/lib/nutrition';
@@ -258,10 +257,6 @@ function describeSession(s: Session, mods: Module[]): string {
  * readout. All of it was plumbing on display, and none of it answered the
  * question someone opens this tab to ask.
  */
-/** The logged-day count's window. Seven, so it reads as "this week" without
- *  needing a week boundary — a Monday reset would make Monday morning always
- *  say "0 of 7", which is the discouraging shape the no-shame rule avoids. */
-const LOGGED_WINDOW_DAYS = 7;
 
 export default function TodayScreen() {
   const accent = useAccent();
@@ -596,18 +591,23 @@ export default function TodayScreen() {
   // Null until the read answers, so the card can say nothing rather than say
   // "0 of 7" — which would be a claim about the athlete's week made from a
   // query that has not run.
-  const [foodLogged, setFoodLogged] = useState<{ logged: number; considered: number } | null>(null);
   const [foodView, setFoodView] = useState<TargetView>({ state: 'checking' });
   const [foodQuick, setFoodQuick] = useState<Food[]>([]);
 
   /**
    * The week's logged FOOD days, as day keys.
    *
-   * Separate from `foodLogged` (a count over a rolling seven days) because the
-   * strip and the `LOGGING` dots need to know WHICH days, and deriving one from
-   * the other is impossible in that direction. `null` until read — never an
-   * empty set, which would draw seven empty dots as though the week were known
-   * and blank.
+   * WHICH days, not how many. A count cannot be turned back into a set, and
+   * both the week strip and the `LOGGING` dots need the individual days.
+   *
+   * `null` until read — never an empty set, which would draw seven empty dots
+   * as though the week were known and blank.
+   *
+   * This replaced a separate rolling-seven-day COUNT that used to feed the
+   * nutrition card. Two counts over two different spans were rendered a few
+   * hundred points apart on one screen — `0 of 5` on the strip and `0 of 7`
+   * below it — which is the W2/W4 shape: one question, two answers. Seen on a
+   * device, which is the only place it was ever going to be obvious.
    */
   const [foodDays, setFoodDays] = useState<ReadonlySet<string> | null>(null);
 
@@ -654,15 +654,12 @@ export default function TodayScreen() {
     // The week's logged-day count. Its own read, because it spans seven days
     // and the entries read above is one — and a failure here leaves the count
     // absent rather than zero, for the same reason.
-    // `null` for the signed-out branch, NOT an empty list. Resolving `[]` fed
-    // `daysLogged` a query that never ran and produced "0 of 7 days logged" —
-    // the confident zero the comment on `foodLogged` exists to forbid, and a
-    // discouraging one. Found in review, two lines under that comment.
+    // `null` for the signed-out branch, NOT an empty list. An empty list is a
+    // query that never ran rendering as "nothing logged" — the confident zero
+    // this whole file refuses, and a discouraging one. Found in review.
     // Widened to Monday..Sunday of the CURRENT week (N108), because the week
-    // strip and the LOGGING dots need the calendar week, while `foodLogged`
-    // still wants its own rolling seven days. One read serves both: the union
-    // of the two spans, sliced differently by each consumer. A second read
-    // would be a second answer to "did I log on Tuesday".
+    // strip and the LOGGING dots both need the calendar week. One read, one
+    // answer to "did I log on Tuesday" — a second would be a second answer.
     const week = weekDays(new Date());
     const spanFrom = dayString(
       new Date(Math.min(week[0].getTime(), addDays(new Date(), -6).getTime())),
@@ -673,14 +670,10 @@ export default function TodayScreen() {
       : Promise.resolve<string[] | null>(null))
       .then((days) => {
         if (!live) return;
-        setFoodLogged(days === null ? null : daysLogged(days, today, LOGGED_WINDOW_DAYS));
         setFoodDays(days === null ? null : new Set(days));
       })
       .catch(() => {
-        if (live) {
-          setFoodLogged(null);
-          setFoodDays(null);
-        }
+        if (live) setFoodDays(null);
       });
 
     // Ranked for the CURRENT slot, so the chips are porridge at breakfast and
@@ -1601,7 +1594,6 @@ export default function TodayScreen() {
             eaten={foodEaten}
             view={foodView}
             rings={rings ?? DEFAULT_RINGS}
-            logged={foodLogged}
             quickAdd={foodQuick}
             onLog={() => router.push('/food/add')}
             onQuickAdd={(f) => void quickLog(f)}
