@@ -38436,6 +38436,7 @@ the failure looked exactly like a regression in a picker nothing had touched.
 **Not verified:** the device criterion — dictate with the network briefly
 interrupted and confirm it recovers with no visible error. That needs a phone
 and a flight-mode toggle, and it is left outstanding on the ticket.
+
 ## 2026-08-21 — A food you described once is stored, and the second time costs nothing (N114)
 
 Reported from a device, in the athlete's own words: *"I entered Pork Shashlik 3
@@ -38773,8 +38774,140 @@ Three pieces of apparatus in this area do not work and cost time:
   not a defect, and it was probably half of what the report was reacting to —
   the y-axis is what makes it readable as lag rather than as two scales.
 
+## 2026-08-21 — N108: Today reshaped toward the reference, and a palette collision resolved by deleting my own
+
+The user supplied a reference image of a redesigned Today screen plus **four
+amendments overriding it**, three of which say *keep what we already have*.
+Recorded here because the amendments are the part that gets lost — a picture is
+more persuasive than a caveat, and the caveats were the design decisions.
+
+### The four amendments, and how each is checkable
+
+1. **`ScreenHeader` untouched.** The reference has a large bold `TODAY` with the
+   date beneath and two circular buttons; none of it was adopted. `git diff` on
+   `components/ScreenHeader.tsx` is empty.
+2. **No haze.** The reference glows around every ring, the FAB and the streak
+   bar. Both halves of the FAB's bloom are gone — the `accentGlow` call *and*
+   the `shadowOpacity`/`shadowRadius`/`shadowOffset`/`elevation` geometry.
+   Removing only the call would have left a black drop shadow, since
+   `shadowColor` defaults to black and Android draws `elevation` regardless of
+   colour. `grep -c 'shadow\|elevation' app/(tabs)/index.tsx` finds only the
+   comment explaining this.
+3. **Our own `bjj` mark**, through `sportIcon`, so a BJJ session on Today gets
+   the identical glyph it gets on a `SessionCard` and the calendar.
+4. **Rings smaller, dynamic, configurable** — 168pt across with a 13pt stroke
+   against the reference's ~210/7, animated, and configurable through the
+   reference's own `Macros target ⚙`, which is now a screen.
+
+A fifth correction arrived mid-build: the reference's own rings are the part
+**not** to copy. They sit at uneven radii, start at different angles and leave
+ragged gaps. What replaced them is the Apple Watch treatment — one centre, even
+gaps, one start angle at 12 o'clock, round caps — implemented by rotating the
+whole `<G>` once rather than per ring, so "one common start angle" is a property
+no future ring can break.
+
+### The ring wraps past 100%, and that was a decision, not a default
+
+A ring that stops at a full turn makes **144% and 100% look identical**, while
+the `Over target` pill beside it says otherwise — two elements on one card
+disagreeing about one fact, which is the W2/W4 shape this project has shipped
+twice. So the second lap is drawn over the first, separated by a hairline of the
+card's own ground.
+
+Past 200% `overflow` saturates and the ring genuinely cannot distinguish 210%
+from 400%. That is **recorded in the type** (`RingSweep.saturated`) rather than
+hidden, and the row's number stays the authority up there. Both halves are
+mutation-tested: making the ring stop at 100% turns two tests red.
+
+### Four macro colours do not exist by picking them — and then N106 landed the same four
+
+The obvious set — the reference's lime, `#6BB6FF` blue, `#FFB020` amber and a
+pale violet — **fails the palette gate**, and instructively. `kcal` vs `carbs`
+measures **ΔE 7.54 under deuteranopia** (35.62 to normal vision); `protein` vs
+`fat` measures **ΔE 1.69**. Both need 15.
+
+**Lime and amber are the same hue to a deuteranope.** Red-green deficiency
+collapses the axis those two are separated on, so two of the four rings can only
+be told apart by LIGHTNESS. A gamut search over 3,052 admissible colours, scored
+by closeness to the reference's intent, produced a set clearing ΔE 16.01.
+
+**And none of it shipped**, because N106 (#521) merged first having done the
+same search independently and reached the same wall — including the one for
+monochrome, where no four near-neutrals clear the floor at all. Two sessions,
+two searches, two correct answers, one concept. **The second one to merge
+deletes theirs**; the values were never the problem, having two sets was.
+
+What made this more than a revert is that the sets differ in MEMBERSHIP, because
+the screens do. Goals shows protein / fat / carbs / **fibre**; Today's rings show
+protein / carbs / fat plus **calories**. Worse, the two had independently
+assigned the same lime to different things — theirs to `carbs`, mine to `kcal`.
+One colour, two meanings, two screens: the W2/W4 shape arriving through the
+palette rather than through arithmetic.
+
+So the three shared macros now come from N106's `activeMacroColors`, which is
+mono-aware, and **Today and Goals agree by construction**. Calories takes a new
+`kcalRingColor` that is deliberately *not* a member of `macroColors`:
+
+- calories is the **total** the macros sum to, not a fourth category beside
+  them, so it is a bright neutral and the coloured rings read as parts of the
+  white one. A fifth hue was not available anyway — the budget was spent.
+- it is `#F3F6FA`, `text`'s value, and clears every macro: worst pair `carbs` at
+  **ΔE 16.87**, the rest 27–32. All four separations are asserted in the gate.
+- **there is no monochrome twin, by refusal.** `monoMacroColors` already starts
+  at that value and the file records that ramp as *already* below the ΔE 15
+  floor at four steps. Monochrome draws the three macro rings and no calorie
+  ring; the calorie figure is the large number in the middle, in words.
+
+`ringColor()` is the single source for all three render sites — rings, row dots,
+configuration swatches — so they cannot drift, which is the bug
+`activeMacroColors` was introduced on Goals to prevent.
+
+**The lasting lesson is about the gate, not the colours.** `check:palette` is
+opt-in per block: adding `macroColors` without a `block(...)` entry and a check
+loop satisfies "passes `check:palette`" while checking nothing. Both sessions
+registered their set, and both verified the check could fail. That is the only
+reason the collision was a merge conflict rather than a silent second palette.
+
+### Three things the reference asks for that this app does not have
+
+Worth recording, because each looked like a rendering task and was a data one:
+
+- **A session has no TIME.** `PlannedSession` carries a `day` and nothing else,
+  so `Today • 7:00 PM` is not data this app holds. `UP NEXT` says the day.
+- **A 28-day session count was not derivable.** Today reads the 30 most recent
+  session *rows*, so a count filtered from that list saturates at 30 and then
+  **under-reports for the most active athletes** while looking like a fact. Added
+  `trainingSince()`, which counts in SQLite and returns distinct local-time days
+  alongside sessions.
+- **`🔥 3 day streak` is a day chain**, which `nutrition-design.md` §5 rejects by
+  name. Shipped as N53's sanctioned substitute — *a count, not a chain* — pending
+  the user's ruling. See the open item below.
+
+### Also
+
+The `TRAINING` ring is **days trained ÷ 28**, not the reference's sessions ÷ days
+(27/28 = 96.4%, which is where its `96%` comes from). A sessions-per-day ratio
+passes 100% the moment somebody trains twice in a day, and a consistency ring
+that can lap itself means nothing.
+
+Quick-add chips and the logged-days count were **carried over** from
+`NutritionCard` rather than dropped. The reference not showing them is not the
+same as the reference removing them.
+
+`useReducedMotion` was extracted from `AnimatedSplash`, which had carried it
+inline as the only such site. Its `null` third state is load-bearing: the OS
+answers asynchronously, and treating "not answered yet" as "motion is fine" runs
+the animation on every cold start for somebody who asked not to see it.
+
+
+
 ## Open items / known gaps as of this entry
 
+- **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
+- **What a filled ring on the week strip MEANS is currently food, and that is a guess.** `WeekStrip` deliberately takes a `Set` of day keys rather than deriving it, so the choice sits at the call site in `app/(tabs)/index.tsx` — food days, chosen so the strip agrees with the `LOGGING` card at the foot rather than contradicting it. A training reading is equally defensible and would make the strip agree with `TRAINING` instead. Nothing in the reference disambiguates it.
+- **Today now carries the reference's five blocks AND everything that was already there.** `MomentumCard` replaced `NutritionCard` and `ProgressCard` replaced `CheckinCard` in place — both replacements rather than additions, because two cards answering one question with different arithmetic is the W2/W4 shape. But the resume card, the roadmap slot, the suggestion card, `TrackerList`, `TrainingCalendar`, `WeekReview`, Recent and the 8-week `TrendStrip` are all still below, and the reference shows none of them. **Nobody has decided whether the reference is the whole screen or the top of it.** #486 removes one of those blocks and #447 folds another into `UP NEXT`, so the question is partly answered by tickets already filed — but not entirely.
+- **`UP NEXT` has a `hint` slot that nothing fills yet.** Built for #447's roadmap theme so that ticket is a prop value rather than a redesign. It renders nothing when absent, so an unfilled slot costs no space — but it is untested against real theme copy, and two lines is the cap.
+- **The belt hero came off the plan card** when it became `UP NEXT`. `usesBelt` still governs it wherever it returns; it is simply not drawn in the tighter row. Not a decision anybody asked for — a consequence of the reshape, recorded so it is not rediscovered as a bug.
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
 - **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.

@@ -333,6 +333,42 @@ export async function listLocalSessions(userID: string, limit = 20): Promise<Loc
   return rows.map(toSession);
 }
 
+/**
+ * How much was trained in a trailing window, counted in the database.
+ *
+ * **This exists because `listLocalSessions` is capped by ROWS, not by days.**
+ * Today reads the 30 most recent sessions and N108's `TRAINING` card wants "27
+ * sessions in 28 days" — derived from that list, a heavy trainer's 28-day count
+ * silently saturates at 30 and then UNDER-reports, while looking like a fact.
+ * A number that is right for most athletes and quietly wrong for the most
+ * active ones is the worst shape a statistic can have, so it is counted here
+ * instead of filtered there.
+ *
+ * `days` is DISTINCT calendar days, not a second count of the same thing: two
+ * sessions on one Tuesday are two sessions and one day, and the card shows both
+ * because the ratio between them is the interesting part.
+ *
+ * The day is taken from `started_at` in **local** time via SQLite's `localtime`
+ * modifier — a session begun at 8pm Pacific belongs to that day, not to the UTC
+ * tomorrow it is stored as. The suite runs under `TZ=America/Los_Angeles`
+ * precisely so a mistake here shows up.
+ */
+export async function trainingSince(
+  userID: string,
+  sinceISO: string,
+): Promise<{ sessions: number; days: number }> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ sessions: number; days: number }>(
+    `SELECT COUNT(*) AS sessions,
+            COUNT(DISTINCT date(started_at, 'localtime')) AS days
+       FROM local_sessions
+      WHERE user_id = ? AND deleted_at IS NULL AND started_at >= ?`,
+    userID,
+    sinceISO,
+  );
+  return { sessions: row?.sessions ?? 0, days: row?.days ?? 0 };
+}
+
 /** Every local edit lands here: write, mark dirty, return. */
 export async function saveLocalSets(
   userID: string,

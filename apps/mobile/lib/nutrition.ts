@@ -168,6 +168,36 @@ export function viewTarget(view: TargetView): Target | null {
 }
 
 /**
+ * Which DAYS of the week carry a food entry.
+ *
+ * A third view union, for the same reason as the two below it and arrived at
+ * the same way — by getting it wrong. N108's week strip and `LOGGING` card were
+ * handed a bare `ReadonlySet<string>`, and the call site wrote
+ * `foodDays ?? new Set()` twenty lines under a docstring saying *"`null` until
+ * read — never an empty set, which would draw seven empty dots as though the
+ * week were known and blank."* The type said one thing and the boundary did
+ * another.
+ *
+ * **A property enforced in a type and discarded with `??` at the call site is
+ * not enforced.** Making the absence unrepresentable is the only version of
+ * this that holds, so the set cannot be reached without naming a state.
+ *
+ * `off` is distinct from `unavailable`: the nutrition module being disabled is
+ * a deployment fact, not a failure, and a screen must not report "0 of 7 days
+ * logged" forever to somebody who has no food log at all.
+ */
+export type LoggedDaysView =
+  | { state: 'checking' }
+  | { state: 'unavailable' }
+  | { state: 'off' }
+  | { state: 'ready'; days: ReadonlySet<string> };
+
+/** The days in a view, or null in every state that has none. */
+export function viewLoggedDays(view: LoggedDaysView): ReadonlySet<string> | null {
+  return view.state === 'ready' ? view.days : null;
+}
+
+/**
  * What this device knows about what was EATEN.
  *
  * The mirror of {@link TargetView}, and it exists for the same reason. Entries

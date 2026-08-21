@@ -6,7 +6,6 @@ import { Icon } from '@/components/ui/Icon';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { accentGlow } from '@/lib/palette';
 import { sportColor } from '@/components/ui/sport';
 import { formatDuration } from '@/lib/history';
 import { labelFor, type Module } from '@/lib/modules';
@@ -338,7 +337,7 @@ export function TrainingCalendar({
                   styles.date,
                   isToday && [
                     styles.dateToday,
-                    { backgroundColor: accent.accent }, accentGlow(accent.accent),
+                    { backgroundColor: accent.accent },
                   ],
                 ]}
               >
@@ -722,23 +721,22 @@ const styles = StyleSheet.create({
   /**
    * Today's chip, and the one place in this app that uses a shadow.
    *
-   * The glow is `shadowColor` set to the chip's own fill rather than to black,
-   * which on a near-black ground reads as light coming off the chip instead of
-   * the chip sitting above the card. Nothing else here casts one — a dark UI
-   * where several things glow is a dark UI where nothing stands out, and this
-   * marker has to win against six neighbours that are the same size and shape.
+   * **The glow is GONE (N108).** This chip used to carry an accent-coloured
+   * bloom — `accentGlow` at the call site supplying the colour, and the four
+   * properties here supplying the geometry. The user asked twice for no haze
+   * anywhere on Today, and this calendar renders on Today, so both halves went.
    *
-   * Android takes `elevation` and ignores the rest, so it gets a plain lift
-   * rather than a coloured one. That is a real difference and an acceptable
-   * one: the fill already carries the meaning, and the glow is emphasis.
+   * **Both halves had to go, not just the call.** `shadowColor` defaults to
+   * BLACK, and Android draws `elevation` regardless of colour — so deleting the
+   * `accentGlow` call alone would have left a grey drop shadow on iOS and a
+   * plain lift on Android, which reads as a bug rather than as a decision.
+   *
+   * The marker still wins against its six identical neighbours: the accent FILL
+   * carries the meaning, and always did. The glow was emphasis on top of an
+   * already-sufficient signal.
    */
   dateToday: {
-    // Fill and glow are the accent's, set at the call site — the shadow has to
-    // match the fill or it reads as a drop shadow rather than light.
-    shadowOpacity: 0.55,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 6,
+    // Fill is the accent's, set at the call site. No shadow, no elevation.
   },
   dateText: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
   // Ink set inline: what can be written on the fill is the accent's own.

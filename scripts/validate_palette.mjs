@@ -636,6 +636,33 @@ for (let i = 0; i < macros.length; i++) {
   and that the ramp has not collapsed: the two ENDS must stay genuinely apart,
   so a later edit cannot quietly flatten four steps into one grey.
 */
+/*
+  The calorie ring (N108), which is not a macro and is checked against all of
+  them.
+
+  Calories is the TOTAL the macros sum to, so it takes a bright neutral rather
+  than a fifth hue — the four-hue budget was already spent, and this reads as
+  the whole with the coloured parts inside it. It is drawn as a ring stroke and
+  never as text, but it is held to the text floor anyway because it is the same
+  value `text` uses and a weaker assertion here would be misleading.
+
+  No monochrome twin is checked because none exists: `monoMacroColors` already
+  starts at this value, so mono draws the three macro rings and no calorie ring.
+  See the note on `kcalRingColor` in Colors.ts.
+*/
+heading('The calorie ring — a total, not a fourth macro');
+const kcalRingMatch = readFileSync(new URL('../apps/mobile/constants/Colors.ts', import.meta.url), 'utf8')
+  .match(/export const kcalRingColor = '(#[0-9A-Fa-f]{6})'/);
+if (!kcalRingMatch) {
+  failures.push('kcalRingColor missing from Colors.ts — renamed, or no longer an inline hex?');
+} else {
+  ratio('calorie ring on surface', kcalRingMatch[1], S.surface, 4.5);
+  ratio('calorie ring on raised', kcalRingMatch[1], S.raised, 3, 'A ring stroke: WCAG 1.4.11.');
+  for (const [name, hex] of macros) {
+    separation(`calorie ring vs ${name}`, kcalRingMatch[1], hex);
+  }
+}
+
 heading('Macro colours in monochrome — order survives, hue does not');
 const monoMacros = Object.entries(MONO_MACRO);
 if (monoMacros.length !== macros.length) {
