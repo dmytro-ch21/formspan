@@ -187,16 +187,6 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "universally, including in the US, and the reference designs pair them with a "
         "weight in lb. Product decision, tracked as N111 (#494).",
     ),
-    (
-        "apps/mobile/app/checkin/[date].tsx",
-        "centimetres",
-        "in centimetres",
-        "The nine check-in GIRTH fields, which N105 deliberately left in centimetres: "
-        "the length primitives now exist (`formatGirth`, `girthUnit`) but the screen "
-        "has not been converted, and relabelling it 'inches' while still showing "
-        "centimetres would be worse. Tracked as N112 (#495); remove this entry when\n"
-        "that lands.",
-    ),
 ]
 
 

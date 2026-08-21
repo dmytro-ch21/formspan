@@ -37881,6 +37881,59 @@ for exactly this reason. Filed rather than patched in passing.
   byte-for-byte against `origin/main` and rewriting an applied one to fix a
   comment is a bad trade.
 
+## 2026-08-20 — check-in girths follow the athlete's unit, and the trap was underneath them (N112, #495)
+
+N105 built the girth primitives — `girthUnit`, `girthUnitName`, `toDisplayGirth`,
+`fromDisplayGirth`, `formatGirth` — and deliberately left `app/checkin/[date].tsx`
+in centimetres, on the grounds that relabelling nine fields "inches" while still
+showing centimetres is worse than being consistently metric. This applies them.
+Storage is unchanged: centimetres, converted at the display and input boundary
+only, so no migration and no historical row becomes ambiguous.
+
+**The nine fields were the easy half.** The part worth recording is two lines
+further down. `waistToHeight` and `navyBodyFat` take centimetres, and they were
+reading `num('waist_cm')` — the draft. Once the draft holds what the athlete
+*typed*, that is inches on an imperial profile, while `checkin.waist_cm` beside
+it is still storage. The naive conversion leaves the two mixed in one
+expression: the estimate reads inches for exactly as long as a field stays
+dirty and centimetres again the moment it is saved. A body-fat figure that
+moves when nothing about the body did, no error anywhere, and nothing on screen
+looking wrong. One converting reader — `girthCM` — is the whole fix, and the
+comment on it says why it exists so the next person does not inline it back.
+
+**What the test suite is actually holding.** Four mutants, each restored and
+re-run: dropping the conversion on load (4 red), on save (2 red), in `girthCM`
+(2 red), and building the accessibility label from the abbreviation instead of
+the word (4 red). Baseline green before and after each. The `girthCM` mutant is
+the one that needed a second pass — the first version of that test asserted the
+derived value was *stable* across an edit, which passed under the mutant,
+because the loaded draft is already in inches and a raw read is equally wrong
+before and after. Stability was not the property; the number was. It asserts
+0.47 now.
+
+Two apparatus failures on the way, both from this file's own list. A `python3`
+edit to `check-unit-literals.py` asserted on a file ending it did not have,
+threw, and left the "test" measuring nothing — the run printed a clean pass for
+a mutation that never applied. And three `pnpm exec jest` invocations ran in the
+machine's zone rather than `America/Los_Angeles`, because **`TZ` is set on the
+`test` script, not in `jest.config.js`**, so calling `jest` directly silently
+drops it: four tracker tests failed on a three-hour offset that had nothing to
+do with this change. Both are already documented; both were walked into anyway.
+The suite is green at `TZ=America/Los_Angeles ... --maxWorkers=3` — 2319 tests,
+152 suites. Two unrelated failures in an uncapped run were worker contention
+with five concurrent agents, which is the documented behaviour.
+
+`sync-units.py` caught the new `girthUnitName` before CI did and regenerated
+`apps/web/src/lib/units.ts` — the parity generator from N110 doing its job on
+its first unrelated change. The `ALLOW` entry for this screen is gone from
+`check-unit-literals.py`, and the stale-entry guard was verified by putting it
+back: it goes red and names the file.
+
+**Not verified:** a device walk on an imperial profile. The conversion, the
+round trip and the derived-estimate guard are all covered by the suite, but
+"enter a girth, leave, come back, same number" against the real API is the
+reporter's own check and is left outstanding on the ticket.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.
