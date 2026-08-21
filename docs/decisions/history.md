@@ -39096,10 +39096,29 @@ to a person.
   `TrackerList` carries a comment about — so a fresh install opened offline told
   an athlete with a water card and a month of history that they track nothing,
   on a screen with no fetch and no pull-to-refresh that could ever correct it.
+
+  **This is the second instance of the same collapse in one day.** The trend
+  card shipped it this morning — a union with four kinds against five real
+  states, and *"not answered yet"* not being one of them. Different feature,
+  different author, same missing state, and in both cases the code was correct
+  about every state it named. The pattern is worth naming because a third will
+  follow: **an empty result and an unasked question are not the same value**,
+  and a type that cannot tell them apart will be flattened by somebody
+  downstream who has no way to know that. Where this repo gets it right —
+  `TrackerView`, `TargetView` — it is because the union makes the distinction
+  impossible to drop silently; where it goes wrong is a `T[] | null` at a
+  boundary, which reads as "no data" in both directions.
 - **Save with no edits was not a no-op for an imperial athlete.** `toDisplayFluid`
   rounds to 0.1 fl oz, so 250 ml → "8.5" → 251.37, and the target recomputed as
   count × increment turned 2000 into 2010.98. An untouched field is now written
   back byte-for-byte.
+
+  Worth naming as a class rather than a bug: **a no-op that is not a no-op**,
+  visible only to athletes on one unit preference, drifting a little on each
+  save. It gets reported as "the app changes my numbers" and costs a day to
+  reproduce, because the person reproducing it is almost certainly on metric.
+  The test asserts `toBe`, not `toBeCloseTo` — a tolerance would pass against
+  the bug.
 - **A destroy the server refused permanently stranded an invisible tombstone**
   — the one lifecycle state with no exit. A 404 (another device got there first)
   now completes the delete; anything else keeps owing it.
