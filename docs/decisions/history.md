@@ -39840,6 +39840,39 @@ is load-bearing for N146, and only that test holds it.
 Open: nothing consumes the store yet — Phase 2's worker (N141) claims through
 it, and the reconciler stays memory-baselined until then.
 
+## 2026-08-21 — N140: the context builder — a diff gets its mapped context, and never the bulk files
+
+Fifth PR of the AI-SDLC initiative. `BuildContext` in
+`engine/internal/devengine/contextbuild.go` maps a diff's touched paths
+through `.vola-agent/context-map.json` into the doc/trap/gate set for a run,
+and `Assemble` reads that selection from disk — docs by path, trap texts
+extracted from `docs/TASKS.md` by their bold id markers. This is the
+diff-time complement of N137's `PlanContext` (which reads a ticket's Scope
+before any code exists).
+
+The properties that matter:
+
+- **Deterministic under input order**: output order is entry order, not
+  touched order, so a shuffled touched list produces byte-identical
+  selections (tested).
+- **An unmapped path is recorded, never silent** — it is a context-map gap
+  somebody should see — and a wholly unmapped diff gets a defined default
+  (the two current-state architecture docs) rather than an empty context
+  that reads like "no rules apply here".
+- **The non-goal is structural**: `Assemble` ERRORS on `CLAUDE.md` or
+  `docs/decisions/history.md` even if a future context-map lists them —
+  dumping those into every model call is exactly what the map exists to
+  replace. Tested from both sides (assembled set never contains them; a
+  poisoned selection refuses).
+- **A pointer to a trap that does not exist is an error**, not a silently
+  dropped key — an agent handed a dangling trap reference would simply never
+  read it.
+- Tested against the fixture map AND the real checked-in one (profile
+  projection diff selects T10; a sync file selects T6 and the offline-sync
+  gate), with the repo's Fatal-not-Skip convention on the real files.
+
+Pure file reads throughout — no network in context assembly, by contract.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
