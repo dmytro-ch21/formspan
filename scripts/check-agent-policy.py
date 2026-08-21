@@ -42,6 +42,7 @@ well-formed and internally consistent, not that the engine honours them.
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 import shutil
 import sys
@@ -249,6 +250,14 @@ def validate_context_map(agent_dir: Path, repo_root: Path) -> list[str]:
         for p in paths:
             check_path_pattern(p, repo_root, where, errors)
         for doc in entry.get("docs", []):
+            # A doc path must be its own clean, repo-relative spelling.
+            # `./CLAUDE.md` and `a/../b` pass an exact-string forbidden-list
+            # and an `is_file()` check while naming something else — review
+            # walked three such aliases through the engine's guard, so both
+            # halves now refuse unclean paths rather than normalizing them.
+            if posixpath.normpath(doc) != doc or doc.startswith(("/", "../")):
+                errors.append(f"{where}: doc {doc!r} is not a clean repo-relative path")
+                continue
             if not (repo_root / doc).is_file():
                 errors.append(f"{where}: doc {doc!r} does not exist")
         for trap in entry.get("traps", []):
@@ -373,6 +382,9 @@ def self_test() -> list[str]:
             ("context-map.json references a doc that does not exist",
              lambda: mutate_json(agent / "context-map.json",
                                  lambda d: d["entries"][0]["docs"].append("docs/no-such.md"))),
+            ("context-map.json aliases a doc path (./ prefix)",
+             lambda: mutate_json(agent / "context-map.json",
+                                 lambda d: d["entries"][0]["docs"].append("./docs/architecture/api-conventions.md"))),
             ("context-map.json references a trap TASKS.md does not hold",
              lambda: mutate_json(agent / "context-map.json",
                                  lambda d: d["entries"][0]["traps"].append("T9999"))),
@@ -414,7 +426,7 @@ def main() -> int:
             print(f"  {e}", file=sys.stderr)
         return 1
 
-    print("agent policy ok — 4 files valid, self-test caught all 12 mutations")
+    print("agent policy ok — 4 files valid, self-test caught all 13 mutations")
     return 0
 
 
