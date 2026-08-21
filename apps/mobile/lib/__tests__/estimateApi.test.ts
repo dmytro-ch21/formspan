@@ -63,6 +63,22 @@ afterEach(() => {
 });
 
 describe('describeMeal', () => {
+  // N114. **Absent is not false**, and the direction matters: every build of
+  // this app that predates the field sends nothing, and a server that read that
+  // as an opt-out would ship the reuse switched off for everybody who already
+  // has the app. So the default is the SERVER'S, and this client states it only
+  // to turn it off — two places holding one default is two defaults.
+  it('says nothing about reuse unless it is being turned off', async () => {
+    await describeMeal(token, { description: 'Pork Shashlik' });
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).not.toHaveProperty('reuse');
+
+    await describeMeal(token, { description: 'Pork Shashlik', reuse: true });
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body)).not.toHaveProperty('reuse');
+
+    await describeMeal(token, { description: 'Pork Shashlik', reuse: false });
+    expect(JSON.parse(mockFetch.mock.calls[2][1].body).reuse).toBe(false);
+  });
+
   it('sends JSON and asks for the meal slot', async () => {
     await describeMeal(token, { description: 'two eggs', meal: 'breakfast' });
     const [, init] = mockFetch.mock.calls[0];

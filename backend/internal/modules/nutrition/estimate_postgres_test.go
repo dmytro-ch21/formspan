@@ -188,7 +188,7 @@ func TestObeyingRetryAfterExactlyIsAdmitted(t *testing.T) {
 	}
 	now := seed.ResetsAt.Add(-remainder)
 
-	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, usage)
+	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, usage, nil)
 	h.now = func() time.Time { return now }
 
 	w := callAs(t, h, userID, `{"description":"two eggs"}`)

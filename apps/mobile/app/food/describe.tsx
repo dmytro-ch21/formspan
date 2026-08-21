@@ -44,11 +44,12 @@ import {
   estimateErrorMessage,
   itemToEntry,
   photographMeal,
+  savedFoodFrom,
   type EstimateQuota,
   type EstimatedItem,
   type MealEstimate,
 } from '@/lib/estimateApi';
-import { logFood } from '@/lib/foodLog';
+import { logFood, saveFoodLocally } from '@/lib/foodLog';
 import { MEALS, slotForClock, todayString, type Macros, type Meal } from '@/lib/nutrition';
 import { request as requestSync } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -102,13 +103,35 @@ export default function DescribeMealScreen() {
    */
   const [singleFood, setSingleFood] = useState(false);
   const [saving, setSaving] = useState(false);
+  /**
+   * The saved food a REGENERATE is replacing, if this draft came from one.
+   *
+   * "Not right? Estimate it again" is the escape hatch from a stored food whose
+   * numbers are wrong. Without this, confirming the fresh draft saves a SECOND
+   * food under the same name — so the athlete escapes the bad numbers by
+   * growing exactly the pile of duplicate rows N114 was reported about, minus
+   * the cost. Carrying the id forward makes the regenerate an overwrite, which
+   * is what "estimate it again" means. Raised in review.
+   *
+   * Cleared whenever a draft arrives that is NOT a regenerate of that food, so
+   * a later unrelated description cannot overwrite it.
+   */
+  const [replacing, setReplacing] = useState<string | null>(null);
 
-  const receive = useCallback((res: { estimate: MealEstimate; quota: EstimateQuota }) => {
-    setEstimate(res.estimate);
-    setRows(res.estimate.items.map(toDraft));
-    setSingleFood(res.estimate.items.length === 1);
-    setQuota(res.quota);
-  }, []);
+  const receive = useCallback(
+    (res: { estimate: MealEstimate; quota: EstimateQuota }, replaces?: string | null) => {
+      setEstimate(res.estimate);
+      setRows(res.estimate.items.map(toDraft));
+      setSingleFood(res.estimate.items.length === 1);
+      setQuota(res.quota);
+      // A regenerate carries the id it is replacing; anything else clears it,
+      // so an unrelated description later cannot overwrite somebody's food.
+      // Only meaningful for a ONE-item answer: a regenerate that comes back as
+      // three components is not a replacement for one row.
+      setReplacing(replaces && res.estimate.items.length === 1 ? replaces : null);
+    },
+    [],
+  );
 
   /**
    * Busy OR saving. Both mean "an operation owns this screen", and the two
@@ -124,18 +147,30 @@ export default function DescribeMealScreen() {
    */
   const locked = busy || saving;
 
-  const describe = useCallback(async () => {
+  /**
+   * Ask the server. `reuse: false` is the "estimate it again" path.
+   *
+   * The default is left UNSENT rather than passed as `true`, so the decision
+   * lives on the server and this screen cannot drift from it.
+   */
+  const describe = useCallback(async (reuse = true) => {
     if (!description.trim() || locked) return;
+    // Read BEFORE the await: `estimate` is replaced by `receive`, and this is
+    // the food the request is being made against.
+    const replaces = reuse ? null : (estimate?.match?.food_id ?? null);
     setBusy(true);
     setError(null);
     try {
-      receive(await describeMeal(getToken, { description: description.trim(), meal }));
+      receive(
+        await describeMeal(getToken, { description: description.trim(), meal, reuse }),
+        replaces,
+      );
     } catch (err) {
       setError(messageFor(err));
     } finally {
       setBusy(false);
     }
-  }, [description, locked, getToken, meal, receive]);
+  }, [description, locked, getToken, meal, receive, estimate]);
 
   const photograph = useCallback(
     async (fromCamera: boolean) => {
@@ -256,7 +291,21 @@ export default function DescribeMealScreen() {
    * idempotency key does not protect a client-side replay. Raised in review.
    */
   const logAll = useCallback(async () => {
-    if (!userId || rows.length === 0 || saving) return;
+    // **`locked`, not `saving`** — the mirror of the race the `locked`
+    // docstring above describes, which that guard did NOT close. Tap "Estimate
+    // it again" and then Log while the request is in flight: this loop logs the
+    // STALE reused draft from its own closure, `router.back()` pops the screen,
+    // and the fresh estimate lands on nothing — one allowance slice spent for a
+    // draft nobody ever sees. Raised in review.
+    //
+    // **The DEFENCE that is pinned is the button's own `disabled={locked}`**,
+    // not this line: mutate the prop and `describeReuse.test.tsx`'s "cannot log
+    // a stale draft" goes red; mutate this line alone and it stays green,
+    // because a disabled Pressable never fires. Recorded rather than deleted,
+    // because "the tests still pass without it" is a persuasive argument for
+    // removing something load-bearing — this is the backstop for any future
+    // caller that is not that button, and the two must not drift apart.
+    if (!userId || rows.length === 0 || locked) return;
     setSaving(true);
     setError(null);
     try {
@@ -264,15 +313,59 @@ export default function DescribeMealScreen() {
       const snapshot = [...rows];
       const logged: DraftRow[] = [];
       for (const row of snapshot) {
+        const item = fromDraft(row);
+        /**
+         * SAVE THE FOOD FIRST, THEN LOG AGAINST IT (N114).
+         *
+         * This write is the whole ticket. Before it, confirming a draft logged
+         * an entry and stored nothing, so describing the same food tomorrow
+         * re-generated it — a fresh estimate off the day's allowance, and
+         * numbers that need not agree with yesterday's. *"I entered Pork
+         * Shashlik 3 times and every time it would generate a new item."*
+         *
+         * **A REUSED draft writes nothing new**: it already came from a saved
+         * row, and minting a second one under the same name would leave the
+         * athlete with a duplicate per log and make the next lookup a choice
+         * between rows. The stored id is reused as the provenance instead.
+         *
+         * **Ordered before the log**, because `source_food_id` is a foreign key
+         * server-side: an entry pushed before its food exists is rejected. The
+         * local write is synchronous and offline, so this costs nothing.
+         *
+         * Local only — `requestSync` below flushes both queues, and the food's
+         * push is ordered ahead of the entry's inside it.
+         */
+        // A reused draft already came from a saved row, so it reuses that id
+        // rather than minting a duplicate under the same name.
+        //
+        // **Matched on the NAME rather than trusting a single-item invariant.**
+        // The server only ever sets `match` on a one-item draft today, and this
+        // file treats the server's vocabulary as extensible everywhere else —
+        // so if a future `match` arrives beside several items, keying on
+        // presence alone would point every entry at one food and silently save
+        // none of the others. Raised in review.
+        const reusedId =
+          estimate?.match && NORMALIZE(estimate.match.name) === NORMALIZE(item.name)
+            ? estimate.match.food_id
+            : null;
+        const savedId =
+          reusedId ??
+          (await saveFoodLocally(userId, {
+            ...savedFoodFrom(item),
+            // Present only on a regenerate, where it makes the save an
+            // OVERWRITE of the food this draft was asked to replace.
+            ...(replacing ? { id: replacing } : {}),
+          }));
         await logFood(userId, {
           eaten_on: date,
           meal,
-          ...itemToEntry(fromDraft(row)),
-          // No source_food_id: a draft came from a guess, not from a saved
-          // food, so there is no provenance to record. And nothing marks the
-          // row as model-drafted — what was eaten is what the athlete
-          // confirmed, whoever typed it first.
-          source_food_id: null,
+          ...itemToEntry(item),
+          // The saved food this came from. Provenance ONLY — nothing ever reads
+          // an entry's nutrition back through it, which is what keeps
+          // correcting a food from silently rewriting what you ate last month.
+          // It is also what puts a drafted food into the quick-add recents,
+          // which group entries by the food they name.
+          source_food_id: savedId,
         });
         logged.push(row);
         setRows((rs) => rs.filter((r) => r.key !== row.key));
@@ -323,7 +416,7 @@ export default function DescribeMealScreen() {
     } finally {
       setSaving(false);
     }
-  }, [userId, rows, saving, date, meal, router, params.barcode, singleFood]);
+  }, [userId, rows, locked, date, meal, router, params.barcode, singleFood, estimate, replacing]);
 
   const updateRow = (key: string, patch: Partial<DraftRow>) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -448,7 +541,65 @@ export default function DescribeMealScreen() {
 
       {estimate && rows.length > 0 ? (
         <>
-          <SectionHeader label="Check these before logging" />
+          {/* THE TWO DRAFTS DO NOT LOOK ALIKE (N114).
+              A reused food and an invented one are different claims, and the
+              ticket's own words are that "the screen should not present them
+              identically". The heading is the first thing read, so it is the
+              heading that changes — a badge tucked beside a row would be the
+              same screen with a decoration on it.
+
+              "Check these" is the right instruction for a guess and the wrong
+              one for numbers the athlete themselves saved and corrected. */}
+          <SectionHeader
+            label={estimate.match ? 'From your saved foods' : 'Check these before logging'}
+          />
+          {estimate.match ? (
+            <>
+              <Text style={styles.saved} testID="describe-reused">
+                Reused “{estimate.match.name}”
+                {estimate.match.food_source === 'ai' ? ', drafted by AI' : ', saved by you'}
+                {savedAgo(estimate.match.saved_at)}. No estimate used.
+              </Text>
+              {/* The escape hatch, and it is not optional. Without it a saved
+                  food with wrong numbers is one the athlete can never ask to be
+                  read again — the feature would have replaced one complaint
+                  with a worse one. Says what it costs, because it does cost. */}
+              <Pressable
+                onPress={() => void describe(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Estimate this again instead of reusing the saved food"
+                disabled={locked}
+                accessibilityState={{ disabled: locked }}
+                testID="describe-regenerate"
+              >
+                <Text style={[styles.regenerate, locked && styles.off]}>
+                  Not right? Estimate it again — uses one estimate
+                </Text>
+              </Pressable>
+              {/* Correcting the STORED food, which is what makes the reuse
+                  right next time rather than wrong every time. The copy says
+                  what an edit does and does not touch, because "does this
+                  rewrite what I already ate?" is the first question it raises
+                  and the answer is no. */}
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/food/saved/[id]',
+                    params: { id: estimate.match!.food_id },
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`Edit the saved food ${estimate.match.name}`}
+                disabled={locked}
+                accessibilityState={{ disabled: locked }}
+                testID="describe-edit-saved"
+              >
+                <Text style={[styles.regenerate, locked && styles.off]}>
+                  Fix these numbers for next time
+                </Text>
+              </Pressable>
+            </>
+          ) : null}
           {estimate.note ? <Text style={styles.note}>{estimate.note}</Text> : null}
           {/* Says the teaching out loud. The barcode came from a scan that
               found nothing, and nothing else on this screen would tell the
@@ -524,11 +675,13 @@ export default function DescribeMealScreen() {
 
           <Pressable
             onPress={() => void logAll()}
-            style={[styles.primary, { backgroundColor: accent.accent }, saving && styles.off]}
+            style={[styles.primary, { backgroundColor: accent.accent }, locked && styles.off]}
             accessibilityRole="button"
             accessibilityLabel={`Log ${rows.length} items`}
-            disabled={saving}
-            accessibilityState={{ disabled: saving }}
+            // `locked`, matching `logAll`'s own guard — and on BOTH props, so
+            // VoiceOver never announces an enabled button that ignores taps.
+            disabled={locked}
+            accessibilityState={{ disabled: locked }}
             testID="describe-log"
           >
             <Text style={[styles.primaryText, { color: accent.on }]}>
@@ -631,6 +784,20 @@ type DraftRow = EstimatedItem & {
   proteinText: string;
 };
 
+/**
+ * Case- and whitespace-insensitive name identity, for comparing a `match.name`
+ * with a draft item's name.
+ *
+ * **Not a reimplementation of the server's matching rule**, and it must not
+ * grow into one — the whole point of doing the lookup server-side is that there
+ * is one rule in one place. Both strings here came from the SAME response, so
+ * this is an identity check between two server-produced values, not a decision
+ * about whether an athlete's typing matches a stored food.
+ */
+function NORMALIZE(s: string): string {
+  return s.trim().toLowerCase().split(/\s+/).join(' ');
+}
+
 let draftKeySeq = 0;
 
 function toDraft(it: EstimatedItem): DraftRow {
@@ -685,6 +852,34 @@ function perServing(it: EstimatedItem): Macros {
 }
 
 /**
+ * How long ago a saved food was last changed, as a phrase to append.
+ *
+ * Coarse on purpose. The athlete is deciding whether numbers are stale enough
+ * to re-check, and that is a "recently / a while back" judgement — minutes on a
+ * figure that changes when they edit it would be false precision.
+ *
+ * Returns the EMPTY STRING for anything it cannot read, rather than "unknown"
+ * or a fallback date. A missing or unparseable timestamp is a fact about the
+ * response, not about the food, and the surrounding sentence reads correctly
+ * without the clause. Guarded because `saved_at` crosses the wire: a stale
+ * server, a proxy, or a future field change can all put something here that
+ * `Date.parse` returns NaN for, and `new Date(NaN).toISOString()` throws.
+ */
+export function savedAgo(iso: string | null | undefined, now = new Date()): string {
+  if (!iso) return '';
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return '';
+  const days = Math.floor((now.getTime() - then) / 86_400_000);
+  // A negative reading means the device clock is behind the server's, which is
+  // ordinary and is not something to report as the future.
+  if (days <= 0) return ', saved today';
+  if (days === 1) return ', saved yesterday';
+  if (days < 30) return `, saved ${days} days ago`;
+  if (days < 365) return `, saved ${Math.floor(days / 30)} months ago`;
+  return ', saved over a year ago';
+}
+
+/**
  * The copy for a failed estimate.
  *
  * **This used to live here**, as `messageFor`: the server's message when there
@@ -730,6 +925,11 @@ const styles = StyleSheet.create({
   photoRow: { flexDirection: 'row', gap: 10 },
   error: { fontSize: 13, color: vola.danger, lineHeight: 18 },
   note: { fontSize: 12, color: vola.textMuted, lineHeight: 17 },
+  // Deliberately NOT `note`'s muted grey. A reuse is the good outcome and the
+  // athlete should read it, whereas `note` is the model apologising for what it
+  // could not see.
+  saved: { fontSize: 13, color: vola.text, lineHeight: 18 },
+  regenerate: { fontSize: 12, color: vola.textMuted, lineHeight: 17, paddingVertical: 6 },
   row: {
     borderWidth: 1,
     borderColor: vola.lineSoft,

@@ -1,7 +1,7 @@
 import { transportDiagnosis } from './apiError';
 import { apiRequest } from './apiRequest';
 import { SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
-import type { Macros, Meal } from './nutrition';
+import type { FoodSource, Macros, Meal } from './nutrition';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -39,12 +39,50 @@ export type EstimatedItem = Macros & {
   assumption: string;
 };
 
+/**
+ * Why a draft came from storage instead of a model (N114).
+ *
+ * Its PRESENCE on a `MealEstimate` is the discriminator — there is deliberately
+ * no `reused: true` beside it, because a flag is a claim and this is evidence.
+ * A screen must render the two differently: "here is the food you saved" and
+ * "here is what a model guessed" are not the same statement, and presenting
+ * them identically is what N114 was reported for.
+ */
+export type SavedFoodMatch = {
+  /**
+   * The saved row this came from. Log the entry with it as `source_food_id`,
+   * which is what makes a reused food show up in the quick-add recents.
+   */
+  food_id: string;
+  /** The STORED name, verbatim. Not the query, and not a normalised form. */
+  name: string;
+  /**
+   * Which rule fired. `exact_name` is the only one today; an unseen value must
+   * read as "matched somehow" rather than be assumed to be this one — the
+   * server owns this vocabulary and may extend it.
+   */
+  rule: 'exact_name' | (string & {});
+  /** The string both sides were compared as, so a surprising match is checkable. */
+  normalized: string;
+  /** How the STORED row was itself produced — `ai` from an earlier draft, `user` typed. */
+  food_source: FoodSource;
+  /** When the stored row last changed, so a screen can say how old the numbers are. */
+  saved_at: string;
+};
+
 export type MealEstimate = {
   items: EstimatedItem[];
   /** What the model could not see. Empty is normal, not an error. */
   note: string;
   model: string;
   source: 'text' | 'photo';
+  /**
+   * Set ONLY when this draft was reused rather than generated. When it is
+   * present: no model was called, no estimate allowance moved, `model` and
+   * `note` are empty, and every item is `high` confidence with no assumption —
+   * the quantity is the athlete's own serving definition, not a guess.
+   */
+  match?: SavedFoodMatch | null;
 };
 
 export type EstimateQuota = {
@@ -71,17 +109,39 @@ export type EstimateResponse = {
   quota: EstimateQuota;
 };
 
-/** Describe a meal in words. The cheap path, and the one to reach for first. */
+/**
+ * Describe a meal in words. The cheap path, and the one to reach for first.
+ *
+ * **The server looks for a food the athlete has already saved before it
+ * generates anything** (N114), and answers from storage when the description
+ * normalises to exactly a saved food's name. That reuse spends no allowance and
+ * arrives with `estimate.match` set.
+ *
+ * `reuse: false` forces a fresh reading, and is the escape hatch for a saved
+ * food whose numbers are wrong. It is sent only when explicitly false, so that
+ * the default lives on the server rather than being restated here — two places
+ * holding one default is two defaults.
+ *
+ * **The matching itself is deliberately NOT done on this device**, even though
+ * `localFoods` could and it would work offline. One rule in one place: two
+ * implementations of "does this name match" is two rules that can disagree, and
+ * this repo has twice paid for two figures on one screen computed under two
+ * rules.
+ */
 export function describeMeal(
   getToken: TokenGetter,
-  input: { description: string; meal?: Meal },
+  input: { description: string; meal?: Meal; reuse?: boolean },
 ): Promise<EstimateResponse> {
   return apiRequest<EstimateResponse>(
     getToken,
     '/nutrition/estimate',
     {
       method: 'POST',
-      body: JSON.stringify({ description: input.description, meal: input.meal ?? null }),
+      body: JSON.stringify({
+        description: input.description,
+        meal: input.meal ?? null,
+        ...(input.reuse === false ? { reuse: false } : {}),
+      }),
     },
     // No photo, and it still gets the slow budget: this waits on the same
     // provider as the photo path, and the default deadline is sized for a
@@ -180,6 +240,55 @@ export function estimateErrorMessage(err: unknown): string {
  * not how confident a model was about it. Keeping them would put a model's
  * uncertainty into the athlete's own history.
  */
+/**
+ * A drafted item as a SAVED FOOD, so the next entry of it finds it.
+ *
+ * This is the write N114 was reported for missing: the draft was confirmed, the
+ * entry was logged, and nothing was ever stored — so describing the same food
+ * again re-generated it, at a fresh cost and with fresh numbers.
+ *
+ * **Per SERVING**, unlike `itemToEntry`. The draft carries the total for the
+ * quantity eaten alongside how many servings that was; a saved food's macros
+ * are what ONE serving contains, and the reuse path multiplies back up. Getting
+ * this backwards would store "two eggs" as the definition of one egg and double
+ * every future log of it silently.
+ *
+ * A zero or negative `servings` is divided by 1 rather than producing an
+ * Infinity that would reach the food store and then every entry made from it.
+ *
+ * `serving_grams` is null, deliberately: a model states a serving in words
+ * ("1 medium egg"), and inventing a gram weight for it would make every
+ * gram-based total derived from this food quietly fictional. #506 is where a
+ * stated amount belongs; this leaves the field honest for it rather than
+ * filling it with a guess that would have to be un-picked.
+ */
+export function savedFoodFrom(it: EstimatedItem): {
+  kind: 'food';
+  name: string;
+  brand: string;
+  serving_label: string;
+  serving_grams: null;
+  source: 'ai';
+} & Macros {
+  const n = it.servings > 0 ? it.servings : 1;
+  return {
+    kind: 'food',
+    name: it.name.trim(),
+    brand: '',
+    serving_label: it.serving_label,
+    serving_grams: null,
+    // `ai`, never `user`. Nobody measured these numbers, and a model cannot
+    // reliably say which of its own to distrust — so an AI-drafted food has to
+    // stay permanently tellable apart from one the athlete weighed.
+    source: 'ai',
+    kcal: it.kcal / n,
+    protein_g: it.protein_g / n,
+    carb_g: it.carb_g / n,
+    fat_g: it.fat_g / n,
+    fibre_g: it.fibre_g == null ? null : it.fibre_g / n,
+  };
+}
+
 export function itemToEntry(it: EstimatedItem): Macros & {
   name: string;
   servings: number;

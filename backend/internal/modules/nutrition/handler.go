@@ -229,6 +229,42 @@ type foodBody struct {
 	YieldServings *float64         `json:"yield_servings"`
 	Items         []recipeItemBody `json:"items"`
 	Barcode       *string          `json:"barcode"`
+	// Source is how the athlete's own row was produced, and it is the ONE
+	// provenance value a client may set — see clientSources.
+	Source Source `json:"source"`
+}
+
+// clientSources is the closed set a client may claim, and it is deliberately
+// two values out of five.
+//
+// `usda`, `off` and `seed` are set by the importers that fetch them and by
+// nothing else. That is not tidiness: `off` marks Open Food Facts rows, which
+// are ODbL, and the share-alike obligation must never reach data we authored —
+// so a client able to write `off` onto its own food, or to strip it from an
+// imported one, would undo the separation the value exists for.
+//
+// `ai` is here because N114 needs it and because it is a claim a client is the
+// only thing in a position to make. A food saved from a draft the athlete
+// confirmed was never measured by anybody; `nutrition.Source`'s own comment
+// argues at length that such a row must stay permanently tellable apart from a
+// measured one, and the phone is where that fact is known. The risk it carries
+// is the mirror of `off`'s and much smaller: an athlete can mislabel their own
+// food as AI-drafted, or as hand-typed, and the only thing downstream that
+// changes is how much this app trusts a number they own anyway.
+//
+// **An unknown value is a 400, never a coercion to `user`.** Silently
+// downgrading a provenance a client asked for is how a wrong label becomes
+// permanent and unnoticed — and this repo has a whole `T` section of changes
+// that compiled, passed and were wrong in exactly that way.
+var clientSources = []Source{SourceUser, SourceAI}
+
+func clientSourceAllowed(s Source) bool {
+	for _, v := range clientSources {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) ListFoods(w http.ResponseWriter, r *http.Request) {
@@ -284,15 +320,27 @@ func (h *Handler) SaveFood(w http.ResponseWriter, r *http.Request) {
 		ServingLabel: strings.TrimSpace(in.ServingLabel), ServingGrams: in.ServingGrams,
 		Macros:        Macros{Kcal: in.Kcal, ProteinG: in.ProteinG, CarbG: in.CarbG, FatG: in.FatG, FibreG: in.FibreG},
 		YieldServings: in.YieldServings, Items: items,
-		// Source is NOT taken from the client. Everything a client writes is
-		// its own; `usda` and `off` are set by the importers that fetch them,
-		// and letting a client claim a provenance would make the ODbL
-		// separation the `off` value exists for meaningless.
-		Source:  SourceUser,
+		Source:  in.Source,
 		Barcode: in.Barcode,
 	}
 	if f.Kind == "" {
 		f.Kind = KindFood
+	}
+	// **Absent is left EMPTY rather than defaulted here.** It means "I am not
+	// telling you", and only the repository is in a position to answer that
+	// correctly: keep what is stored on an update, write `user` on an insert.
+	// Defaulting in the handler would turn every source-less edit — which is
+	// every edit made by a client that predates N114 — into a silent
+	// relabelling of an AI-drafted food as one somebody measured.
+	//
+	// Checked BEFORE Validate, so the message names the actual problem.
+	// `Food.Validate` would also reject `off` here — it is a valid Source, so
+	// it would pass — which is precisely the gap: the domain's vocabulary is
+	// wider than the wire's on purpose, and only this check knows that.
+	if f.Source != "" && !clientSourceAllowed(f.Source) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"source must be user or ai")
+		return
 	}
 	if err := f.Validate(); err != nil {
 		writeError(w, r, err)

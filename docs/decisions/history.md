@@ -38436,6 +38436,188 @@ the failure looked exactly like a regression in a picker nothing had touched.
 **Not verified:** the device criterion — dictate with the network briefly
 interrupted and confirm it recovers with no visible error. That needs a phone
 and a flight-mode toggle, and it is left outstanding on the ticket.
+## 2026-08-21 — A food you described once is stored, and the second time costs nothing (N114)
+
+Reported from a device, in the athlete's own words: *"I entered Pork Shashlik 3
+times and every time it would generate a new item — it wasn't stored."*
+
+Three generations for one food. Three slices of a 25-a-day allowance, and three
+sets of numbers with no obligation to agree with each other — the same skewer
+could be 480 kcal on Monday and 610 on Wednesday, with nothing on the screen
+saying why. #367 (F16) already records that a provider outage burns the day's
+allowance; every avoidable generation is exposure to that as well as to the
+bill.
+
+**The storage already existed and nothing wrote to it.** `nutrition_foods` has
+been the athlete's personal, reusable food list since migration 000059, its
+`source` CHECK has allowed `'ai'` since 000062, and `nutrition_entries` has
+carried `source_food_id` for provenance the whole time. `describe.tsx`'s confirm
+loop logged the entry with `source_food_id: null` and saved no food. The comment
+above that line said so, plainly and wrongly: *"a draft came from a guess, not
+from a saved food, so there is no provenance to record."* True of the draft, and
+the wrong conclusion — the athlete had just confirmed it, which is exactly when
+it stops being a guess.
+
+So the fix is two writes and one lookup, and most of the work was in deciding
+what the lookup may do.
+
+**Matching is exact on a normalised name, and nothing else.** Lowercase, trim,
+collapse internal whitespace runs. `Pork  shashlik` matches; `Pork Shashlik
+(spicy)`, `Pork Shashliks` and `Skyr 10%` against `Skyr 0%` do not. Punctuation,
+brackets, digits and plurals are deliberately left alone, because they are
+usually the *only* thing distinguishing two foods an athlete keeps apart. The
+ticket's own line is the argument: *"fuzzy matching that silently substitutes a
+different food is worse than generating again"* — and it is, by a lot. A
+regeneration costs an allowance slice. A wrong substitution puts another meal's
+numbers in somebody's log and says nothing. Only one of those is recoverable, so
+every judgement call here falls to the recoverable side.
+
+**Reuse is checked BEFORE the quota gate, and that ordering is the measurable
+claim.** The ticket asks for "log the same food three times and the quota moves
+once", and below the gate a reuse would still be refused at 25 — the athlete
+charged for a lookup that spent nothing, which is F16 arriving from a different
+direction. `TestAReusedDraftDoesNotTouchTheAllowanceEvenWhenItIsExhausted` pins
+it at the cap, and asserts in the same test that a *generation* there is still
+refused, so the fixture cannot be one that never refuses anything.
+
+**The rule is spelled three times and pinned twice.** `NormalizeFoodName` in Go,
+`normalizedNameSQL` in `postgres.go`, and migration `000074`'s expression index.
+The Go/SQL pair is compared on a real database against shared vectors; the
+SQL/index pair is checked by reading the query plan. Both tests were WRONG on
+their first pass and both failures are the reason they are worth having:
+
+- The plan test used `EXPLAIN (FORMAT TEXT)`, which returns **one row per
+  line**, so `QueryRow` read `Limit (cost=…)` and nothing else — a plan
+  containing no scan node at all, which reported "the index cannot serve this
+  query" whatever the planner had done. A check that could not succeed.
+- Then, fixed, it asserted only that the index *name* appeared. The index leads
+  on `user_id`, so Postgres uses it for that column alone and re-checks the name
+  in a `Filter` — measured, swapping `btrim(lower(…))` for `lower(btrim(…))` left
+  it green while every reuse scanned the athlete's whole food list. It asserts
+  on the `Index Cond` now.
+- The Go/SQL agreement test inlined the SQL expression by hand, so it compared
+  the Go rule with a *copy* of the SQL rule. `normalizedNameSQL` became a
+  function of its argument so the test can put the production expression over a
+  literal; before that, changing the real one left it green.
+
+**A client may now claim `source`, and only `user` or `ai`.** `SaveFood` used to
+hard-code `SourceUser` with a good reason attached — Open Food Facts data is
+ODbL and a client able to write or strip `off` would undo the separation that
+value exists for. That reason covers `off`, `usda` and `seed` and does not cover
+`ai`, which is a claim only the phone is in a position to make: a food saved
+from a confirmed draft was never measured by anybody, and `nutrition.Source`'s
+own comment spends a paragraph on why that must stay permanently tellable apart.
+An unknown value is a 400 rather than a coercion to `user`, because a silent
+downgrade is how a wrong label becomes permanent and unnoticed.
+
+**Which walked straight into the `updateWithin` trap, and the guard is the point
+of this paragraph.** `SaveFood`'s `ON CONFLICT` had `source = EXCLUDED.source`.
+Made client-settable, that means the mobile edit screen — correcting a food's
+calories, saying nothing about provenance — silently relabels an AI-drafted row
+as one the athlete measured. Same mechanism as `load_mode`, `implements` and
+`note` on `exercises`, three times, each caught in review and never by the
+suite. The fix is `COALESCE(NULLIF($19::text, ''), nutrition_foods.source)`, and
+note it reads the **parameter** rather than `EXCLUDED`: `EXCLUDED` holds the row
+that *would have been inserted*, i.e. after the VALUES clause has already turned
+`''` into `'user'`, so reading it there compiles, looks right, and can never see
+the absent case. The local SQLite upsert carries the identical shape for the
+identical reason. `TestEditingAFoodWithoutSayingItsSourceKeepsIt` was written
+before the migration and goes red on `EXCLUDED.source`.
+
+**One rule, one place — the phone does NOT match locally.** `localFoods` could,
+and it would work offline, and it was rejected: two implementations of "does
+this name match" is two rules that can disagree, which is W2/W4 with the numbers
+changed. The phone renders `estimate.match` and nothing more. The cost is real
+and stated — with no signal there is no reuse — and it is smaller than two rules.
+
+**On screen, a reuse and a guess do not look alike.** The section heading itself
+changes ("From your saved foods" against "Check these before logging"), because
+*check these* is the right instruction for a guess and the wrong one for numbers
+the athlete saved and corrected themselves. Below it: which food was reused, how
+old it is, whether it was drafted or typed, that no estimate was used, a way to
+force a fresh reading (which does cost one, and says so), and a way to correct
+the stored numbers. That last one is not optional — without it a saved food with
+wrong numbers is one the athlete can never escape, and the feature would have
+replaced one complaint with a worse one.
+
+`app/food/saved/[id].tsx` is the correction screen, reachable from the reuse
+banner and from an Edit control on every saved row in quick-add. It states the
+scope on the screen rather than only in a comment: *these numbers apply to what
+you log from now on; days you have already logged keep the numbers they were
+logged with.* That is the rule the whole module rests on, and "does this rewrite
+last month?" is the first thing an athlete wonders when they change a stored
+figure. It deliberately does not send `source` back — a field a screen does not
+own, restated by a screen that happens to have read it, is the trap above with
+the sign flipped.
+
+**The write introduced an outbox ordering bug, and it was silent data loss.**
+`push()` drained the ENTRY queue first and the FOOD queue second, which was
+correct for as long as a drafted entry carried `source_food_id: null` — it did,
+until this change. `nutrition_entries` has a composite foreign key onto
+`nutrition_foods`, so an entry sent before its food names a row the server has
+never seen; the repository maps the 23503 to `invalid_input`, the handler
+answers **400**, and the phone's `classify` reads a 400 as a *permanent*
+rejection and clears `dirty`. Correct in general — a 4xx will not become a
+2xx — and here it meant the athlete's lunch left the outbox, stayed on the
+phone, and nothing anywhere said so.
+
+Found by asking the question rather than by anything going red: the suite was
+green, both reviewers were still running, and no existing test could see it
+because every drafted entry had always pushed a null. Reproduced first (two
+tests: one on the call ORDER, one on the consequence — `result.failed === 0`
+against a fake that refuses an entry naming an unknown food), then fixed by
+draining foods first, then confirmed by reverting the order and watching both
+go red. The `stalled` short-circuit moved with it, so a queue that finds no
+connection still stops the other from being read.
+
+**A side effect worth knowing about:** entries logged from a draft now carry
+`source_food_id`, and `recentsFor` groups on exactly that. Every AI-logged meal
+the app has ever made was invisible to the quick-add recents; from here they are
+not.
+
+**Review found three more, and two of them were the same class as everything
+else here — a rule spelled twice.**
+
+- **The SQL normalisation was not the analogue of the Go one that three
+  comments claimed it was.** Measured on a real database: Postgres' `[:space:]`
+  does **not** fold U+00A0 (NBSP), U+1680 or U+202F, and `btrim` applied
+  *before* the collapse removes ordinary spaces only, so a stored name with a
+  leading tab normalised to `' pork shashlik '`. Go folds all of them. A food
+  saved with an internal NBSP — which iOS keyboards insert — was therefore
+  permanently unmatchable: the N114 complaint surviving inside the N114 fix, for
+  that row, forever. The failure direction was safe (a missed reuse, never a
+  wrong substitution) and safe is not right. The class is explicit now, the
+  `btrim` moved outside the collapse, and the agreement test carries every
+  separator **built from code points rather than typed** — because the first
+  version of the probe had literal NBSPs in its source, they were folded to
+  ordinary spaces before the database saw them, and the broken expression
+  "passed" a case it could not handle.
+- **A keyless deploy refused a reuse.** The `estimator == nil` 503 sat above the
+  lookup, purely because it was written before the lookup existed — and
+  `README.md`, written the same day, states in as many words that the reuse
+  works with no key. It does now; the check moved below.
+- **The Log button stayed tappable during a regenerate**, so the stale reused
+  draft could be logged while the paid-for fresh estimate landed on a screen
+  that had already been popped. Both the button and `logAll` follow `locked`
+  now. Only the button is pinned — a disabled Pressable never fires, so
+  mutating the function's own guard leaves the test green, and that is written
+  beside it so nobody deletes it as dead code.
+
+Review also caught that "estimate it again" saved a *second* food under the same
+name — escaping bad numbers by growing the pile the ticket is about. A
+regenerate carries the id it is replacing, so it overwrites.
+
+**What this does NOT do.** A *multi-item* description is not reused — it is a
+meal, not a food, and #504 is where a meal becomes reusable as a unit. Its items
+are each saved, so describing one of them alone later does reuse. A photo is
+never answered from storage. And the model naming a food differently from the
+athlete's phrasing ("Pork shashlik skewers" for "Pork Shashlik") defeats the
+match; case and whitespace are folded and nothing else, so the second attempt
+generates again. That is the conservative side of the trade, taken knowingly.
+
+Migration `000074` adds only an expression index — no column, no data change.
+`serving_grams` is left null on a saved draft rather than filled with a guess,
+which keeps the field honest for #506.
 
 ## 2026-08-21 — W12: the trend's dots and line always shared a scale; there was no room left on it
 

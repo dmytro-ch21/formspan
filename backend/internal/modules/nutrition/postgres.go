@@ -375,6 +375,104 @@ func (r *PostgresRepository) GetFood(ctx context.Context, userID, id string) (Fo
 	return f, nil
 }
 
+// normalizedNameSQL is the SQL half of NormalizeFoodName.
+//
+// **These two are one rule spelled twice, and they must not be allowed to
+// drift.** `TestTheSQLNormalisationAgreesWithTheGoOne` runs the same vectors
+// through both against a real database; if you change either, change both and
+// watch that test go red first.
+//
+// `regexp_replace(btrim(lower(x)), '\s+', ' ', 'g')` is the exact analogue of
+// `strings.Join(strings.Fields(strings.ToLower(x)), " ")`: lowercase, trim the
+// ends, collapse internal runs. All three functions are IMMUTABLE, which is
+// what lets migration 000074 index this expression.
+// A FUNCTION of the expression to normalise rather than a constant naming the
+// column, so a test can put the same rule over a literal and compare it with
+// NormalizeFoodName. A constant hardcoding `name` can only be exercised through
+// a row, and the test that tried inlined the expression by hand instead — which
+// meant it agreed with a copy of the rule rather than with the rule, and drift
+// in this line passed it. Measured: changing the constant left that test green.
+func normalizedNameSQL(expr string) string {
+	return `btrim(regexp_replace(lower(` + expr + `), '` + whitespaceClassSQL + `', ' ', 'g'))`
+}
+
+// whitespaceClassSQL is what Go's `strings.Fields` treats as a separator,
+// spelled for Postgres — and it is NOT `\s`.
+//
+// Measured 2026-08-21 against this database, after review pointed at it. Go's
+// `unicode.IsSpace` folds every one of these; Postgres' `[:space:]` folds only
+// some, and the ones it misses are reachable:
+//
+//	U+00A0 NBSP              Go folds · SQL did NOT   <- iOS keyboards insert it
+//	U+1680 OGHAM SPACE       Go folds · SQL did NOT
+//	U+202F NARROW NBSP       Go folds · SQL did NOT
+//	U+0085 U+2002 U+3000     both fold
+//
+// A food saved with an internal NBSP was therefore permanently unmatchable —
+// which is precisely the complaint N114 exists to fix, surviving inside the
+// fix, for that row, forever. The failure direction was safe (a Go-normalised
+// query can never contain one, so a mismatch is a MISSED reuse rather than a
+// wrong substitution), and safe is not the same as right.
+//
+// **The BTRIM MOVED OUTWARDS in the same change, and that is the second half.**
+// It used to run before the collapse, and `btrim` with no explicit character
+// set removes ordinary spaces only — so a stored name with a leading TAB or
+// NEWLINE normalised to `' pork shashlik '` and matched nothing. Collapsing
+// first turns every edge separator into a plain space, which is exactly what
+// `btrim` then removes. Measured: tab-edge, newline-edge and NBSP-edge all
+// failed before and all pass now.
+//
+// The remaining known divergence is `lower()` versus `strings.ToLower` on
+// exotic scripts, which is locale-dependent in Postgres and not in Go. Left
+// alone: closing it means carrying a case-folding table, and no vector anybody
+// has produced reaches it.
+const whitespaceClassSQL = `[[:space:]\u00a0\u0085\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+`
+
+// FindFoodByNormalizedName is N114's reuse lookup: the caller's own saved food
+// whose name normalises to exactly this string.
+//
+// **Scoped to user_id inside the WHERE, and that predicate is the security
+// property** — the same one SaveFood's conflict clause carries. Without it this
+// method answers "does any athlete have a food called X", and a reuse would
+// hand one athlete another's numbers.
+//
+// Served by `nutrition_foods_user_normalized_name_idx` (migration 000074),
+// whose expression must stay byte-identical to `normalizedNameSQL` or Postgres
+// will not use it and this degrades to a scan of the athlete's whole food list.
+//
+// **Ordered, because a match must be reproducible.** Nothing stops an athlete
+// having two saved foods that normalise the same way — two devices offline,
+// two client-generated ids, one name — and an unordered LIMIT 1 would then
+// return whichever row the plan happened to reach first, so the same
+// description could yield different numbers on consecutive calls. That is the
+// defect N114 was reported for, reproduced by the fix for it. Newest wins,
+// which is the athlete's most recent correction, with `id` breaking a tie so
+// the answer is total rather than merely usually-stable.
+func (r *PostgresRepository) FindFoodByNormalizedName(ctx context.Context, userID, normalized string) (Food, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT `+foodCols+`
+		FROM nutrition_foods
+		WHERE user_id = $1 AND `+normalizedNameSQL("name")+` = $2
+		ORDER BY updated_at DESC, id
+		LIMIT 1`, userID, normalized)
+	f, err := scanFood(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Food{}, ErrNotFound
+	}
+	if err != nil {
+		return Food{}, translate(err)
+	}
+	items, err := r.itemsFor(ctx, []string{f.ID})
+	if err != nil {
+		return Food{}, err
+	}
+	f.Items = items[f.ID]
+	if f.Items == nil {
+		f.Items = []RecipeItem{}
+	}
+	return f, nil
+}
+
 // SaveFood writes the parent and its items atomically, recomputing a recipe's
 // per-serving macros from its items on the way through.
 //
@@ -401,7 +499,8 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
 			yield_servings, source, external_id, barcode)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-		        $13, $14, $15, $16, $17, $18, $19, $20, $21)
+		        $13, $14, $15, $16, $17, $18,
+		        COALESCE(NULLIF($19::text, ''), 'user'), $20, $21)
 		ON CONFLICT (id) DO UPDATE SET
 			kind = EXCLUDED.kind,
 			name = EXCLUDED.name,
@@ -419,7 +518,25 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 			sodium_mg = EXCLUDED.sodium_mg,
 			cholesterol_mg = EXCLUDED.cholesterol_mg,
 			yield_servings = EXCLUDED.yield_servings,
-			source = EXCLUDED.source,
+			-- **NOT "EXCLUDED.source", and this is the whole of N114's
+			-- restore-path guard.**
+			--
+			-- An empty Source means the caller did not state one, and the right
+			-- answer to that on an UPDATE is the value already stored — not a
+			-- default. Adding a column to this SET clause has silently blanked
+			-- authored data three times in this repo ("load_mode", "implements",
+			-- "note" on "exercises"); making an EXISTING column client-settable
+			-- is the same hazard wearing different clothes, and it would land on
+			-- provenance, which is the one field here nothing downstream can
+			-- reconstruct. An athlete correcting the macros of an AI-drafted
+			-- food would have relabelled it as something they measured.
+			--
+			-- "$19" rather than "EXCLUDED.source" because EXCLUDED holds the
+			-- row that WOULD have been inserted — i.e. after the COALESCE in
+			-- VALUES above has already turned '' into 'user'. Reading EXCLUDED
+			-- here compiles, looks right, and can never see the empty case.
+			-- Pinned by "TestEditingAFoodWithoutSayingItsSourceKeepsIt".
+			source = COALESCE(NULLIF($19::text, ''), nutrition_foods.source),
 			external_id = EXCLUDED.external_id,
 			barcode = EXCLUDED.barcode,
 			updated_at = now()

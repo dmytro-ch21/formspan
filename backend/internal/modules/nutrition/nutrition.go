@@ -447,7 +447,11 @@ func (f *Food) Validate() error {
 	if err := f.Macros.validate("food"); err != nil {
 		return err
 	}
-	if !f.Source.valid() {
+	// An EMPTY source is legal and means "unstated": the repository keeps
+	// whatever is already stored on an update, and writes `user` on an insert.
+	// See SaveFood's ON CONFLICT clause — this is what lets a client correct a
+	// food's macros without having to know, or resend, its provenance.
+	if f.Source != "" && !f.Source.valid() {
 		return fmt.Errorf("%w: unknown source %q", ErrInvalidInput, f.Source)
 	}
 	if (f.Kind == KindRecipe) != (f.YieldServings != nil) {

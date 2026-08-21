@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(21);
+  expect(row.user_version).toBe(22);
 });
 
 it('a fresh install has the sequences outbox', async () => {
@@ -122,7 +122,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -156,7 +156,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -177,7 +177,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
@@ -331,7 +331,7 @@ it('upgrading a v15-shaped database does not mark every cached name as owed', as
     .prepare(`SELECT name_dirty FROM workout_cache WHERE id = 'w1'`)
     .get() as { name_dirty: number };
   expect(row.name_dirty).toBe(0);
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
 });
 
 it('a fresh install has the food log', async () => {
@@ -376,6 +376,10 @@ it('a fresh install has the food log', async () => {
       'name',
       'serving_label',
       'kcal',
+      // Pushed and pulled: how the row was produced (N114). `ai` marks a food
+      // saved from a draft nobody measured, and it has to stay tellable apart
+      // from one the athlete typed.
+      'source',
       // Local-only and never pulled. This pair is what makes the quick-add
       // list a single indexed read rather than a network round trip, which is
       // the whole of the two-tap repeat.
@@ -407,7 +411,7 @@ it('upgrades a v17-shaped database by adding the food log', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -432,7 +436,7 @@ it('upgrades a v18-shaped database by adding the target cache', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -453,7 +457,7 @@ it('upgrades a v19-shaped database by adding the barcode cache', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 21 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -516,6 +520,46 @@ it('a device already stamped 20 reaches the tracker tables', async () => {
   ).map((t) => t.name);
   expect(tables).toContain('daily_trackers');
   expect(tables).toContain('tracker_entries');
+});
+
+it('a device already stamped 21 gains foods.source', async () => {
+  // **The first upgrade in this file that is a real ALTER rather than a
+  // re-runnable CREATE**, and that is why it needs its own test. Versions
+  // 19/20/21 each added a whole TABLE, so the unconditional `CREATE TABLE IF
+  // NOT EXISTS` block above already covers any device that reaches it — those
+  // branches are no-ops and the BUMP is the whole fix.
+  //
+  // A COLUMN has no such backstop: `CREATE TABLE IF NOT EXISTS foods` does
+  // nothing at all on a device that already has the table, so a stamped-21
+  // device without this branch keeps a `foods` table with no `source` column
+  // and every read of it throws — which is every quick-add, every recents list
+  // and every food push, with no error anywhere saying why.
+  const db = await migratedFixture();
+  db.raw.exec('ALTER TABLE foods DROP COLUMN source; PRAGMA user_version = 21;');
+
+  await migrate(db as never);
+
+  const cols = (db.raw.prepare('PRAGMA table_info(foods)').all() as { name: string }[]).map(
+    (c) => c.name,
+  );
+  expect(cols).toContain('source');
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 22 });
+});
+
+it('re-running the source migration is not an error', async () => {
+  // `migrate()` must be safe to re-enter: a run that failed after the ALTER and
+  // before the version stamp would otherwise hit `duplicate column name`
+  // forever, and this file's own comment calls that "every offline feature dead
+  // on arrival, on exactly the path a new user takes".
+  const db = await migratedFixture();
+  db.raw.exec('PRAGMA user_version = 21;');
+
+  await expect(migrate(db as never)).resolves.toBeUndefined();
+
+  const cols = (db.raw.prepare('PRAGMA table_info(foods)').all() as { name: string }[]).map(
+    (c) => c.name,
+  );
+  expect(cols.filter((c) => c === 'source')).toHaveLength(1);
 });
 
 it("a tracker's target may be NULL, because a count with no goal is a real state", async () => {

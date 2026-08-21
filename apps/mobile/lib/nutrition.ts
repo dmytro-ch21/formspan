@@ -55,6 +55,21 @@ export type Entry = Macros & {
   notes: string;
 };
 
+/**
+ * How a saved food was produced — and it is not decoration either.
+ *
+ * `ai` is a food saved from a draft the athlete confirmed; nobody measured it.
+ * `user` is one they typed. The server's own vocabulary is wider (`seed`,
+ * `usda`, `off` are written by importers), so an unrecognised value must read
+ * as "something else", never be coerced into one of these two — the same rule
+ * the server states about its own enum, in the direction that matters here.
+ *
+ * The distinction has to survive, because a model cannot reliably say which of
+ * its own numbers to distrust. Fold it into `user` and nothing downstream can
+ * ever weight the two differently, or find the drafted ones again to re-check.
+ */
+export type FoodSource = 'user' | 'ai' | (string & {});
+
 export type Food = Macros & {
   id: string;
   kind: 'food' | 'recipe';
@@ -62,6 +77,14 @@ export type Food = Macros & {
   brand: string;
   serving_label: string;
   serving_grams: number | null;
+  /**
+   * Optional on the TYPE because rows pulled by a build that predates N114 do
+   * not carry it, and because the server treats an absent source on an update
+   * as "keep what is stored" rather than as `user`. Sending `undefined` is
+   * therefore the correct thing to do when a screen has no opinion, and is not
+   * the same as sending `'user'`.
+   */
+  source?: FoodSource;
 };
 
 /**

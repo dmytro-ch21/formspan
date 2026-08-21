@@ -57,7 +57,14 @@ jest.mock('@/lib/barcodeCache', () => ({
 }));
 
 const mockLogFood = jest.fn();
-jest.mock('@/lib/foodLog', () => ({ logFood: (...a: unknown[]) => mockLogFood(...a) }));
+const mockSaveFood = jest.fn();
+// N114 added `saveFoodLocally` to this screen's imports. A mock that names only
+// `logFood` leaves the new one `undefined`, and the screen crashes on confirm —
+// which is a fault in the harness, not in the code under test.
+jest.mock('@/lib/foodLog', () => ({
+  logFood: (...a: unknown[]) => mockLogFood(...a),
+  saveFoodLocally: (...a: unknown[]) => mockSaveFood(...a),
+}));
 jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
 jest.mock('expo-image-picker', () => ({}));
 jest.mock('expo-image-manipulator', () => ({ SaveFormat: { JPEG: 'jpeg' } }));
@@ -115,6 +122,7 @@ beforeEach(() => {
   mockDescribe.mockReset();
   mockRemember.mockReset().mockResolvedValue(undefined);
   mockLogFood.mockReset().mockResolvedValue('entry-1');
+  mockSaveFood.mockReset().mockResolvedValue('food-1');
 });
 
 it('learns the packet when the draft is a single item', async () => {

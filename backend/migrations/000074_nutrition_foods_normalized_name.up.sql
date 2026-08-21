@@ -1,0 +1,43 @@
+-- N114: a food entered by AI or free text is stored and REUSED, so the same
+-- meal is not re-generated (and re-charged) every time.
+--
+-- The reuse lookup is an exact match on a normalised name — lowercase, trimmed,
+-- internal whitespace collapsed — scoped to one athlete. This index is what
+-- makes that lookup a probe rather than a scan of the athlete's whole food
+-- list, which is a list that only ever grows and that this feature exists to
+-- make grow faster.
+--
+-- **The expression must stay byte-identical to `normalizedNameSQL` in
+-- backend/internal/modules/nutrition/postgres.go, and to what
+-- `NormalizeFoodName` does in Go.** Three spellings of one rule:
+--
+--   Go:    strings.Join(strings.Fields(strings.ToLower(s)), " ")
+--   SQL:   btrim(regexp_replace(lower(name), '<the class below>', ' ', 'g'))
+--   index: the same SQL, here
+--
+-- The character class is NOT `\s`, and the btrim is OUTSIDE the collapse. Both
+-- were wrong in the first draft of this migration and both are measured in
+-- `normalizedNameSQL`'s comment: Postgres' `[:space:]` does not fold U+00A0,
+-- U+1680 or U+202F, and a `btrim` applied before the collapse leaves a leading
+-- tab behind as a space. Go folds all of them, so either mistake makes a stored
+-- name permanently unmatchable — the N114 complaint surviving inside the N114
+-- fix.
+--
+-- A drift between the first two silently stops matching anything; a drift
+-- between the last two silently stops using the index, which nothing would ever
+-- go red for. `TestTheSQLNormalisationAgreesWithTheGoOne` pins the first pair
+-- against a real database; `TestTheReuseLookupUsesItsIndex` reads the plan and
+-- pins the second.
+--
+-- All three functions are IMMUTABLE, which is what makes the expression
+-- indexable at all.
+--
+-- NOT unique. Two devices offline can each save "Pork Shashlik" with their own
+-- client-generated id, and refusing the second write would strand an outbox row
+-- forever with nothing on the phone able to resolve it. The lookup orders
+-- instead — newest first — so a duplicate is a stale row rather than an error.
+CREATE INDEX nutrition_foods_user_normalized_name_idx
+    ON nutrition_foods (
+        user_id,
+        (btrim(regexp_replace(lower(name), '[[:space:]\u00a0\u0085\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+', ' ', 'g')))
+    );

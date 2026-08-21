@@ -261,7 +261,8 @@ func main() {
 		os.Exit(1)
 	}
 	bodyHandler := body.NewHandler(body.NewPostgresRepository(pool), photoStore)
-	nutritionHandler := nutrition.NewHandler(nutrition.NewPostgresRepository(pool))
+	nutritionRepo := nutrition.NewPostgresRepository(pool)
+	nutritionHandler := nutrition.NewHandler(nutritionRepo)
 	trackerHandler := tracker.NewHandler(tracker.NewPostgresRepository(pool))
 	// The AI estimate endpoint. `NewEstimator` returns nil on an empty key and
 	// the handler serves 503 for that, so a deploy without the selected
@@ -315,6 +316,10 @@ func main() {
 	estimateHandler := nutrition.NewEstimateHandler(
 		mealEstimator,
 		nutrition.NewPostgresEstimateUsage(pool),
+		// N114's reuse lookup. The same repository the food log uses, handed
+		// over through a one-method port so this handler cannot write anything
+		// — see `nutrition.SavedFoodFinder`.
+		nutritionRepo,
 	)
 
 	// Machine identification (N7). Same nil-safe shape as the estimator above:

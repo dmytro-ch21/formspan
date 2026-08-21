@@ -489,22 +489,38 @@ export default function AddFoodScreen() {
       <SectionHeader label={q.trim() ? 'Matches' : 'Recent'} />
 
       {shown.map((f) => (
-        <Pressable
-          key={f.id}
-          style={styles.row}
-          onPress={() => void log(f)}
-          accessibilityRole="button"
-          accessibilityLabel={`Log ${f.name}`}
-          testID={`add-food-${f.id}`}
-        >
-          <View style={styles.rowMain}>
-            <Text style={styles.rowName} numberOfLines={1}>
-              {f.name}
-            </Text>
-            <Text style={styles.rowServing}>{f.serving_label}</Text>
-          </View>
-          <Text style={styles.rowKcal}>{Math.round(f.kcal)}</Text>
-        </Pressable>
+        <View key={f.id} style={styles.savedRow}>
+          <Pressable
+            style={[styles.row, styles.savedTap]}
+            onPress={() => void log(f)}
+            accessibilityRole="button"
+            accessibilityLabel={`Log ${f.name}`}
+            testID={`add-food-${f.id}`}
+          >
+            <View style={styles.rowMain}>
+              <Text style={styles.rowName} numberOfLines={1}>
+                {f.name}
+              </Text>
+              <Text style={styles.rowServing}>{f.serving_label}</Text>
+            </View>
+            <Text style={styles.rowKcal}>{Math.round(f.kcal)}</Text>
+          </Pressable>
+          {/* A SEPARATE control, not a long-press or a swipe. Tapping the row
+              still logs — that two-tap repeat is the whole point of this list,
+              and a screen that sometimes navigates instead of logging would
+              break the muscle memory it depends on. N114 makes these rows
+              correctable, which is what stops a stored wrong number coming
+              back forever, so the affordance has to be visible. */}
+          <Pressable
+            onPress={() => router.push({ pathname: '/food/saved/[id]', params: { id: f.id } })}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${f.name}`}
+            hitSlop={8}
+            testID={`add-food-edit-${f.id}`}
+          >
+            <Text style={styles.rowEdit}>Edit</Text>
+          </Pressable>
+        </View>
       ))}
 
       {shown.length === 0 && (
@@ -938,6 +954,18 @@ const styles = StyleSheet.create({
   },
   cardAddText: { fontSize: 20, lineHeight: 22, fontWeight: '600' },
   rowKcal: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  savedRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  savedTap: { flex: 1 },
+  // `paddingVertical` as well as the hitSlop: a 12pt text label is a small
+  // target beside a full-width row, and the two together bring it to a
+  // comfortable tap area without changing the row's height.
+  rowEdit: {
+    fontSize: 12,
+    color: vola.textMuted,
+    fontWeight: '600',
+    paddingHorizontal: 6,
+    paddingVertical: 10,
+  },
   empty: { fontSize: 13, color: vola.textMuted, paddingVertical: 8 },
   newRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
   newText: { fontSize: 14, fontWeight: '600' },
