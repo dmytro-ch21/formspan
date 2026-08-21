@@ -45,7 +45,14 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
@@ -62,6 +69,7 @@ import {
 import {
   MAX_DICTATION_CHARS,
   describeNotice,
+  draftErrorMessage,
   draftReflection,
   draftToDetail,
   type Draft,
@@ -76,6 +84,15 @@ import { useAuthToken } from '@/lib/useAuthToken';
 /** The fallback when the athlete never said what kind of session it was. */
 const DEFAULT_KIND: Kind = 'class';
 
+/**
+ * What a retry in progress says, in one place.
+ *
+ * Shared by the rendered line and the VoiceOver announcement so the two cannot
+ * drift — a screen reader hearing something the screen does not say is its own
+ * small bug.
+ */
+const RETRY_NOTICE = 'Still working on it — trying again.';
+
 export default function DictateReflectionScreen() {
   const router = useRouter();
   const accent = useAccent();
@@ -84,6 +101,18 @@ export default function DictateReflectionScreen() {
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // A retry in flight is NOT an error state, and keeping the two apart is most
+  // of N118: what the athlete met was a failure they were asked to fix, at a
+  // moment the app was perfectly capable of fixing it itself.
+  const [retrying, setRetrying] = useState(false);
+  // A live region is Android-only, so VoiceOver needs telling directly — the
+  // pattern `app/sign-in.tsx` and `app/forgot-password.tsx` already use. Said
+  // once per attempt: this is reassurance that work is still happening, and
+  // repeating it over a two-attempt sequence would be chatter.
+  const announceRetry = useCallback(() => {
+    setRetrying(true);
+    AccessibilityInfo.announceForAccessibility(RETRY_NOTICE);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [quota, setQuota] = useState<DraftQuota | null>(null);
@@ -130,17 +159,27 @@ export default function DictateReflectionScreen() {
     const said = text.trim();
     if (!said || sending) return;
     setSending(true);
+    setRetrying(false);
     setError(null);
     try {
-      const res = await draftReflection(getToken, said);
+      // `said` is a local copy and `text` is never cleared on any path, so the
+      // dictation survives every failure and every retry. Re-recording is not
+      // a recovery anybody should be asked for.
+      const res = await draftReflection(getToken, said, {
+        onRetry: () => announceRetry(),
+      });
       setDraft(res.draft);
       setQuota(res.quota);
       setDetail(draftToDetail(res.draft, DEFAULT_KIND));
       setUnresolved(res.draft.unresolved);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // NEVER `err.message`. The server's prose is written for an API consumer
+      // and one sentence of it told an athlete they had spoken badly about a
+      // failure that was not theirs — see `draftErrorMessage`.
+      setError(draftErrorMessage(err));
     } finally {
       setSending(false);
+      setRetrying(false);
     }
   }
 
@@ -173,8 +212,10 @@ export default function DictateReflectionScreen() {
       // same controls as anything typed. There is no separate "review a
       // dictated session" surface, deliberately.
       router.replace({ pathname: '/bjj/reflect/[id]', params: { id: sessionId } });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch {
+      // Local storage, not the network — so no transport wording, and no raw
+      // SQLite text either. The draft on screen is untouched by a failed save.
+      setError('Couldn’t save that just now. Your draft is still here — try Save again.');
       setSaving(false);
     }
   }
@@ -265,6 +306,18 @@ export default function DictateReflectionScreen() {
               <Text style={styles.primaryLabel}>Read it</Text>
             )}
           </Pressable>
+          {/* Said only once a first attempt has already failed, so the ordinary
+              case never sees it. Not styled as an error, because it is not one
+              — the athlete has nothing to do and nothing has gone wrong yet. */}
+          {retrying && (
+            <Text
+              style={styles.muted}
+              testID="dictate-retrying"
+              accessibilityLiveRegion="polite"
+            >
+              {RETRY_NOTICE}
+            </Text>
+          )}
         </>
       )}
 
@@ -279,9 +332,13 @@ export default function DictateReflectionScreen() {
       {draft?.empty && (
         <View style={styles.card} testID="dictate-empty">
           <Text style={styles.emptyTitle}>Nothing was picked up from that</Text>
+          {/* A 200 with nothing in it — the draft was spent, so this is NOT
+              retried automatically. The wording still had to change: "try again
+              with what you drilled" reads as *you left that out*, and the same
+              words often come back with a session in them on the next pass. */}
           <Text style={styles.muted}>
-            It didn’t read as a session. Try again with what you drilled and what happened in the
-            rounds — or log it by hand instead.
+            It didn’t come back as a session this time. You can send the same words again, or log
+            it by hand instead.
           </Text>
           <Pressable
             onPress={() => {

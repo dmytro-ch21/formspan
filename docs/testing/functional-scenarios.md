@@ -10005,6 +10005,67 @@ The mobile surface for N33's `POST /v1/bjj/reflect/draft`. Reached from
   feature — backend or mobile — has met real keyboard transcription. A green
   suite is not evidence that dictation works on speech.
 
+### Retrying a failed draft (N118)
+
+A failed draft used to be handed to the athlete as their fault, with the
+server's own *"try saying what happened in plainer terms"* rendered verbatim —
+and the reporter fixed it by resending the identical sentence. The screen now
+retries, bounded by the athlete's daily allowance rather than by wall time.
+
+**Happy path**
+
+- A dictation that fails once on the network and succeeds on the retry shows
+  **no error at any point** — a "still working on it" line and then the draft.
+- The success case retries nothing and shows no extra line.
+
+**Edge cases & errors**
+
+- **A dead-on-arrival request retries up to three attempts** — `OfflineError`,
+  `RequestDroppedError` — with a rising backoff (400ms, 1600ms), then reports
+  the transport's own diagnosis.
+- **A `TimeoutError` gets TWO attempts, not three**, because our own deadline
+  firing cancels a request the server meters anyway. A scenario that lumps it
+  in with the rest of the transport family is asserting the bug.
+- **503 + `unavailable` retries; 503 + `internal` does not.** They share a
+  status and differ only by code — a scenario asserting the status alone is
+  asserting nothing.
+- **A 422 refusal is retried exactly once.** Assert the number of requests, not
+  that "a retry happened": each attempt spends one of ten daily drafts.
+- **A 429 is never retried**, and it keeps the server's sentence, which names
+  when the next draft is available.
+- **A 400 is never retried** — an over-long or empty dictation fails the same
+  way forever.
+- **The dictation survives every failure**: the field still holds the words and
+  the send button is still there. Re-recording is not an acceptable recovery.
+- **A retry stops after `DRAFT_RETRY_BUDGET_MS`** even with attempts left. The
+  route runs on a 45s deadline, so three timeouts is over two minutes behind a
+  spinner.
+- **A failed local save says so in the app's own words** — never raw SQLite
+  text — and leaves the draft on screen.
+- **A status with no branch (403, 409, anything new) gets the neutral line**,
+  not the server's sentence. Only 429 and 400 pass their message through.
+- **VoiceOver is told a retry is happening**, in the same words the screen
+  shows. `accessibilityLiveRegion` is Android-only, so the announcement is what
+  carries it on iOS.
+
+### Regression traps (N118)
+
+- **Never render `err.message` on this screen.** That is exactly how the
+  handler's prose became an accusation. Every failure gets a line composed by
+  `draftErrorMessage` from the status and the code.
+- **No failure message may say the athlete spoke badly.** The backend has a
+  guard on this too (`reflect_blame_test.go`) — the message must be checked as
+  the client receives it, not compared against a constant.
+- **Count the requests when testing a refusal retry.** "It retried" and "it
+  retried once" differ by somebody's daily allowance, and running out is
+  invisible until the day it happens.
+- **A retry in flight is not an error.** A scenario that asserts "an error is
+  shown eventually" passes against a screen that flashes the error first, which
+  is the reported bug.
+- **This cannot be verified in the suite.** Whether a refusal reverses itself on
+  an unchanged resend needs a live provider; every test here stubs one, and a
+  stub encodes the belief it is supposed to be testing.
+
 
 
 

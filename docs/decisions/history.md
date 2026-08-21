@@ -38265,6 +38265,178 @@ now, and its hint says "Nothing logged in the last 28 days" rather than
 - The check-in screen's weight placeholder has the same 38pt-em-dash-as-a-bar
   problem this ticket fixed on the target card. Different screen, not touched.
 
+
+## 2026-08-21 — A refusal is a sample, not a verdict (N118)
+
+Reported from a device: *"When I dictated today I first got an error that it's
+not articulated correctly and then I just resent again."* Two separate failures
+in one sentence, and the second is the interesting one.
+
+**The wording.** `apps/mobile/app/bjj/dictate.tsx` rendered `err.message`
+straight into the error card, so the athlete read the handler's own 422:
+*"could not read that as a session — try saying what happened in plainer
+terms"*. Backend prose written for an API consumer, shown to a person in a gym,
+telling them they had spoken badly.
+
+**The remedy it named was wrong.** The resend was of the *same words* and it
+worked. So on this route a refusal is not a verdict on the sentence — it is one
+sample. The mechanism, rather than the anecdote: `llm.Request` has no
+temperature field, so both providers are called at their default sampling
+temperature and identical input does not imply identical output. Three places
+asserted the opposite in so many words — `llm.ErrRefused`'s doc comment
+("a refusal will happen again for the same input, so nothing should retry it"),
+the OpenAPI 422 description ("a refusal is deterministic"), and the 422 message
+itself. All three are corrected. The claim was inherited from **truncation**,
+which maps onto the same sentinel and genuinely *is* deterministic, and was
+generalised to every refusal without anyone measuring it.
+
+### The constraint that shaped the fix: a refusal is metered
+
+This is why "just retry it" was not the answer. `reflect_handler.go` returns
+before `RecordDraft` for `ErrDraftUnreachable` — a provider that never answered
+spent no tokens, so it costs no draft (F16 / #367). **Everything else meters,
+including the refusal**, and the handler's comment says why: it is what stops a
+client looping on input the model keeps declining. A naive auto-retry would
+silently eat somebody's ten-a-day and defeat a deliberate design.
+
+So the client's retry budget is denominated in **drafts**, not in attempts or
+seconds. `draftRetryClass` in `lib/reflectApi.ts` sorts a failure into three:
+
+| what happened | on the wire | billed | attempts |
+|---|---|---|---|
+| no route / request dropped | `OfflineError`, `RequestDroppedError` | no | 3 |
+| provider never answered | 503 + `unavailable` | no | 3 |
+| expired session token | 401 | no | 3 |
+| **our own 45s deadline fired** | `TimeoutError` | **yes** | **2** |
+| model declined | 422 | **yes** | **2** |
+| answered unusably | 503 + `internal` | **yes** | **2** |
+| allowance gone | 429 | — | 1 |
+| bad request | 400 and other 4xx | — | 1 |
+
+Two of those are overrides of N55's own taxonomy and both are deliberate: 429
+is retryable to `isPermanentStatus` and is `final` here, because on this route
+it is the daily allowance rather than a throttle; 422 is permanent there and
+gets one retry here, which is the judgement this ticket turns on.
+
+**The `TimeoutError` row is the one that would have gone wrong quietly.** N55's
+whole transport family means "the request produced no answer", which reads as
+free — and for a timeout it is not. Aborting at 45s cancels the request context
+while the handler is inside the provider call, and `internal/platform/llm` maps
+a cancelled call **away** from `ErrUnreachable` on purpose: *"if cancellation
+were free, the quota would be trivially defeatable"*. `reflect_handler.go` then
+records the draft under `context.WithoutCancel` so hanging up cannot escape the
+meter. A client reading its own deadline off the transport family would have
+retried three times and spent three of ten while believing it had spent none.
+`OfflineError` and `RequestDroppedError` stay free because they are the *fast*
+failures — the brief interruption this ticket is about; llm.go already documents
+the residual asymmetry there and calls it deliberate and bounded.
+
+**The trade, stated plainly: an automatic retry can spend one of the athlete's
+ten drafts.** That is exactly what the reporter already spent by tapping the
+button again. It is bounded three ways — one extra attempt per tap, never a
+loop; the server's quota gate runs *before* any token is spent, so a retry with
+nothing left comes back 429 and stops; and a wall-clock budget
+(`DRAFT_RETRY_BUDGET_MS`) stops a 45s-deadline route from parking somebody
+behind a spinner for two minutes. The case it spends a draft on for nothing is a
+truncated response, which will truncate again; it shares a status *and* a code
+with a sampled refusal, and separating them would need a new sentinel in
+`internal/platform/llm` plus a new code on the wire. Not done — the evidence is
+one field report, and that buys one retry, not a new wire distinction.
+
+### Everything else that came out of reading the path
+
+- **The route was on the 30s default timeout** while `describeMeal`,
+  `estimateMeal` and `identifyMachine` all use `SLOW_REQUEST_TIMEOUT_MS` (45s).
+  The constant's own doc says why it exists — "it waits on a language model …
+  the backend puts no ceiling of its own on that call" — and this route was
+  manufacturing the very `TimeoutError` it is now retried for. Fixed.
+- **`draftErrorMessage`** composes every final message from the status and the
+  code, in the same shape as `identifyErrorMessage` and `estimateErrorMessage`.
+  Two statuses deliberately keep the server's sentence, for the reason
+  `estimateApi` already records: a 429 states when the next draft is available
+  and a 400 names the limit that was broken, and neither is a diagnosis of how
+  anybody spoke.
+- **The save path stopped rendering raw errors too** — that is local SQLite, so
+  a failure there was showing storage-engine text to an athlete.
+- **The empty-draft card was reworded.** A 200 with nothing in it is not retried
+  (it was billed), but *"try again with what you drilled"* reads as *you left
+  that out*.
+
+### What the tests can and cannot establish, said out loud
+
+`lib/__tests__/dictateRetry.test.ts` opens with the distinction, because the
+premise of this ticket is that a belief encoded in copy turned out to be false
+and the same trap is available to a test. **Measured:** which failures the
+handler meters — that is asserted in rows against the real handler in
+`reflect_outage_test.go`. **Assumed:** that an identical dictation can be
+refused once and drafted next time. Nothing in the suite stubs a provider on
+that question, deliberately: a stub answering "refused, then fine" would look
+like proof and would be the author asserting their own belief back at
+themselves.
+
+Seven client guards and the backend copy guard were mutation-tested and all
+eight go red — the refusal retry count, the 429 stop, the 503-by-code split, the
+free-attempt bound, the message mapping, the screen's raw-error path, and the
+retry indicator. The backend one was checked by putting the *old* sentence back:
+it names it.
+
+### What review changed
+
+Three findings, none blocking, all of them the same shape — a comment claiming
+more than the code did:
+
+- **`draftErrorMessage` fell through to `err.message` for any status it had no
+  branch for.** Its own doc said *two* statuses deliberately keep the server's
+  sentence (429's reset, 400's limit); the code meant every unmatched one, which
+  quietly re-opened the door the function exists to close for 403, 409 and
+  whatever the backend adds next. Restricted to the two, with a neutral line
+  otherwise.
+- **The retry line was visual-only.** `accessibilityLiveRegion` is Android-only
+  — `sign-in.tsx` and `forgot-password.tsx` already pair it with
+  `announceForAccessibility` — so a screen-reader user got no signal that the
+  app was still working, which is the entire reason the line exists. The
+  rendered text and the announcement now come from one constant, and a test
+  asserts they are the same string. **It survived the first mutation pass with
+  nothing red**, which is the only reason it was found at all.
+- **The OpenAPI edit had invented an absolute.** It said a retrying client "can
+  never spend past the allowance". `reflect_quota.go` records that the gate is
+  advisory under concurrency — simultaneous requests overshoot by the in-flight
+  count — so that is true of a sequential retry and not in general. Scoped.
+  Correcting one unchecked absolute with another would have been a good joke and
+  a bad contract.
+
+The blame table was widened at the same time: it covered the three drafter
+sentinels while its comment claimed every failure, so a blaming 400 or 429 could
+have shipped under a test asserting it could not. Seven rows now, each guarded
+by a `w.Code < 400` check so a row that stops exercising an error path fails
+rather than passes.
+
+**One residual, named rather than hidden.** `RequestDroppedError` is classed
+free and gets three attempts, and a connection that dies *after* the handler has
+entered the provider call is billed by the same mechanism as the timeout. So the
+"one extra draft per tap" bound has a corner where it is three. It needs the
+network to die mid-response specifically, `llm.go` already documents accepting
+that ambiguity in the same direction, and the alternative — treating every
+dropped request as billed — would stop retrying the brief interruption this
+ticket is about.
+
+**Left for a follow-up.** `/nutrition/estimate` and `/exercises/identify`
+describe their own 422s as deterministic, on the same temperature-less platform,
+so they are probably wrong for the same reason. Not corrected here: the evidence
+is from this route, and generalising an anecdote is how the original claim got
+in.
+
+**One collateral finding.** Adding a single state update to the dictate screen
+turned an unrelated picker test red. It was asserting the technique options
+**synchronously after** a `waitFor` on the prompt — the draft and the library
+arrive on two independent timers, and the test passed only while those two
+happened to flush together. Moved inside the `waitFor`. Worth knowing because
+the failure looked exactly like a regression in a picker nothing had touched.
+
+**Not verified:** the device criterion — dictate with the network briefly
+interrupted and confirm it recovers with no visible error. That needs a phone
+and a flight-mode toggle, and it is left outstanding on the ticket.
+
 ## Open items / known gaps as of this entry
 
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.
