@@ -14,14 +14,9 @@ import {
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 
-import { CheckinCard } from '@/components/CheckinCard';
-import { NutritionCard } from '@/components/NutritionCard';
 import { Text, View } from '@/components/Themed';
-import { Image } from 'expo-image';
 
-import { BELT_HERO } from '@/components/BeltPhoto';
 import { Icon } from '@/components/ui/Icon';
-import { sportColor } from '@/components/ui/sport';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { RoadmapLine } from '@/components/RoadmapLine';
@@ -29,6 +24,17 @@ import { RoadmapOffer } from '@/components/RoadmapOffer';
 import { SectionHeader } from '@/components/ui/Section';
 import { TrendStrip } from '@/components/ui/TrendStrip';
 import { SessionCard, type Metric } from '@/components/ui/SessionCard';
+import { WeekStrip } from '@/components/today/WeekStrip';
+import { MomentumCard } from '@/components/today/MomentumCard';
+import { UpNextCard } from '@/components/today/UpNextCard';
+import { ProgressCard } from '@/components/today/ProgressCard';
+import {
+  LoggingCard,
+  MiniCardRow,
+  TrainingCard,
+  TRAINING_WINDOW_DAYS,
+} from '@/components/today/MiniCards';
+import { parseRings, type RingKey, DEFAULT_RINGS } from '@/lib/macroRings';
 import { TrackerList } from '@/components/TrackerList';
 import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { WeekReview } from '@/components/WeekReview';
@@ -40,7 +46,7 @@ import { owedOn } from '@/lib/adherence';
 import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
 import { formatElapsed } from '@/lib/rest';
 import type { Session } from '@/lib/sessions';
-import { cachedWorkouts, listLocalSessions } from '@/lib/sessionStore';
+import { cachedWorkouts, listLocalSessions, trainingSince } from '@/lib/sessionStore';
 import { reviewWeek } from '@/lib/weekReview';
 import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
 import { fetchProficiency } from '@/lib/proficiency';
@@ -56,6 +62,7 @@ import {
 import {
   PREF_DETAIL_OFFERS,
   PREF_DISMISSED_SUGGESTIONS,
+  PREF_MACRO_RINGS,
   PREF_SUGGESTIONS,
   PREF_SUGGESTIONS_OFF,
   readPref,
@@ -67,7 +74,6 @@ import {
   enabledSports,
   labelFor,
   moduleWithCatalog,
-  usesBelt,
   type Module,
 } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
@@ -95,7 +101,6 @@ import {
   type EatenView,
 } from '@/lib/nutrition';
 import { listTargets, targetOn } from '@/lib/nutritionApi';
-import { accentGlow } from '@/lib/palette';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useTrackerDay } from '@/lib/useTrackerDay';
 import { useUnits } from '@/lib/useUnits';
@@ -594,6 +599,23 @@ export default function TodayScreen() {
   const [foodLogged, setFoodLogged] = useState<{ logged: number; considered: number } | null>(null);
   const [foodView, setFoodView] = useState<TargetView>({ state: 'checking' });
   const [foodQuick, setFoodQuick] = useState<Food[]>([]);
+
+  /**
+   * The week's logged FOOD days, as day keys.
+   *
+   * Separate from `foodLogged` (a count over a rolling seven days) because the
+   * strip and the `LOGGING` dots need to know WHICH days, and deriving one from
+   * the other is impossible in that direction. `null` until read — never an
+   * empty set, which would draw seven empty dots as though the week were known
+   * and blank.
+   */
+  const [foodDays, setFoodDays] = useState<ReadonlySet<string> | null>(null);
+
+  /** Sessions and distinct days over the trailing 28. `null` until counted. */
+  const [training, setTraining] = useState<{ sessions: number; days: number } | null>(null);
+
+  /** Which macros the rings draw. `null` until the preference is read. */
+  const [rings, setRings] = useState<readonly RingKey[] | null>(null);
   const foodEnabled = hasFoodLog(modules);
   // The module that WOULD carry the Fuel card, turned off. See the card's
   // render below — N61.
@@ -636,15 +658,29 @@ export default function TodayScreen() {
     // `daysLogged` a query that never ran and produced "0 of 7 days logged" —
     // the confident zero the comment on `foodLogged` exists to forbid, and a
     // discouraging one. Found in review, two lines under that comment.
+    // Widened to Monday..Sunday of the CURRENT week (N108), because the week
+    // strip and the LOGGING dots need the calendar week, while `foodLogged`
+    // still wants its own rolling seven days. One read serves both: the union
+    // of the two spans, sliced differently by each consumer. A second read
+    // would be a second answer to "did I log on Tuesday".
+    const week = weekDays(new Date());
+    const spanFrom = dayString(
+      new Date(Math.min(week[0].getTime(), addDays(new Date(), -6).getTime())),
+    );
+    const spanTo = dayString(week[6]) > today ? dayString(week[6]) : today;
     (userId
-      ? localLoggedDays(userId, dayString(addDays(new Date(), -6)), today)
+      ? localLoggedDays(userId, spanFrom, spanTo)
       : Promise.resolve<string[] | null>(null))
       .then((days) => {
         if (!live) return;
         setFoodLogged(days === null ? null : daysLogged(days, today, LOGGED_WINDOW_DAYS));
+        setFoodDays(days === null ? null : new Set(days));
       })
       .catch(() => {
-        if (live) setFoodLogged(null);
+        if (live) {
+          setFoodLogged(null);
+          setFoodDays(null);
+        }
       });
 
     // Ranked for the CURRENT slot, so the chips are porridge at breakfast and
@@ -681,6 +717,41 @@ export default function TodayScreen() {
       live = false;
     };
   }, [getToken, userId]);
+
+  /**
+   * The trailing-28-day training count, and which rings to draw.
+   *
+   * Counted in SQLite rather than derived from `sessions`, which is capped at
+   * the 30 most recent ROWS — see `trainingSince`. Both reads fail to `null`
+   * rather than to a zero, because "we have not counted yet" and "you did
+   * nothing" are different sentences and only one of them is discouraging.
+   */
+  const refreshSummary = useCallback(() => {
+    let live = true;
+
+    const since = new Date();
+    since.setDate(since.getDate() - TRAINING_WINDOW_DAYS);
+    (userId ? trainingSince(userId, since.toISOString()) : Promise.resolve(null))
+      .then((t) => {
+        if (live) setTraining(t);
+      })
+      .catch(() => {
+        if (live) setTraining(null);
+      });
+
+    (userId ? readPref(userId, PREF_MACRO_RINGS) : Promise.resolve<string | null>(null))
+      .then((raw) => {
+        if (live) setRings(parseRings(raw));
+      })
+      // A preference that cannot be read is a preference nobody set.
+      .catch(() => {
+        if (live) setRings(DEFAULT_RINGS);
+      });
+
+    return () => {
+      live = false;
+    };
+  }, [userId]);
 
   /** One tap from the card: log a serving of a ranked food, right now. */
   const quickLog = useCallback(
@@ -756,6 +827,7 @@ export default function TodayScreen() {
       // On focus only, not on every day-step: the funnel is an aggregate over
       // every session ever logged and does not change because you looked at
       // Thursday.
+      const stopSummary = refreshSummary();
       refreshFunnel();
       // On focus, not on mount: enrolling happens on a screen pushed over these
       // tabs, and Today stays mounted for the life of the process.
@@ -765,9 +837,10 @@ export default function TodayScreen() {
       return () => {
         stopFood?.();
         stopTrackers?.();
+        stopSummary?.();
         stop?.();
       };
-    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins, refreshFood, refreshTrackers, todayKey]),
+    }, [refreshSessions, refreshPlan, refreshFunnel, refreshRoadmaps, readSuggestionPrefs, refreshCheckins, refreshFood, refreshTrackers, refreshSummary, todayKey]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -1026,6 +1099,24 @@ export default function TodayScreen() {
 
       <View style={styles.body}>
         {/*
+          The week strip (N108). It sits ABOVE the day switcher deliberately:
+          the strip is the week, the switcher steps a day inside it, and the
+          reference puts the week first.
+
+          `logged` is FOOD days. That is a choice the strip does not make for
+          itself — it takes a set — and it is flagged on the PR as a question,
+          because "logged" could equally mean a training session. Food is the
+          reading that matches the `LOGGING` card at the foot, so the two agree.
+        */}
+        <WeekStrip
+          now={now}
+          days={weekDays(now)}
+          logged={foodDays ?? new Set<string>()}
+          onWeekInReview={() => router.push('/(tabs)/goals')}
+          testID="today-week-strip"
+        />
+
+        {/*
           Steps the day the Upcoming block below describes. Before this the
           screen could only ever answer "what is on today", so the answer to
           "am I training Thursday" was in another tab.
@@ -1207,35 +1298,34 @@ export default function TodayScreen() {
 
             {owed.length > 0 ? (
               owed.map((p) => (
-                <Pressable
+                /*
+                  UP NEXT, one row per owed plan.
+
+                  Reshaped onto `UpNextCard` (N108). Two things the reference
+                  shows are deliberately NOT rendered here:
+
+                  - **a clock time.** `PlannedSession` has a `day` and no time
+                    at all, so `Today • 7:00 PM` is data this app does not hold.
+                    The day is what it knows and the day is what it says.
+                  - **the belt hero.** It lived on this card and is dropped with
+                    the reshape rather than kept as texture behind a tighter
+                    row; `usesBelt` still governs it wherever it returns.
+
+                  The past-day behaviour is preserved exactly: no press target,
+                  `accessibilityRole="text"`, and the state said in WORDS rather
+                  than by dimming — a blanket opacity took "Not logged" to
+                  1.96:1, which is the measurement that comment records.
+                */
+                <UpNextCard
                   key={p.id}
-                  style={({ pressed }) => [
-                    styles.planCard,
-                    pressed && !isPast && styles.planCardPressed,
-                  ]}
-                  // Note there is no blanket `opacity` on a past card. It had
-                  // one, and opacity composites EVERY ink inside: "Not logged"
-                  // fell to 1.96:1 and the BJJ eyebrow to 2.51:1 — the latter
-                  // being the exact number the palette cites as its reason for
-                  // banning `textDim` from a done row. What is past is said in
-                  // words instead.
-                  //
-                  // A past day cannot be started; a FUTURE one can, and
-                  // deliberately — "start Thursday's workout now" is a normal
-                  // thing to want, and it dates the session today, which is
-                  // true. The past is different only because the plan it looks
-                  // like it satisfies would stay owed, so the card would be
-                  // asserting something the next render contradicts. It was never blocked before
-                  // because the screen could only ever show today; the switcher
-                  // is what makes "Start" on last Tuesday reachable, and
-                  // starting it would date the session today and leave the plan
-                  // it appears to satisfy still owed.
-                  onPress={isPast ? undefined : () => startPlanned(p)}
-                  // NOT `disabled`: React Native folds it into
-                  // `accessibilityState`, so VoiceOver appends "dimmed" to an
-                  // element already declared `text`. No handler is already
-                  // inert. Same trap `PeriodSwitcher` documents one branch ago.
-                  accessibilityRole={isPast ? 'text' : 'button'}
+                  sport={p.sport}
+                  title={p.workoutName ?? `${labelFor(modules, p.sport)} session`}
+                  when={isToday ? 'Today' : dayLabel}
+                  past={isPast}
+                  pastLabel="Not logged"
+                  logLabel={logsAfterwards(p.sport, modules) ? 'Log' : 'Start'}
+                  onLog={() => startPlanned(p)}
+                  onOpen={() => startPlanned(p)}
                   accessibilityLabel={
                     isPast
                       ? `${p.workoutName ?? labelFor(modules, p.sport)}, planned and not logged`
@@ -1244,70 +1334,7 @@ export default function TodayScreen() {
                         }`
                   }
                   testID={`today-plan-${p.id}`}
-                >
-                  {/* The discipline's own colour down the edge, matching the
-                      Recent rows below — so the eye learns one mapping for the
-                      whole screen rather than two. */}
-                  <RNView
-                    style={[
-                      styles.planRule,
-                      { backgroundColor: sportColor(p.sport) ?? accent.accent },
-                    ]}
-                  />
-
-                  {/*
-                    The belt, centred behind the card and only on a discipline
-                    that wears one.
-
-                    It used to bleed off the right edge on every plan card,
-                    including a squat day, where a BJJ belt is decoration
-                    claiming something untrue. Centred it reads as the card's
-                    own texture rather than as an image sliding out of frame,
-                    and `usesBelt` keeps it to the sport it belongs to.
-                  */}
-                  {usesBelt(p.sport, modules) && (
-                    <Image
-                      source={BELT_HERO}
-                      style={styles.planHero}
-                      contentFit="contain"
-                      transition={0}
-                      accessibilityElementsHidden
-                      importantForAccessibility="no-hide-descendants"
-                    />
-                  )}
-
-                  <View style={styles.planMain}>
-                    <Text
-                      style={[
-                        styles.planEyebrow,
-                        { color: sportColor(p.sport) ?? vola.textDim },
-                      ]}
-                    >
-                      {labelFor(modules, p.sport).toUpperCase()}
-                    </Text>
-                    <Text style={styles.planTitle}>
-                      {p.workoutName ?? `${labelFor(modules, p.sport)} session`}
-                    </Text>
-                  </View>
-
-                  {/* The accent, not the sport: this is the one thing on the
-                      card you are meant to press, and "act here" is the job the
-                      accent does everywhere else in the app. A sport-coloured
-                      button would make the edge and the action the same signal
-                      and leave the primary action unmarked. */}
-                  {isPast ? (
-                    <Text style={styles.planMissed}>Not logged</Text>
-                  ) : (
-                    <>
-                      <View style={[styles.planGo, { backgroundColor: accent.accent }]}>
-                        <Text style={[styles.planGoText, { color: accent.on }]}>
-                          {logsAfterwards(p.sport, modules) ? 'Log' : 'Start'}
-                        </Text>
-                      </View>
-                      <Icon name="chevron" size={14} color={vola.textDim} />
-                    </>
-                  )}
-                </Pressable>
+                />
               ))
             ) : viewPlans.length > 0 ? (
               /*
@@ -1529,28 +1556,58 @@ export default function TodayScreen() {
 
         {/* The check-in, above the week's readout: it is the one block here
             that asks for something rather than reporting. */}
-        <CheckinCard
+        {/*
+          PROGRESS (N108), replacing `CheckinCard` in place.
+
+          A replacement rather than an addition: both render the weight trend,
+          and two cards on one screen answering the same question with different
+          arithmetic is the W2/W4 shape this repo has already shipped twice.
+        */}
+        <ProgressCard
           checkins={checkins}
           phase={phase}
           today={dayString(new Date())}
           units={units}
           loaded={checkinsLoaded}
           unitsReady={unitsReady}
+          onOpen={() => router.push('/goals/trend')}
+          testID="today-progress"
         />
+
+        {/* TRAINING and LOGGING, the two small cards at the foot of the
+            reference. Placed here rather than at the very bottom so the
+            reporting blocks stay together. */}
+        <MiniCardRow>
+          <TrainingCard
+            training={training}
+            onPress={() => router.push('/(tabs)/workouts')}
+            testID="today-training"
+          />
+          <LoggingCard
+            loggedDays={foodDays}
+            days={weekDays(now)}
+            now={now}
+            onPress={() => router.push('/(tabs)/food')}
+            testID="today-logging"
+          />
+        </MiniCardRow>
 
         {/* Fuel sits beside the check-in because both ASK for something rather
             than reporting, and the two belong together above the blocks that
             only report. Two numbers and nothing else: remaining calories and
             remaining protein. */}
         {foodEnabled ? (
-          <NutritionCard
+          <MomentumCard
             eaten={foodEaten}
-            logged={foodLogged}
             view={foodView}
+            rings={rings ?? DEFAULT_RINGS}
+            logged={foodLogged}
             quickAdd={foodQuick}
             onLog={() => router.push('/food/add')}
-            onOpenDay={() => router.push('/food')}
             onQuickAdd={(f) => void quickLog(f)}
+            onOpenDay={() => router.push('/food')}
+            onConfigureRings={() => router.push('/food/rings')}
+            testID="today-momentum"
           />
         ) : (
           /* N61's last surface, and the one the first audit missed — it fell
@@ -1747,7 +1804,7 @@ export default function TodayScreen() {
       <Pressable
         style={({ pressed }) => [
           styles.fab,
-          { backgroundColor: accent.accent }, accentGlow(accent.accent),
+          { backgroundColor: accent.accent },
           pressed && styles.fabPressed,
         ]}
         onPress={() => setPicking(true)}
@@ -1806,14 +1863,15 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 12,
     paddingHorizontal: 18,
-    // `shadowColor` is set INLINE to the accent, not black: 35% black on this
-    // ground is a 1.02:1 step — invisible — while the accent reads as light
-    // coming off the pill. `height: 0` for the same reason; an offset makes it
-    // a drop shadow rather than light.
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 6,
+    // NO GLOW (N108). This pill used to carry an accent-coloured bloom, set up
+    // by `accentGlow` supplying the colour and the four properties below
+    // supplying the geometry. The user has said twice that they do not want
+    // haze anywhere on this screen, so BOTH halves are gone.
+    //
+    // Removing the `accentGlow` call alone would not have done it: `shadowColor`
+    // defaults to BLACK, and Android draws `elevation` regardless of colour —
+    // so the pill would have kept a grey drop shadow and looked like a bug
+    // rather than a decision.
   },
   fabPressed: { opacity: 0.85 },
   fabText: { fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },

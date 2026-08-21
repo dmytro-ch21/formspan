@@ -272,6 +272,21 @@ export const PREF_MODULES = 'modules';
  */
 export const PREF_ACCENT = 'accent';
 
+/**
+ * Which macros Today's rings track, as a JSON array of {@link RingKey}.
+ *
+ * **One key holding the whole set**, not one key per ring — the same shape
+ * `PREF_MODULES` and `PREF_DISMISSED_SUGGESTIONS` use, and for the reason stated
+ * there: this is read before the card's first paint, and four keyed reads are
+ * four SQLite round trips to answer one question.
+ *
+ * Device-local and never `owed`, like {@link PREF_ACCENT}. Which rings this
+ * phone draws is a look-and-feel choice about a screen, not a fact about the
+ * athlete, and there is no server field for it. Absent means the default (all
+ * four), so the common case needs no write at all.
+ */
+export const PREF_MACRO_RINGS = 'macro_rings';
+
 
 /**
  * Timestamp of the first successful full seed, or absent if it never ran.
