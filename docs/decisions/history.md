@@ -40002,6 +40002,58 @@ branch resolution as its own branch-gone state, never as "".
 Open: the live loop (fetch failed logs, apply a fix, push) is N141's worker
 wiring; this is the decision layer it consults on every poll.
 
+## 2026-08-21 — N144: circuit breakers and the merge policy's two locks
+
+Eighth PR of the AI-SDLC initiative. `breakers.go` encodes when the engine
+STOPS, and every stop names the human action that unblocks it — a Blocked
+run that does not say what unblocks it is one nobody unblocks. Nine
+breakers, each with a trip and a clear case, and a completeness assertion
+that the test table covers the whole set: absent acceptance criteria,
+unencoded product decision, CI budget exhausted (code AND infra bounds,
+via N143's ledger), semantic merge conflict ("the engine may not pick a
+side"), credential in the diff, destructive migration (DROP/TRUNCATE in a
+touched migration file), auth/security boundary, runtime budget, provider
+outage. All breakers run — a run blocked three ways names all three.
+
+The merge policy has TWO independent locks, and the second is the point:
+
+- `policy.json` pins `auto_merge.enabled=false` (V1 is human-merge always;
+  the validator refuses true).
+- `CanAutoMerge`'s **category gate is independent of the flag**: auth,
+  migrations, deploy config, billing/privacy/destructive labels can never
+  auto-merge in ANY phase — tested by simulating a future phase with the
+  flag on and asserting the gated categories still refuse while an ungated
+  low-risk change passes. Flipping one config value must never be
+  sufficient to let an auth change self-approve.
+
+Review hardening, three blockers all in the destructive-migration breaker
+and all measured: the regex anchored DROP at line start while EVERY column
+drop in backend/migrations/ is an `ALTER TABLE … DROP COLUMN` statement, so
+detection depended on the author's line-wrapping (now unanchored, plus DROP
+SCHEMA and semicolon-free DELETE FROM); review gutted the regex to
+DROP-TABLE-only and the suite stayed green, so every branch has its own
+trip case now, in the repo's actual idioms; and the breaker scanned the
+WHOLE diff once any migration was touched — which blocked every
+schema-adding ticket forever, because a down file dropping what its up
+created is the normal case — it now tracks the diff's own +++ headers and
+scans only up.sql lines, with down-file and mixed-diff non-trip tests
+(downs stay covered by the migrations human gate at merge). Also from
+review: `CanAutoMerge`'s gate became the UNION of the hardcoded floor and
+policy.json's human_gate — config may ADD gates it can never REMOVE, and a
+drift test against the real checked-in policy proves every human_gate entry
+refuses auto-merge even with the flag simulated on, so an operator's
+policy addition can never gate preflight while the merge decision silently
+ignores it.
+
+Evidence discipline: while a ticket carries `evidence-outstanding`, the
+machine's terminal is `EVIDENCE_WAIT` — `FinalState` picks it, `GuardDone`
+refuses DONE, auto-merge refuses the ticket, and the machine itself has no
+edge from EVIDENCE_WAIT back into the pipeline. The existing evidence latch
+remains the SOLE releaser: the engine only observes the label, and a test
+asserts no generated comment (Blocked comments, CI diagnoses) ever opens a
+line with the attestation gesture — the latch once attested to its own
+instructions, and the engine will not be the second thing to do that.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
