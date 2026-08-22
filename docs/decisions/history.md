@@ -40054,6 +40054,57 @@ asserts no generated comment (Blocked comments, CI diagnoses) ever opens a
 line with the attestation gesture — the latch once attested to its own
 instructions, and the engine will not be the second thing to do that.
 
+## 2026-08-21 — N147: engine metrics — derived from what the engine already writes
+
+Ninth PR of the AI-SDLC initiative. `runstate.Metrics` computes the design's
+metric set with plain SQL over `agent_runs` / `agent_steps` / `agent_events`
+— honouring the ticket's explicit constraint that no metric may require a
+new instrumentation call in a worker; if one does, the EVENT SCHEMA is what
+changes.
+
+- **Delivery**: dispatch latency (run created → CLAIMED transition), lead
+  time (created → terminal), CI wait (summed intervals from each CI_WAIT
+  entry to the run's next transition, via a window over the event log), and
+  evidence wait — measured EVIDENCE_WAIT → DONE, which by construction IS
+  the latch's window: the machine enters EVIDENCE_WAIT at merge (label
+  applied) and leaves at DONE (latch released), pinned by its own test.
+- **Quality**: first-pass gate rate off RecordGates' step rows; FIXING
+  loops per run; reworked issues (more than one run per issue — the
+  engine-side proxy for reverts/escaped defects, stated as a proxy).
+- **System health**: queue depth, active runs, stale leases (expired
+  non-terminal), blocked runs, terminal distribution, and webhook
+  duplicates — a query over `duplicate_delivery` events that reads zero
+  until N146's gateway records refusals, ready for it.
+- **Empty data reads as -1, never as perfect**: a dashboard congratulating
+  an engine that has done nothing is the absence-reads-as-answer failure
+  with a graph on it, and a test pins every rate at -1 on an empty
+  database.
+- Fixture histories are driven through the REAL state machine (`driveTo`
+  fails loudly on an illegal chain, so a machine reshape breaks the
+  fixtures visibly), with event timestamps pinned so every expected value
+  is exact rather than tolerance-based.
+
+Review hardening, both blockers converged on by ac-verifier and reviewer
+independently and both measured: the 0.5 `approx` tolerance — sized for
+seconds — could not fail on 0–1-scale metrics (two broken SQL filters
+survived the suite), so rates and per-run counts assert EXACTLY now, and
+both mutations were re-run red-then-green after the fix; and the six
+listed metrics the tables cannot hold yet (AC miss rate, diff size, token
+cost, scope violations, API rate remaining, block correctness) are no
+longer silently absent — each is a LIVE query today, reading -1/0 until
+its named emitter exists (N141 records ac-verifier as a gate and emits
+pr_opened/usage/scope_violation events; N146 samples api_rate), with a
+test inserting exactly the rows those emitters will write and asserting
+the computed values, so the emitters only add events, never metric code.
+Block correctness ships as the measurable half (blocked-then-done issues,
+a documented proxy) because only a human can label a block unnecessary.
+Also from review: a comment records why the window functions order by id,
+not created_at (the single live lease serializes inserts, so identity
+order IS transition order; timestamps tie at clock resolution).
+
+Diff proof of the constraint: nothing outside `engine/internal/runstate`
+changes — no worker, no gate, no reconciler code is touched.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
