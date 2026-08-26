@@ -41830,6 +41830,46 @@ for it — `check-verify-chain.py` remains the thing that notices a dropped link
 And a **clean** auto-merge that makes a claim in another file false has no
 conflict in it to catch, by definition.
 
+## 2026-08-26 — H10: the N197 plugins pinned repo-wide, and security-guidance given its VOLA policy file
+
+Two follow-ups the user asked for after N197's user-scope plugin installs.
+
+**`.claude/settings.json` now pins the five plugins at project scope** —
+`expo`, `security-guidance`, `frontend-design`, `typescript-lsp`,
+`gopls-lsp` (all `@claude-plugins-official`) — so collaborators and future
+engine sessions inherit them without per-machine setup. The file was written
+by `claude plugin install --scope project` run from the worktree, not
+hand-authored, so the committed format is byte-for-byte what the CLI reads
+back. One machine-level dependency the repo file cannot carry: the two LSP
+plugins need their language servers on the developer's machine
+(`go install golang.org/x/tools/gopls@latest`;
+`npm install -g typescript-language-server typescript`) — installed on
+this machine during N197's follow-up, needed once per machine elsewhere.
+
+**`.claude/claude-security-guidance.md`** feeds the security-guidance
+plugin's reviews (its own convention: project rules, committed; contents are
+appended to every review prompt, so the file itself must never hold a
+secret). Deliberately only what this codebase can't have inferred: the
+credential-file map (`secrets.txt`, `backend/.env.staging.local`, the
+`.example` convention, the localhost-password exemption mirroring the
+engine gate's `localConnRe`); where the real auth boundary lives (backend
+JWT verification — UI gates are defence in depth, and admin server
+actions must call `assertAdmin` themselves since the router exposes them
+independently of their pages); the ownership-predicate rule (the
+cross-user ID-enumeration class has shipped twice here with green suites);
+the never-echo-matched-secret-text output discipline; untrusted issue/PR
+text never interpolated into shell or workflow `run:` blocks; the engine
+worker rules including "a fallback to unsandboxed execution is a finding";
+and the mobile token-broker / SecureStore / user-scoped-rows rules. Generic
+OWASP restatement was left out on purpose — the plugin's built-ins carry
+that, and a policy file that repeats them buries the rules only this repo
+knows.
+
+Not done here: the plugins deliberately skipped in N197 (`feature-dev`,
+`pr-review-toolkit`, the Swift/Kotlin LSPs, community Apple skills) remain
+skipped, for the reasons recorded in that entry — this pinning is of the
+aligned set, not an expansion of it.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
