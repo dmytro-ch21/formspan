@@ -789,7 +789,10 @@ func main() {
 	recorder := health.NewRecorder(healthRepo, slowRequestAfter, logger)
 
 	logger.Info("api listening", "port", port, "slow_request_ms", slowRequestAfter.Milliseconds())
-	if err := http.ListenAndServe(":"+port, httplog.Middleware(logger, recorder.Observe)(apihttp.Stack(withCORS(mux)))); err != nil {
+	// The chain lives in `apihttp.Assemble`, not inline here, so a test can
+	// build the real one — see that function for why, and for the two bugs
+	// that were invisible while it was assembled at this call site.
+	if err := http.ListenAndServe(":"+port, apihttp.Assemble(logger, recorder.Observe, withCORS(mux))); err != nil {
 		logger.Error("server exited", "err", err)
 		os.Exit(1)
 	}

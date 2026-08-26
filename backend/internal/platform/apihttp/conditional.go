@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 // ConditionalGet answers a repeat request with 304 when the body has not
@@ -339,12 +342,51 @@ func (c *conditionalWriter) flush() {
 // and therefore could only ever pass: swapping the order in main.go left the
 // whole suite green. Assembly belongs somewhere a test can reach.
 //
-// DrainRequestBody must be OUTERMOST. Its work happens in a `defer`, and the
-// outermost middleware's defer runs last — so putting it here is what makes
-// the drain happen after every inner handler has finished with the response,
-// and, crucially, before `net/http` decides whether an unread body means the
-// connection has to be closed. Inside `Compress` it would still work today;
-// outermost it cannot be made not to by a future insertion.
+// DrainRequestBody must be OUTERMOST. It drains after `next.ServeHTTP`
+// returns, so being outermost is what puts that drain after every inner
+// middleware has finished with the response — in particular after `Compress`'s
+// deferred close flushes — and, crucially, before `net/http` decides whether an
+// unread body means the connection has to be closed. Inside `Compress` it would
+// still work today; outermost it cannot be made not to by a future insertion.
 func Stack(next http.Handler) http.Handler {
 	return DrainRequestBody(Compress(ConditionalGet(next)))
+}
+
+// Assemble is the whole server-side middleware chain, in the order `cmd/api`
+// runs it.
+//
+// **It exists so a test can build the real chain rather than an approximation
+// of it**, which is the same argument `Stack` above makes one paragraph up —
+// and the argument was proved twice by the same class of bug. `Stack`'s own
+// ordering test used to build its own stack and therefore could only ever
+// pass. Then `DrainRequestBody`'s read deadline was found inert in production
+// while green in every test, because the wrapper that broke it —
+// `httplog.statusRecorder`, missing an `Unwrap` — lives OUTSIDE `Stack` and so
+// appeared in no test's chain.
+//
+// So the outer layer gets the same treatment the inner one already had. A
+// middleware added here is a middleware every test that calls this sees; one
+// added at the call site in `main()` is not, which is exactly how the last one
+// went unnoticed.
+func Assemble(logger *slog.Logger, observe httplog.ObserveFunc, next http.Handler) http.Handler {
+	return outerChain(logger, observe)(Stack(next))
+}
+
+// outerChain is everything that wraps `Stack` — the layers whose
+// ResponseWriters `DrainRequestBody` has to see through.
+//
+// Split out from `Assemble` rather than inlined so a test can stand exactly
+// where the drain stands: `outerChain(...)(probe)` hands the probe the same
+// writer `drain` gets. Composing the whole of `Assemble` cannot do that — the
+// probe would land inside `Stack`, below `Compress` and `ConditionalGet`, whose
+// writers deliberately have no `Unwrap`, and the test would fail for a reason
+// that says nothing about the drain.
+//
+// **Anything added to the chain must be added HERE, not at the call site in
+// `main()`.** That is the whole point: a layer added here is one every test
+// through this function sees, and a layer added at the call site is invisible
+// to all of them — which is how `statusRecorder`'s missing `Unwrap` disabled
+// the drain's only time bound in production while every test stayed green.
+func outerChain(logger *slog.Logger, observe httplog.ObserveFunc) func(http.Handler) http.Handler {
+	return httplog.Middleware(logger, observe)
 }
