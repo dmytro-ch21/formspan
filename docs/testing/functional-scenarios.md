@@ -12396,3 +12396,109 @@ meaning something it did not.
   strength sport chip sitting beside brand-coloured chrome (ΔE 3.05 apart, i.e.
   they should read as one colour — if they read as two, that is the thing to
   report).
+
+## N177 — Train, the execution hub (`app/(tabs)/train.tsx`, `lib/trainBoard.ts`, `lib/useTrainBoard.ts`, `lib/startSession.ts`)
+
+N176's shell becomes the screen: **Resume · Today · Later · Quick start ·
+Recent**. It creates nothing — every action opens an existing route, and the
+three reads are the same SQLite reads Today makes. So the scenarios split into
+two halves: what Train newly asserts, and what must be provably *unchanged*
+underneath it.
+
+### Happy path
+
+- **Quick start → Strength.** Lands on `/session/start?sport=strength`, which
+  offers the cached templates for that sport. Same screen, same templates, same
+  latency as reaching it from Today or Plan.
+- **Quick start → BJJ.** Lands on `/bjj/log`. **Never** the set logger. A round
+  pushed into the strength logger fails nothing and loses the reflection
+  entirely, so this is a check by observation, not by absence of an error.
+- **A day with a plan.** Today's block shows one card per planned discipline,
+  reading *Start* for strength and *Log* for BJJ. Pressing it carries the
+  template through (`&workout=<id>`) — losing it means rebuilding the plan at
+  the rack.
+- **Later.** With something planned two days out, the Later block names it and
+  its date. With nothing planned ahead, **no Later heading appears at all** —
+  not a heading over a sentence telling the athlete they plan nothing.
+- **Recent.** One row per discipline, newest first, opening the right reader:
+  strength to `/session/[id]`, BJJ to `/bjj/session/[id]`.
+
+### Resume outranks every other CTA
+
+- **Start a strength session, leave it open, open Train.** The Resume card is
+  first and is the only accent-filled control on the screen. Today's plan and
+  its Start button are **not on the screen at all** — not below, not smaller.
+- **Press Resume** → the session you left, with its sets intact.
+- **With a BJJ session open**, Resume goes to `/bjj/session/[id]`, and the card
+  carries **no set count** — "0 working sets" on a mat session reads as
+  abandoned, and a BJJ session cannot hold a set at all.
+- **Leave a session open overnight.** The card reads *UNFINISHED* and offers
+  *Finish or discard*, in the warning colour rather than the accent. It must not
+  claim a clock is running.
+- **Two open sessions.** The newest is offered as Resume; the older stays visible
+  in Recent rather than vanishing. A session that appears nowhere is worse than
+  one shown twice.
+
+### Offline — the ticket's `NEEDS HUMAN EVIDENCE`
+
+- **Airplane mode, cold launch, open Train.** Resume, Today, Later, Quick start
+  and Recent all render from the local database. Nothing spins, nothing is
+  blank, nothing says it failed.
+- **Airplane mode → Quick start → Strength → start a session.** It must work
+  exactly as it does from wherever that flow is reached today. Any network
+  dependency is a failure of the whole ticket, not of this screen.
+- **Airplane mode → BJJ → log a round.** The three-tap / five-second floor is
+  unchanged.
+- Reconnect and confirm both sync.
+
+### It must never claim an absence it has not checked
+
+This is the class that has shipped here three times, and every instance was
+invisible in a screenshot taken a second late.
+
+- **Cold launch on an account with a plan for today.** Train must not show
+  *"Nothing planned for today"* at any point, however briefly, before the plan
+  appears. Record a screen capture and step through it — a single frame counts.
+- **Cold launch on an account with months of history.** Train must never show
+  *"Nothing logged yet"* on the way to showing the sessions.
+- **Corrupt or lock the local database, then open Train.** Each block says what
+  it could not read — dashed, in words — rather than showing a plausible empty
+  state. The plan block failing must not blank the history block, and vice
+  versa.
+- **The workout cache unreadable but the plan readable.** The planned day is
+  still offered and still startable; it just renders as the discipline rather
+  than the template name. A missing *label* must never delete a *plan*.
+
+### Modules
+
+- **Turn BJJ off, reopen Train.** It is gone from Quick start, **and** a muted
+  line below still names it and links to Sports. An athlete who cannot see a
+  discipline cannot tell *off* from *not built* from *broken*; that is what was
+  reported from a device as "not there".
+- **Turn everything off.** Quick start is replaced by *Choose what you train*,
+  and nothing on the screen offers to start a session that cannot exist.
+- **A discipline turned off after sessions were logged in it.** Those sessions
+  stay in Recent. History is not an offer.
+
+### Untouched by this ticket — assert nothing changed
+
+- Log a strength set inline mid-session: same taps, same latency, airplane mode.
+- Log a BJJ round and its optional reflection: unchanged.
+- Today: the resume card, the plan cards and the Recent list all behave exactly
+  as before. `sessionHref` moved out of that file and nothing else there did.
+- Plan: unchanged. The week planner still writes plans through the same picker.
+
+### Accessibility
+
+- VoiceOver on the Resume card announces the discipline, the state and the set
+  count as one coarse label — not a per-second clock.
+- Quick start chips announce *Start Strength* / *Log BJJ* — the verb matching
+  what actually happens.
+- At the largest accessibility text size the Quick start chips wrap rather than
+  truncating, and the Resume card's action button stays fully on screen.
+
+- **NEEDS HUMAN EVIDENCE — offline Strength start, on a device with the network
+  disabled**, confirmed to work exactly as it does today from wherever it is
+  currently reached. The suite proves the three reads are SQLite and that
+  nothing on this screen touches a token, a fetch or a sync run. It cannot prove
+  the phone in a basement.

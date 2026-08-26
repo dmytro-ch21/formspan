@@ -67,15 +67,18 @@ const MODULES = [strength, bjj, running];
 const NOW = new Date('2026-08-26T15:00:00-07:00');
 const TODAY = '2026-08-26';
 
+// `...over` last, so every default below is genuinely a default — including
+// `ended_at`, where an explicit `null` in the override is what makes a session
+// unfinished. Restating a field before the spread would be dead code that
+// looked load-bearing.
 function session(over: Partial<Session> & { id: string }): Session {
   return {
-    id: over.id,
     user_id: 'u1',
     workout_id: null,
     sport: 'strength',
     name: 'Legs',
-    started_at: over.started_at ?? '2026-08-26T09:00:00-07:00',
-    ended_at: 'ended_at' in over ? (over.ended_at ?? null) : '2026-08-26T10:00:00-07:00',
+    started_at: '2026-08-26T09:00:00-07:00',
+    ended_at: '2026-08-26T10:00:00-07:00',
     notes: '',
     sets: [],
     created_at: '2026-08-26T09:00:00Z',
@@ -85,12 +88,11 @@ function session(over: Partial<Session> & { id: string }): Session {
 }
 
 function plan(over: Partial<PlannedSession> & { id: string }): PlannedSession {
-  return { id: over.id, day: TODAY, sport: 'strength', workoutId: null, notes: '', ...over };
+  return { day: TODAY, sport: 'strength', workoutId: null, notes: '', ...over };
 }
 
 function workout(over: Partial<Workout> & { id: string }): Workout {
   return {
-    id: over.id,
     owner_user_id: 'u1',
     name: 'Push A',
     sport: 'strength',
@@ -346,11 +348,28 @@ describe('recent', () => {
 
 describe('planWindow', () => {
   it('starts today, in the local calendar', () => {
-    // `dayString`, not `toISOString().slice(0,10)`. Under
-    // `TZ=America/Los_Angeles` a 15:00 local instant is already tomorrow in
-    // UTC, so a UTC-derived window opens on the wrong day and today's plan
-    // falls outside it — invisible, on the day it matters.
     expect(planWindow(NOW).from).toBe(TODAY);
+  });
+
+  /**
+   * The instant that separates `dayString` from `toISOString().slice(0, 10)`.
+   *
+   * **The assertion above does not**, which is the whole reason this one is
+   * written separately rather than folded into it. `NOW` is 15:00 local, which
+   * under `TZ=America/Los_Angeles` is 22:00 UTC — the same calendar day either
+   * way — so a UTC-derived window passes it. Mutation-tested: swapping in
+   * `toISOString().slice(0, 10)` left the whole suite green until this case
+   * existed. A guard is only exercised by the input it is meant to reject.
+   *
+   * At 20:00 local the two disagree: UTC has already rolled to the 27th, so a
+   * UTC window opens tomorrow and **today's own plan falls outside it** —
+   * invisible, on the evening an athlete is most likely to be checking what
+   * they still owe.
+   */
+  it('names the local day even when UTC has already rolled over', () => {
+    const evening = new Date('2026-08-26T20:00:00-07:00');
+    expect(evening.toISOString().slice(0, 10)).toBe('2026-08-27'); // the wrong answer, pinned
+    expect(planWindow(evening).from).toBe('2026-08-26');
   });
 
   it('reaches far enough ahead that Later has something to find', () => {

@@ -101,15 +101,16 @@ jest.mock('@/lib/ModulesProvider', () => ({
   useModules: () => ({ modules: mockModules, ready: true, stale: false, apply: jest.fn() }),
 }));
 
+// `...over` last, so `ended_at: null` in an override is what makes a session
+// unfinished and every field above is genuinely a default.
 function session(over: Partial<Session> & { id: string }): Session {
   return {
-    id: over.id,
     user_id: 'u1',
     workout_id: null,
     sport: 'strength',
     name: 'Legs',
     started_at: new Date(Date.now() - 30 * 60_000).toISOString(),
-    ended_at: 'ended_at' in over ? (over.ended_at ?? null) : new Date().toISOString(),
+    ended_at: new Date().toISOString(),
     notes: '',
     sets: [],
     created_at: '2026-08-26T09:00:00Z',
@@ -171,6 +172,28 @@ describe('resume outranks everything', () => {
 
     fireEvent.press(await screen.findByTestId('train-resume'));
     expect(mockPush).toHaveBeenCalledWith({ pathname: '/bjj/session/[id]', params: { id: 'roll' } });
+  });
+
+  // "0 working sets" on a mat session is not a neutral default — it reads as an
+  // abandoned session, and a BJJ session cannot legally hold a set at all (no
+  // BJJ exercises have existed since migration 000019). The chip is omitted,
+  // never zeroed, and a strength session with no sets yet still gets it because
+  // there the zero is true and about to change.
+  it('omits the set count on a discipline that cannot hold a set', async () => {
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 'roll', sport: 'bjj', name: 'Evening class', ended_at: null }),
+    ]);
+    render(<TrainScreen />);
+
+    expect(await screen.findByTestId('train-resume')).toBeTruthy();
+    expect(screen.queryByText('0 working sets')).toBeNull();
+  });
+
+  it('shows the set count on a discipline that can hold one', async () => {
+    mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
+    render(<TrainScreen />);
+
+    expect(await screen.findByText('0 working sets')).toBeTruthy();
   });
 
   it('says a day-old session is unfinished rather than in progress', async () => {

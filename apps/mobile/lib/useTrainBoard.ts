@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Module } from './modules';
 import { listPlannedBetween, type PlannedSession } from './plan';
@@ -44,11 +44,6 @@ import type { Workout } from './workouts';
  * and a second screen requesting a run on every focus is a change to sync
  * behaviour that this ticket has no business making.
  */
-export type TrainBoardView = TrainBoard & {
-  /** Re-read now. Handed to the screen's pull-to-refresh and nothing else. */
-  reload: () => void;
-};
-
 /** `unread` until a read settles; the reads never reset it back. */
 function useSource<T>(): [Source<T>, (v: T) => void, () => void] {
   const [source, setSource] = useState<Source<T>>({ state: 'unread' });
@@ -74,7 +69,7 @@ export function useTrainBoard(
    * focus.
    */
   now: Date,
-): TrainBoardView {
+): TrainBoard {
   const [sessions, sessionsReady, sessionsFailed] = useSource<Session[]>();
   const [plans, plansReady, plansFailed] = useSource<PlannedSession[]>();
   const [workouts, workoutsReady, workoutsFailed] = useSource<Workout[]>();
@@ -119,10 +114,6 @@ export function useTrainBoard(
   // process, so coming back from a session it started must show that the
   // session now exists — otherwise Train would still be offering to start what
   // the athlete has just finished.
-  //
-  // `lastSyncAt` is in the deps for the second half of the same story: a plan
-  // made on the web arrives through the plan pull, and without this the screen
-  // is only ever as fresh as the last focus.
   useFocusEffect(
     useCallback(() => {
       let live = true;
@@ -130,18 +121,30 @@ export function useTrainBoard(
       return () => {
         live = false;
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- `lastSyncAt` is
-      // not read in the body; it is here to re-run the read when a sync run
-      // completes, which is the same trigger Today uses for this exact table.
-    }, [read, lastSyncAt]),
+    }, [read]),
   );
 
-  const reload = useCallback(() => read(() => true), [read]);
+  // Again whenever a sync run finishes, which is the second half of the same
+  // story: a plan made on the web arrives through the plan pull, and without
+  // this the screen is only ever as fresh as the last focus. Today re-reads
+  // this exact table on this exact trigger.
+  //
+  // A separate effect rather than `lastSyncAt` in the focus deps, and the guard
+  // below is why: an effect that only *lists* a value it never reads is one
+  // `exhaustive-deps` correctly objects to. `null` means no run has completed
+  // yet, so there is nothing new to have arrived — the read on focus above has
+  // already covered the first paint.
+  useEffect(() => {
+    if (lastSyncAt === null) return;
+    let live = true;
+    read(() => live);
+    return () => {
+      live = false;
+    };
+  }, [read, lastSyncAt]);
 
-  const board = useMemo(
+  return useMemo(
     () => buildTrainBoard({ sessions, plans, workouts, modules, now }),
     [sessions, plans, workouts, modules, now],
   );
-
-  return { ...board, reload };
 }

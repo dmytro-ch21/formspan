@@ -41224,6 +41224,147 @@ quietly:** a remedy that correlates with the outcome gets recorded as the cause,
 and thereafter every green run confirms it and every red one is blamed on
 something else. The correction came from someone re-running the comparison
 rather than from anyone reasoning about it.
+## 2026-08-26 — N177: Train becomes the execution hub, and nothing under it moved
+
+N176 left `app/(tabs)/train.tsx` as an honest shell — one button that opened the
+existing picker, and a dashed note saying the rest was coming. This is the rest.
+Train now answers **"what can I do now?"** in five blocks — Resume · Today ·
+Later · Quick start · Recent — and the whole of it is a render over screens and
+functions that already existed.
+
+**Reused, not rebuilt, and the list is the point.** Every action on this screen
+is a `router.push` at a route that already shipped: `/session/start`,
+`/session/[id]`, `/bjj/log`, `/bjj/session/[id]`, `/profile/edit`. The reads are
+`listLocalSessions`, `listPlannedBetween` and `cachedWorkouts` — the same three
+Today calls, unmodified. `owedOn` is `lib/adherence.ts`'s and is not
+reimplemented. `enabledSports`, `offSports`, `labelFor` and `logsAfterwards` come
+from the module registry. `SessionCard`, `SectionHeader` and `UpNextCard` are the
+existing components. **Nothing in this PR writes a session, a set or a plan**, so
+the epic's hard non-regression holds structurally rather than by inspection:
+strength logging keeps its inline local-first path and BJJ its three-tap floor,
+because neither engine was re-entered.
+
+### One extraction, and it is the branch that fails silently
+
+`sessionHref` — where an *existing* session opens — lived inline in
+`app/(tabs)/index.tsx`. It is now in `lib/startSession.ts` beside
+`startSessionHref`, which N176 moved there for the mirror-image reason. Train has
+a Resume card and a Recent list, both of which open a session, so a second copy
+was the alternative.
+
+The failure it prevents has already shipped once: a BJJ session opened in the
+live set logger renders `Sets 0 · Reps 0 · Volume —` over a list it can never
+fill, **and the reflection wizard becomes unreachable entirely** — it is entered
+by `replace` from the log screen and linked from nowhere else. Both branches are
+keyed on `logsAfterwards`, which reads the catalog kind rather than
+`key === 'bjj'`, so a second technique-shaped discipline gets the right flow
+without either function learning its name. Both have vectors that separate those
+two implementations, because a bjj-only test set cannot.
+
+Today's three call sites now go through the shared function. Nothing else in
+Today changed.
+
+### Five states, because Train reads history and history has five
+
+`lib/trainBoard.ts` is the derivation and `lib/useTrainBoard.ts` is the fetch,
+split the way `lib/useWeightTrend.ts` was split after review found a card
+asserting *"Record your weight and the trend appears here"* to an athlete with
+two years of readings, for the whole of every first request.
+
+Each of the three reads carries its own `Source` — `unread`, `unavailable`,
+`ready` — and no block ever renders an empty state from a read that has not
+answered. That collapse has shipped here **three times**, and every time the
+missing kind was *not answered yet*.
+
+Today still has the live instance, and it is worth naming because Train reads
+the same table: `viewPlans` and `weekPlan` both start `[]` and `refreshPlan`
+swallows its own errors, so *unread*, *nothing planned* and *the read failed* are
+one value there — and on the first frame of every cold open Today asserts
+"Nothing planned" before it has looked. Not fixed here: it is Today's render
+ladder, N179 (#584) owns Today's restructure, and a speculative rewrite of the
+app's most-used screen inside a ticket that promised to stay invisible to a
+running session is the wrong trade. Filed as what it is.
+
+Three combination rules earned their own tests:
+
+- **Today's plan needs BOTH reads.** `owedOn` subtracts the sessions that met a
+  plan, so an unknown session list makes an unmet plan unknown rather than merely
+  unstarted. Without that, "Start BJJ" is offered for a class already logged, on
+  every open, for as long as the session read takes.
+- **Unavailable beats unread.** A permanent failure must not sit behind a
+  spinner forever.
+- **The workout cache is never fatal.** It turns a `workoutId` into a name; if it
+  fails, the plan is still known and still startable and renders as the
+  discipline alone. A failed *label* lookup must not delete a plan.
+
+### Resume outranks everything, structurally
+
+When there is an unfinished session, today's plan and its Start button are **not
+rendered at all** — not demoted, not below. Quick start stays, outlined rather
+than accent-filled, because it is not a competing primary and hiding it would be
+a new restriction. Later stays too: it carries no button, and "and after this?"
+is a fair question for somebody finishing a session.
+
+Past 24 hours the card stops claiming a clock is running and offers *Finish or
+discard* instead, in `warn` rather than the accent — clearing up should not be
+painted like training. The one deliberate difference from Today's card is that
+this one shows the session's **start time** rather than a live elapsed count.
+An elapsed figure is only true while something re-renders it, and the screen with
+the 1 Hz ticker is one tap away; a start time is true without one.
+
+### Two smaller decisions
+
+**Recent is one row per discipline, not the newest N.** Three strength days in a
+row would fill the block with strength and hide that the athlete also rolls,
+which is the one thing a multi-sport list is for. It is deliberately **not**
+filtered by enabled module: Quick start hides a switched-off discipline because
+offering to start it would be wrong, but history is not an offer, and hiding a
+session that happened because a toggle moved afterwards is the N61 lie — the one
+where the user went looking on a real phone and reported working features as
+missing. For the same reason a switched-off discipline is **named** below Quick
+start, in one muted line linking to `/profile/edit`, rather than vanishing.
+
+**The picker is gone from this screen, and that is not a loss.** N176's shell
+mounted `PickSessionSheet` to choose a discipline and a template. Quick start's
+chips call `startSessionHref` with no template, which lands on `/session/start`
+— the existing screen that already offers the cached templates for that sport.
+One fewer modal, the same destination, and no second entry-point logic.
+
+### Verification
+
+**25 mutations, applied one at a time, each killed by a named relevant test and
+none by a suite crash** — the unavailable/unread precedence reversed, `stale`
+pinned to each constant, the resume search taking any session rather than an open
+one, an unread session list collapsed to "nothing to resume", `owedOn` dropped,
+the today filter dropped, the workout cache made fatal, Later's sort dropped and
+its boundary widened to include today, Recent's dedupe and its resume exclusion
+each removed, Recent filtered by enabled module, `planWindow` swapped to a UTC
+date, both route branches inverted and re-keyed on the module key, the resume
+branch bypassed in the render, both unread gates and both unavailable gates
+collapsed to their empty states, Quick start unfiltered, the set chip forced on,
+and the staleness copy pinned. Baseline green in the same session before and
+after, and the tree verified clean after every restore.
+
+**Two survived the first pass and both are recorded, because the second one is
+the more useful half.** `planWindow` swapped to `toISOString().slice(0, 10)`
+survived — the fixture instant was 15:00 local, which is 22:00 UTC and therefore
+the *same calendar day*, so the vector could not tell the two apart. A guard is
+only exercised by the input it is meant to reject; the added case uses 20:00
+local, where UTC has already rolled to the 27th and a UTC window opens tomorrow,
+leaving today's own plan outside it. The other survivor was **the apparatus, not
+the test**: the mutation appended a comment to the line it claimed to delete, so
+it changed nothing and "survived" measured nothing.
+
+`pnpm run verify` green: 175 suites, 2788 mobile tests, `lint:mobile` at exactly
+53 of 53. One earlier run failed `bjjSessionScreen.test.tsx` on the
+missing-element `waitFor` signature at load average 15; it passes alone, nothing
+in this diff is in that file's import graph, and the re-run was clean.
+
+**What no test here can reach**, and what the ticket flags: an offline Strength
+start on a device with the network disabled. The suite proves the three reads are
+SQLite and that nothing on the screen touches a token, a fetch or a sync run —
+which is the property — but a phone in a basement is the only instrument for the
+claim itself.
 
 ## Open items / known gaps as of this entry
 
