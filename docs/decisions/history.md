@@ -41191,6 +41191,40 @@ directory that is actually empty (no `.git`) rather than relying on any
 one host's mount-sharing configuration — the same guard, tested a way that
 travels.
 
+## 2026-08-25 — The cap was never the variable; ambient load was
+
+`CLAUDE.md` said `--maxWorkers=3` *"rescues the suite reliably at ambient load
+26–40"*. A checker re-measured it on 2026-08-25 and the claim does not hold:
+
+```
+uncapped, load 13.4   →  1 suite,  9 tests failed
+CAPPED,   load 31–39  →  3 suites, 15 tests failed   ← worse
+capped,   load ~25    →  172/172 green
+uncapped, load ~22    →  172/172 green
+```
+
+**Wall time is the tell — 655s under load against 56s clean, an 11× swing.**
+The flag is not what separates the green runs from the red ones; the load is.
+
+**This does not overturn #409**, and the distinction matters. That ticket
+measured `maxWorkers: 2` **on CI** — one instance, two physical cores, 0/30
+against 6/35, p = 0.007. That result stands. What was wrong was the *local*
+guidance built beside it: a per-instance cap bounds your own contribution and
+cannot bound a machine several other sessions are already saturating.
+
+**The failing case also broke its own stated signature.** The documented tell
+was *"never a wrong value, always a missing element"* — and one failure was a
+wrong value (`Assuming On your feet` where `Desk job` was expected). Still
+timing-class on inspection, an unresolved async default rather than a wrong
+computation, but a signature that admits exceptions cannot be used to wave a
+failure away, which is exactly what it had been used for.
+
+**The general shape, which is why this is written down rather than edited
+quietly:** a remedy that correlates with the outcome gets recorded as the cause,
+and thereafter every green run confirms it and every red one is blamed on
+something else. The correction came from someone re-running the comparison
+rather than from anyone reasoning about it.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
