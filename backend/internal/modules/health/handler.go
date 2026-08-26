@@ -344,6 +344,18 @@ var recordRejectionsOn = map[string]bool{
 // the two columns together. The `status` column carries which 4xx it was, which
 // is the whole question an operator has: a 429 is a spent allowance, a 401 is a
 // credential, a 400 is the upload itself.
+//
+// **`o.Duration` on a refused upload is not latency, and must not be read as
+// it.** `apihttp.DrainRequestBody` finishes reading the client's body after the
+// handler has answered, and it does so INSIDE the window `httplog` times — so a
+// rejection's duration includes however long the phone took to finish sending,
+// up to the drain's ten-second bound. On the three routes above that is
+// harmless, because the rejection branch wins and the row is filed as what it
+// is. Elsewhere a refused large POST over a slow link can now cross
+// `slowerThan` and file as `slow_request` — a row measuring the athlete's
+// bandwidth rather than this server's. Raised in review; recorded rather than
+// worked around, because the alternative is timing the drain separately and
+// nothing yet needs that precision.
 func (rec *Recorder) Observe(ctx context.Context, o httplog.Observation) {
 	var kind Kind
 	switch {

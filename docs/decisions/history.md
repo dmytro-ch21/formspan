@@ -40759,6 +40759,26 @@ precisely `RequestDroppedError`, and precisely the reported sentence.
 The cliff is Go's, not Railway's — which also means Railway imposes no body cap
 of its own, so a large upload the handler *reads* passes through fine.
 
+**And the athlete's own report brackets that cliff.** They confirmed that a
+**plate** photo works today and a **label** photo does not — same phone, same
+network, same code path (`scan.tsx` routes to `describe.tsx`; the only route
+param, `params.barcode`, is consumed after a successful log and never touches
+the request). Encoding two synthetic extremes at exactly the client's settings
+(1080×1440, quality 80): a smooth blurred plate is **39,328 bytes**, dense small
+label text is **324,701 bytes** — 0.15× and 1.24× the cliff, an 8.3× spread from
+content alone.
+
+**That asymmetry is itself evidence that something answers early**, and it is
+the load-bearing inference in this entry. Walk the path and ask what is
+sensitive to body size at all: the client's 45s deadline would raise
+`TimeoutError`, a different sentence; `MaxImageBytes` (5 MB) and
+`maxEstimateBody` (8 MB) are far above either figure and both refuse *after* the
+body is read, so their 400 is delivered cleanly; and this cliff. Only the third
+produces a dead request with no status, and only above 256 KiB. A photo path
+that works small and fails large therefore says the server is answering before
+it reads the body — **without saying which status**, which is the part still
+missing.
+
 **Consequence, and it is the sharp one: #433's own acceptance criteria are void
 above 256 KiB on the photo path.** "A 503 reads as *not switched on yet*", "a
 429 reads as a quota and says when it resets" — the server writes both
@@ -40785,17 +40805,29 @@ the wording and cannot see the transport: the status never arrives to be worded.
 
 ### What is NOT established, stated plainly
 
-**Which status the phone actually receives.** The 256 KiB mechanism is
-reproduced and real, but reproducing it required the 401 gate; for an
-authenticated, well-formed multipart request `parseMultipartEstimate` reads the
-whole body, so there is no early answer to lose. Process of elimination leaves
-401 as the only early gate that survives, and that is an inference, not a
-measurement. **It was not possible to recover the original status**: Railway's
-retention is minutes, and `health_events` excluded it by design.
+**Which status the phone actually receives**, and this is the whole gap.
 
-So this entry does not claim to have found the cause. It claims two things it
-did measure — a status-destroying transport bug, and an observability hole that
-guaranteed nobody could see past it — and fixes both.
+The size asymmetry says *something* answers before reading the body. Reading
+the handler says nothing should: `callerID` is the only gate above
+`parseEstimateRequest`, and once that passes `parseMultipartEstimate` reads the
+whole body, so an authenticated well-formed multipart request has no early
+answer left to lose. Those two statements are in tension, and the tension is
+the finding. Either an early gate is firing that the code review above did not
+account for — **401 is the only candidate left standing, and that is an
+inference, not a measurement** — or the size sensitivity has a cause outside
+this handler.
+
+**It was not possible to settle it.** Railway's request log retains about
+eighteen minutes; `health_events` excluded 4xx by design; and reproducing the
+cliff at all needed the unauthenticated gate, because there is no way to mint a
+Clerk token from here. Every attempt to recover the original status ran into one
+of those three.
+
+So this entry does not claim to have found the cause. It claims three things it
+did measure — a status-destroying transport bug, a size asymmetry that brackets
+it, and an observability hole that guaranteed nobody could see past either —
+fixes the first and third, and leaves the diagnosis open rather than shipping a
+third plausible story. Two have already been shipped and neither worked.
 
 ### What changed
 
@@ -40812,6 +40844,27 @@ status assertion would pass against a server that hangs up on every upload —
 the entire bug. Reuse of the connection for a second request is what goes red
 when the middleware is removed from `Stack`, verified by mutation in both
 directions.
+
+**And the drain's own deadline was a guard that could not fire**, found by
+measuring it rather than reading it — which is the section rule applied to this
+change's own apparatus, ten minutes after writing it. `DrainRequestBody` bounds
+the drain at ten seconds via `http.NewResponseController(w).SetReadDeadline`,
+and a ResponseController walks `Unwrap() http.ResponseWriter`.
+`httplog.statusRecorder` *embedded* the interface — which satisfies it — without
+implementing that method, so the controller stopped there and every call under
+this middleware returned **`feature not supported`**. Measured both ways: `nil`
+on a bare handler, `feature not supported` through the real chain. Since this
+server runs `http.ListenAndServe` with no `ReadTimeout`, that ten seconds was
+the *only* bound on a client dribbling its body, and it was doing nothing.
+
+Nothing would ever have reported it: `SetReadDeadline` refuses by **return
+value**, and `drain` discards that on purpose (a `httptest` recorder genuinely
+cannot set one). `statusRecorder` now has the `Unwrap`, with a test that
+compares bare against wrapped so a future Go release breaking
+ResponseController everywhere cannot read as this middleware's fault.
+`Compress` and `ConditionalGet` deliberately do **not** get one — both buffer in
+order to gzip or hash, and handing a handler the real writer would let it push
+bytes past the buffer and emit the body twice.
 
 **`health.Recorder.Observe` now records 4xx on three routes** —
 `/v1/nutrition/estimate`, `/v1/exercises/identify`, `/v1/bjj/reflect/draft` — as

@@ -3,11 +3,14 @@ package apihttp_test
 import (
 	"bytes"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 // refusedWithoutReading is the shape every gate in front of an upload has: the
@@ -100,6 +103,80 @@ func TestTheDrainOnlyMattersAboveNetHTTPsOwnLimit(t *testing.T) {
 	if len(seen) == 2 && seen[0] != seen[1] {
 		t.Fatalf("a small unread body already cost the connection (%s then %s); "+
 			"the assumption the drain test rests on no longer holds", seen[0], seen[1])
+	}
+}
+
+// The drain's time bound must survive the assembly `cmd/api` actually builds.
+//
+// **Every other test in this file builds `Stack` alone, and that is exactly
+// where the deadline bug hid.** `main.go` wraps it —
+// `httplog.Middleware(...)(apihttp.Stack(withCORS(mux)))` — so the writer the
+// drain receives in production is `httplog`'s, not the socket's.
+// `http.NewResponseController` walks `Unwrap() http.ResponseWriter` and stops
+// at the first wrapper without one, and `statusRecorder` had no `Unwrap`: the
+// 10-second bound returned `feature not supported` on every real request while
+// passing in every test here. Since this server has no `ReadTimeout`, that was
+// the only bound on a client trickling 8 MB.
+//
+// So this asserts through the production shape rather than the convenient one.
+// It is the guard against the NEXT wrapper inserted outside `Stack` in
+// `main.go` — which would kill the deadline again with every other test in this
+// package still green. Raised in review.
+//
+// **The probe sits where the DRAIN sits, and getting that wrong makes this test
+// a permanent false alarm.** The first version put it at the innermost position
+// — `httplog.Middleware(Stack(probe))` — and failed, correctly: from in there
+// the chain runs back out through `ConditionalGet` and `Compress`, and neither
+// has an `Unwrap` **by design**, because both buffer the response to hash or
+// gzip it and handing a handler the real writer would let it emit the body
+// twice. That failure says nothing about the drain, which runs OUTSIDE both and
+// is handed `httplog`'s writer directly. Wrapping `DrainRequestBody(probe)` is
+// what puts the probe on the drain's own side of that boundary.
+func TestTheDrainsDeadlineSurvivesTheProductionMiddlewareStack(t *testing.T) {
+	var bare, assembled error
+	probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(time.Minute))
+		if r.Header.Get("X-Case") == "bare" {
+			bare = err
+		} else {
+			assembled = err
+		}
+		apihttp.WriteJSON(w, http.StatusOK, map[string]string{"ok": "yes"})
+	})
+
+	call := func(h http.Handler, kase string) {
+		t.Helper()
+		srv := httptest.NewServer(h)
+		defer srv.Close()
+		req, err := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader([]byte("{}")))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("X-Case", kase)
+		res, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", kase, err)
+		}
+		defer res.Body.Close()
+		_, _ = io.Copy(io.Discard, res.Body)
+	}
+
+	// The control arm. Without it, a Go release that broke ResponseController
+	// everywhere would read as this stack's fault.
+	call(probe, "bare")
+	if bare != nil {
+		t.Fatalf("SetReadDeadline failed on a BARE handler (%v) — the control is "+
+			"broken, so the assertion below measures nothing", bare)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	call(httplog.Middleware(logger, nil)(apihttp.DrainRequestBody(probe)), "assembled")
+	if assembled != nil {
+		t.Fatalf("SetReadDeadline at DrainRequestBody's position in the production "+
+			"chain = %v, want nil. A wrapper OUTSIDE apihttp.Stack lacks "+
+			"Unwrap() http.ResponseWriter, so the drain's 10s bound — the only "+
+			"limit on a client trickling its body, since this server sets no "+
+			"ReadTimeout — is a silent no-op", assembled)
 	}
 }
 

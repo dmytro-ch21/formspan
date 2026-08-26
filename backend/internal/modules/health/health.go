@@ -49,7 +49,23 @@ const (
 	// KindSlowRequest crossed the latency threshold. Recorded as a symptom,
 	// not a failure — the request succeeded.
 	KindSlowRequest Kind = "slow_request"
-	// KindClientError is anything an app failed at locally.
+	// KindClientError is a request that was refused, from either side of the
+	// wire — and **`source` is the only thing that tells the two apart**.
+	//
+	// `source: client` is the original meaning: an app reporting something it
+	// failed at locally. That is a CLAIM, believed because the app said so.
+	//
+	// `source: api` is a rejection this server measured and returned, on one of
+	// the routes in `recordRejectionsOn` (see `handler.go`). That is EVIDENCE,
+	// and `status` carries which 4xx it was.
+	//
+	// This comment used to read "anything an app failed at locally", which is
+	// now false for half the rows. The distinction is not decorative: the
+	// package's promise that a measured event and a claimed one are tellable
+	// apart at a glance rests entirely on `source` here, and `Summarise` groups
+	// by kind alone — so `ByKind["client_error"]` mixes both. `Filter` has no
+	// source field yet; anything reasoning about one of the two populations
+	// needs to add one rather than trust this kind. Raised in review.
 	KindClientError Kind = "client_error"
 	// KindSyncBlocked is the one that matters most: a client has given up
 	// pushing something. The training exists only on that device, and no

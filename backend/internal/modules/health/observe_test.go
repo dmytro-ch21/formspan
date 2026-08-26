@@ -122,8 +122,19 @@ func TestServerErrorsAndSlowRequestsStillRecord(t *testing.T) {
 }
 
 // Every route in the list is one somebody chose. A typo'd path is a silent
-// no-op — it compiles, it reads correctly, and it records nothing forever —
-// so the paths are asserted against the routes `cmd/api` actually serves.
+// no-op: it compiles, it reads correctly, and it records nothing forever.
+//
+// **This does NOT verify the paths against the mux, and saying so matters.**
+// An earlier version of this comment claimed it asserted them "against the
+// routes `cmd/api` actually serves"; it does not — it restates the same three
+// literals, so a route renamed in `main.go`, or a typo made identically in both
+// places, passes. Raised in review, and left as a restatement rather than
+// deleted: the count assertion below still catches a route ADDED to the map
+// without a matching test, which is the likelier mistake. Walking the mux would
+// need register-time introspection or exporting the list into `main.go`, and
+// neither is worth it for three strings — but nobody should read this as
+// coverage it doesn't provide. Checked by hand against `main.go` at
+// lines 466, 554 and 685 on 2026-08-26.
 func TestTheRecordedRoutesAreSpelledAsTheyAreServed(t *testing.T) {
 	for _, p := range []string{
 		"/v1/nutrition/estimate",
