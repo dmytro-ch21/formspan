@@ -1,10 +1,6 @@
 import { apiRequest } from './apiRequest';
-import { newTraceId, traceparent } from './trace';
-import { netFetch, type NetFetchOptions } from './authedFetch';
+import type { NetFetchOptions } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 /**
  * The global exercise catalog. Unlike activities this is read-only reference
@@ -131,44 +127,49 @@ export function pickImage(e: Exercise, prefer: MediaKind): string | null {
  *
  * ## It throws `ApiError`, and that is the point
  *
- * `fetchExercises` above hand-rolls its failure into a bare `Error`, so a
- * caller cannot tell "this id is gone" from "I could not ask". Going through
- * `apiRequest` keeps the status and the contract's error CODE, so a 404 can say
- * the exercise is gone and a dead network can say something true instead —
- * the same distinction N41's barcode lookup turns on.
+ * Going through `apiRequest` keeps the status and the contract's error CODE,
+ * so a 404 can say the exercise is gone and a dead network can say something
+ * true instead — the same distinction N41's barcode lookup turns on.
+ * `fetchExercises` below now goes through the same helper for the same
+ * reason (N62) — this file used to be the one place still hand-rolling a
+ * bare `Error`.
  */
 export function fetchExercise(getToken: TokenGetter, id: string): Promise<Exercise> {
   return apiRequest<Exercise>(getToken, `/exercises/${encodeURIComponent(id)}`);
 }
 
+/**
+ * The catalog listing, filtered by sport and/or a name search.
+ *
+ * Went through `netFetch` directly and hand-rolled a bare `Error` on a
+ * non-2xx response until N62. That lost the server's error CODE (so a 404
+ * and a validation error were indistinguishable to a caller) and put a
+ * second copy of `apiRequest`'s dozen lines here to drift from — see
+ * `fetchExercise`'s doc comment above for the fuller argument. Every caller
+ * already catches this with a bare `catch` (offline falls back to the
+ * cache), so the error's *identity* changing from `Error` to `ApiError` is
+ * safe: nothing here pattern-matches on `.message`.
+ */
 export async function fetchExercises(
   getToken: TokenGetter,
   filter: ExerciseFilter = {},
   signal?: AbortSignal,
   opts?: NetFetchOptions,
 ): Promise<Exercise[]> {
-  const token = await getToken();
-
   const params = new URLSearchParams();
   if (filter.sport) params.set('sport', filter.sport);
   if (filter.q) params.set('q', filter.q);
   const qs = params.toString();
 
-  const res = await netFetch(
-    `${API_BASE}/exercises${qs ? `?${qs}` : ''}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        traceparent: traceparent(newTraceId()),
-      },
-      signal,
-    },
+  const body = await apiRequest<{ exercises: Exercise[] }>(
+    getToken,
+    `/exercises${qs ? `?${qs}` : ''}`,
+    { signal },
     opts,
   );
-
-  if (!res.ok) {
-    throw new Error(`Couldn't load exercises (${res.status}).`);
-  }
-  const body = (await res.json()) as { exercises: Exercise[] };
-  return body.exercises ?? [];
+  // `apiRequest` hands back `null` for a 2xx body that failed to parse (and
+  // `undefined` on 204) rather than throwing — optional chaining rather than
+  // `body.exercises` so that lands as an empty list through every caller's
+  // existing bare `catch`, not a raw `TypeError` one frame later.
+  return body?.exercises ?? [];
 }

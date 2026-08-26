@@ -43404,6 +43404,54 @@ estimator doubling a quantity it should have read off the label.
   nutrition surfaces were out of scope for N59 and were not audited for the
   same gap.
 
+## 2026-08-26 — N62: `fetchExercises` stops hand-rolling its failure, and the one caller that read the old message text
+
+`lib/exercises.ts` had two functions with two different answers to "the
+request failed." `fetchExercise` (singular, N47) went through `apiRequest`
+and threw `ApiError` — status and error code preserved. `fetchExercises`
+(plural) sat beside it hand-rolling `throw new Error(\`Couldn't load
+exercises (\${res.status}).\`)`, exactly the drift `apiError.ts` warns
+against: *"every module that talks to the API should throw this rather than
+a bare Error… which is exactly what the API conventions forbid."* N62
+(#377) migrated it to `apiRequest` too, so both functions in the file now
+answer the same way.
+
+Every caller already caught the plural with a bare `catch` or displayed
+`err.message` without matching on it — `library.tsx`, `records/pinned.tsx`,
+`exercise/[id].tsx`, `workout/[id].tsx` (twice), `session/[id].tsx`,
+`session/[id]/add.tsx` and `lib/seed.ts` — so the error's *identity*
+changing from `Error` to `ApiError` was safe everywhere **except one**,
+found only by reading each call site rather than trusting the grep: the
+Library's `describeError` matched the error MESSAGE against the literal
+substring `(401)` to show "Your session expired. Sign in again." That regex
+only ever matched because it was written against the old hand-rolled string
+— the server's own `error.message` never contains `"(401)"` — so it would
+have silently stopped firing the moment this shipped, with a 401 on the
+catalog falling through to whatever raw text the backend sent instead of the
+sign-in prompt. It had zero test coverage before this change, which is
+exactly how it would have shipped broken. Fixed to check `err instanceof
+ApiError && err.status === 401` instead, and pinned with a new test file
+(`libraryErrorMessages.test.tsx`) asserting the copy no longer depends on the
+message containing that substring.
+
+`session/[id]/add.tsx`'s offline fallback — search the cache when the live
+request fails — is the caller doing real work in its `catch` rather than
+just displaying text, so it gets its own component test
+(`addExerciseScreen.test.tsx`) pinned against the *new* error identity
+(`ApiError`/`OfflineError`), not a bare `Error`. Both new tests were
+mutation-verified: deleting the guard they cover (the fallback body, and the
+status check respectively) turns them red as genuine test failures, then
+restored to green.
+
+### What is not done
+
+- No other caller of `fetchExercises` needed a code change beyond the type
+  migration — confirmed by reading every call site's catch block, not by
+  assuming the grep for `.message` was exhaustive.
+- `position/[id].tsx` has its own `/\(404\)/.test(...)` message-regex, on a
+  different fetch entirely. Out of scope for this ticket; worth its own
+  ticket if the same drift is suspected there.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

@@ -13011,3 +13011,21 @@ on screen. That, and only that, is what moved.
 - **NEEDS HUMAN EVIDENCE — hold a phone and read the nutrition panel** at
   default text size and at the largest accessibility size, and confirm the
   two-column layout still fits without truncating a label or a value.
+
+## N62 — `fetchExercises` now throws `ApiError`, and the Library's expired-session copy reads the status, not the message (`apps/mobile/lib/exercises.ts`, `apps/mobile/app/library.tsx`, `apps/mobile/app/session/[id]/add.tsx`)
+
+- Open the exercise catalog (Library, Add exercise mid-session, an exercise's
+  own detail page) online and confirm it loads normally — the request shape
+  is unchanged, only the failure path moved.
+- With a valid session that has since expired (or a token forced to 401),
+  open Library and confirm it shows **"Your session expired. Sign in
+  again."** — not the server's raw error text, and not a generic "couldn't
+  load" message.
+- **NEEDS HUMAN EVIDENCE — put the phone in airplane mode after the catalog
+  has loaded once, then open "Add exercise" from an active session** and
+  confirm the cached catalog still appears and search still filters it — the
+  offline fallback this ticket exists to keep working.
+- **NEEDS HUMAN EVIDENCE — serve a 404 from the exercises endpoint (or watch
+  one occur naturally)** and confirm it does not read as an offline message —
+  a dead network and "the server rejected this" should look visibly
+  different to the athlete.
