@@ -41,7 +41,15 @@ type Phase = {
 const UNKNOWN_PHASE: Phase = { label: "", dot: "bg-text-muted", pip: "bg-text-muted" };
 
 const PHASE: Record<SuggestionCode, Phase> = {
-  add_load: { label: "Add load", dot: "bg-lime", pip: "bg-lime" },
+  // `progression-advance`, NOT `lime` — the web half of the same split the
+  // mobile map records. Every other colour here is a fixed semantic token, so
+  // reading the brand would make this the one entry that moves with the logo.
+  // Same value as before N183.
+  add_load: {
+    label: "Add load",
+    dot: "bg-progression-advance",
+    pip: "bg-progression-advance",
+  },
   add_reps: { label: "Add a rep", dot: "bg-green", pip: "bg-green" },
   deload: { label: "Deload", dot: "bg-warn", pip: "bg-warn" },
   hold: { label: "Hold", dot: "bg-text-muted", pip: "bg-text-muted" },

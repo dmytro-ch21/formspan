@@ -751,8 +751,10 @@ const styles = StyleSheet.create({
   //
   // That sizing matters more here than the equivalent on web, because on
   // mobile the SHAPE carries the whole distinction on its own: filled #42F58D
-  // and a #B8FF2C ring are 1.18:1 apart in greyscale, i.e. the same blob. Web
-  // has a ✓/○ glyph doing that job; this does not.
+  // and a `vola.lime` ring are the same blob in greyscale. That was 1.18:1 at
+  // the old lime and is **1.08:1** at the brand lime N183 moved it to, so the
+  // argument for the 8pt hole got stronger, not weaker. Web has a ✓/○ glyph
+  // doing that job; this does not.
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'transparent' },
 
   expander: {

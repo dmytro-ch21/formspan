@@ -5,7 +5,7 @@
 <defs>
   <linearGradient id="grad-vola-stacked-dark" x1="120" y1="360" x2="410" y2="100" gradientUnits="userSpaceOnUse">
     <stop stop-color="#42F58D"/>
-    <stop offset="1" stop-color="#B8FF2C"/>
+    <stop offset="1" stop-color="#D3EC52"/>
   </linearGradient>
 </defs>
 <path d="M120 270 L220 365 L405 135" stroke="url(#grad-vola-stacked-dark)" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>

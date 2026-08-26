@@ -159,12 +159,22 @@ function WeekdayGutter() {
   );
 }
 
+/**
+ * The consistency heatmap's steps — a QUANTITY, so `training`, not `lime`.
+ *
+ * These are opacity steps of one hue, and until N183 that hue was `--c-lime`.
+ * The brand moved and mobile's equivalent (`vola.gridLevels`) did not, so
+ * leaving this on the brand would have given one measurement two different
+ * colours on two surfaces — invisible on screen (the two limes are ΔE 3.05
+ * apart under deuteranopia) and therefore exactly the kind of drift no test
+ * would ever have reported. Caught in review. Values are unchanged.
+ */
 const LEVEL_CLASS = [
   "bg-line-soft",
-  "bg-lime/25",
-  "bg-lime/45",
-  "bg-lime/70",
-  "bg-lime",
+  "bg-training/25",
+  "bg-training/45",
+  "bg-training/70",
+  "bg-training",
 ] as const;
 
 function DayCell({

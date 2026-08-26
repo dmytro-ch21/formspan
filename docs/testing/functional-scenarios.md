@@ -3834,9 +3834,10 @@ glyph. If that changes, these scenarios apply there too.
 - Collapsed: today is filled; a **filled** dot marks a day trained, a **hollow
   ring** a day planned. A day that is both shows the filled dot — what happened
   outranks what was intended.
-- **The shape, not the colour, is the distinction.** Green and lime are 1.18:1
-  apart in greyscale, so a screenshot with hue removed must still tell trained
-  from planned. Check the ring's hole is visible at arm's length, not just in a
+- **The shape, not the colour, is the distinction.** Green and lime are **1.08:1**
+  apart in greyscale — 1.18:1 before N183 moved the brand lime, so the margin got
+  thinner, not thicker — and a screenshot with hue removed must still tell
+  trained from planned. Check the ring's hole is visible at arm's length, not just in a
   screenshot — and on Android specifically, where border widths round.
 - Every marker clears 3:1 against its own ground in **both** themes.
 - `Week in review` expands to seven day rows; a trained day shows its
@@ -12237,3 +12238,52 @@ the athlete-visible defect rather than the file.
 - One-handed reach: all five within a thumb's arc at the bottom of the screen.
 - The label widths above — jest has no font metrics, so a screenshot is the only
   evidence.
+
+## Design tokens — the brand lime versus the readings that resemble it (N183)
+
+These are checks on the *palette*, not on a screen, and most of them are already
+mechanised by `pnpm run check:palette`. They are recorded here because the
+failure they guard is silent: nothing renders wrong, a colour simply starts
+meaning something it did not.
+
+**Happy path**
+- `node scripts/validate_palette.mjs` exits 0, and its output contains the
+  section `The brand is not a reading`. A run with no such section is a run
+  against a validator that has lost the check — the absence, not a failure, is
+  the thing to look for.
+- The brand lime is identical in all four of its homes — `design-tokens.json`,
+  mobile's `Colors.ts`, web's dark `--c-lime`, admin's `--color-brand-lime`. The
+  gate compares them; changing one and not the others is a red build.
+- The Library tile `advance` colour, the BJJ RPE moderate step, the progression
+  card's `add_load` phase, the consistency grid's top step,
+  `sportColors.strength` and `macroColors.carbs` all still render the value they
+  rendered before the brand moved.
+- **Web draws the same readings as mobile and must draw them in the same
+  colour.** The consistency heatmap and the weekly volume bars read
+  `--c-training`, not the brand — check a web heatmap cell against the mobile
+  calendar's top step, and the web volume bar against Today's weekly bar. Two views of the same
+  quantity must agree: the Today screen's weekly bar and the calendar's grid draw
+  the *same* ramp, so a trained bar and a lit calendar cell must be the same
+  colour, not two limes ΔE 3 apart.
+
+**Edge cases and errors**
+- Point any of those five at the brand hex and the gate fails, naming the value.
+  Three of the five fail **only** this check — no contrast or ΔE assertion
+  catches them — so a version of the gate without it is a version that passes a
+  discipline colour silently becoming the logo.
+- Delete `mono.tileAdvance` or `mono.rpeModerate` and the gate throws rather than
+  skipping: a hue with no monochrome twin stays **coloured** in a black-and-white
+  app, which the metals and belt edges already shipped once.
+- In monochrome mode, a Library tile and the RPE selector must be grey. If either
+  is lime, its mono twin is missing or unreachable.
+
+**Visual / accessibility**
+- The brand lime is held to 4.5:1, not the 3:1 a meaningful fill needs, because
+  it renders as *type* — a sheet's "Close", a rename action, the PR chip's
+  "fresh", the progress card's phase label. Any new brand-coloured **text** must
+  be checked against the surface it lands on, not assumed from the fill figure.
+- **NEEDS HUMAN EVIDENCE — none of the above says how the lime looks.** On a
+  phone, in daylight: the tab bar's active state, the splash gradient, and the
+  strength sport chip sitting beside brand-coloured chrome (ΔE 3.05 apart, i.e.
+  they should read as one colour — if they read as two, that is the thing to
+  report).

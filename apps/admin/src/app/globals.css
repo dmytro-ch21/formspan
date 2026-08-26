@@ -7,15 +7,27 @@
   admin mock's pale lime, *not* the brand lime — they're different values
   and reconciling them is part of the deferred restyle, not this change).
 
-  Duplicated verbatim in apps/web/src/app/globals.css. See the note there,
-  including why this is `@theme static` rather than plain `@theme`.
+  **This block used to claim it was "duplicated verbatim in
+  apps/web/src/app/globals.css. See the note there" — and it is not, and there
+  is no note there.** `apps/web` carries no `--color-brand-*` at all; it names
+  the same brand values through its own `--c-*` theme tokens. Found while
+  reconciling the lime (N183) by grepping for `brand-lime` across `apps/`, which
+  returns this file and nothing else. Corrected rather than left, because the
+  next person to change a brand value would have gone looking for a second copy
+  and a note, found neither, and had no way to tell whether they had missed it.
+
+  The real second homes for these five values are
+  `apps/mobile/constants/Colors.ts` (the palette validator's source of truth),
+  `apps/web/src/app/globals.css`'s `--c-*` blocks, and
+  `assets/brand/design-tokens.json`, which `CLAUDE.md` names as the source of
+  truth for all of them. Change one, change all four.
 
   Second name collision worth knowing alongside the lime one: brand-muted
   (#94a3b8, a cool slate) is not admin's text-muted (#8d918d, a warm grey).
   Two different "muted"s coexisting — pick deliberately, not by autocomplete.
 */
 @theme static {
-  --color-brand-lime: #b8ff2c;
+  --color-brand-lime: #d3ec52;
   --color-brand-green: #42f58d;
   --color-brand-navy: #0b1220;
   --color-brand-charcoal: #111827;

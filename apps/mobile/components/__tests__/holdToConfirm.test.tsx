@@ -169,10 +169,15 @@ describe('the screen-reader path', () => {
 describe('the fill has to be visible against what it fills', () => {
   it('never defaults to the same colour as an accent it might sit on', () => {
     // Found in review, and it was deterministic rather than subtle: the
-    // strength Finish button's background IS `accent.accent`, the default
-    // accent is `#B8FF2C`, and `vola.lime` is `#B8FF2C` — so the default fill
-    // over the default accent was lime on lime. The one button this control
-    // was built for showed no progress at all.
+    // strength Finish button's background IS `accent.accent`, and the default
+    // accent is the same value as `vola.lime` — so the default fill over the
+    // default accent was lime on lime. The one button this control was built
+    // for showed no progress at all.
+    //
+    // The hex is deliberately not spelled out here: it was `#B8FF2C` and is
+    // `#D3EC52` since N183, and the assertion below is about the two being
+    // EQUAL, which is what makes the collision possible. Naming the value would
+    // make this test go stale on a brand change without the bug coming back.
     //
     // The call site now passes `accent.on`, which every palette defines
     // precisely because it reads against that palette's accent. This pins the

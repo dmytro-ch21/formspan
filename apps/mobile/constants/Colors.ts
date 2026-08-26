@@ -30,7 +30,100 @@ const palette = {
   textMuted: '#949FB3',
   textDim: '#667085',
 
-  lime: '#B8FF2C',
+  /**
+   * **The VOLA brand lime — identity, interaction, progress, achievement.**
+   *
+   * This value moved on 2026-08-25 (N183) from `#B8FF2C` to the approved brand
+   * source, and the move is the *smaller* half of that change. The larger half
+   * is that "the lime hex" was doing seven jobs at once, and only one of them
+   * is the brand:
+   *
+   *   1. the brand accent (this)                — moved to `#D3EC52`
+   *   2. the Library tile `advance` intent      — `tileAdvance`, still `#B8FF2C`
+   *   3. the BJJ RPE ramp's moderate step       — `rpeModerate`, still `#B8FF2C`
+   *   4. the progression engine's `add_load`    — `progressionAdvance`, still `#B8FF2C`
+   *   5. the consistency grid's top step        — `gridLevels[2]`, still `#B8FF2C`
+   *   6. a discipline's colour                  — `sportColors.strength`, still `#B8FF2C`
+   *   7. a macro's colour                       — `macroColors.carbs`, still `#B8FF2C`
+   *
+   * **It was six until review found the seventh**, and that is worth recording
+   * rather than tidying away: `progressionAdvance` was reached by classifying
+   * every `vola.lime` call site by role, missed on the first pass, and caught
+   * by a reviewer reading the same diff. A grep finds hexes; only reading finds
+   * a colour used for the wrong reason.
+   *
+   * Six of the seven encode a READING, and a reading whose colour follows the
+   * brand is a reading nobody can learn — the same argument the `accents` note
+   * below makes about the accent being a preference. Two of them are not even
+   * a choice: moving `macroColors.carbs` to the brand drops fat-versus-carbs
+   * from ΔE 15.56 to **13.85** *and* calorie-ring-versus-carbs from 16.87 to
+   * **9.70**, and moving `gridLevels[2]` drops ramp 1→2 from 15.35 to
+   * **12.46** — all below the gate's floor, and none of them a figure anyone
+   * reasoned out: each was produced by making the change and watching the build
+   * go red. The other four would NOT have failed anything, which is why
+   * `validate_palette.mjs` grew an identity check covering all six.
+   *
+   * **The two limes are NOT distinguishable, and that is the point, not a
+   * problem.** They measure ΔE 3.05 apart under deuteranopia (7.22 with full
+   * colour vision) — indistinguishable in practice — so the split costs nothing
+   * on screen and buys a boundary a future edit cannot cross by accident. It
+   * also means no ΔE threshold can ever police that boundary: only identity
+   * can, which is what `validate_palette.mjs` asserts.
+   *
+   * `#D3EC52` clears every floor with room — 13.83:1 on `surface`, 12.64:1 on
+   * `surfaceRaised`, and 14.89:1 for `bg` written on it.
+   */
+  lime: '#D3EC52',
+
+  /**
+   * The Library tile's "improving position" intent — a category, not the brand.
+   *
+   * This is the value `lime` used to hold, kept here under its own name because
+   * `components/LibraryTile.tsx` reads it as one of four *categorical* hues that
+   * the gate checks pairwise under three CVD simulations. It sits beside
+   * `tileHold` for the same reason that one exists: a colour outside this file
+   * is a colour nobody re-validates, and a colour sharing a name with the brand
+   * is a colour that moves when the brand does.
+   *
+   * Unchanged by N183, so every tile pair measures exactly what it measured
+   * before — worst pair 19.5, defend-versus-hold.
+   */
+  tileAdvance: '#B8FF2C',
+
+  /**
+   * The BJJ effort scale's moderate step — a status, not the brand.
+   *
+   * `app/bjj/log.tsx` colours the RPE selector on an ordered four-step ramp:
+   * `green` (1–4) → this (5–6) → `warn` (7–8) → `danger` (9–10). Every swatch
+   * carries its own number, so the ramp is ordered rather than pairwise
+   * separable, and the gate does not check it — which is exactly why it needs a
+   * name. Read off `lime`, an effort reading would have silently become the
+   * brand accent the day the brand moved.
+   *
+   * Also this value is what `lime` used to be, so the ramp renders identically.
+   */
+  rpeModerate: '#B8FF2C',
+
+  /**
+   * The progression engine's "add load" phase — a status, not the brand.
+   *
+   * `PROGRESSION_PHASE` in `app/session/[id].tsx` (and `PHASE` in web's
+   * `ProgressionCard.tsx`) maps a `SuggestionCode` to a colour, and **every
+   * other member of that map is a fixed semantic value** — `green`, `warn`,
+   * `textMuted`. Left reading `lime`, `add_load` would have been the one entry
+   * in a status map that follows the logo, which is the asymmetry that makes
+   * this a bug rather than a preference.
+   *
+   * Caught in review rather than by the gate, and the gate could not have
+   * caught it: this set is **not** pairwise separable and never was. `add_load`
+   * versus `add_reps` measured **ΔE 10.97** under protanopia before N183 and
+   * would have been **7.98** at the brand lime — both under the floor, so no
+   * threshold moves. The set is legible because each row prints its label in
+   * full-contrast text and the dot is redundant encoding, which is what the
+   * comment above that map already says. Pinning the value keeps the 10.97
+   * rather than shipping a quieter one for nothing.
+   */
+  progressionAdvance: '#B8FF2C',
 
   /**
    * The consistency grid's ramp, and the one place in this palette whose
@@ -50,9 +143,17 @@ const palette = {
    * **If `surface` changes, re-run the validator.** Nothing else will catch it.
    */
   /**
-   * A logged set's row. Lime at 15% over `surface`, solved per channel and
-   * stored opaque — the house convention in this file, so the row does not
-   * composite differently depending on what is behind it.
+   * A logged set's row. `gridLevels[2]` at 15% over `surface`, solved per
+   * channel and stored opaque — the house convention in this file, so the row
+   * does not composite differently depending on what is behind it.
+   *
+   * **It says `gridLevels[2]` rather than "lime" since N183, and the change is
+   * a correction rather than a re-derivation.** This value is unmoved: 15% of
+   * `#B8FF2C` over `#10151F` is exactly `#293821` (41.2 / 56.1 / 32.95 per
+   * channel, measured), and `#B8FF2C` is now the grid's top step rather than
+   * the brand lime. A completed set is a STATE, so it belongs to the training
+   * ramp and not to the brand — re-deriving it from `#D3EC52` would give
+   * `#2d3527` and make the one row-tint in the app follow the logo.
    *
    * 15% specifically. Measured against `surface` (#10151F) and the inks that
    * sit on it: the tint is 1.47:1 against the untouched row, which is what
@@ -106,8 +207,8 @@ const palette = {
    * the accent is a user preference, and this is only the value someone gets
    * before they have expressed one.
    */
-  accent: '#B8FF2C',
-  accentInk: '#B8FF2C',
+  accent: '#D3EC52',
+  accentInk: '#D3EC52',
   accentOn: '#080B12',
 };
 
@@ -157,12 +258,20 @@ const palette = {
  *   text. Retuning `danger` to a truer red (#E5322F or deeper) would take
  *   orange past 15 and make destructive actions read more urgently — a good
  *   change, and a separate one.
- * - **Green and yellow sit ΔE 2.3–7.5 from `warn`.** Recorded rather than
- *   fixed: green-accent-with-amber-warnings is what this app already ships,
+ * - **The brand lime and yellow sit close to `warn`.** Recorded rather than
+ *   fixed: lime-accent-with-amber-warnings is what this app already ships,
  *   and `warn` only ever appears as a line of text next to an explanation.
+ *   Re-measured for N183 against `#FFB020`, worst across the three
+ *   simulations: brand **ΔE 6.48** (was 7.54 at `#B8FF2C`), yellow **5.50**.
+ *   This line used to say "ΔE 2.3–7.5"; the 2.3 could not be reproduced by
+ *   `validate_palette.mjs`'s maths against any current value, so it is
+ *   replaced by figures that can be, rather than carried forward.
  */
 export const accents = {
-  green: { label: 'Green', accent: '#B8FF2C', ink: '#B8FF2C', on: '#080B12' },
+  // `green` is the BRAND theme — the key is provenance and cannot be renamed
+  // without rewriting every stored `PREF_ACCENT` row, exactly as
+  // `trackerColors.water` records. The label says what it is.
+  green: { label: 'VOLA', accent: '#D3EC52', ink: '#D3EC52', on: '#080B12' },
   yellow: { label: 'Yellow', accent: '#FFD400', ink: '#FFD400', on: '#080B12' },
   blue: { label: 'Blue', accent: '#4C7DF0', ink: '#4C7DF0', on: '#080B12' },
   purple: { label: 'Purple', accent: '#7A50EC', ink: '#A78BFA', on: '#FFFFFF' },
@@ -249,6 +358,14 @@ export const accents = {
  */
 export const mono = {
   lime: '#E7EBF1',
+  // N183 split `tileAdvance` and `rpeModerate` out of `lime`, and a hue with no
+  // mono twin **stays coloured in a black-and-white app** — the exact failure
+  // the metals comment above records. Both take what `lime` resolved to before
+  // the split, so the Library tile and the RPE selector render identically in
+  // monochrome; nothing here is a new value.
+  tileAdvance: '#E7EBF1',
+  rpeModerate: '#E7EBF1',
+  progressionAdvance: '#E7EBF1',
   green: '#C9D2E0',
   info: '#98A3B5',
   warn: '#B9C2D0',

@@ -335,7 +335,8 @@ function loadPalette() {
       accent: one('accent'), accentInk: one('accentInk'), accentOn: one('accentOn'),
       lime: one('lime'), green: one('green'), info: one('info'),
       warn: one('warn'), danger: one('danger'), gridRest: one('gridRest'),
-      tileHold: one('tileHold'),
+      tileHold: one('tileHold'), tileAdvance: one('tileAdvance'),
+      rpeModerate: one('rpeModerate'), progressionAdvance: one('progressionAdvance'),
       ramp: [...ramp[1].matchAll(/'(#[0-9A-Fa-f]{6})'/g)].map((m) => m[1]),
     },
     BELT: block('beltAccent', 5),
@@ -365,6 +366,13 @@ function loadPalette() {
       rest: monoOne('gridRest'),
       ramp: monoRamp,
       lime: monoOne('lime'),
+      // `monoOne` throws on a missing key, which is the whole guard: N183 split
+      // these two out of `lime`, and a hue with no mono twin stays COLOURED in
+      // a black-and-white app. That is not hypothetical here — the metals and
+      // the belt edges shipped exactly that way.
+      tileAdvance: monoOne('tileAdvance'),
+      rpeModerate: monoOne('rpeModerate'),
+      progressionAdvance: monoOne('progressionAdvance'),
       info: monoOne('info'),
       danger: monoOne('danger'),
       warn: monoOne('warn'),
@@ -385,6 +393,141 @@ heading('Text');
 ratio('text on surface', P.text, S.surface, 4.5);
 ratio('textMuted on surface', P.textMuted, S.surface, 4.5);
 ratio('textDim on surface (large/secondary only)', P.textDim, S.surface, 3);
+
+/*
+  The brand lime, and the boundary around it. Added by N183.
+
+  `palette.lime` had no check of its own before this: it reached the gate only
+  through the Library tile's `advance` intent, because it WAS that intent's
+  hue. Splitting the two (see the note on `lime` in Colors.ts) would have left
+  the app's most-used single colour — done ticks, today's marker, the PR chip,
+  every progress ring — measured by nothing at all.
+
+  It is held to 4.5:1 rather than the 3:1 a meaningful fill needs, because it is
+  routinely TEXT: `sheetClose`, `renameAction`, `RecordsCard`'s `fresh` and
+  `ProgressCard`'s `phaseLabel` all render type in it.
+*/
+heading('The brand lime — the one colour that is the product');
+ratio('brand on surface', P.lime, S.surface, 4.5, 'It renders as type, not only as fill.');
+ratio('brand on raised', P.lime, S.raised, 4.5);
+ratio('brand on bg', P.lime, S.bg, 4.5);
+ratio('bg ink on brand', S.bg, P.lime, 4.5, 'What is written on a brand fill is small.');
+// `info` is the categorical blue Library tiles carry beside brand-coloured
+// chrome — the same pair every accent theme is checked against below.
+separation('brand vs info', P.lime, P.info);
+separation('brand vs danger', P.lime, P.danger);
+separation('brand vs tileHold', P.lime, P.tileHold);
+// Same argument the mono accent gets: an accent that reads as body text has
+// stopped signalling anything.
+separation('brand vs body text', P.lime, P.text, 8);
+
+/*
+  The brand lime has FOUR homes, and this is the only thing that keeps them
+  equal.
+
+  `assets/brand/design-tokens.json` is the declared source of truth per
+  CLAUDE.md; `apps/mobile/constants/Colors.ts` is what the phone renders;
+  `apps/web/src/app/globals.css`'s dark block is what the web app renders; and
+  `apps/admin/src/app/globals.css` carries the brand set for the console. Before
+  N183 the only thing joining them was a comment in the admin file asking the
+  next person to change all of them — **and that comment was already wrong**: it
+  said the block was "duplicated verbatim in apps/web/src/app/globals.css. See
+  the note there", where there is no such block and no such note.
+
+  A comment is not a guarantee. `scripts/check-brand-copies.mjs` exists because
+  a hand-copied brand component drifted within one commit, and the mitigation at
+  the time was exactly this kind of comment. So the four are read and compared
+  here instead — three of them by regex over files this script does not own,
+  which is fragile in one direction only: a rename makes the read throw rather
+  than silently pass, the same property `loadPalette` is built on.
+
+  Only the brand values are joined. The stepped light-mode variants are NOT
+  brand values — `--c-lime: #6f9c00` is a derived dark-lime for a white ground —
+  so they are deliberately outside this check.
+*/
+heading('The brand lime has four homes — they must agree');
+{
+  const read = (file, re, what) => {
+    const src = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    const m = src.match(re);
+    if (!m) throw new Error(`validate_palette: could not read ${what} from ${file} — moved or renamed?`);
+    return m[1].toLowerCase();
+  };
+  const homes = {
+    'assets/brand/design-tokens.json': read(
+      'assets/brand/design-tokens.json', /"lime":\s*"(#[0-9A-Fa-f]{6})"/, 'brand.lime'),
+    'apps/mobile/constants/Colors.ts': P.lime.toLowerCase(),
+    'apps/web (dark --c-lime)': read(
+      'apps/web/src/app/globals.css',
+      /:root\[data-theme="dark"\][\s\S]*?--c-lime:\s*(#[0-9A-Fa-f]{6})/, 'dark --c-lime'),
+    'apps/admin (--color-brand-lime)': read(
+      'apps/admin/src/app/globals.css', /--color-brand-lime:\s*(#[0-9A-Fa-f]{6})/, '--color-brand-lime'),
+  };
+  const values = [...new Set(Object.values(homes))];
+  for (const [where, hex] of Object.entries(homes)) {
+    const ok = hex === homes['assets/brand/design-tokens.json'];
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${where.padEnd(38)} ${hex}`);
+  }
+  if (values.length !== 1) {
+    failures.push(
+      `${group} — the brand lime differs across its homes: ` +
+        Object.entries(homes).map(([w, h]) => `${w}=${h}`).join(', ') +
+        `. Changing one and not the others is the shape this check exists for.`,
+    );
+  }
+}
+
+/*
+  **The brand must not BE a reading**, and ΔE cannot enforce that — this is the
+  one guard in this file whose mechanism is identity rather than measurement,
+  so it is worth saying why out loud rather than leaving it looking lazy.
+
+  Five values in this palette were the same hex as the brand until N183, and
+  each of them encodes something: a Library category, an effort step, a
+  quantity, a discipline, a macro. The brand moved to `#D3EC52` and they did
+  not. **They are ΔE 3.05 apart under deuteranopia** (7.22 with full colour
+  vision) — the two limes are indistinguishable, which is exactly why the split
+  is free on screen and exactly why no separation threshold can police it: a
+  floor low enough to pass would pass anything, and a floor high enough to mean
+  something would demand two limes nobody wants.
+
+  So what is asserted is that they are not the SAME VALUE. A future edit that
+  "tidies up" one of these by pointing it back at the brand fails here, with the
+  reason attached, instead of silently making a measurement follow the logo.
+
+  Two of the five could not be pointed at the brand even if somebody wanted to,
+  and the arithmetic is recorded next to them in Colors.ts: `macroColors.carbs`
+  at `#D3EC52` drops fat-versus-carbs to ΔE 13.85, and `gridLevels[2]` drops
+  ramp 1→2 to 12.46. Those two would fail below regardless. The other three
+  would not, which is what this check is for.
+*/
+heading('The brand is not a reading — identity, because ΔE cannot carry this');
+{
+  const gap = deltaE(simulate(P.lime, 'deuteranopia'), simulate(P.tileAdvance, 'deuteranopia'));
+  console.log(
+    `  note the two limes measure ΔE ${fmt(gap)} apart under deuteranopia — ` +
+      'indistinguishable, so the checks below are on identity, not separation.',
+  );
+  const SEMANTIC = {
+    'Library tile advance': P.tileAdvance,
+    'BJJ RPE moderate': P.rpeModerate,
+    'progression add_load': P.progressionAdvance,
+    'consistency grid top step': P.ramp[P.ramp.length - 1],
+    'sportColors.strength': SPORTS.strength,
+    'macroColors.carbs': MACRO.carbs,
+  };
+  for (const [label, hex] of Object.entries(SEMANTIC)) {
+    const ok = hex.toLowerCase() !== P.lime.toLowerCase();
+    if (!ok) {
+      failures.push(
+        `${group} — ${label} is the brand lime (${P.lime}). It encodes a reading, ` +
+          `and a reading whose colour follows the brand is one nobody can learn. ` +
+          `Give it its own value; see the note on 'lime' in Colors.ts.`,
+      );
+    }
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${`${label} is not the brand`.padEnd(38)} ${hex}`);
+  }
+}
 
 heading(`Accent themes — every one the picker offers (${Object.keys(ACCENTS).length})`);
 for (const [name, a] of Object.entries(ACCENTS)) {
@@ -419,6 +562,11 @@ separation('ramp 1→2', P.ramp[1], P.ramp[2]);
 // the chroma is gone.
 heading('Monochrome mode — the same guarantees, on one axis');
 ratio('mono accent on surface', MONO.accent, S.surface, 3, 'A fill that carries meaning: WCAG 1.4.11.');
+// The mono brand. Checked in its own right since N183 split `tileAdvance` off:
+// before that this value reached the gate only through the mono Library tile,
+// and the split would have left it unmeasured.
+ratio('mono brand on surface', MONO.lime, S.surface, 4.5, 'It renders as type, not only as fill.');
+ratio('mono brand on raised', MONO.lime, S.raised, 4.5);
 ratio('mono danger on surface', MONO.danger, S.surface, 4.5, 'Error text and destructive actions.');
 ratio('mono warn on surface', MONO.warn, S.surface, 4.5);
 ratio('mono sport on surface', MONO.sport, S.surface, 4.5);
@@ -450,7 +598,7 @@ separation('mono ramp 1→2', MONO.ramp[1], MONO.ramp[2]);
 */
 const MONO_TILES = {
   attack: MONO.danger,
-  advance: MONO.lime,
+  advance: MONO.tileAdvance,
   defend: MONO.info,
   hold: MONO.tileHold,
 };
@@ -517,7 +665,7 @@ for (let i = 0; i < monograms.length; i++) {
 // that these four clear every check — a claim that was measured by hand and,
 // until now, against a validator that did not exist.
 heading('Library tile intents — four hues carrying nine categories');
-const TILES = { attack: P.danger, advance: P.lime, defend: P.info, hold: P.tileHold };
+const TILES = { attack: P.danger, advance: P.tileAdvance, defend: P.info, hold: P.tileHold };
 const tiles = Object.entries(TILES);
 for (const [name, hex] of tiles) ratio(`${name} on surface`, hex, S.surface, 4.5);
 for (let i = 0; i < tiles.length; i++) {

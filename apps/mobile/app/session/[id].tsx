@@ -1794,8 +1794,8 @@ export default function SessionScreen() {
             textStyle={styles.finishText}
             /*
               `accent.on`, not the default lime. This button's background IS
-              `accent.accent`, and on the default (green) palette that is
-              `#B8FF2C` — the exact value of `vola.lime`. A lime fill over a
+              `accent.accent`, and on the default (brand) palette that is
+              `#D3EC52` — the exact value of `vola.lime`. A lime fill over a
               lime button at 28% opacity is lime: the fill was mathematically
               invisible on the one button this control was built for. Every
               accent ships an `on` colour precisely because it reads against
@@ -2013,7 +2013,10 @@ export default function SessionScreen() {
 const UNKNOWN_PHASE = { label: '', color: vola.textMuted };
 
 const PROGRESSION_PHASE: Record<SuggestionCode, { label: string; color: string }> = {
-  add_load: { label: 'ADD LOAD', color: vola.lime },
+  // `progressionAdvance`, NOT `lime`. Every other colour in this map is a fixed
+  // semantic value; reading the brand here would make `add_load` the one entry
+  // that moves when the logo does. Same value as before N183. See Colors.ts.
+  add_load: { label: 'ADD LOAD', color: vola.progressionAdvance },
   add_reps: { label: 'ADD A REP', color: vola.green },
   deload: { label: 'DELOAD', color: vola.warn },
   hold: { label: 'HOLD', color: vola.textMuted },

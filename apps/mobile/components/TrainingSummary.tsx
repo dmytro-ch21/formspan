@@ -467,8 +467,24 @@ function ThisWeek({ history, units }: { history: History; units: UnitSystem }) {
                       // "measured zero" against a future day's nothing, so it
                       // has to survive being glanced at.
                       height: `${v > 0 ? Math.max(9, (v / peak) * 100) : d.sessions > 0 ? 9 : 7}%`,
+                      // `gridLevels[2]`, not `lime`. This bar is the top step
+                      // of the consistency ramp — its other two steps are
+                      // `gridLevels[0]` and `gridRest` right here — and it was
+                      // spelled `lime` only because the two were the same hex
+                      // until N183. Read off `lime` it would have left that
+                      // ramp the moment the brand moved — a bar drawn in the
+                      // brand accent beside a calendar grid drawn in the
+                      // training ramp, differing by ΔE 3.05, which reads as a
+                      // rendering fault rather than as a decision. Nothing
+                      // would have gone red: `gridLevels` itself is unmoved, so
+                      // the gate would still pass while these two views of the
+                      // same quantity quietly stopped matching.
                       backgroundColor:
-                        v > 0 ? vola.lime : d.sessions > 0 ? vola.gridLevels[0] : vola.gridRest,
+                        v > 0
+                          ? vola.gridLevels[2]
+                          : d.sessions > 0
+                            ? vola.gridLevels[0]
+                            : vola.gridRest,
                     },
                   ]}
                 />

@@ -472,9 +472,18 @@ function RpeScale({
   );
 }
 
+/**
+ * An ordered four-step effort ramp — a READING, not chrome.
+ *
+ * The moderate step is `vola.rpeModerate` rather than `vola.lime` since N183:
+ * they were the same hex, and reading it off `lime` would have turned an effort
+ * scale into the brand accent the day the brand moved. Every swatch renders its
+ * own number (`rpeNumber`), so the ramp is ordered rather than pairwise
+ * separable.
+ */
 function rpeColour(n: number): string {
   if (n <= 4) return vola.green;
-  if (n <= 6) return vola.lime;
+  if (n <= 6) return vola.rpeModerate;
   if (n <= 8) return vola.warn;
   return vola.danger;
 }
