@@ -40138,6 +40138,103 @@ nearly done.
 than remembered. The pressure to start one more comes from wanting the board to
 look busy.
 
+## 2026-08-25 — N141: the worker isolation runner (Phase 2)
+
+The dev engine's Phase 2 worker: every run now executes in a disposable
+environment rather than the primary checkout or anything shared.
+`engine/internal/worker` provisions a **fresh clone at an explicitly recorded
+base SHA** — never "whatever HEAD is current" — checked out onto its own
+`agent/<issue>-<slug>` branch, plus an ephemeral, uniquely-named Postgres
+database (`engine_run_<id>_<hex>`) created and dropped by the worker itself.
+Cloning from git (rather than copying a working tree) is what keeps
+gitignored secrets — `backend/.env.staging.local` and friends — out by
+construction: history never contains them, so a clone cannot either. That
+guarantee is tested by *attempting* the leak (`TestGitignoredSecretsCannotReachAWorkspace`),
+per this repo's "verify that a check can fail" discipline, not asserted from
+reading the clone logic.
+
+`Workspace.Env()` is a hard allowlist (`PATH`, `HOME`, `TMPDIR`, `LANG`,
+`LC_ALL`, `GOPATH`, `GOCACHE`, `GOMODCACHE`, plus `CI=1` and the run's own
+`DATABASE_URL`/`TEST_DATABASE_URL`) — no GitHub token, no LLM key, no Railway
+credential ever reaches a worker process, tested the same way: plant real-
+looking secrets in the parent environment and assert they don't cross.
+`Budget{MaxWall, MaxTokens}` names which limit an overrun tripped rather than
+returning a bare error, and a new `EnforceBudget` helper wires that directly
+to the run's state machine — an overrun records the reason as a step and
+transitions the run straight to `BLOCKED` (any non-terminal state may move
+there), so the acceptance criterion is a real transition an integration test
+observes, not a `Check()` error nobody calls yet. `RetainArtifact` copies
+whatever the run wants kept (logs, diffs, decision records) into
+`WorkRoot/artifacts/run-<id>/` *before* teardown, so artifacts survive a
+total cleanup by construction — they live outside the workspace directory
+that gets removed.
+
+`AuditResidue` is the self-audit the ticket demands: it re-checks that the
+workspace directory is gone and the ephemeral database no longer exists,
+rather than trusting that `Teardown` succeeded — and it is demonstrated
+failing on purpose (workspace left in place, database left in place) before
+being demonstrated passing, so the audit is proven capable of catching a
+leak rather than merely capable of returning nil.
+
+Left for the executor that eventually drives a real run through this
+package (a later ticket, once N145's GitHub App/org exists): wiring
+`EnforceBudget` into the actual agent loop's elapsed-time/token accounting,
+and deciding where `RetainArtifact`'s output gets recorded into
+`agent_artifacts` (the `Store.AddArtifact` method added alongside this work
+is ready for that call).
+
+`ac-verifier` and `backend-reviewer` both ran against #564's criteria before
+this merged, and found two real gaps rather than two documentation gaps.
+**Base SHA was only ever an in-memory `Workspace` field** — the durable
+`agent_runs.base_sha`/`branch` columns the schema already carried sat
+unwritten, so "recorded per run" was true of a struct that died with the
+process and false of the row anyone else would read. Fixed with
+`Store.RecordProvisioning` (lease-guarded, mirrors `AppendStep`), called from
+`Provision` when a caller passes a store — proven with a real Postgres
+integration test, and mutation-verified (removing the call sends the test
+red; restoring it turns it green again). **A credentialed clone URL would
+have leaked into the workspace.** git persists whatever URL it was given
+verbatim into `.git/config` regardless of transport — verified directly
+against this host's git using a `file://` remote carrying fake userinfo,
+which clones successfully while ignoring the credentials and still recording
+them. `Provision` now runs `git remote set-url origin` with the password
+component stripped (`stripCredentials`) immediately after checkout, tested
+the same way rather than asserted from reading the diff, and also
+mutation-verified. Smaller fixes from the same review: `DROP DATABASE IF
+EXISTS` for `Teardown` idempotency, `AuditResidue` now distinguishes a real
+stat error from "gone" instead of reading either as clean, `replaceDBName`
+rewritten on `net/url` (the manual string-split mishandled a password
+containing `/` and any non-URL DSN form), and `EnforceBudget` no longer masks
+its own error when the run is already terminal.
+
+Two things the review surfaced are real gaps this PR does **not** close, and
+they are filed rather than absorbed: the worker's ephemeral database
+authenticates as the *same* Postgres role that created it (only the database
+name changes) and is never migrated, so a gate needing schema finds none —
+[N187](https://github.com/dmytro-ch21/formspan/issues/603). And "no
+production secret is readable from a worker" is true of the environment and
+the clone, not of the process — an unsandboxed worker can still read any
+path the host user can reach (its own `HOME`, the primary checkout) by
+absolute path, which is a structural property of Phase 2's design (env
+allowlist, not a container) rather than a bug in this code —
+[N188](https://github.com/dmytro-ch21/formspan/issues/604), marked high
+priority since it is the actual security boundary for a system executing
+AI-generated code changes.
+
+A correction, not a finding: this entry originally reported "no CI job builds
+or tests `engine/` at all" as a third gap, filed as N189/#605. That was
+**wrong**, and worth recording so the mistake doesn't get repeated. A `grep`
+of `.github/workflows/ci.yml` in this session read a stale copy of the file
+after an unnoticed shell working-directory reset, and its line numbers didn't
+match — the tell that something was off. `git log -S"name: Engine (gofmt"
+-- .github/workflows/ci.yml` settles it: the `Backend (Go)` job has carried
+an `Engine (gofmt, vet, build, test)` step since **N137/#592**, the very
+first commit that created the `engine/` module, using that job's Postgres
+service via the job-level `TEST_DATABASE_URL` — present continuously through
+every PR in this epic, including this one's base. N189 was retracted and
+closed as not planned rather than left open against a gap that never
+existed.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

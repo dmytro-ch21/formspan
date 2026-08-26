@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -395,5 +396,60 @@ func TestRecordGatesWritesOneDistinguishableStepPerGate(t *testing.T) {
 	// A dispossessed engine cannot write gate history.
 	if err := store.RecordGates(ctx, run.ID, "engine-x", outcomes[:1]); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("non-owner RecordGates: %v, want ErrLeaseLost", err)
+	}
+}
+
+func TestAddArtifactIsLeaseGuarded(t *testing.T) {
+	store, pool := newTestStore(t)
+	ctx := context.Background()
+	run, err := store.Claim(ctx, 1100, "engine-a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddArtifact(ctx, run.ID, "engine-a", "decision-log", "/artifacts/run-1/decisions.jsonl"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddArtifact(ctx, run.ID, "engine-x", "sneak", "x"); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("non-owner artifact write: %v, want ErrLeaseLost", err)
+	}
+	var kind, ref string
+	if err := pool.QueryRow(ctx,
+		`SELECT kind, ref FROM agent_artifacts WHERE run_id = $1`, run.ID).Scan(&kind, &ref); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "decision-log" || !strings.Contains(ref, "decisions.jsonl") {
+		t.Fatalf("artifact row wrong: %s %s", kind, ref)
+	}
+}
+
+func TestRecordProvisioningPersistsBaseSHAAndBranch(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+	run, err := store.Claim(ctx, 1141, "engine-a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.BaseSHA != "" || run.Branch != "" {
+		t.Fatalf("fresh claim already has provisioning fields: %+v", run)
+	}
+
+	if err := store.RecordProvisioning(ctx, run.ID, "engine-a", "abc123def456", "agent/1141-worker-runner"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.Get(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BaseSHA != "abc123def456" {
+		t.Fatalf("base_sha = %q, want the recorded SHA", got.BaseSHA)
+	}
+	if got.Branch != "agent/1141-worker-runner" {
+		t.Fatalf("branch = %q, want the recorded branch", got.Branch)
+	}
+
+	// A non-owner cannot backdate a run it no longer holds the lease on.
+	if err := store.RecordProvisioning(ctx, run.ID, "engine-x", "sneak", "sneak"); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("non-owner RecordProvisioning: %v, want ErrLeaseLost", err)
 	}
 }
