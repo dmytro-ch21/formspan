@@ -4,6 +4,7 @@ import { clearTelemetryForSignOut, installTelemetry } from '@/lib/telemetryClien
 import { initSounds } from '@/lib/sounds';
 import { initVoice } from '@/lib/voice';
 import { clearSessionToken } from '@/lib/session';
+import { useResumeSignOutGuard } from '@/lib/authResume';
 
 import { AccentProvider, useAccent } from '@/lib/AccentProvider';
 import { ModulesProvider } from '@/lib/ModulesProvider';
@@ -125,12 +126,21 @@ export default function RootLayout() {
 const AUTH_ROUTES = ['sign-in', 'sign-up', 'forgot-password'];
 
 function RootLayoutNav() {
-  const { isLoaded, isSignedIn, userId } = useAuth();
+  const { isLoaded, isSignedIn, userId, getToken: clerkGetToken } = useAuth();
   const { signUp } = useSignUp();
   const getToken = useAuthToken();
   const segments = useSegments();
   const router = useRouter();
   const [splashDone, setSplashDone] = useState(false);
+
+  // N190 (#607) — see lib/authResume.ts for the full account. `isSignedIn`
+  // reading false the instant the phone comes back from a lock is not
+  // necessarily a real sign-out: Clerk's RN SDK never refreshes anything in
+  // the background, and the first read after resume can race a not-yet-
+  // reconnected radio. `signedOutConfirmed` is the guard's real signal below
+  // — `isSignedIn` itself is untouched everywhere else (the "signed in on an
+  // auth screen" branch still reacts instantly, as it always has).
+  const signedOutConfirmed = useResumeSignOutGuard(isLoaded, isSignedIn, clerkGetToken);
 
   // A sign-up that got as far as "account created, email not yet verified" and
   // was then interrupted — a killed app, a lost connection. Clerk keeps it on
@@ -234,22 +244,26 @@ function RootLayoutNav() {
     // silently, one frame after it rendered. Every new auth screen belongs in
     // AUTH_ROUTES; that is the whole reason it's a named constant next to the
     // routes themselves rather than an inline `||` chain that grows.
-    // Drop the brokered token the moment Clerk says there is no session —
-    // a remote sign-out, a revoked session, an expired one. The Settings
-    // button is NOT the only way out of a session, and the token is persisted
-    // in the keychain, so relying on that button alone left the next athlete
-    // on a shared device authenticating as the previous one until the token
-    // expired. Keyed on the transition, so it runs once rather than on every
-    // navigation while signed out.
-    if (!isSignedIn) void clearSessionToken();
+    // Drop the brokered token once Clerk's "no session" reading is
+    // CONFIRMED — a remote sign-out, a revoked session, an expired one. The
+    // Settings button is NOT the only way out of a session, and the token is
+    // persisted in the keychain, so relying on that button alone left the
+    // next athlete on a shared device authenticating as the previous one
+    // until the token expired. Keyed on the transition, so it runs once
+    // rather than on every navigation while signed out.
+    //
+    // `signedOutConfirmed`, not `!isSignedIn`, is what gates BOTH of these —
+    // see lib/authResume.ts. The `isSignedIn` branch below it is untouched:
+    // becoming signed in is never something to hold back.
+    if (signedOutConfirmed) void clearSessionToken();
 
     const onAuthScreen = AUTH_ROUTES.includes(segments[0] as string);
-    if (!isSignedIn && !onAuthScreen) {
+    if (signedOutConfirmed && !onAuthScreen) {
       router.replace(hasPendingSignUp ? '/sign-up' : '/sign-in');
     } else if (isSignedIn && onAuthScreen) {
       router.replace('/');
     }
-  }, [isLoaded, isSignedIn, hasPendingSignUp, segments, router]);
+  }, [isLoaded, isSignedIn, signedOutConfirmed, hasPendingSignUp, segments, router]);
 
   // Hold the UI until Clerk resolves, so the first frame isn't the wrong screen
   // followed by a visible redirect. This used to `return null` outright; now the
