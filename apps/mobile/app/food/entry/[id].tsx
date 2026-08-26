@@ -130,13 +130,28 @@ export default function EditEntryScreen() {
   const save = async () => {
     if (!userId || saving) return;
     const n = parse(servings);
+    const effectiveServings = n > 0 ? n : entry.servings;
+    // This screen has no fields for the N52 label macros — it corrects the
+    // four figures the athlete can see, not the whole label. They are
+    // therefore never taken from `draft` (there is nothing there to take),
+    // but they must NOT be carried through UNSCALED from the original entry
+    // either: the common correction on this screen is changing `servings`,
+    // and `entry`'s own fields are its ORIGINAL per-log absolutes — sending
+    // them back untouched while `kcal`/`protein_g`/etc are rescaled to the
+    // new serving count would store an entry whose visible and hidden
+    // macros disagree about how much was eaten. `rescale` already scales
+    // all ten `Macros` fields from the entry's per-serving figures, null-
+    // preserving exactly as `fibre_g` is, so reading the hidden five off
+    // its result keeps them in step with the visible four without a second,
+    // parallel scaling rule to keep in sync by hand.
+    const rescaled = rescale(entry, effectiveServings);
     setSaving(true);
     try {
       await editEntry(userId, entry.id, {
         eaten_on: entry.eaten_on,
         meal,
         name: entry.name,
-        servings: n > 0 ? n : entry.servings,
+        servings: effectiveServings,
         serving_label: entry.serving_label,
         kcal: parse(draft.kcal),
         protein_g: parse(draft.protein_g),
@@ -145,17 +160,11 @@ export default function EditEntryScreen() {
         // Blank stays absent. Clearing the field is "I never recorded this",
         // which is not the same claim as zero grams of fibre.
         fibre_g: draft.fibre_g?.trim() ? parse(draft.fibre_g) : null,
-        // This screen has no fields for the N52 label macros — it corrects
-        // the four figures the athlete can see, not the whole label. Carried
-        // through from the entry as it was logged, so a routine calorie
-        // correction cannot silently blank a value nothing here offers to
-        // edit — the same `updateWithin` trap this repo has paid for three
-        // times on a different table.
-        saturated_fat_g: entry.saturated_fat_g,
-        sugar_g: entry.sugar_g,
-        added_sugar_g: entry.added_sugar_g,
-        sodium_mg: entry.sodium_mg,
-        cholesterol_mg: entry.cholesterol_mg,
+        saturated_fat_g: rescaled.saturated_fat_g,
+        sugar_g: rescaled.sugar_g,
+        added_sugar_g: rescaled.added_sugar_g,
+        sodium_mg: rescaled.sodium_mg,
+        cholesterol_mg: rescaled.cholesterol_mg,
         source_food_id: entry.source_food_id,
         notes: entry.notes,
       });

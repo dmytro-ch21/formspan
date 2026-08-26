@@ -144,10 +144,14 @@ export function FoodQuantity({
   // Reports on every change to the numbers themselves, never on a re-render
   // that leaves them the same — `onLog`/`busy` are read fresh inside the
   // callback the caller gets, so they are deliberately not in the dep list.
+  // `food` IS in the dep list, even though `add.tsx`'s only in-place swap
+  // (the partial search result upgrading to the full catalog fetch) carries
+  // identical per-100g figures either way: a future caller whose food's
+  // numbers genuinely change while mounted must not see a stale report.
   useEffect(() => {
     onQuantityChange?.({ grams: valid ? grams : 0, valid, macros });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grams, valid]);
+  }, [grams, valid, food]);
 
   return (
     <View style={styles.wrap}>
