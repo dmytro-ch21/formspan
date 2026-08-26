@@ -59,8 +59,15 @@ import type { Workout } from './workouts';
  * silently. Add the sequence guard then; `app/(tabs)/index.tsx`'s `planSeq` is
  * the shape to copy.
  */
-/** `unread` until a read settles; the reads never reset it back. */
-function useSource<T>(): [Source<T>, (v: T) => void, () => void] {
+/**
+ * `unread` until a read settles; the reads never reset it back.
+ *
+ * Exported because Today needs the identical discipline — see
+ * `lib/useTodayBoard.ts`. A second copy of these six lines is exactly how the
+ * "a refresh that fails must not retract an answer already on screen" rule
+ * below ends up true on one screen and not the other.
+ */
+export function useSource<T>(): [Source<T>, (v: T) => void, () => void] {
   const [source, setSource] = useState<Source<T>>({ state: 'unread' });
   const ready = useCallback((value: T) => setSource({ state: 'ready', value }), []);
   const failed = useCallback(() => {

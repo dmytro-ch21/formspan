@@ -6,6 +6,7 @@ import { Pressable, ScrollView, StyleSheet } from 'react-native';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { RecordsCard } from '@/components/RecordsCard';
 import { TrainingSummary } from '@/components/TrainingSummary';
+import { TrainingHistory } from '@/components/progress/TrainingHistory';
 import { ThisWeek } from '@/components/progress/ThisWeek';
 import { WhatChanged } from '@/components/progress/WhatChanged';
 import { Text, View } from '@/components/Themed';
@@ -355,6 +356,20 @@ export default function ProgressScreen() {
           {/* Brings its own section header and its own span control. */}
           <TrainingSummary getToken={getToken} units={units} />
           <RecordsCard records={recordsReading} names={names} units={units} />
+
+          {/*
+            The training calendar, rehomed from Today by N179 — which days were
+            planned, which were met, and the way into a past session by date.
+            `TrainingSummary` above says WHICH DAYS; this says which days were
+            asked for. It reads local SQLite, so it is also the block that still
+            answers when the summary above cannot reach the network.
+
+            Deliberately the ONLY one of Today's three analytical blocks that
+            landed here: `WeekReview` is already drawn by `ThisWeek`, and
+            `TrendStrip`'s weekly bars are already drawn by `TrainingSummary`.
+            See the component's own note.
+          */}
+          <TrainingHistory />
 
           {/*
             The position map, moved off You.

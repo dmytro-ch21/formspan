@@ -119,7 +119,7 @@ export const RECENT_LIMIT = 3;
  * different one from *"there is nothing"*. Ranking unread first would let a
  * permanent failure sit forever behind a spinner.
  */
-function both<A, B, T>(a: Source<A>, b: Source<B>, value: (a: A, b: B) => T): Source<T> {
+export function both<A, B, T>(a: Source<A>, b: Source<B>, value: (a: A, b: B) => T): Source<T> {
   if (a.state === 'unavailable' || b.state === 'unavailable') return { state: 'unavailable' };
   if (a.state === 'unread' || b.state === 'unread') return { state: 'unread' };
   return { state: 'ready', value: value(a.value, b.value) };
