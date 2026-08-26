@@ -58,3 +58,13 @@ evals/bjj-dictation/pending/
 # The dev engine's shadow-mode decision log (engine/cmd/devengine) — an
 # append-only local observation record, never repo content.
 devengine-decisions.jsonl
+
+# Tool-installed skill packs (e.g. `npx skills add clerk/skills`) — local dev
+# tooling, not application code. Scoped narrowly: .claude/skills/* holds both
+# this repo's own tracked, load-bearing skills (vola-*, new-module, pre-merge
+# — the reviewers and ticket-manager depend on these staying versioned) and
+# whatever a session installs ad hoc. Never blanket-ignore .claude/ or
+# .claude/skills/ itself — only the specific tool-installed names. #626.
+.agents/
+.claude/skills/clerk*
+skills-lock.json
