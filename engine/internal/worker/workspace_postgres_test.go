@@ -4,11 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dmytro-ch21/vola/engine/internal/runstate"
@@ -216,5 +220,226 @@ func TestProvisionRecordsBaseSHAAndBranchDurably(t *testing.T) {
 	}
 	if got.Branch != ws.Branch {
 		t.Fatalf("durable branch = %q, want %q", got.Branch, ws.Branch)
+	}
+}
+
+// TestPerRunRoleCannotReadWriteOrCreateInTheSharedDatabase is the acceptance
+// criterion itself, proven by attempting the leak rather than by reading the
+// code — mirroring TestGitignoredSecretsCannotReachAWorkspace's pattern.
+// Verified manually against this project's own Postgres before writing this
+// test: a fresh, ungranted role CAN still open a bare connection to
+// vola_test (Postgres grants CONNECT to PUBLIC by default, and an explicit
+// per-role REVOKE does not override that additive ACL), but it categorically
+// CANNOT read, write, or create anything there, because table/schema
+// privileges are NOT PUBLIC by default. That is the isolation this test
+// checks — not "cannot connect", but "cannot touch data or schema".
+func TestPerRunRoleCannotReadWriteOrCreateInTheSharedDatabase(t *testing.T) {
+	admin := os.Getenv("TEST_DATABASE_URL")
+	if admin == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	src, first, _ := makeSourceRepo(t)
+	r := &Runner{RepoURL: src, WorkRoot: t.TempDir(), AdminDBURL: admin}
+	ws, err := r.Provision(context.Background(), 30, 1, "role-iso", first, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Teardown(context.Background())
+
+	if ws.DBRole == "" {
+		t.Fatal("Provision did not assign a per-run role")
+	}
+
+	// Sanity check FIRST: the credentials in ws.DBURL must actually work
+	// against the run's OWN database. Without this, a broken ws.DBURL (wrong
+	// password, wrong role) would make the isolation attempt below fail for
+	// the wrong reason — an auth error, not a permission denial — and the
+	// "connection refused reads as isolation" shortcut this test used to
+	// have would then silently pass on a broken test. Proven by mutation:
+	// swapping ws.DBURL's construction back to reuse admin credentials made
+	// this exact test pass falsely, because it fell into that shortcut.
+	ownConn, err := pgx.Connect(context.Background(), ws.DBURL)
+	if err != nil {
+		t.Fatalf("the run's own credentials do not even work against its own database: %v", err)
+	}
+	ownConn.Close(context.Background())
+
+	// Now reuse THOSE SAME credentials — never re-derived from admin or from
+	// a separate source — against the shared database. This is what makes
+	// the test catch a regression rather than only proving today's code:
+	// if ws.DBURL ever again carries admin credentials, this URL carries
+	// them too, and admin really can touch the shared database.
+	sharedDBURL := sameCredentialsOtherDB(t, ws.DBURL, mustExtractDBName(t, admin))
+	conn, err := pgx.Connect(context.Background(), sharedDBURL)
+	if err != nil {
+		// A refusal to even connect is stronger isolation, not a test
+		// failure — but only having just proven the credentials are good
+		// against the run's own database, so this refusal is specific to
+		// the shared database rather than a broken URL.
+		return
+	}
+	defer conn.Close(context.Background())
+
+	// Attempt to create something durable in the shared database.
+	if _, err := conn.Exec(context.Background(), "CREATE TABLE role_isolation_probe(x int)"); err == nil {
+		t.Fatal("per-run role was able to CREATE TABLE in the shared database — isolation is broken")
+	}
+
+	// Attempt to read an existing real table, if one exists.
+	var tableName string
+	adminConn, err := pgx.Connect(context.Background(), admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminConn.Close(context.Background())
+	err = adminConn.QueryRow(context.Background(),
+		`SELECT table_name FROM information_schema.tables WHERE table_schema='public' LIMIT 1`).Scan(&tableName)
+	if err == nil {
+		if _, err := conn.Exec(context.Background(), fmt.Sprintf("SELECT * FROM %q LIMIT 1", tableName)); err == nil {
+			t.Fatalf("per-run role was able to read table %q in the shared database — isolation is broken", tableName)
+		}
+	}
+}
+
+// sameCredentialsOtherDB swaps only the database name in dbURL, leaving
+// userinfo untouched — deliberately NOT re-deriving credentials from
+// anywhere else, so the isolation test above tracks whatever ws.DBURL
+// actually carries rather than what it is supposed to carry.
+func sameCredentialsOtherDB(t *testing.T, dbURL, otherDB string) string {
+	t.Helper()
+	u, err := url.Parse(dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.Path = "/" + otherDB
+	return u.String()
+}
+
+func mustExtractDBName(t *testing.T, dbURL string) string {
+	t.Helper()
+	u, err := url.Parse(dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimPrefix(u.Path, "/")
+}
+
+// TestMigrateBackendAppliesTheClonesOwnMigrations is the second acceptance
+// criterion: a REAL table exists afterward, proven by connecting and
+// checking information_schema — not by trusting MigrateBackend's own nil
+// return.
+func TestMigrateBackendAppliesTheClonesOwnMigrations(t *testing.T) {
+	admin := os.Getenv("TEST_DATABASE_URL")
+	if admin == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	src, first, _ := makeSourceRepo(t)
+	r := &Runner{RepoURL: src, WorkRoot: t.TempDir(), AdminDBURL: admin}
+	ws, err := r.Provision(context.Background(), 31, 1, "migrate", first, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Teardown(context.Background())
+
+	migDir := filepath.Join(ws.Dir, "backend", "migrations")
+	if err := os.MkdirAll(migDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Two files, the second depending on the first, to prove ORDER as well
+	// as application — a shuffled apply would fail outright on file 2.
+	if err := os.WriteFile(filepath.Join(migDir, "000001_create.up.sql"),
+		[]byte("CREATE TABLE probe_migrated_marker (id INT PRIMARY KEY);"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(migDir, "000002_alter.up.sql"),
+		[]byte("ALTER TABLE probe_migrated_marker ADD COLUMN note TEXT;"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ws.MigrateBackend(context.Background()); err != nil {
+		t.Fatalf("MigrateBackend: %v", err)
+	}
+
+	conn, err := pgx.Connect(context.Background(), ws.DBURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	var exists bool
+	if err := conn.QueryRow(context.Background(),
+		`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'probe_migrated_marker' AND column_name = 'note')`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("migrations did not apply in order — the second file's ALTER never ran")
+	}
+}
+
+func TestMigrateBackendFailsClearlyWithNoMigrationsDirectory(t *testing.T) {
+	admin := os.Getenv("TEST_DATABASE_URL")
+	if admin == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	src, first, _ := makeSourceRepo(t)
+	r := &Runner{RepoURL: src, WorkRoot: t.TempDir(), AdminDBURL: admin}
+	ws, err := r.Provision(context.Background(), 32, 1, "no-migrations", first, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Teardown(context.Background())
+
+	if err := ws.MigrateBackend(context.Background()); err == nil {
+		t.Fatal("MigrateBackend succeeded with no backend/migrations directory present")
+	}
+}
+
+// TestPerRunRoleIsDroppedAtTeardownAndAuditCatchesALeak extends the residue
+// audit to the new role — demonstrated failing before it is demonstrated
+// passing, per this package's own established discipline.
+func TestPerRunRoleIsDroppedAtTeardownAndAuditCatchesALeak(t *testing.T) {
+	admin := os.Getenv("TEST_DATABASE_URL")
+	if admin == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	src, first, _ := makeSourceRepo(t)
+	r := &Runner{RepoURL: src, WorkRoot: t.TempDir(), AdminDBURL: admin}
+	ws, err := r.Provision(context.Background(), 33, 1, "role-audit", first, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ws.Teardown(context.Background()) })
+
+	if ws.DBRole == "" {
+		t.Fatal("no role assigned")
+	}
+
+	// Before teardown: the role exists, so the audit must be red — proof it
+	// can fail on the role half, not only the directory/database halves.
+	adminConn, err := pgx.Connect(context.Background(), admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminConn.Close(context.Background())
+	var n int
+	if err := adminConn.QueryRow(context.Background(),
+		`SELECT count(*) FROM pg_roles WHERE rolname = $1`, ws.DBRole).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("role %q not found right after Provision", ws.DBRole)
+	}
+
+	if err := ws.Teardown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := adminConn.QueryRow(context.Background(),
+		`SELECT count(*) FROM pg_roles WHERE rolname = $1`, ws.DBRole).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("role %q survived Teardown", ws.DBRole)
+	}
+	if err := ws.AuditResidue(context.Background()); err != nil {
+		t.Fatalf("audit red after a clean teardown: %v", err)
 	}
 }

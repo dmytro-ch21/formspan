@@ -18,6 +18,20 @@
 //     Provision returns, so the token git would otherwise persist verbatim
 //     into .git/config never reaches the workspace either.
 //
+// The ephemeral database is owned by a per-run, non-superuser Postgres role
+// created and dropped alongside it (N187/#603) — not the admin role with
+// only the database name swapped. Verified empirically against this
+// project's own Postgres image before writing this: a role with zero
+// explicit grants CAN still open a bare connection to vola_test (Postgres
+// grants CONNECT to PUBLIC by default, and revoking it from one named role
+// does not override that — ACL checks are additive, not subtractive), but
+// it CANNOT read, write, or create anything there (table/schema privileges
+// are NOT PUBLIC by default). So the honest claim is: a worker cannot touch
+// any pre-existing database's data or schema, but a per-role connect-only
+// probe against the shared server is not fully closable without revoking
+// PUBLIC's server-wide grant — invasive to a resource other sessions
+// constantly use, and out of scope here.
+//
 // What this package does NOT provide: a process sandbox. Isolation here is
 // an explicit environment allowlist plus git-clone provenance, not a
 // container or chroot — a worker process runs as this host's own user and
@@ -41,6 +55,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,15 +72,10 @@ type Runner struct {
 	// WorkRoot holds workspaces and retained artifacts. Workspaces are
 	// removed at teardown; ArtifactsDir survives.
 	WorkRoot string
-	// AdminDBURL is a Postgres SERVER connection used to CREATE and DROP the
-	// run's ephemeral database. The worker is handed a DERIVED URL with only
-	// the database name swapped (see replaceDBName) — same host, same role,
-	// same password. That is a known limitation, not a full grant: the
-	// worker cannot reach vola_test or staging by NAME (they're different
-	// databases), but it authenticates as the same Postgres role that can,
-	// on any server where that role has broader rights than "connect to my
-	// own database". Real isolation needs a per-run, least-privilege role,
-	// which this phase does not create.
+	// AdminDBURL is a Postgres SERVER connection used to CREATE the run's
+	// ephemeral database AND role, and to DROP both afterward. The worker
+	// itself never receives this URL or its credentials — it is handed a
+	// connection string for the per-run role instead (see Workspace.DBURL).
 	AdminDBURL string
 }
 
@@ -77,7 +87,8 @@ type Workspace struct {
 	Branch  string
 	BaseSHA string // recorded at provision; the clone is checked out AT it
 	DBName  string
-	DBURL   string
+	DBRole  string // the per-run Postgres role that owns DBName; dropped at Teardown
+	DBURL   string // connects as DBRole, never as the admin role
 	runner  *Runner
 	dropped bool
 }
@@ -141,13 +152,39 @@ func (r *Runner) Provision(ctx context.Context, runID int64, issue int, slug, ba
 			return nil, fmt.Errorf("provision: admin connect: %w", err)
 		}
 		defer conn.Close(ctx)
-		// The name is generated above from a fixed prefix + integers + hex,
-		// so it cannot carry injection; quoted anyway.
+
+		ws.DBRole = fmt.Sprintf("engine_role_%d_%s", runID, hex.EncodeToString(raw[:]))
+		password, err := randomHex(16)
+		if err != nil {
+			os.RemoveAll(ws.Dir)
+			return nil, fmt.Errorf("provision: generate role password: %w", err)
+		}
+		// NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOREPLICATION: a run's role can
+		// do everything inside the one database it owns and nothing that
+		// reaches outside it. The role name and password are both generated
+		// above from fixed prefixes + hex, so neither can carry injection;
+		// quoted anyway.
+		if _, err := conn.Exec(ctx, fmt.Sprintf(
+			`CREATE ROLE %q LOGIN PASSWORD %s NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION`,
+			ws.DBRole, quoteLiteral(password))); err != nil {
+			os.RemoveAll(ws.Dir)
+			return nil, fmt.Errorf("provision: create role: %w", err)
+		}
 		if _, err := conn.Exec(ctx, fmt.Sprintf(`CREATE DATABASE %q`, ws.DBName)); err != nil {
 			os.RemoveAll(ws.Dir)
 			return nil, fmt.Errorf("provision: create db: %w", err)
 		}
-		ws.DBURL = replaceDBName(r.AdminDBURL, ws.DBName)
+		// Ownership, not a grant: the role gets full control of its OWN
+		// database (needed to apply migrations) and, by omission, nothing
+		// anywhere else — a fresh role has no table/schema privileges on any
+		// pre-existing database by default (only CONNECT, which PUBLIC
+		// already grants and which an explicit per-role REVOKE cannot
+		// override; see the package doc).
+		if _, err := conn.Exec(ctx, fmt.Sprintf(`ALTER DATABASE %q OWNER TO %q`, ws.DBName, ws.DBRole)); err != nil {
+			os.RemoveAll(ws.Dir)
+			return nil, fmt.Errorf("provision: assign db ownership: %w", err)
+		}
+		ws.DBURL = roleConnectionURL(r.AdminDBURL, ws.DBRole, password, ws.DBName)
 	}
 
 	if store != nil {
@@ -251,6 +288,67 @@ func EnforceBudget(ctx context.Context, store *runstate.Store, runID int64, owne
 	return err
 }
 
+// MigrateBackend applies the product's own backend migrations — the exact
+// .up.sql files checked out inside THIS workspace's clone, at the recorded
+// base SHA — against the run's ephemeral database, so a gate that needs
+// schema (go test against the backend, a functional test) has one. Applied
+// directly via pgx rather than by shelling out to backend/cmd/migrate: that
+// tool's own safety guard already treats our database as local (same
+// host/port as the admin connection, only the name and role differ) and
+// would apply cleanly, but reaching a second Go module's build from inside
+// this one buys no isolation — the .sql files are the source of truth
+// either way, and applying them directly means no caller needs `go`
+// resolvable on PATH just to hand a gate a schema.
+//
+// Uses the SIMPLE query protocol, not the default extended/prepared-
+// statement one: a migration file is one or more full statements, including
+// dollar-quoted function bodies, and the extended protocol refuses more than
+// one command per Parse/Bind cycle.
+func (ws *Workspace) MigrateBackend(ctx context.Context) error {
+	if ws.DBURL == "" {
+		return fmt.Errorf("migrate: no ephemeral database provisioned for this workspace")
+	}
+	dir := filepath.Join(ws.Dir, "backend", "migrations")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("migrate: read migrations dir: %w", err)
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".up.sql") {
+			files = append(files, e.Name())
+		}
+	}
+	// NNNNNN_ prefixes are fixed-width, so lexical order is numeric order —
+	// the same property backend/cmd/migrate itself relies on.
+	sort.Strings(files)
+	if len(files) == 0 {
+		return fmt.Errorf("migrate: no .up.sql files found in %s", dir)
+	}
+
+	cfg, err := pgx.ParseConfig(ws.DBURL)
+	if err != nil {
+		return fmt.Errorf("migrate: parse database url: %w", err)
+	}
+	cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("migrate: connect: %w", err)
+	}
+	defer conn.Close(ctx)
+
+	for _, name := range files {
+		content, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("migrate: read %s: %w", name, err)
+		}
+		if _, err := conn.Exec(ctx, string(content)); err != nil {
+			return fmt.Errorf("migrate: apply %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // RetainArtifact copies one file out of the workspace into the survivor
 // directory (WorkRoot/artifacts/run-<id>/), so teardown can be total without
 // losing the run's evidence. Returns the retained path — the `ref` a caller
@@ -268,9 +366,10 @@ func (ws *Workspace) RetainArtifact(name string, content []byte) (string, error)
 }
 
 // Teardown destroys the environment: workspace directory removed, ephemeral
-// database dropped (WITH FORCE, so a leaked connection cannot wedge it).
-// Artifacts retained via RetainArtifact survive by construction — they live
-// outside the workspace.
+// database dropped (WITH FORCE, so a leaked connection cannot wedge it),
+// then the per-run role dropped — in that order, since a role that still
+// owns a database cannot be dropped. Artifacts retained via RetainArtifact
+// survive by construction — they live outside the workspace.
 func (ws *Workspace) Teardown(ctx context.Context) error {
 	var firstErr error
 	if err := os.RemoveAll(ws.Dir); err != nil {
@@ -285,6 +384,10 @@ func (ws *Workspace) Teardown(ctx context.Context) error {
 		} else {
 			defer conn.Close(ctx)
 			if _, err := conn.Exec(ctx, fmt.Sprintf(`DROP DATABASE IF EXISTS %q WITH (FORCE)`, ws.DBName)); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+			} else if _, err := conn.Exec(ctx, fmt.Sprintf(`DROP ROLE IF EXISTS %q`, ws.DBRole)); err != nil {
 				if firstErr == nil {
 					firstErr = err
 				}
@@ -325,6 +428,16 @@ func (ws *Workspace) AuditResidue(ctx context.Context) error {
 		if n != 0 {
 			residue = append(residue, "ephemeral database still exists: "+ws.DBName)
 		}
+		if ws.DBRole != "" {
+			var roleCount int
+			if err := conn.QueryRow(ctx,
+				`SELECT count(*) FROM pg_roles WHERE rolname = $1`, ws.DBRole).Scan(&roleCount); err != nil {
+				return fmt.Errorf("audit: %w", err)
+			}
+			if roleCount != 0 {
+				residue = append(residue, "per-run role still exists: "+ws.DBRole)
+			}
+		}
 	}
 	if len(residue) > 0 {
 		return fmt.Errorf("residue after teardown: %s", strings.Join(residue, "; "))
@@ -344,21 +457,42 @@ func runGit(ctx context.Context, dir string, args ...string) error {
 	return nil
 }
 
-// replaceDBName swaps the database (path) segment of a Postgres URL,
-// leaving userinfo, host, port and query parameters untouched. Parsed with
-// net/url rather than string-split so it doesn't mis-handle userinfo
-// containing "@" or unescaped "/", IPv6 hosts, or a URL with no path —
-// shapes a naive split got wrong. Requires AdminDBURL to be genuine
-// postgres://... URL syntax; a key=value DSN is out of scope.
-func replaceDBName(rawURL, db string) string {
-	u, err := url.Parse(rawURL)
+// roleConnectionURL builds the run's own connection string: the admin URL's
+// host, port and query parameters, but authenticating as the per-run role
+// and pointed at the per-run database — never the admin role's credentials.
+// Parsed with net/url rather than string-split so it doesn't mis-handle
+// userinfo containing "@" or unescaped "/", IPv6 hosts, or a URL with no
+// path. Requires AdminDBURL to be genuine postgres://... URL syntax; a
+// key=value DSN is out of scope.
+func roleConnectionURL(adminURL, role, password, db string) string {
+	u, err := url.Parse(adminURL)
 	if err != nil {
 		// Should not happen for the postgres:// URLs this project uses. No
 		// caller checks this return for an error, so there is nothing safer
 		// to do than hand back the input unchanged — callers should not be
 		// building an AdminDBURL that fails to parse in the first place.
-		return rawURL
+		return adminURL
 	}
+	u.User = url.UserPassword(role, password)
 	u.Path = "/" + db
 	return u.String()
+}
+
+// quoteLiteral renders s as a single-quoted SQL string literal, doubling any
+// embedded quote. The passwords this guards are always our own generated hex
+// (never containing a quote), but the escaping is here so that remains true
+// by inspection rather than by convention.
+func quoteLiteral(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// randomHex returns n random bytes, hex-encoded — used for the per-run
+// role's password, which must never contain characters a connection URL or
+// a SQL literal would need to escape.
+func randomHex(n int) (string, error) {
+	raw := make([]byte, n)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
 }
