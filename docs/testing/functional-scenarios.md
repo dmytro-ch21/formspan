@@ -12414,8 +12414,11 @@ a failure names the athlete-visible defect rather than the file.
   still work.
 - Press back out of a deep-linked Train screen. It must not strand the athlete on
   a tab-less screen.
-- A stale back-stack entry — be on Train, background the app, return — still
-  works. `href: null` keeps the route mounted; omitting it would not.
+- A stale back-stack entry pointing at Train — background the app on it, return
+  — lands on Today rather than erroring. **N182 changed what this checks**: you
+  can no longer *be* on Train, so the state to reproduce is a link or a
+  back-stack entry that still names it. `href: null` keeps the route mounted;
+  omitting it would not.
 - **`train.tsx` still exists.** If it has been deleted to tidy the diff, that is
   the failure — the route has to keep resolving. N182 replaced its BODY with a
   redirect; it did not remove the file, and it must not be removed later either.

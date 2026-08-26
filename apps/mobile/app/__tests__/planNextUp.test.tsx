@@ -156,10 +156,14 @@ it('leaves a day inside the visible week to the planner that already draws it', 
 
   render(<WorkoutsScreen />);
 
-  // The Templates heading proves the plan header has rendered, so the absence
-  // below is a decision and not an assertion that ran before the first paint.
-  expect(await screen.findByText('TEMPLATES')).toBeTruthy();
-  await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
+  // Sequenced on a POSITIVE artifact of the same resolved read, not on the
+  // Templates heading. That heading renders on first paint whatever the reads
+  // do, so waiting for it proved only that the screen mounted — the absence
+  // below would then have been resting on microtask ordering. `WeekPlanner`
+  // drawing the planned day is proof that this exact `listPlannedBetween`
+  // answer has landed and been rendered, which is what makes the absence a
+  // decision. Raised in review.
+  expect(await screen.findByText('BJJ session')).toBeTruthy();
   expect(screen.queryByTestId('plan-later')).toBeNull();
 });
 

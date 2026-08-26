@@ -126,6 +126,17 @@ export default function WorkoutsScreen() {
   // `planned_sessions` table `WeekPlanner` above reads. Only `later` is
   // rendered here; see `NextPlannedBlock` for why the other three fields are
   // not this screen's business.
+  //
+  // **The cost is named rather than hidden**, because review counted it: this
+  // adds a `listLocalSessions(userId, 30)` that only feeds `resume`/`today`/
+  // `recent`, none of which this screen draws, plus a second
+  // `listPlannedBetween` (a different window from the planner's) and a third
+  // `cachedWorkouts`. Accepted for now on two grounds — they are local SQLite
+  // reads over small tables on expo-sqlite's serial queue, and the ticket's
+  // criterion is *moved, not reimplemented*, which a bespoke later-only read
+  // would break. If Plan ever grows a heavier read, this is the term that
+  // compounds, and a `useTrainBoard` variant taking the fields it is asked for
+  // is the fix.
   const board = useTrainBoard(userId ?? null, modules, now);
 
   // Unconditional across scopes even though only `mine` renders the pill. One
@@ -634,13 +645,24 @@ export default function WorkoutsScreen() {
  * and a session booked on the 5th saw an empty planner and no hint the plan
  * existed. That gap is what this block fills, and it is the only thing it says.
  *
+ * **It is the soonest plan OVERALL, not the soonest plan beyond the week**, and
+ * the difference is worth knowing before reading the heading as a promise.
+ * `lib/trainBoard.ts` picks the first day strictly after today; this block then
+ * either shows it or defers. So an athlete with a session tomorrow *and* one on
+ * the 5th sees nothing here — tomorrow is in the week above, and that is the
+ * row answering "what is next". Widening it to "the soonest one outside the
+ * week" would mean drawing a second forward answer beside the planner's, which
+ * is the duplicate this block exists to avoid.
+ *
  * The boundary is computed from `now` rather than from the planner's anchor.
  * That is deliberate: the anchor is `WeekPlanner`'s private state, and lifting
  * it out to make this pixel-perfect would couple an 827-line component to a
- * three-line one for a case the athlete has to deliberately navigate into. Page
- * the planner two weeks forward and this row may briefly name a day now visible
- * above it — a transient duplicate in a state the athlete chose, against a
- * permanent one in the state every visit starts in.
+ * three-line one for a case the athlete has to deliberately navigate into. Both
+ * directions drift, and both were raised in review: page the planner FORWARD
+ * and this row may briefly name a day now visible above it; page it BACK and a
+ * plan later this week is on screen nowhere. Transient duplicates and
+ * transient gaps, in states the athlete navigated to on purpose, against
+ * correctness in the state every visit starts in.
  *
  * ## Three states, and the fourth that is not a state
  *
@@ -709,6 +731,13 @@ function NextPlannedBlock({
           `text`, not `button`, so a screen reader is not told it acts. */}
       <View
         style={styles.nextRow}
+        // `accessible` is what makes the two below fire at all. Without it iOS
+        // does not group the row, so VoiceOver reads the title and the date as
+        // separate elements and this label — the one sentence that says what
+        // the row IS — is never announced, while the role is inert. Raised in
+        // review; a label that does not fire is worse than no label, because it
+        // reads as covered.
+        accessible
         accessibilityRole="text"
         accessibilityLabel={`Next planned: ${title}, ${shortDate(p.day)}`}
         testID="plan-later"

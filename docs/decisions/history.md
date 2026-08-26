@@ -42599,6 +42599,41 @@ file:
 Baseline green in the same session, before and after: 179 suites, 2838 tests.
 Lint at 53 warnings, unchanged, against a ratchet of 53.
 
+### The criterion the amendment never touched, and the test that did not exist
+
+#587's **original** body asked for something the amendment left standing: *"a
+test should assert that logging a session's set does not change the template it
+came from"*, called out there as "a correctness requirement, not just a UX one".
+There was no such test in the repo. `lib/__tests__/templateNotMutated.test.ts`
+is it — against a real migrated database rather than a mock, because the claim
+is about which ROWS changed and an array mock can only report which functions
+were called.
+
+**And it was mutation-checked, because a guard like this is the archetype of a
+test that is true by construction.** Nothing on the write path touches
+`workout_cache` today, so all three assertions pass whether or not the guard
+means anything. The mutation is the plausible feature: `saveLocalSets` writing
+the achieved weights back onto the plan it came from. All three go red on it —
+the whole-row comparison, the target values, and the dirty flags — and green
+again on restore. The third matters on its own: a template flagged `dirty`
+without a value changing survives on this device and is overwritten on every
+other one at the next sync, which is the quiet half of that bug.
+
+### Review found five things and all five were taken
+
+Both reviewers returned no `[blocking]` findings. The suggestions acted on:
+`accessible` added to the new row (without it iOS does not group it, so the
+carefully worded label never fires — a label that does not fire is worse than
+none, because it reads as covered); the docstring now says `later` is the
+soonest plan **overall** rather than the soonest beyond the week, and records
+the backward-paging drift as well as the forward one; the unused
+`listLocalSessions` read is named as a cost rather than left implicit; the
+inside-the-week absence test is sequenced on a positive artifact of the *same*
+resolved read (`WeekPlanner` drawing the day) instead of on a heading that
+renders on first paint regardless; and the scenarios doc's "be on Train,
+background the app, return" line is reworded, since you can no longer be on
+Train.
+
 ### What this leaves open
 
 - **`Recent` is one screen's, and another branch is moving it.** N179 (in
