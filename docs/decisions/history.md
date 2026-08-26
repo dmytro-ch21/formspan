@@ -42654,6 +42654,38 @@ Train.
 - **The device check is owed.** A redirect rendered from a tab route is the kind
   of thing a test asserts structurally and a phone asserts visually.
 
+## 2026-08-26 — N181's own device pass finds the identity order it shipped wrong (#586)
+
+Five of six device checks on N181 (#586, `1e7b79e5`) confirmed good; the sixth
+found the belt card rendering ABOVE the athlete's name, not below it — the
+reverse of the ticket's own stated product role, *"who am I as an athlete"*
+with identity leading. A name is more identity than a rank is: "who am I"
+reads as a name first, a rank second, and the shipped order answered "what's
+my rank" before it answered "who am I". The user's words, from the annotated
+screenshot: *"I think its better to place the name on top."*
+
+**Fix is a JSX reorder inside `apps/mobile/app/(tabs)/you.tsx`, nothing else** —
+the name heading now renders before `BjjRankHeader`, matching the doc comment
+at the top of the file (also corrected) and the order diagram in N181's own
+history entry above, which already said "the belt masthead... the name" and
+was wrong in the same direction the code was.
+
+**The existing order assertion in `youScreen.test.tsx` could not have caught
+this, and that gap is closed rather than left.** `BjjRankHeader` was mocked
+`() => null` for the whole file, so no assertion built on testIDs could ever
+see where it rendered relative to anything else — and the two "order of the
+sections" tests only check the `you-section-*` labels against each other,
+none of which sit on the belt. The mock now renders a real element carrying
+the production component's own `testID="bjj-rank-header"`, and a new case
+asserts `you-section-identity` (the name, which is deliberately what carries
+that testID — see the comment above it) precedes `bjj-rank-header` in document
+order. Mutation-verified: reverting to belt-then-name turns the new case red
+with an assertion failure (not a compile error); restoring turns the whole
+file green again in the same session.
+
+No other row moved, no new component was built, and the two-question
+structure N181 established — identity, then People, then App — is unchanged.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

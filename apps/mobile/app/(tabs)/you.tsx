@@ -34,9 +34,11 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * and it is asserted in `app/__tests__/youScreen.test.tsx` on the
  * `you-section-*` testIDs in document order:
  *
- * 1. **Identity** (unlabelled — it is the masthead). The belt for a ranked
- *    grappler, the athlete's name, then the three facts the app reasons over:
- *    which sports are on, which training phase is live, and date of birth.
+ * 1. **Identity** (unlabelled — it is the masthead). The athlete's name leads,
+ *    then the belt for a ranked grappler, then the three facts the app
+ *    reasons over: which sports are on, which training phase is live, and
+ *    date of birth. (Shipped belt-first; moved above the belt after the N181
+ *    device pass caught it — see the identity block below.)
  *    `RoadmapSummary` and the Library row close it: what this athlete is
  *    LEARNING is part of who they are, which is the line N178 drew when it
  *    took "is it working" to Progress and left this behind.
@@ -282,21 +284,27 @@ export default function YouScreen() {
           </Text>
         ) : (
           <>
-            {/* The belt leads for a ranked grappler — see BjjRankHeader for
-                why it is a masthead rather than a card. It owns the no-rank
-                case too, as a single quiet row, so this is the only place the
-                standing is fetched. */}
-            {bjjEnabled && <BjjRankHeader getToken={getToken} />}
-
-            {/* The identity section's anchor for the order assertion, and the
-                athlete's own name is the right thing to anchor it on: it is the
-                one element of this section that renders for every account. */}
+            {/* The name leads (N181 device pass, #586) — the athlete's own
+                name is more identity than a rank is, and "who am I" has to
+                read as a name first, a rank second. It shipped belt-first
+                instead, which the user caught on a real screenshot: *"I think
+                its better to place the name on top."* This is also the
+                identity section's anchor for the order assertion below, and
+                the athlete's own name is the right thing to anchor it on: it
+                is the one element of this section that renders for every
+                account. */}
             <Text style={styles.name} testID="you-section-identity">
               {profile?.display_name || 'Add your name'}
             </Text>
             {!profile?.display_name && (
               <Text style={styles.muted}>Tap Edit profile to tell VOLA who you are.</Text>
             )}
+
+            {/* The belt follows the name for a ranked grappler — see
+                BjjRankHeader for why it is a masthead rather than a card. It
+                owns the no-rank case too, as a single quiet row, so this is
+                the only place the standing is fetched. */}
+            {bjjEnabled && <BjjRankHeader getToken={getToken} />}
 
             {/* `TrainingSummary` and `RecordsCard` USED to sit here, and they
                 moved to the Progress tab in N178 (#583) — moved, not copied,

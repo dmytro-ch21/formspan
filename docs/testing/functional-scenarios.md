@@ -12728,10 +12728,13 @@ grow a second copy of any of them.
 
 ### Happy path — You
 
-- Open You on an account with every module enabled. The belt masthead is first,
-  the athlete's name is directly under it, and the three facts the app reasons
-  over (Sports, Phase, Born) sit in one card beneath that. No chart, no
-  consistency grid and no records list appear anywhere on the screen.
+- Open You on an account with every module enabled. The athlete's name is
+  first, the belt masthead is directly under it for a ranked grappler, and the
+  three facts the app reasons over (Sports, Phase, Born) sit in one card
+  beneath that. No chart, no consistency grid and no records list appear
+  anywhere on the screen. (Shipped belt-then-name; a device pass caught the
+  order reversed and it was corrected — see the name-before-belt entry in
+  `docs/decisions/history.md`.)
 - The `People` label appears below the whole identity block, and `App` below
   that. Nothing above the name.
 - Tap `Sports` → the profile editor's sport toggles. Tap `Phase` → the phase
@@ -12794,11 +12797,17 @@ grow a second copy of any of them.
   either assertion alone is satisfied by a copy.
 - **A second `Sequences` entry point.** The Library block is the only one.
 - **A `Units` row coming back to You.** Settings owns units.
+- **The belt card rendering above the athlete's name.** It shipped that way
+  once — every existing order test still passed, because `BjjRankHeader`
+  carried no `you-section-*` testID and was mocked to render nothing at all.
+  The suite now pins name-before-belt directly (`youScreen.test.tsx`, "puts
+  the athlete's name above the belt card"), mutation-verified.
 
 - **NEEDS HUMAN EVIDENCE — a device pass on You and the Library.** The suite can
   assert document order and gate behaviour; it cannot see whether identity
-  actually reads as primary at the top of a real phone screen, whether the
-  identity card is legible at the largest accessibility text size, or whether
+  actually reads as primary at the top of a real phone screen — including that
+  the name now leads the belt card, not the reverse — whether the identity
+  card is legible at the largest accessibility text size, or whether
   `Your own chains` is findable in the Library's header stack (which is ~300pt
   before the first result on a 4.7" screen — see the open gap in
   `docs/decisions/history.md`).
