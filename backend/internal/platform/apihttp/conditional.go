@@ -338,6 +338,13 @@ func (c *conditionalWriter) flush() {
 // This exists because the test asserting that property built its own stack
 // and therefore could only ever pass: swapping the order in main.go left the
 // whole suite green. Assembly belongs somewhere a test can reach.
+//
+// DrainRequestBody must be OUTERMOST. Its work happens in a `defer`, and the
+// outermost middleware's defer runs last — so putting it here is what makes
+// the drain happen after every inner handler has finished with the response,
+// and, crucially, before `net/http` decides whether an unread body means the
+// connection has to be closed. Inside `Compress` it would still work today;
+// outermost it cannot be made not to by a future insertion.
 func Stack(next http.Handler) http.Handler {
-	return Compress(ConditionalGet(next))
+	return DrainRequestBody(Compress(ConditionalGet(next)))
 }

@@ -2086,6 +2086,48 @@ It previously read `GET /v1/activities` — a table with no writer — so it sho
   survive. Verified by inserting rows either side of the boundary.
 - A prune failure must not fail the deploy.
 
+### A refused AI request is findable afterwards (N92, #433)
+
+The property: **a rejection on a route that costs the athlete an answer must
+leave a row that outlives the afternoon.** It did not, and that is why #433 was
+reported three times and diagnosed twice from evidence that could not contain
+it — `health_events` skipped 4xx by design, and Railway's request log retains
+roughly eighteen minutes.
+
+- **A 400, 401, 413 or 429 on `/v1/nutrition/estimate`, `/v1/exercises/identify`
+  or `/v1/bjj/reflect/draft` appears in `health_events`** as `client_error` with
+  `source: api`, carrying the **status**. The status is the whole diagnosis: 429
+  is a spent allowance, 401 a credential, 400 the upload itself.
+- **An ordinary 4xx elsewhere still does not.** A 404 for a deleted session, a
+  401 for an expired token on a read — these stay out. The regression to watch
+  for is the health screen filling with routine client mistakes, which is how it
+  becomes something nobody opens.
+- **A refused request that was also slow files as a rejection, not as
+  `slow_request`.** An operator hunting latency filters `slow_request` out, so
+  the interesting row would hide in the pile it least belongs to.
+
+### An upload refused before it is read keeps its status (N92, #433)
+
+The property: **a client must receive the status it was sent, whatever the size
+of the body it was still uploading.** Measured against staging before the fix:
+an early-answered response on a body over **262144 bytes** was delivered as a
+connection reset, and the phone rendered *"That didn't get through."* instead of
+the 429 or 503 the server actually wrote.
+
+- **Force a 429** (exhaust the estimate allowance), then photograph a meal with
+  a picture that encodes to **more than 256 KB**. The phone must read the quota
+  sentence with its reset time. Before the fix this was the failing case, and no
+  amount of copy work could have fixed it — the status never arrived.
+- **Force a 503** (a deploy with no provider key), same size of photo. Must read
+  as *"isn't switched on here yet"*, never as a connection problem.
+- **Size is the variable, so vary it deliberately.** The same forced status with
+  a photo under 200 KB passed before the fix and after it; a test written only
+  at that size proves nothing. A dense, close-up nutrition label is the natural
+  way to land over the line; a plate of food often lands under it.
+- **The unauthenticated case is the cheapest reproduction and needs no device:**
+  `curl -X POST .../v1/nutrition/estimate -F image=@big.jpg` with no bearer
+  token must report **401 with the upload complete**, not a stream error.
+
 ## Offline is not signed out (mobile token broker)
 
 The scenario that produced this: an athlete at a gym, on a phone that had been

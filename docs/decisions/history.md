@@ -40687,6 +40687,168 @@ but it blocks `DROP ROLE`) — `Teardown` now runs
 `pg_terminate_backend` for that role before dropping it, and the doc says
 "cannot create anything **durable**" rather than the broader claim it made
 before.
+## 2026-08-26 — N92 (#433), third attempt: the status the phone was never allowed to read
+
+**#433 has now been reported three times and fixed twice, and both fixes were
+sound diagnoses of mechanisms that were not this one.** This entry records what
+was measured this time, what that overturns, and — because it matters more than
+the code — **what is still not known.**
+
+The user's sentence changed, and the new one is the whole clue:
+
+> *"That didn't get through. Enter the food by hand."*
+
+That is `RequestDroppedError` from N55's transport taxonomy, thrown by
+`netFetch` only when `fetch` rejects **and** a probe to `/v1/healthz` comes
+back. So the phone had a route to VOLA and this request did not complete. The
+copy is correct. It is not connectivity.
+
+### The evidence the previous round reasoned from does not support its conclusion
+
+The dispatching analysis observed that successful estimates appear in
+`health_events` while the failing attempt does not, and concluded **the request
+never arrives.** That inference is unsound, and the reason is four lines in
+`health.Recorder.Observe`:
+
+```go
+case o.Status >= 500:   kind = KindServerError
+case ... o.Duration >= rec.slowerThan: kind = KindSlowRequest
+default: return
+```
+
+**4xx are excluded by design**, and `slowRequestAfter` is 2s. The 200s in that
+log — 5306ms, 6330ms, 7783ms, 11789ms — are there because they were **slow**,
+not because every request is recorded. A rejected request answered in
+milliseconds was never going to appear, so its absence says nothing at all.
+Railway's own request log does capture it, and retains roughly **eighteen
+minutes** — measured, `--since 2d` returns nothing older. Between the two,
+**a refused AI request left no trace that outlives an afternoon**, which is the
+actual reason this ticket has been undiagnosable three times.
+
+### What was measured
+
+**No photo estimate has ever succeeded on staging.** `nutrition_estimates`
+holds 51 rows spanning 2026-08-19 → 2026-08-26, **every one `source='text'`,
+every one `succeeded=true`**. Zero photo rows, ever. `exercise_identifications`
+— the other multipart AI endpoint — has **zero rows, ever**. And this is not a
+metering gap: `EstimateInput.Matchable()` refuses every input carrying an image
+("a photo never matches"), so the reuse path cannot answer a photo request
+without writing a row. A photo estimate that returned a draft would be in that
+table. None is.
+
+**An early-answered upload loses its status at exactly 256 KiB.** Live against
+staging, `POST /v1/nutrition/estimate` with a multipart body, unauthenticated so
+the server answers 401 before reading a byte:
+
+```
+200 KB -> 401, upload completed (size_upload 205003)
+240 KB -> 401, upload completed (245963)
+250 KB -> 401, upload completed (256203)
+256 KB -> curl exit 92, upload cut at 262347
+260 KB -> curl exit 92, cut at 261898
+512 KB -> curl exit 92, cut at 261898
+```
+
+A sharp cliff at **262144 bytes** — `net/http`'s own `maxPostHandlerReadBytes`.
+When a handler returns having left the request body unread, the server drains up
+to 256 KiB to keep the connection usable and past that closes. The response has
+already been written; a client **still uploading** has the connection torn out
+from under it and surfaces a transport failure with no status on it. Which is
+precisely `RequestDroppedError`, and precisely the reported sentence.
+
+The cliff is Go's, not Railway's — which also means Railway imposes no body cap
+of its own, so a large upload the handler *reads* passes through fine.
+
+**Consequence, and it is the sharp one: #433's own acceptance criteria are void
+above 256 KiB on the photo path.** "A 503 reads as *not switched on yet*", "a
+429 reads as a quota and says when it resets" — the server writes both
+correctly and **the phone never receives either**. The previous round marked
+that criterion **MET**, verified against `estimateCopy.test.ts`, which asserts
+the wording and cannot see the transport: the status never arrives to be worded.
+
+### Eliminated, with the method
+
+- **The client's own 45s deadline** — eliminated *by the message*. `netFetch`
+  turns its deadline into `TimeoutError` ("VOLA took too long to answer."), a
+  different sentence. Whatever this is, the client did not time out.
+- **A wrong `Content-Type` making the server take the JSON path** (which would
+  400 instantly with the body unread — a perfect fit) — eliminated by reading
+  the installed runtime. `RCTNetworking.mm:350-359` **overrides** any
+  caller-supplied Content-Type for a multipart body, because it is the half
+  holding the boundary. The phone's framing is correct.
+- **N73's size bug** — `describe.tsx:248` still downscales to 1080px at
+  `compress: 0.8` and line 269 uploads `shrunk.uri`. Confirmed on current `main`.
+- **The 35s server deadline, and the no-provider 503** — real calls finish in
+  4–12s, and there are no 503s.
+- **A token expiring mid-upload** — weakened, not eliminated. `session.ts`
+  refreshes at `REFRESH_SKEW_MS = 20_000`, so a returned token has ≥20s of life.
+
+### What is NOT established, stated plainly
+
+**Which status the phone actually receives.** The 256 KiB mechanism is
+reproduced and real, but reproducing it required the 401 gate; for an
+authenticated, well-formed multipart request `parseMultipartEstimate` reads the
+whole body, so there is no early answer to lose. Process of elimination leaves
+401 as the only early gate that survives, and that is an inference, not a
+measurement. **It was not possible to recover the original status**: Railway's
+retention is minutes, and `health_events` excluded it by design.
+
+So this entry does not claim to have found the cause. It claims two things it
+did measure — a status-destroying transport bug, and an observability hole that
+guaranteed nobody could see past it — and fixes both.
+
+### What changed
+
+**`apihttp.DrainRequestBody`**, outermost in `apihttp.Stack`. Reads whatever the
+handler left behind before `net/http` decides whether to close, bounded at 8 MB
+(the largest body any route accepts) and 10s (there is no `ReadTimeout` on this
+server, so an unbounded drain is a parking space). Draining costs almost
+nothing — the bytes are already in flight — and it is what `net/http` is already
+attempting; this only removes the ceiling on attempting it.
+
+The test asserts **connection survival, not the status**, and that distinction
+is the test. Go's *client* tolerates the close and reports 401 either way, so a
+status assertion would pass against a server that hangs up on every upload —
+the entire bug. Reuse of the connection for a second request is what goes red
+when the middleware is removed from `Stack`, verified by mutation in both
+directions.
+
+**`health.Recorder.Observe` now records 4xx on three routes** —
+`/v1/nutrition/estimate`, `/v1/exercises/identify`, `/v1/bjj/reflect/draft` — as
+`client_error` with `source: api`, carrying the status. No migration: the kind
+already exists and the CHECK constraint does not tie the columns together. The
+general rule is untouched, and a test pins that an ordinary 404 still stays out.
+Rejections are checked **before** the slow branch, so a refused request that was
+also slow files as a rejection rather than hiding under the kind an operator
+filters out when hunting latency.
+
+**The copy is deliberately unchanged.** The user proposed something like *"it
+doesn't look like food"*. If the request never reaches the server that sentence
+is a lie — nothing has looked at the image — and it would be the same defect as
+*"check your signal"* on a phone with four bars, which is what this ticket
+descends from. The copy question is downstream of the diagnosis, and the
+diagnosis is not finished. Once a rejection is legible in `health_events` and
+its status actually reaches the phone, the right sentence follows from what the
+status turns out to be.
+
+### What is owed
+
+`#433` keeps its `NEEDS HUMAN EVIDENCE` box **open**. Deploy the API, then one
+label photo on the reporter's device, then:
+
+```sql
+SELECT occurred_at, status, error_code, duration_ms, left(message,200)
+FROM health_events
+WHERE path = '/v1/nutrition/estimate' AND occurred_at > now() - interval '1 day'
+ORDER BY occurred_at DESC;
+```
+
+A row there is the status nobody has been able to capture in three attempts —
+and if the phone now renders that status as its own sentence instead of "That
+didn't get through", the transport half is confirmed on a device rather than
+against curl. **An empty result is also an answer**, and a much more
+interesting one: it would mean the request genuinely never reaches the server,
+which no evidence gathered here can currently distinguish.
 
 ## Open items / known gaps as of this entry
 
