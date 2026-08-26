@@ -60,29 +60,41 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { fmtAmount, type TargetView } from '@/lib/nutrition';
 
-/** What the row says on its second line, and what it announces, per state. */
-function describe(view: TargetView): { value: string; hint: string; muted: boolean } {
+/**
+ * What the row shows, per state.
+ *
+ * `note` is a VISIBLE second line, not an accessibility hint, and that
+ * distinction was a review finding worth keeping. The reassurance "logging
+ * still works" used to live in `RemainingBlock`'s caption where everyone could
+ * read it; suppressing that caption on Food (see `showTarget`) would have left
+ * it hint-only — announced to VoiceOver and invisible to everybody else, which
+ * is a copy regression wearing an accessibility costume.
+ */
+function describe(view: TargetView): { value: string; note: string | null; muted: boolean } {
   switch (view.state) {
     case 'set':
-      return {
-        value: `${fmtAmount(view.target.kcal)} kcal`,
-        hint: 'Adjust it, or see how it was worked out',
-        muted: false,
-      };
+      return { value: `${fmtAmount(view.target.kcal)} kcal`, note: null, muted: false };
     case 'none':
-      return { value: 'Not set', hint: 'Set one, or work one out', muted: true };
+      return { value: 'Not set', note: null, muted: true };
     case 'unknown':
       // NOT "not set". This device could not ask; that is a statement about the
       // connection, never about whether the athlete has done the work.
-      return {
-        value: 'Cannot check from here',
-        hint: 'Logging still works',
-        muted: true,
-      };
+      return { value: 'Cannot check from here', note: 'Logging still works', muted: true };
     case 'checking':
-      return { value: 'Checking…', hint: 'Adjust it, or see how it was worked out', muted: true };
+      return { value: 'Checking…', note: null, muted: true };
   }
 }
+
+/**
+ * What pressing the row does — the SAME in every state, because it is.
+ *
+ * An `accessibilityHint` is supposed to describe the result of activating a
+ * control. The first version varied it per state and used it to carry app
+ * status ("Logging still works"), which left a VoiceOver user in the `unknown`
+ * state with no indication the row still opened anything — it does, always, by
+ * deliberate design.
+ */
+const HINT = 'Opens your target, how it was worked out, and past targets';
 
 export function TargetRow({
   view,
@@ -96,7 +108,7 @@ export function TargetRow({
   testID?: string;
 }) {
   const accent = useAccent();
-  const { value, hint, muted } = describe(view);
+  const { value, note, muted } = describe(view);
 
   return (
     <Pressable
@@ -106,8 +118,8 @@ export function TargetRow({
       // The label carries the number, so the row answers the question without
       // the athlete having to open anything — the same job the visible value
       // does. The hint carries what the tap will do.
-      accessibilityLabel={`Daily target, ${value}`}
-      accessibilityHint={hint}
+      accessibilityLabel={note ? `Daily target, ${value}. ${note}` : `Daily target, ${value}`}
+      accessibilityHint={HINT}
       testID={testID}
     >
       <View style={styles.text}>
@@ -118,6 +130,11 @@ export function TargetRow({
         >
           {value}
         </Text>
+        {note && (
+          <Text style={styles.note} testID={testID ? `${testID}-note` : undefined}>
+            {note}
+          </Text>
+        )}
       </View>
       {/* Decoration. `Icon` hides itself from assistive technology already —
           it sets `accessible={false}` internally — so the row announces its own
@@ -148,4 +165,5 @@ const styles = StyleSheet.create({
   // Tabular figures so the number does not jitter as the target changes, the
   // same treatment `RemainingBlock` gives its two headline figures.
   value: { fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'], marginTop: 2 },
+  note: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
 });

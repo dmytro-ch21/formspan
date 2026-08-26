@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 import FoodScreen from '../(tabs)/food';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
 import type { Module } from '@/lib/modules';
+import type { EatenView, Target, TargetView } from '@/lib/nutrition';
 import { TABS, offBar } from '@/lib/tabs';
 
 /**
@@ -140,7 +141,7 @@ function withModules(modules: Module[], ready = true) {
 }
 
 /** A stored target as the API hands it back. */
-function target(kcal: number) {
+function target(kcal: number): Target {
   return {
     effective_on: '2020-01-01',
     kcal,
@@ -197,7 +198,15 @@ describe('tap two — the target row', () => {
     render(<FoodScreen />);
     await settle();
 
-    fireEvent.press(screen.getByTestId('food-target'));
+    const row = screen.getByTestId('food-target');
+    // The hint describes what activating the row DOES, and says the same thing
+    // in every state, because the row always opens the same screen. A hint that
+    // carried app status instead left a VoiceOver user in the `unknown` state
+    // with no sign the row was still a way in.
+    expect(row.props.accessibilityHint).toBe(
+      'Opens your target, how it was worked out, and past targets',
+    );
+    fireEvent.press(row);
     expect(mockPush).toHaveBeenCalledWith('/(tabs)/goals');
   });
 
@@ -280,6 +289,10 @@ describe('every state it renders is one the screen can actually reach', () => {
     const value = screen.getByTestId('food-target-value');
     expect(value).toHaveTextContent('Cannot check from here');
     expect(value).not.toHaveTextContent('Not set');
+    // VISIBLE, not an accessibility hint. Food suppresses `RemainingBlock`'s
+    // caption, which is where this reassurance used to be readable — leaving it
+    // hint-only would announce it to VoiceOver and hide it from everyone else.
+    expect(screen.getByTestId('food-target-note')).toHaveTextContent('Logging still works');
   });
 
   it('still shows a cached number when the server cannot be reached', async () => {
@@ -295,24 +308,39 @@ describe('every state it renders is one the screen can actually reach', () => {
 });
 
 /**
- * `showTarget`, both ways.
+ * `showTarget`, both ways — and an honest account of what the default guards.
  *
  * The Food tab turns the caption OFF because its row says the same number
- * louder. Every other surface — Today's `MomentumCard`, `NutritionCard` — has
- * no such row and relies on the caption, so a mutation hard-coding the prop to
- * `false` would take the target off Today entirely and nothing above would
- * notice: the Food-side assertions are all satisfied by a caption that never
- * renders anywhere.
+ * louder. **This block first claimed the default was live on Today, and review
+ * showed it was not:** the card Today actually renders is `MomentumCard`, which
+ * does not use `RemainingBlock` at all and carries its own wording, and the one
+ * caller taking the default — `NutritionCard` — is imported by nothing but its
+ * own test.
  *
- * Hence both branches, asserted on the component directly. This is the one
- * place in this file that does not go through the screen, deliberately — the
- * default is exercised by callers this file does not render.
+ * So this is a CONTRACT test for the component, not a claim about a screen, and
+ * it is labelled as one. It is the only place in this file that renders a
+ * component directly rather than driving the screen — the header above says
+ * hand-built state is what this file avoids, and the exception is worth stating
+ * plainly rather than dressing up: the `true` branch has no live screen behind
+ * it today, `NutritionCard`'s orphaning is pre-existing debt that #584 may
+ * resolve either way, and until it does, this keeps the prop from silently
+ * degenerating into a constant.
  */
 describe('the target caption', () => {
-  const view = { state: 'set', target: target(2700) } as const;
-  const eaten = { state: 'ready', rows: [], totals: { kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0, fibre_g: null } } as const;
+  // Annotated, NOT `as const`. `as const` narrows the literals and widens
+  // nothing, so `rows` becomes `readonly []` and `source` becomes `string` —
+  // neither assignable to `EatenView` / `Target`. **Jest never noticed**: it
+  // runs through babel, which strips types without checking them, so these two
+  // fixtures were green and unsound at the same time until `typecheck:mobile`
+  // rejected them. That is the whole reason it is a separate link in `verify`.
+  const view: TargetView = { state: 'set', target: target(2700) };
+  const eaten: EatenView = {
+    state: 'ready',
+    rows: [],
+    totals: { kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0, fibre_g: null },
+  };
 
-  it('is on by default, for the surfaces with no row above them', () => {
+  it('is on by default, so the prop cannot degenerate into a constant', () => {
     render(<RemainingBlock eaten={eaten} view={view} />);
     expect(screen.getByTestId('fuel-target')).toHaveTextContent('2,700 target');
   });
