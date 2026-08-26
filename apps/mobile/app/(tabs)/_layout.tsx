@@ -18,7 +18,7 @@ import { OFF_BAR_ROUTES, TABS } from '@/lib/tabs';
  * destinations that each shape stays learnable.
  *
  * That said "four" until Food arrived, then "four or five" while the food-log
- * gate was in force. It is **exactly five now, always** — Today · Train ·
+ * gate was in force. It is **exactly five now, always** — Today · Food ·
  * Progress · Plan · You — and the claim was always about LEARNABILITY rather
  * than the literal number, so a fixed five is the easy case for it.
  *
@@ -54,6 +54,11 @@ export default function TabLayout() {
   // "the bar does not depend on the module set" is what says so — both its
   // cases, the unread list and the all-disabled one — and is what turns red if
   // a future ticket makes a tab conditional again without restoring that guard.
+  //
+  // **N180 returned Food to the bar WITHOUT returning the gate**, so that
+  // property still holds and is more load-bearing than it was: Food is now a
+  // permanent slot whose screen carries its own off-state, rather than a slot
+  // that comes and goes with a server response.
   //
   // **It still guards the SCREENS, which is the larger half and always was.**
   // `<Tabs>` mounts its initial route immediately, and `(tabs)/index.tsx` reads
@@ -101,7 +106,7 @@ export default function TabLayout() {
         declared or not, so leaving these out brings them back as a sixth and
         seventh tab with filename-derived titles. `href: null` removes the
         button and keeps the route resolvable, which is what an in-flight
-        `router.push`, a back-stack entry and every `vola://food` deep link
+        `router.push`, a back-stack entry and every `vola://train` deep link
         need — and which is why both screens still carry their own off-state.
       */}
       {OFF_BAR_ROUTES.map((name) => (

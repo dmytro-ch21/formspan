@@ -1047,7 +1047,7 @@ most prominent thing.
 ## Mobile shell (`apps/mobile` tab navigator)
 
 - **No seams.** Header, content and tab bar share one background; there must be no hairline rule or colour step between them, on tab screens *and* pushed stack screens.
-- **The tab bar is flat and type-only**: uppercase labels on the app's own ground, a dot above the active tab, one hairline separator. No icons, no pill, no fill. It sits in normal flow, so nothing scrolls underneath it.
+- **The tab bar carries an icon above an uppercase label**, on the app's own ground, with an **underline beneath the active tab** spanning that tab's full width rather than just the glyph, and one hairline separator. No pill, no fill. It sits in normal flow, so nothing scrolls underneath it.
 - Absolutely-positioned controls (the "New workout" button) sit above the bar, not behind it.
 - **The wordmark must not collide with the Dynamic Island** — it sits below it. Check on a device with an island, not just a notch.
 - The wordmark's chevron apex must be closed, and must point up.
@@ -12272,49 +12272,93 @@ replacement.
 - Blank fibre on the by-hand form stays *not stated*; a typed `0` stays `0`. A
   number that cannot be read disables the button rather than being taken as zero.
 
-## N176 — the bottom bar: Today · Train · Progress · Plan · You (`app/(tabs)/_layout.tsx`, `lib/tabs.ts`, `app/(tabs)/train.tsx`, `app/(tabs)/progress.tsx`)
+## N176 / N180 — the bottom bar: Today · Food · Progress · Plan · You (`app/(tabs)/_layout.tsx`, `lib/tabs.ts`, `app/(tabs)/food.tsx`, `components/food/TargetRow.tsx`)
 
-The bar read Today · Food · Plan · Goals · You. Food and Goals lose their
-buttons and keep their routes; Train and Progress arrive as shells that N177
-(#582) and N178 (#583) build out. Everything below is written so a failure names
-the athlete-visible defect rather than the file.
+**This block was written for N176 and is rewritten by N180, which reversed part
+of it.** N176 made the bar Today · Train · Progress · Plan · You. The user
+carried that on their own phone and reversed it: food is logged three to five
+times a day against four to six sessions a week, and it had lost its permanent
+slot to the lower-frequency action. **Food is back in slot two; Train's slot is
+retired**, its route kept, its sections moving to Plan in #587. N180 also puts
+the daily calorie target at the head of the Food tab.
+
+There is deliberately only ONE block describing the bar — check it against the
+bar in front of you, not against a ticket number. Everything below is written so
+a failure names the athlete-visible defect rather than the file.
 
 ### Happy path
 
-- Cold-launch. The bar reads **Today, Train, Progress, Plan, You**, left to
-  right, and each one navigates. Order is the product loop, not a preference —
+- Cold-launch. The bar reads **Today, Food, Progress, Plan, You**, left to
+  right, and each one navigates. Order is a product decision, not a preference —
   a reordering is a failure, not a nitpick.
+- **Food is the second tab, beside Today.** Not last, not behind a card on
+  Today. Reaching a meal log from a cold open must not require passing through
+  any other screen.
 - Plan is the same screen it always was. Open it, scroll the week, open a
-  template, start a session from it: **no behaviour may differ at all.** This
-  ticket renamed nothing and moved nothing there.
-- Train: press the primary action, pick a discipline, land in the session that
-  discipline uses. A strength pick lands on `/session/start?sport=…`; a BJJ pick
-  lands on `/bjj/log`, never on the set logger.
-- Train with a template chosen: the template is carried through
-  (`&workout=<id>`). Losing it means rebuilding the plan at the rack, which is
-  the thing the plan exists to avoid.
+  template, start a session from it: **no behaviour may differ at all.** N176
+  renamed nothing and moved nothing there, and N180 did not touch it.
 - Progress: both rows open — the weight trend, and You. Neither is a dead end.
 
-### Food and Goals are gone from the bar and NOT gone
+### The daily target at the head of Food — N180
 
-- **Deep link both**: `vola://food` and `vola://goals` open the real screens with
-  their real data. A route that only *resolves* is not enough — check the day's
-  entries and the target actually render.
-- From Today with nutrition on: the Fuel and Logging cards still reach Food, and
-  Food still reaches Goals. Count the taps and record them — N180 (#585) owns
-  the friction question and needs the number.
-- Press back out of a deep-linked Food screen. It must not strand the athlete on
+- **Two taps, cold open to adjusting a target**: Food tab, then the target row.
+  Count them. Three is the defect this ticket exists to remove.
+- The row states the **number**, grouped — `2,700 kcal`, not `2700` and not the
+  bare word "Target". An athlete must be able to read their target without
+  opening anything.
+- Tap it: `(tabs)/goals` opens on the derivation and the history. Change the
+  target there, come back, and the row shows the new number.
+- **The number is not recomputed on the Food tab.** Set a target on web, open
+  Food: the same figure. The row reads what the screen already fetched.
+- Step the day back with the stepper. The row shows **that day's** target and
+  sits below the stepper, so which day it belongs to is never ambiguous.
+- **The target appears exactly once on the screen.** The row states it; the
+  remaining block below no longer repeats it in its caption. Two copies of one
+  number reads as a bug in the number.
+- On Today, the Fuel card **still** states the target in its caption — it has no
+  row above it. Suppressing it there would take the target off Today entirely.
+
+### The target row's four states — each must be reachable, and none may lie
+
+- **A target set**: the number.
+- **No target set** (a fresh account): "Not set", and tapping still reaches the
+  screen that sets one.
+- **Offline with a cached target**: the cached number, not an error.
+- **Offline with no cache**: "Cannot check from here" — and **never "Not set"**.
+  Telling an athlete who set a target on web to go and set one again, because
+  this phone is in a basement, is the app being wrong rather than uninformed.
+  This is the state most worth deliberately reproducing: airplane mode, fresh
+  install, signed in.
+
+### Train and Goals are off the bar and NOT gone
+
+- **Deep link both**: `vola://train` and `vola://goals` open the real screens
+  with their real data. A route that only *resolves* is not enough — check that
+  Train's sections and the target history actually render.
+- **Train has no in-app link until #587 lands.** Its tab was its only entry
+  point, so between N180 and that ticket a deep link is the only way in. That is
+  a known gap, not a defect to file — #587 moves its sections into Plan.
+- From Today with nutrition on: the Fuel and Logging cards still reach Food.
+  N180 **added** the tab as an entry point; it did not move these, and they must
+  still work.
+- Press back out of a deep-linked Train screen. It must not strand the athlete on
   a tab-less screen.
-- A stale back-stack entry — be on Food, background the app, return — still
+- A stale back-stack entry — be on Train, background the app, return — still
   works. `href: null` keeps the route mounted; omitting it would not.
+- **`train.tsx` still exists.** If it has been deleted to tidy the diff, that is
+  the failure: N177's work is being re-homed, not discarded.
 
 ### The regression this must not reintroduce
 
 - **Turn nutrition OFF in Sports.** Today must say so in words (dashed "Nutrition
-  is turned off"), and `vola://food` must still open a screen that explains
-  itself rather than a blank one or `+not-found`. The failure to watch for is
-  the athlete concluding the feature does not exist — that is what was reported
-  from a device as "not there" for BJJ.
+  is turned off"). **The Food tab must still be in the bar** — N180 put it back
+  unconditionally and deliberately did not restore the old food-log gate — and
+  pressing it must open a screen that explains itself rather than a blank one,
+  an empty day, or a target row over a module that is off. The failure to watch
+  for is the athlete concluding the feature does not exist — that is what was
+  reported from a device as "not there" for BJJ.
+- **A bar that changes shape between cold start and first paint is a failure.**
+  Food's slot must not appear, disappear or move while the module list loads.
 - **Turn every module off.** The bar still reads all five. Not four, not three.
 - **First frame of a cold start, on an account with nutrition ON.** Today must
   never flash "Nutrition is turned off" before the real Fuel card. That is the
@@ -12332,8 +12376,11 @@ the athlete-visible defect rather than the file.
 ### Accessibility
 
 - VoiceOver over the bar: five tabs, each announcing its name, its position
-  ("3 of 5") and whether it is selected. The two new tabs must announce exactly
-  like the three old ones — one button implementation serves all five.
+  ("3 of 5") and whether it is selected. Every tab must announce exactly like
+  its neighbours — one button implementation serves all five.
+- VoiceOver on the target row: it announces as a button, **reads the number**,
+  and its hint says what the tap does. The chevron is decoration and must be
+  silent.
 - The active underline is decoration and must be silent; hearing a nameless
   element after each tab name is the failure.
 - Largest accessibility text size: the bar still shows five labels. **`PROGRESS`
@@ -12347,6 +12394,10 @@ the athlete-visible defect rather than the file.
 - One-handed reach: all five within a thumb's arc at the bottom of the screen.
 - The label widths above — jest has no font metrics, so a screenshot is the only
   evidence.
+- **Log a meal from a cold open without going through Today**, and confirm the
+  target is legible at the top of Food. This is N180's acceptance criterion and
+  no test can reach it: it is about whether the number is readable at arm's
+  length and whether the tab is where a thumb expects it.
 
 ## N178 — the Progress tab (`app/(tabs)/progress.tsx`, `lib/progress.ts`, `components/progress/*`)
 

@@ -28,6 +28,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   remaining as computeRemaining,
+  fmtAmount as fmt,
   viewTarget,
   viewTotals,
   type EatenView,
@@ -38,6 +39,7 @@ export function RemainingBlock({
   eaten,
   view,
   compact = false,
+  showTarget = true,
   testID,
 }: {
   /** Everything this device knows about what was eaten. See {@link EatenView}. */
@@ -46,6 +48,38 @@ export function RemainingBlock({
   view: TargetView;
   /** The card is compact; the day screen is not. */
   compact?: boolean;
+  /**
+   * Whether to state the target in the caption under the figures.
+   *
+   * **False on the Food tab**, which since N180 states the target in a
+   * `TargetRow` at the head of the screen — bigger, tappable, and carrying the
+   * same four states. Left on, the two would print the same number twice within
+   * a thumb's width of each other, which reads as a bug in the figure rather
+   * than in the layout.
+   *
+   * **Who actually passes `true`, stated precisely, because the first version
+   * of this comment got it wrong and review caught it.** It claimed Today's
+   * `MomentumCard` and `NutritionCard` relied on this caption. Neither does the
+   * job that claim implies:
+   *
+   *  - `MomentumCard` — the card Today really renders — does NOT use this
+   *    component at all. It REPLACED it and carries its own copy of the
+   *    wording; its own comments say so.
+   *  - `NutritionCard` is the only caller taking the default, and **nothing
+   *    renders `NutritionCard`**: its sole importer is its own test.
+   *
+   * So the `true` branch is today reachable from an orphaned component and from
+   * tests, and turning it off unconditionally would take the target off
+   * *nothing*. That is recorded rather than quietly relied on, because a prop
+   * whose other branch no screen reaches is the #583 shape — and the honest
+   * reading is that `NutritionCard`'s orphaning is pre-existing debt (#584 is
+   * reworking Today and may delete or revive it), not something N180 created.
+   * The prop still earns its keep on the branch that IS live: Food's.
+   *
+   * The bar, the eaten line and the two headline figures are unaffected — this
+   * suppresses the one line the caller has already said.
+   */
+  showTarget?: boolean;
   testID?: string;
 }) {
   const accent = useAccent();
@@ -120,9 +154,11 @@ export function RemainingBlock({
       <Text style={styles.caption} testID="fuel-eaten">
         {eatenText}
       </Text>
-      <Text style={styles.caption} testID="fuel-target">
-        {targetText}
-      </Text>
+      {showTarget && (
+        <Text style={styles.caption} testID="fuel-target">
+          {targetText}
+        </Text>
+      )}
 
       {target && totals ? (
         <View
@@ -174,10 +210,6 @@ function Figure({
       <Text style={styles.unit}>{unit}</Text>
     </View>
   );
-}
-
-function fmt(n: number): string {
-  return Math.round(n).toLocaleString('en-US');
 }
 
 function pct(eaten: number, target: number): number {

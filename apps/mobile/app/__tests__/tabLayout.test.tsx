@@ -17,9 +17,9 @@ import TabLayout from '../(tabs)/_layout';
  *   `foodEnabled` is `hasFoodLog([])` — false. Without the hold, Today renders
  *   the dashed "Nutrition is turned off" placeholder for the first frames of
  *   every cold start on an account where nutrition is ON.
- * - **Food and Goals are still routes.** `href: null`, not omission: omitting a
+ * - **Train and Goals are still routes.** `href: null`, not omission: omitting a
  *   `<Tabs.Screen>` does not hide it, expo-router injects it anyway, so the two
- *   would come back as extra tabs titled "food" and "goals".
+ *   would come back as extra tabs titled "train" and "goals".
  * - **One accessible button for all five.** `tabBarButton` is installed once on
  *   `screenOptions`, so the two tabs N176 added cannot announce themselves
  *   differently from their three neighbours.
@@ -118,16 +118,16 @@ beforeEach(() => {
 });
 
 describe('the bar the navigator is given', () => {
-  it('shows Today, Train, Progress, Plan, You, in that order', () => {
+  it('shows Today, Food, Progress, Plan, You, in that order', () => {
     const bar = visible(declare({ modules: fullModules(), ready: true }));
     expect(bar.map((d) => d.options.title)).toEqual([
       'Today',
-      'Train',
+      'Food',
       'Progress',
       'Plan',
       'You',
     ]);
-    expect(bar.map((d) => d.name)).toEqual(['index', 'train', 'progress', 'workouts', 'you']);
+    expect(bar.map((d) => d.name)).toEqual(['index', 'food', 'progress', 'workouts', 'you']);
   });
 
   it('gives each of the five an icon to draw', () => {
@@ -135,17 +135,20 @@ describe('the bar the navigator is given', () => {
     expect(bar.every((d) => typeof d.options.tabBarIcon === 'function')).toBe(true);
   });
 
-  // **Food and Goals lost a button, not a route.** `href: null` keeps the route
+  // **Train and Goals lost a button, not a route.** `href: null` keeps the route
   // resolvable, which is what an in-flight `router.push`, a back-stack entry
-  // and a `vola://food` deep link all need. Omitting the `<Tabs.Screen>`
+  // and a `vola://train` deep link all need. Omitting the `<Tabs.Screen>`
   // entirely does the opposite of hiding it: expo-router injects the file
-  // anyway, and it returns as a sixth tab titled "food".
-  it('keeps Food and Goals reachable with no button in the bar', () => {
+  // anyway, and it returns as a sixth tab titled "train".
+  //
+  // N180 swapped which two these are. `train.tsx` is NOT deleted — #587 moves
+  // its sections into Plan — so it has to keep being declared here.
+  it('keeps Train and Goals reachable with no button in the bar', () => {
     const declared = declare({ modules: fullModules(), ready: true });
     const names = declared.map((d) => d.name);
-    expect(names).toContain('food');
+    expect(names).toContain('train');
     expect(names).toContain('goals');
-    for (const name of ['food', 'goals']) {
+    for (const name of ['train', 'goals']) {
       expect(declared.find((d) => d.name === name)!.options.href).toBeNull();
     }
   });
@@ -195,7 +198,7 @@ describe('the bar does not depend on the module set', () => {
     const off = fullModules().map((m) => ({ ...m, enabled: false }));
     expect(visible(declare({ modules: off, ready: true })).map((d) => d.name)).toEqual([
       'index',
-      'train',
+      'food',
       'progress',
       'workouts',
       'you',
@@ -263,11 +266,11 @@ describe('the tab button', () => {
     // every tab as the current one and passes a single-vector test.
     renderButton({
       accessibilityRole: 'tab',
-      accessibilityLabel: 'Train, tab, 2 of 5',
+      accessibilityLabel: 'Food, tab, 2 of 5',
       accessibilityState: { selected: false },
       'aria-selected': false,
     });
-    expect(screen.getByLabelText('Train, tab, 2 of 5').props.accessibilityState).toEqual({
+    expect(screen.getByLabelText('Food, tab, 2 of 5').props.accessibilityState).toEqual({
       selected: false,
     });
   });
@@ -291,7 +294,7 @@ describe('the tab button', () => {
 
   it('leaves the unselected tabs unmarked', () => {
     const { toJSON } = renderButton({
-      accessibilityLabel: 'Train',
+      accessibilityLabel: 'Food',
       'aria-selected': false,
       accessibilityState: { selected: false },
     });
