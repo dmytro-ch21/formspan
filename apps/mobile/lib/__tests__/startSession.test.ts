@@ -1,5 +1,5 @@
 import type { Module } from '../modules';
-import { startSessionHref } from '../startSession';
+import { sessionHref, startSessionHref } from '../startSession';
 
 /**
  * Where a chosen discipline goes — one branch, two callers.
@@ -80,5 +80,60 @@ describe('startSessionHref', () => {
     expect(startSessionHref({ sport: 'rowing', workoutId: null }, [strength])).toBe(
       '/session/start?sport=rowing',
     );
+  });
+});
+
+/**
+ * Where an EXISTING session opens — the sibling branch, and now a shared one.
+ *
+ * It lived inline in Today, which was fine while Today was the only screen that
+ * opened a session. N177's Train tab has a Resume card and a Recent list, both
+ * of which open one, so it moved here beside the start branch. The failure it
+ * prevents is the same one and is completely silent: the live set logger over a
+ * BJJ session renders "Sets 0 · Reps 0 · Volume —" above an empty list, and the
+ * reflection wizard — reachable only by `replace` from the log screen —
+ * disappears entirely.
+ */
+describe('sessionHref', () => {
+  it('opens a live-logged session in the set logger', () => {
+    expect(sessionHref({ id: 's1', sport: 'strength' }, [strength, bjj])).toEqual({
+      pathname: '/session/[id]',
+      params: { id: 's1' },
+    });
+  });
+
+  it('opens a logged-afterwards session in its own reader', () => {
+    expect(sessionHref({ id: 's2', sport: 'bjj' }, [strength, bjj])).toEqual({
+      pathname: '/bjj/session/[id]',
+      params: { id: 's2' },
+    });
+  });
+
+  // The vector that separates the real predicate from `key === 'bjj'` — same
+  // reason as above, and the reason this pair sits in one file: if the two
+  // branches ever disagree, an athlete starts a BJJ session on one screen and
+  // reads it back on a screen built for a different shape.
+  it('reads the catalog kind rather than the module key', () => {
+    const judo = mod({ key: 'judo', capabilities: { catalog: 'techniques' } as Module['capabilities'] });
+    expect(sessionHref({ id: 's3', sport: 'judo' }, [judo])).toEqual({
+      pathname: '/bjj/session/[id]',
+      params: { id: 's3' },
+    });
+  });
+
+  it('treats an unknown discipline as one that logs live', () => {
+    expect(sessionHref({ id: 's4', sport: 'rowing' }, [strength])).toEqual({
+      pathname: '/session/[id]',
+      params: { id: 's4' },
+    });
+  });
+
+  // The id has to reach the route as a PARAM, not be baked into the pathname.
+  // A template string here type-checks against `Href` and takes the tap to a
+  // route that does not exist, which is N32 relocated into a helper.
+  it('carries the id as a route parameter', () => {
+    expect(sessionHref({ id: 'abc-123', sport: 'strength' }, [strength])).toMatchObject({
+      params: { id: 'abc-123' },
+    });
   });
 });

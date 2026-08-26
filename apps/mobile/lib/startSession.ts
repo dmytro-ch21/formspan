@@ -41,3 +41,33 @@ export function startSessionHref(
     ? `/session/start?sport=${pick.sport}&workout=${pick.workoutId}`
     : `/session/start?sport=${pick.sport}`;
 }
+
+/**
+ * Where an EXISTING session opens — resuming it, or reading one back.
+ *
+ * The sibling of {@link startSessionHref} and keyed on the same predicate, for
+ * the same reason one level along: a discipline whose sessions cannot hold a
+ * set gets a screen that can never be filled, and the live set logger renders
+ * "Sets 0 · Reps 0 · Volume —" over an empty list. That shipped once, and the
+ * damage was larger than a wrong screen — the BJJ reflection wizard is entered
+ * by `replace` from the log screen and linked from nowhere else, so a logged
+ * class had no surface anywhere that would ever show it back.
+ *
+ * It lived inline in Today, which was fine while Today was the only screen that
+ * opened a session. N177 gives Train a Resume card and a Recent list, both of
+ * which open one, and a second copy of this branch is how the two surfaces end
+ * up disagreeing about where a BJJ session lives. Moved here beside the start
+ * branch rather than copied, so the pair can only ever agree.
+ *
+ * ## The object form is deliberate
+ *
+ * `{ pathname, params }` rather than a template string. Expo Router's typed
+ * routes reject a bare `string`, and going through the generated pathname
+ * literals means a renamed route breaks the build instead of the tap — the same
+ * argument the `Href` return type above makes, arrived at from the other side.
+ */
+export function sessionHref(s: { id: string; sport: string }, modules: Module[]): Href {
+  return logsAfterwards(s.sport, modules)
+    ? ({ pathname: '/bjj/session/[id]', params: { id: s.id } } as const)
+    : ({ pathname: '/session/[id]', params: { id: s.id } } as const);
+}
