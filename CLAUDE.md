@@ -700,7 +700,46 @@ diff**, which looks correct either way:
 grep -c '^## Open items / known gaps as of this entry' docs/decisions/history.md   # must be 1
 ```
 
+**That count is now a check rather than a habit** — `pnpm run check:doc-merge`,
+in `verify` and in CI. It asserts exactly one line *is* the heading and that it
+is the **last** `## ` heading in the file, which is the invariant this section
+has described for four repairs and nothing ever read. It skips fenced code
+blocks, so quoting the heading or a conflict marker in an example is fine; and
+it was verified by reproducing the historical defect, which it reports at line
+16331 against the 16330 measured above.
+
 Skip the entry only for truly trivial changes (typo fixes, formatting) that don't represent a decision anyone would need to know about later.
+
+### Appending no longer conflicts with every other open PR (N63)
+
+**This file used to guarantee a conflict between any two open PRs.** 17 of 20
+commits on 20 Aug touched it, 9 of 10 on 26 Aug — so a PR open across one merge
+cycle conflicted with all the rest, and a conflicting PR gets **zero check
+runs**, which reads exactly like nothing failing.
+
+`.gitattributes` now routes `docs/decisions/history.md` and
+`docs/testing/functional-scenarios.md` through `scripts/append-only-merge.py`.
+It resolves **one** case — both sides inserted at the same anchor and neither
+changed or deleted anything, so git's diff3 base region is empty and
+concatenation is the only loss-free answer — and leaves every other conflict
+with markers, exactly as before. It never looks for a heading: the anchor is
+git's own, which is why the `## Open items` convention survives it structurally
+rather than by recognition.
+
+**What you have to do: nothing, except `pnpm install` once.** The driver
+definition lives in `.git/config`, which is not versioned, and `postinstall`
+writes it. If it was never installed, git falls back to the built-in merge —
+you get today's conflict, never a wrong resolution. One install covers every
+worktree.
+
+**Do not swap it for `merge=union`.** That is the obvious answer for an
+append-only file and it silently keeps both sides of an edit to the same line,
+and silently reverts a deletion the other side reworded. Both cases run against
+git's real union driver in `--self-test`.
+
+`package.json`'s `verify` chain is the other file every task edits. It is one
+line, so it is not append-shaped and this does nothing for it —
+`check-verify-chain.py` is still what notices a dropped link.
 
 ## Keep functional test scenarios current (hard rule)
 

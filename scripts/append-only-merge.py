@@ -539,6 +539,39 @@ def self_test() -> int:
     # assertion in a docstring.
     _union_is_wrong()
 
+    # ---- 9b. The shape check, in both directions -------------------------
+    # `--check-shape` runs against a file that is correct today, so its FAILING
+    # branch would otherwise never execute. These feed it the two historical
+    # defects directly.
+    good = _doc(["A", "B"], ["gap one"])
+    check("shape: a correct file reports nothing", history_problems(good) == [])
+
+    # The defect measured on `origin/main`: an insert anchored on the FIRST
+    # occurrence of the phrase rather than the last, leaving a second column-0
+    # heading in the middle of the file.
+    decoy = good.replace("## B", f"{OPEN_ITEMS}\n\n- a stranded decoy\n\n## B", 1)
+    check("shape: a first-match-anchored insert is caught",
+          any("expected 1" in p for p in history_problems(decoy)))
+
+    # The other half: an entry appended AFTER the gap list, which strands it.
+    stranded = good + "\n## 2026-01-01 — appended in the wrong place\n\nprose.\n"
+    check("shape: an entry after the gap list is caught",
+          any("appear AFTER" in p for p in history_problems(stranded)))
+
+    # Fenced quoting is legitimate and must not be reported. This file's own
+    # N63 entry quotes a diff3 hunk containing exactly these lines, and a
+    # fence-blind version reported five findings on the commit that added it.
+    quoted_doc = good.replace(
+        "prose for A.",
+        "prose for A.\n\n```\n<<<<<<< ours\n" + OPEN_ITEMS + "\n>>>>>>> theirs\n```",
+    )
+    check("shape: a fenced example of the heading is not a finding",
+          history_problems(quoted_doc) == [], str(history_problems(quoted_doc)))
+    check("shape: `_unfenced` preserves line numbering",
+          len(_unfenced(quoted_doc)) == len(quoted_doc.splitlines()))
+    check("shape: fenced content really is blanked",
+          "<<<<<<< ours" not in _unfenced(quoted_doc))
+
     # ---- 10. The apparatus can fail --------------------------------------
     # CLAUDE.md's rule: check that a check can go red. Every case above would
     # pass on a driver that always concatenated, EXCEPT the refusals — so the
@@ -769,6 +802,68 @@ OPEN_ITEMS = "## Open items / known gaps as of this entry"
 ATTRIBUTED = (HISTORY, "docs/testing/functional-scenarios.md")
 
 
+def _unfenced(text: str) -> list[str]:
+    """Lines outside fenced code blocks; fenced lines become `""`.
+
+    Blanked rather than dropped so every index is still the real line number —
+    an off-by-N in a message that says "line 16331" is worse than useless.
+
+    Deliberately simple: a ``` or ~~~ at the start of a line toggles the fence.
+    That is what this corpus uses. Indented fences inside list items are not
+    handled, and if one ever matters the fix is to teach this function, not to
+    weaken a caller.
+    """
+    out: list[str] = []
+    fence: str | None = None
+    for line in text.splitlines():
+        opener = line.startswith("```") or line.startswith("~~~")
+        if fence is None:
+            if opener:
+                fence = line[:3]
+                out.append("")
+                continue
+            out.append(line)
+        else:
+            out.append("")
+            if line.startswith(fence):
+                fence = None
+    return out
+
+
+def history_problems(text: str) -> list[str]:
+    """The two structural assertions on `history.md`, as a pure function.
+
+    Separated from `check_shape` so `--self-test` can feed it the historical
+    defect — a first-match-anchored insert — rather than only ever seeing a
+    file that happens to be correct today. A check only ever run against a
+    passing input is one whose failing branch nobody has executed.
+    """
+    problems: list[str] = []
+    lines = _unfenced(text)
+
+    headings = [i for i, l in enumerate(lines) if l == OPEN_ITEMS]
+    mentions = sum(1 for l in lines if l and OPEN_ITEMS.lstrip("# ") in l)
+    if len(headings) != 1:
+        problems.append(
+            f"{HISTORY}: {len(headings)} lines ARE `{OPEN_ITEMS}`, expected 1.\n"
+            f"    ({mentions} lines mention the phrase; only the heading counts.)\n"
+            "    A second one is usually an insert anchored on the first match "
+            "rather than the last."
+        )
+        return problems
+
+    after = [i for i, l in enumerate(lines)
+             if l.startswith("## ") and i > headings[0]]
+    if after:
+        problems.append(
+            f"{HISTORY}: {len(after)} `## ` heading(s) appear AFTER the "
+            f"gap list (first at line {after[0] + 1}: {lines[after[0]][:70]}).\n"
+            "    Entries go BEFORE it, or the gap list reads as belonging "
+            "to whatever landed last."
+        )
+    return problems
+
+
 def check_shape() -> int:
     """Assert the structure the history rule depends on, which nothing read.
 
@@ -792,6 +887,19 @@ def check_shape() -> int:
     3. no committed conflict markers in any append-only doc — a resolution
        left half-finished, which lints and typechecks clean because these are
        prose files nothing else reads.
+
+    **All three skip fenced code blocks, and that is not a loophole — it is
+    what makes the check usable in a repo whose narrative is largely ABOUT
+    merges.** The entry that introduced this check quotes a diff3 hunk, so its
+    own code fence contains a column-0 `## Open items …` line and four column-0
+    conflict markers. A fence-blind version reported all five on the commit
+    that added it, which is the cry-wolf shape `check-verify-chain.py` warns
+    about: a checker whose first act is a false positive gets silenced.
+
+    Nothing is lost by it. The defects this catches — a first-match-anchored
+    insert, a half-finished resolution — are written by tools that do not open
+    a fence first, and the "last `## ` heading" assertion still covers anything
+    appended below the gap list whether it is fenced or not.
     """
     problems: list[str] = []
 
@@ -799,34 +907,14 @@ def check_shape() -> int:
     if not history.exists():
         print(f"{HISTORY} is missing.", file=sys.stderr)
         return 1
-    lines = history.read_text(encoding="utf-8").splitlines()
-
-    headings = [i for i, l in enumerate(lines) if l == OPEN_ITEMS]
-    mentions = sum(1 for l in lines if OPEN_ITEMS.lstrip("# ") in l)
-    if len(headings) != 1:
-        problems.append(
-            f"{HISTORY}: {len(headings)} lines ARE `{OPEN_ITEMS}`, expected 1.\n"
-            f"    ({mentions} lines mention the phrase; only the heading counts.)\n"
-            "    A second one is usually an insert anchored on the first match "
-            "rather than the last."
-        )
-    else:
-        after = [i for i, l in enumerate(lines)
-                 if l.startswith("## ") and i > headings[0]]
-        if after:
-            problems.append(
-                f"{HISTORY}: {len(after)} `## ` heading(s) appear AFTER the "
-                f"gap list (first at line {after[0] + 1}: {lines[after[0]][:70]}).\n"
-                "    Entries go BEFORE it, or the gap list reads as belonging "
-                "to whatever landed last."
-            )
+    problems += history_problems(history.read_text(encoding="utf-8"))
 
     for rel in ATTRIBUTED:
         path = ROOT / rel
         if not path.exists():
             problems.append(f"{rel}: listed in ATTRIBUTED but missing.")
             continue
-        stray = [i + 1 for i, l in enumerate(path.read_text(encoding="utf-8").splitlines())
+        stray = [i + 1 for i, l in enumerate(_unfenced(path.read_text(encoding="utf-8")))
                  if l.startswith(("<" * 7, "|" * 7, "=" * 7, ">" * 7))]
         if stray:
             problems.append(

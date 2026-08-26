@@ -41548,6 +41548,150 @@ note still carried the pre-N176 tab layout (Today / Plan / Log / Progress /
 Profile). The skill points at `lib/tabs.ts` instead of restating any layout,
 which is the same staleness lesson applied to memory files.
 
+## 2026-08-26 — N63: the conflict every open PR gets is an ORDERING question, and a 40-line rule answers it
+
+Two independent counts, six days apart, of commits landing on `main`:
+
+```
+20 Aug:  17 of 20 touched docs/decisions/history.md   (85%)
+26 Aug:   9 of 10 touched it                          (90%)
+```
+
+Every PR appends to that file, because the history rule in `CLAUDE.md` says to.
+So **any PR open across one merge cycle conflicts with every other open PR** —
+arithmetic, not bad luck. #332 was rebased and green three times and
+re-conflicted twice through no fault of its own.
+
+**The cost is not the rebase.** A conflicting PR cannot have
+`refs/pull/N/merge` built for it, so GitHub creates no workflow run — and an
+empty check list reads exactly like nothing failing. That is N65's subject, and
+this defect *routinely produces it*: on 26 Aug alone #583 reported `0 check
+runs / CONFLICTING` with `history.md` as the only conflict, and #581's work sat
+unpushed through two full gate rounds. Two real defects were also introduced
+during forced rebases this month and caught only by review — including a clean
+auto-merge that made a claim in a *different file* false.
+
+### What the conflict actually is, measured rather than assumed
+
+`git merge-file --diff3` on the real 41,000-line file, `origin/main` against
+#621:
+
+```
+<<<<<<< ours          288 lines — the entries that had landed on main
+||||||| base          ZERO lines
+======= theirs        120 lines — the branch's own entry
+>>>>>>>
+## Open items / known gaps as of this entry
+```
+
+**One hunk, and its base section is empty.** Neither side deleted or changed
+anything; both only *added*, at the same anchor. Git conflicts here because the
+**order** of two insertions is undetermined, not because their content
+disagrees.
+
+That is the whole opening, and it is narrower than the ticket assumed. When the
+base region is empty, concatenation drops nothing from base, ours or theirs —
+it is the unique loss-free resolution, by construction rather than by heuristic.
+
+### The rule, and it is the entire driver
+
+`scripts/append-only-merge.py`, wired to `docs/decisions/history.md` and
+`docs/testing/functional-scenarios.md` through a new `.gitattributes`:
+
+```
+base region empty  ->  emit ours + theirs, resolved.
+anything else      ->  leave git's conflict markers, exit non-zero.
+```
+
+It defers to `git merge-file` for the merge itself and only post-processes the
+hunks git could not settle, so it adds exactly one capability and inherits
+everything else. A non-empty base region means at least one side changed or
+deleted text that existed — the case where a wrong resolution destroys work —
+and it refuses that, every time.
+
+**It never looks for a heading.** The anchor comes from git's own diff, so
+`## Open items` keeps its position because nothing moves it rather than because
+anything recognises it. That was a stated constraint: a session once landed its
+section **3,350 lines from where it belonged** by anchoring on the first
+matching heading. This cannot repeat it — the driver has no notion of what a
+heading is.
+
+Ordering is ours-then-theirs. Under `rebase`, ours is upstream and theirs is the
+commit being replayed, so the already-landed entry sits above the arriving one.
+Worth not over-trusting: the file is not strictly chronological today anyway.
+
+### What was rejected, and why each rejection is a measurement
+
+- **`merge=union`**, git's built-in and the obvious answer for an append-only
+  file. It resolves the real case correctly and **silently corrupts two others**:
+  both sides editing the same sentence produces an entry asserting both, with no
+  marker; one side deleting a resolved gap while the other rewords it silently
+  reverts the deletion. Both run in `--self-test` against git's real union
+  driver, so the rejection is evidence and stays evidence.
+- **One file per entry with a generated index.** It removes the conflict by
+  construction, and the migration is a 40,938-line rewrite that would conflict
+  with every open PR the moment it landed — paying the whole ticket's cost once,
+  at maximum blast radius. It also does not finish the job: `## Open items` is a
+  single mutable list every entry edits, so that file keeps conflicting. Kept as
+  the fallback if the driver proves insufficient.
+- **A different insertion anchor** — moving the gap list, or appending
+  newest-first at the top. **Position is not the mechanism.** Two appends at EOF
+  conflict identically, which `--self-test` demonstrates on
+  `functional-scenarios.md`'s shape, a file with no trailing anchor at all.
+- **Relaxing the history rule, or ticking in a follow-up PR.** The first is a
+  regression wearing a fix's clothes; the second moves the conflict later and
+  decouples the record from the change it records.
+
+### The other half: nothing read this file's structure
+
+The append-before-`## Open items` convention has been repaired **four** times,
+and `CLAUDE.md` names why it recurs — the phrase occurs **six** times on `main`
+and only one occurrence is a heading, so each repair adds another decoy and the
+trap gets measurably worse every time somebody falls in.
+
+`--check-shape` asserts what nothing asserted: exactly one line *is* the
+heading, it is the last `## ` heading in the file, and no append-only doc
+carries committed conflict markers. It also checks `.gitattributes` still names
+the driver, so a rename cannot silently orphan the attribute — the same floor
+`check-verify-chain.py` puts on a `verify` link. Verified by reproducing the
+historical defect: a first-match-anchored insert lands a decoy heading at line
+16331, against the 16330 `CLAUDE.md` measured, and the check goes red on it.
+
+### Verification
+
+Three mutations, each confirmed to go red: removing the empty-base guard turns
+seven cases red (all the refusals); swapping the concatenation order turns two
+red; shrinking the internal marker size from 40 to 7 turns three red — and that
+last one *is* the mis-framing hazard, because this file quotes seven-character
+conflict markers as prose. The suite carries a negative control that prints a
+deliberate `FAIL`, so a run that only ever prints `ok` is distinguishable from
+one that cannot fail.
+
+The end-to-end cases build a throwaway repository and run a real `git merge`,
+including a control proving the *driver* resolved it: with the attribute removed
+the identical merge conflicts. And on the real file, the `origin/main` vs #621
+merge that GitHub reported as `CONFLICTING` resolves clean, with **zero lines
+lost from base, ours or theirs** — checked by set difference, not by reading the
+diff.
+
+### Installation, and how it fails
+
+`.gitattributes` is versioned; the driver definition is not, so `pnpm install`
+registers it via `postinstall`. **If it is never registered, git falls back to
+the built-in text merge** — you lose the benefit, never correctness. The config
+is written to the shared `.git/config`, so one install covers every worktree,
+and the command is deliberately a **repo-relative** path: an absolute one gets
+written from inside `.claude/worktrees/<name>` and dangles the moment that
+worktree is removed.
+
+### What this does not fix
+
+`package.json`'s `verify` chain is the other file every task edits, and it is
+one line, so it is not append-shaped and this driver does nothing for it —
+`check-verify-chain.py` remains the thing that notices a dropped link. The
+driver also cannot help a **clean** auto-merge that makes a claim in another
+file false; that failure has no conflict in it to catch.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
