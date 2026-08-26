@@ -40105,6 +40105,39 @@ order IS transition order; timestamps tie at clock resolution).
 Diff proof of the constraint: nothing outside `engine/internal/runstate`
 changes — no worker, no gate, no reconciler code is touched.
 
+## 2026-08-25 — Three at once, because twelve in progress is a board that lies
+
+The user, on seeing a twelve-ticket design workstream about to be dispatched:
+*"we need at most 3 agents working on parallel with 3 tickets at most in
+parallel. I dont want this flood of tickets 12 in progress doesnt make any
+sense."*
+
+**The measurement behind it.** On 2026-08-20 roughly thirty PRs merged in one
+day across a dozen concurrent sessions. Four days later the board carried
+**17 assigned issues behind 5 worktrees** — a dozen claims with nothing behind
+them, and only **two commits** landed in those four days. So the flood did not
+buy throughput; it bought a board nobody could read, and then it stopped buying
+anything at all.
+
+That is the same failure the claiming convention was rewritten to prevent in the
+first place. It came back at scale the moment the fleet grew, which is the
+argument for a hard number rather than a discipline.
+
+Recorded in `.vola-agent/policy.json` as `max_parallel_agents` and
+`max_tickets_in_progress`, so one place holds the number and the prose points at
+it rather than repeating it — the same fix applied to the lint ratchet on
+2026-08-20, after a stale figure in this file was relayed to five agents while
+`main` said something else.
+
+**The consequence that is easy to miss:** an interlocking workstream is a
+sequence, not a fan-out. Twelve tickets where each assumes the last is three,
+then three more — dispatched when the first three *land*, not when they are
+nearly done.
+
+**And it binds the coordinator hardest**, which is why it is written down rather
+than remembered. The pressure to start one more comes from wanting the board to
+look busy.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

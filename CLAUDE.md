@@ -542,6 +542,39 @@ sentinel it refuses on the way back in — both guards exist because the latch
 once attested to its own instructions and re-closed three tickets it had just
 reopened. Quote the gesture indented or inline, as this file does.
 
+### At most three at once (hard rule)
+
+**Three agents in parallel. Three tickets `In Progress`. Set by the user on
+2026-08-25, in these words:** *"we need at most 3 agents working on parallel
+with 3 tickets at most in parallel. I dont want this flood of tickets 12 in
+progress doesnt make any sense."*
+
+Recorded machine-readably in `.vola-agent/policy.json` as
+`max_parallel_agents` and `max_tickets_in_progress`, so the number lives in one
+place and this section does not go stale quoting it.
+
+**What produced it.** On 2026-08-20 roughly thirty PRs merged in a day across a
+dozen concurrent sessions, and the cost was not throughput — it was that
+**nothing could be followed**. Four days later the board carried **17 assigned
+issues behind 5 worktrees**: a dozen claims with nothing behind them, which is
+precisely the failure the claiming convention above was rewritten to prevent,
+returning at scale the moment the fleet grew.
+
+**A ticket `In Progress` is a promise that somebody is on it right now.** Twelve
+of those is not twelve times the work; it is a board that lies, twelve times.
+
+**The consequences, so this is not merely a number:**
+
+- **Do not dispatch a fourth.** Queue it. A queued ticket stays `Todo` and
+  unassigned, which is true, rather than `In Progress`, which would not be.
+- **Interlocking work is a sequence, not a fan-out.** A twelve-ticket
+  workstream where each assumes the last is three tickets, then three more —
+  and the second three are dispatched when the first three land, not when the
+  first three are *nearly* done.
+- **This binds the coordinator hardest.** The pressure to start one more comes
+  from wanting the board to look busy, and a busy board that nobody is reading
+  is worth less than a short one that is true.
+
 ### Claiming (hard rule)
 
 The board is ordered by what an athlete would notice, so every session that opens

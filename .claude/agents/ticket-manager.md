@@ -72,6 +72,15 @@ On the board a claim is one server-side write, visible immediately to everyone:
 - **assign the issue** to the person or session taking it, and
 - **move Status to `In Progress`**.
 
+**At most THREE tickets may be `In Progress` at once**, and at most three agents
+run in parallel — `max_parallel_agents` and `max_tickets_in_progress` in
+`.vola-agent/policy.json`, set by the user on 2026-08-25. **Count before you
+move a fourth.** If three are already in progress, the answer is that the fourth
+stays `Todo` and unassigned; a queue that says `Todo` is true, and a board
+showing twelve in progress behind five worktrees is not.
+
+Read the number from the policy file rather than from here.
+
 So before starting anything, the claim check is:
 
 ```bash
