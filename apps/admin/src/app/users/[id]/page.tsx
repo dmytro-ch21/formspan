@@ -4,6 +4,7 @@ import { ApiError, fetchHealth, getUserBjjStanding, getUserDetail } from "@/lib/
 import type { BjjStanding, HealthEvent } from "@/lib/api";
 import { formatUTC } from "@/lib/format";
 import { AdminMasthead } from "../../AdminMasthead";
+import { AvatarModeration } from "./AvatarModeration";
 import { BeltSwatch, describeBelt } from "./Belt";
 
 /**
@@ -168,6 +169,11 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
               ))}
             </div>
           )}
+        </section>
+
+        <section className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-4">
+          <SectionLabel>Moderation</SectionLabel>
+          <AvatarModeration userID={id} hasAvatar={user.has_avatar} />
         </section>
 
         <section className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-4">

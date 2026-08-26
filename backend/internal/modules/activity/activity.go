@@ -79,6 +79,14 @@ type UserSummary struct {
 	Modules []string `json:"modules"`
 	// When they joined.
 	CreatedAt *time.Time `json:"created_at"`
+	// HasAvatar is the admin console's whole answer to "is there an image to
+	// look at, or a moderation report about". No URL here — this endpoint is
+	// RequireAdmin, not RequireAuth, and profile.Handler's presigning lives on
+	// the profile module; an admin who needs to actually SEE the avatar looks
+	// at the account in the app, or asks for the presigned link from support
+	// tooling that has it. This boolean is what makes "Remove avatar" a real
+	// button rather than a dead one on every account.
+	HasAvatar bool `json:"has_avatar"`
 }
 
 // UserDetail is one athlete's admin page: the same summary row, plus the

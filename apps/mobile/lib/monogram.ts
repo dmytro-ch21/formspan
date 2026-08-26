@@ -3,19 +3,24 @@ import { activeMonogramColors, monogramInk, type MonogramColor } from '@/constan
 /**
  * A person's stand-in avatar, derived from their handle.
  *
- * There are no uploaded avatars in this app and this is not a placeholder for
- * one — it is the answer for now, and it stays the fallback if photos are ever
- * added, because every avatar system needs something to draw for the people who
- * have not uploaded anything.
+ * **N12 added real uploaded avatars, and this stayed exactly what it always
+ * was: the fallback.** That was the plan from the start — the doc comment
+ * here used to argue avatars shouldn't exist at all ("nothing to moderate…
+ * with no report path built"), and both halves of that argument were
+ * answered rather than overridden: moderation is an admin takedown
+ * (`DELETE /v1/admin/users/{userID}/avatar`, reachable from an operator
+ * today, no in-app report flow yet), and see `components/Avatar.tsx` for
+ * where this and a real photo now compose — this function never changed.
  *
- * Deriving it rather than storing it buys three things worth having:
+ * Deriving it rather than storing it still buys what it always did, for the
+ * case it is now actually used in — no avatar set, or a real one that failed
+ * to load:
  *
- *   - **Nothing new crosses the wire.** The social scope addresses everyone by
- *     handle and never sends a user id; fetching a hosted image would need one.
- *   - **Nothing to moderate.** `display_name` is already unguarded prose that
- *     friends can see, and an uploaded picture is a strictly worse version of
- *     that problem with no report path built.
- *   - **Nothing to store, resize, cache or serve.**
+ *   - **Nothing new crosses the wire** for the athletes who have not
+ *     uploaded one — most of the app, most of the time.
+ *   - **Nothing to store, resize, cache or serve** for that same majority.
+ *   - **A photo that fails to load degrades to this, never to a broken-image
+ *     icon** — see `Avatar`'s `onError`.
  *
  * ## What the colour is and is not
  *

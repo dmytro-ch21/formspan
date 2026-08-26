@@ -10,14 +10,20 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/objectstore"
 )
 
 type Handler struct {
 	repo Repository
+	// store is nil when object storage is not configured — a supported state
+	// (local dev, CI), same as body.Handler. The avatar endpoints then say so
+	// rather than failing in a way that looks like a bug; every other route
+	// here does not touch it at all.
+	store *objectstore.Store
 }
 
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(repo Repository, store *objectstore.Store) *Handler {
+	return &Handler{repo: repo, store: store}
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
@@ -27,6 +33,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	h.present(r, p)
 	apihttp.WriteJSON(w, http.StatusOK, p)
 }
 
@@ -268,6 +275,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	h.present(r, p)
 	apihttp.WriteJSON(w, http.StatusOK, p)
 }
 
@@ -324,5 +332,6 @@ func (h *Handler) Lookup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	h.presentPublic(r, p)
 	apihttp.WriteJSON(w, http.StatusOK, p)
 }

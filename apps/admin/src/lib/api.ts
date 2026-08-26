@@ -18,6 +18,13 @@ export type AdminUserSummary = {
   /** Enabled disciplines, resolved server-side through the registry. */
   modules: string[];
   created_at: string | null;
+  /**
+   * Whether this account has an uploaded avatar (N12) — no URL, just the
+   * fact that decides whether "Remove avatar" is a real action on this
+   * account's page. Seeing the image itself means opening the account in
+   * the app; this console has no presigning of its own to show one.
+   */
+  has_avatar: boolean;
 };
 
 /** Carries the HTTP status so the error boundary can tell 403 from 5xx. */
@@ -74,6 +81,11 @@ async function adminFetch<T>(path: string, init?: { method: string; body: unknow
   if (!res.ok) {
     throw await apiErrorFrom(res, path);
   }
+  // 204 (adminClearAvatar, N12) has no body — every call site before it
+  // returned JSON, so nothing here needed this until now. `res.json()` on an
+  // empty body throws a SyntaxError that reads as a fault in the request
+  // rather than in this function's own assumption.
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -167,6 +179,19 @@ export type BjjStanding = {
  */
 export async function getUserBjjStanding(userID: string): Promise<BjjStanding> {
   return adminFetch<BjjStanding>(`/admin/users/${encodeURIComponent(userID)}/bjj/standing`);
+}
+
+/**
+ * N12's moderation answer: remove a specific account's avatar. There is no
+ * in-app report flow yet, so this is reached however a complaint reaches an
+ * operator today (email, a DM) — the same way every other admin action in
+ * this console is initiated.
+ */
+export async function clearAvatar(userID: string): Promise<void> {
+  await adminFetch<void>(`/admin/users/${encodeURIComponent(userID)}/avatar`, {
+    method: "DELETE",
+    body: undefined,
+  });
 }
 
 // `listUserActivities` and the `Activity` type lived here. Both are gone:

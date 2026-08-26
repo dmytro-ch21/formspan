@@ -104,9 +104,29 @@ type Profile struct {
 	// a fact about the athlete's life, not about one screen's session — and
 	// because with it held per-client, a phone and a browser derived different
 	// targets for the same person on the same day. See N93.
-	ActivityLevel *string   `json:"activity_level"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ActivityLevel *string `json:"activity_level"`
+	// HasAvatar is whether an avatar object exists in storage — never the URL
+	// itself, and never serialised. The handler mints AvatarURL from this (and
+	// UserID, which IS on the wire here) at response time, because a presigned
+	// URL expires and caching one would be a broken image with extra steps.
+	HasAvatar bool      `json:"-"`
+	AvatarURL string    `json:"avatar_url,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AvatarKey is the deterministic storage key for a user's avatar.
+//
+// **Deterministic, not per-upload**, unlike a check-in's `PhotoKey` (one per
+// date). An avatar is re-encoded to JPEG server-side on every upload
+// regardless of the source format (see UploadAvatar), so there is exactly one
+// object per account and re-uploading overwrites it — which is also what
+// makes "replace" and "upload" the same code path.
+//
+// Exported so `Handler` can presign it; the profiles table stores only
+// whether the object exists (HasAvatar), never this string.
+func AvatarKey(userID string) string {
+	return "avatars/" + userID + ".jpg"
 }
 
 // NewProfile is the input for onboarding. Module enablement isn't set here —
@@ -219,6 +239,16 @@ type Repository interface {
 	// SetModules upserts the given keys. Keys the caller doesn't mention are
 	// left alone, so a client can PATCH one toggle without sending the rest.
 	SetModules(ctx context.Context, userID string, enabled map[string]bool) error
+	// SetAvatar records that userID now has an avatar object in storage.
+	// Called AFTER the object is written, never before — see UploadAvatar —
+	// so a failed upload can never leave this true for an object that does
+	// not exist.
+	SetAvatar(ctx context.Context, userID string) error
+	// ClearAvatar records that userID no longer has one. Called after a
+	// best-effort delete of the object, and does not itself fail if the
+	// object was already gone — same "404 counts as success" rule
+	// body.deleteObject uses.
+	ClearAvatar(ctx context.Context, userID string) error
 }
 
 // PublicProfile is what one athlete may see of another — the response of
@@ -234,6 +264,15 @@ type PublicProfile struct {
 	// DisplayName is the human name beside the handle — "is this the right
 	// Dmytro" is answered here. Nil when the athlete never set one.
 	DisplayName *string `json:"display_name"`
+	// AvatarKey is `json:"-"` for the same reason `body.Checkin.PhotoKey` is:
+	// it embeds the owner's user id (see AvatarKey above) and this struct's
+	// entire point is that an id never crosses the wire from it. `json:"-"`
+	// makes that a property of the type rather than of remembering to leave a
+	// field out — the Go struct may hold it, the JSON encoder never will.
+	// Nil when the athlete has no avatar. Set by GetByUsername; read by the
+	// handler to mint AvatarURL, then discarded.
+	AvatarKey *string `json:"-"`
+	AvatarURL string  `json:"avatar_url,omitempty"`
 }
 
 // usernamePattern is the whole format rule: 3–30 characters, lowercase

@@ -590,3 +590,79 @@ func TestUpdateBindsFoodUnitAndActivityLevelToTheirOwnColumns(t *testing.T) {
 		t.Errorf("after re-read unit_system = %q, want \"imperial\"", reread.UnitSystem)
 	}
 }
+
+// N12: SetAvatar/ClearAvatar and has_avatar's round trip through both Get
+// (self) and GetByUsername (public card) — the two projections that read the
+// column, and the only two places a stale scan order would show up silently
+// (has_avatar is a bool sitting next to other bools/strings; a dropped or
+// misordered column would compile and scan something, just the wrong thing).
+func TestAvatarSetAndClear(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	userID := "test_user_avatar"
+	cleanupProfile(t, pool, userID)
+	if _, err := repo.Create(ctx, userID, NewProfile{}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	fresh, err := repo.Get(ctx, userID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if fresh.HasAvatar {
+		t.Fatalf("a fresh profile must not already have an avatar")
+	}
+
+	if err := repo.SetAvatar(ctx, userID); err != nil {
+		t.Fatalf("set avatar: %v", err)
+	}
+	got, err := repo.Get(ctx, userID)
+	if err != nil {
+		t.Fatalf("get after set: %v", err)
+	}
+	if !got.HasAvatar {
+		t.Fatalf("has_avatar should be true after SetAvatar")
+	}
+
+	// GetByUsername is the OTHER projection — a claimed handle is required to
+	// reach it at all, so claim one here rather than in every avatar test.
+	handle := "test_avatar_handle"
+	if _, err := repo.Update(ctx, userID, ProfileUpdate{Username: &handle}); err != nil {
+		t.Fatalf("claim handle: %v", err)
+	}
+	pub, err := repo.GetByUsername(ctx, handle)
+	if err != nil {
+		t.Fatalf("get by username: %v", err)
+	}
+	if pub.AvatarKey == nil {
+		t.Fatalf("GetByUsername should carry an AvatarKey once has_avatar is true")
+	}
+	if want := AvatarKey(userID); *pub.AvatarKey != want {
+		t.Errorf("avatar key = %q, want %q", *pub.AvatarKey, want)
+	}
+
+	if err := repo.ClearAvatar(ctx, userID); err != nil {
+		t.Fatalf("clear avatar: %v", err)
+	}
+	cleared, err := repo.Get(ctx, userID)
+	if err != nil {
+		t.Fatalf("get after clear: %v", err)
+	}
+	if cleared.HasAvatar {
+		t.Fatalf("has_avatar should be false after ClearAvatar")
+	}
+	pubCleared, err := repo.GetByUsername(ctx, handle)
+	if err != nil {
+		t.Fatalf("get by username after clear: %v", err)
+	}
+	if pubCleared.AvatarKey != nil {
+		t.Errorf("AvatarKey should be nil once has_avatar is false, got %q", *pubCleared.AvatarKey)
+	}
+
+	if err := repo.SetAvatar(ctx, "no_such_user_xyz"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetAvatar on an unknown user: want ErrNotFound, got %v", err)
+	}
+	if err := repo.ClearAvatar(ctx, "no_such_user_xyz"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("ClearAvatar on an unknown user: want ErrNotFound, got %v", err)
+	}
+}
