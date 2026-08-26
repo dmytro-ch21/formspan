@@ -194,6 +194,33 @@ func (r *statusRecorder) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
+// Unwrap lets `http.NewResponseController` reach the real ResponseWriter.
+//
+// **Without this, every ResponseController call under this middleware returns
+// `feature not supported` — silently, since the API reports it as an error
+// value nobody is obliged to read.** Embedding `http.ResponseWriter` satisfies
+// the interface but NOT the unwrap contract Go 1.20 introduced; a controller
+// walks `Unwrap() http.ResponseWriter` and stops at the first type that does
+// not have one.
+//
+// Measured, because reasoning about it is how it stays broken:
+// `SetReadDeadline` on a bare handler returns nil, and through
+// `Middleware` returned `feature not supported`. `apihttp.DrainRequestBody`'s
+// 10-second bound was therefore doing nothing at all in production — a
+// deadline that cannot fire, on the one middleware whose job is to keep a slow
+// client from holding a goroutine open.
+//
+// **`Compress` and `ConditionalGet` deliberately do NOT get one**, and that is
+// not an oversight to be tidied up later. Both BUFFER the response in order to
+// gzip or hash it, and their doc comments say in as many words that Flusher,
+// Hijacker and ReaderFrom are unsupported for that reason. An Unwrap there
+// would hand a handler the real writer and let it push bytes past the buffer,
+// emitting the body twice. This recorder is safe precisely because it buffers
+// nothing — it notes the status and passes every write straight through.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 func newHexID(bytes int) string {
 	b := make([]byte, bytes)
 	if _, err := rand.Read(b); err != nil {

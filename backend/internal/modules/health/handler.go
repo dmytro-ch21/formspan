@@ -307,20 +307,66 @@ func (rec *Recorder) run() {
 	}
 }
 
+// recordRejectionsOn are the routes where a 4xx is worth a durable row.
+//
+// **The general rule below is right and this is the exception that proves it.**
+// A 404 for a deleted session is noise. A refused AI request is not: it costs
+// the athlete an answer they asked for, it is the one place a rejection can be
+// invisible to the phone as well (see `apihttp.DrainRequestBody` — an upload
+// past 256 KiB used to lose its status on the wire), and it is rare enough that
+// recording every one adds a handful of rows a day rather than a flood.
+//
+// **Why this is not a nice-to-have.** N92 (#433) was reported three times and
+// diagnosed twice from the wrong evidence, because a rejected estimate left no
+// trace anywhere that outlives an afternoon: `health_events` skipped it as a
+// 4xx, and Railway's request log retains minutes, not days. Two sessions read
+// "the failing attempt is not in `health_events`" as *the request never
+// arrived* — a sound-looking inference from a log that was never going to
+// contain it. This closes that gap, so the next occurrence is one query away.
+var recordRejectionsOn = map[string]bool{
+	"/v1/nutrition/estimate": true,
+	"/v1/exercises/identify": true,
+	"/v1/bjj/reflect/draft":  true,
+}
+
 // Observe is called once per request, after it completes.
 //
-// Deliberately selective: only 5xx and slow requests are stored. Recording
-// every request would put a database write on the hot path of every call, and
-// the healthy case — nearly all of them — is exactly the case with nothing to
-// say. 4xx are left out too: they are overwhelmingly ordinary (a 404 for a
-// deleted session, a 401 for an expired token), and filling the operator's
-// screen with routine client mistakes is how a health page becomes something
-// nobody opens.
+// Deliberately selective: 5xx, slow requests, and a rejection on one of the few
+// routes listed above. Recording every request would put a database write on
+// the hot path of every call, and the healthy case — nearly all of them — is
+// exactly the case with nothing to say. 4xx are otherwise left out: they are
+// overwhelmingly ordinary (a 404 for a deleted session, a 401 for an expired
+// token), and filling the operator's screen with routine client mistakes is how
+// a health page becomes something nobody opens.
+//
+// **A rejection is recorded as `client_error` with `source: api`**, which needs
+// no migration — the kind already exists and the CHECK constraint does not tie
+// the two columns together. The `status` column carries which 4xx it was, which
+// is the whole question an operator has: a 429 is a spent allowance, a 401 is a
+// credential, a 400 is the upload itself.
+//
+// **`o.Duration` on a refused upload is not latency, and must not be read as
+// it.** `apihttp.DrainRequestBody` finishes reading the client's body after the
+// handler has answered, and it does so INSIDE the window `httplog` times — so a
+// rejection's duration includes however long the phone took to finish sending,
+// up to the drain's ten-second bound. On the three routes above that is
+// harmless, because the rejection branch wins and the row is filed as what it
+// is. Elsewhere a refused large POST over a slow link can now cross
+// `slowerThan` and file as `slow_request` — a row measuring the athlete's
+// bandwidth rather than this server's. Raised in review; recorded rather than
+// worked around, because the alternative is timing the drain separately and
+// nothing yet needs that precision.
 func (rec *Recorder) Observe(ctx context.Context, o httplog.Observation) {
 	var kind Kind
 	switch {
 	case o.Status >= 500:
 		kind = KindServerError
+	case o.Status >= 400 && recordRejectionsOn[o.Path]:
+		// Checked BEFORE the slow branch, not after. A refused request that
+		// also happened to be slow is a rejection first — filing it as
+		// `slow_request` would put the interesting row under the kind an
+		// operator filters out when hunting latency.
+		kind = KindClientError
 	case rec.slowerThan > 0 && o.Duration >= rec.slowerThan:
 		kind = KindSlowRequest
 	default:
