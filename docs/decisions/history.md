@@ -42898,6 +42898,259 @@ package has been unwired since N141 — there is still no live dispatcher
 (blocked on N145) to wire any of this into.
 
 
+## 2026-08-26 — Three device-found Today bugs from #584's round-2 pass: a biased week comparison, a doubled date, and Momentum's day-following reversal
+
+Round 2 of #584's device pass (the N179 Today-reorg follow-up) confirmed four
+of seven outstanding checks and found two real bugs plus one deliberate
+decision to make. All three are fixed here, on `n584-today-followups`.
+
+### Bug 1 — the week-over-week comparison compared a partial week against a full one
+
+User's words: *"'You are training less than last week' - it compares
+currently done against whole past week which is incorrect. at least it has to
+compare days from the week. if todays is wed then we compare to past week up
+to wednesday."*
+
+`lib/weekReview.ts`'s `reviewWeek` bounded `thisWeek` to the calendar week
+(Monday through Sunday), which in practice never includes more than what has
+actually happened — sessions cannot happen in the future. `lastWeek`, though,
+summed the complete seven days of the previous week regardless of how much of
+the current week had elapsed. A Wednesday reading therefore always compared
+2–3 days of live training against 7 days of history, and read as "training
+less than last week" for athletes training at an *identical* frequency, purely
+because the current week had not caught up yet.
+
+**Fix:** mirror `now`'s Monday-first weekday index onto the previous week, so
+the comparison window is last Monday through the same day-of-week as today —
+last Monday through last Wednesday, not last Monday through last Sunday. The
+formula reuses the same `(getDay() + 6) % 7` `startOfWeek` already computes,
+so a Sunday reading (the week fully elapsed) naturally widens back out to the
+full seven days — not a special case, the same formula produces it.
+
+**The existing null-guard reasoning is untouched.** `previous` still comes
+back `null` when the local session list cannot prove it reaches back past
+`prevFrom` — that guard is about whether the list was truncated, which has
+nothing to do with how wide the window is once the list is trusted. `deltaPct`
+was not touched: it consumes `WeekTotals` as data and has no opinion on how the
+window was built, exactly where the ticket said the fix belonged. **`whatChanged`
+in `lib/progress.ts` DOES need one copy fix on top of this**, found by
+`frontend-reviewer` — see below, right after the mutation-testing note.
+
+**One existing test asserted the old, buggy comparison and had to change.**
+`reviewWeek — the window guard`'s "reports the previous week once the list
+demonstrably reaches back past it" summed a Wednesday(08-05) and a
+Friday(08-07) session from the previous week into a `previous.sessions: 2`.
+Under the fix the Friday session falls past the mirrored cutoff, so the
+correct number is 1 — the Friday session is repurposed as a second
+`reachesBack` proof rather than dropped, alongside the existing Sunday one.
+The UTC-bucketing test (`buckets by local day, not by UTC date`) needed its
+`NOW` moved to the following Sunday evening rather than the file's usual
+midweek `NOW`: its own fixture session sits on the last day of the previous
+week, which the new partial-week bound would otherwise exclude for a reason
+unrelated to what that test checks — a full elapsed week is the one point
+where the bound covers the whole previous week again, so it stays out of the
+UTC test's way.
+
+**Mutation-tested.** Reverting the window-construction line back to
+`day >= prevFrom && day < from` (the old full-week condition) turns three
+tests red — the updated "reaches back" test, and two new ones added
+specifically for this bug (`reviewWeek — the partial-week bound`): one proving
+the mirrored window excludes a same-week-but-later session, one proving an
+athlete training identically both weeks reads as unchanged rather than a
+decline. Restoring the fix turns all 23 tests in the file green again in the
+same session.
+
+**`frontend-reviewer` caught a real `[blocking]` issue on top of this, and it
+is now also fixed.** `lib/progress.ts`'s `whatChanged` renders the consistency
+insight as `"${gap} more/fewer than last week's ${before}."` — and `before` is
+now `week.previous.sessions`, which `reviewWeek` bounds to the SAME mirrored,
+partial range as `now` rather than the full previous week. The old copy
+presented that partial figure as though it were last week's whole total: an
+athlete who trained 6 times last week but only reached 2 by the equivalent
+Wednesday would have read "2 more than last week's 2" — arithmetically
+consistent with the now-correct headline, and still a misattribution of what
+the number counts. Fixed to `"than the ${before} you had by this point last
+week."`, which names the number for what it is rather than implying a total it
+is not.
+
+A new test in `lib/__tests__/progress.test.ts` pins the corrected phrasing
+directly and asserts the old "last week's" wording is gone; the existing
+"compares this week with last" test's two literal expectations were updated to
+match. Mutation-tested the same way as everything else here: reverting the
+template string back to `` `than last week's ${before}.` `` turns both tests
+red; restoring returns the file to 34/34 green.
+
+### Bug 2 — the date rendered twice
+
+User's words: *"we show twice the date - we show the ‹ TODAY › and right
+under again Wednesday, August 26. Lets have this somehow in the TODAY pill
+right under it. With a bit smaller font so it fits."*
+
+`app/(tabs)/index.tsx` rendered `PeriodSwitcher` with `label={dayLabel}` (
+`TODAY`, or a short weekday-and-date when browsing) and then a second,
+standalone `<Text style={styles.date}>` directly beneath it carrying the same
+fact in long form — `todayLabel(now)` when on today, the browsed day's own
+long-form date otherwise. Two elements, one fact, on every render.
+
+**Fix:** `PeriodSwitcher` (`components/ui/PeriodSwitcher.tsx`) gained an
+**optional** `subLabel?: string` prop, rendered smaller inside the same pill,
+directly under `label`. Today is the only caller that passes one — Plan's
+week/month switchers, and anything future, render exactly as they always have
+when `subLabel` is omitted; the pill's `flexDirection` moved from `row` to
+`column` with a nested row for `label`+`icon`, so a plain caller with no
+`subLabel` renders the identical single-line layout it always did (spot-checked
+by the "renders nothing extra when subLabel is omitted" test). The standalone
+`styles.date` `<Text>` and its now-dead style entry are removed from
+`app/(tabs)/index.tsx`.
+
+**Colour, not guessed.** `subLabel` uses `vola.textMuted`, not a new token: the
+same colour already used one line above it for this component's own disclosure
+icon, already measured in `PeriodSwitcher`'s own doc comment at 6.26:1 against
+`surfaceRaised` (the pill's fill) — comfortably clear of 4.5:1 for normal-size
+text, with no separate contrast pass needed because nothing new was
+introduced.
+
+**The accessible name now carries both lines.** A sighted user reads the date
+off the smaller line beneath `TODAY`; the control's `accessibilityLabel` says
+so too now (`"TODAY, Wednesday, 26 August"`, or with `". Back to today"`
+appended when browsing) rather than announcing only the word above it.
+
+**Mutation-tested**, at both layers. `components/ui/__tests__/periodSwitcher.test.tsx`
+is new (no prior `PeriodSwitcher` test existed): four cases, and reverting the
+spoken-label line back to `const spokenLabel = label` turns two of them red
+(the ones asserting both lines are spoken). In `todayScreen.test.tsx`, a new
+"folded into the switcher" describe block asserts the accessible name shape
+and that the weekday-and-date string renders **exactly once** on screen;
+removing the `subLabel` prop from the render call turns both red. Restoring
+either mutation returns both files to green.
+
+### Bug 3 — Momentum reversed to follow the browsed day, a decision confirmed directly by the user
+
+User's words, on being asked to confirm scope: *"no matter where we switch the
+Todays momentum with cals and stuff shows todays stats we need to show real
+things."* This explicitly reverses `MomentumCard`'s previous, deliberately
+tested behaviour (recorded in the N179 entry above: *"LATER and the fuel/
+tracker cards do NOT re-date... trackers still log to real today"* — verified
+correct by a reviewer on that earlier pass). The user was asked and confirmed
+the reversal directly rather than this being inferred from the bug report
+alone.
+
+**The capability already existed** — `app/(tabs)/food.tsx`'s own day stepper
+already fetches day-keyed totals (`localEntries(userId, on)` where
+`on = dayString(addDays(new Date(), dayOffset))`), so this was wiring Today's
+own `foodEaten`/`foodView` to its own `viewDay`, not new plumbing.
+
+**The refresh was split in two, not just re-dated, to avoid re-fetching
+unrelated reads on every day-step.** `refreshFood` is now two callbacks:
+
+- `refreshFoodDay` — entries and target for the browsed day (`on`, derived
+  from `viewDay`), replacing what used to always read real today. Its own
+  `useFocusEffect`, separate from the screen's combined one: `on` is a
+  dependency, so stepping the day changes this callback's identity and
+  React Navigation's `useFocusEffect` re-runs it immediately (mirroring how
+  `food.tsx`'s own stepper re-triggers its `refresh`) — without also
+  re-running checkins, the training summary, the funnel or the roadmap read,
+  none of which describe the browsed day.
+- `refreshFoodWeek` — the week's logged-day count and the quick-add ranking,
+  unchanged and still real-today-only. This stays in the screen's combined
+  focus effect exactly as before.
+
+Both `foodEaten` and `foodView` are now derived from day-keyed state
+(`loadedFood`/`datedFoodView`, each `{ on, ... }`) rather than plain
+`useState`s, the same shape `food.tsx` already uses — without the key,
+stepping the day would leave the *previous* day's figures on screen under the
+new date until the read resolved.
+
+**One edge case the fix had to account for explicitly: a resumed session with
+a leftover `dayOffset`.** The day switcher is hidden while a session is
+running (`!resume`), so there is no way to see or correct a `dayOffset` left
+over from browsing before the session started — and this screen stays mounted
+for the process's life, so that leftover state genuinely persists. Momentum's
+day key now falls back to real today whenever `resume` is truthy,
+regardless of `viewDay`, matching "the resume card leads, full stop" for this
+card too rather than silently showing a browsed day nobody can see the
+switcher for. `lead`/`resume` were hoisted up next to their source (`board`)
+so this fallback could see them; nothing about their own logic changed.
+
+**The decision, made explicitly rather than defaulted:** Log Food and
+quick-add keep acting on real today, unconditionally, regardless of which
+day's figures are on screen. This is the safer of the two options the ticket
+posed — it matches `food.tsx`'s own stated rule ("Today pins its row to
+today, because a tap there logs a cup now") and avoids introducing retroactive
+logging into a browsed past day, which is a bigger behavioural change than
+this ticket's fix warrants. `quickLog`'s post-log refresh only re-fetches the
+browsed day's stats when that day *is* today (or a session is resuming), so a
+quick-add while browsing Tuesday writes to today without repainting the
+screen onto a day the athlete did not ask to see.
+
+**Left alone, deliberately, and named rather than silently expanded:**
+`MomentumCard`'s title (`"TODAY'S MOMENTUM"`) is hardcoded inside the
+component and stays literal even while browsing another day — the component
+was out of this ticket's scope boundary (`components/ui/PeriodSwitcher.tsx`
+and `app/(tabs)/index.tsx` only), and the switcher pill directly above the
+card already states which day is on screen. Reconciling the card's own title
+with a browsed day is a small follow-up, not folded in here.
+
+**Mutation-tested.** Reverting the day key back to always-`todayKey` turns
+the new "re-fetches and shows the BROWSED day's entries" test red (still 1
+entry expected 2); restoring returns the whole `todayScreen.test.tsx` suite
+(48 tests) to green.
+
+**`ac-verifier` found the resume fallback shipped with no test able to catch
+its deletion**, and it was right: `const on = resume ? todayKey :
+dayString(viewDay)` is a one-line branch, but reproducing "browsed away, THEN a
+session starts" through the full rendered screen means widening the plan
+window (crossing the current week's Monday, or Train's 14-day horizon) before
+the resume state changes — an awkward sequence, and the kind that is easy to
+get subtly wrong even when it superficially passes. **Pulled the branch out as
+a pure function instead of writing that choreography**:
+`momentumDayKey(resume, viewDay, todayKey)` now lives in `lib/todayBoard.ts`
+beside `todayPlanWindow`, and `lib/__tests__/todayBoard.test.ts` covers both
+branches directly — no rendering, no window-widening dance. Deleting the
+`resume ? todayKey :` half of the ternary (replacing it with a bare
+`dayString(viewDay)`) turns exactly one of the three new tests red; restoring
+returns the file to 46/46. A fourth `NEEDS HUMAN EVIDENCE` checkbox was added
+to #584 for the device-observable version of this (a resumed session
+overriding a leftover browsed day), since the earlier three didn't name it and
+the evidence latch reads the issue body, not this file or the scenarios doc.
+
+**Three more `[suggestion]` findings from the same review, taken because they
+were cheap:**
+
+- `quickLog` used to discard `refreshFoodDay`'s returned canceller. Two rapid
+  quick-adds could race — the first read, started before the second, could
+  resolve after it and overwrite fresher figures with stale ones, since both
+  write to the same `on` key and the key-match guard cannot tell the two
+  calls apart. A `foodDayCancelRef` now cancels the previous in-flight read
+  before starting a new one.
+- `PeriodSwitcher`'s `{subLabel && (<Text>...)}` became `{subLabel ? (...) :
+  null}`, so a future caller passing `subLabel=""` cannot render a bare empty
+  string as a text node.
+- The `subLabel` prop on `PeriodSwitcher` in `index.tsx` used to branch on
+  `isToday` to format the same string two different-looking ways
+  (`todayLabel(now)` vs. `viewDay.toLocaleDateString(...)` with identical
+  options). Collapsed to `subLabel={todayLabel(viewDay)}` — `viewDay` already
+  equals `now` exactly when `isToday` (`addDays(now, 0)`), so one expression
+  covers both and there is no longer a second place the two could quietly
+  drift apart.
+
+### What this leaves open
+
+- **`MomentumCard`'s own title stays "TODAY'S MOMENTUM" while browsing another
+  day.** Recorded above as a scope boundary, not an oversight — a follow-up
+  ticket should reconcile the card's static title with the day it now
+  displays, most likely by threading the switcher's own day label through as
+  a prop.
+- **NEEDS HUMAN EVIDENCE, added to #584:** the fixed week comparison read
+  correctly against a real week of training data; the folded date's line
+  break and font size at a real device size (especially a long weekday name
+  at accessibility text sizes); the Log Food/quick-add behaviour while
+  browsing, on a device, to confirm the "no silent retroactive log" call reads
+  as intended rather than as a bug; and the resume-overrides-a-browsed-day
+  case above, which is genuinely device-only — nothing short of a running
+  session can confirm the switcher stays hidden and Momentum stays on today
+  throughout.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

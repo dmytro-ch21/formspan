@@ -238,3 +238,27 @@ export function todayPlanWindow(now: Date, viewDay: Date = now): { from: string;
   const to = viewDay.getTime() > horizon.getTime() ? viewDay : horizon;
   return { from: dayString(from), to: dayString(to) };
 }
+
+/**
+ * The day key a browsed-day-following read should use — Momentum's own
+ * (N179/#584 follow-up), and any future one built the same way.
+ *
+ * **Real today whenever a session is resuming, regardless of `viewDay`.** The
+ * day switcher is hidden during a resume (see the render in
+ * `app/(tabs)/index.tsx`), so there is no way for the athlete to see or
+ * correct a `dayOffset` left over from browsing before the session started —
+ * and this screen stays mounted for the process's life, so that leftover can
+ * genuinely still be sitting there. "The resume card leads, full stop" means
+ * nothing else on the screen describes a browsed day while a session is
+ * running; this is what makes that true for a day-following read too, rather
+ * than silently keying it off whatever day the switcher was last left on.
+ *
+ * Pulled out on its own — this one-line branch shipped with no test able to
+ * catch its deletion, because reproducing "browsed away, THEN a session
+ * starts" through the full screen needs the plan window to widen before the
+ * resume state changes, which is an awkward sequence to orchestrate and an
+ * easy one to get subtly wrong. As a pure function it needs neither.
+ */
+export function momentumDayKey(resume: boolean, viewDay: Date, todayKey: string): string {
+  return resume ? todayKey : dayString(viewDay);
+}

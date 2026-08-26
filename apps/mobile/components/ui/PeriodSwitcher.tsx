@@ -51,9 +51,27 @@ import { vola } from '@/constants/Colors';
  * (Every figure above was recomputed after review found the first set 2–3%
  * low across the board. None of them changed a conclusion, but a repo that has
  * deleted a card fill over a single measurement does not get to round.)
+ *
+ * **`subLabel`, added for Today (N179/#584 follow-up), is optional and additive
+ * on purpose.** Today used to render `TODAY` in this pill and then repeat the
+ * full date directly underneath it in a standalone `<Text>` — one fact, twice.
+ * `subLabel` folds the second line into the pill instead, so every other
+ * consumer (Plan's week/month switchers, and anything future) is unaffected
+ * unless it opts in.
+ *
+ * Colour is `vola.textMuted`, not a new token: it is already used one line up
+ * for this component's own disclosure icon, already measured in this file's
+ * own doc comment (6.26:1 on `surfaceRaised`, the pill's fill), and clears
+ * 4.5:1 for normal-size text with room to spare — so a smaller second line
+ * does not need its own contrast pass, it needs to reuse one that already
+ * passed. `subLabel`'s text is smaller than the main label's, which is exactly
+ * why it borrows the dimmer of the two inks already proven on this surface
+ * rather than the full-contrast one: the main label stays the loudest thing in
+ * the pill.
  */
 export function PeriodSwitcher({
   label,
+  subLabel,
   onPrev,
   onNext,
   onPress,
@@ -64,6 +82,12 @@ export function PeriodSwitcher({
   testID,
 }: {
   label: string;
+  /**
+   * A smaller second line under `label`, inside the same pill. Optional —
+   * omit it and this renders exactly as it always has. Today is the only
+   * current caller that passes one.
+   */
+  subLabel?: string;
   onPrev: () => void;
   onNext: () => void;
   /** Omit to make the label plain text — a readout rather than a control. */
@@ -74,6 +98,10 @@ export function PeriodSwitcher({
   pressLabel?: string;
   testID?: string;
 }) {
+  // The accessible name carries both lines — a sighted user reads the date
+  // off the smaller line, so a screen reader has to say it too, not just the
+  // bigger word above it.
+  const spokenLabel = subLabel ? `${label}, ${subLabel}` : label;
   return (
     <RNView style={styles.row} testID={testID}>
       <Pressable
@@ -101,19 +129,30 @@ export function PeriodSwitcher({
         // announced "AUGUST 2026, dimmed" — a `Pressable` with no handler is
         // already inert without saying so.
         hitSlop={10}
-        style={({ pressed }) => [styles.pill, pressed && onPress && styles.pressed]}
+        style={({ pressed }) => [
+          styles.pill,
+          subLabel && styles.pillWithSubLabel,
+          pressed && onPress && styles.pressed,
+        ]}
         accessibilityRole={onPress ? 'button' : 'text'}
         // The visible text LEADS the accessible name — WCAG 2.5.3. Naming it
         // only by the sentence version ("August, week of 11 August. Open the
         // month…") means "tap THIS WEEK" does nothing under Voice Control, and
         // on Plan this pill is the only route to the month grid.
-        accessibilityLabel={onPress && pressLabel ? `${label}. ${pressLabel}` : label}
+        accessibilityLabel={onPress && pressLabel ? `${spokenLabel}. ${pressLabel}` : spokenLabel}
         testID={testID ? `${testID}-label` : undefined}
       >
-        <Text style={styles.label} numberOfLines={1}>
-          {label}
-        </Text>
-        {icon && <Icon name={icon} size={13} color={vola.textMuted} />}
+        <RNView style={styles.labelRow}>
+          <Text style={styles.label} numberOfLines={1}>
+            {label}
+          </Text>
+          {icon && <Icon name={icon} size={13} color={vola.textMuted} />}
+        </RNView>
+        {subLabel ? (
+          <Text style={styles.subLabel} numberOfLines={1}>
+            {subLabel}
+          </Text>
+        ) : null}
       </Pressable>
 
       <Pressable
@@ -141,9 +180,8 @@ const styles = StyleSheet.create({
   // Rotating the one chevron rather than shipping a second asset — see above.
   flip: { transform: [{ rotate: '180deg' }] },
   pill: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    gap: 7,
     paddingVertical: 7,
     paddingHorizontal: 16,
     borderRadius: 999,
@@ -153,11 +191,31 @@ const styles = StyleSheet.create({
     minWidth: 148,
     justifyContent: 'center',
   },
+  // Only applied when `subLabel` is present, so a plain caller (Plan) keeps
+  // the exact vertical rhythm it always had — a second line needs a little
+  // more room or it crowds against the pill's edge.
+  pillWithSubLabel: { paddingVertical: 9 },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
   label: {
     color: vola.text,
     fontSize: 13,
     fontWeight: '800',
     letterSpacing: 1.1,
+  },
+  // Smaller and dimmer than `label` on purpose — the date is context under the
+  // pill's real content, not a second headline. `textMuted` is reused rather
+  // than introduced; see the doc comment above for why it is already proven on
+  // this surface.
+  subLabel: {
+    color: vola.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    marginTop: 1,
   },
   pressed: { opacity: 0.55 },
 });

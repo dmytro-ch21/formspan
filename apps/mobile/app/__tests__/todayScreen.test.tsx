@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import TodayScreen from '../(tabs)/index';
+import type { Entry } from '@/lib/nutrition';
 import type { Module } from '@/lib/modules';
 import type { PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
@@ -110,8 +111,13 @@ jest.mock('@/lib/prefs', () => ({
   readPref: () => Promise.resolve(null),
   writePref: () => Promise.resolve(),
 }));
+// `localEntries` is a real jest.fn (not a constant resolver), unlike its
+// neighbours here — Momentum's day-following behaviour (N179/#584 follow-up)
+// is specifically that it reads the BROWSED day, not always real today, so
+// the tests for that need to see which `on` argument this was called with.
+const mockLocalEntries = jest.fn((..._a: unknown[]): Promise<Entry[]> => Promise.resolve([]));
 jest.mock('@/lib/foodLog', () => ({
-  localEntries: () => Promise.resolve([]),
+  localEntries: (...a: unknown[]) => mockLocalEntries(...a),
   localLoggedDays: () => Promise.resolve([]),
   localTargetView: () => Promise.resolve({ state: 'unknown' }),
   recentsFor: () => Promise.resolve([]),
@@ -214,6 +220,25 @@ function dayFromNow(n: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/** A logged food entry, defaulted to today so a test only sets what it means. */
+function entry(over: Partial<Entry> & { id: string }): Entry {
+  return {
+    eaten_on: todayKey(),
+    meal: 'breakfast',
+    name: 'Food',
+    servings: 1,
+    serving_label: '1 serving',
+    source_food_id: null,
+    notes: '',
+    kcal: 100,
+    protein_g: 10,
+    carb_g: 10,
+    fat_g: 5,
+    fibre_g: null,
+    ...over,
+  };
+}
+
 beforeEach(() => {
   mockModules = [strength, bjj, nutrition];
   mockPush.mockReset();
@@ -225,6 +250,8 @@ beforeEach(() => {
   mockListPlannedBetween.mockResolvedValue([]);
   mockFunnel.mockReset();
   mockFunnel.mockResolvedValue([]);
+  mockLocalEntries.mockReset();
+  mockLocalEntries.mockResolvedValue([]);
 });
 
 describe('the active session outranks everything', () => {
@@ -748,6 +775,75 @@ describe('the six blocks', () => {
 
     expect(await screen.findByTestId('today-fuel-off')).toBeTruthy();
     expect(screen.queryByTestId('today-momentum')).toBeNull();
+  });
+});
+
+describe('the date, folded into the switcher (N179/#584 follow-up)', () => {
+  // The bug: the switcher read `TODAY` and a second, separate `<Text>`
+  // immediately below it repeated the exact same date — one fact, twice.
+  // `subLabel` folds it into the pill; see `PeriodSwitcher`'s own tests for
+  // the component-level coverage. What matters here is that TODAY the screen
+  // no longer renders a redundant standalone line.
+
+  it('speaks the date as part of the switcher’s own accessible name', async () => {
+    render(<TodayScreen />);
+    const label = await screen.findByTestId('today-day-label');
+    expect(label.props.accessibilityLabel).toMatch(/^TODAY, [A-Z][a-z]+day, [A-Z][a-z]+ \d{1,2}$/);
+  });
+
+  it('renders the weekday-and-date string exactly once, not twice', async () => {
+    render(<TodayScreen />);
+    await screen.findByTestId('today-day');
+    // "Wednesday, 26 August" — the exact shape `todayLabel` produces. Before
+    // the fix this matched TWO nodes: the standalone `<Text style={styles
+    // .date}>` and (once browsing) the pill's own short label. Folding it in
+    // leaves exactly one.
+    expect(screen.getAllByText(/^[A-Z][a-z]+day, [A-Z][a-z]+ \d{1,2}$/)).toHaveLength(1);
+  });
+});
+
+describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
+  // Reversed on direct user instruction: "no matter where we switch the
+  // Todays momentum with cals and stuff shows todays stats we need to show
+  // real things." Momentum used to always read real today regardless of
+  // `viewDay`; it now reads whichever day the switcher is showing.
+
+  it('reads real today’s entries with nothing browsed', async () => {
+    mockLocalEntries.mockResolvedValue([entry({ id: 'e1' })]);
+    render(<TodayScreen />);
+
+    const momentum = within(await screen.findByTestId('today-momentum'));
+    expect(await momentum.findByText('1 entry')).toBeTruthy();
+    expect(mockLocalEntries).toHaveBeenCalledWith('u1', todayKey());
+  });
+
+  it('re-fetches and shows the BROWSED day’s entries once the switcher steps back', async () => {
+    const yesterday = dayFromNow(-1);
+    mockLocalEntries.mockImplementation((..._a: unknown[]) => {
+      const on = _a[1] as string;
+      return Promise.resolve(on === yesterday ? [entry({ id: 'e1' }), entry({ id: 'e2' })] : []);
+    });
+    render(<TodayScreen />);
+    await screen.findByTestId('today-momentum');
+
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    const momentum = within(await screen.findByTestId('today-momentum'));
+    expect(await momentum.findByText('2 entries')).toBeTruthy();
+    expect(mockLocalEntries).toHaveBeenCalledWith('u1', yesterday);
+  });
+
+  it('keeps Log Food pinned to real today even while browsing a different day', async () => {
+    // The decision recorded in the history entry: logging stays on real
+    // today regardless of which day's stats are on screen, rather than
+    // silently logging retroactively into a browsed day. `/food/add` with no
+    // date param is what makes it default to today.
+    render(<TodayScreen />);
+    await screen.findByTestId('today-day');
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    fireEvent.press(await screen.findByTestId('today-log-food'));
+    expect(mockPush).toHaveBeenCalledWith('/food/add');
   });
 });
 

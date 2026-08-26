@@ -1106,6 +1106,43 @@ this is a lighter, day-at-a-time control living above NOW/NEXT.
   empty answer for a day genuinely outside what has loaded yet (it should
   simply not have rendered the section at all until the wider read answers).
 
+**The date is folded into the switcher, not repeated below it (#584
+follow-up).** `today-day-label` reads `TODAY` (or the short weekday-and-date
+when browsing) as its main line, with the full weekday-and-date underneath it
+as a smaller second line inside the same pill — check on a device that this
+does not visually crowd the pill at the largest accessibility text sizes,
+since jest cannot see actual glyph widths. There must be **no second,
+separate line below the switcher repeating the same date** — that duplication
+is the bug this replaced. A screen reader announces both lines together
+(`"TODAY, Wednesday, 26 August"`), not just the word above the date.
+
+**Momentum (the Fuel card / `today-momentum`) now follows the browsed day,
+reversed from N179's own shipped behaviour (#584 follow-up).** Step the
+switcher to a past day with different food logged than today: the rings, the
+eaten total and the entry count must update to that day's figures, not stay
+pinned to real today's. Step to a future day with nothing logged: the card
+must read as an unread/empty day for THAT day, never today's numbers. Step
+back to today (press the label, or `today-day-next`/`prev` back to zero): the
+card must return to real today's figures.
+
+- **NEEDS HUMAN EVIDENCE** — the stale-day flash. Log different amounts on two
+  different days, then step between them quickly (prev, prev, next, next) and
+  watch for the card ever showing one day's rings/total under the other day's
+  label, even for a single frame.
+- **Log Food and quick-add stay pinned to real today, deliberately, even while
+  browsing another day.** This was a decision, not an oversight — see the
+  history entry. Browse to yesterday, tap Log Food: the add screen must open
+  with **no** date carried over (it defaults to real today), never silently
+  logging into the browsed day. **NEEDS HUMAN EVIDENCE** — confirm this reads
+  as intentional on a device rather than as a bug, since nothing on screen
+  currently tells the athlete which day a tap will log to while browsing.
+- **A resumed session overrides any leftover browsed day.** Step forward or
+  back a few days, then start (or return to) a session elsewhere in the app so
+  `resume-session` takes over Today: Momentum must show real today's figures,
+  never the day the switcher was left on before the session started — the
+  switcher itself is hidden during a resume, so there is no way to notice or
+  correct a stale day otherwise.
+
 **Gone, and should stay gone**
 
 - No activity logging UI. `activity-notes`, `log-activity`, `pending-count`,
@@ -12489,6 +12526,16 @@ already existed somewhere in the app.
   that order is the ticket.
 - "What changed" says at most **two** things and each is a sentence with the
   evidence under it, never a bare number.
+- **The week-over-week consistency line compares like-for-like ranges, not a
+  partial week against a full one (#584 follow-up).** Mid-week (say Wednesday),
+  train the same two days this week as last week, and also have trained
+  further into last week (Thursday/Friday) than this week has reached yet.
+  "What changed" must **not** say "training less than last week" for that —
+  the comparison window is bounded to last Monday through last Wednesday, the
+  same range this week has actually had. **NEEDS HUMAN EVIDENCE** — walk this
+  against a real account with a few weeks of history and confirm the reading
+  matches actual training frequency rather than how far into the week it
+  happens to be.
 - The span control on the training grid still switches 1W / 1M / 6M / 1Y, and
   the grid still lays a month out as a calendar and a year as a heatmap. It is
   the same component; nothing about it may differ from how it behaved on You.
