@@ -256,6 +256,28 @@ jobs:
       - name: Every gate is reachable
         run: python3 scripts/check-verify-chain.py
 
+      # N63. `docs/decisions/history.md` is the append target for every PR —
+      # 17 of 20 commits on 20 Aug, 9 of 10 on 26 Aug — so any two open PRs
+      # conflict on it by arithmetic. A conflicting PR gets ZERO check runs
+      # (N65, above), so this defect routinely produces the one board state
+      # this repo has learned not to trust.
+      #
+      # `--check` is two things. The SHAPE half asserts the structure the
+      # history rule depends on and that nothing read until now: exactly one
+      # `## Open items` heading, and it is the last one in the file. That is
+      # the repair that has been made four times, always silently — the phrase
+      # occurs SIX times on `main` and only one is a heading, so an insert
+      # anchored on the first match lands 21,000 lines up and every check stays
+      # green.
+      #
+      # The DRIVER half runs the merge driver's demonstration suite, including
+      # cases through a real throwaway git repository and two showing git's
+      # built-in `merge=union` silently corrupting the cases this driver
+      # refuses. `check:python` only `ast.parse`s; a driver that resolves
+      # wrongly is a behaviour, so it needs a check that runs it.
+      - name: Append-only docs merge safely, and still end with their gap list
+        run: python3 scripts/append-only-merge.py --check
+
       # The detector for "this PR received ZERO check runs", which is
       # indistinguishable from every check passing. This step runs its OFFLINE
       # self-test only — the live half needs an authenticated `gh` and a PR, and

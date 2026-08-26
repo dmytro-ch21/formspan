@@ -1,0 +1,25 @@
+# Append-only documents: every PR adds an entry to these, so any two open PRs
+# conflict on them by arithmetic. Measured on `main`: 17 of 20 commits on
+# 20 Aug 2026 and 9 of 10 on 26 Aug touched `docs/decisions/history.md`.
+#
+# `merge=append-only` routes them through `scripts/append-only-merge.py`, which
+# resolves EXACTLY ONE case — both sides inserted at the same anchor and
+# neither deleted or changed anything (git's diff3 base region is empty, so
+# concatenation is the only loss-free answer) — and leaves every other conflict
+# for a human, with markers, exactly as today.
+#
+# NOT `merge=union`. Union is the obvious choice for an append-only file and it
+# is wrong here: it silently keeps both sides of an edit to the SAME line, and
+# silently reverts a deletion the other side reworded. `--self-test` runs both
+# of those cases through git's real union driver and shows it merging clean.
+#
+# If the driver is not registered in `.git/config`, git falls back to the
+# built-in text merge — you lose the benefit, never correctness. Register it
+# with `pnpm install`, or `python3 scripts/append-only-merge.py --install`.
+docs/decisions/history.md merge=append-only
+docs/testing/functional-scenarios.md merge=append-only
+
+# Deliberately NOT listed: docs/TASKS.md. It is an archive since 2026-08-20
+# (1 of 21 commits touched it after the move to Issues), and a tick is a line
+# MODIFICATION, which this driver refuses anyway. `check-tasks-integrity.py`
+# is the guard there.

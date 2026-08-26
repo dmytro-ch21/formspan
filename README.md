@@ -36,6 +36,7 @@ to empty, and that emptiness is the signal.
 ## Run it locally
 
 ```bash
+pnpm install                      # also registers the append-only merge driver (below)
 docker compose up -d              # local Postgres on :5432
 cd backend && go run ./cmd/migrate up
 cd backend && go run ./cmd/seed   # reference content (exercises, techniques, curricula, public workout plans); idempotent
@@ -117,6 +118,23 @@ exempt: an empty draft is a branch pushed early, which is fine. If it fires on
 you, either push the work or put the PR back to draft with
 `gh pr ready --undo <n>`.
 
+
+### Why `pnpm install` touches your git config
+
+Every PR appends an entry to `docs/decisions/history.md` — 17 of 20 commits on
+20 Aug 2026, 9 of 10 on 26 Aug — so any two open PRs used to conflict on it by
+arithmetic, and **a conflicting PR receives zero CI check runs**, which looks
+exactly like nothing failing.
+
+`.gitattributes` routes that file and `docs/testing/functional-scenarios.md`
+through `scripts/append-only-merge.py`, and `postinstall` registers the driver
+in `.git/config` (which is not versioned, so it cannot ship in the repo). The
+driver resolves exactly one case — both sides appended at the same anchor and
+neither changed anything — and leaves every other conflict for you, with
+markers. **If it is never registered, git falls back to its normal merge**: you
+lose the convenience, never correctness. Install it by hand with
+`python3 scripts/append-only-merge.py --install`, and see what it refuses with
+`python3 scripts/append-only-merge.py --self-test`.
 
 Deliberately **not** in it — each is slow or needs setup, and CI runs them:
 
