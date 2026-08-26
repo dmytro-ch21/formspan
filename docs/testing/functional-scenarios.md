@@ -12642,3 +12642,88 @@ invisible in a screenshot taken a second late.
   currently reached. The suite proves the three reads are SQLite and that
   nothing on this screen touches a token, a fetch or a sync run. It cannot prove
   the phone in a basement.
+
+## You as athlete identity, and the Library's own-chains shelf (N181, `apps/mobile`)
+
+The You tab answers *"who am I as an athlete, and how is VOLA configured for
+me?"* — in that order. `Sequences` moved off it into the Library and the inert
+`Units` row moved off it into Settings; `TrainingSummary`, `RecordsCard` and the
+position map had already gone to Progress in N178, and this screen must not
+grow a second copy of any of them.
+
+### Happy path — You
+
+- Open You on an account with every module enabled. The belt masthead is first,
+  the athlete's name is directly under it, and the three facts the app reasons
+  over (Sports, Phase, Born) sit in one card beneath that. No chart, no
+  consistency grid and no records list appear anywhere on the screen.
+- The `People` label appears below the whole identity block, and `App` below
+  that. Nothing above the name.
+- Tap `Sports` → the profile editor's sport toggles. Tap `Phase` → the phase
+  screen. Tap `Edit profile` → the profile editor.
+- Tap `Library` → the catalog. Its subtitle names the athlete's own chains, so
+  somebody looking for a sequence has a reason to open it.
+- Tap `Settings` → units, accent, privacy and account, all of it still there.
+
+### Happy path — the Phase row
+
+- With a live phase (say a cut), the Phase row reads `Cut` — the label from
+  `PHASE_LABELS`, the same table the phase screen renders from.
+- End that phase and return to You. The row reads `None`. It must not keep
+  showing the ended phase, and it must not show the ended phase's label with a
+  past tense bolted on.
+- With no phase ever started, the row reads `None`.
+
+### Happy path — the Library's sequences shelf
+
+- Open the Library on a BJJ account. `Your own chains` appears with a
+  `Your sequences` link; tapping it opens the chain list.
+- Capture a chain, then find it again from a cold start **without** having just
+  accepted or created it — the whole point of the entry point existing (#414).
+
+### Edge cases and errors
+
+- **Cold open, slow network.** The Phase row reads `—` until the server answers.
+  It must never read `None` before an answer arrives — that is an assertion
+  about the athlete made from an unanswered question.
+- **Airplane mode, then reopen You.** Every value already on screen stays:
+  the phase, the badge counts, the name. Nothing retracts, nothing reads `None`,
+  no badge disappears. The profile banner is the only thing that changes.
+- **Airplane mode on a first-ever open.** The screen says the profile will
+  appear once VOLA can reach the account, and renders no defaulted facts.
+- **Library with the positions fetch failing.** `Your own chains` still renders.
+  The position glossary below it is allowed to be absent; the sequences link is
+  not.
+- **Library opened with a persisted sport filter on Strength.** `Your own
+  chains` still renders. The filter is remembered across visits, so this is the
+  ordinary case for anyone who last searched for an exercise.
+- **BJJ turned off.** The belt masthead, the roadmap summary and the Library's
+  `Your own chains` block are all absent, consistently. The Library row on You
+  is still there and unGated — that is N61, and turning a discipline off must
+  not silently remove the screen that explains how to turn it back on.
+- **A phase read that fails on refresh** leaves the previously shown phase in
+  place rather than clearing it.
+
+### Auth / security
+
+- Every read on this screen is scoped to the signed-in athlete: profile, pending
+  counts and phases. None of the three may be requested for another user id.
+- The pending counts are capped server-side; the badge says `99+` at the cap
+  rather than claiming an exact number.
+
+### Regressions to watch
+
+- **`TrainingSummary`, `RecordsCard` or the position map reappearing on You.**
+  They belong to Progress. There must be exactly one of each in the app, and the
+  suite asserts absence from You and presence on Progress from both sides —
+  either assertion alone is satisfied by a copy.
+- **A second `Sequences` entry point.** The Library block is the only one.
+- **A `Units` row coming back to You.** Settings owns units.
+
+- **NEEDS HUMAN EVIDENCE — a device pass on You and the Library.** The suite can
+  assert document order and gate behaviour; it cannot see whether identity
+  actually reads as primary at the top of a real phone screen, whether the
+  identity card is legible at the largest accessibility text size, or whether
+  `Your own chains` is findable in the Library's header stack (which is ~300pt
+  before the first result on a 4.7" screen — see the open gap in
+  `docs/decisions/history.md`).

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { fireEvent, act, configure, render, screen, waitFor, within } from '@testing-library/react-native';
 
-import YouScreen, { badgeText, rowLabelFor } from '../(tabs)/you';
+import YouScreen, { badgeText, phaseValue, rowLabelFor } from '../(tabs)/you';
+import type { Phase } from '@/lib/body';
 
 /**
  * The waiting counts on the You tab.
@@ -42,6 +43,17 @@ const mockCounts = jest.fn((..._a: unknown[]): Promise<Record<string, number>> =
 // a hole that took the badge down in five of these tests.
 const mockPlay = jest.fn();
 jest.mock('@/lib/sounds', () => ({ playSound: (...a: unknown[]) => mockPlay(...a) }));
+
+// The phase read, which N181 put on this screen so the Phase row shows the live
+// phase instead of listing the kinds. Spread the real module, like the friends
+// mock below and for the same reason: `PHASE_LABELS` is the table the row's
+// wording comes from, and a listed-exports mock would deliver it as `undefined`
+// and read as a rendering bug.
+const mockPhases = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve([]));
+jest.mock('@/lib/body', () => ({
+  ...jest.requireActual('@/lib/body'),
+  listPhases: (...a: unknown[]) => mockPhases(...a),
+}));
 
 jest.mock('@/lib/friends', () => ({
   ...jest.requireActual('@/lib/friends'),
@@ -114,10 +126,27 @@ beforeEach(() => {
   // its `toHaveBeenCalledWith` with somebody else's chime. No test can fire the
   // cue today, which is exactly when this is cheap to add.
   mockPlay.mockReset();
+  // An athlete on no phase, which is the common case and the one every test
+  // here that is not about the phase should assume.
+  mockPhases.mockReset().mockResolvedValue([]);
   // Back to the bare account. Every test in this file that predates the
   // mutable mock assumes nothing is enabled.
   mockModules = [];
 });
+
+/** A live phase — no `ended_on`, which is what `you.tsx` filters on. */
+function livePhase(kind: Phase['kind']): Phase {
+  return {
+    id: 'p1',
+    user_id: 'u1',
+    kind,
+    started_on: '2026-08-01',
+    target_on: null,
+    target_weight_kg: null,
+    ended_on: null,
+    notes: '',
+  };
+}
 
 describe('what a count renders as', () => {
   it('renders nothing at zero, rather than a zero', () => {
@@ -159,6 +188,90 @@ describe('what a count renders as', () => {
 
     const row = await screen.findByTestId('you-shared');
     expect(row.props.accessibilityHint).toBe('What partners sent you, and what you sent them');
+  });
+});
+
+/**
+ * N181 — the Phase row shows the live phase.
+ *
+ * It was a `NavRow` whose detail line listed the kinds ("Cutting, bulking, or
+ * holding where you are") and never said which one was running, so the one fact
+ * it existed to carry was the one thing it did not show. The ticket puts
+ * training phase in athlete identity; a link is not identity, an answer is.
+ *
+ * The three outcomes below are pinned on the pure helper AND through the
+ * screen, because the helper cannot see the thing most likely to go wrong: a
+ * failed read that clears the state feeding it.
+ */
+describe('what the Phase row says', () => {
+  it('withholds until the server has answered, and does not guess', () => {
+    // `'—'` and `'None'` are both "no phase to show", and only one of them is a
+    // claim about the athlete. Collapsing them would tell somebody on week six
+    // of a cut that they are on no phase.
+    expect(phaseValue(null, false)).toBe('—');
+    expect(phaseValue(livePhase('cut'), false)).toBe('—');
+  });
+
+  it('says None once the server has answered and there is none', () => {
+    expect(phaseValue(null, true)).toBe('None');
+  });
+
+  it('names the live phase from the registry, not from a copy of its words', () => {
+    // `PHASE_LABELS` is the same table `app/phase/index.tsx` renders from, so
+    // renaming a kind moves both. A literal here would be the two-modules-drift
+    // shape the Units row was fixed for.
+    expect(phaseValue(livePhase('cut'), true)).toBe('Cut');
+    expect(phaseValue(livePhase('making_weight'), true)).toBe('Making weight');
+  });
+
+  it('renders the live phase on the row, and opens the phase screen', async () => {
+    mockPhases.mockResolvedValue([livePhase('lean_bulk')]);
+    render(<YouScreen />);
+
+    const row = await screen.findByTestId('you-phase');
+    await waitFor(() => expect(row.props.accessibilityValue?.text).toBe('Lean bulk'));
+    fireEvent.press(row);
+    expect(mockPush).toHaveBeenCalledWith('/phase');
+  });
+
+  it('ignores a phase that has ended', async () => {
+    // `ended_on` is stamped rather than the row deleted, so every target
+    // derived during it keeps its frozen basis — which means the list this
+    // screen reads is a HISTORY, and taking its first entry would show a cut
+    // that finished in March as live.
+    mockPhases.mockResolvedValue([{ ...livePhase('cut'), ended_on: '2026-03-01' }]);
+    render(<YouScreen />);
+
+    const row = await screen.findByTestId('you-phase');
+    await waitFor(() => expect(row.props.accessibilityValue?.text).toBe('None'));
+  });
+
+  it('keeps the phase on screen when a refresh fails', async () => {
+    // The same rule as the counts below, for the same reason: failing to
+    // re-read a fact about the athlete is not evidence that it changed. Zeroing
+    // it here would render "None" — an assertion, from a dead-spot.
+    mockPhases.mockResolvedValue([livePhase('cut')]);
+    render(<YouScreen />);
+    const row = await screen.findByTestId('you-phase');
+    await waitFor(() => expect(row.props.accessibilityValue?.text).toBe('Cut'));
+
+    mockPhases.mockRejectedValue(new Error('Network request failed'));
+    await act(async () => {
+      refocus();
+    });
+
+    expect(screen.getByTestId('you-phase').props.accessibilityValue?.text).toBe('Cut');
+  });
+
+  it('speaks its own hint, not the Sports row hint', async () => {
+    // `NavValueRow` hard-coded "Opens your sport toggles" while it had one call
+    // site. Harmless then, and silently wrong the moment a second row used it —
+    // which is this one.
+    render(<YouScreen />);
+    const phase = await screen.findByTestId('you-phase');
+    const sports = screen.getByTestId('you-sports');
+    expect(phase.props.accessibilityHint).not.toBe(sports.props.accessibilityHint);
+    expect(sports.props.accessibilityHint).toContain('sport');
   });
 });
 
@@ -319,27 +432,81 @@ describe('the Library row (N70)', () => {
   });
 });
 
-describe('the Sequences row (N80)', () => {
-  // Same risk as the Library row above, and the reason #414 exists: accepting
-  // a shared sequence now navigates straight to the copy, which answers the
-  // athlete who just tapped Accept — and nobody else. Without this row a chain
-  // is reachable only by having just arrived at it, which is the same
-  // phone-impossible gap in a smaller form.
-  it('is present for a BJJ account, and goes to the chain list', async () => {
+/**
+ * N181 — what the restructure moved OFF this screen.
+ *
+ * Two rows left, for two different reasons, and both are asserted from this
+ * side because "moved" is only checkable from the screen that lost them. The
+ * other side is `libraryBjjEntries.test.tsx` (sequences) and settings' own
+ * screen (units); either half alone is satisfied by a copy, which is exactly
+ * the point N178's move made and this one inherits.
+ */
+describe('what N181 moved off You', () => {
+  it('no longer carries a Sequences row, with BJJ on', async () => {
+    // With BJJ ON, which is the only configuration in which that row was ever
+    // drawn here — asserting its absence on a bare account would be true by
+    // construction, which is the vacuous-test shape this file already carries a
+    // note about for the N178 move.
     mockModules = [{ key: 'bjj', enabled: true }];
     render(<YouScreen />);
+    await screen.findByTestId('you-sports');
 
-    fireEvent.press(await screen.findByTestId('you-sequences'));
-    expect(mockPush).toHaveBeenCalledWith('/sequence');
+    expect(screen.queryByTestId('you-sequences')).toBeNull();
+    // The Library row is what now stands between this screen and the chains,
+    // and its detail line has to say so — a route that exists behind a label
+    // nobody reads as "my chains live here" is the #414 gap wearing a hat.
+    expect(screen.getByTestId('you-library').props.accessibilityHint).toContain('chains');
   });
 
-  it('is absent when BJJ is off', async () => {
-    // The arm that makes the previous one mean anything — and the gate itself:
-    // a strength-only account has no use for a list that can only be empty.
-    // `beforeEach` has already cleared the modules.
+  it('no longer carries an inert Units row', async () => {
+    // It displayed a preference it could not change, one tap above a Settings
+    // row whose own detail line names units. Settings › Preferences › Units is
+    // the single home now, and the Settings row here says so.
+    mockGetProfile.mockResolvedValue({ display_name: 'Rhonda', unit_system: 'metric' });
     render(<YouScreen />);
-    await screen.findByTestId('you-library');
-    expect(screen.queryByTestId('you-sequences')).toBeNull();
+    await screen.findByTestId('you-sports');
+
+    expect(screen.queryByText('Units')).toBeNull();
+    expect(screen.getByTestId('you-settings').props.accessibilityHint).toContain('Units');
+  });
+});
+
+/**
+ * N181 — the order of the screen IS the product requirement.
+ *
+ * You answers two questions, in this order: who am I as an athlete, then how is
+ * VOLA configured for me. Identity first is an acceptance criterion of #586 and
+ * is the thing a refactor silently loses — every row still renders, every test
+ * still passes, and the athlete's name has drifted below a settings menu.
+ *
+ * Asserted on document order rather than on pixel position, which is what RNTL
+ * can actually see: `onLayout` never fires here, so nothing is ever measured.
+ */
+describe('the order of the sections', () => {
+  it('leads with the athlete and puts the app last', async () => {
+    mockModules = [{ key: 'bjj', enabled: true }];
+    render(<YouScreen />);
+    await screen.findByTestId('you-section-identity');
+
+    const order = ['you-section-identity', 'you-section-people', 'you-section-app'];
+    const found = screen
+      .getAllByTestId(/^you-section-/)
+      .map((n) => String(n.props.testID));
+    expect(found).toEqual(order);
+  });
+
+  it('puts the identity block above every destination row', async () => {
+    // The criterion in words: "athlete identity is primary — the first thing
+    // seen". A section list alone does not pin that, because the identity
+    // section could be first and empty.
+    mockModules = [{ key: 'bjj', enabled: true }];
+    render(<YouScreen />);
+    await screen.findByTestId('you-section-identity');
+
+    const ids = screen
+      .getAllByTestId(/^you-(section-identity|library|social|shared|settings)$/)
+      .map((n) => String(n.props.testID));
+    expect(ids[0]).toBe('you-section-identity');
   });
 });
 
@@ -428,7 +595,12 @@ describe('what N178 moved to Progress', () => {
     expect(screen.queryByTestId('you-bjj-positions')).toBeNull();
 
     // And what stayed is still here, so this is a move rather than a cull.
+    //
+    // `you-sequences` used to be named here as the second survivor. N181 moved
+    // that row into the Library, so this line now names the Library row alone —
+    // and the sequences half of the claim is made by the two tests above and by
+    // `libraryBjjEntries.test.tsx`, which is where a moved thing's presence is
+    // supposed to be asserted from.
     expect(screen.getByTestId('you-library')).toBeTruthy();
-    expect(screen.getByTestId('you-sequences')).toBeTruthy();
   });
 });

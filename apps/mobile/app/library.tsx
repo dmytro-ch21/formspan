@@ -933,15 +933,84 @@ export default function LibraryScreen() {
             <Pressable
               onPress={() => router.push('/profile/edit')}
               accessibilityRole="button"
-              accessibilityLabel={`Turn ${techniqueSportOff.label} on to see the belt roadmaps, the position map and the technique library`}
+              accessibilityLabel={`Turn ${techniqueSportOff.label} on to see the belt roadmaps, the position map, your own chains and the technique library`}
               style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
               testID="library-techniques-off-link"
             >
               <Text style={styles.mapLinkTitle}>
                 Turn it on to see the belt roadmaps
               </Text>
+              {/* `your own chains` joined this list with N181 (#586), because
+                  the sequences block below is gated on the same toggle — so
+                  turning the discipline off now hides an athlete's OWN captured
+                  chains, not only reference content. An absence with nothing
+                  accounting for it is N61 exactly, and this explainer is the
+                  one place that accounts for the others. */}
               <Text style={styles.mapLinkNote}>
-                The position map and {techniqueSportOff.label} techniques come back too.
+                The position map, your own chains and {techniqueSportOff.label} techniques come
+                back too.
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* The chains this athlete captured — moved here from the You tab by
+            N181 (#586), and moved rather than copied, so there is exactly one
+            entry point to `/sequence` in the app.
+
+            **Why here.** You answers "who am I as an athlete"; a list of
+            technique chains is knowledge, and this screen is where this app
+            keeps knowledge — the round map, the belt syllabuses and the
+            position glossary are already below. It is the athlete-authored
+            shelf of the same library.
+
+            **Three things about the gate, and all three are load-bearing
+            because this row is now the only way in.** (#414 is the ticket for
+            what happens when a destination is reachable only by having just
+            arrived at it.)
+
+            1. It reads `techniqueSport`, so it is gated on the technique
+               MODULE and on this server having a technique catalog at all —
+               the same predicate that gates the fetch. A strength-only account
+               has no use for a chain list that can only be empty.
+            2. It deliberately does NOT read `sport`, unlike the position block
+               below it. The sport chip is PERSISTED (`PREF_LIBRARY_SPORT`), so
+               an athlete whose last visit left the filter on Strength would
+               open this screen with the app's only route to their own chains
+               already gone, and nothing on screen saying why.
+            3. It is its own block rather than a row inside the position
+               glossary, because that block additionally requires
+               `positions.length > 0` — a server read. Putting this inside it
+               would make a failed positions fetch silently take the sequences
+               away too, which is the same unreachability arriving by a
+               different door. */}
+        {techniqueSport !== undefined && (
+          <View style={styles.glossary} testID="library-sequences">
+            <Text style={styles.glossaryLabel} accessibilityRole="header">
+              Your own chains
+            </Text>
+            <Pressable
+              onPress={() => router.push('/sequence')}
+              accessibilityRole="button"
+              // A LABEL PLUS A HINT, where the two links below this one fold
+              // their note into a colon-joined label. The difference is
+              // deliberate and it is not style: an `accessibilityLabel`
+              // REPLACES the concatenation of child text, so a colon-label has
+              // to restate the whole note or silently drop part of it — and the
+              // part this note carries that a short label loses is *and the
+              // ones partners sent you*, which is precisely #414's audience,
+              // the athlete hunting for a chain somebody shared last week.
+              // Splitting them means the note cannot go stale against the
+              // label. This is the pattern `NavRow` on the You tab already
+              // uses, which is the screen an athlete arrives here from.
+              accessibilityLabel="Your sequences"
+              accessibilityHint="Chains you captured, step by step, and the ones partners sent you"
+              testID="library-sequences-link"
+              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+            >
+              <Text style={styles.mapLinkTitle}>Your sequences</Text>
+              <Text style={styles.mapLinkNote}>
+                Chains you captured, step by step — and the ones partners sent you.
               </Text>
             </Pressable>
           </View>

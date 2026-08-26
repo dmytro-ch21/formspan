@@ -42029,6 +42029,169 @@ rather than the directory. Demonstrated rather than asserted: a scratch clone
 carrying the same untracked structure, `git add -A`, confirms nothing from
 those paths is added.
 
+## 2026-08-26 — N181: You becomes the athlete, and the Library gains the shelf that was on it
+
+`apps/mobile/app/(tabs)/you.tsx` was 593 lines answering no particular
+question. N178 (#621) had already taken the analytics off it — `TrainingSummary`,
+`RecordsCard` and the position map are on Progress, moved and not copied — and
+this is the other half of that ticket pair: give what is LEFT a shape.
+
+**The ticket body was stale before anyone started, and the correction is the
+interesting part of the story.** #586 opens *"Depends on N178 (Progress) — this
+ticket moves TrainingSummary and RecordsCard into Progress, which must exist
+first."* By the time it was dispatched N178 had merged and done the move itself.
+A dependency that has been *satisfied* reads exactly like one that is *pending*
+when you read the sentence and not the tree, and the natural next action from
+that misreading — build the two components on Progress — is the W2/W4 shape
+(two surfaces answering one question with different arithmetic) arriving through
+the front door with a ticket authorising it. The user posted the correction as
+an issue comment an hour before dispatch. Nothing in the repo would have caught
+it, and the thing that WOULD have is #621's own tests, which assert absence from
+You and presence on Progress *from both sides* precisely so a copy fails.
+
+### The screen now answers two questions, in that order
+
+1. **Who am I as an athlete** — the belt masthead for a ranked grappler, the
+   name, then the three facts the app reasons over as *answers* rather than as
+   links to answers: which sports are on, which training phase is live, date of
+   birth. `RoadmapSummary` and the Library row close it, because what an athlete
+   is LEARNING is part of who they are — that is the line N178 drew when it took
+   "is it working" to Progress.
+2. **How is VOLA configured for me** — `People`, then `App`.
+
+The order is asserted on `you-section-*` testIDs in document order, the same
+device `progressScreen.test.tsx` uses, because "identity is primary" is a
+criterion that a refactor loses silently: every row still renders, every
+existing test still passes, and the athlete's name has drifted below a settings
+menu.
+
+### The Phase row now says which phase
+
+It was a `NavRow` whose detail line listed the kinds — *"Cutting, bulking, or
+holding where you are"* — and never said which one was running, so the single
+fact it existed to carry was the one thing it did not show. It is a value row
+now, reading `listPhases` on focus as a third independent chain beside the
+profile and the pending counts.
+
+`phaseValue(phase, answered)` has **three** outcomes and all three are
+reachable, which is the question this codebase now asks of every rendered state:
+`'—'` while the server has not answered (every cold open, and the whole of a gym
+dead-spot, because a failed read deliberately does not set `answered`), the
+phase's own label from `PHASE_LABELS`, and `'None'` once the server has answered
+and there is none. The first and third are both "no phase to show" and only one
+of them is a claim about the athlete — collapsing them would tell somebody on
+week six of a cut that they are on no phase, which is the absent-value-renders-
+as-its-most-discouraging-cause defect this app has shipped three times.
+
+### Two rows left the screen, for two different reasons
+
+**Units** was inert: it displayed a preference it could not change, one tap
+above a Settings row whose own detail line already names units. Two surfaces for
+one fact, and only one of them could act. `app/settings.tsx` › Preferences ›
+Units is the single home now.
+
+**Sequences** moved into the Library, which is where this app keeps knowledge —
+the round map, the belt syllabuses and the position glossary are already there,
+and a list of chains the athlete captured is the athlete-authored shelf of the
+same library. It is the ticket's own instruction (*"move them to a more natural
+BJJ/knowledge location if one exists"*), and the position map went to Progress
+under the same instruction in #621.
+
+**That move made a gate load-bearing, and the gate is where the work was.** You's
+row was the app's ONLY route to `/sequence` and the Library block now is, so
+three separate things could each silently make an athlete's own chains
+unreachable, and none of them produces an error, a red box or a failing
+typecheck:
+
+- gating on the sport FILTER, which the position glossary beside it legitimately
+  does. That filter is **persisted** (`PREF_LIBRARY_SPORT`), so an athlete whose
+  last visit left it on Strength would open the Library with the route already
+  gone and nothing on screen saying why;
+- putting the block *inside* the position glossary, which additionally requires
+  `positions.length > 0` — a server read, so an unrelated 500 would take the
+  chains with it;
+- forgetting the module gate, which would offer a strength-only account a shelf
+  that can only be empty.
+
+`app/__tests__/libraryBjjEntries.test.tsx` is this repo's first render test for
+the Library screen and pins all three by mutation. **The sport-filter one was
+wrong on the first attempt, in the way this file's "verify that a check can
+fail" section describes exactly**: the assertion ran before the persisted pref
+resolved, so it measured the *unfiltered* screen — and adding `sport` to the gate
+survived it intact. Waiting for the filter to land before asserting the link is
+the whole fix, and it turns the mutation red. Two more harness notes worth
+keeping: a `useAuthToken` mock that returns a fresh closure per render re-runs
+this screen's fetch effects forever (`Maximum update depth exceeded`, which reads
+as a bug in the screen), and `capabilities.catalog` is a **string**, not an
+array, so a plausible-looking module fixture renders a screen with no BJJ at all.
+
+### Three sections the ticket recommended and this did not build
+
+Recorded as decisions rather than omissions, because each is defensible and each
+is cheap to reverse:
+
+- **Goals & Records.** Progress already *is* that section as of N178 — §Goals
+  and §Training carry the entry points. A second set on You is the competing-
+  surface shape again.
+- **History** and **Integrations.** Neither has a destination to point at: there
+  is no athlete-timeline screen, and no device or data-source integration
+  exists. A section header above a row that goes nowhere is a state that cannot
+  be constructed, wearing navigation's clothes.
+
+### Social and Sharing were evaluated and kept as two rows
+
+The ticket asks for them to be "secondary profile/account destinations rather
+than competing with athlete identity for screen space", and they are secondary
+by POSITION now — below the whole identity block, under a `People` label.
+Merging them into one row was considered and refused: `app/social/index.tsx` has
+a friends pane and a feed and no sharing pane, so it would mean either building
+one or summing two counts into a single badge, and a badge that cannot say WHICH
+source is waiting is precisely what `anyArrived` compares per source to avoid.
+
+### Two things review caught, both about the move's blast radius
+
+Neither was blocking and both are the same shape: the move changed what a
+toggle and a label are responsible for, and only one half got updated.
+
+**The BJJ-off explainer did not know about the chains.** `library.tsx` has a
+block that fires when the technique discipline is turned off and accounts for
+what went with it — *"Turn it on to see the belt roadmaps, the position map and
+the technique library"*. The sequences block is gated on that same toggle, so
+turning BJJ off now hides an athlete's **own captured chains**, not only
+reference content, and nothing said so. That is N61 exactly — the bill this repo
+pays every time a surface vanishes silently — re-opened one row over by a move
+that was otherwise careful about it. The explainer names the chains now, and the
+module-off test asserts it, so the next thing gated on that toggle has a
+precedent to copy.
+
+**The link's `accessibilityLabel` was eating half its own note.** A label
+REPLACES the concatenation of child text, and the two links beside this one fold
+their note into a colon-joined label — so copying that pattern meant the visible
+*"and the ones partners sent you"* was spoken by nobody. That clause is #414's
+entire audience: the athlete who accepted a shared chain last week and is
+hunting for the copy. It is a label plus a hint now, which is what `NavRow` on
+the You tab already does and cannot go stale against the visible text.
+
+Also raised and deliberately not changed: `listPhases` fetches the whole phase
+history to render one word. The backend has an `ActivePhase` query built for
+exactly this question and does not expose it; the payload is small, the chain is
+independent of the other two on the screen, and inventing an endpoint is not
+this ticket. It is the first customer if `/body/phases` ever grows a lighter
+form. And `Born` stays inert while Sports and Phase navigate — N61's argument is
+about a value that EXPLAINS AN ABSENCE elsewhere in the app, which a date of
+birth does not; making it a control would put a third route to `/profile/edit`
+on one card.
+
+### Open, and small
+
+`app/sync.tsx` — the repair queue, the closest thing this app has to a
+data-source surface — is reachable only from `SyncChip`, and only while
+`lastError` is set. So the screen that explains a permanent sync refusal can be
+opened only by an athlete who already has one, and only while the chip is on
+screen. That is the N61 shape at small scale. It was NOT added to You here,
+because "Integrations" with one repair-queue row in it would be inventing a
+section to hold a thing that is not an integration; it deserves its own ticket.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

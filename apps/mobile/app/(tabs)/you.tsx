@@ -10,30 +10,70 @@ import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
+import { PHASE_LABELS, listPhases, type Phase } from '@/lib/body';
 import { playSound } from '@/lib/sounds';
 import { anyArrived, getPendingCounts } from '@/lib/friends';
 import { getProfile, type Profile } from '@/lib/profile';
-import { DEFAULT_UNIT_SYSTEM, unitSystemDetail } from '@/lib/units';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
- * You — the athlete, and the way in to everything about them.
+ * You — **who am I as an athlete, and how is VOLA configured for me?**
  *
- * The destinations are ROWS, not controls in the header.
+ * ## The two questions, in that order (N181, #586)
+ *
+ * This screen had become a miscellaneous app menu: six identically-shaped
+ * destination rows, a settings value nobody could act on, and the athlete's own
+ * name somewhere in the middle of them. N178 (#621) took the analytics off it —
+ * `TrainingSummary`, `RecordsCard` and the position map are on Progress now,
+ * moved and not copied. What N181 does is the other half: give what is LEFT a
+ * shape, so the first screenful answers the first question and everything else
+ * is grouped under the second.
+ *
+ * The order below is the product requirement rather than a layout preference,
+ * and it is asserted in `app/__tests__/youScreen.test.tsx` on the
+ * `you-section-*` testIDs in document order:
+ *
+ * 1. **Identity** (unlabelled — it is the masthead). The belt for a ranked
+ *    grappler, the athlete's name, then the three facts the app reasons over:
+ *    which sports are on, which training phase is live, and date of birth.
+ *    `RoadmapSummary` and the Library row close it: what this athlete is
+ *    LEARNING is part of who they are, which is the line N178 drew when it
+ *    took "is it working" to Progress and left this behind.
+ * 2. **People** — everything that involves another person, each row badged
+ *    with what is waiting.
+ * 3. **App** — how VOLA behaves, which is one row, because `app/settings.tsx`
+ *    already holds units, training settings, privacy and account.
+ *
+ * ## What is NOT here, and why each one is a decision rather than an omission
+ *
+ * - **Units.** It was an inert row displaying a setting, one tap above a
+ *   Settings row whose own detail line names units. Two surfaces for one fact,
+ *   and only one of them could change it. Settings › Preferences › Units is the
+ *   single home now.
+ * - **Sequences.** Moved into the Library screen, which is the app's knowledge
+ *   home and already carries the round map, the belt syllabuses and the
+ *   position glossary. A list of chains you captured belongs beside those, not
+ *   beside your date of birth. It is gated there on the technique MODULE and
+ *   not on any server read, so the app's only route to `/sequence` cannot
+ *   vanish with a failed fetch — see `app/__tests__/libraryBjjEntries.test.tsx`.
+ * - **A Goals & Records section.** The ticket recommends one; Progress already
+ *   is one, as of N178. A second set of entry points on You would be two
+ *   surfaces competing to answer one question, which is the W2/W4 shape this
+ *   codebase keeps paying for.
+ * - **History and Integrations sections.** The ticket recommends both and
+ *   neither has a destination to point at: there is no athlete-timeline screen,
+ *   and no device or data-source integration exists yet. A section header above
+ *   a row that goes nowhere is a state that cannot be constructed, dressed as
+ *   navigation.
+ *
+ * ## Every destination is a ROW, never a header control
  *
  * They were three text controls in the top-right until the header's centred
  * wordmark ran out of room for them — see `ScreenHeader`, which now refuses to
  * draw a wordmark it cannot fit, and would have dropped it on this tab
  * permanently had the cluster stayed. Rows are the better home anyway: they
  * carry a line saying what is behind each one, and a count that reads.
- *
- * The distinction the old pair was making survives, and is easier to see now
- * that both sit under the facts they act on: Edit alters *facts about you*
- * that the app reasons over (which sports you do, your date of birth), while
- * Settings alters *how the app behaves*. They are grouped under Profile for
- * that reason, and People is its own section above — everything involving
- * another person, each row badged with what is waiting.
  */
 /** The server caps counts here — see friend.maxBadgeCount. At the cap the value
  *  means "this many or more", so the badge stops claiming to be exact. */
@@ -69,6 +109,22 @@ export default function YouScreen() {
   // and the rule it was protecting ("badge only what can be answered here")
   // is now satisfied rather than waived.
   const [waiting, setWaiting] = useState({ friend_requests: 0, shares: 0 });
+  /*
+    The live training phase, and whether the server has ever answered about it.
+
+    TWO pieces of state rather than one, for the same reason `answered` exists
+    above: `null` on its own cannot tell "we have not asked yet" from "there is
+    no phase running", and those render as different sentences. Collapsing them
+    would make a gym dead-spot assert that this athlete is on no phase — the
+    absent-value-reads-as-the-discouraging-cause defect this codebase has
+    shipped three times.
+
+    Only ever set TRUE by a successful read, and a failure leaves both alone, so
+    a refresh that fails keeps the phase already on screen rather than
+    retracting it. See `phaseValue` for the three strings this pair produces.
+  */
+  const [phase, setPhase] = useState<Phase | null>(null);
+  const [phaseAnswered, setPhaseAnswered] = useState(false);
   /*
     The last counts we actually saw, so a rise can be told from a first look.
 
@@ -152,7 +208,29 @@ export default function YouScreen() {
           }
         })
         .catch(() => {});
-      return () => counting.abort();
+
+      // A THIRD independent chain, for the same reason the counts are a second
+      // one: the phase read is slow, online-only, and nothing else on this
+      // screen waits for it. `alive` rather than an AbortController because
+      // `listPhases` takes no signal — the guard is on the WRITE, so a blurred
+      // response cannot land on a screen that has since been re-focused.
+      let alive = true;
+      listPhases(getToken)
+        .then((ps) => {
+          if (!alive) return;
+          setPhase(ps.find((p) => p.ended_on == null) ?? null);
+          setPhaseAnswered(true);
+        })
+        .catch(() => {
+          // Silent, and deliberately does NOT clear what is on screen. A phase
+          // is a fact about the athlete; failing to re-read it is not evidence
+          // that it ended.
+        });
+
+      return () => {
+        counting.abort();
+        alive = false;
+      };
     }, [getToken]),
   );
 
@@ -210,9 +288,14 @@ export default function YouScreen() {
                 standing is fetched. */}
             {bjjEnabled && <BjjRankHeader getToken={getToken} />}
 
-            <Text style={styles.name}>{profile?.display_name || 'Add your name'}</Text>
+            {/* The identity section's anchor for the order assertion, and the
+                athlete's own name is the right thing to anchor it on: it is the
+                one element of this section that renders for every account. */}
+            <Text style={styles.name} testID="you-section-identity">
+              {profile?.display_name || 'Add your name'}
+            </Text>
             {!profile?.display_name && (
-              <Text style={styles.muted}>Tap Edit to tell VOLA who you are.</Text>
+              <Text style={styles.muted}>Tap Edit profile to tell VOLA who you are.</Text>
             )}
 
             {/* `TrainingSummary` and `RecordsCard` USED to sit here, and they
@@ -230,41 +313,92 @@ export default function YouScreen() {
                 consistency grid, the streak, the week bars and every record
                 row render on Progress exactly as they did here. */}
 
+            {/* The three facts about this athlete that the app REASONS OVER —
+                which sports are on, which phase is live, when they were born —
+                shown as answers rather than as links to answers.
+
+                Sports and Phase each navigate to where their own fact is
+                changed, which is what N61 established for Sports and is the
+                same argument for Phase: a value the athlete can see and cannot
+                act on is how "the app does not have this" gets mistaken for
+                "this is turned off".
+
+                BORN IS DELIBERATELY INERT, and the asymmetry is worth stating
+                because the paragraph above reads like a rule. N61's argument is
+                about a value that EXPLAINS AN ABSENCE elsewhere in the app —
+                Sports says why the roadmaps are missing, Phase says why a
+                calorie target has no direction. A date of birth explains
+                nothing that is missing; it is a fact, and the row directly
+                below this card changes it. Making it a control would be
+                consistency for its own sake, and the row would then be the
+                third thing on this card pointing at `/profile/edit`.
+
+                `Units` is NOT here any more. It was an inert row displaying a
+                preference, sitting one tap above a Settings row whose detail
+                line already names units — two surfaces for one fact, only one
+                of which could change it. Settings › Preferences › Units is the
+                single home now. */}
+            <View style={styles.card}>
+              <NavValueRow
+                label="Sports"
+                value={
+                  enabledLabels === null
+                    ? '—'
+                    : enabledLabels.length
+                      ? enabledLabels.join(' · ')
+                      : 'None chosen yet'
+                }
+                onPress={() => router.push('/profile/edit')}
+                hint="Opens your sport toggles"
+                testID="you-sports"
+              />
+              {/* A phase is the thing every calorie target points at, and until
+                  this row existed the API could hold one that nothing in the
+                  app could create. It was a NavRow whose detail line listed the
+                  kinds ("Cutting, bulking, or holding where you are") and never
+                  said which one was running — so the one fact it existed to
+                  carry was the one thing it did not show. */}
+              <NavValueRow
+                label="Phase"
+                value={phaseValue(phase, phaseAnswered)}
+                onPress={() => router.push('/phase')}
+                hint="Start, change or end a training phase"
+                testID="you-phase"
+              />
+              {profile?.date_of_birth && <Row label="Born" value={profile.date_of_birth} />}
+            </View>
+            {/* Directly under the facts it changes, which is the distinction
+                the old header pair was making and is easier to see here: Edit
+                alters facts about YOU that the app reasons over, Settings
+                alters how the app BEHAVES. */}
+            <NavRow
+              label="Edit profile"
+              detail="Your name, sports and date of birth"
+              onPress={() => router.push('/profile/edit')}
+              testID="you-edit"
+            />
+
             {/* What you are LEARNING, which stayed here when the records left.
                 The line N178 drew: records and the consistency grid answer
                 "is the training working", which is Progress; a roadmap is
                 closer to who this athlete is — the belt masthead above is the
-                same fact at a coarser grain. N181 (#586) owns this screen and
-                may move it. It renders nothing at all for an athlete on no
-                roadmap with no focus, so a strength-only account never sees an
-                empty BJJ block. */}
+                same fact at a coarser grain. It renders nothing at all for an
+                athlete on no roadmap with no focus, so a strength-only account
+                never sees an empty BJJ block. */}
             <RoadmapSummary />
 
             {/* The position map used to be a row here and is on Progress now
                 (N178, #583) — "where you score and where you get stuck" is a
                 page of numbers you sit with after a hard week, which is that
-                tab's question rather than this one's. Moved, not copied. */}
+                tab's question rather than this one's. Moved, not copied.
 
-            {/* The chains you have captured, and the ones partners sent you.
-
-                Gated on the module, like the position map above it — a
-                strength-only account has no use for a BJJ chain list.
-
-                This row is the discoverable half of #414. Accepting a shared
-                sequence now navigates straight to the copy, which answers the
-                athlete who just tapped Accept; it does not answer the one who
-                accepted last week and wants to find it again. A destination
-                reachable only by having just arrived at it is the same gap in
-                a smaller form, which is why the entry point ships with the
-                screen rather than after it. */}
-            {bjjEnabled && (
-              <NavRow
-                label="Sequences"
-                detail="Chains you captured, step by step"
-                onPress={() => router.push('/sequence')}
-                testID="you-sequences"
-              />
-            )}
+                `Sequences` used to be a row here too and is in the LIBRARY now
+                (N181, #586) — moved, not copied, and asserted from both sides
+                the way N178's move is. The chains an athlete captured are
+                knowledge, and the Library is where this app keeps knowledge:
+                the round map, the belt syllabuses and the position glossary are
+                already there. The row below is now the only thing standing
+                between this screen and all of it. */}
 
             {/* The catalog, which used to be a tab of its own.
 
@@ -288,7 +422,7 @@ export default function YouScreen() {
                 naming the reason is what makes the absence readable. */}
             <NavRow
               label="Library"
-              detail="Techniques, exercises and the belt roadmaps"
+              detail="Techniques, exercises, belt roadmaps and your own chains"
               onPress={() => router.push('/library')}
               testID="you-library"
             />
@@ -298,8 +432,18 @@ export default function YouScreen() {
                 Both rows are BADGED, and both badges point at a screen that
                 can answer them — the rule the notification counts were built
                 on. Shares could not be badged when the counts shipped, because
-                the phone had no sharing surface; `app/shared/` closed that. */}
-            <Text style={styles.sectionLabel}>People</Text>
+                the phone had no sharing surface; `app/shared/` closed that.
+
+                Kept as TWO rows rather than folded into Social, which N181
+                considered. Social's screen has a friends pane and a feed and no
+                sharing pane, so merging would mean either building one or
+                summing two counts into a single badge — and a badge that cannot
+                say WHICH source is waiting is the thing `anyArrived` compares
+                per source specifically to avoid. They are secondary here by
+                POSITION, which is what the ticket asked for. */}
+            <Text style={styles.sectionLabel} testID="you-section-people">
+              People
+            </Text>
             {/* Social took the entry point over, exactly as planned — this
                 row changed its label, its detail line and its href, and
                 nothing else moved. Friend management still exists at
@@ -323,55 +467,20 @@ export default function YouScreen() {
               testID="you-shared"
             />
 
-            <Text style={styles.sectionLabel}>Profile</Text>
-            <View style={styles.card}>
-              <NavValueRow
-                label="Sports"
-                value={
-                  enabledLabels === null
-                    ? '—'
-                    : enabledLabels.length
-                      ? enabledLabels.join(' · ')
-                      : 'None chosen yet'
-                }
-                onPress={() => router.push('/profile/edit')}
-                testID="you-sports"
-              />
-              <Row
-                label="Units"
-                value={
-                  // Falls back to the DEFAULT SYSTEM's own description rather
-                  // than a copy of its words. The literal here said
-                  // 'kilograms · metres' and the table said the same thing
-                  // twice — the shape that let the two units modules drift.
-                  unitSystemDetail(profile?.unit_system ?? DEFAULT_UNIT_SYSTEM)
-                }
-              />
-              {profile?.date_of_birth && <Row label="Born" value={profile.date_of_birth} />}
-            </View>
-            {/* Directly under the facts they change, which is the distinction
-                the old header pair was making and is easier to see here: Edit
-                alters facts about YOU that the app reasons over, Settings
-                alters how the app BEHAVES. */}
-            <NavRow
-              label="Edit profile"
-              detail="Your name, sports and date of birth"
-              onPress={() => router.push('/profile/edit')}
-              testID="you-edit"
-            />
-            {/* A phase is the thing every calorie target points at, and until
-                this row existed the API could hold one that nothing in the app
-                could create. Beside Edit profile because it is the same kind of
-                fact: something true about you that the app reasons over. */}
-            <NavRow
-              label="Phase"
-              detail="Cutting, bulking, or holding where you are"
-              onPress={() => router.push('/phase')}
-              testID="you-phase"
-            />
+            {/* How VOLA behaves — the screen's second question, and one row,
+                because `app/settings.tsx` already carries the whole of it:
+                Account (profile, sign out), Preferences (units, rest timer,
+                sounds, spoken cues, suggestions, effort) and Privacy. The
+                ticket's recommended `Settings` section lists units, training
+                settings, notifications, privacy and account; that screen IS
+                that section, and re-listing its contents here would be the
+                second surface all over again. */}
+            <Text style={styles.sectionLabel} testID="you-section-app">
+              App
+            </Text>
             <NavRow
               label="Settings"
-              detail="Units, accent, and how VOLA behaves"
+              detail="Units, accent, privacy and how VOLA behaves"
               onPress={() => router.push('/settings')}
               testID="you-settings"
             />
@@ -410,18 +519,28 @@ function Row({ label, value }: { label: string; value: string }) {
  * that already tells you which disciplines are on.
  *
  * Deliberately NOT a `NavRow`: those are section destinations with a detail
- * line, and this belongs in the Profile card beside Units and Born. It keeps
- * the row's shape and gains a hit target.
+ * line, and this belongs in the identity card beside Born. It keeps the row's
+ * shape and gains a hit target.
+ *
+ * N181 made it take its own `hint` and gave it a second caller — Phase — for
+ * the same reason. The hint was hard-coded to "Opens your sport toggles" while
+ * this had one call site, which is exactly the shape that reads as harmless
+ * until the second one arrives and silently tells a screen-reader user that the
+ * phase row opens their sport toggles.
  */
 function NavValueRow({
   label,
   value,
   onPress,
+  hint,
   testID,
 }: {
   label: string;
   value: string;
   onPress: () => void;
+  /** Spoken after the label and the value, and silenceable. Required rather
+   *  than defaulted: a default would be some other row's sentence. */
+  hint: string;
   testID: string;
 }) {
   return (
@@ -438,7 +557,7 @@ function NavValueRow({
       // description, so the analogy does not transfer. Raised in review.
       accessibilityLabel={label}
       accessibilityValue={{ text: value }}
-      accessibilityHint="Opens your sport toggles"
+      accessibilityHint={hint}
       testID={testID}
     >
       <Text style={styles.rowLabel}>{label}</Text>
@@ -452,6 +571,34 @@ function NavValueRow({
       </RNView>
     </Pressable>
   );
+}
+
+/**
+ * What the Phase row says, from the two pieces of state that carry it.
+ *
+ * Three outcomes, and every one of them is reachable — which is the question
+ * worth asking of any state a screen can render:
+ *
+ *   - **`'—'`** while the server has not answered. Reached on every cold open,
+ *     and reached for as long as an athlete stays in a dead-spot, because a
+ *     failed read deliberately does not set `answered`. It withholds rather
+ *     than guesses.
+ *   - **the phase's label** when one is running. Reached by anyone mid-cut.
+ *   - **`'None'`** once the server has answered and there is no live phase.
+ *     Reached by every athlete who has never started one, which is most of
+ *     them.
+ *
+ * The distinction between the first and the third is the whole reason
+ * `phaseAnswered` exists as separate state: both are "we have no phase to
+ * show", and only one of them is a claim about the athlete. Rendering `'None'`
+ * from a failed read would tell somebody on week six of a cut that they are on
+ * no phase — an absent value shown as its most discouraging cause, which is
+ * this codebase's most repeated defect.
+ */
+export function phaseValue(phase: Phase | null, answered: boolean): string {
+  if (!answered) return '—';
+  if (!phase) return 'None';
+  return PHASE_LABELS[phase.kind].label;
 }
 
 /**
