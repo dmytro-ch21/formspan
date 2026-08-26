@@ -85,7 +85,21 @@ jest.mock('@/lib/sync', () => ({
 // pass against a You screen that still rendered them, because the stub draws
 // nothing either way.
 jest.mock('@/components/RoadmapSummary', () => ({ RoadmapSummary: () => null }));
-jest.mock('@/components/BjjRankHeader', () => ({ BjjRankHeader: () => null }));
+// Rendered as a real (stub) element rather than `() => null`, deliberately —
+// the whole point of N181's device-pass fix is WHERE this renders relative to
+// the athlete's name, and a component that renders nothing can never fail an
+// order assertion. `testID="bjj-rank-header"` matches the real component's own
+// outer testID, so this stands in for it in the order checks below without
+// inventing a second name for the same thing.
+jest.mock('@/components/BjjRankHeader', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Text } = require('react-native');
+  return {
+    BjjRankHeader: () => React.createElement(Text, { testID: 'bjj-rank-header' }, 'Belt'),
+  };
+});
 
 // `mock`-prefixed so jest's out-of-scope rule allows them in the factory, and
 // so no `require('react')` is needed inside it (each one costs a lint warning
@@ -507,6 +521,30 @@ describe('the order of the sections', () => {
       .getAllByTestId(/^you-(section-identity|library|social|shared|settings)$/)
       .map((n) => String(n.props.testID));
     expect(ids[0]).toBe('you-section-identity');
+  });
+
+  /**
+   * N181 device pass, item 6 (#586) — the belt card shipped ABOVE the name,
+   * not below it, and every check above still passed: the belt carries no
+   * `you-section-*` testID, so a screen leading with rank instead of name is
+   * invisible to them. Updated (not replaced) to close that gap by including
+   * `bjj-rank-header` — see the `BjjRankHeader` mock above, which now renders
+   * a real testID rather than `null` specifically so this can fail.
+   *
+   * The user's own words, from the annotated screenshot: *"I think its better
+   * to place the name on top."* A name is more identity than a rank — "who am
+   * I" reads as a name first, a rank second — so the name has to render
+   * before the belt, never after it.
+   */
+  it("puts the athlete's name above the belt card", async () => {
+    mockModules = [{ key: 'bjj', enabled: true }];
+    render(<YouScreen />);
+    await screen.findByTestId('you-section-identity');
+
+    const ids = screen
+      .getAllByTestId(/^(you-section-identity|bjj-rank-header)$/)
+      .map((n) => String(n.props.testID));
+    expect(ids).toEqual(['you-section-identity', 'bjj-rank-header']);
   });
 });
 
