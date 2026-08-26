@@ -42192,6 +42192,289 @@ screen. That is the N61 shape at small scale. It was NOT added to You here,
 because "Integrations" with one repair-queue row in it would be inventing a
 section to hold a thing that is not an integration; it deserves its own ticket.
 
+## 2026-08-26 — N179: Today stops being a dashboard, and stops asserting "Nothing planned" before it has looked
+
+**The ticket asked for a hierarchy. The screen had a live bug that made one of
+its own acceptance criteria unsatisfiable, and that came first.**
+
+`app/(tabs)/index.tsx` was ~2,100 lines and is the first thing an athlete sees.
+Its plan state was two plain arrays — `weekPlan` and `viewPlans` — both
+initialised to `[]`, refreshed by a `useCallback` whose `catch` block was empty
+with a comment explaining that a quieter screen was fine. So *"we have not
+looked yet"*, *"the read failed"* and *"there is nothing planned"* were one
+value, and Today asserted **"Nothing planned"** on the first frame of every cold
+open, and kept asserting it when the read failed.
+
+#582's agent found this while building Train, deliberately did not fix it, and
+recorded why: rewriting the app's most-used screen inside a Train ticket was the
+wrong trade. That was the right call. It is the **fourth** instance of one
+defect class here — a trend card telling an athlete with two years of weigh-ins
+to start logging; a tracker screen telling somebody with a month of history that
+they track nothing; a records card drawing its empty state mid-fetch — and the
+first found before an athlete hit it.
+
+It also blocked criterion 7 outright: *"a rest day renders a real state, not an
+empty screen or a discouraging one"* cannot be satisfied while a genuine rest
+day and a failed disk read produce the identical screen.
+
+### The union was not invented here, twice over
+
+`lib/todayBoard.ts` **calls** `buildTrainBoard` rather than answering the
+question a third time. N177's `Source<T>` — `unread | unavailable | ready`, with
+loading a first-class kind — is imported, `both` is exported from that module
+rather than re-implemented, and `useSource` is exported from `lib/useTrainBoard.ts`
+and shared. N178 arrived at the same shape independently for Progress
+(`Reading<T>`, five kinds, `off` and `empty` added for a tab that is nothing but
+reads). Three screens, one idea, now with one implementation of the parts that
+overlap.
+
+What Today adds is the single distinction Train does not need. Train offers what
+you can still do, so a met plan is simply not offered; Today also has to say how
+the day went, and **"you planned two sessions and did both" is not the same day
+as "you planned nothing"** — the second sentence, shown at the exact moment an
+athlete finishes their last session, is the one flatly untrue thing this screen
+used to say. That is `done` vs `rest`, and it needs the unfiltered count of the
+day's plans, which `buildTrainBoard` deliberately does not return.
+
+`rest` also carries `loggedToday`. An athlete who lifted without planning it,
+told only "Nothing on the plan", has been told their session did not count.
+
+**Resume outranks everything, and the word is "unconditionally".** The early
+return in `buildTodayBoard` fires before the plan reads are consulted at all,
+because the conditions the criterion has to survive are the *other reads'
+states*: an open session must lead the screen while the plan is still loading,
+and when the plan read has failed outright. Folded into the same combinator, a
+failed plan read turns a live session into "we could not look" — the athlete is
+standing in a gym with a clock running and the screen has lost it.
+
+### Six blocks, and one removal that is a product decision
+
+NOW/NEXT · LATER · DAILY PROGRESS · THIS WEEK · INSIGHT · CURRENT FOCUS, in that
+fixed order. The order descends from *act now* through *is asked of you* to *is
+true about you*; the content of a block changes with the day, the sequence never
+does, because a screen whose blocks move is one you have to read rather than
+glance at.
+
+Everything below the fold was reorganised rather than rewritten. The resume
+card, the plan cards, the suggestion, the Tier 0 offer, the fuel card, the
+trackers, the check-in, the roadmap slot and the theme card are the same
+components with the same rules; they are grouped differently and the plan-state
+plumbing under them is new.
+
+**The day stepper is gone, and that is the one removal that is a judgement
+rather than a relocation.** Today answered *what is on Thursday* with a pair of
+arrows that re-dated the whole top of the screen — past mode, "Not logged"
+labels, the suggestion suppressed, and a `planSeq` ref to stop three reads per
+tap racing each other. Plan owns future intent (N182) and already browses any
+day, week or month through `WeekPlanner`, so nothing became unreachable; what
+went is a second, weaker planner sitting on top of the screen an athlete opens
+to decide the next ten minutes. Its removal is most of why the plan read
+collapsed from two overlapping queries plus a sequence guard to one query with
+no guard.
+
+### Where the analytics went, and the one that had already moved
+
+The ticket says *moved, not deleted*, and the honest answer changed mid-branch
+when #621 merged:
+
+| Was on Today | Now |
+|---|---|
+| `WeekReview` | Progress — N178 renders **the same component** inside `ThisWeek` |
+| `TrendStrip` (8 weeks) | Progress — `TrainingSummary` already draws a bar per week over a selectable span |
+| `TrainingCalendar` | Progress — `components/progress/TrainingHistory.tsx`, one line in `progress.tsx` |
+| Recent sessions | Train, from the same read; and by date through the calendar above |
+| Day stepper | Plan (`WeekPlanner`) |
+
+So only **one** of the three analytical blocks needed a new home. Rendering
+`WeekReview` on Progress would have drawn one card twice on one screen, and a
+second weekly-bar chart beside `TrainingSummary` is the W2/W4 shape this repo
+has shipped twice. `TrainingCalendar` is the one with no equivalent there: it
+says which days were **planned** and which were met, and it is the last surface
+on the phone that opens a past session by date. It is also purely local, where
+`TrainingSummary` fetches — so in a gym dead-spot it is the block that still
+answers.
+
+**`components/ui/TrendStrip.tsx` therefore has no caller now.** It is left in
+place with a note saying so, rather than deleted: this ticket's criterion is
+*moved, not deleted*, and sweeping a redundant view is #591's audit.
+
+### Mutation-tested, and the one that survived is the useful half
+
+Sixteen mutations, applied one at a time by a harness that verifies the pattern
+matched exactly once, that the write changed the file, and that the restore is
+byte-identical — then re-runs the whole set at the end. Baseline green in the
+same session before and after: **67 tests across the three files. 16 of 16
+red.**
+
+**Thirteen of the first fourteen went red. The survivor was the DST guard, and
+it took two more vectors to kill — which is the useful half of this section.**
+
+`todayPlanWindow` uses `addDays` rather than `+ 14 * 86_400_000`. The original
+vector was **noon** on 2026-03-08: an hour either side of midday is the same
+calendar day whichever arithmetic runs, so the millisecond form passed with the
+test green. That is precisely the shape recorded against N177 four days earlier
+— a fixture instant that fell on the same day either way — and reading the test
+would never have found it.
+
+The second attempt moved to **00:30** with the sign of the shift backwards.
+Spring-forward maps a fixed instant to a *later* wall clock, not an earlier one,
+so the millisecond form landed at 01:30 the same day and survived again. Only
+the third vector works: **23:30 on 2026-03-01**, where the gained hour tips the
+millisecond form over midnight onto the 16th while `addDays` holds the 15th.
+Measured rather than reasoned this time — `addDays` → Sun Mar 15 23:30 PDT,
+milliseconds → Mon Mar 16 00:30 PDT — and then re-mutated: red.
+
+Recorded honestly in both the code and the test: `useTodayBoard` normalises
+`now` to noon before calling this, so the guard protects a future caller rather
+than a live bug.
+
+One guard is redundant **by arithmetic and stays anyway**, with a comment saying
+so rather than a test pretending otherwise: the Tier 0 offer reads the session
+list only when it has answered, but `shouldOfferDetail` needs `>= 2` and a
+defaulted `[]` gives 0, so no mutation of that line changes any assertion today.
+It is the arithmetic that makes it harmless, not the intent — move the bound, or
+add a tier that fires on a LOW count, and `[]` becomes a confident zero about an
+athlete whose history has not loaded.
+
+### What review found, and the two mutations it added
+
+`frontend-reviewer` returned no blocking findings and three suggestions, all
+taken. Two of them were guards nothing asserted, so both became mutations —
+**M15 and M16, and both go red**, which is the point of writing them down here
+rather than in a commit message:
+
+- **The `unavailable` copy claimed both reads had failed.** They are independent
+  sources: the lead goes `unavailable` if *either* fails, and when only the plan
+  read fails we know nothing is part-finished — a resume would have
+  short-circuited the block entirely. So "we could not check for an unfinished
+  session" was false in that case and sent the athlete looking in the wrong
+  place. It now branches on which read failed, exactly as Train does with its
+  two separate notes.
+- **The suggestion card's `accessibilityLabel` said "try {name} live" while the
+  card said "Try {name} in a round"** — the WCAG 2.5.3 failure this branch
+  *fixes on two other cards*, left inconsistent with its own neighbours. Nothing
+  asserted that label at all; there is a test now.
+- **`useTodayBoard`'s `refresh` passed `() => true`**, the one read path with no
+  liveness guard, so a slow Retry resolving after blur still wrote state.
+  Practically unreachable and fixed anyway, because "the one exception" is how a
+  discipline stops being one.
+
+`ac-verifier` returned **8 MET · 0 NOT MET · 3 needing a person · 0 NOT
+ADDRESSED**, and caught something outside the diff: **the issue body carried no
+evidence marker at all**, so `closes #584` would have closed the ticket with the
+three device criteria unsettled and nothing holding it open — the exact failure
+the evidence latch exists for, arriving on the ticket whose reviewer noticed it.
+Markers were added to the issue.
+
+### Coverage this screen did not have
+
+Today had **no screen-level test at all**. Its only coverage was
+`todayDaySwitcher.test.tsx`, two derivations lifted out of it — and the second
+one's final assertion was `expect(offset === 0).toBe(today)` over a table where
+`today` was *defined* as `offset === 0`. True by construction, green forever,
+incapable of failing for any change to any file. The stepper is gone and so is
+that half; the `owedOn` half survives as `todayPlanMatching.test.ts`, because it
+is still one call from the screen through `buildTrainBoard`.
+
+New: `lib/__tests__/todayBoard.test.ts` (31), `app/__tests__/todayScreen.test.tsx`
+(30), `components/__tests__/trainingHistory.test.tsx` (5). Every kind of every
+union has a vector that constructs it — #583's review found a `ReadingState`
+whose `empty` prop no code path could reach, propping up an assertion that had
+been vacuously green forever, so a union is not coverage.
+
+One apparatus bug is worth recording because it cost a worker. The first version
+of the screen test mocked `useAuthToken` as `() => () => Promise.resolve('tok')`
+— a fresh arrow per render. `getToken` is a dependency of four of Today's
+`useCallback`s, so every render changed their identity, which re-ran the focus
+effect, which called `setNow(new Date())`, which re-rendered. It did not merely
+spin: it exhausted V8's heap and aborted the jest worker with a native stack
+trace, which reads as a broken test file rather than as an unstable mock. The
+fix in the test is a module-scope constant; the fix in the app is that
+`setNow` now has its own dependency-free focus effect instead of riding on an
+eight-callback list.
+
+### Numbers
+
+`pnpm run verify` green. `lint:mobile` at **50 warnings against a ratchet
+lowered 53 → 50** — the removed dashboard code took three findings with it.
+
+### What no test here can reach
+
+- The whole thing on a phone. The rest state's copy, whether NOW/NEXT actually
+  reads in two to three seconds, and whether six section headers make the screen
+  feel structured or bureaucratic are judgements about a device.
+- **The rest day specifically.** The criterion is about how a screen *feels* to
+  somebody who did not train today, and no assertion measures "not
+  discouraging".
+- Offline. The suite proves the primary block's three reads are SQLite and that
+  nothing in it touches a token, a fetch or a sync run — which is the property —
+  but a phone in a basement is the only instrument for the claim.
+
+### Addendum, same day — the day switcher comes back, on direct user instruction, and closes a question this entry left open
+
+**The first version of this entry recorded the day stepper's removal as a
+deliberate scope call.** It was not the right call, and the correction did not
+come from re-reading the ticket — it came from the user walking the branch on a
+real device and saying, in these words: *"we can go to before dates or future
+ones... above it we will have that today."* That is continuous navigation FROM
+Today, and a redirect to Plan's `WeekPlanner` does not satisfy it. The switcher
+is back, on the strip above NOW/NEXT, and this reverses a criterion
+`ac-verifier` had already marked MET — *"existing route behavior remains
+stable," on the grounds that Plan owns day-browsing.* That verdict no longer
+describes what ships; `ac-verifier` was re-run after the restoration rather than
+left standing.
+
+**It is restored, not reintroduced unchanged.** The distinction was already
+mostly built into `lib/todayBoard.ts`, and generalising it to a browsed day
+turned out to need one new idea rather than a rewrite:
+
+- `buildTodayBoard` takes an optional `viewDay`, separate from `now`. `now`
+  stays the real clock — resume's staleness and LATER are measured against
+  it, unconditionally, and neither reads `viewDay` at all. Only the
+  OWED/DONE/REST section does. That separation is what stops browsing to last
+  Tuesday from silently moving what "stale" or "later" mean, which is the
+  exact bug a `viewDay` fed into `buildTrainBoard` in place of `now` would
+  reintroduce — and which the mutation harness checks directly (S2).
+- The owed computation for `viewDay` is built from `owedOn` and the newly
+  exported `toPlannedOffer` (lifted out of `trainBoard.ts`'s own `today`
+  block) rather than from a second closure — so a change to what "owed" means
+  still lands on Train and Today from one place, and only the DAY differs.
+- `todayPlanWindow` widens a SINGLE query to cover `viewDay` rather than
+  issuing a second one, which is the property N179 introduced this ticket to
+  get in the first place (the old screen ran two overlapping plan queries per
+  refresh and needed a sequence guard to keep them from racing). Stepping the
+  switcher three weeks in either direction widens the range; stepping within
+  the current week or the 14-day horizon costs nothing extra. `useTodayBoard`
+  fires that wider read only when the window's SHAPE actually changes — one
+  `useEffect` keyed on `read`'s own identity, guarded to skip the run that
+  coincides with the focus effect's own fetch on mount, which is the
+  duplicate-I/O bug this file's own history already records once.
+- The switcher itself is hidden the moment a session is open, for the same
+  reason it always was: the only thing it drives is a section the resume card
+  replaces entirely, and a control that does nothing is worse than no control.
+- Past-day copy is restored to the pre-N179 wording where it existed
+  ("Everything planned was logged.", "Nothing was planned, and nothing
+  logged.", `UpNextCard`'s `past` prop disabling the Log button and the press
+  target) and extended where N179 had added something the old screen never
+  had — the rest-day off-plan credit ("You logged N session(s) then anyway")
+  now applies on a past day too, and a FUTURE day gets its own sentence
+  ("Nothing planned yet") rather than inheriting "Rest counts", which is not
+  true of a day that has not happened.
+
+**Mutation-tested with the rest of the file, not separately.** 11 new
+mutations for the switcher's own logic, run together with the original 16 as
+one 25-mutation pass (one was a duplicate of an existing case and dropped):
+baseline green (91 tests across the three files, before and after), **25 of
+25 red**. `pnpm run verify` green afterward — 182 suites, 2950 mobile tests,
+`lint:mobile` still at 50 of 50.
+
+Three findings from `frontend-reviewer`'s first pass were folded in alongside
+this, all taken: the `unavailable` copy no longer claims both reads failed
+when only one did; the suggestion card's spoken label now matches its own
+visible title (the same WCAG 2.5.3 fix this branch already made on two other
+cards); and the Retry button's re-read gained the liveness guard the rest of
+`useTodayBoard` already had.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

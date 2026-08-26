@@ -119,7 +119,7 @@ export const RECENT_LIMIT = 3;
  * different one from *"there is nothing"*. Ranking unread first would let a
  * permanent failure sit forever behind a spinner.
  */
-function both<A, B, T>(a: Source<A>, b: Source<B>, value: (a: A, b: B) => T): Source<T> {
+export function both<A, B, T>(a: Source<A>, b: Source<B>, value: (a: A, b: B) => T): Source<T> {
   if (a.state === 'unavailable' || b.state === 'unavailable') return { state: 'unavailable' };
   if (a.state === 'unread' || b.state === 'unread') return { state: 'unread' };
   return { state: 'ready', value: value(a.value, b.value) };
@@ -142,6 +142,30 @@ function findResume(sessions: Session[], now: Date): ResumeOffer | null {
   };
 }
 
+/**
+ * Turn one planned row into the shape a screen renders — the template name
+ * resolved from the workout cache (never fatal if that read failed) and the
+ * catalog-kind verb.
+ *
+ * Exported so a caller matching against a day OTHER than the window this
+ * module computes can still build a {@link PlannedOffer} through the SAME
+ * rule rather than a second one. `lib/todayBoard.ts` is that caller — Today's
+ * day switcher lets an athlete browse a day outside Train's own window, and a
+ * second `offer` closure there would be exactly the kind of divergence this
+ * epic exists to remove.
+ */
+export function toPlannedOffer(
+  p: PlannedSession,
+  workouts: Source<Workout[]>,
+  modules: Module[],
+): PlannedOffer {
+  const workoutName =
+    !p.workoutId || workouts.state !== 'ready'
+      ? null
+      : (workouts.value.find((w) => w.id === p.workoutId)?.name ?? null);
+  return { ...p, workoutName, logsAfterwards: logsAfterwards(p.sport, modules) };
+}
+
 export function buildTrainBoard(input: {
   sessions: Source<Session[]>;
   /** Plans across a window that starts today. Anything before today is ignored. */
@@ -154,16 +178,7 @@ export function buildTrainBoard(input: {
   const { sessions, plans, workouts, modules, now } = input;
   const today = dayString(now);
 
-  const nameOf = (workoutId: string | null): string | null => {
-    if (!workoutId || workouts.state !== 'ready') return null;
-    return workouts.value.find((w) => w.id === workoutId)?.name ?? null;
-  };
-
-  const offer = (p: PlannedSession): PlannedOffer => ({
-    ...p,
-    workoutName: nameOf(p.workoutId),
-    logsAfterwards: logsAfterwards(p.sport, modules),
-  });
+  const offer = (p: PlannedSession): PlannedOffer => toPlannedOffer(p, workouts, modules);
 
   const resume: Source<ResumeOffer | null> =
     sessions.state === 'ready'

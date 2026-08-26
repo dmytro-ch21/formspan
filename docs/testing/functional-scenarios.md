@@ -980,69 +980,138 @@ The screen answers one question — *what am I doing right now, or next* — so
 almost every scenario is about **hierarchy**: is the most urgent thing also the
 most prominent thing.
 
+**N179 restructured it into six blocks, in one fixed order**: NOW/NEXT ·
+LATER · DAILY PROGRESS · THIS WEEK · INSIGHT · CURRENT FOCUS. The order never
+changes; the content of each block does. Scenarios below that describe the old
+dashboard are marked where they moved.
+
 **Happy path**
 
 - **An unfinished session dominates.** With one open, `resume-session` renders
-  above everything, the sport start buttons do **not**, and the elapsed time
-  ticks. This is the regression that matters: it used to be a small "in
-  progress" label on a row in a list, indistinguishable from finished sessions.
-- **With no session open**, the start buttons render and `resume-session` does
-  not. `start-session-strength` is the primary; `start-session-running` is
-  visibly secondary.
-- The stat row was `week-summary` and is now `week-review-stats`, inside a
-  `week-review` group that ALWAYS renders (the old row was hidden at zero
-  sessions; the group now shows a verdict line instead). A test asserting the
-  row's absence on an untrained week must assert the row, not the group.
-- **`week-review-stats` counts only this week**, Monday-based, in the device's
-  timezone. Log a session, check the count rises; a session from last Sunday
-  must not be included.
-- **Volume matches the session screen.** Working sets only — completed and not
-  warm-up. A session showing "Sets 0" internally must contribute 0 here; the two
-  screens disagreeing is the specific bug this rule exists to prevent.
-- **`session-{id}` opens that session.**
+  and **nothing competes with it** — no plan card, no rest state, no "that is
+  everything planned". It is the only filled control on the screen and the
+  elapsed time ticks. This is the regression that matters: it used to be a small
+  "in progress" label on a row in a list.
+- **With a plan for today and nothing open**, `today-plan-{id}` renders per owed
+  plan, with `Start` or `Log` depending on the discipline, and the template name
+  when the workout cache has it.
+- **LATER shows the next planned day and has no button on it.** Starting
+  tomorrow's session today is how a plan stops meaning anything. It is shown
+  *alongside* a running session, unlike today's plan.
+- **Log Food is one tap.** `today-log-food` goes straight to `/food/add` with no
+  intermediate confirmation. **This is no longer the only way into food** —
+  Food is back on the permanent tab bar (#585) — but it must stay one tap.
+- **THIS WEEK is a glance, not a report**: the week strip plus the TRAINING and
+  LOGGING counts. `week-strip-review` goes to **Progress**, which is where the
+  week review now lives.
+- **INSIGHT renders at most one thing, or the whole block is absent.** No
+  permanent "no insights yet" row.
 
 **Edge cases & errors**
 
-- **`start-session-bjj` does not exist.** BJJ is temporarily off Today because
-  there is no BJJ module. When one lands, this scenario inverts.
-- **The elapsed clock survives backgrounding.** Background the app mid-session
-  for a minute and return: the time must be correct, not a minute behind — it
-  recomputes from `started_at` rather than incrementing.
-- **The date is never stale.** The regression to watch, because a tab screen
-  never unmounts: use the app late on Sunday, background it, reopen on Monday.
-  The header must read Monday and `week-review-stats` must be **empty or this
-  week's** — not Sunday's date over last week's totals, which is what a
-  mount-frozen clock produces. Both the focus and the app-foreground path need
-  checking; they are different code paths and only one involves a tab change.
+- **A rest day is a real state.** Nothing planned, nothing open:
+  `today-unplanned` renders a date-circulated rest line plus "Rest counts",
+  and opens Plan. It never scolds and never says the athlete did nothing.
+- **A rest day on which the athlete trained anyway says so.** Log an unplanned
+  session, then look at Today: the rest card credits it ("You logged 1 session
+  today anyway"). Without this, an athlete who trained off-plan reads "Nothing
+  on the plan" and is told their session did not count.
+- **Planned and done is not "nothing planned".** Finish the last planned
+  session: `today-all-done` renders with the count logged against the plan.
+  Saying "nothing planned for today" at that exact moment is flatly untrue and
+  is the bug that card exists to prevent.
+- **Today never claims an absence it has not checked.** THE regression to guard,
+  because it was live until N179: `viewPlans`/`weekPlan` started `[]` and the
+  read swallowed its errors, so Today asserted "Nothing planned" on the first
+  frame of every cold open. Check all four:
+  - plan read still in flight → **no** rest state, **no** all-done, **no**
+    unavailable note. Silence.
+  - session read still in flight → the same silence. Without the session list
+    the screen cannot tell whether a plan was met or a session is open.
+  - either read failed → `today-lead-unavailable`, which names **both** the plan
+    and the unfinished-session check, and says New log still works.
+  - both reads answered with nothing → the rest state, and only then.
 - **A session left open overnight stops pretending to tick.** Past 24h the card
   reads UNFINISHED with the start date instead of a running clock, and offers
-  "Finish or discard". A resume button reading `506:24:12` is not information.
-- **A second unfinished session is still reachable.** Start one on web (or from
-  a workout) while another is open: the newest owns the resume card and the
-  older appears in the list marked `unfinished`. It must not vanish — it still
-  counts toward `week-review-stats`, so hiding it makes the header disagree with the
-  list below it.
+  "Finish or discard".
+- **A BJJ round never opens the set logger.** Both the resume card and the plan
+  card route through `lib/startSession.ts`, keyed on the catalog kind rather
+  than on `key === 'bjj'`. A BJJ session in the set logger renders a screen it
+  can never fill and makes the reflection behind it unreachable — and **nothing
+  fails when it happens**, which is why it is checked on both cards.
+- **The elapsed clock survives backgrounding.** Background the app mid-session
+  for a minute and return: the time must be correct, not a minute behind — it
+  recomputes from `started_at`.
+- **The date is never stale.** A tab screen never unmounts: use the app late on
+  Sunday, background it, reopen on Monday. The header must read Monday, and the
+  plan window must be re-derived. Both the focus and the app-foreground path
+  need checking; they are different code paths.
 - **A permanently-refused session says why.** Retry must surface `sync-error`
-  rather than spinning silently; `syncSessions` reports failures in its return
-  value instead of throwing, so a discarded result means a stuck row is
-  invisible forever.
-- **`sessions-pending` appears only when something is pending.** With everything
-  synced there is no counter and no Retry — the old permanent "0 pending · 0
-  synced" is gone.
+  rather than spinning silently.
+- **`sessions-pending` appears only when something is pending.**
 - **`retry-sync` drains and the counter clears.** Offline, log a session, come
   back online, tap Retry.
-- **`today-empty` only after a successful local read.** A brand-new account sees
-  it; a *failed* read must show `session-list-error` instead. An empty state is
-  a claim about the athlete and has to be earned.
-- **Everything renders offline** — the whole screen is local-first, including
-  the week summary.
+- **Everything in NOW/NEXT and LATER renders offline** — all three reads behind
+  them are SQLite. Nothing in the primary block touches a token, a fetch or a
+  sync run.
+
+**Moved by N179 — check them on Progress, not here**
+
+- **The week review** → Progress, `progress-section-week` (N178 renders the same
+  `WeekReview` component inside `ThisWeek`).
+- **The eight-week bar strip** → Progress, `TrainingSummary`'s per-week bars
+  over a selectable span.
+- **The training calendar** → Progress,
+  `progress-training-calendar`. It keeps its own three reading states: unread
+  draws nothing, a failed read says `progress-calendar-unavailable`, and only an
+  answered read draws a week. Handed `[]` it would render a confident empty
+  week, which is the same defect one level along.
+- **Recent sessions** → Train, from the same read; and reachable by date through
+  the calendar on Progress.
+
+**The day stepper is back on Today** (`today-day`), restored on direct user
+instruction after this ticket had first removed it — *"we can go to before
+dates or future ones"* is continuous navigation from Today, which a redirect to
+Plan does not satisfy. `WeekPlanner` still owns week/month browsing separately;
+this is a lighter, day-at-a-time control living above NOW/NEXT.
+
+- **Hidden while a session is open.** The only thing it drives — OWED/DONE/REST
+  — is replaced by the resume card, which ignores the browsed day by design.
+  `today-day` must not render beside `resume-session`.
+- **`today-day-prev` / `today-day-next`** step one day at a time, unbounded in
+  either direction. **`today-day-label`** reads `TODAY` on today and is a plain
+  readout there (no press, `accessibilityRole="text"`); on any other day it
+  reads the weekday and date and pressing it returns to today.
+- **A plan owed on the browsed day** renders exactly like today's, with the verb
+  from the catalog kind (`Log`/`Start`) and the correct destination
+  (`startSessionHref`) — a BJJ round on a future day must still go to
+  `/bjj/log`, never the set logger.
+- **A past day with an unmet plan is inert and says so.** `past` on `UpNextCard`
+  drops the Log button and the press handler, sets `accessibilityRole="text"`,
+  and shows "Not logged" — never dimmed (a blanket opacity took this below AA
+  once already).
+- **Rest-day copy varies by when the day is**, and none of the three
+  congratulate or scold: a past rest day says "Nothing was planned, and nothing
+  logged"; today says "Rest counts — or plan something here…"; a future day
+  says "Nothing planned yet. Plan something here." An off-plan session logged
+  on the browsed day is credited regardless of which of the three it is.
+- **"Planned and done" reads in the past tense for a past day** — "Everything
+  planned was logged" rather than "That is everything planned."
+- **LATER never moves.** It always names the soonest day after REAL today,
+  regardless of which day the switcher is showing — stepping the switcher does
+  not make LATER answer a different question.
+- **The plan read widens to cover the browsed day rather than issuing a second
+  query.** Stepping three weeks back or forward should still show the correct
+  plan/rest/done state for that day; nothing here should ever show a stale or
+  empty answer for a day genuinely outside what has loaded yet (it should
+  simply not have rendered the section at all until the wider read answers).
 
 **Gone, and should stay gone**
 
 - No activity logging UI. `activity-notes`, `log-activity`, `pending-count`,
-  `sync-now` and `sync-status` were removed with the scaffolding. Nothing in the
-  app creates activities now, so the admin activity list shows only historical
-  rows — expected, not a bug.
+  `sync-now` and `sync-status` were removed with the scaffolding.
+- No `today-empty` ("Nothing logged yet") — it belonged to the Recent list,
+  which is on Train.
 
 ## Mobile shell (`apps/mobile` tab navigator)
 

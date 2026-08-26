@@ -81,8 +81,30 @@ export function ProgressRing({
         )}
       </Svg>
       <RNView style={styles.centre} pointerEvents="none">
-        <Text style={[styles.value, { color, fontSize: Math.round(size * 0.28) }]}>
-          {percent === null ? '—' : `${shown}%`}
+        {/*
+          **Rounded here, not at the call site — and that is the fix rather than
+          a tidy-up.** Seen on a real device (#584, item 4): Today's TRAINING
+          card passes `days / 28 * 100`, so 22 days of 28 arrives as
+          `78.57142857142857`. Rendered raw into a 54pt circle that string wraps
+          onto three lines, and what the athlete reads is `78.57`, `4285` and
+          `71428.5` stacked on top of each other — which looks like two numbers
+          colliding, not like one number that is too long.
+
+          Every other caller happened to pass an integer, so the component
+          looked correct for months. Rounding at the one call site that got it
+          wrong would leave the next caller to rediscover this; a ring 54pt
+          across has room for three characters and that is a property of the
+          ring.
+
+          `numberOfLines={1}` is the second half deliberately: rounding removes
+          today's overflow, and this removes the whole class — no value of
+          `percent` can ever stack again, it can only ellipsise.
+        */}
+        <Text
+          numberOfLines={1}
+          style={[styles.value, { color, fontSize: Math.round(size * 0.28) }]}
+        >
+          {percent === null ? '—' : `${Math.round(shown)}%`}
         </Text>
       </RNView>
     </RNView>
