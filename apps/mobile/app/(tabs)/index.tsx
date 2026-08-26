@@ -77,7 +77,7 @@ import {
   moduleWithCatalog,
   type Module,
 } from '@/lib/modules';
-import { startSessionHref } from '@/lib/startSession';
+import { sessionHref, startSessionHref } from '@/lib/startSession';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
@@ -190,28 +190,6 @@ function shortDay(iso: string): string {
 /** e.g. "Thursday, 31 July" — orientation, not decoration. */
 function todayLabel(now: Date): string {
   return now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-}
-
-/**
- * Where tapping a session goes.
- *
- * Keyed on the SAME predicate as the log button, deliberately: a sport that
- * logs afterwards is a sport whose sessions cannot hold a set, so sending one
- * to the set logger renders "Sets 0 · Reps 0 · Volume —" over an empty list.
- * That is what shipped, and it made the whole reflection unreachable — the
- * wizard is entered by `replace` from the log screen and linked from nowhere
- * else, so a logged class had no surface that would ever show it back.
- *
- * If the two predicates ever disagree, a session opens a screen built for a
- * different shape. Reusing the one function is what stops that.
- */
-function sessionHref(s: Session, mods: Module[]) {
-  // The object form rather than a template string: expo-router's typed routes
-  // reject a bare `string`, and going through the generated pathname literals
-  // means a renamed route breaks the build instead of the tap.
-  return logsAfterwards(s.sport, mods)
-    ? ({ pathname: '/bjj/session/[id]', params: { id: s.id } } as const)
-    : ({ pathname: '/session/[id]', params: { id: s.id } } as const);
 }
 
 function describeSession(s: Session, mods: Module[]): string {
