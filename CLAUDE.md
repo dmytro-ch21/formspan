@@ -697,7 +697,22 @@ first hit of an editor's find. And **verify by counting, not by reading the
 diff**, which looks correct either way:
 
 ```bash
-grep -c '^## Open items / known gaps as of this entry' docs/decisions/history.md   # must be 1
+pnpm run check:doc-merge          # the real check — fence-aware, and in `verify` and CI
+```
+
+**Do not verify this with a bare `grep -c`.** That command was the check here
+until 2026-08-26, and on a healthy `main` it now answers **2**. The file
+illustrates its own repair inside a fenced code block, and a column-0 `##`
+inside a fence is not a heading — but `grep` cannot tell, so the documented
+check began reporting a defect in a file that has exactly one heading. Anybody
+following it would have "fixed" something that was never broken, which is the
+same trap this section describes, one level up: **the decoys are now inside
+code fences, and the counting check could not see the difference.**
+
+It needs no pnpm if you want it directly:
+
+```bash
+python3 scripts/append-only-merge.py --check
 ```
 
 **That count is now a check rather than a habit** — `pnpm run check:doc-merge`,

@@ -41830,6 +41830,44 @@ for it — `check-verify-chain.py` remains the thing that notices a dropped link
 And a **clean** auto-merge that makes a claim in another file false has no
 conflict in it to catch, by definition.
 
+## 2026-08-26 — the heading-count check counted a heading inside a code fence
+
+**`main` was healthy and the documented check said it was broken.** N63 (#624)
+landed a merge driver for this file, and its entry illustrates the conflict it
+resolves inside a fenced code block — a block that necessarily contains the line
+`## Open items / known gaps as of this entry`, because that is the anchor the
+conflict forms around.
+
+CLAUDE.md told every session to verify the invariant with:
+
+    grep -c '^## Open items / known gaps as of this entry' docs/decisions/history.md   # must be 1
+
+On the very next commit that command answered **2**. A column-0 `##` inside a
+fence is not a heading, and `grep` cannot tell the difference.
+
+**Nothing was actually wrong.** `pnpm run check:doc-merge` — which has been in
+`verify` and CI since N63 — skips fenced blocks, has an explicit case named
+*"a fenced example of the heading is not a finding"*, and passed. The file has
+exactly one heading. Counting with fences excluded gives 1.
+
+**What this is an instance of.** The section in CLAUDE.md describing this trap
+already warned that *"each repair adds another decoy, and the trap gets
+measurably worse every time somebody falls into it"* — it counted five matches
+in 2026-08-21, of which one was the heading and four were prose in entries
+describing the repair. This is that same mechanism one level up: the decoys are
+now inside **code fences**, and the hand-run counting check could not see the
+difference. The prose warning was right and the command beneath it had gone
+stale against the very file it was describing.
+
+So the documented gesture is now `pnpm run check:doc-merge` (or
+`python3 scripts/append-only-merge.py --check`, which needs no pnpm), and the
+bare `grep -c` is explicitly retired with the reason attached, so nobody
+reintroduces it as a convenience.
+
+**Worth stating plainly**: the check that mattered was correct, in CI, and
+already had a test for this exact case. What was wrong was the human-facing
+instruction sitting above it — and that is the half nothing verifies.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
