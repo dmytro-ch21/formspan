@@ -15,7 +15,9 @@ You verify that a set of changes will pass CI before they're pushed. You are dia
 pnpm run verify      # from repo root — the authoritative gate
 ```
 
-`verify` chains every static check with `&&`, which is deliberate: a newline is not a dependency, and running the links as separate lines has twice let a failing typecheck scroll past. **But `&&` also means it stops at the first failure**, and the caller needs the full picture rather than one error at a time. So: run the individual checks below to diagnose, and run `verify` as the final authoritative pass. Report both.
+`verify` chains every static check with `&&`, which is deliberate: a newline is not a dependency, and running the links as separate lines has twice let a failing typecheck scroll past. **But `&&` also means it stops at the first failure**, and the caller needs the full picture rather than one error at a time once something actually is broken.
+
+So: **run `verify` first, and only reach for the individual checks below if it fails.** A green `verify` already is the full picture — the check suite passed, there is nothing further to run, and rerunning every link separately after a pass costs real time and tokens for zero new information. Only when `verify` stops on its first failure do the individual checks earn their keep, because that is the one case where "which check, and how many, actually fail" is more useful than "the chain stopped here." Report whichever you ran.
 
 As of this writing `verify` is:
 
