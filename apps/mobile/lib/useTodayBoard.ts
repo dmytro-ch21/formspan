@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { AppState } from 'react-native';
 
 import { dayString } from './calendar';
@@ -154,7 +154,28 @@ export function useTodayBoard(
     };
   }, [read]);
 
-  const refresh = useCallback(() => read(() => true), [read]);
+  /*
+   * The Retry button's re-read, and the one read path that had no liveness
+   * guard — it passed `() => true`, so a slow retry resolving after the screen
+   * blurred still wrote state.
+   *
+   * Practically unreachable (the button only exists while this screen is
+   * mounted and focused) and fixed anyway, because "the one exception" is how a
+   * discipline stops being one. Raised in review.
+   *
+   * Set in the effect body as well as cleared in the cleanup: under StrictMode
+   * the mount effect is invoked twice, so a cleanup-only version would leave
+   * the ref false for the whole second life of the component.
+   */
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+
+  const refresh = useCallback(() => read(() => live.current), [read]);
 
   const board = useMemo(
     () => buildTodayBoard({ sessions, plans, workouts, modules, now }),

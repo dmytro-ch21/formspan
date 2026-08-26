@@ -96,7 +96,10 @@ jest.mock('@/lib/sync', () => ({
 // DO construct, which is the apparatus trap: a screen showing "couldn't read"
 // for the wrong reason still passes an assertion that it says so.
 jest.mock('@/lib/themes', () => ({ fetchThemes: () => Promise.resolve([]) }));
-jest.mock('@/lib/proficiency', () => ({ fetchProficiency: () => Promise.resolve([]) }));
+const mockFunnel = jest.fn((..._a: unknown[]): Promise<unknown[]> => Promise.resolve([]));
+jest.mock('@/lib/proficiency', () => ({
+  fetchProficiency: (...a: unknown[]) => mockFunnel(...a),
+}));
 jest.mock('@/lib/curriculum', () => ({ listWorkingCurricula: () => Promise.resolve([]) }));
 jest.mock('@/lib/body', () => ({
   listCheckins: () => Promise.resolve([]),
@@ -220,6 +223,8 @@ beforeEach(() => {
   mockCachedWorkouts.mockResolvedValue([]);
   mockListPlannedBetween.mockReset();
   mockListPlannedBetween.mockResolvedValue([]);
+  mockFunnel.mockReset();
+  mockFunnel.mockResolvedValue([]);
 });
 
 describe('the active session outranks everything', () => {
@@ -397,20 +402,35 @@ describe('it never claims an absence it has not checked', () => {
     expect(screen.queryByTestId('today-unplanned')).toBeNull();
   });
 
-  it('says it could not read today rather than showing an unplanned day', async () => {
+  it('says it could not read the plan rather than showing an unplanned day', async () => {
     mockListPlannedBetween.mockRejectedValue(new Error('disk'));
     render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-lead-unavailable')).toBeTruthy();
     expect(screen.queryByTestId('today-unplanned')).toBeNull();
+    // **It blames the PLAN, and only the plan.** The session read answered, and
+    // a resume would have short-circuited this block entirely — so we know
+    // nothing is part-finished, and saying "we could not check for an
+    // unfinished session" here would send the athlete looking in the wrong
+    // place. This copy asserted both halves unconditionally until review.
+    expect(screen.getByText("We couldn't read today's plan just now.")).toBeTruthy();
+    expect(screen.queryByText(/unfinished session/)).toBeNull();
   });
 
-  it('says the same when the SESSION read is what failed', async () => {
+  it('names the unfinished-session check when THAT is what failed', async () => {
     mockListLocalSessions.mockRejectedValue(new Error('disk'));
     render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-lead-unavailable')).toBeTruthy();
     expect(screen.queryByTestId('today-unplanned')).toBeNull();
+    // Here the screen genuinely cannot tell whether something is open, so the
+    // rule that a running session outranks everything is the one it has just
+    // lost the ability to apply. Worth saying: the athlete may have one.
+    expect(
+      screen.getByText(
+        'That covers your plan and any unfinished session. New log still works.',
+      ),
+    ).toBeTruthy();
   });
 
   it('does claim a rest day once both reads have answered', async () => {
@@ -444,6 +464,50 @@ describe('insight', () => {
 
     expect(await screen.findByTestId('today-week-strip')).toBeTruthy();
     expect(screen.queryByTestId('today-offer-detail')).toBeNull();
+  });
+
+  it('names the suggestion card by the words printed on it', async () => {
+    // WCAG 2.5.3. The label read "try {name} live" while the card says
+    // "Try {name} in a round", so "tap try armbar in a round" matched nothing
+    // under Voice Control — and this branch fixes the same thing on two other
+    // cards, so the card was inconsistent with its own neighbours. Review
+    // caught it; nothing asserted the label at all before this test.
+    // Two rows, and the first is not decoration: `funnelGap` refuses to make
+    // any suggestion until SOMETHING in the funnel has a live counter on it,
+    // because otherwise the rule collapses to "drilled a lot, recently" over
+    // data that could never have been recorded. The second row is the
+    // candidate — six drills, nothing live, seen recently.
+    mockFunnel.mockResolvedValue([
+      {
+        technique_id: 't0',
+        name: 'Triangle',
+        position: 'guard',
+        category: 'submission',
+        drilled: 2,
+        attempted: 1,
+        scored: 1,
+        conceded: 0,
+        sessions: 2,
+        last_seen: new Date().toISOString(),
+      },
+      {
+        technique_id: 't1',
+        name: 'Armbar',
+        position: 'guard',
+        category: 'submission',
+        drilled: 6,
+        attempted: 0,
+        scored: 0,
+        conceded: 0,
+        sessions: 3,
+        last_seen: new Date().toISOString(),
+      },
+    ]);
+    render(<TodayScreen />);
+
+    const card = await screen.findByTestId('today-suggestion');
+    expect(screen.getByText('Try Armbar in a round')).toBeTruthy();
+    expect(card.props.accessibilityLabel).toContain('Try Armbar in a round');
   });
 
   it('draws no Insight heading when there is nothing to say', async () => {

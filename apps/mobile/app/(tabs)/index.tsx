@@ -808,6 +808,7 @@ export default function TodayScreen() {
               competing for the same glance. */}
           <LeadBlock
             lead={lead}
+            sessionsUnavailable={sessions.state === 'unavailable'}
             modules={modules}
             accent={accent}
             now={now}
@@ -994,7 +995,13 @@ export default function TodayScreen() {
                   style={({ pressed }) => [styles.suggestion, pressed && styles.planCardPressed]}
                   onPress={() => router.push(`/technique/${suggestion.techniqueId}`)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Suggestion: try ${suggestion.name} live. Drilled in ${suggestion.drilled} sessions and never logged live. Open the technique.`}
+                  // Leads with the card's OWN visible title — WCAG 2.5.3. It
+                  // read "try {name} live" while the card says "Try {name} in a
+                  // round", so "tap try armbar in a round" matched nothing
+                  // under Voice Control. The same fix this branch makes on the
+                  // plan card and the Tier 0 offer; review caught that this one
+                  // was inconsistent with its own neighbours.
+                  accessibilityLabel={`Suggestion: Try ${suggestion.name} in a round. Drilled in ${suggestion.drilled} sessions and never logged live. Open the technique.`}
                   // The x below is a Pressable INSIDE this one, and UIKit does
                   // not descend into a view that is itself an accessibility
                   // element — so its label and hint are never announced, and
@@ -1254,6 +1261,7 @@ export default function TodayScreen() {
  */
 function LeadBlock({
   lead,
+  sessionsUnavailable,
   modules,
   accent,
   now,
@@ -1262,6 +1270,14 @@ function LeadBlock({
   onPlan,
 }: {
   lead: Source<TodayLead>;
+  /**
+   * Whether the SESSION read specifically is what failed.
+   *
+   * Only consulted in the `unavailable` branch, and it is the difference
+   * between "we could not check for an unfinished session" and a claim that is
+   * simply untrue — see there.
+   */
+  sessionsUnavailable: boolean;
   modules: Module[];
   accent: ReturnType<typeof useAccent>;
   now: Date;
@@ -1273,18 +1289,34 @@ function LeadBlock({
 
   if (lead.state === 'unavailable') {
     /*
-      Dashed, per #468: it stands WHERE content would stand. And it names both
-      halves, because the session read and the plan read fail together here —
-      saying only "we could not read your plan" would attribute an unfinished
-      session's disappearance to the wrong thing, and that is where the athlete
-      then goes looking. New log below still works.
+      Dashed, per #468: it stands WHERE content would stand. And **which read
+      failed is part of what the athlete is told**, because the two are not
+      equivalent and this copy used to claim they were:
+
+      - The SESSION read failing means the screen cannot tell whether something
+        is part-finished — so the rule that a running session outranks
+        everything is the one it has just lost the ability to apply. That is
+        worth saying, because the athlete may have a session open.
+      - The PLAN read failing while sessions answered means the opposite: we
+        know nothing is open, because a resume would have short-circuited this
+        block entirely. Saying "we could not check for an unfinished session"
+        there is false, and it sends the athlete looking in the wrong place.
+
+      Found in review, on copy that asserted both halves unconditionally.
+      Train draws the same distinction with two separate notes.
     */
     return (
       <View style={styles.planEmpty} testID="today-lead-unavailable">
         <View style={styles.planMain}>
-          <Text style={styles.planEmptyTitle}>We couldn&apos;t read today just now.</Text>
+          <Text style={styles.planEmptyTitle}>
+            {sessionsUnavailable
+              ? "We couldn't read today just now."
+              : "We couldn't read today's plan just now."}
+          </Text>
           <Text style={styles.planEmptyMeta}>
-            That covers both your plan and any unfinished session. New log still works.
+            {sessionsUnavailable
+              ? 'That covers your plan and any unfinished session. New log still works.'
+              : 'New log still works.'}
           </Text>
         </View>
       </View>

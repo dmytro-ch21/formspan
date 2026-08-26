@@ -42300,13 +42300,14 @@ place with a note saying so, rather than deleted: this ticket's criterion is
 
 ### Mutation-tested, and the one that survived is the useful half
 
-Fourteen mutations, applied one at a time by a harness that verifies the pattern
+Sixteen mutations, applied one at a time by a harness that verifies the pattern
 matched exactly once, that the write changed the file, and that the restore is
 byte-identical — then re-runs the whole set at the end. Baseline green in the
-same session before and after: **66 tests across the three files.**
+same session before and after: **67 tests across the three files. 16 of 16
+red.**
 
-**Thirteen went red on the first run. The survivor was the DST guard, and it
-took two more vectors to kill — which is the useful half of this section.**
+**Thirteen of the first fourteen went red. The survivor was the DST guard, and
+it took two more vectors to kill — which is the useful half of this section.**
 
 `todayPlanWindow` uses `addDays` rather than `+ 14 * 86_400_000`. The original
 vector was **noon** on 2026-03-08: an hour either side of midday is the same
@@ -42321,8 +42322,7 @@ so the millisecond form landed at 01:30 the same day and survived again. Only
 the third vector works: **23:30 on 2026-03-01**, where the gained hour tips the
 millisecond form over midnight onto the 16th while `addDays` holds the 15th.
 Measured rather than reasoned this time — `addDays` → Sun Mar 15 23:30 PDT,
-milliseconds → Mon Mar 16 00:30 PDT — and then re-mutated: red. **Final run: 14
-of 14 red, baseline green before and after.**
+milliseconds → Mon Mar 16 00:30 PDT — and then re-mutated: red.
 
 Recorded honestly in both the code and the test: `useTodayBoard` normalises
 `now` to noon before calling this, so the guard protects a future caller rather
@@ -42335,6 +42335,36 @@ defaulted `[]` gives 0, so no mutation of that line changes any assertion today.
 It is the arithmetic that makes it harmless, not the intent — move the bound, or
 add a tier that fires on a LOW count, and `[]` becomes a confident zero about an
 athlete whose history has not loaded.
+
+### What review found, and the two mutations it added
+
+`frontend-reviewer` returned no blocking findings and three suggestions, all
+taken. Two of them were guards nothing asserted, so both became mutations —
+**M15 and M16, and both go red**, which is the point of writing them down here
+rather than in a commit message:
+
+- **The `unavailable` copy claimed both reads had failed.** They are independent
+  sources: the lead goes `unavailable` if *either* fails, and when only the plan
+  read fails we know nothing is part-finished — a resume would have
+  short-circuited the block entirely. So "we could not check for an unfinished
+  session" was false in that case and sent the athlete looking in the wrong
+  place. It now branches on which read failed, exactly as Train does with its
+  two separate notes.
+- **The suggestion card's `accessibilityLabel` said "try {name} live" while the
+  card said "Try {name} in a round"** — the WCAG 2.5.3 failure this branch
+  *fixes on two other cards*, left inconsistent with its own neighbours. Nothing
+  asserted that label at all; there is a test now.
+- **`useTodayBoard`'s `refresh` passed `() => true`**, the one read path with no
+  liveness guard, so a slow Retry resolving after blur still wrote state.
+  Practically unreachable and fixed anyway, because "the one exception" is how a
+  discipline stops being one.
+
+`ac-verifier` returned **8 MET · 0 NOT MET · 3 needing a person · 0 NOT
+ADDRESSED**, and caught something outside the diff: **the issue body carried no
+evidence marker at all**, so `closes #584` would have closed the ticket with the
+three device criteria unsettled and nothing holding it open — the exact failure
+the evidence latch exists for, arriving on the ticket whose reviewer noticed it.
+Markers were added to the issue.
 
 ### Coverage this screen did not have
 
