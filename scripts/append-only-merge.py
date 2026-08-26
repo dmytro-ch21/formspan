@@ -697,9 +697,12 @@ def self_test() -> int:
     # Fenced quoting is legitimate and must not be reported. This file's own
     # N63 entry quotes a diff3 hunk containing exactly these lines, and a
     # fence-blind version reported five findings on the commit that added it.
+    #
+    # The heading inside the fence is INDENTED, which is the convention the
+    # recipe-parity check below enforces and which that entry follows.
     quoted_doc = good.replace(
         "prose for A.",
-        "prose for A.\n\n```\n<<<<<<< ours\n" + OPEN_ITEMS + "\n>>>>>>> theirs\n```",
+        "prose for A.\n\n```\n<<<<<<< ours\n  " + OPEN_ITEMS + "\n>>>>>>> theirs\n```",
     )
     check("shape: a fenced example of the heading is not a finding",
           history_problems(quoted_doc) == [], str(history_problems(quoted_doc)))
@@ -717,6 +720,20 @@ def self_test() -> int:
           str(history_problems(blinded)))
     check("shape: a balanced fence is not reported",
           not any("unterminated" in p for p in history_problems(quoted_doc)))
+
+    # The RAW grep recipe CLAUDE.md tells people to run is not fence-aware, so
+    # a column-0 heading inside a fence makes it report 2 while this check —
+    # correctly — reports nothing. The two disagreeing is how a documented
+    # habit turns into a false alarm and gets abandoned, so they are kept in
+    # agreement. Measured on this branch: writing the N63 entry put the heading
+    # at column 0 inside its diff3 example and moved the recipe's answer from
+    # 1 to 2. It is indented now, and this is what would catch the next one.
+    column0 = quoted_doc.replace("\n  " + OPEN_ITEMS, "\n" + OPEN_ITEMS)
+    check("shape: a fenced heading at column 0 is reported against the grep recipe",
+          any("grep recipe" in p for p in history_problems(column0)),
+          str(history_problems(column0)))
+    check("shape: indenting it inside the fence clears the finding",
+          history_problems(quoted_doc) == [], str(history_problems(quoted_doc)))
 
     # ---- 10. The apparatus can fail --------------------------------------
     # CLAUDE.md's rule: check that a check can go red. Every case above would
@@ -1031,6 +1048,25 @@ def history_problems(text: str) -> list[str]:
             f"{HISTORY}: unterminated code fence opened at line {opened_at}.\n"
             "    Everything after it is invisible to the checks below, so a "
             "stranded entry there would go unreported."
+        )
+
+    # The recipe `CLAUDE.md` tells people to run is a RAW grep:
+    #
+    #   grep -c '^## Open items / known gaps as of this entry'   # must be 1
+    #
+    # It counts column-0 matches anywhere, fences included. This check is
+    # fence-aware, so the two can disagree — and if they do, the documented
+    # recipe starts reporting a defect that is not there, which is how a habit
+    # gets abandoned. Keep them in agreement: indent the heading inside a
+    # fenced example, as this file's own N63 entry does.
+    raw = [i for i, l in enumerate(text.splitlines()) if l == OPEN_ITEMS]
+    if len(raw) != 1:
+        problems.append(
+            f"{HISTORY}: {len(raw)} column-0 `{OPEN_ITEMS}` lines counting "
+            "fenced examples, so the grep recipe in CLAUDE.md would report "
+            f"{len(raw)} rather than 1.\n"
+            f"    Lines: {', '.join(str(i + 1) for i in raw[:5])}. If one is an "
+            "example inside a code fence, indent it by two spaces."
         )
 
     headings = [i for i, l in enumerate(lines) if l == OPEN_ITEMS]
