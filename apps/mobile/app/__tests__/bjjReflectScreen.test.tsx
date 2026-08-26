@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 
 import ReflectScreen from '../bjj/reflect/[id]';
 import type { SessionDetail } from '@/lib/bjjSession';
-import { saveLocalBjjDetail } from '@/lib/sessionStore';
+import { readLocalBjjDetail, saveLocalBjjDetail } from '@/lib/sessionStore';
 
 /**
  * N185 (#590) — the reflection wizard's visual pass, and the two things a
@@ -41,6 +41,8 @@ const deferred = <T,>(value: T) => new Promise<T>((r) => setTimeout(() => r(valu
 jest.mock('expo-router', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Text } = require('react-native');
   return {
     // `KeyboardAwareScroll` calls this too — omitting it here (rather than
     // relying on jest.setup.js's default, which this file's own
@@ -59,6 +61,11 @@ jest.mock('expo-router', () => {
       Screen: ({ options }: { options?: { headerRight?: () => React.ReactNode } }) =>
         options?.headerRight ? options.headerRight() : null,
     },
+    // `RoadmapLine` renders one of these around itself. Not exercised by the
+    // fixtures in THIS file (`listWorkingCurricula` resolves `[]` below), but
+    // its absence would crash any future test that mocks a non-empty roadmap
+    // list — a test-setup gap that would read as a screen bug.
+    Link: ({ children }: { children: React.ReactNode }) => React.createElement(Text, null, children),
   };
 });
 
@@ -212,4 +219,33 @@ it('shows Reliable on a technique the funnel already has three live hits for', a
   expect(screen.getByTestId('bjj-drilled-chip-armbar-closed-guard-state')).toHaveTextContent(
     'Reliable',
   );
+});
+
+it('shows no learning-state badge on a drilled row whose technique was retired', async () => {
+  // `technique_id: null` is a REAL state, not a hypothetical one — migration
+  // 000025's `ON DELETE SET NULL` produces exactly this when a technique is
+  // retired, and `removeDrilledTechnique` in `bjjSession.ts` documents the
+  // same nullability. `displayLearningState` reads a null id as 'seen', so an
+  // unconditional badge here would show "Seen" on a row this session itself
+  // recorded as drilled — a direct contradiction on the same line, which is
+  // exactly what review caught before this test existed.
+  (readLocalBjjDetail as jest.Mock).mockImplementationOnce(() =>
+    deferred({
+      ...mockDetail,
+      tags: [{ category: 'submission', event: 'drilled', position: '', technique_id: null, count: 1 }],
+    }),
+  );
+
+  render(<ReflectScreen />);
+
+  await waitFor(() => {
+    expect(screen.getByText('Drilled today')).toBeTruthy();
+  });
+
+  // The row itself must still render (nothing here hides the technique).
+  expect(screen.getByTestId('bjj-drilled-chip-null')).toBeTruthy();
+  // But no badge — and specifically no "Seen" contradicting a row the
+  // session just recorded as drilled.
+  expect(screen.queryByTestId('bjj-drilled-chip-null-state')).toBeNull();
+  expect(screen.queryByText('Seen')).toBeNull();
 });

@@ -712,6 +712,15 @@ function DrilledStep({
             // The state THIS row justifies right now, including the drilled
             // tag just added — so tapping "add" and landing here never shows
             // a stale "Seen" for a technique the athlete just drilled.
+            //
+            // Gated on `!== 'seen'` — the SAME condition the search results
+            // and the live step's focus rows use, and it has to be, for a
+            // real reason: `t.technique_id` is nullable (`ON DELETE SET NULL`
+            // when a technique is retired, `bjjSession.ts`'s own comment on
+            // `removeDrilledTechnique`), and `displayLearningState` reads
+            // "seen" off a null id. An UNCONDITIONAL badge here showed "Seen"
+            // on a row the session itself had just recorded as drilled — a
+            // direct contradiction on the same line. Caught in review.
             const state = displayLearningState(proficiency, detail.tags, t.technique_id);
             return (
               <RNView key={t.technique_id ?? `${t.category}-${t.position}`} style={styles.drilledRow}>
@@ -720,10 +729,12 @@ function DrilledStep({
                     <Text style={styles.drilledName} numberOfLines={2}>
                       {name}
                     </Text>
-                    <LearningStateBadge
-                      state={state}
-                      testID={`bjj-drilled-chip-${t.technique_id}-state`}
-                    />
+                    {state !== 'seen' && (
+                      <LearningStateBadge
+                        state={state}
+                        testID={`bjj-drilled-chip-${t.technique_id}-state`}
+                      />
+                    )}
                   </RNView>
                   <Pressable
                     onPress={() => remove(t.technique_id)}
