@@ -265,7 +265,7 @@ describe('whatChanged — "nothing changed" is a claim, and it needs every answe
         {
           id: 'consistency',
           headline: 'You are training more than last week',
-          detail: "4 sessions so far, 2 more than last week's 2.",
+          detail: '4 sessions so far, 2 more than the 2 you had by this point last week.',
         },
       ],
     });
@@ -277,10 +277,27 @@ describe('whatChanged — "nothing changed" is a claim, and it needs every answe
         {
           id: 'consistency',
           headline: 'You are training less than last week',
-          detail: "1 session so far, 3 fewer than last week's 4.",
+          detail: '1 session so far, 3 fewer than the 4 you had by this point last week.',
         },
       ],
     });
+  });
+
+  it('never presents week.previous as last week’s WHOLE total — it is a mirrored, partial count (#584 follow-up)', () => {
+    // `week.previous` now comes from `reviewWeek`'s day-of-week-mirrored
+    // window (N179/#584 follow-up) — it is "as of the same point last week",
+    // never the full seven days. The old copy, "than last week's ${before}",
+    // stated that number as though it were last week's total: an athlete who
+    // trained 6 times last week but only reached 2 by the equivalent
+    // Wednesday would have read "2 more than last week's 2" — arithmetically
+    // consistent with the (correct) headline, and still a misattribution of
+    // what `before` counts. The fixed copy has to name the number as a
+    // same-point comparison, not a whole-week one.
+    const view = whatChanged({ ...allAnswered, week: ready(week(4, 2)) }, KG);
+    const detail = insightsOf(view)[0].detail;
+    expect(detail).toBe('4 sessions so far, 2 more than the 2 you had by this point last week.');
+    expect(detail).not.toMatch(/last week's/);
+    expect(detail).toMatch(/by this point last week/);
   });
 
   it('draws no comparison at all when the device cannot see last week', () => {

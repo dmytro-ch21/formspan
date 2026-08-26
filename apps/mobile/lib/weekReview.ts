@@ -131,6 +131,21 @@ function accumulate(sessions: Session[]): { totals: WeekTotals; bySport: SportTo
  * before last Monday also gets `null`, and "no comparison" is the honest answer
  * for them too, because one week of history cannot say whether this week was
  * better.
+ *
+ * **The previous week's window is bounded to the SAME day-of-week range as this
+ * week's, not the full seven days.** `thisWeek` is naturally bounded to *today*
+ * — sessions can't happen in the future, so summing "Monday through this
+ * week's Sunday" only ever picks up what has actually happened. `lastWeek`
+ * used to sum the complete previous week regardless of how much of the
+ * current one had elapsed, which meant a Wednesday reading always compared
+ * 2–3 days of this week against a full 7 of the last one — and read as
+ * "training less than last week" almost every time, independent of whether
+ * the athlete actually was. The fix mirrors `now`'s weekday index onto the
+ * previous week: on a Wednesday (day index 2, Monday = 0), the comparison
+ * runs last Monday through the previous Wednesday, not through the previous
+ * Sunday. On a Sunday the mirrored index is 6, so the comparison naturally
+ * widens back out to the full week — this is not a special case, it falls out
+ * of the same formula.
  */
 export function reviewWeek(
   sessions: Session[],
@@ -142,6 +157,12 @@ export function reviewWeek(
   const to = dayString(addDays(weekStart, 6));
   const prevStart = addDays(weekStart, -7);
   const prevFrom = dayString(prevStart);
+  // Same formula `startOfWeek` uses to find Monday: `getDay()` is 0 on Sunday,
+  // six days into the week rather than minus one, so `+6 mod 7` turns that
+  // into a Monday-first index (Mon=0 … Sun=6) — how far INTO this week `now`
+  // already is.
+  const elapsedInWeek = (now.getDay() + 6) % 7;
+  const prevTo = dayString(addDays(prevStart, elapsedInWeek));
 
   const thisWeek: Session[] = [];
   const lastWeek: Session[] = [];
@@ -151,14 +172,16 @@ export function reviewWeek(
     const day = dayString(new Date(s.started_at));
     if (oldest === null || day < oldest) oldest = day;
     if (day >= from && day <= to) thisWeek.push(s);
-    else if (day >= prevFrom && day < from) lastWeek.push(s);
+    else if (day >= prevFrom && day <= prevTo) lastWeek.push(s);
   }
 
   const { totals, bySport } = accumulate(thisWeek);
 
   // Strictly before: a list whose oldest session is exactly the previous Monday
   // proves nothing about the days before it, and cannot rule out having been
-  // truncated at that boundary.
+  // truncated at that boundary. Unaffected by the day-of-week bound above: the
+  // list still has to reach back past `prevFrom` itself, regardless of how much
+  // of `lastWeek`'s window that data is then used to fill.
   const reachesBack = oldest !== null && oldest < prevFrom;
   const previous = reachesBack ? accumulate(lastWeek).totals : null;
 

@@ -93,16 +93,22 @@ describe('reviewWeek — the window guard', () => {
   });
 
   it('reports the previous week once the list demonstrably reaches back past it', () => {
+    // NOW is Wednesday (see the top of the file), so the previous week's
+    // window is bounded to last Monday through last Wednesday — see
+    // "reviewWeek — the partial-week bound" below. 2026-08-07 is a FRIDAY,
+    // past that cutoff, so it demonstrates the list reaches back far enough
+    // to prove `reachesBack` without itself counting toward the total — the
+    // same role 2026-08-02 already plays.
     const sessions = [
       session('2026-08-10', 'bjj'),
-      session('2026-08-05', 'bjj'), // last week
-      session('2026-08-07', 'bjj'), // last week
+      session('2026-08-05', 'bjj'), // last week, Wednesday — inside the window
+      session('2026-08-07', 'bjj'), // last week, Friday — past the cutoff
       session('2026-08-02', 'bjj'), // the Sunday BEFORE last week — the proof
     ];
     const r = reviewWeek(sessions, [], NOW);
     expect(r.previous).not.toBeNull();
-    expect(r.previous?.sessions).toBe(2);
-    expect(r.previous?.days).toBe(2);
+    expect(r.previous?.sessions).toBe(1);
+    expect(r.previous?.days).toBe(1);
   });
 
   it('does not let sessions older than last week leak into the previous total', () => {
@@ -115,6 +121,78 @@ describe('reviewWeek — the window guard', () => {
   });
 });
 
+describe('reviewWeek — the partial-week bound', () => {
+  /**
+   * The bug: `thisWeek` is naturally bounded to *today*, because sessions
+   * cannot happen in the future — so on a Wednesday it only ever holds Monday
+   * and Tuesday's training. The OLD `lastWeek` window summed the full seven
+   * days of the previous week regardless of that, so a mid-week reading
+   * always compared a partial current week against a complete previous one.
+   * An athlete who trained the exact same two days both weeks — and who,
+   * last week, went on to train Thursday and Friday too, which this week
+   * simply has not arrived at yet — read as "training less than last week"
+   * for a reason that had nothing to do with their actual behaviour.
+   *
+   * NOW is 2026-08-12T12:00:00, a Wednesday — day index 2 of a Monday-first
+   * week. The fix mirrors that index onto the previous week, so the
+   * comparison window is last Monday through last Wednesday, not last Monday
+   * through last Sunday.
+   */
+  it('mirrors this week’s elapsed range onto last week, not the full 7 days', () => {
+    const sessions = [
+      session('2026-07-27', 'bjj'), // proof — the Monday before last week's, for `reachesBack`
+      session('2026-08-03', 'bjj'), // last week, Monday — inside the mirrored window
+      session('2026-08-04', 'bjj'), // last week, Tuesday — inside the mirrored window
+      session('2026-08-06', 'bjj'), // last week, Thursday — PAST the mirrored cutoff
+      session('2026-08-07', 'bjj'), // last week, Friday — PAST the mirrored cutoff
+      session('2026-08-10', 'bjj'), // this week, Monday
+      session('2026-08-11', 'bjj'), // this week, Tuesday
+    ];
+    const r = reviewWeek(sessions, [], NOW);
+    expect(r.totals.sessions).toBe(2); // this week so far: Monday, Tuesday
+
+    // The old, buggy window summed all four last-week sessions here (4),
+    // against this week's 2 — a false "training less than last week". The
+    // fixed window stops at last Wednesday, same as this week has, and
+    // reports the two that actually fall in range.
+    expect(r.previous?.sessions).toBe(2);
+    expect(r.previous?.days).toBe(2);
+  });
+
+  it('reports identical training frequency as unchanged, never as a decline', () => {
+    // Same fixture as above, read the way `whatChanged` (lib/progress.ts)
+    // would: equal `sessions` on both sides is "nothing changed", not "less
+    // than last week" — which is exactly what the pre-fix numbers (2 vs 4)
+    // would have triggered there.
+    const sessions = [
+      session('2026-07-27', 'bjj'),
+      session('2026-08-03', 'bjj'),
+      session('2026-08-04', 'bjj'),
+      session('2026-08-06', 'bjj'),
+      session('2026-08-07', 'bjj'),
+      session('2026-08-10', 'bjj'),
+      session('2026-08-11', 'bjj'),
+    ];
+    const r = reviewWeek(sessions, [], NOW);
+    expect(r.previous?.sessions).toBe(r.totals.sessions);
+  });
+
+  it('widens back to the full previous week once this week is complete', () => {
+    // Sunday: this week's own elapsed range IS the full 7 days, so the
+    // mirrored previous-week window is too — this is not a special case, it
+    // falls out of the same formula (day index 6, Monday-first).
+    const weekEnd = new Date('2026-08-16T20:00:00');
+    const sessions = [
+      session('2026-07-27', 'bjj'), // proof
+      session('2026-08-03', 'bjj'), // last week, Monday
+      session('2026-08-09', 'bjj'), // last week, Sunday — the far edge of the full window
+      session('2026-08-16', 'bjj'), // this week, Sunday
+    ];
+    const r = reviewWeek(sessions, [], weekEnd);
+    expect(r.previous?.sessions).toBe(2);
+  });
+});
+
 describe('reviewWeek — bucketing', () => {
   it('buckets by local day, not by UTC date', () => {
     /*
@@ -122,10 +200,19 @@ describe('reviewWeek — bucketing', () => {
       raw timestamp moves it into the NEXT week — so this week gains a session
       it did not have and last week loses one. The single most consequential
       off-by-one available here, and invisible to a UTC-only suite.
+
+      Run as of the FOLLOWING Sunday evening, not the file's usual mid-week
+      `NOW` — the session under test falls on the last day of the previous
+      week, and `reviewWeek`'s partial-week bound (see "the partial-week
+      bound" below) would otherwise cut it out of the comparison for a reason
+      that has nothing to do with what this test checks. A full week elapsed
+      is the one point where that bound covers the whole previous week again,
+      so it stays out of this test's way.
     */
+    const weekEnd = new Date('2026-08-16T20:00:00');
     const sunday9pm = session('2026-08-09', 'bjj', { hour: 21 });
     const proof = session('2026-08-01', 'bjj');
-    const r = reviewWeek([sunday9pm, proof], [], NOW);
+    const r = reviewWeek([sunday9pm, proof], [], weekEnd);
     expect(r.totals.sessions).toBe(0);
     expect(r.previous?.sessions).toBe(1);
   });

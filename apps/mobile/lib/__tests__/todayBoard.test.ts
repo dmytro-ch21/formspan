@@ -2,7 +2,7 @@ import { dayString } from '@/lib/calendar';
 import type { Module } from '@/lib/modules';
 import type { PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
-import { buildTodayBoard, todayPlanWindow, type TodayLead } from '@/lib/todayBoard';
+import { buildTodayBoard, momentumDayKey, todayPlanWindow, type TodayLead } from '@/lib/todayBoard';
 import { PLAN_WINDOW_DAYS, type Source } from '@/lib/trainBoard';
 import type { Workout } from '@/lib/workouts';
 
@@ -499,5 +499,30 @@ describe('the plan window', () => {
   it('defaults viewDay to now, so a caller that never touched the switcher needs no second argument', () => {
     const now = new Date('2026-08-26T12:00:00');
     expect(todayPlanWindow(now, now)).toEqual(todayPlanWindow(now));
+  });
+});
+
+describe('momentumDayKey — a resume overrides any leftover browsed day (#584 follow-up)', () => {
+  const viewDay = new Date('2026-08-20T12:00:00'); // some day NOT today
+  const todayKey = '2026-08-26';
+
+  it('follows the browsed day when nothing is resuming', () => {
+    expect(momentumDayKey(false, viewDay, todayKey)).toBe(dayString(viewDay));
+    expect(momentumDayKey(false, viewDay, todayKey)).not.toBe(todayKey);
+  });
+
+  it('falls back to real today whenever a session is resuming, regardless of viewDay', () => {
+    // The exact case a full-screen test cannot cheaply construct: the athlete
+    // browsed away, THEN a session started, leaving `viewDay` stale with no
+    // switcher visible to correct it.
+    expect(momentumDayKey(true, viewDay, todayKey)).toBe(todayKey);
+    expect(momentumDayKey(true, viewDay, todayKey)).not.toBe(dayString(viewDay));
+  });
+
+  it('agrees with the non-resuming case when viewDay already IS today', () => {
+    // Not a special case — both branches happen to produce the same string
+    // when there is nothing to disagree about.
+    const today = new Date(`${todayKey}T12:00:00`);
+    expect(momentumDayKey(true, today, todayKey)).toBe(momentumDayKey(false, today, todayKey));
   });
 });

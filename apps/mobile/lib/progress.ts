@@ -239,9 +239,17 @@ export function whatChanged(facts: ChangeFacts, formatKg: (kg: number) => string
       insights.push({
         id: 'consistency',
         headline: more ? 'You are training more than last week' : 'You are training less than last week',
+        // `before` is a MIRRORED, PARTIAL count — `reviewWeek` (N179/#584
+        // follow-up) bounds it to the same elapsed range as `now`, not the
+        // full previous week. "than last week's ${before}" used to present
+        // that partial figure as if it were the week's whole total, so an
+        // athlete who trained 6 times last week but only 2 by the equivalent
+        // Wednesday would read "2 more than last week's 2" — true of the
+        // comparison, misleading about what `before` actually counts.
+        // "by this point last week" states what the number IS.
         detail: `${now} ${now === 1 ? 'session' : 'sessions'} so far, ${gap} ${
           more ? 'more' : 'fewer'
-        } than last week's ${before}.`,
+        } than the ${before} you had by this point last week.`,
       });
     }
   }

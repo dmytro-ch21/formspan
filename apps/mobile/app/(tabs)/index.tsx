@@ -70,7 +70,7 @@ import {
 } from '@/lib/modules';
 import { sessionHref, startSessionHref } from '@/lib/startSession';
 import type { PlannedOffer, Source } from '@/lib/trainBoard';
-import type { TodayLead } from '@/lib/todayBoard';
+import { momentumDayKey, type TodayLead } from '@/lib/todayBoard';
 import { useTodayBoard } from '@/lib/useTodayBoard';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
@@ -258,6 +258,12 @@ export default function TodayScreen() {
     refresh: refreshBoard,
   } = useTodayBoard(userId ?? null, modules, now, viewDay);
 
+  // Moved up from beside its other render-time uses so Momentum's own food
+  // read (below) can see `resume` — a running session means "right now",
+  // full stop, regardless of what the day switcher was left showing.
+  const lead = board.lead;
+  const resume = lead.state === 'ready' && lead.value.kind === 'resume' ? lead.value.offer : null;
+
   /**
    * The technique funnel, for the suggestion below it.
    *
@@ -390,11 +396,24 @@ export default function TodayScreen() {
 
   // Fuel. Read locally first, exactly like the day screen: the card must be
   // right with no signal, because the log it reports is written offline.
-  const [foodEaten, setFoodEaten] = useState<EatenView>({ state: 'loading' });
-  // Null until the read answers, so the card can say nothing rather than say
-  // "0 of 7" — which would be a claim about the athlete's week made from a
-  // query that has not run.
-  const [foodView, setFoodView] = useState<TargetView>({ state: 'checking' });
+  //
+  // **Keyed to the day it was read for, the same shape `app/(tabs)/food.tsx`
+  // uses for its own stepper.** Momentum used to always read real "today",
+  // deliberately — this ticket (N179/#584 follow-up) reverses that on direct
+  // user instruction: *"no matter where we switch the Todays momentum with
+  // cals and stuff shows todays stats we need to show real things"*. Without
+  // the key, stepping the day would leave the PREVIOUS day's figures on
+  // screen under the new date until the read resolves — the same stale-day
+  // flash `food.tsx`'s own `loaded`/`dated` comments describe, and the reason
+  // this is a keyed pair rather than two plain `useState`s.
+  const [loadedFood, setLoadedFood] = useState<{ on: string; eaten: EatenView }>({
+    on: '',
+    eaten: { state: 'loading' },
+  });
+  const [datedFoodView, setDatedFoodView] = useState<{ on: string; view: TargetView }>({
+    on: '',
+    view: { state: 'checking' },
+  });
   const [foodQuick, setFoodQuick] = useState<Food[]>([]);
 
   /**
@@ -443,21 +462,101 @@ export default function TodayScreen() {
   const { refresh: refreshTrackers } = trackerDay;
   const todayKey = dayString(new Date());
 
-  const refreshFood = useCallback(() => {
-    let live = true;
-    const today = dayString(new Date());
-    const slot = slotForClock(new Date());
+  /**
+   * The browsed day, as a day key — what Momentum now follows. See
+   * `loadedFood`/`datedFoodView` above.
+   *
+   * **Real today whenever a session is resuming, regardless of `viewDay`.**
+   * The switcher is hidden during `resume` (see the render below), so there
+   * is no way to see or correct a leftover `dayOffset` from a previous
+   * browse — and this screen stays mounted for the process's life, so that
+   * leftover can genuinely still be sitting there. "The resume card leads,
+   * full stop" already means nothing else on the screen describes a browsed
+   * day while a session is running; Momentum falling back to `now` here is
+   * what makes that true for it too, rather than silently showing whatever
+   * day the switcher was last left on.
+   *
+   * The branch itself is {@link momentumDayKey} (`lib/todayBoard.ts`), pulled
+   * out as a pure function specifically so it has its own test — this exact
+   * one-line decision shipped with no test able to catch its deletion,
+   * because reproducing "browsed away, then a session starts" through the
+   * full rendered screen needs the plan window to widen before the resume
+   * state changes, an awkward sequence to orchestrate and an easy one to get
+   * subtly wrong.
+   */
+  const on = momentumDayKey(resume !== null, viewDay, todayKey);
 
-    (userId ? localEntries(userId, today) : Promise.resolve<Entry[]>([]))
+  /**
+   * Entries and target for the day the switcher is showing.
+   *
+   * Split out from the week/quick-add read below (`refreshFoodWeek`)
+   * specifically so stepping the day — which changes `on` and therefore this
+   * callback's identity — refetches only this, not checkins/summary/roadmaps
+   * as well. Those are real-today reads with nothing to do with browsing.
+   */
+  const refreshFoodDay = useCallback(() => {
+    let live = true;
+
+    (userId ? localEntries(userId, on) : Promise.resolve<Entry[]>([]))
       .then((rows) => {
-        if (live) setFoodEaten(eatenFrom(rows));
+        if (live) setLoadedFood({ on, eaten: eatenFrom(rows) });
       })
       .catch(() => {
         // Was `.catch(() => {})`, which left the list empty and rendered a
         // failed read as "nothing logged" — a claim the athlete ate nothing.
         // See `EatenView`.
-        if (live) setFoodEaten({ state: 'unavailable' });
+        if (live) setLoadedFood({ on, eaten: { state: 'unavailable' } });
       });
+
+    // The one thing the phone cannot compute. Cache first, server second — and
+    // a failed fetch leaves the cached answer standing rather than falling back
+    // to "set a target", which would be a false claim about an athlete who set
+    // one on web. See TargetView.
+    // Sequenced rather than raced, same as the day screen: started in parallel
+    // a slow cache read can land after a fast network answer and overwrite it.
+    let answered = false;
+    (userId ? localTargetView(userId, on) : Promise.resolve<TargetView>({ state: 'unknown' }))
+      .catch((): TargetView => ({ state: 'unknown' }))
+      .then((v) => {
+        if (live && !answered) setDatedFoodView({ on, view: v });
+        return listTargets(getToken, { from: on, to: on });
+      })
+      .then(async (ts) => {
+        if (userId) await cacheTargets(userId, on, on, ts);
+        if (!live) return;
+        answered = true;
+        const t = targetOn(ts, on);
+        setDatedFoodView({ on, view: t ? { state: 'set', target: t } : { state: 'none' } });
+      })
+      .catch(() => {});
+
+    return () => {
+      live = false;
+    };
+  }, [getToken, userId, on]);
+
+  // Derived, not stored directly — the same guard `food.tsx` uses. A read
+  // answering for a day that is no longer on screen must not paint over the
+  // day the athlete has since stepped to.
+  const foodEaten: EatenView = loadedFood.on === on ? loadedFood.eaten : { state: 'loading' };
+  const foodView: TargetView = datedFoodView.on === on ? datedFoodView.view : { state: 'checking' };
+
+  /**
+   * The week's logged-day count and the quick-add ranking — always real
+   * TODAY's, never the browsed day's.
+   *
+   * **Deliberately NOT re-dated.** Logging and quick-add stay pinned to real
+   * today regardless of which day Momentum is displaying — see `quickLog`
+   * below and the decision recorded in the history entry: the safer default
+   * is that a tap here always logs to today, matching `food.tsx`'s own rule
+   * ("Today pins its row to today, because a tap there logs a cup now") and
+   * avoiding a "viewing Tuesday, tap Log Food, it silently logs to today"
+   * surprise that a day-following action would create.
+   */
+  const refreshFoodWeek = useCallback(() => {
+    let live = true;
+    const today = dayString(new Date());
+    const slot = slotForClock(new Date());
 
     // The week's logged-day count. Its own read, because it spans seven days
     // and the entries read above is one — and a failure here leaves the count
@@ -488,32 +587,10 @@ export default function TodayScreen() {
       })
       .catch(() => {});
 
-    // The one thing the phone cannot compute. Cache first, server second — and
-    // a failed fetch leaves the cached answer standing rather than falling back
-    // to "set a target", which would be a false claim about an athlete who set
-    // one on web. See TargetView.
-    // Sequenced rather than raced, same as the day screen: started in parallel
-    // a slow cache read can land after a fast network answer and overwrite it.
-    let answered = false;
-    (userId ? localTargetView(userId, today) : Promise.resolve<TargetView>({ state: 'unknown' }))
-      .catch((): TargetView => ({ state: 'unknown' }))
-      .then((v) => {
-        if (live && !answered) setFoodView(v);
-        return listTargets(getToken, { from: today, to: today });
-      })
-      .then(async (ts) => {
-        if (userId) await cacheTargets(userId, today, today, ts);
-        if (!live) return;
-        answered = true;
-        const t = targetOn(ts, today);
-        setFoodView(t ? { state: 'set', target: t } : { state: 'none' });
-      })
-      .catch(() => {});
-
     return () => {
       live = false;
     };
-  }, [getToken, userId]);
+  }, [userId]);
 
   /**
    * The trailing-28-day training count, and which rings to draw.
@@ -550,7 +627,30 @@ export default function TodayScreen() {
     };
   }, [userId]);
 
-  /** One tap from the card: log a serving of a ranked food, right now. */
+  /**
+   * The last `refreshFoodDay` this screen itself triggered (from `quickLog`),
+   * so a second quick-add before the first read resolves can cancel it.
+   *
+   * Without this, two rapid taps race: the second write is the freshest, but
+   * nothing stops the FIRST read — started before it — from resolving after
+   * the second one's and overwriting it with stale figures. Both fetches are
+   * keyed to the same `on`, so the `on`-match guard on `foodEaten`/`foodView`
+   * cannot tell them apart; only cancelling the earlier one can.
+   */
+  const foodDayCancelRef = useRef<() => void>(() => {});
+
+  /**
+   * One tap from the card: log a serving of a ranked food, right now.
+   *
+   * Always writes to real TODAY, regardless of which day Momentum is showing
+   * — see the decision recorded on `refreshFoodWeek` above. `refreshFoodDay`
+   * only runs after it when the card is currently showing today's figures
+   * (`isToday`, or `resume` — see the fallback on `on` above): browsing
+   * Tuesday and quick-adding does write to today, but re-fetching Tuesday's
+   * own totals would show nothing different, and fetching today's instead
+   * would silently repaint the screen onto a day the athlete did not ask to
+   * see.
+   */
   const quickLog = useCallback(
     async (food: Food) => {
       if (!userId) return;
@@ -564,9 +664,16 @@ export default function TodayScreen() {
         source_food_id: food.id,
       });
       requestSync('food logged');
-      refreshFood();
+      refreshFoodWeek();
+      if (isToday || resume) {
+        // Cancel any still-in-flight read this same source started, so a
+        // slow first tap cannot resolve after a fast second one and paint
+        // over it.
+        foodDayCancelRef.current();
+        foodDayCancelRef.current = refreshFoodDay();
+      }
     },
-    [userId, refreshFood],
+    [userId, refreshFoodWeek, refreshFoodDay, isToday, resume],
   );
 
   /**
@@ -625,7 +732,7 @@ export default function TodayScreen() {
       // this screen with a same-screen writer racing it — `quickLog` refreshes
       // again immediately after logging — so a slow read started at focus could
       // otherwise resolve last and paint over the row just added.
-      const stopFood = refreshFood();
+      const stopFood = refreshFoodWeek();
       // Same treatment as food, and for the same reason: this screen writes to
       // it (every tap re-reads the day), so a slow read started at focus could
       // otherwise resolve last and paint over a cup just added.
@@ -648,11 +755,30 @@ export default function TodayScreen() {
       refreshRoadmaps,
       readSuggestionPrefs,
       refreshCheckins,
-      refreshFood,
+      refreshFoodWeek,
       refreshTrackers,
       refreshSummary,
       todayKey,
     ]),
+  );
+
+  /**
+   * Momentum's own read, kept OUT of the bundle above on purpose.
+   *
+   * `refreshFoodDay` depends on `on` (the browsed day), so stepping the
+   * switcher changes its identity and — since the screen is already
+   * focused — re-runs this effect immediately, the same way `food.tsx`'s day
+   * stepper re-triggers its own `refresh`. Folding it into the combined focus
+   * effect above would mean every day-step also re-runs checkins, trackers,
+   * the training summary, the funnel and the roadmap read: none of those
+   * describe the browsed day, so none of them need to answer again just
+   * because the switcher moved.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      const stop = refreshFoodDay();
+      return stop;
+    }, [refreshFoodDay]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -668,9 +794,6 @@ export default function TodayScreen() {
 
   const { fontScale } = useWindowDimensions();
   const fabPad = fabClearance(fontScale);
-
-  const lead = board.lead;
-  const resume = lead.state === 'ready' && lead.value.kind === 'resume' ? lead.value.offer : null;
 
   /**
    * The one suggestion, and the offer that precedes it.
@@ -855,6 +978,17 @@ export default function TodayScreen() {
           {!resume && (
             <PeriodSwitcher
               label={dayLabel}
+              // The full date, folded into the pill rather than repeated in a
+              // standalone line under it — see N179/#584. `TODAY` and
+              // "Wednesday, 26 August" were the same fact stated twice; a
+              // browsed day's short label (`FRI 28 AUG`) and its own full date
+              // were the same duplication one level down.
+              //
+              // ONE expression, not an `isToday` branch that formats the same
+              // string two ways — `viewDay` already equals `now` exactly when
+              // `isToday` (`addDays(now, 0)`), so `todayLabel(viewDay)` covers
+              // both without a second place the two could quietly drift apart.
+              subLabel={todayLabel(viewDay)}
               onPrev={() => setDayOffset((d) => d - 1)}
               onNext={() => setDayOffset((d) => d + 1)}
               onPress={isToday ? undefined : () => setDayOffset(0)}
@@ -865,16 +999,6 @@ export default function TodayScreen() {
               testID="today-day"
             />
           )}
-
-          <Text style={styles.date}>
-            {isToday || resume
-              ? todayLabel(now)
-              : viewDay.toLocaleDateString(undefined, {
-                  weekday: 'long',
-                  day: 'numeric',
-                  month: 'long',
-                })}
-          </Text>
 
           {/* ── 1. NOW / NEXT ─────────────────────────────────────────────
               The screen's single primary. Everything below it is outlined,
@@ -1682,7 +1806,6 @@ const styles = StyleSheet.create({
   fabPressed: { opacity: 0.85 },
   fabText: { fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
   body: { paddingHorizontal: 20, gap: 16 },
-  date: { color: vola.textMuted, fontSize: 13, marginTop: -4 },
 
   resumeCard: {
     backgroundColor: vola.surfaceRaised,
