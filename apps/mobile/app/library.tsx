@@ -947,6 +947,56 @@ export default function LibraryScreen() {
           </View>
         )}
 
+        {/* The chains this athlete captured — moved here from the You tab by
+            N181 (#586), and moved rather than copied, so there is exactly one
+            entry point to `/sequence` in the app.
+
+            **Why here.** You answers "who am I as an athlete"; a list of
+            technique chains is knowledge, and this screen is where this app
+            keeps knowledge — the round map, the belt syllabuses and the
+            position glossary are already below. It is the athlete-authored
+            shelf of the same library.
+
+            **Three things about the gate, and all three are load-bearing
+            because this row is now the only way in.** (#414 is the ticket for
+            what happens when a destination is reachable only by having just
+            arrived at it.)
+
+            1. It reads `techniqueSport`, so it is gated on the technique
+               MODULE and on this server having a technique catalog at all —
+               the same predicate that gates the fetch. A strength-only account
+               has no use for a chain list that can only be empty.
+            2. It deliberately does NOT read `sport`, unlike the position block
+               below it. The sport chip is PERSISTED (`PREF_LIBRARY_SPORT`), so
+               an athlete whose last visit left the filter on Strength would
+               open this screen with the app's only route to their own chains
+               already gone, and nothing on screen saying why.
+            3. It is its own block rather than a row inside the position
+               glossary, because that block additionally requires
+               `positions.length > 0` — a server read. Putting this inside it
+               would make a failed positions fetch silently take the sequences
+               away too, which is the same unreachability arriving by a
+               different door. */}
+        {techniqueSport !== undefined && (
+          <View style={styles.glossary} testID="library-sequences">
+            <Text style={styles.glossaryLabel} accessibilityRole="header">
+              Your own chains
+            </Text>
+            <Pressable
+              onPress={() => router.push('/sequence')}
+              accessibilityRole="button"
+              accessibilityLabel="Your sequences: chains you captured, step by step"
+              testID="library-sequences-link"
+              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+            >
+              <Text style={styles.mapLinkTitle}>Your sequences</Text>
+              <Text style={styles.mapLinkNote}>
+                Chains you captured, step by step — and the ones partners sent you.
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         {usesPosition(sport, modules) && positions.length > 0 && (
           <View style={styles.glossary}>
             <Text style={styles.glossaryLabel} accessibilityRole="header">
