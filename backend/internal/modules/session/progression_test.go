@@ -1,6 +1,7 @@
 package session
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -567,5 +568,178 @@ func TestProgress_EvidenceIsPopulatedOnEveryBranchWithHistory(t *testing.T) {
 	}
 	if !p.HitTargetEffort {
 		t.Error("hit_target_effort should be true at 3 RIR throughout")
+	}
+}
+
+// N191 — today's own already-logged working sets are a SEPARATE signal, not
+// a silent rewrite of the history-derived prescription. See the doc note on
+// Progress in progression.go for the product decision these tests pin.
+
+// A baseline hypertrophy session (2 sets of 6 @ 80kg, 2 RIR) always resolves
+// to ProgressAddReps, TargetWeightKg 80, TargetReps 7 — see
+// TestProgress_RepsBeforeLoad. Every InSessionSignal test below starts from
+// the identical history so a passing test proves the signal is additive: the
+// prescription itself must come out exactly as it does with no in-session
+// evidence at all.
+func baselineHypertrophyInput(inSession ...float64) ProgressionInput {
+	day := 24 * time.Hour
+	in := progIn("hypertrophy",
+		sess(2*day, testNow, set(6, 80, ptrInt(2), nil), set(6, 80, ptrInt(2), nil)))
+	in.InSessionWorkingWeightsKg = inSession
+	return in
+}
+
+func TestProgress_InSessionSignal_SurfacesWhenMeaningfullyAbove(t *testing.T) {
+	// 90kg is 12.5% above the 80kg prescription — over the 10% threshold.
+	p := Progress(baselineHypertrophyInput(90), testNow)
+
+	if p.Code != ProgressAddReps || *p.TargetWeightKg != 80 || *p.TargetReps != 7 {
+		t.Fatalf("the standing prescription must be untouched: got %q %v @ %v",
+			p.Code, p.TargetReps, p.TargetWeightKg)
+	}
+	if p.InSessionSignal == nil {
+		t.Fatal("90kg logged today against an 80kg prescription should surface a signal")
+	}
+	if p.InSessionSignal.Code != InSessionAbove {
+		t.Errorf("got %q, want %q", p.InSessionSignal.Code, InSessionAbove)
+	}
+	if p.InSessionSignal.AverageWeightKg != 90 {
+		t.Errorf("average_weight_kg: got %v, want 90", p.InSessionSignal.AverageWeightKg)
+	}
+	if p.InSessionSignal.WorkingSets != 1 {
+		t.Errorf("working_sets: got %d, want 1", p.InSessionSignal.WorkingSets)
+	}
+	if p.InSessionSignal.Reason == "" || p.InSessionSignal.Reason == p.Reason {
+		t.Errorf("the signal needs its own arguable reason, distinct from Plan.Reason, got %q",
+			p.InSessionSignal.Reason)
+	}
+}
+
+func TestProgress_InSessionSignal_SurfacesWhenMeaningfullyBelow(t *testing.T) {
+	// 70kg is 12.5% below the 80kg prescription.
+	p := Progress(baselineHypertrophyInput(70), testNow)
+
+	if *p.TargetWeightKg != 80 {
+		t.Fatalf("the standing prescription must be untouched: got %v", *p.TargetWeightKg)
+	}
+	if p.InSessionSignal == nil {
+		t.Fatal("70kg logged today against an 80kg prescription should surface a signal")
+	}
+	if p.InSessionSignal.Code != InSessionBelow {
+		t.Errorf("got %q, want %q", p.InSessionSignal.Code, InSessionBelow)
+	}
+	if p.InSessionSignal.AverageWeightKg != 70 {
+		t.Errorf("average_weight_kg: got %v, want 70", p.InSessionSignal.AverageWeightKg)
+	}
+}
+
+func TestProgress_InSessionSignal_AveragesEveryLoggedSet(t *testing.T) {
+	// (88 + 92) / 2 = 90, same average as the single-set case above — this
+	// pins that it's a mean over ALL entries, not just the first or the top.
+	p := Progress(baselineHypertrophyInput(88, 92), testNow)
+
+	if p.InSessionSignal == nil {
+		t.Fatal("average of 90 against an 80kg prescription should surface a signal")
+	}
+	if p.InSessionSignal.AverageWeightKg != 90 {
+		t.Errorf("average_weight_kg: got %v, want 90", p.InSessionSignal.AverageWeightKg)
+	}
+	if p.InSessionSignal.WorkingSets != 2 {
+		t.Errorf("working_sets: got %d, want 2", p.InSessionSignal.WorkingSets)
+	}
+}
+
+// The exact case the ticket worried about: a SINGLE early set, read
+// meaningfully differently from the prescription, still has to produce
+// something — this is the acceptance test's own scenario ("log an early set
+// well above the historical prescription, then ask for the same exercise's
+// next-set suggestion, same session").
+func TestProgress_InSessionSignal_OneEarlySetIsEnoughToNote(t *testing.T) {
+	p := Progress(baselineHypertrophyInput(95), testNow)
+
+	if p.InSessionSignal == nil || p.InSessionSignal.Code != InSessionAbove {
+		t.Fatalf("one meaningfully heavier set today should still surface a signal, got %+v",
+			p.InSessionSignal)
+	}
+	// And the decision this test exists to pin: the signal is additive, not a
+	// rewrite. A client reading only Code/Reason/TargetWeightKg/TargetReps
+	// sees precisely what it saw before N191.
+	if p.Code != ProgressAddReps || *p.TargetWeightKg != 80 || *p.TargetReps != 7 {
+		t.Errorf("the prescription must not change: got %q %v @ %v kg",
+			p.Code, p.TargetReps, p.TargetWeightKg)
+	}
+}
+
+func TestProgress_InSessionSignal_WithinThresholdIsSilent(t *testing.T) {
+	// 82kg is 2.5% above 80kg — real, but not the kind of difference this
+	// signal exists to interrupt a workout over.
+	p := Progress(baselineHypertrophyInput(82), testNow)
+
+	if p.InSessionSignal != nil {
+		t.Errorf("a 2.5%% difference should stay silent, got %+v", p.InSessionSignal)
+	}
+}
+
+func TestProgress_InSessionSignal_NothingLoggedTodayIsSilent(t *testing.T) {
+	p := Progress(baselineHypertrophyInput(), testNow)
+
+	if p.InSessionSignal != nil {
+		t.Errorf("no in-session sets should never produce a signal, got %+v", p.InSessionSignal)
+	}
+}
+
+// SuggestNoHistory and SuggestNotApplicable both leave TargetWeightKg nil —
+// there is no numeric prescription for today's evidence to be compared
+// against, so the signal must not invent one.
+func TestProgress_InSessionSignal_SilentWithNoNumericPrescription(t *testing.T) {
+	noHistory := progIn("hypertrophy")
+	noHistory.InSessionWorkingWeightsKg = []float64{100}
+	p := Progress(noHistory, testNow)
+	if p.Code != SuggestNoHistory {
+		t.Fatalf("setup: want %q, got %q", SuggestNoHistory, p.Code)
+	}
+	if p.InSessionSignal != nil {
+		t.Errorf("no_history has no prescription to compare against, got %+v", p.InSessionSignal)
+	}
+
+	notApplicable := ProgressionInput{
+		ExerciseID: "plank", LoadType: "time",
+		InSessionWorkingWeightsKg: []float64{100},
+	}
+	p = Progress(notApplicable, testNow)
+	if p.Code != SuggestNotApplicable {
+		t.Fatalf("setup: want %q, got %q", SuggestNotApplicable, p.Code)
+	}
+	if p.InSessionSignal != nil {
+		t.Errorf("not_applicable has no prescription to compare against, got %+v", p.InSessionSignal)
+	}
+}
+
+// applyInSessionSignal's own finite-value guard, independent of the wire
+// parser (handler.go's parseInSessionWeights) that normally keeps non-finite
+// values out. Two layers on purpose — see the doc comment on
+// applyInSessionSignal — so this test bypasses the parser entirely and feeds
+// ProgressionInput directly, the way a future caller reusing this function
+// against different input could.
+func TestProgress_InSessionSignal_NonFiniteAverageNeverReachesTheResponse(t *testing.T) {
+	nan := math.NaN()
+	posInf := math.Inf(1)
+
+	p := Progress(baselineHypertrophyInput(nan), testNow)
+	if p.InSessionSignal != nil {
+		t.Errorf("a NaN input should never produce a signal, got %+v", p.InSessionSignal)
+	}
+
+	p = Progress(baselineHypertrophyInput(posInf), testNow)
+	if p.InSessionSignal != nil {
+		t.Errorf("an infinite input should never produce a signal, got %+v", p.InSessionSignal)
+	}
+
+	// A handful of very large but individually finite values overflowing to
+	// +Inf once summed for the average — the case that motivated the guard.
+	huge := math.MaxFloat64 / 2
+	p = Progress(baselineHypertrophyInput(huge, huge, huge), testNow)
+	if p.InSessionSignal != nil {
+		t.Errorf("an overflowed average should never produce a signal, got %+v", p.InSessionSignal)
 	}
 }

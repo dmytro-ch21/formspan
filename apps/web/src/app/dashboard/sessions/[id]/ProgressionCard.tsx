@@ -243,6 +243,14 @@ export default function ProgressionCard({
           can argue with, not one you have to trust. */}
       <p className="mt-2 text-sm text-text-muted">{s.reason}</p>
 
+      {/* N191 — an ADDITIONAL note, never a replacement for the target/reason
+          above, which stay purely last session's numbers. `text-text` rather
+          than `text-text-muted`, deliberately: it's new information the
+          prescription above hasn't seen, and reads as one. */}
+      {s.in_session_signal != null && (
+        <p className="mt-1 text-sm text-text">{s.in_session_signal.reason}</p>
+      )}
+
       {(last || s.estimated_1rm_kg != null) && (
         <div className="mt-3 space-y-2 border-t border-line-soft pt-3">
           {range.high > 0 && (

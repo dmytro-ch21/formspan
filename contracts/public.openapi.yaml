@@ -3313,11 +3313,17 @@ components:
         across every working set and belong to the session, not to any one set.
 
         Branch on `code`; `reason` is prose and is not part of the contract.
+
+
+        `in_session_signal` is a SEPARATE, additive note — see its own
+        description and N191. Everything else on this object stays a pure
+        function of the caller's history; it never changes because of
+        `in_session_signal` being present.
       required: [exercise_id, code, reason, target_weight_kg, target_reps,
                  rep_range, last_performed_at, last_weight_kg, last_reps,
                  last_rir, last_rpe, last_min_reps, last_max_reps,
                  working_sets, sessions_at_load, hit_target_effort,
-                 estimated_1rm_kg, best_1rm_kg]
+                 estimated_1rm_kg, best_1rm_kg, in_session_signal]
       properties:
         exercise_id: { type: string, example: back-squat }
         target_weight_kg:
@@ -3518,6 +3524,53 @@ components:
           type: string
           description: Human-readable, cites the evidence. Never pattern-match on it.
           example: Every set hit 10 with something left. Add weight and drop back to 6 reps.
+        in_session_signal:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/InSessionSignal"
+          description: >
+            Set when today's own already-logged working sets for this
+            exercise (see `today_sets` on the request) diverge meaningfully
+            from `target_weight_kg` above — see N191.
+
+
+            Null covers three cases alike: nothing logged for this exercise
+            yet today, no numeric prescription to compare against
+            (`no_history`/`not_applicable`), or today agrees closely enough
+            with the plan that flagging it would be noise. A client that
+            ignores this field sees exactly the recommendation it always has
+            — this never rewrites `target_weight_kg` or `target_reps`.
+
+    InSessionSignal:
+      type: object
+      description: >
+        The note layered on top of a history-derived `Suggestion` when
+        today's own working sets disagree with it — see N191. Carries its own
+        `code`/`reason` for the same "argue with the number" reason
+        `Suggestion` does.
+      required: [code, reason, average_weight_kg, working_sets]
+      properties:
+        code:
+          type: string
+          enum: [in_session_above, in_session_below]
+          description: >
+            `in_session_above` — today's own working sets, so far, average
+            meaningfully heavier than `target_weight_kg`.
+            `in_session_below` — the mirror case, meaningfully lighter.
+        reason:
+          type: string
+          description: Human-readable. Never pattern-match on it.
+          example: >-
+            Today's own 2 sets so far are meaningfully heavier than the plan
+            above, which is still built from last time. The number here
+            hasn't changed — that's your call to make if today's the real one.
+        average_weight_kg:
+          type: number
+          description: The mean weight across the working sets this is built from.
+        working_sets:
+          type: integer
+          description: How many of today's own working sets went into the average.
 
     SuggestionList:
       type: object
@@ -8702,6 +8755,14 @@ paths:
 
         Scoped to the caller: this endpoint reads training history and returns
         only their own.
+
+
+        `code`/`reason`/`target_weight_kg`/`target_reps` are always derived
+        purely from that history — see N191. `today_sets` layers a SEPARATE,
+        additive signal (`in_session_signal`) on top when the caller has
+        already logged working sets for the same exercise earlier in the
+        session making this request; it never changes the prescription
+        itself.
       parameters:
         - $ref: "#/components/parameters/IfNoneMatch"
         - name: exercise_ids
@@ -8730,6 +8791,28 @@ paths:
             general range rather than failing the request, since a goal the
             server doesn't recognise doesn't make the question invalid, it just
             fails to narrow it.
+        - name: today_sets
+          in: query
+          required: false
+          schema: { type: string }
+          example: "back-squat:102.5,back-squat:105"
+          description: >
+            Comma-separated `<exercise_id>:<weight_kg>` pairs, one per
+            already-logged WORKING set for that exercise so far in the
+            session making this request — see N191.
+
+
+            Client-supplied rather than looked up from a session id: the
+            authoritative copy of "what have I already lifted today" is
+            whatever the caller already has locally (mobile writes its own
+            SQLite before anything syncs), and this is what lets the signal
+            appear before a set has reached the server at all. Only the
+            WEIGHT of each set travels — not reps or effort — since weight is
+            the one number `in_session_signal` reasons about.
+
+
+            Malformed entries are dropped rather than failing the request
+            (this is advisory data); more than 500 entries is refused.
       responses:
         "200":
           description: >
@@ -8744,7 +8827,9 @@ paths:
         "304":
           $ref: "#/components/responses/NotModified"
         "400":
-          description: Missing `exercise_ids`, or more than 100 of them.
+          description: >
+            Missing `exercise_ids`, more than 100 of them, or more than 500
+            `today_sets` entries.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

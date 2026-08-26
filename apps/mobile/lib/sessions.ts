@@ -273,6 +273,28 @@ export type SuggestionCode =
   | 'repeat_unknown_effort'
   | 'repeat_stale';
 
+/**
+ * Flags when today's own already-logged working sets disagree with the
+ * standing prescription above — see N191. A separate code from
+ * `SuggestionCode` on purpose: `code`/`reason`/`target_weight_kg`/
+ * `target_reps` above stay a pure function of history, exactly as before
+ * N191, and this is the note layered on top, never a silent rewrite of them.
+ */
+export type InSessionSignalCode = 'in_session_above' | 'in_session_below';
+
+/**
+ * The in-session note itself, present only when today's own working sets for
+ * this exercise average meaningfully above or below `target_weight_kg`. Carries
+ * its own `code`/`reason` for the same "argue with the number" reason `Suggestion`
+ * does.
+ */
+export type InSessionSignal = {
+  code: InSessionSignalCode;
+  reason: string;
+  average_weight_kg: number;
+  working_sets: number;
+};
+
 /** The rep window a lift progresses inside before load moves. */
 export type RepRange = { low: number; high: number };
 
@@ -316,6 +338,15 @@ export type Suggestion = {
   estimated_1rm_kg: number | null;
   /** The highest estimate anywhere in your history for this exercise. */
   best_1rm_kg: number | null;
+
+  /**
+   * Set when today's own already-logged working sets for this exercise
+   * diverge meaningfully from `target_weight_kg` above — see N191. Null
+   * covers "nothing logged today yet" and "today agrees closely enough that
+   * saying so would be noise" alike. Never changes what `target_weight_kg`/
+   * `target_reps` above say — see the type's own doc comment.
+   */
+  in_session_signal: InSessionSignal | null;
 };
 
 export type Volume = {
@@ -816,17 +847,37 @@ async function request<T>(
  * 3-rep lift in a strength block and a 10-rep lift in a hypertrophy one. Pass
  * the goal of the workout being performed; omitting it falls back to a general
  * 5-8 range rather than failing.
+ *
+ * `todaySets` is the session CURRENTLY OPEN's own sets — see N191. Sent
+ * straight from whatever the caller already has in hand (state, or the
+ * SQLite row `readLocalSession` returned), never re-read from anywhere else:
+ * that's what makes this work before a set has synced, in a gym with no
+ * signal, which is the whole point (`lib/db.ts` writes locally first). Only
+ * sets the athlete would call a SET travel — `countsAsSet` (completed, not a
+ * warm-up, not a drop) — with a recorded weight; a warm-up or an unticked
+ * set says nothing about what the athlete can do today, and a drop is
+ * always lighter than the set it hangs off BY DEFINITION, so including it
+ * would drag the average down against a TargetWeightKg that's derived from
+ * the top set — manufacturing a false "lighter day" note on a session that
+ * went exactly to plan. Found in review.
  */
 export async function fetchSuggestions(
   getToken: TokenGetter,
   exerciseIDs: string[],
   goal?: string | null,
+  todaySets?: readonly Pick<LoggedSet, 'exercise_id' | 'weight_kg' | 'completed' | 'set_type'>[],
   signal?: AbortSignal,
 ): Promise<Map<string, Suggestion>> {
   const unique = [...new Set(exerciseIDs)].filter(Boolean);
   if (unique.length === 0) return new Map();
   const q = new URLSearchParams({ exercise_ids: unique.join(',') });
   if (goal) q.set('goal', goal);
+  if (todaySets && todaySets.length > 0) {
+    const pairs = todaySets
+      .filter((s) => countsAsSet(s) && s.weight_kg != null && s.weight_kg > 0)
+      .map((s) => `${s.exercise_id}:${s.weight_kg}`);
+    if (pairs.length > 0) q.set('today_sets', pairs.join(','));
+  }
   const b = await request<{ suggestions: Suggestion[] }>(
     getToken,
     `/sessions/suggestions?${q}`,

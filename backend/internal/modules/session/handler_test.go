@@ -1,12 +1,16 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 )
 
 // The wire code, asserted where it is actually produced.
@@ -174,4 +178,232 @@ func TestValidateSets_AcceptsTheGripsTheEnumDefines(t *testing.T) {
 	if err := validateSets([]Set{{ExerciseID: "bench-press"}}); err != nil {
 		t.Errorf("an unrecorded grip was refused: %v", err)
 	}
+}
+
+// N191 — parseInSessionWeights is the transport-layer half of the in-session
+// signal (see progression.go's Progress doc for the product decision). These
+// pin the wire format independently of Progress itself, since a handler test
+// against a real repository would need Postgres for something that is really
+// just string parsing.
+func TestParseInSessionWeights_ParsesEveryEntryPerExercise(t *testing.T) {
+	got, err := parseInSessionWeights("squat:102.5,bench:80,squat:105")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got["squat"]) != 2 || got["squat"][0] != 102.5 || got["squat"][1] != 105 {
+		t.Errorf("squat: got %v", got["squat"])
+	}
+	if len(got["bench"]) != 1 || got["bench"][0] != 80 {
+		t.Errorf("bench: got %v", got["bench"])
+	}
+}
+
+func TestParseInSessionWeights_EmptyIsEmpty(t *testing.T) {
+	got, err := parseInSessionWeights("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("want an empty map, got %v", got)
+	}
+}
+
+// A malformed entry is advisory data gone wrong, not a bad request — see the
+// doc comment on parseInSessionWeights. Refusing the whole suggestion because
+// one today_sets entry didn't parse would be worse than reasoning from the
+// entries that did.
+func TestParseInSessionWeights_DropsMalformedEntriesRatherThanFailing(t *testing.T) {
+	got, err := parseInSessionWeights("squat:102.5,not-a-pair,bench:not-a-number,:80,squat:0,squat:-5,,squat:110")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got["squat"]) != 2 || got["squat"][0] != 102.5 || got["squat"][1] != 110 {
+		t.Errorf("squat should keep only the two valid, positive entries: got %v", got["squat"])
+	}
+	if _, ok := got["bench"]; ok {
+		t.Errorf("bench had no valid entry and should not appear at all, got %v", got["bench"])
+	}
+}
+
+func TestParseInSessionWeights_RefusesTooManyEntries(t *testing.T) {
+	items := make([]string, maxInSessionSetEntries+1)
+	for i := range items {
+		items[i] = "squat:100"
+	}
+	if _, err := parseInSessionWeights(strings.Join(items, ",")); err == nil {
+		t.Error("want an error past maxInSessionSetEntries, got nil")
+	}
+
+	items = items[:maxInSessionSetEntries]
+	if _, err := parseInSessionWeights(strings.Join(items, ",")); err != nil {
+		t.Errorf("exactly the cap should still be accepted, got %v", err)
+	}
+}
+
+// Found in backend review of N191: strconv.ParseFloat happily parses "NaN",
+// "Inf" and "Infinity", and the w <= 0 filter alone lets every one of them
+// through — NaN comparisons are always false (IEEE 754) and +Inf is
+// positive. A NaN or Inf reaching applyInSessionSignal (progression.go)
+// produces a non-finite AverageWeightKg, and encoding that fails the whole
+// response AFTER apihttp.WriteJSON has already sent status 200 — corrupting
+// every exercise in the request, not just the poisoned entry.
+func TestParseInSessionWeights_RejectsNonFiniteAndOutOfRangeWeights(t *testing.T) {
+	got, err := parseInSessionWeights("squat:NaN,squat:Inf,squat:-Inf,squat:Infinity,squat:100")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got["squat"]) != 1 || got["squat"][0] != 100 {
+		t.Errorf("only the one finite, in-range entry should survive, got %v", got["squat"])
+	}
+
+	// A ceiling past any real lift, so a legitimate top-end deadlift never
+	// gets caught by this — but math.MaxFloat64 does, which is the value
+	// that overflows to +Inf the moment a handful of them are summed for the
+	// average, even though each one parses as an ordinary finite float on
+	// its own.
+	got, err = parseInSessionWeights("squat:1.7976931348623157e+308,squat:200")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got["squat"]) != 1 || got["squat"][0] != 200 {
+		t.Errorf("a finite value past maxInSessionWeightKg should be dropped, got %v", got["squat"])
+	}
+}
+
+// suggestionsFakeRepo implements Repository with only RecentEfforts and
+// BestOneRMs meaningful — everything else panics, so a test that touches an
+// unexpected method fails loudly rather than silently returning a zero value.
+// Only Suggestions is under test here.
+type suggestionsFakeRepo struct {
+	efforts map[string]ProgressionInput
+	bestRMs map[string]float64
+}
+
+func (f *suggestionsFakeRepo) RecentEfforts(_ context.Context, _ string, ids []string) (map[string]ProgressionInput, error) {
+	out := map[string]ProgressionInput{}
+	for _, id := range ids {
+		if in, ok := f.efforts[id]; ok {
+			out[id] = in
+		}
+	}
+	return out, nil
+}
+func (f *suggestionsFakeRepo) BestOneRMs(_ context.Context, _ string, _ []string) (map[string]float64, error) {
+	return f.bestRMs, nil
+}
+func (f *suggestionsFakeRepo) List(context.Context, string, Filter) (*SessionPage, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) History(context.Context, string, HistoryFilter) (*History, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) Records(context.Context, string, []string) ([]ExerciseRecords, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) LoadHistory(context.Context, string, string, LoadHistoryFilter) (*LoadHistory, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) PinnedExercises(context.Context, string) ([]string, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) SetPinnedExercises(context.Context, string, []string) error {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) MostTrainedExercises(context.Context, string, int) ([]string, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) Get(context.Context, string, string) (*Session, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) Create(context.Context, NewSession) (*Session, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) ReplaceSets(context.Context, string, string, []Set) (*Session, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) Finish(context.Context, string, string, time.Time) (*Session, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) Rename(context.Context, string, string, string) (*Session, error) {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) Delete(context.Context, string, string) error {
+	panic("not used by Suggestions")
+}
+
+// The one join `parseInSessionWeights` and `Progress` are each tested in
+// isolation but never together: `in.InSessionWorkingWeightsKg =
+// todaySets[id]` at the call site in Suggestions. Delete that line and every
+// test above still passes — parseInSessionWeights doesn't call Progress, and
+// Progress's own tests build ProgressionInput by hand. This is the one test
+// that would go red. Found in backend review of N191.
+func TestSuggestionsHandler_TodaySetsReachesTheSignal(t *testing.T) {
+	// A history-only baseline that resolves to add_reps at 80kg — same shape
+	// as progression_test.go's baselineHypertrophyInput, reproduced here
+	// because the wire path builds ProgressionInput from a map keyed by
+	// exercise id rather than from the helper.
+	reps6, kg80, rir2 := 6, 80.0, 2
+	in := ProgressionInput{
+		LoadType: "weight_reps", MovementPattern: "horizontal_push",
+		Recent: []SessionEffort{{
+			SessionID: "s1", PerformedAt: time.Now().Add(-2 * 24 * time.Hour),
+			Sets: []Set{
+				{ExerciseID: "bench-press", SetType: SetTypeWorking, Completed: true,
+					Reps: &reps6, WeightKg: &kg80, RIR: &rir2},
+				{ExerciseID: "bench-press", SetType: SetTypeWorking, Completed: true,
+					Reps: &reps6, WeightKg: &kg80, RIR: &rir2},
+			},
+		}},
+	}
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{"bench-press": in},
+		bestRMs: map[string]float64{},
+	}
+	h := NewHandler(repo)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=bench-press&goal=hypertrophy&today_sets=bench-press:95",
+		nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Suggestions []Suggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body did not decode: %v — %s", err, rec.Body.String())
+	}
+	if len(body.Suggestions) != 1 {
+		t.Fatalf("want 1 suggestion, got %d", len(body.Suggestions))
+	}
+	s := body.Suggestions[0]
+
+	// 95kg is 18.75% above the 80kg standing prescription — over the 10%
+	// threshold, so the signal must have made it all the way through the
+	// wire: query param -> parseInSessionWeights -> the handler's join ->
+	// Progress -> JSON.
+	if s.InSessionSignal == nil {
+		t.Fatalf("today_sets=bench-press:95 against an 80kg prescription should reach "+
+			"in_session_signal in the response body: %s", rec.Body.String())
+	}
+	if s.InSessionSignal.Code != InSessionAbove {
+		t.Errorf("want %q, got %q", InSessionAbove, s.InSessionSignal.Code)
+	}
+	if s.InSessionSignal.AverageWeightKg != 95 {
+		t.Errorf("average_weight_kg: want 95, got %v", s.InSessionSignal.AverageWeightKg)
+	}
+	// The standing prescription itself must be untouched by today_sets.
+	if s.Code != ProgressAddReps || s.TargetWeightKg == nil || *s.TargetWeightKg != 80 {
+		t.Errorf("the standing prescription must be unaffected by today_sets: code=%q weight=%v",
+			s.Code, s.TargetWeightKg)
+	}
+}
+
+func signedInSession(r *http.Request, userID string) *http.Request {
+	return r.WithContext(auth.ContextWithClaims(r.Context(), &auth.Claims{UserID: userID}))
 }
