@@ -159,6 +159,21 @@ describe('the sequences entry (N181)', () => {
     expect(mockPush).toHaveBeenCalledWith('/sequence');
   });
 
+  it('speaks the shared half of the note, which is #414 audience', async () => {
+    // An `accessibilityLabel` REPLACES the concatenation of child text, so the
+    // two links below this one — which fold their note into a colon-joined
+    // label — can only speak what their label restates. This one splits the
+    // note into a hint precisely so the clause a short label drops first,
+    // *and the ones partners sent you*, is spoken: the athlete who accepted a
+    // shared chain last week and is hunting for the copy is the whole reason
+    // the entry point exists.
+    render(<LibraryScreen />);
+
+    const link = await screen.findByTestId('library-sequences-link');
+    expect(link.props.accessibilityLabel).toBe('Your sequences');
+    expect(link.props.accessibilityHint).toContain('partners sent you');
+  });
+
   it('survives a failed positions fetch', async () => {
     // The gate this asserts is the one a reading of the code cannot check: the
     // position glossary below requires `positions.length > 0`, so putting the
@@ -209,5 +224,14 @@ describe('the sequences entry (N181)', () => {
     // against a screen that has not rendered at all.
     await screen.findByTestId('library-screen');
     expect(screen.queryByTestId('library-sequences-link')).toBeNull();
+
+    // And the absence is ACCOUNTED FOR rather than silent. This toggle now
+    // hides an athlete's own captured chains, not only reference content, and
+    // N61 is the standing bill for a surface that vanishes with nothing saying
+    // why — the user went looking for the belt roadmaps on a real phone and
+    // reported them missing. The explainer that covers the roadmaps has to
+    // cover the chains too, or this move re-opens that bug one row over.
+    const off = await screen.findByTestId('library-techniques-off-link');
+    expect(off.props.accessibilityLabel).toContain('your own chains');
   });
 });

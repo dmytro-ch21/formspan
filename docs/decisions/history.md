@@ -42148,6 +42148,40 @@ a friends pane and a feed and no sharing pane, so it would mean either building
 one or summing two counts into a single badge, and a badge that cannot say WHICH
 source is waiting is precisely what `anyArrived` compares per source to avoid.
 
+### Two things review caught, both about the move's blast radius
+
+Neither was blocking and both are the same shape: the move changed what a
+toggle and a label are responsible for, and only one half got updated.
+
+**The BJJ-off explainer did not know about the chains.** `library.tsx` has a
+block that fires when the technique discipline is turned off and accounts for
+what went with it — *"Turn it on to see the belt roadmaps, the position map and
+the technique library"*. The sequences block is gated on that same toggle, so
+turning BJJ off now hides an athlete's **own captured chains**, not only
+reference content, and nothing said so. That is N61 exactly — the bill this repo
+pays every time a surface vanishes silently — re-opened one row over by a move
+that was otherwise careful about it. The explainer names the chains now, and the
+module-off test asserts it, so the next thing gated on that toggle has a
+precedent to copy.
+
+**The link's `accessibilityLabel` was eating half its own note.** A label
+REPLACES the concatenation of child text, and the two links beside this one fold
+their note into a colon-joined label — so copying that pattern meant the visible
+*"and the ones partners sent you"* was spoken by nobody. That clause is #414's
+entire audience: the athlete who accepted a shared chain last week and is
+hunting for the copy. It is a label plus a hint now, which is what `NavRow` on
+the You tab already does and cannot go stale against the visible text.
+
+Also raised and deliberately not changed: `listPhases` fetches the whole phase
+history to render one word. The backend has an `ActivePhase` query built for
+exactly this question and does not expose it; the payload is small, the chain is
+independent of the other two on the screen, and inventing an endpoint is not
+this ticket. It is the first customer if `/body/phases` ever grows a lighter
+form. And `Born` stays inert while Sports and Phase navigate — N61's argument is
+about a value that EXPLAINS AN ABSENCE elsewhere in the app, which a date of
+birth does not; making it a control would put a third route to `/profile/edit`
+on one card.
+
 ### Open, and small
 
 `app/sync.tsx` — the repair queue, the closest thing this app has to a

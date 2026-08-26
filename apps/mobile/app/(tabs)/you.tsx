@@ -317,11 +317,21 @@ export default function YouScreen() {
                 which sports are on, which phase is live, when they were born —
                 shown as answers rather than as links to answers.
 
-                Each row navigates to where its own fact is changed, which is
-                what N61 established for Sports and is the same argument for the
-                other two: a value the athlete can see and cannot act on is how
-                "the app does not have this" gets mistaken for "this is turned
-                off".
+                Sports and Phase each navigate to where their own fact is
+                changed, which is what N61 established for Sports and is the
+                same argument for Phase: a value the athlete can see and cannot
+                act on is how "the app does not have this" gets mistaken for
+                "this is turned off".
+
+                BORN IS DELIBERATELY INERT, and the asymmetry is worth stating
+                because the paragraph above reads like a rule. N61's argument is
+                about a value that EXPLAINS AN ABSENCE elsewhere in the app —
+                Sports says why the roadmaps are missing, Phase says why a
+                calorie target has no direction. A date of birth explains
+                nothing that is missing; it is a fact, and the row directly
+                below this card changes it. Making it a control would be
+                consistency for its own sake, and the row would then be the
+                third thing on this card pointing at `/profile/edit`.
 
                 `Units` is NOT here any more. It was an inert row displaying a
                 preference, sitting one tap above a Settings row whose detail

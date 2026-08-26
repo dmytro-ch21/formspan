@@ -933,15 +933,22 @@ export default function LibraryScreen() {
             <Pressable
               onPress={() => router.push('/profile/edit')}
               accessibilityRole="button"
-              accessibilityLabel={`Turn ${techniqueSportOff.label} on to see the belt roadmaps, the position map and the technique library`}
+              accessibilityLabel={`Turn ${techniqueSportOff.label} on to see the belt roadmaps, the position map, your own chains and the technique library`}
               style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
               testID="library-techniques-off-link"
             >
               <Text style={styles.mapLinkTitle}>
                 Turn it on to see the belt roadmaps
               </Text>
+              {/* `your own chains` joined this list with N181 (#586), because
+                  the sequences block below is gated on the same toggle — so
+                  turning the discipline off now hides an athlete's OWN captured
+                  chains, not only reference content. An absence with nothing
+                  accounting for it is N61 exactly, and this explainer is the
+                  one place that accounts for the others. */}
               <Text style={styles.mapLinkNote}>
-                The position map and {techniqueSportOff.label} techniques come back too.
+                The position map, your own chains and {techniqueSportOff.label} techniques come
+                back too.
               </Text>
             </Pressable>
           </View>
@@ -985,7 +992,19 @@ export default function LibraryScreen() {
             <Pressable
               onPress={() => router.push('/sequence')}
               accessibilityRole="button"
-              accessibilityLabel="Your sequences: chains you captured, step by step"
+              // A LABEL PLUS A HINT, where the two links below this one fold
+              // their note into a colon-joined label. The difference is
+              // deliberate and it is not style: an `accessibilityLabel`
+              // REPLACES the concatenation of child text, so a colon-label has
+              // to restate the whole note or silently drop part of it — and the
+              // part this note carries that a short label loses is *and the
+              // ones partners sent you*, which is precisely #414's audience,
+              // the athlete hunting for a chain somebody shared last week.
+              // Splitting them means the note cannot go stale against the
+              // label. This is the pattern `NavRow` on the You tab already
+              // uses, which is the screen an athlete arrives here from.
+              accessibilityLabel="Your sequences"
+              accessibilityHint="Chains you captured, step by step, and the ones partners sent you"
               testID="library-sequences-link"
               style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
             >
