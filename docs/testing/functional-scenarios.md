@@ -2130,6 +2130,56 @@ signed in for days, met "Not signed in." on every screen.
   the entire feature deleted — this happened, and is why the harness counts
   reaching the getter.
 
+## Locking the phone does not sign the athlete out (N190, `lib/authResume.ts`)
+
+The report that opened this: *"the app keeps logging off when i block the
+phone and its very annoying."* `apps/mobile/app/_layout.tsx`'s redirect guard
+now waits on `useResumeSignOutGuard` rather than acting on the raw
+`isSignedIn` reading — see that hook's doc comment for the full mechanism
+(Clerk's RN SDK never refreshes anything in the background, so the first read
+after resume can race a not-yet-reconnected radio).
+
+**NEEDS HUMAN EVIDENCE for all of the "lock the phone" scenarios below** — the
+suite can simulate the hook-state sequence (see
+`lib/__tests__/authResume.test.ts`) but not an actual OS-level lock/resume,
+and the PR that introduces this hook states plainly that it was not verified
+against a physical device.
+
+### The loop that has to work
+
+- Start a strength session, lock the phone (side button / auto-lock) for
+  **30s**, unlock. Still signed in, session screen exactly where it was.
+- Same at **90s** — past Clerk's 60s default token lifetime. This is the
+  ticket's own repro case; record whether it still bounces to sign-in.
+- Same at **5 min** and **30 min**. Record the actual threshold, if any —
+  don't assume the 2.5s grace window (`RESUME_GRACE_MS`) is sufficient
+  without having watched it hold at each duration.
+- A set typed but not yet submitted, still on screen unlock, in every case
+  above — an athlete dropped into sign-in mid-set is exactly the failure this
+  exists to prevent, and local-first storage means the workout survives even
+  if the redirect fires, but the redirect firing at all mid-set is the bug.
+
+### Auth that really is auth, still
+
+- Sign out from another device/session while this phone is in the
+  foreground: this phone reaches sign-in on its own, same as before this
+  change (no resume window applies — the false reading did not follow a
+  background transition, so it is confirmed on the spot).
+- Sign out from another device/session, THEN lock and unlock this phone: it
+  should reach sign-in within `RESUME_GRACE_MS` of unlocking, not be held
+  indefinitely — a genuine revoke must not be swallowed by the same window
+  that protects a false positive.
+- The everyday Settings → Sign out button: still feels instant. (It does not
+  go through a resume window — no AppState transition precedes it.)
+
+### If a Clerk JWT template gets configured
+
+`EXPO_PUBLIC_CLERK_JWT_TEMPLATE` (documented in `.env.example`, unset as of
+N190) widens the token lifetime independently of this hook. If it is ever
+set, re-run the loop above — a longer-lived token should make the sub-60s
+cases trivially pass and shifts where (if anywhere) a real threshold shows up
+at the longer durations.
+
 ## In-session editing (mobile)
 
 ### Adding an exercise mid-session

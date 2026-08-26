@@ -40235,7 +40235,6 @@ every PR in this epic, including this one's base. N189 was retracted and
 closed as not planned rather than left open against a gap that never
 existed.
 
-
 ## 2026-08-25 — N176: the bottom bar becomes Today · Train · Progress · Plan · You
 
 The mobile tab bar read **Today · Food · Plan · Goals · You**. It now reads
@@ -40336,6 +40335,109 @@ inside a 75pt slot on a 375pt device. It truncates rather than wraps
 (expo-router's `Label` sets `numberOfLines: 1` and disables font scaling on iOS),
 so the failure mode is an ellipsis rather than a broken bar, but nothing in this
 repo has font metrics and only a screenshot settles it.
+
+## 2026-08-25 — N190: locking the phone was never confirmed to sign anyone out, but the guard could not tell a blip from a revoke
+
+Issue #607: *"the app keeps logging off when i block the phone and its very
+annoying."* The ticket's own framing left two things genuinely open — whether
+the 60-second default Clerk session token is the whole story, or whether
+`useAuth()` additionally reports a transient `isSignedIn: false` on resume from
+a background/lock independent of token lifetime — and said to reproduce before
+changing anything.
+
+**Reproduction, as far as static analysis and the installed SDKs could take
+it.** No physical device or simulator run happened this session (see the PR's
+`NEEDS HUMAN EVIDENCE` list) — what follows is what the installed `@clerk/clerk-js`,
+`@clerk/clerk-expo` and `@clerk/shared` (5.127.1 / 2.19.31 / 4.25.8) actually
+do, read from their shipped `dist/` bundles rather than assumed from docs:
+
+- **Nothing in Clerk's React Native code path listens to `AppState` or
+  refreshes anything in the background.** The only foreground-refresh
+  mechanism Clerk ships at all — `refreshTokenOnFocus`, a `window.addEventListener('focus', …)` /
+  `document.visibilityState` check plus a 5s poller — lives in the web
+  `AuthCookieService`, which `@clerk/clerk-expo`'s `ClerkProvider` never
+  instantiates on native (`standardBrowser: !isNative()`). Clerk's own
+  published guidance for this exact symptom ("How to Handle Session Expiry in
+  a React Native App with Clerk") recommends adding this yourself, under the
+  name `useForegroundRefresh` — confirming it is not something the SDK does on
+  its own.
+- **`isSignedIn` does not read the JWT's `exp` at all.** `resolveAuthState`
+  (`@clerk/shared/authorization`) derives it purely from whether the client
+  reports `sessionId`/`userId`/`sessionClaims` — a stale-but-uncalled 60s token
+  sitting unused does not by itself flip anything. Something has to actively
+  tell Clerk's client there is no session.
+- The credible mechanism, then: `lib/sync.ts`'s existing foreground handler
+  calls `getToken()` on resume (to drain the outbox), which makes Clerk
+  refetch its client/session state from FAPI — and a phone waking from a
+  pocket lock is exactly the case where the radio has not reconnected yet.
+  This is the same shape of bug `lib/session.ts` was already built to prevent
+  for the JWT (a network failure reading as a false "no", not a thrown error)
+  — one layer up, inside Clerk's own client resource, which is not ours to
+  defend from the inside.
+
+**The fix does not pick one cause over the other — it can't, without a device
+run — so it defends against both, narrowly.** `apps/mobile/lib/authResume.ts`
+adds `useResumeSignOutGuard(isLoaded, isSignedIn, getToken)`:
+
+1. On a foreground transition (the same `wasAway` comparison
+   `startSyncOrchestrator` uses — compared, never regex-matched, since
+   `AppState.currentState` can be `null` under jest and Clerk's own sample code
+   for this pattern uses `.match()` and would throw on it), it nudges Clerk
+   with a real `getToken({ skipCache: true })` call — literally the fix
+   Clerk's own docs recommend, and the only thing in this chain that can make
+   the client's next read correct sooner.
+2. For 2.5s (`RESUME_GRACE_MS`) after that same transition, an
+   `isSignedIn === false` reading is held rather than acted on — long enough
+   for a network round-trip on a radio that just woke up.
+3. Every OTHER `false` reading — cold start already signed out, an explicit
+   Settings sign-out, a remote revoke discovered while already in the
+   foreground — confirms on the very next render, exactly as before this
+   existed. The window is scoped to "immediately follows a resume", not "any
+   false reading", specifically so the fix cannot regress into the offline-null
+   failure `lib/session.ts`'s own doc comment already tells this story about:
+   nine modules once read an offline blip as "not signed in" and told a
+   signed-in athlete to sign in on every screen at once.
+
+`app/_layout.tsx`'s redirect effect now gates on the hook's
+`signedOutConfirmed` rather than raw `!isSignedIn`; only the clear-token +
+redirect effect changed — `setSyncIdentity` and telemetry's clear-on-sign-out
+still read `isSignedIn` directly, so a held-but-unconfirmed blip still pauses
+sync/telemetry briefly rather than tearing down the actual credential, which
+was already true before this change and is unaffected by it.
+
+**What was deliberately NOT done.** `EXPO_PUBLIC_CLERK_JWT_TEMPLATE` — the
+other half the ticket names, per `session.ts`'s own long-standing comment — is
+still unset. Creating the Clerk JWT template itself is a Clerk Dashboard (or
+Backend-API-with-secret-key) action on an external account, which is outside
+this repo and outside what a coding session should do unprompted; it is called
+out as a manual step in the PR rather than performed. `.env.example` already
+documents the exact trade-off (a longer-lived token widens the offline window
+but also the stolen-device/revoked-session window, since the API does no
+revocation check) and needed no change.
+
+**Testing.** `lib/authResume.ts` is pure-logic-testable in isolation — no
+component render, following this suite's existing discipline — via
+`renderHook` driving the actual hook-state sequence (a resume event fires,
+`isSignedIn` transitions, time advances or doesn't) rather than a static mock,
+since a race cannot be caught by a fixed value. Both load-bearing mutations
+were run and confirmed red: removing the grace window collapses two tests, and
+depending the `AppState` subscription effect on Clerk's per-render-unstable
+`getToken` directly (rather than the latest-ref indirection `useAuthToken.ts`
+already established the reason for) breaks the "registered once" test with 3
+registrations instead of 1. `react-hooks/set-state-in-effect` flagged the
+first draft's `isSignedIn ? setConfirmed(false) : …` branch — a bare
+mirror-a-prop-into-state pattern — so the true-branch was rewritten as a
+render-time mask (`isLoaded && !isSignedIn && confirmed`) instead, with the
+remaining `setConfirmed` calls left where they sit beside genuine effect work
+(a computed `elapsed`, a scheduled timer), which is not flagged; lint holds at
+53/53 against the ratchet, unchanged.
+
+**Left for the user, precisely because it needs a device**: the actual
+lock/unlock threshold across durations (30s/90s/5min/30min), and whether
+`RESUME_GRACE_MS`'s 2.5s is enough in practice — see the PR body's
+`NEEDS HUMAN EVIDENCE` section and the new scenarios in
+`docs/testing/functional-scenarios.md` under "Locking the phone does not sign
+the athlete out (N190)".
 
 ## Open items / known gaps as of this entry
 
