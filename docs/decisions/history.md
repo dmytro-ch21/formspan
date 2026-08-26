@@ -42010,6 +42010,25 @@ lands Plan is unchanged and Train is deep-link-only. The two tickets share
 `lib/tabs.ts`; whichever landed second was to rebase onto the first, and this one
 landed first.
 
+## 2026-08-26 — the primary checkout is clean again (N200, #626)
+
+`npx skills add clerk/skills`, run once in the primary checkout for real
+config work (N190's Clerk JWT template), left 141 untracked files behind —
+one skill pack's worth of tool-installed content `git status` had no rule
+for. Harmless on its own; what made it a real hazard is `git add -A`, which
+this repo has already used to commit a stale `.mutbak` backup and a
+conflict marker this month, each caught by luck (`ac-verifier`, `lint:mobile`)
+rather than by any check built for the purpose. A 141-file sweep would be
+easier to miss in a diff, not harder.
+
+The fix is three `.gitignore` lines, scoped narrowly on purpose: `.claude/skills/*`
+holds both this repo's own tracked, load-bearing skills (`vola-*`, `new-module`,
+`pre-merge` — the reviewers and `ticket-manager` read these) and whatever a
+session installs ad hoc, so the rule names the untracked ones specifically
+rather than the directory. Demonstrated rather than asserted: a scratch clone
+carrying the same untracked structure, `git add -A`, confirms nothing from
+those paths is added.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
