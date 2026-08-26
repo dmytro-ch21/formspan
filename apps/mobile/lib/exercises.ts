@@ -167,5 +167,9 @@ export async function fetchExercises(
     { signal },
     opts,
   );
-  return body.exercises ?? [];
+  // `apiRequest` hands back `null` for a 2xx body that failed to parse (and
+  // `undefined` on 204) rather than throwing — optional chaining rather than
+  // `body.exercises` so that lands as an empty list through every caller's
+  // existing bare `catch`, not a raw `TypeError` one frame later.
+  return body?.exercises ?? [];
 }
