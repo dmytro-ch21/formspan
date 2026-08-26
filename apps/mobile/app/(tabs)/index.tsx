@@ -73,9 +73,11 @@ import { formatVolume, type UnitSystem } from '@/lib/units';
 import {
   enabledSports,
   labelFor,
+  logsAfterwards,
   moduleWithCatalog,
   type Module,
 } from '@/lib/modules';
+import { startSessionHref } from '@/lib/startSession';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
@@ -188,19 +190,6 @@ function shortDay(iso: string): string {
 /** e.g. "Thursday, 31 July" — orientation, not decoration. */
 function todayLabel(now: Date): string {
   return now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-}
-
-/**
- * Whether this discipline is logged after the fact rather than started and
- * logged into.
- *
- * Keyed on the catalog kind rather than on `key === 'bjj'`, so a future
- * discipline whose sessions are technique-shaped gets the right flow without
- * this file learning its name — the same reasoning that moved the sport list
- * itself into the registry.
- */
-function logsAfterwards(sportKey: string, mods: Module[]): boolean {
-  return mods.find((m) => m.key === sportKey)?.capabilities.catalog === 'techniques';
 }
 
 /**
@@ -561,15 +550,10 @@ export default function TodayScreen() {
 
   const startPlanned = useCallback(
     (p: { sport: string; workoutId: string | null }) => {
-      if (logsAfterwards(p.sport, modules)) {
-        router.push('/bjj/log');
-        return;
-      }
-      router.push(
-        p.workoutId
-          ? `/session/start?sport=${p.sport}&workout=${p.workoutId}`
-          : `/session/start?sport=${p.sport}`,
-      );
+      // The branch itself lives in `lib/startSession.ts` — the Train tab makes
+      // the same decision, and two copies of it is how a technique-shaped
+      // discipline ends up in the set logger on one surface and not the other.
+      router.push(startSessionHref(p, modules));
     },
     [modules, router],
   );

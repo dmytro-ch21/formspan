@@ -8,7 +8,6 @@ import {
   serverHasFoodLog,
   type Module,
 } from '../modules';
-import { tabHidden } from '../tabs';
 
 /**
  * N61 — telling "turned off" apart from "does not exist".
@@ -211,18 +210,24 @@ describe('moduleOffWithFoodLog', () => {
 });
 
 /**
- * The tab bar — N61's largest instance, and its answer.
+ * Reachability — N61's largest instance, and its answer.
  *
- * Food and Goals used to disappear outright when nutrition was off: two of five
- * tabs, 40% of the primary navigation, gone with nothing saying why. #370's
- * finding on the BJJ surfaces was that the DESTINATIONS were never the problem
- * — they already explain themselves — and that nothing LINKED to them while the
- * module was off. A tab is that link, so the tab stays and the screen explains.
+ * Food and Goals used to disappear outright from the tab bar when nutrition was
+ * off: two of five tabs, 40% of the primary navigation, gone with nothing
+ * saying why. #370's finding on the BJJ surfaces was that the DESTINATIONS were
+ * never the problem — they already explain themselves — and that nothing LINKED
+ * to them while the module was off. A tab is that link, so the tab stayed and
+ * the screen explained.
  *
- * Which leaves the third state as the only remaining reason to hide: a
+ * Which leaves the third state as the only remaining reason to hide a link: a
  * deployment with no food-log module at all, where there is nothing to turn on
- * and a tab offering to turn it on would promise a feature the server does not
- * have.
+ * and an offer to turn it on would promise a feature the server does not have.
+ *
+ * **N176 retired the caller, not the rule.** Food and Goals left the bar for
+ * Train and Progress, so this predicate has no production caller today — see
+ * its docstring in `modules.ts`, and the note below where `tabHidden`'s tests
+ * used to be. The three predicates are still one partition, which is what the
+ * last test here holds together and what N180 will need intact.
  *
  * **Every vector below is chosen to distinguish a correct implementation from a
  * broken one, not merely to exercise the correct one.** #468's guard survived
@@ -292,60 +297,30 @@ describe('serverHasFoodLog', () => {
   });
 });
 
-describe('tabHidden', () => {
-  const nutritionOn = mod({
-    key: 'nutrition', label: 'Nutrition', is_sport: false,
-    capabilities: { has_food_log: true } as Module['capabilities'],
-  });
-  const nutritionIsOff = { ...nutritionOn, enabled: false };
-  const runningOff = mod({ key: 'running', label: 'Running', enabled: false });
-
-  // **The regression, stated as plainly as it can be.** This is the ticket:
-  // nutrition off, two tabs gone. Both of these were `true` before.
-  it('keeps Food and Goals in the bar when nutrition is merely turned off', () => {
-    expect(tabHidden('food', [strength, nutritionIsOff])).toBe(false);
-    expect(tabHidden('goals', [strength, nutritionIsOff])).toBe(false);
-  });
-
-  it('keeps them when nutrition is on', () => {
-    expect(tabHidden('food', [strength, nutritionOn])).toBe(false);
-    expect(tabHidden('goals', [strength, nutritionOn])).toBe(false);
-  });
-
-  // The one case where hiding survives. BOTH tabs, because Goals holds only the
-  // daily target and could never be anything but empty on a deployment with no
-  // food log — leaving one and hiding the other would be the inconsistency.
-  it('hides both when this deployment has no food log at all', () => {
-    expect(tabHidden('food', [strength])).toBe(true);
-    expect(tabHidden('goals', [strength])).toBe(true);
-  });
-
-  // The trap vector again, one level up: turning Running off must not be what
-  // decides whether the Food tab exists.
-  it('is not moved by a disabled module that does not carry the food log', () => {
-    expect(tabHidden('food', [strength, runningOff])).toBe(true);
-    expect(tabHidden('food', [strength, runningOff, nutritionIsOff])).toBe(false);
-  });
-
-  // The other three tabs are never gated on nutrition — a mutation widening the
-  // name list would take Today away from an athlete on a deployment that has no
-  // food log, which is the original bug with a bigger blast radius.
-  it('never hides Today, Plan or You', () => {
-    for (const name of ['index', 'workouts', 'you']) {
-      expect(tabHidden(name, [strength])).toBe(false);
-      expect(tabHidden(name, [strength, nutritionIsOff])).toBe(false);
-      expect(tabHidden(name, [])).toBe(false);
-    }
-  });
-
-  // Before the cache is read the list is empty, which is why the layout holds a
-  // frame rather than rendering this answer. Pinned so the frame-hold cannot be
-  // deleted as redundant: widening the gate did NOT make an empty list safe.
-  it('still hides both for an unread module list, which is why the layout waits', () => {
-    expect(tabHidden('food', [])).toBe(true);
-    expect(tabHidden('goals', [])).toBe(true);
-  });
-});
+/*
+ * `tabHidden` used to be tested here and no longer exists — N176.
+ *
+ * It answered "should this tab's button be left out of the bar", and its whole
+ * remaining job was the third state: on a deployment with **no food-log module
+ * at all** the Food and Goals buttons were dropped, because a tab offering to
+ * turn something on promises a feature the server does not have. Every other
+ * case answered "keep the tab", which was N61's fix.
+ *
+ * The bar no longer holds those two tabs in any state, so there is nothing left
+ * for the predicate to decide. What replaced it is in two files:
+ *
+ *   - `lib/__tests__/tabBar.test.ts` — which five tabs, in what order, and that
+ *     Food and Goals are deliberately off the bar rather than missing.
+ *   - `app/__tests__/tabLayout.test.tsx` — that the bar is IDENTICAL for an
+ *     unread module list, a full one and an all-disabled one. That is the same
+ *     guarantee the tests above gave, stated as a property instead of a table,
+ *     and it is what goes red if a later ticket makes a tab conditional again.
+ *
+ * The three-state predicates themselves are untouched and still tested above:
+ * `serverHasFoodLog` is still the right question for anything that decides
+ * whether a food surface should be REACHABLE, which is what N180 (#585) faces
+ * when it re-homes nutrition.
+ */
 
 /**
  * What a food-log SCREEN asks — the same question in two places, so one

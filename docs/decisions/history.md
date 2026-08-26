@@ -40235,6 +40235,108 @@ every PR in this epic, including this one's base. N189 was retracted and
 closed as not planned rather than left open against a gap that never
 existed.
 
+
+## 2026-08-25 — N176: the bottom bar becomes Today · Train · Progress · Plan · You
+
+The mobile tab bar read **Today · Food · Plan · Goals · You**. It now reads
+**Today · Train · Progress · Plan · You**, which is the approved primary
+navigation for the product and the athlete's loop read left to right: plan,
+train, understand, progress, plan. First of eleven tickets under N175, and the
+one the other ten assume — `train.tsx` and `progress.tsx` are the tab shells
+N177 (#582) and N178 (#583) build into.
+
+**What this supersedes, said plainly rather than deleted.** Food and Goals were
+permanent bottom-bar destinations by an explicit decision (#355), and the
+argument holds on its own terms: food is logged three to six times a day against
+once for a session, and the bar is the only fixed-position affordance a phone
+has; Goals sat beside it because the daily target is the number every food
+decision is measured against. Nothing about that is retracted. What changed is
+the frame — a bar that spends two of five slots on one module cannot spell the
+loop — so `lib/tabs.ts` now carries the new decision *and* the old reasoning it
+overrode, rather than the old justification standing as though it still decided
+anything. Where nutrition goes instead is N180 (#585), and making Food a sixth
+tab to split the difference is the specific thing that ticket exists to prevent.
+
+**What is emphatically NOT superseded: nothing hides.** Food and Goals used to
+vanish from the bar whenever nutrition was merely turned off — 40% of the
+primary navigation, erased with nothing left behind to say why — and #470 fixed
+that by asking whether the module exists on the SERVER rather than whether it is
+enabled. The user hit the BJJ equivalent on a real device and reported the
+features as "not there"; they were there. So the two tabs lose a *button* and
+keep their *route*: `href: null`, declared rather than omitted, because omitting
+a `<Tabs.Screen>` does not hide it — expo-router injects every route file in
+that folder regardless, and an omitted one returns as a sixth tab titled after
+its filename. The routes stay resolvable for `router.push`, the back stack and
+`vola://food`; Today links to both while nutrition is on and says in words what
+is happening while it is off; `ModuleOffNotice` still distinguishes off from
+absent on the screens themselves. `food.tsx` and `goals.tsx` are untouched.
+
+**The food-log gate is retired, and the frame-hold is not.** `tabHidden` had one
+job left — the third state, a deployment with no food-log module at all, where a
+tab offering to turn something on promises a feature the server does not have —
+and with both tabs unconditionally off the bar there is nothing left for it to
+decide. `serverHasFoodLog` stays in `lib/modules.ts` with no caller, documented
+as such: it is one third of a partition the tests pin *as* a partition, and it
+is the exact question N180 has to answer.
+
+That retirement removes the frame-hold's bar-shaped justification, and the
+honest thing was to say so rather than leave a comment asserting a defunct
+reason. `if (!ready) return null` **stays**, because its larger half was never
+about the bar: `<Tabs>` mounts its initial route immediately, and
+`(tabs)/index.tsx` reads `useModules()` without reading `ready`, so
+`hasFoodLog([])` is false and Today would render the dashed "Nutrition is turned
+off" placeholder for the first frames of every cold start on an account where
+nutrition is on — the N61 lie flashing rather than sticking, which
+`foodLogGate`'s docstring already describes one level down. The bar-shaped half
+is replaced by a property test: the declared bar is **identical** for an unread
+module list, a full one and an all-disabled one, so the rearrangement can no
+longer occur — and that test is the tripwire if a later ticket in this epic makes
+a tab conditional again.
+
+**The shells are shells, and both say what they are.** Train mounts the existing
+`PickSessionSheet` behind one primary action, so the tab can start a session on
+the day it ships — a tab called Train that cannot start training is worse than
+no tab, and "coming soon" on a shipped bar slot is the same claim dressed up. It
+creates nothing: `sessionStore`, `session/start` and `bjj/log` are untouched, so
+strength logging keeps its inline local-first path and BJJ its three-tap floor.
+Progress deliberately does **less** — reorganising `TrainingSummary`,
+`RecordsCard` and the trend into one answer is N178's whole ticket, and a second
+unowned arrangement of the same components would have to be reconciled with it —
+so it signposts the two surfaces that answer "am I getting better" today and
+labels them as living there *for now*. Both use #468's placeholder rule: dashed
+where content would stand.
+
+One small extraction rather than a copy: Today's `startPlanned` branched between
+`/bjj/log` and `/session/start` inline, and Train needs the same decision. It is
+`lib/startSession.ts` now, typed to return `Href` rather than `string` — a helper
+returning a bare string would launder route literals past the generated typed
+routes, which is N32's failure relocated into a helper. `logsAfterwards` moved to
+`lib/modules.ts` beside `usesBelt`, still keyed on the catalog kind rather than
+on `key === 'bjj'`.
+
+**Verification.** 18 mutations applied one at a time, each killed by a named,
+relevant test and none by a suite crash — the frame-hold deleted, the order
+swapped, `href: null` softened to `undefined`, the off-bar screens undeclared, a
+tab made conditional on the module set, `focused` pinned to each constant and
+narrowed to one spelling, `offBar` collapsed to a constant, the start branch
+inverted and re-keyed on the module key, and `serverHasFoodLog` collapsed back
+into `hasFoodLog`. Baseline re-run green in the same session before and after.
+Typed routes verified both ways: `/train` and `/progress` are in the generated
+`Href` union, and a deliberately misspelt `router.push` target fails `tsc`.
+`lint:mobile` lands exactly on its ratchet, which cost the test file its
+`require('react')` — the mock returns children directly and names its components
+instead.
+
+**What no test here can reach**, and what the ticket flags as needing a device:
+the five tabs under a thumb, safe-area handling on a phone with a home
+indicator, and that Food and Goals are genuinely reachable rather than merely
+resolvable. Worth one specific look: `PROGRESS` is the longest label the bar has
+ever carried — eight uppercase characters at 11pt with 1.1pt of tracking, ~67pt
+inside a 75pt slot on a 375pt device. It truncates rather than wraps
+(expo-router's `Label` sets `numberOfLines: 1` and disables font scaling on iOS),
+so the failure mode is an ellipsis rather than a broken bar, but nothing in this
+repo has font metrics and only a screenshot settles it.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
