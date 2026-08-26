@@ -1,18 +1,16 @@
-import { useCallback, useState } from 'react';
-import type { TokenGetter } from '@/lib/useAuthToken';
-import { ActivityIndicator, Pressable, StyleSheet, View as RNView } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { useRouter } from 'expo-router';
 
+import { ReadingState, StaleNote } from '@/components/progress/Reading';
 import { Text, View } from '@/components/Themed';
 import { Medal } from '@/components/ui/Medal';
 import { StatValue } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { cachedExercises } from '@/lib/sessionStore';
+import type { Reading } from '@/lib/progress';
 import {
   basisFor,
   describeEvidence,
-  fetchRecords,
   formatRecord,
   RECORD_LABEL,
   type ExerciseRecords,
@@ -20,7 +18,7 @@ import {
 import type { UnitSystem } from '@/lib/units';
 
 /**
- * Personal records, on the profile.
+ * Personal records, on the Progress tab.
  *
  * Every number here is derived from the log rather than stored, which is what
  * makes it safe to show: correct a set or delete a session and the record
@@ -31,40 +29,33 @@ import type { UnitSystem } from '@/lib/units';
  * Two records per lift where both apply, because they answer different
  * questions: the heaviest is what you'd tell someone in a gym, the estimated
  * 1RM is what actually moves when you get stronger at any rep range.
+ *
+ * ## Why it no longer fetches
+ *
+ * It lived on the You tab and owned its own `fetchRecords`, which was right
+ * while it was the only thing on the phone that wanted records. N178 moved it
+ * to Progress, where the "What changed" block reads the SAME list to say
+ * whether anything is newly a best — and two components fetching `/v1/records`
+ * on one screen focus is both a wasted request and two answers that can
+ * disagree with each other a few hundred points apart.
+ *
+ * So the screen owns the read and this renders it. The four states it used to
+ * juggle by hand — null-and-loading, null-and-failed, empty, populated — are
+ * now the {@link Reading} union, which is the same distinction spelled out in
+ * a type rather than in a nested ternary. Nothing about the rendering changed.
  */
 export function RecordsCard({
-  getToken,
+  records,
+  names,
   units,
 }: {
-  getToken: TokenGetter;
+  records: Reading<ExerciseRecords[]>;
+  /** Exercise id → human name, from the cached catalog. */
+  names: Map<string, string>;
   units: UnitSystem;
 }) {
   const accent = useAccent();
   const router = useRouter();
-  const [records, setRecords] = useState<ExerciseRecords[] | null>(null);
-  const [names, setNames] = useState<Map<string, string>>(new Map());
-  const [failed, setFailed] = useState(false);
-
-  useFocusEffect(
-    useCallback(() => {
-      const c = new AbortController();
-      fetchRecords(getToken, undefined, c.signal)
-        .then((r) => {
-          if (c.signal.aborted) return;
-          setRecords(r);
-          setFailed(false);
-          // Names come from the cached catalog — the same one that makes a
-          // session readable offline — so a record never renders as its slug.
-          cachedExercises()
-            .then((list) => setNames(new Map(list.map((e) => [e.id, e.name]))))
-            .catch(() => {});
-        })
-        .catch(() => {
-          if (!c.signal.aborted) setFailed(true);
-        });
-      return () => c.abort();
-    }, [getToken]),
-  );
 
   return (
     <>
@@ -80,23 +71,18 @@ export function RecordsCard({
         </Pressable>
       </RNView>
 
-      {records === null ? (
-        <View style={styles.card}>
-          {failed ? (
-            <Text style={styles.muted}>Couldn&apos;t load your records just now.</Text>
-          ) : (
-            <ActivityIndicator accessibilityLabel="Loading your records" />
-          )}
-        </View>
-      ) : records.length === 0 ? (
-        <View style={styles.card}>
-          <Text style={styles.muted}>
-            Log a few sets and your bests show up here — no setup needed.
-          </Text>
-        </View>
-      ) : (
+      <ReadingState
+        reading={records}
+        subject="your records"
+        empty="Log a few sets and your bests show up here — no setup needed."
+        offLabel="Strength"
+        testID="records-state"
+      />
+      <StaleNote reading={records} testID="records-stale" />
+
+      {records.state === 'ready' && (
         <View style={styles.list}>
-          {records.map((er, i) => {
+          {records.value.map((er, i) => {
             // The headline record is the first the API returns; the rest ride
             // along on one line beneath. Two records per lift answer different
             // questions (see the file header), so neither is dropped — but one
@@ -230,15 +216,6 @@ const styles = StyleSheet.create({
   },
   // Colour set inline, from the accent.
   action: { fontWeight: '700', fontSize: 14 },
-  card: {
-    borderWidth: 1,
-    borderColor: vola.line,
-    borderRadius: 14,
-    backgroundColor: vola.surface,
-    padding: 14,
-    gap: 10,
-    marginTop: 4,
-  },
   list: {
     borderWidth: 1,
     borderColor: vola.line,
@@ -270,5 +247,4 @@ const styles = StyleSheet.create({
   reported: { color: vola.textMuted, fontStyle: 'italic' },
   value: { alignItems: 'flex-end', gap: 1 },
   valueLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
-  muted: { color: vola.textMuted, fontSize: 13 },
 });

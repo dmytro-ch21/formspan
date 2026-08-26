@@ -4,9 +4,7 @@ import { Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native'
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { BjjRankHeader } from '@/components/BjjRankHeader';
-import { RecordsCard } from '@/components/RecordsCard';
 import { RoadmapSummary } from '@/components/RoadmapSummary';
-import { TrainingSummary } from '@/components/TrainingSummary';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
@@ -201,8 +199,8 @@ export default function YouScreen() {
             standing in for an unknown. Say so rather than render them. */}
         {!answered && error ? (
           <Text style={styles.muted} testID="you-unavailable">
-            Your profile, training summary and records will appear here once VOLA can reach your
-            account. Nothing you&apos;ve logged is affected.
+            Your profile will appear here once VOLA can reach your account. Nothing you&apos;ve
+            logged is affected.
           </Text>
         ) : (
           <>
@@ -217,41 +215,35 @@ export default function YouScreen() {
               <Text style={styles.muted}>Tap Edit to tell VOLA who you are.</Text>
             )}
 
-            {/* History, phone-sized. The web app owns the analytical surface —
-                this answers the one question a desk can't while you're standing
-                in a gym: am I showing up. */}
-            <TrainingSummary getToken={getToken} units={profile?.unit_system ?? 'metric'} />
+            {/* `TrainingSummary` and `RecordsCard` USED to sit here, and they
+                moved to the Progress tab in N178 (#583) — moved, not copied,
+                so there is exactly one of each in the app.
 
-            {/* Records sit between the training summary and the profile facts:
-                they're the payoff for the logging above, and the thing people
-                actually open this tab to look at. */}
-            <RecordsCard getToken={getToken} units={profile?.unit_system ?? 'metric'} />
+                The argument for having them here was that this tab answers
+                "am I showing up" and "what have I lifted", and both are still
+                good questions. They are just not questions about the ATHLETE,
+                which is what this screen is now for; they are questions about
+                whether the training is working, which is the whole of the tab
+                that did not exist when they landed here.
 
-            {/* After Records, before Profile. Records is what you have lifted;
-                this is what you are learning — both are payoffs for logging,
-                and both belong above the account facts. It renders nothing at
-                all for an athlete on no roadmap with no focus, so a
-                strength-only account never sees an empty BJJ block. */}
+                Nothing was dropped in the move: the span control, the
+                consistency grid, the streak, the week bars and every record
+                row render on Progress exactly as they did here. */}
+
+            {/* What you are LEARNING, which stayed here when the records left.
+                The line N178 drew: records and the consistency grid answer
+                "is the training working", which is Progress; a roadmap is
+                closer to who this athlete is — the belt masthead above is the
+                same fact at a coarser grain. N181 (#586) owns this screen and
+                may move it. It renders nothing at all for an athlete on no
+                roadmap with no focus, so a strength-only account never sees an
+                empty BJJ block. */}
             <RoadmapSummary />
 
-            {/* Where the rounds actually go.
-
-                Gated on the module rather than on data, the same way the belt
-                above is: a strength-only account should not be offered a BJJ
-                screen that would only ever be empty for them.
-
-                A link and not a card, unlike Records and the roadmap. Those two
-                are payoffs read at a glance; this one is a page of numbers you
-                sit with after a hard week, and inlining it here would put a
-                three-section readout in the middle of the account tab. */}
-            {bjjEnabled && (
-              <NavRow
-                label="Position map"
-                detail="Where you score, and where you get stuck"
-                onPress={() => router.push('/bjj/positions')}
-                testID="you-bjj-positions"
-              />
-            )}
+            {/* The position map used to be a row here and is on Progress now
+                (N178, #583) — "where you score and where you get stuck" is a
+                page of numbers you sit with after a hard week, which is that
+                tab's question rather than this one's. Moved, not copied. */}
 
             {/* The chains you have captured, and the ones partners sent you.
 

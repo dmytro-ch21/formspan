@@ -65,8 +65,13 @@ jest.mock('@/lib/sync', () => ({
 }));
 
 // The heavy cards fetch on their own and are not what this file is about.
-jest.mock('@/components/TrainingSummary', () => ({ TrainingSummary: () => null }));
-jest.mock('@/components/RecordsCard', () => ({ RecordsCard: () => null }));
+//
+// `TrainingSummary` and `RecordsCard` USED to be stubbed here too, and their
+// stubs are gone rather than kept: N178 (#583) moved both to the Progress tab,
+// and a stub for a component this screen no longer renders would make the
+// "moved, not copied" assertion at the foot of this file vacuous — it would
+// pass against a You screen that still rendered them, because the stub draws
+// nothing either way.
 jest.mock('@/components/RoadmapSummary', () => ({ RoadmapSummary: () => null }));
 jest.mock('@/components/BjjRankHeader', () => ({ BjjRankHeader: () => null }));
 
@@ -392,5 +397,38 @@ describe('the Sports row', () => {
     // it back on under Sports"). Nothing linked to them while they were off,
     // which is why the athlete never reached the screen that would say so.
     expect(mockPush).toHaveBeenCalledWith('/profile/edit');
+  });
+});
+
+/**
+ * N178 — the training summary, the records list and the position map MOVED.
+ *
+ * The ticket asks for a move rather than a duplication, and "moved" is only
+ * checkable from the screen that lost them: `progressScreen.test.tsx` asserts
+ * they render there, and this asserts they do not render here. Either half
+ * alone is satisfied by a copy.
+ *
+ * Asserted on testIDs the components render UNCONDITIONALLY — `training-span-1m`
+ * is TrainingSummary's span control and `records-manage` is RecordsCard's
+ * "Choose", both outside every loading and empty branch — so re-adding either
+ * component to this screen turns this red whatever state its fetch is in.
+ * Neither is stubbed in this file any more, for the same reason.
+ */
+describe('what N178 moved to Progress', () => {
+  it('no longer renders the training summary, the records or the position map', async () => {
+    // With BJJ on, which is the only configuration in which the position map
+    // row was ever drawn here — asserting its absence on a strength-only
+    // account would be true by construction.
+    mockModules = [{ key: 'bjj', enabled: true }];
+    render(<YouScreen />);
+    await screen.findByTestId('you-sports');
+
+    expect(screen.queryByTestId('training-span-1m')).toBeNull();
+    expect(screen.queryByTestId('records-manage')).toBeNull();
+    expect(screen.queryByTestId('you-bjj-positions')).toBeNull();
+
+    // And what stayed is still here, so this is a move rather than a cull.
+    expect(screen.getByTestId('you-library')).toBeTruthy();
+    expect(screen.getByTestId('you-sequences')).toBeTruthy();
   });
 });
