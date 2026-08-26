@@ -337,7 +337,18 @@ describe('the target caption', () => {
   const eaten: EatenView = {
     state: 'ready',
     rows: [],
-    totals: { kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0, fibre_g: null },
+    totals: {
+      kcal: 0,
+      protein_g: 0,
+      carb_g: 0,
+      fat_g: 0,
+      fibre_g: null,
+      saturated_fat_g: null,
+      sugar_g: null,
+      added_sugar_g: null,
+      sodium_mg: null,
+      cholesterol_mg: null,
+    },
   };
 
   it('is on by default, so the prop cannot degenerate into a constant', () => {

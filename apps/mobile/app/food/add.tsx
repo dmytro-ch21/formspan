@@ -47,7 +47,12 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
-import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import {
+  KeyboardAwareFooter,
+  KeyboardAwareScreen,
+  KeyboardAwareScrollView,
+} from '@/components/KeyboardAwareScroll';
+import { NutritionPanel } from '@/components/food/NutritionPanel';
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { SectionHeader } from '@/components/ui/Section';
@@ -73,6 +78,7 @@ import {
   slotForClock,
   todayString,
   type Food,
+  type Macros,
   type Meal,
 } from '@/lib/nutrition';
 import { request } from '@/lib/sync';
@@ -299,6 +305,19 @@ export default function AddFoodScreen() {
    */
   const [picking, setPicking] = useState<CatalogFood | null>(null);
   const [pickBusy, setPickBusy] = useState(false);
+  /**
+   * The quantity currently entered in the picking view, reported up by
+   * `FoodQuantity`'s `onQuantityChange` — this is what feeds the nutrition
+   * panel and the sticky confirm button, both of which live outside
+   * `FoodQuantity` itself now that the confirm action is in a
+   * `KeyboardAwareFooter`. Null only for the instant before `FoodQuantity`'s
+   * own mount effect first reports in.
+   */
+  const [quantityState, setQuantityState] = useState<{
+    grams: number;
+    valid: boolean;
+    macros: Macros;
+  } | null>(null);
 
   const openQuantity = useCallback(
     async (food: CatalogFood) => {
@@ -307,6 +326,10 @@ export default function AddFoodScreen() {
       // blocking the sheet on a network call would put a spinner between the
       // tap and the number.
       setPicking(food);
+      // Cleared explicitly rather than left to carry over: the previous
+      // food's numbers must not flash beside a food they no longer describe,
+      // even for the one frame before the new `FoodQuantity` reports in.
+      setQuantityState(null);
       try {
         const full = await fetchCatalogFood(getToken, food.id);
         setPicking((cur) => (cur && cur.id === full.id ? full : cur));
@@ -386,23 +409,95 @@ export default function AddFoodScreen() {
   );
 
   if (picking) {
+    // Whatever the athlete has typed so far — 0 while the field is empty or
+    // unreadable, which is what `FoodQuantity`'s own inline path also treats
+    // as "nothing to log yet".
+    const grams = quantityState?.valid ? quantityState.grams : 0;
+    const canConfirm = Boolean(quantityState?.valid) && !pickBusy;
     return (
-      <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
-        <Stack.Screen options={{ title: 'How much?' }} />
-        <Pressable
-          onPress={() => setPicking(null)}
-          accessibilityRole="button"
-          accessibilityLabel="Back to search results"
-          testID="food-quantity-cancel"
-        >
-          <Text style={styles.rowServing}>← Back</Text>
-        </Pressable>
-        <FoodQuantity
-          food={picking}
-          busy={pickBusy}
-          onLog={(grams) => void logCatalog(picking, grams)}
-        />
-      </KeyboardAwareScrollView>
+      <KeyboardAwareScreen>
+        <View style={styles.pickingScreen}>
+          <Stack.Screen options={{ title: 'How much?' }} />
+          <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
+            <Pressable
+              onPress={() => setPicking(null)}
+              accessibilityRole="button"
+              accessibilityLabel="Back to search results"
+              testID="food-quantity-cancel"
+            >
+              <Text style={styles.rowServing}>← Back</Text>
+            </Pressable>
+            <FoodQuantity
+              food={picking}
+              busy={pickBusy}
+              onLog={(g) => void logCatalog(picking, g)}
+              onQuantityChange={setQuantityState}
+              hideBuiltInFooter
+            />
+
+            <NutritionPanel
+              macros={quantityState?.macros ?? macrosForGrams(picking, 0)}
+            />
+
+            {/* LOG DETAILS: Meal only. The reference screenshot also shows
+                `Log Time` and `Mark as Planned`, and both are refused rather
+                than stubbed — neither has anything behind it. There is no
+                editable log time anywhere in this app (`logged_at` is stamped
+                by the device clock at write time and never surfaced), and
+                nothing in the nutrition or Plan domain models a "planned"
+                entry — a food is logged or it does not exist yet. A chip that
+                toggles neither is the affordance N39 refused: it would look
+                identical whether it did something or nothing. Filed as N204
+                for a real decision on both rather than dropped silently.
+
+                An "OPTIONS" group also appears in the reference and is left
+                out entirely, on the same principle applied one step earlier:
+                the design names no actual options, so there is nothing to
+                even file a follow-up about — building a group with nothing
+                in it would be the exact affordance this comment already
+                refuses, and there is no ticket to write until something
+                concrete belongs in it. */}
+            <SectionHeader label="Log details" />
+            <View style={styles.slots}>
+              {MEALS.map((m) => {
+                const on = m === meal;
+                return (
+                  <Pressable
+                    key={m}
+                    onPress={() => setMeal(m)}
+                    style={[styles.slotPill, on && { backgroundColor: accent.accent }]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={mealLabel(m)}
+                    testID={`food-quantity-meal-${m}`}
+                  >
+                    <Text style={[styles.slotText, on && { color: accent.on }]}>
+                      {mealLabel(m)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </KeyboardAwareScrollView>
+
+          <KeyboardAwareFooter style={styles.pickingFooter}>
+            <Pressable
+              onPress={() => canConfirm && void logCatalog(picking, grams)}
+              disabled={!canConfirm}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canConfirm }}
+              testID="food-quantity-log"
+              style={[styles.log, !canConfirm && styles.logOff]}
+            >
+              <Text style={styles.logText}>
+                {quantityState?.valid
+                  ? `Log · ${Math.round(quantityState.macros.kcal)} kcal`
+                  : 'Log'}
+              </Text>
+            </Pressable>
+          </KeyboardAwareFooter>
+        </View>
+      </KeyboardAwareScreen>
     );
   }
 
@@ -630,40 +725,61 @@ export default function AddFoodScreen() {
         </Text>
       ) : null}
 
-      {/* Above the describe row, because a packet with a barcode should never
-          be described: a scan gives the numbers printed on it, and describing
-          it hands the same job to an estimator that N40 measured doubling a
-          quantity without flagging it. Below the recents, because the two-tap
-          repeat still beats both. */}
-      <Pressable
-        style={styles.newRow}
-        onPress={() => router.push(`/food/scan?meal=${meal}&date=${date}`)}
-        accessibilityRole="button"
-        accessibilityLabel="Scan a barcode"
-        testID="add-scan"
-      >
-        <Icon name="plus" size={14} color={accent.ink} />
-        <Text style={[styles.newText, { color: accent.ink }]}>Scan a barcode</Text>
-      </Pressable>
+      {/* N59: photograph, describe and scan used to be two unrelated rows
+          scattered below the results — this is the one place all three ways
+          to add a food the search box could not find are presented together,
+          as equal-weight options rather than as a row you notice and a second
+          one you might. Below the recents, because the two-tap repeat still
+          beats all three.
 
-      {/* The escape hatch BELOW the list rather than above it: recents are the
-          two-tap path and this is for the meal that is not in them. Offered
-          whether or not anything was typed, because "I cannot describe this in
-          a search box" is exactly when it is wanted. */}
-      <Pressable
-        style={styles.newRow}
-        onPress={() =>
-          router.push(
-            `/food/describe?meal=${meal}&date=${date}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`,
-          )
-        }
-        accessibilityRole="button"
-        accessibilityLabel="Describe a meal or photograph it"
-        testID="add-describe"
-      >
-        <Icon name="plus" size={14} color={accent.ink} />
-        <Text style={[styles.newText, { color: accent.ink }]}>Describe a meal, or photograph it</Text>
-      </Pressable>
+          Scan stays FIRST of the three: a packet with a barcode should never
+          be described (a scan gives the numbers printed on it; describing it
+          hands the same job to an estimator that N40 measured doubling a
+          quantity without flagging it), so the option that reads the label
+          exactly leads the group. */}
+      <SectionHeader label="Can't find it?" />
+      <View style={styles.groupedChoice}>
+        <Pressable
+          style={styles.choiceOption}
+          onPress={() => router.push(`/food/scan?meal=${meal}&date=${date}`)}
+          accessibilityRole="button"
+          accessibilityLabel="Scan a barcode"
+          testID="add-scan"
+        >
+          <Icon name="plus" size={16} color={accent.ink} />
+          <Text style={[styles.choiceText, { color: accent.ink }]}>Scan a barcode</Text>
+        </Pressable>
+        <View style={styles.choiceDivider} />
+        <Pressable
+          style={styles.choiceOption}
+          onPress={() =>
+            router.push(
+              `/food/describe?photo=1&meal=${meal}&date=${date}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`,
+            )
+          }
+          accessibilityRole="button"
+          accessibilityLabel="Photograph a meal"
+          testID="add-photograph"
+        >
+          <Icon name="plus" size={16} color={accent.ink} />
+          <Text style={[styles.choiceText, { color: accent.ink }]}>Photograph it</Text>
+        </Pressable>
+        <View style={styles.choiceDivider} />
+        <Pressable
+          style={styles.choiceOption}
+          onPress={() =>
+            router.push(
+              `/food/describe?meal=${meal}&date=${date}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`,
+            )
+          }
+          accessibilityRole="button"
+          accessibilityLabel="Describe a meal in words"
+          testID="add-describe"
+        >
+          <Icon name="plus" size={16} color={accent.ink} />
+          <Text style={[styles.choiceText, { color: accent.ink }]}>Describe it</Text>
+        </Pressable>
+      </View>
 
       {q.trim().length > 0 && !exact && (
         <Pressable
@@ -810,6 +926,16 @@ function NewFood({
                 // Absent, not zero: a food nobody stated fibre for is not
                 // claiming there is none.
                 fibre_g: draft.fibre_g?.trim() ? num('fibre_g') : null,
+                // This form has no fields for the N52 label macros at all — a
+                // food typed by hand from a nutrition panel the athlete is
+                // reading off a package states what is on that label, and
+                // this screen does not ask for it. Null here is honest: the
+                // athlete was never asked, not "this food has none".
+                saturated_fat_g: null,
+                sugar_g: null,
+                added_sugar_g: null,
+                sodium_mg: null,
+                cholesterol_mg: null,
               });
             } finally {
               setSaving(false);
@@ -866,6 +992,19 @@ function mealLabel(m: Meal): string {
 
 const styles = StyleSheet.create({
   scroll: { padding: 16, gap: 14, paddingBottom: 48 },
+  // N59: the picking view's own screen wrapper, so `KeyboardAwareFooter` sits
+  // beside the scroll rather than inside it — the same shape
+  // `bjj/reflect/[id].tsx` uses for a sticky bottom bar.
+  pickingScreen: { flex: 1 },
+  pickingFooter: {
+    padding: 16,
+    backgroundColor: vola.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: vola.line,
+  },
+  log: { paddingVertical: 16, borderRadius: 12, backgroundColor: vola.accent, alignItems: 'center' },
+  logOff: { opacity: 0.4 },
+  logText: { color: vola.bg, fontWeight: '700', fontSize: 16 },
   slots: { flexDirection: 'row', gap: 8 },
   slotPill: {
     flex: 1,
@@ -959,6 +1098,26 @@ const styles = StyleSheet.create({
   empty: { fontSize: 13, color: vola.textMuted, paddingVertical: 8 },
   newRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
   newText: { fontSize: 14, fontWeight: '600' },
+  // N59: the one grouped choice — a single bordered row rather than three
+  // loose rows, so the three ways to add a food read as one decision.
+  groupedChoice: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  choiceOption: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+  },
+  choiceText: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  choiceDivider: { width: StyleSheet.hairlineWidth, backgroundColor: vola.line },
   field: { gap: 6 },
   fieldLabel: { fontSize: 12, color: vola.textDim, fontWeight: '600' },
   hint: { fontSize: 11, color: vola.textDim },

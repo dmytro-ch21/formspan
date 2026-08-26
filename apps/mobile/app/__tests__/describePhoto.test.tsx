@@ -64,10 +64,19 @@ jest.mock('expo-image-manipulator', () => ({
   manipulateAsync: (...a: unknown[]) => mockManipulate(...a),
 }));
 
+/**
+ * N59: mutable rather than the plain static object every other consumer of
+ * this file's mock uses, because one new test below needs `photo: '1'` and
+ * every other test needs it ABSENT — a photo-choice param that leaked into
+ * the wrong test would auto-fire the camera on a screen not expecting it.
+ */
+const mockUseLocalSearchParams = jest.fn(
+  (): { meal: string; date: string; photo?: string } => ({ meal: 'lunch', date: '2026-08-20' }),
+);
 jest.mock('expo-router', () => ({
   __esModule: true,
   useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
-  useLocalSearchParams: () => ({ meal: 'lunch', date: '2026-08-20' }),
+  useLocalSearchParams: () => mockUseLocalSearchParams(),
   useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
   Stack: { Screen: () => null },
 }));
@@ -116,6 +125,9 @@ beforeEach(() => {
   mockPermission.mockReset().mockResolvedValue({ granted: true });
   mockLaunchCamera.mockReset().mockResolvedValue({ canceled: false, assets: [{ uri: RAW_URI }] });
   mockManipulate.mockReset().mockResolvedValue({ uri: SHRUNK_URI, width: 1080, height: 1440 });
+  // The ordinary case: no `photo` param, so nothing auto-fires. Only the N59
+  // test below overrides this.
+  mockUseLocalSearchParams.mockReturnValue({ meal: 'lunch', date: '2026-08-20' });
 });
 
 it('uploads the DOWNSCALED frame, not the one the camera returned', async () => {
@@ -215,4 +227,48 @@ it('does not blame the network for a failure carrying no message', async () => {
   for (const word of NETWORK_WORDS) {
     expect(shown.props.children).not.toMatch(word);
   }
+});
+
+/**
+ * N59: the "Photograph it" option on the grouped add-food choice routes here
+ * with `photo=1`, and this screen is what has to act on that — opening the
+ * camera itself rather than landing on the typing view and leaving the
+ * athlete to notice the photo button below it.
+ */
+describe('arriving with photo=1', () => {
+  it('opens the camera immediately, without a tap', async () => {
+    mockUseLocalSearchParams.mockReturnValue({
+      meal: 'lunch',
+      date: '2026-08-20',
+      photo: '1',
+    });
+
+    render(<DescribeMealScreen />);
+
+    await waitFor(() => expect(mockPermission).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockLaunchCamera).toHaveBeenCalledTimes(1));
+  });
+
+  it('fires once, not on every re-render', async () => {
+    mockUseLocalSearchParams.mockReturnValue({
+      meal: 'lunch',
+      date: '2026-08-20',
+      photo: '1',
+    });
+
+    render(<DescribeMealScreen />);
+    await waitFor(() => expect(mockLaunchCamera).toHaveBeenCalledTimes(1));
+
+    // A description typed afterwards re-renders the screen; the auto-photo
+    // effect must not fire a second time off that re-render.
+    fireEvent.changeText(screen.getByTestId('describe-input'), 'and some toast');
+    expect(mockLaunchCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not open the camera on an ordinary visit', async () => {
+    // The default `beforeEach` mock — no `photo` param at all.
+    render(<DescribeMealScreen />);
+    await act(async () => {});
+    expect(mockLaunchCamera).not.toHaveBeenCalled();
+  });
 });

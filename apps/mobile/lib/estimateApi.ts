@@ -286,6 +286,11 @@ export function savedFoodFrom(it: EstimatedItem): {
     carb_g: it.carb_g / n,
     fat_g: it.fat_g / n,
     fibre_g: it.fibre_g == null ? null : it.fibre_g / n,
+    saturated_fat_g: it.saturated_fat_g == null ? null : it.saturated_fat_g / n,
+    sugar_g: it.sugar_g == null ? null : it.sugar_g / n,
+    added_sugar_g: it.added_sugar_g == null ? null : it.added_sugar_g / n,
+    sodium_mg: it.sodium_mg == null ? null : it.sodium_mg / n,
+    cholesterol_mg: it.cholesterol_mg == null ? null : it.cholesterol_mg / n,
   };
 }
 
@@ -303,5 +308,10 @@ export function itemToEntry(it: EstimatedItem): Macros & {
     carb_g: it.carb_g,
     fat_g: it.fat_g,
     fibre_g: it.fibre_g,
+    saturated_fat_g: it.saturated_fat_g,
+    sugar_g: it.sugar_g,
+    added_sugar_g: it.added_sugar_g,
+    sodium_mg: it.sodium_mg,
+    cholesterol_mg: it.cholesterol_mg,
   };
 }

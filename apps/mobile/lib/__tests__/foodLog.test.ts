@@ -76,6 +76,11 @@ function meal(over: Partial<Parameters<typeof logFood>[1]> = {}) {
     carb_g: 0,
     fat_g: 8,
     fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
     ...over,
   };
 }
@@ -383,6 +388,11 @@ describe('the foods pull', () => {
       carb_g: 50,
       fat_g: 15,
       fibre_g: null,
+      saturated_fat_g: null,
+      sugar_g: null,
+      added_sugar_g: null,
+      sodium_mg: null,
+      cholesterol_mg: null,
       ...over,
     };
   }
@@ -414,6 +424,7 @@ describe('the foods pull', () => {
     const id = await saveFoodLocally(USER, {
       kind: 'food', name: 'Mine', brand: '', serving_label: '1',
       serving_grams: null, kcal: 100, protein_g: 1, carb_g: 1, fat_g: 1, fibre_g: null,
+      saturated_fat_g: null, sugar_g: null, added_sugar_g: null, sodium_mg: null, cholesterol_mg: null,
     });
     // The push FAILS transiently, so the row is still owed when the pull runs —
     // a 5xx is not offline, so the pull is not skipped. That is the only
@@ -451,6 +462,7 @@ describe('the foods pull', () => {
     await saveFoodLocally(USER, {
       kind: 'food', name: 'Unpushed', brand: '', serving_label: '1',
       serving_grams: null, kcal: 100, protein_g: 1, carb_g: 1, fat_g: 1, fibre_g: null,
+      saturated_fat_g: null, sugar_g: null, added_sugar_g: null, sodium_mg: null, cholesterol_mg: null,
     });
     // Same shape: the push fails, so the row has genuinely never reached the
     // server, and an empty list means "never heard of it" rather than
@@ -529,6 +541,7 @@ describe('pending count', () => {
     await saveFoodLocally(USER, {
       kind: 'food', name: 'Oats', brand: '', serving_label: '100 g', serving_grams: 100,
       kcal: 380, protein_g: 13, carb_g: 60, fat_g: 8, fibre_g: 10,
+      saturated_fat_g: null, sugar_g: null, added_sugar_g: null, sodium_mg: null, cholesterol_mg: null,
     });
     expect(await pendingFoodCount(USER)).toBe(2);
   });
@@ -550,6 +563,7 @@ describe('recents', () => {
     const oats = await saveFoodLocally(USER, {
       kind: 'food', name: 'Oats', brand: '', serving_label: '100 g', serving_grams: 100,
       kcal: 380, protein_g: 13, carb_g: 60, fat_g: 8, fibre_g: 10,
+      saturated_fat_g: null, sugar_g: null, added_sugar_g: null, sodium_mg: null, cholesterol_mg: null,
     });
     await logFood(USER, meal({ meal: 'breakfast', source_food_id: oats }));
     await logFood(USER, meal({ meal: 'breakfast', source_food_id: oats }));
@@ -565,6 +579,7 @@ describe('recents', () => {
     const oats = await saveFoodLocally(USER, {
       kind: 'food', name: 'Oats', brand: '', serving_label: '100 g', serving_grams: 100,
       kcal: 380, protein_g: 13, carb_g: 60, fat_g: 8, fibre_g: 10,
+      saturated_fat_g: null, sugar_g: null, added_sugar_g: null, sodium_mg: null, cholesterol_mg: null,
     });
     const id = await logFood(USER, meal({ meal: 'breakfast', source_food_id: oats }));
     await cacheEntries(USER, TODAY, TODAY, []); // make it server-known so it tombstones

@@ -29,6 +29,15 @@ const OATS: ScannedFood = {
   carb_g: 26.4,
   fat_g: 2.8,
   fibre_g: 3.6,
+  // Real values, not null, deliberately: "round-trips a scanned food" below
+  // does a deep `toEqual` against the read-back row, so these are what
+  // actually exercises the N59 migration's new `barcode_cache` columns rather
+  // than merely typechecking against them.
+  saturated_fat_g: 0.5,
+  sugar_g: 1.1,
+  added_sugar_g: null,
+  sodium_mg: 2,
+  cholesterol_mg: null,
 };
 
 beforeEach(async () => {

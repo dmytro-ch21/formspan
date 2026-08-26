@@ -32,7 +32,18 @@ const target: Target = {
   fibre_g: 30,
 };
 
-const totals: Macros = { kcal: 900, protein_g: 60, carb_g: 100, fat_g: 30, fibre_g: null };
+const totals: Macros = {
+  kcal: 900,
+  protein_g: 60,
+  carb_g: 100,
+  fat_g: 30,
+  fibre_g: null,
+  saturated_fat_g: null,
+  sugar_g: null,
+  added_sugar_g: null,
+  sodium_mg: null,
+  cholesterol_mg: null,
+};
 
 describe('the macro split', () => {
   it('is three macros in the order a label lists them', () => {

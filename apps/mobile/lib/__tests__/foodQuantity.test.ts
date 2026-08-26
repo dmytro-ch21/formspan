@@ -27,6 +27,11 @@ const banana: CatalogFood = {
   carb_g: 22.8,
   fat_g: 0.3,
   fibre_g: 2.6,
+  saturated_fat_g: 0.1,
+  sugar_g: 12.2,
+  added_sugar_g: null,
+  sodium_mg: 1,
+  cholesterol_mg: null,
 };
 
 test('grams scale the macros, they do not round to whole servings', () => {
@@ -51,6 +56,18 @@ test('fibre stays null rather than becoming zero', () => {
   const noFibre: CatalogFood = { ...banana, fibre_g: null };
   expect(macrosForGrams(noFibre, 150).fibre_g).toBeNull();
   expect(macrosForGrams(banana, 150).fibre_g).toBeCloseTo(3.9, 1);
+});
+
+test('the N52 label macros scale the same way, null-preserving exactly as fibre is', () => {
+  const m = macrosForGrams(banana, 150);
+  // Rounded to one decimal by `round1`, same as every other macro here —
+  // 0.1 * 1.5 = 0.15, which rounds to 0.2, not down to 0.1.
+  expect(m.saturated_fat_g).toBeCloseTo(0.2, 1);
+  expect(m.sugar_g).toBeCloseTo(18.3, 1);
+  expect(m.sodium_mg).toBeCloseTo(1.5, 1);
+  // Never stated for a banana, and scaling must not turn that into a zero.
+  expect(m.added_sugar_g).toBeNull();
+  expect(m.cholesterol_mg).toBeNull();
 });
 
 test('a null serving_grams never produces NaN macros', () => {

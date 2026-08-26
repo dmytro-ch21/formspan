@@ -270,6 +270,11 @@ const CREATE_FOOD_ENTRIES = `
     carb_g REAL NOT NULL DEFAULT 0,
     fat_g REAL NOT NULL DEFAULT 0,
     fibre_g REAL,
+    saturated_fat_g REAL,
+    sugar_g REAL,
+    added_sugar_g REAL,
+    sodium_mg REAL,
+    cholesterol_mg REAL,
     source_food_id TEXT,
     notes TEXT NOT NULL DEFAULT '',
     logged_at TEXT NOT NULL,
@@ -310,6 +315,11 @@ const CREATE_FOODS = `
     carb_g REAL NOT NULL DEFAULT 0,
     fat_g REAL NOT NULL DEFAULT 0,
     fibre_g REAL,
+    saturated_fat_g REAL,
+    sugar_g REAL,
+    added_sugar_g REAL,
+    sodium_mg REAL,
+    cholesterol_mg REAL,
     -- How this row was produced: 'user' for one the athlete typed, 'ai' for one
     -- saved from a draft they confirmed (N114). Pushed, unlike the two counters
     -- below — the server holds the same column and a phone is the only thing in
@@ -393,6 +403,11 @@ const CREATE_BARCODE_CACHE = `
     carb_g REAL NOT NULL DEFAULT 0,
     fat_g REAL NOT NULL DEFAULT 0,
     fibre_g REAL,
+    saturated_fat_g REAL,
+    sugar_g REAL,
+    added_sugar_g REAL,
+    sodium_mg REAL,
+    cholesterol_mg REAL,
     -- 'catalog', 'off' or 'ai' -- the last being a food the athlete described
     -- because no catalog had the packet, kept distinct so a guess can never
     -- wear a fact's provenance. Kept at all because a purge of ODbL rows has to
@@ -538,7 +553,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 24;
+const SCHEMA_VERSION = 25;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1055,6 +1070,28 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // than as a null every caller has to interpret.
     await addColumnIfMissing(db, 'foods', 'yield_servings', 'REAL');
     await addColumnIfMissing(db, 'foods', 'items', `TEXT NOT NULL DEFAULT '[]'`);
+  }
+
+  if (current < 25) {
+    // N59: the wider N52 label macros — saturated fat, sugar, added sugar,
+    // sodium, cholesterol — reach the nutrition panel, and the panel needs
+    // them from the local cache exactly as it needs `fibre_g`, or the offline
+    // path would silently drop them the moment the network wasn't there to
+    // re-fetch. `nutrition_targets` is deliberately NOT touched: a target
+    // never carried these fields even before this, and it still doesn't —
+    // see `Target`'s own comment in `lib/nutrition.ts`.
+    //
+    // Real ALTERs on all three, same reason as 22/23/24: `CREATE TABLE IF NOT
+    // EXISTS` is a no-op on a table that already exists, so a device already
+    // stamped 24 would keep tables without these columns and every read
+    // would throw the moment `Macros` requires them.
+    for (const table of ['food_entries', 'foods', 'barcode_cache'] as const) {
+      await addColumnIfMissing(db, table, 'saturated_fat_g', 'REAL');
+      await addColumnIfMissing(db, table, 'sugar_g', 'REAL');
+      await addColumnIfMissing(db, table, 'added_sugar_g', 'REAL');
+      await addColumnIfMissing(db, table, 'sodium_mg', 'REAL');
+      await addColumnIfMissing(db, table, 'cholesterol_mg', 'REAL');
+    }
   }
 
   // The day query the card runs on every render of Today.

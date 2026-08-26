@@ -14,6 +14,11 @@ const macros = (over: Partial<Macros> = {}): Macros => ({
   carb_g: 130,
   fat_g: 47,
   fibre_g: null,
+  saturated_fat_g: null,
+  sugar_g: null,
+  added_sugar_g: null,
+  sodium_mg: null,
+  cholesterol_mg: null,
   ...over,
 });
 

@@ -34,6 +34,11 @@ function item(over: Partial<RecipeItem> = {}): RecipeItem {
     carb_g: 0,
     fat_g: 3.6,
     fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
     source_food_id: null,
     ...over,
   };
@@ -115,6 +120,19 @@ describe('perServing', () => {
     expect(per.kcal).toBe(0);
     expect(per.fibre_g).toBeNull();
   });
+
+  // Each N52 label macro follows fibre's own rule independently — a recipe
+  // where only one ingredient states sodium must not report a confident zero
+  // for sugar just because sodium was found.
+  it('sums each N52 label macro only from the ingredients that stated it', () => {
+    const per = perServing(
+      [item({ sodium_mg: 200 }), item({ sodium_mg: null, sugar_g: 4 })],
+      2,
+    );
+    expect(per.sodium_mg).toBe(100);
+    expect(per.sugar_g).toBe(2);
+    expect(per.saturated_fat_g).toBeNull();
+  });
 });
 
 const catalogFood: CatalogFood = {
@@ -130,6 +148,11 @@ const catalogFood: CatalogFood = {
     carb_g: 0,
     fat_g: 3.6,
     fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
   market: 'us',
   source: 'seed',
 } as CatalogFood;
@@ -176,6 +199,11 @@ const savedFood: Food = {
     carb_g: 4,
     fat_g: 0.2,
     fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
   yield_servings: null,
   items: [],
 };

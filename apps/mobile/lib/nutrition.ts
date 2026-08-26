@@ -42,6 +42,21 @@ export type Macros = {
   fat_g: number;
   /** Null is "not stated", never zero — see the server's own note. */
   fibre_g: number | null;
+  /**
+   * The five N52 label macros, all nullable for the exact reason `fibre_g`
+   * already is — and more sharply, per the server's own `Macros` doc comment:
+   * **absence is a fact about what we know, never a fact about the food.**
+   * Two of these (`added_sugar_g`, `cholesterol_mg`) are null for MOST rows by
+   * nature of the source data, not as an edge case — a UI reading null as 0
+   * would be wrong on the common path, not the rare one. Render `n/a`, never
+   * `0`. `sodium_mg` is MILLIGRAMS — see the server's own note on why the unit
+   * is in the name.
+   */
+  saturated_fat_g: number | null;
+  sugar_g: number | null;
+  added_sugar_g: number | null;
+  sodium_mg: number | null;
+  cholesterol_mg: number | null;
 };
 
 export type Entry = Macros & {
@@ -154,9 +169,30 @@ export type Target = {
  * genuinely zero when nothing was eaten.
  */
 export function dayTotals(entries: Entry[]): Macros {
-  const out: Macros = { kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0, fibre_g: null };
+  const out: Macros = {
+    kcal: 0,
+    protein_g: 0,
+    carb_g: 0,
+    fat_g: 0,
+    fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
+  };
   let fibre = 0;
   let anyFibre = false;
+  let saturatedFat = 0;
+  let anySaturatedFat = false;
+  let sugar = 0;
+  let anySugar = false;
+  let addedSugar = 0;
+  let anyAddedSugar = false;
+  let sodium = 0;
+  let anySodium = false;
+  let cholesterol = 0;
+  let anyCholesterol = false;
   for (const e of entries) {
     out.kcal += e.kcal;
     out.protein_g += e.protein_g;
@@ -166,8 +202,33 @@ export function dayTotals(entries: Entry[]): Macros {
       fibre += e.fibre_g;
       anyFibre = true;
     }
+    if (e.saturated_fat_g != null) {
+      saturatedFat += e.saturated_fat_g;
+      anySaturatedFat = true;
+    }
+    if (e.sugar_g != null) {
+      sugar += e.sugar_g;
+      anySugar = true;
+    }
+    if (e.added_sugar_g != null) {
+      addedSugar += e.added_sugar_g;
+      anyAddedSugar = true;
+    }
+    if (e.sodium_mg != null) {
+      sodium += e.sodium_mg;
+      anySodium = true;
+    }
+    if (e.cholesterol_mg != null) {
+      cholesterol += e.cholesterol_mg;
+      anyCholesterol = true;
+    }
   }
   if (anyFibre) out.fibre_g = fibre;
+  if (anySaturatedFat) out.saturated_fat_g = saturatedFat;
+  if (anySugar) out.sugar_g = sugar;
+  if (anyAddedSugar) out.added_sugar_g = addedSugar;
+  if (anySodium) out.sodium_mg = sodium;
+  if (anyCholesterol) out.cholesterol_mg = cholesterol;
   return out;
 }
 
@@ -569,6 +630,11 @@ export function scale(food: Food, servings: number): Macros {
     carb_g: round1(food.carb_g * servings),
     fat_g: round1(food.fat_g * servings),
     fibre_g: food.fibre_g == null ? null : round1(food.fibre_g * servings),
+    saturated_fat_g: food.saturated_fat_g == null ? null : round1(food.saturated_fat_g * servings),
+    sugar_g: food.sugar_g == null ? null : round1(food.sugar_g * servings),
+    added_sugar_g: food.added_sugar_g == null ? null : round1(food.added_sugar_g * servings),
+    sodium_mg: food.sodium_mg == null ? null : round1(food.sodium_mg * servings),
+    cholesterol_mg: food.cholesterol_mg == null ? null : round1(food.cholesterol_mg * servings),
   };
 }
 
@@ -595,6 +661,17 @@ export function rescale(entry: Macros & { servings: number }, servings: number):
     carb_g: round1(entry.carb_g * f),
     fat_g: round1(entry.fat_g * f),
     fibre_g: entry.fibre_g == null ? null : round1(entry.fibre_g * f),
+    // The N52 macros rescale the same way fibre does, and for the same
+    // reason: null stays null under any factor, because scaling "not stated"
+    // does not make it stated. Found in review while wiring N59's nutrition
+    // panel — before this, rescaling an entry (the servings stepper on
+    // `food/entry/[id]`) silently dropped these five fields regardless of
+    // what UI read them, since `Macros` never declared them at all.
+    saturated_fat_g: entry.saturated_fat_g == null ? null : round1(entry.saturated_fat_g * f),
+    sugar_g: entry.sugar_g == null ? null : round1(entry.sugar_g * f),
+    added_sugar_g: entry.added_sugar_g == null ? null : round1(entry.added_sugar_g * f),
+    sodium_mg: entry.sodium_mg == null ? null : round1(entry.sodium_mg * f),
+    cholesterol_mg: entry.cholesterol_mg == null ? null : round1(entry.cholesterol_mg * f),
   };
 }
 

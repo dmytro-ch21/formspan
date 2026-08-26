@@ -560,3 +560,82 @@ describe('the scope row', () => {
     expect(screen.queryByTestId('add-scope-verified')).toBeNull();
   });
 });
+
+/**
+ * N59 — photograph, describe and scan used to be two unrelated rows below the
+ * results; this is the one place all three are presented together.
+ */
+describe('the grouped add-food choice', () => {
+  it('offers all three ways in, together', async () => {
+    render(<AddFoodScreen />);
+    expect(screen.getByTestId('add-scan')).toBeTruthy();
+    expect(screen.getByTestId('add-photograph')).toBeTruthy();
+    expect(screen.getByTestId('add-describe')).toBeTruthy();
+  });
+
+  it('sends scan to the barcode screen', async () => {
+    render(<AddFoodScreen />);
+    fireEvent.press(screen.getByTestId('add-scan'));
+    expect(mockPush).toHaveBeenCalledWith(expect.stringContaining('/food/scan'));
+  });
+
+  it('sends photograph to the describe screen with photo=1, so the camera opens immediately', async () => {
+    render(<AddFoodScreen />);
+    fireEvent.press(screen.getByTestId('add-photograph'));
+    expect(mockPush).toHaveBeenCalledWith(expect.stringContaining('/food/describe?photo=1'));
+  });
+
+  it('sends describe to the describe screen WITHOUT photo=1', async () => {
+    render(<AddFoodScreen />);
+    fireEvent.press(screen.getByTestId('add-describe'));
+    const dest = mockPush.mock.calls[0][0] as string;
+    expect(dest).toContain('/food/describe?meal=');
+    expect(dest).not.toContain('photo=1');
+  });
+});
+
+/**
+ * N59 — the picking view's own nutrition panel and meal picker, and the
+ * sticky confirm bar that survives them both.
+ */
+describe('the picking view', () => {
+  it('shows the nutrition panel, recalculated at the chosen portion', async () => {
+    mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
+    await search('oats');
+    await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
+    });
+
+    // Default quantity for a food with no portions loaded yet is 100 g — the
+    // panel should show CATALOG_OATS' own per-100g calories.
+    await waitFor(() =>
+      expect(screen.getByTestId('nutrition-panel-kcal').props.children).toBe(CATALOG_OATS.kcal),
+    );
+  });
+
+  it('offers the meal picker, so the athlete can change it without leaving the sheet', async () => {
+    mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
+    await search('oats');
+    await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
+    });
+    await waitFor(() => expect(screen.getByTestId('food-quantity-meal-breakfast')).toBeTruthy());
+    expect(screen.getByTestId('food-quantity-meal-dinner')).toBeTruthy();
+  });
+
+  it('keeps the confirm button reachable — it lives in the sticky footer, not the scroll content', async () => {
+    mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_OATS], total: 1, outcome: 'ok' }));
+    await search('oats');
+    await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
+    });
+    // `FoodQuantity`'s own inline Log button is suppressed (`hideBuiltInFooter`)
+    // — there must be exactly one confirm button, the sticky one.
+    await waitFor(() => expect(screen.getByTestId('food-quantity-log')).toBeTruthy());
+    expect(screen.queryAllByTestId('food-quantity-log')).toHaveLength(1);
+  });
+});

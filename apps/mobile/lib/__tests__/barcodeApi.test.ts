@@ -28,6 +28,11 @@ const FOOD: ScannedFood = {
   carb_g: 26.4,
   fat_g: 2.8,
   fibre_g: 3.6,
+  saturated_fat_g: 0.5,
+  sugar_g: 1.1,
+  added_sugar_g: null,
+  sodium_mg: 2,
+  cholesterol_mg: null,
 };
 
 beforeEach(() => mockApi.mockReset());

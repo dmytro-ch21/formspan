@@ -145,6 +145,17 @@ export default function EditEntryScreen() {
         // Blank stays absent. Clearing the field is "I never recorded this",
         // which is not the same claim as zero grams of fibre.
         fibre_g: draft.fibre_g?.trim() ? parse(draft.fibre_g) : null,
+        // This screen has no fields for the N52 label macros — it corrects
+        // the four figures the athlete can see, not the whole label. Carried
+        // through from the entry as it was logged, so a routine calorie
+        // correction cannot silently blank a value nothing here offers to
+        // edit — the same `updateWithin` trap this repo has paid for three
+        // times on a different table.
+        saturated_fat_g: entry.saturated_fat_g,
+        sugar_g: entry.sugar_g,
+        added_sugar_g: entry.added_sugar_g,
+        sodium_mg: entry.sodium_mg,
+        cholesterol_mg: entry.cholesterol_mg,
         source_food_id: entry.source_food_id,
         notes: entry.notes,
       });

@@ -37,6 +37,11 @@ const egg: CatalogFood = {
   carb_g: 0.7,
   fat_g: 9.5,
   fibre_g: null,
+  saturated_fat_g: null,
+  sugar_g: null,
+  added_sugar_g: null,
+  sodium_mg: null,
+  cholesterol_mg: null,
   portions: [
     { seq: 1, label: '1 large', grams: 50 },
     { seq: 2, label: '1 jumbo', grams: 63 },
