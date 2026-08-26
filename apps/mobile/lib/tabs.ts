@@ -9,40 +9,73 @@ import type { IconName } from '@/components/ui/Icon';
  * predicate that used to sit inline in that layout was inline, untested and
  * wrong, which are not three unrelated facts.
  *
- * ## What N176 changed, and what it did not
+ * ## What N180 changed, and why it partly reverses N176
  *
- * The bar reads **Today · Train · Progress · Plan · You**. That is the approved
- * primary navigation for the product, and it supersedes the arrangement below
- * it — Today · Food · Plan · Goals · You — under which Food and Goals each held
- * a permanent slot.
+ * The bar reads **Today · Food · Progress · Plan · You**. Food is back in slot
+ * two and **Train's slot is retired** — decided by the user on 2026-08-26,
+ * after carrying the N176 bar on their own phone:
  *
- * **Food's slot was earned on frequency and the argument still stands on its
- * own terms.** Food is logged three to six times a day against once for a
- * session, and the tab bar is the only fixed-position affordance a phone has;
- * Goals sat beside it because the daily target is the number every food
- * decision is measured against. Neither claim is retracted here. What changed is
- * the frame around them: the bar's five slots now spell the athlete's loop —
- * plan, train, understand, progress, plan — and a bar that spends two of five on
- * one module cannot spell it. Nutrition gets a home that suits its frequency in
- * N180 (#585); **this file is not that home, and making Food a sixth tab to
- * split the difference is the specific thing that ticket exists to prevent.**
+ * > "I agree its a little too deep and right now the only way to get there is
+ * > via today widget, in fact Train tab which is instead of food is way less
+ * > useful not sure what was the purpose"
  *
- * ## What did NOT change: Food and Goals are still reachable
+ * **N176's loop was coherent about the wrong thing.** Its five slots spelled
+ * plan · train · understand · progress · plan, which is a real and defensible
+ * reading of a training app — and VOLA is training *and nutrition*, where the
+ * nutrition half carries by far the higher touch count. An athlete logs food
+ * three to five times a day, every day, and starts a session four to six times
+ * a week. The loop spent a permanent slot on the lower-frequency action and
+ * demoted the higher-frequency one to a link.
+ *
+ * **And to one link, measured rather than assumed.** With Food off the bar, the
+ * only way into food logging was `app/(tabs)/index.tsx` — three `router.push`
+ * call sites, all in that one file. Scroll Today past the food widget and the
+ * most frequent action in the product had no entry point at all.
+ *
+ * So the paragraph N176 wrote about Food's slot — earned on frequency, the tab
+ * bar being the only fixed-position affordance a phone has — is not merely
+ * un-retracted, it is the finding. What N176 got right and this keeps: **the
+ * bar is five, and a sixth tab to split the difference is still refused.** Food
+ * takes Train's slot rather than being added beside it.
+ *
+ * **Goals stays off the bar, and that half of N176 is untouched.** The daily
+ * target no longer needs a slot of its own because N180 puts it at the TOP OF
+ * THE FOOD TAB, next to the thing it constrains — `components/food/TargetRow`,
+ * two taps, linking to `(tabs)/goals` for the derivation and the history. That
+ * is the mobile-first rule in `CLAUDE.md` applied to chrome: the reasoning was
+ * reachable and the action was three taps behind it.
+ *
+ * ## What did NOT change: Train and Goals are still reachable
  *
  * They lose a button, not a route. Both stay declared below in
  * `OFF_BAR_ROUTES`, which the layout renders with `href: null` — the button
  * disappears and the route stays resolvable, which is what an in-flight
- * `router.push` and every deep link need. Today links to both while nutrition
- * is on, and says so in words while it is off.
+ * `router.push` and every deep link need.
+ *
+ * **`train.tsx` is deliberately NOT deleted**, and N176's work on it is being
+ * re-homed rather than thrown away: #587 owns moving its sections into Plan and
+ * rebases onto this array. Until it lands, note the honest state — **nothing in
+ * the app links to `(tabs)/train` any more.** Its tab was its only entry point,
+ * so between this change and #587 it is reachable by deep link alone. That is a
+ * known, bounded gap owned by the next ticket, not an oversight here.
  *
  * ## The gate that used to live here, and why it is gone
  *
  * `tabHidden(name, modules)` hid Food and Goals whenever this DEPLOYMENT had no
  * food-log module — the third state that `serverHasFoodLog` separates from
- * "turned off". It is retired because the two tabs are now unconditionally
- * off-bar, so there is nothing left for it to decide; the question it asked is
- * still the right one for whatever links to food next, and the predicate it
- * asked it with is still in `lib/modules.ts`.
+ * "turned off". N176 retired it because both tabs went unconditionally off-bar,
+ * so there was nothing left for it to decide; the predicate it asked with is
+ * still in `lib/modules.ts`.
+ *
+ * **N180 puts Food back on the bar and does NOT bring the gate back with it.**
+ * That is the deliberate choice, not an omission. The screen behind the tab
+ * already answers the question in words — `app/(tabs)/food.tsx` reads
+ * `foodLogGate(modules, ready)` and renders `ModuleOffNotice` — so an athlete
+ * whose deployment or account has nutrition off arrives somewhere that explains
+ * itself, which is exactly what #370 concluded the fix was. A conditional slot
+ * would instead make 20% of the primary navigation appear and disappear
+ * depending on a server response, and reintroduce the cold-start flash the
+ * layout holds a frame to prevent.
  *
  * **Do not read that retirement as licence to hide a tab again.** The gate it
  * replaced hid Food and Goals whenever nutrition was merely turned OFF — two of
@@ -68,20 +101,30 @@ export type TabSpec = {
 /**
  * The five, in bar order.
  *
- * **Today** orchestrates the day, **Train** executes, **Progress** answers "am I
- * getting better", **Plan** holds future intent, **You** is the athlete. Train
- * and Progress are shells for now and get built out in N177 (#582) and N178
- * (#583); Plan is the existing `workouts` route under its product name, which
- * it has carried since long before this change.
+ * **Today** orchestrates the day, **Food** is the thing done most often,
+ * **Progress** answers "am I getting better", **Plan** holds future intent,
+ * **You** is the athlete. Plan is the existing `workouts` route under its
+ * product name, which it has carried since long before any of this.
  *
- * Order is load-bearing rather than cosmetic — it is the loop read left to
- * right — so it is asserted rather than assumed. The icons come from the brand
- * kit by name; `workout` is the barbell and `progress` is the kit's own glyph
- * for the idea, so neither needed inventing.
+ * **Order is load-bearing rather than cosmetic, and what it is ordered BY
+ * changed with N180.** N176 ordered it as a loop to be read left to right;
+ * ordering it by frequency is what put Food back in slot two, beside Today,
+ * where a thumb reaches it without looking. Either way it is a product decision
+ * rather than a layout detail, so `lib/__tests__/tabBar.test.ts` asserts it and
+ * a reordering fails there instead of being noticed on a device.
+ *
+ * The icons come from the brand kit by name; `food` is the kit's own glyph and
+ * is the one Food carried before N176 took its slot, so this restores the
+ * arrangement rather than inventing a new one.
  */
 export const TABS = [
   { name: 'index', title: 'Today', icon: 'dashboard' },
-  { name: 'train', title: 'Train', icon: 'workout' },
+  // Second, not last, and this is the sentence N176 removed and N180 restores.
+  // Food is logged three to six times a day against once for a session, and the
+  // tab bar is the only fixed-position affordance the phone has. A card on
+  // Today costs an extra tap every time, on a screen whose contents move — and
+  // measured with Food off the bar, that card was the ONLY way in at all.
+  { name: 'food', title: 'Food', icon: 'food' },
   { name: 'progress', title: 'Progress', icon: 'progress' },
   { name: 'workouts', title: 'Plan', icon: 'calendar' },
   { name: 'you', title: 'You', icon: 'profile' },
@@ -93,12 +136,16 @@ export const TABS = [
  * They must still be DECLARED — `href: null` rather than omitting the
  * `<Tabs.Screen>`. Omitting one does not hide it: expo-router auto-injects
  * every route file in this folder whether it is declared or not, so an omitted
- * screen comes back as a sixth tab with a filename-derived title ("food"). That
- * is the failure this list exists to make impossible, and it is why
+ * screen comes back as a sixth tab with a filename-derived title ("train").
+ * That is the failure this list exists to make impossible, and it is why
  * `lib/__tests__/tabBar.test.ts`'s "is either a tab or deliberately off the
  * bar, and never neither" READS THE DIRECTORY rather than trusting this array.
+ *
+ * **`train` is here rather than deleted.** N180 retires its BUTTON; #587 moves
+ * its sections into Plan. Deleting the file to make this diff smaller would
+ * throw away N177's work and break every `vola://train` link in flight.
  */
-export const OFF_BAR_ROUTES: readonly string[] = ['food', 'goals'];
+export const OFF_BAR_ROUTES: readonly string[] = ['train', 'goals'];
 
 /**
  * Does this route file sit in the tab folder without owning a bar slot?

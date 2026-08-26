@@ -4,14 +4,18 @@ import { join } from 'node:path';
 import { OFF_BAR_ROUTES, TABS, declaredTabRoutes, offBar } from '../tabs';
 
 /**
- * The bottom bar's membership and order — N176.
+ * The bottom bar's membership and order — N176, as revised by N180.
  *
- * The bar reads **Today · Train · Progress · Plan · You**, and every one of the
+ * The bar reads **Today · Food · Progress · Plan · You**, and every one of the
  * five is unconditional. Two properties are worth a test rather than a comment:
  *
- * 1. **The order is the product loop** — plan, train, understand, progress,
- *    plan — read left to right. A reordering is a product decision, so it fails
- *    here rather than being noticed on a device.
+ * 1. **The order is frequency, highest first among the destinations.** N176
+ *    ordered it as a loop — plan, train, understand, progress, plan — and put
+ *    Train in slot two; the user carried that bar and reversed it, because food
+ *    is logged three to five times a day against four to six sessions a WEEK.
+ *    Food is back in slot two and Train's slot is retired. Either way a
+ *    reordering is a product decision, so it fails here rather than being
+ *    noticed on a device.
  * 2. **Every route file in `app/(tabs)/` is accounted for exactly once.**
  *    expo-router auto-injects every route file in that folder whether the
  *    layout declares it or not, so a new file that nobody put in one of the two
@@ -35,15 +39,23 @@ function routeFilesInTabFolder(): string[] {
 }
 
 describe('the visible bar', () => {
-  it('reads Today, Train, Progress, Plan, You, in that order', () => {
-    expect(TABS.map((t) => t.title)).toEqual(['Today', 'Train', 'Progress', 'Plan', 'You']);
+  it('reads Today, Food, Progress, Plan, You, in that order', () => {
+    expect(TABS.map((t) => t.title)).toEqual(['Today', 'Food', 'Progress', 'Plan', 'You']);
   });
 
   it('maps those titles onto the routes that actually implement them', () => {
     // Titles alone would pass with every tab pointing at the same file. Plan is
     // the interesting row: it is the long-standing `workouts` route under its
     // product name, and renaming the file is not part of this change.
-    expect(TABS.map((t) => t.name)).toEqual(['index', 'train', 'progress', 'workouts', 'you']);
+    expect(TABS.map((t) => t.name)).toEqual(['index', 'food', 'progress', 'workouts', 'you']);
+  });
+
+  // **Slot two specifically, because that is the whole of N180's bar change.**
+  // The two assertions above are satisfied by any bar holding those five names;
+  // this one fails if Food drifts to the end, which is the shape the next
+  // reorder is most likely to take — appending is always the smaller diff.
+  it('puts Food in slot two, beside Today', () => {
+    expect(TABS[1]).toEqual({ name: 'food', title: 'Food', icon: 'food' });
   });
 
   it('gives every tab an icon, and no two the same', () => {
@@ -65,8 +77,13 @@ describe('the visible bar', () => {
 });
 
 describe('the routes with no bar position', () => {
-  it('is Food and Goals, which lost a button and not a route', () => {
-    expect([...OFF_BAR_ROUTES].sort()).toEqual(['food', 'goals']);
+  // **Train replaced Food here in N180**, and `train.tsx` is deliberately still
+  // on disk: its sections move into Plan in #587, so deleting the file to make
+  // that diff smaller would throw away N177's work. It has to be DECLARED with
+  // `href: null` — see the directory test at the foot of this file for what
+  // omitting it would actually do.
+  it('is Train and Goals, which lost a button and not a route', () => {
+    expect([...OFF_BAR_ROUTES].sort()).toEqual(['goals', 'train']);
   });
 
   it('never overlaps the bar', () => {
@@ -80,8 +97,8 @@ describe('the routes with no bar position', () => {
     // mutation returning `true` unconditionally passes the overlap test above
     // only by making it vacuous — and would strip the whole bar.
     expect(offBar('index')).toBe(false);
-    expect(offBar('train')).toBe(false);
-    expect(offBar('food')).toBe(true);
+    expect(offBar('food')).toBe(false);
+    expect(offBar('train')).toBe(true);
   });
 });
 

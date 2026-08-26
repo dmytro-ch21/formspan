@@ -33,6 +33,7 @@ import { ModuleOffNotice } from '@/components/ModuleOffNotice';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
+import { TargetRow } from '@/components/food/TargetRow';
 import { TrackerList } from '@/components/TrackerList';
 import { Icon } from '@/components/ui/Icon';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
@@ -255,22 +256,12 @@ export default function FoodScreen() {
       >
         {/* Inside the ScrollView, so it scrolls away with the content and
             nothing passes under it — no bottom rule. See `ScreenHeader`. */}
-        <ScreenHeader
-          title="Food"
-          contentScrollsUnder={false}
-          action={
-            <Pressable
-              onPress={() => router.push('/(tabs)/goals')}
-              accessibilityRole="button"
-              accessibilityLabel={view.state === 'set' ? 'Why this target' : 'Set a target'}
-              testID="food-target-link"
-            >
-              <Text style={[styles.headerLink, { color: accent.ink }]}>
-                {view.state === 'set' ? 'Target' : 'Set target'}
-              </Text>
-            </Pressable>
-          }
-        />
+        {/* No header action any more. It used to hold a "Target" / "Set target"
+            word linking to the same place `TargetRow` now links to — one entry
+            point, not two, and the row states the NUMBER, which the word never
+            did. N180's whole complaint was that the target was reachable and
+            not readable. */}
+        <ScreenHeader title="Food" contentScrollsUnder={false} />
 
         <View style={styles.body}>
           <PeriodSwitcher
@@ -285,8 +276,34 @@ export default function FoodScreen() {
             testID="food-day"
           />
 
+          {/* **The target, at the head of the day.** N180: two taps from
+              anywhere — Food tab, then this row — and the number is legible
+              without the second one.
+
+              BELOW the day stepper rather than above it, and that is deliberate
+              rather than cosmetic. `view` is keyed to the day on screen, so on
+              yesterday this row shows YESTERDAY'S target; sitting above the
+              control that chose the day, it would read as "the" target and
+              quietly be a different number from the one the athlete means. It
+              is the same failure `budget` guards against a few lines down by
+              suppressing itself on any day but today. Under the stepper, the
+              row is unambiguously about the day named directly above it. */}
+          <TargetRow
+            view={view}
+            onPress={() => router.push('/(tabs)/goals')}
+            testID="food-target"
+          />
+
           <View style={styles.summary}>
-            <RemainingBlock eaten={eaten} view={view} testID="food-remaining" />
+            {/* `showTarget={false}`: the row above has just said it, in bigger
+                type and with somewhere to go. Two statements of one number
+                within a thumb's width read as a bug in the number. */}
+            <RemainingBlock
+              eaten={eaten}
+              view={view}
+              showTarget={false}
+              testID="food-remaining"
+            />
           </View>
 
           {/* Water and anything else being tracked, for the day on screen.
@@ -421,7 +438,6 @@ const styles = StyleSheet.create({
   manageTrackers: { paddingVertical: 13, alignItems: 'center' },
   manageTrackersText: { fontSize: 13, fontWeight: '700', color: vola.textMuted },
   screen: { flex: 1, backgroundColor: vola.bg },
-  headerLink: { fontSize: 13, fontWeight: '700' },
   container: { gap: 12 },
   body: { paddingHorizontal: 20, gap: 16 },
   summary: {

@@ -199,6 +199,27 @@ export function viewTarget(view: TargetView): Target | null {
 }
 
 /**
+ * One figure, the one way this feature prints one: rounded whole, thousands
+ * grouped.
+ *
+ * Shared rather than re-typed because a calorie target is now stated in two
+ * places on the Food tab — `TargetRow` at the head of the screen and
+ * `RemainingBlock` under it — and two copies of `Math.round(n).toLocaleString`
+ * is how one of them ends up saying `2700` next to the other's `2,700`. Small,
+ * and exactly the kind of small that reads as a bug in the number rather than
+ * in the formatting.
+ *
+ * **The locale is pinned to `en-US` deliberately**, matching what the two
+ * private copies already did. It is not a units question — a kilocalorie is a
+ * kilocalorie in both systems, which is why `check:unit-literals` has no
+ * vocabulary for `kcal` — so nothing here is waiting on `useUnits()`, and no
+ * caller has to guard it behind `unitsReady`.
+ */
+export function fmtAmount(n: number): string {
+  return Math.round(n).toLocaleString('en-US');
+}
+
+/**
  * Which DAYS of the week carry a food entry.
  *
  * A third view union, for the same reason as the two below it and arrived at

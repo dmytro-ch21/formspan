@@ -28,6 +28,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   remaining as computeRemaining,
+  fmtAmount as fmt,
   viewTarget,
   viewTotals,
   type EatenView,
@@ -38,6 +39,7 @@ export function RemainingBlock({
   eaten,
   view,
   compact = false,
+  showTarget = true,
   testID,
 }: {
   /** Everything this device knows about what was eaten. See {@link EatenView}. */
@@ -46,6 +48,23 @@ export function RemainingBlock({
   view: TargetView;
   /** The card is compact; the day screen is not. */
   compact?: boolean;
+  /**
+   * Whether to state the target in the caption under the figures.
+   *
+   * **True everywhere except the Food tab**, which since N180 states it in a
+   * `TargetRow` at the head of the screen — bigger, tappable, and carrying the
+   * same four states. Left on, the two would print the same number twice within
+   * a thumb's width of each other, which reads as a bug in the figure rather
+   * than in the layout.
+   *
+   * Both settings are live: Today's `MomentumCard` and `NutritionCard` have no
+   * row above them and rely on this caption, so turning it off unconditionally
+   * would take the target off Today entirely.
+   *
+   * The bar, the eaten line and the two headline figures are unaffected — this
+   * suppresses the one line the caller has already said.
+   */
+  showTarget?: boolean;
   testID?: string;
 }) {
   const accent = useAccent();
@@ -120,9 +139,11 @@ export function RemainingBlock({
       <Text style={styles.caption} testID="fuel-eaten">
         {eatenText}
       </Text>
-      <Text style={styles.caption} testID="fuel-target">
-        {targetText}
-      </Text>
+      {showTarget && (
+        <Text style={styles.caption} testID="fuel-target">
+          {targetText}
+        </Text>
+      )}
 
       {target && totals ? (
         <View
@@ -174,10 +195,6 @@ function Figure({
       <Text style={styles.unit}>{unit}</Text>
     </View>
   );
-}
-
-function fmt(n: number): string {
-  return Math.round(n).toLocaleString('en-US');
 }
 
 function pct(eaten: number, target: number): number {

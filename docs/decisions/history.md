@@ -41870,6 +41870,140 @@ Not done here: the plugins deliberately skipped in N197 (`feature-dev`,
 skipped, for the reasons recorded in that entry — this pinning is of the
 aligned set, not an expansion of it.
 
+## 2026-08-26 — N180: Food returns to the tab bar, and the daily target moves to the top of it
+
+**This partially reverses N176 (#602), which shipped yesterday.** Recorded that
+way deliberately: N176's entry above stands as written, because it was true when
+it was written and a history you edit retroactively stops being one.
+
+**What happened.** N176 made the bottom bar `Today · Train · Progress · Plan ·
+You`, modelling it as the athlete's training loop — Today orchestrates, Train
+executes, Progress measures, Plan holds intent, You is the athlete. The user
+carried that build on their own phone and reversed it:
+
+> "I agree its a little too deep and right now the only way to get there is via
+> today widget, in fact Train tab which is instead of food is way less useful
+> not sure what was the purpose"
+
+**The loop was coherent about the wrong thing.** It is a real and defensible
+reading of a *training* app, and VOLA is training **and nutrition** — where the
+nutrition half carries by far the higher touch count. An athlete logs food three
+to five times a day, every day, and starts a session four to six times a week.
+The bar spent a permanent slot on the lower-frequency action and demoted the
+higher-frequency one to a link.
+
+**And to exactly one link, measured rather than argued.** With Food off the bar,
+every route into food logging was a `router.push` in `app/(tabs)/index.tsx` —
+three call sites, all in that one file. Scroll Today past the food widget and
+the most frequent action in the product had no entry point at all. That is the
+same failure shape as #370's "the features are not there" report from a device:
+the destination explained itself perfectly well, and nothing linked to it.
+
+**The bar is now `Today · Food · Progress · Plan · You`.** Food takes Train's
+slot rather than being added beside it — N176's refusal of a sixth tab is kept,
+and `lib/tabs.ts` still says so. What changed is what the order is ordered *by*:
+frequency rather than narrative, which is what puts Food in slot two where a
+thumb reaches it without looking. It is the slot Food held before N176, with the
+icon it held before N176.
+
+**`train.tsx` is NOT deleted**, and that was a deliberate instruction on the
+ticket. N177 built those sections and they are being *re-homed*, not discarded:
+#587 moves them into Plan and rebases onto this `TABS` array. Train keeps
+`href: null` in `OFF_BAR_ROUTES` — declared, never omitted, because omitting a
+route from `app/(tabs)/` does not hide it; expo-router auto-injects every file
+in that folder and an undeclared one returns as a sixth tab titled `train`.
+
+**One honest gap this opens, owned by #587 and stated here so it is not
+rediscovered as a bug:** *nothing in the app links to `(tabs)/train` any more.*
+Its tab was its only entry point — grepped, not assumed — so between this change
+and #587 it is reachable by deep link alone. The ticket's own framing assumed
+Today already linked to it when nothing is planned; it does not, yet.
+
+### The daily target, at the head of Food
+
+Second decision from the same conversation: the target belongs next to the thing
+it constrains, not on a screen of its own. `components/food/TargetRow.tsx` is a
+new row at the top of the Food tab's content — **two taps to adjust a target**
+(Food tab, then the row), with the number legible without the second one.
+`(tabs)/goals` is unchanged and still owns the derivation and the history; the
+row links to it rather than duplicating it.
+
+**It computes nothing.** The target is the one number the phone cannot work out
+for itself — it needs training history the device does not hold — so the row
+receives the finished `TargetView` that `food.tsx` already fetched for
+`RemainingBlock`. `lib/manualTarget.ts` and `lib/targetHistory.ts` keep owning
+parsing and the record. A second derivation would be a second answer to a
+question with one right answer.
+
+Three smaller decisions inside it worth recording:
+
+- **It sits BELOW the day stepper, not above it.** `view` is keyed to the day on
+  screen, so on yesterday the row shows *yesterday's* target; above the control
+  that chose the day it would read as "the" target and quietly be a different
+  number from the one the athlete means. That is the same failure `mealBudgetLine`
+  already guards by suppressing itself on any day but today.
+- **The target is now stated exactly once on the screen.** `RemainingBlock` grew
+  a `showTarget` prop, false on Food and true everywhere else. Today's
+  `MomentumCard` and `NutritionCard` have no row above them and rely on that
+  caption, so both branches are live — and both are asserted, because a mutation
+  hard-coding it to `false` would take the target off Today entirely while every
+  Food-side assertion stayed green.
+- **The header's old `Target` / `Set target` link is gone**, not kept beside the
+  row. One entry point, and the row states the number the word never did.
+
+**All four `TargetView` states render, and all four were checked for
+reachability** rather than assumed — `checking` (initial, and every day step),
+`unknown` (asked and could not be told), `none` (asked, no target), `set`. The
+`unknown` case is the one that matters and is never phrased as "Not set":
+telling an athlete who set a target on web to go and set one again, because this
+phone is in a basement, is the app being wrong rather than uninformed. That
+audit is the direct lesson of #583, which shipped an `empty` prop no code path
+could construct and whose test had been vacuously green for as long as it
+existed.
+
+### What was checked, and how
+
+Eight mutations, each applied to the shipped code and each confirmed to turn the
+suite **red on an assertion** rather than on a parse error — the distinction
+CLAUDE.md's "verify that a check can fail" section exists for, and one this run
+nearly got wrong: three of the eight first reported "red with 0 failing tests"
+because the harness grepped for a `✕` marker jest only prints in verbose mode.
+Re-run by hand, they were five genuine assertion failures. **The apparatus was
+the thing that needed checking, again.**
+
+The mutations: the row removed from the screen; Food dropped from the bar with
+Train restored; Food moved to the end of the bar; `train` dropped from
+`OFF_BAR_ROUTES`; `showTarget` defaulted to `false`; the `showTarget` guard
+removed so the caption always renders; `unknown` re-phrased as "Not set"; and
+the row's `onPress` stubbed out. Baseline green was re-established in the same
+session both before and after, and the restore was confirmed by re-running the
+suite rather than by grepping the files.
+
+The two existing tab-order assertions were **updated, never deleted** — they are
+what makes bar order load-bearing rather than incidental, and they should keep
+failing on a reorder, just against the right order. `lib/__tests__/tabBar.test.ts`
+gained one more: Food in slot two specifically, because the three assertions
+around it are all satisfied by any bar holding those five names, and appending is
+always the smaller diff for whoever reorders next.
+
+**Also corrected, and it was not this ticket's:**
+`docs/testing/functional-scenarios.md` described the tab bar as *"flat and
+type-only … a dot above the active tab … No icons"*. Every clause of that has
+been false since the redesign put icons back and moved the active mark to an
+underline. It was **a scenario that could not pass against the shipping app** —
+the mirror of a check that cannot fail, and just as useless, since anyone running
+the mobile-shell pass would have reported the real bar as a defect. Rewritten to
+describe what ships. The N176 scenario block was rewritten in place rather than
+having an N180 block appended beside it, so the doc describes one bar rather than
+two contradictory ones.
+
+### Open question this leaves
+
+**Where Train's sections land is #587's call, not this ticket's**, and until it
+lands Plan is unchanged and Train is deep-link-only. The two tickets share
+`lib/tabs.ts`; whichever landed second was to rebase onto the first, and this one
+landed first.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
