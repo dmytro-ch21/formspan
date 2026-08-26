@@ -40591,6 +40591,103 @@ lock/unlock threshold across durations (30s/90s/5min/30min), and whether
 `docs/testing/functional-scenarios.md` under "Locking the phone does not sign
 the athlete out (N190)".
 
+## 2026-08-26 — N187: the worker's own database gets its own role, and real migrations
+
+Follow-up to N141/#564. Two of the review's findings on that PR are now
+fixed rather than filed. **The ephemeral database was owned by the SAME
+Postgres role as the admin connection** — the worker's URL swapped only the
+database name, so isolation was by-name, not by-credential. **The ephemeral
+database was also never migrated** — a gate needing schema found none, which
+made the "no migration against a database the worker didn't create"
+non-regression only vacuously true.
+
+`Provision` now creates a per-run, non-superuser Postgres role
+(`NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION`) alongside the ephemeral
+database, makes it the database's owner, and hands the worker a connection
+string authenticating as that role — never the admin credentials.
+`Teardown` drops the database first, then the role (a role that still owns a
+database cannot be dropped), and `AuditResidue` checks both. The isolation
+claim was checked empirically against this project's own Postgres image
+before writing any code, not assumed: a fresh role with zero explicit grants
+CAN still open a bare connection to `vola_test` (Postgres grants `CONNECT`
+to `PUBLIC` by default, and an explicit per-role `REVOKE` does not override
+that — ACL checks are additive, not subtractive, confirmed by reverting a
+revoke and watching the connection still succeed), but it categorically
+CANNOT read, write, or create anything there, since table/schema privileges
+are not `PUBLIC` by default. So the real, achievable claim is "cannot touch
+data or schema in a database it didn't create", not "cannot open a TCP
+connection to it" — closing the latter would mean revoking `PUBLIC`'s
+server-wide grant on `vola_test`, invasive to a resource every session on
+this machine constantly uses, and deliberately out of scope.
+
+A new `MigrateBackend` applies the exact `.up.sql` files checked out inside
+the run's OWN clone — never `backend/migrations` from anywhere else — using
+`pgx` directly against the ephemeral database, in `QueryExecModeSimpleProtocol`
+rather than the default extended/prepared-statement mode (a migration file
+can be more than one statement, including dollar-quoted function bodies, and
+the extended protocol refuses more than one command per Parse/Bind cycle).
+Considered and rejected: shelling out to the cloned `backend/cmd/migrate`
+binary via `go run` — it would work (the ephemeral database is "local" by
+that tool's own check, since it shares a host with the admin connection),
+but reaching a second Go module's build from inside this one buys no
+isolation the direct-SQL approach doesn't already have, and costs every
+caller a `go` binary on `PATH` just to hand a gate a schema.
+
+Both new guards are mutation-tested, and one mutation caught a real bug in
+the test itself before the code: the first version of the role-isolation
+test built its cross-database probe by re-deriving the role's password from
+`ws.DBURL` but the database name from `admin`, and its "a refused connection
+is stronger isolation" fallback treated a resulting *authentication* failure
+as a *pass*. Simulating the old admin-credential-reuse behavior made the
+test pass falsely rather than fail — the tell that it was testing nothing.
+Fixed by first proving `ws.DBURL`'s credentials work against the run's own
+database, then reusing exactly those credentials (never re-derived) against
+the shared one; the same mutation now fails loudly. The migration-ordering
+test was mutation-checked too — reversing the sort order makes the second
+file's `ALTER` run before the first file's `CREATE TABLE`, and the test
+catches it.
+
+Not closing #564 with this PR either — #564 also names real worker
+sandboxing (N188/#604) as an open criterion, and this entry doesn't touch
+that.
+
+**Board note, unrelated to this ticket's own content:** at the time this was
+claimed, the board already carried five tickets `In Progress` (N176, N183,
+N187, N190, N191) against the `max_tickets_in_progress: 3` policy set in
+`.vola-agent/policy.json` on 2026-08-25 — over the cap before this one was
+even added. Claimed directly on the user's instruction in-session rather than
+by independently picking the board's top line, so the claim itself was
+authorized; the over-cap board state is recorded here because it is exactly
+the flood the policy exists to prevent, and nothing in this PR fixes it.
+
+`backend-reviewer` found one real blocking bug in the first version above,
+since fixed. **A failure between `CREATE ROLE` and the end of provisioning
+leaked the role (and, one step later, the database too)** — those branches
+only removed the clone directory and returned an error, so no `*Workspace`
+ever existed for a caller to `Teardown` or `AuditResidue`, and a role is
+cluster-global, invisible to any per-run check. Fixed with two cleanup
+helpers (`dropRole`, `dropDatabaseAndRole`) called from every fallible step
+after role creation, each one folded into the returned error rather than
+swallowed if the cleanup itself also fails. Directly unit-tested against
+real Postgres (`TestDropDatabaseAndRoleCleansUpBoth`,
+`TestDropRoleCleansUpARoleWithNoDatabase`), since forcing `Provision`'s own
+`CREATE DATABASE`/`ALTER DATABASE` calls to fail on cue isn't possible from
+outside — the ephemeral names carry a random suffix no caller can predict.
+
+Also from that review: `roleConnectionURL` no longer falls back to
+returning the admin URL unchanged on a parse failure — `pgx.Connect`
+accepts a `key=value` DSN this function's `net/url` parsing does not, so
+the old fallback was reachable and would have hemorrhaged admin
+credentials into a *"per-run"* connection string, silently, on the one path
+meant to prevent exactly that. It now returns an error and `Provision`
+fails closed. The package doc's isolation claim was also tightened: PUBLIC
+grants `TEMPORARY` as well as `CONNECT` by default, so a held connection
+under the per-run role can create a *temp* object (harmless to real data,
+but it blocks `DROP ROLE`) — `Teardown` now runs
+`pg_terminate_backend` for that role before dropping it, and the doc says
+"cannot create anything **durable**" rather than the broader claim it made
+before.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

@@ -237,3 +237,55 @@ func TestCredentialedCloneURLIsNotPersistedInWorkspace(t *testing.T) {
 		t.Fatalf("credentialed clone URL persisted into the workspace: %q", got)
 	}
 }
+
+func TestRoleConnectionURL(t *testing.T) {
+	got, err := roleConnectionURL("postgres://vola:vola_dev_only@localhost:5432/vola_test?sslmode=disable", "engine_role_1_ab", "sekret", "engine_run_1_ab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "postgres://engine_role_1_ab:sekret@localhost:5432/engine_run_1_ab?sslmode=disable"
+	if got != want {
+		t.Fatalf("roleConnectionURL = %q, want %q", got, want)
+	}
+	// The admin credentials must never survive into the run's own URL.
+	if strings.Contains(got, "vola_dev_only") || strings.Contains(got, ":vola@") {
+		t.Fatalf("admin credentials leaked into role URL: %q", got)
+	}
+}
+
+// TestRoleConnectionURLFailsClosedOnAnUnparseableAdminURL is the fix for the
+// blocking finding review raised: a parse failure must never fall back to
+// handing a caller the admin URL unchanged, which would be admin credentials
+// pointed at the admin's own database.
+func TestRoleConnectionURLFailsClosedOnAnUnparseableAdminURL(t *testing.T) {
+	_, err := roleConnectionURL("://not a valid url", "role", "pw", "db")
+	if err == nil {
+		t.Fatal("an unparseable admin URL was accepted rather than refused")
+	}
+}
+
+func TestQuoteLiteral(t *testing.T) {
+	if got := quoteLiteral("abc123"); got != "'abc123'" {
+		t.Fatalf("quoteLiteral(abc123) = %q", got)
+	}
+	if got := quoteLiteral("o'brien"); got != "'o''brien'" {
+		t.Fatalf("quoteLiteral did not double an embedded quote: %q", got)
+	}
+}
+
+func TestRandomHexIsNonEmptyAndVaries(t *testing.T) {
+	a, err := randomHex(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := randomHex(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a) != 32 || len(b) != 32 {
+		t.Fatalf("randomHex(16) lengths = %d, %d, want 32 hex chars each", len(a), len(b))
+	}
+	if a == b {
+		t.Fatal("two calls to randomHex(16) produced the same value")
+	}
+}
