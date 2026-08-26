@@ -808,8 +808,22 @@ Replaced the earlier single-set rule (`increase`/`repeat_consolidate`, now gone)
 
 **Auth & security**
 - Scoped to the caller — this reads training history, and `TestRecentEfforts_IsUserScoped` is the test that would catch it leaking.
-- Missing `exercise_ids` → `400`. More than 100 → `400`.
+- Missing `exercise_ids` → `400`. More than 100 → `400`. More than 500 `today_sets` entries → `400`.
 - The route must not shadow `GET /v1/sessions/{sessionID}`; both are live (verify with two unauthenticated calls, each `401` rather than one `404`).
+
+**In-session evidence (N191) — today's own sets, layered on top, never blended in**
+
+Reported from a device: logging a heavier set didn't change the recommendation for the exercise's next set, same session, because the endpoint only ever read completed history. `today_sets` closes that gap as an ADDITIONAL signal (`in_session_signal`) — the standing `code`/`reason`/`target_weight_kg`/`target_reps` stay purely history-derived, unaffected by anything in `today_sets`.
+
+- Log a working set meaningfully heavier (>10%) than the standing prescription, then request the suggestion for the same exercise, same session: `in_session_signal.code = in_session_above`, and `code`/`target_weight_kg`/`target_reps` are byte-identical to a request with no `today_sets` at all.
+- The mirror case, meaningfully lighter → `in_session_below`.
+- A single early set is enough — this is the ticket's own acceptance scenario. Not gated on "at least two sets": the signal only ever adds a sentence, never changes the prescription, so the mislabelled-warm-up risk that would justify such a gate doesn't apply the way it does to the stall check.
+- Within the 10% threshold → no signal. A delta must be **meaningful**, not merely nonzero.
+- Multiple `today_sets` entries for one exercise average together (`average_weight_kg`, `working_sets` in the response).
+- `no_history` and `not_applicable` — which leave `target_weight_kg` null — must never produce a signal even when `today_sets` is present: there is no numeric prescription for today's evidence to disagree with.
+- Malformed `today_sets` entries (bad float, missing colon, non-positive weight, `NaN`, `Inf`/`Infinity`, or a value past the 2000kg sanity ceiling) are dropped individually rather than failing the request — this is advisory data. **Found in review**: `NaN`/`Inf` parse cleanly as floats and are neither `<= 0`, so the original filter let them through, and a non-finite `average_weight_kg` reaching the JSON encoder corrupted the ENTIRE response (200 status already sent, then an empty body) rather than just the poisoned exercise. Test `today_sets=<id>:NaN` and `today_sets=<id>:Inf` explicitly, not just malformed strings.
+- A **drop** set must never be averaged into `today_sets`, on either client — a drop is always lighter than the set it hangs off by definition, so including it drags the mean below a `target_weight_kg` derived from the top set and can manufacture a false `in_session_below` note on a session that went exactly to plan. **Found in review.** Test: log a heavy working set followed by a drop, confirm no `in_session_below` appears.
+- **Known gap, recorded rather than solved**: a genuinely first-ever exercise gets no in-session awareness even after several heavy sets today, since `no_history` has nothing to compare against. Today's sets become tomorrow's history regardless.
 
 **Clients**
 - Starting a session from a template pre-fills **weight and reps**: the plan's prescription wins, the recommendation fills the gaps. Reps are filled now where they deliberately weren't before — under double progression the rep target is half the recommendation.
@@ -820,6 +834,9 @@ Replaced the earlier single-set rule (`increase`/`repeat_consolidate`, now gone)
 - **Recommendations must follow the exercise list, not just the initial page load.** Adding an exercise from the catalog mid-session has to fetch a suggestion for it. Fetching once on mount meant a freeform session — which starts empty, so the call asks about zero exercises — never showed a card for anything the athlete added. The refetch is keyed on the deduped, sorted exercise ids, so it fires once per change to *which movements are in the session*, not per set or per keystroke.
 - Web (`ProgressionCard`) shows the phase, the target as `weight × reps`, the reason verbatim, the rep-range track, and the evidence. The rep-range track sits in the *evidence* section and is correctly absent for a first-time exercise; the range still reaches the athlete through the reason text. The rep-range pips fill to `last_min_reps` — filling to the best set would explain the wrong thing.
 - Mobile shows the same recommendation compressed: phase, pips, target, one line of reason, one of evidence.
+- **In-session evidence reaches the request before a set has synced (N191).** Turn the API off, log a working set meaningfully heavier than the standing suggestion, turn it back on, and request the next suggestion for the same exercise, same session — `in_session_signal` must appear even though `ReplaceSets`'s push for that set only just succeeded, because `today_sets` is built from the local `sets` state (mobile) / local `sets` state (web), never looked up server-side.
+- Mobile refetches suggestions on ticking a set **done** (not on every keystroke, and not on un-ticking — that's a correction, not new evidence) and renders `in_session_signal.reason` as an additional line (`hintInSession`) beside the existing reason, never in place of it.
+- Web refetches on a `completedWorkingSetsKey` change (a completed working set's weight) in addition to the existing `exerciseKey` trigger, and renders `in_session_signal.reason` as an additional paragraph in `ProgressionCard`, never in place of the existing one. Typing into an unticked set's weight field must **not** refetch — same "not per keystroke" property `exerciseKey` already guarantees for the exercise list.
 - The apply control is hidden once the first set already carries both halves, and on a finished session. Judged on the first set specifically: a session mid-flight legitimately has later sets empty.
 - Rep ranges wider than the pip cap (endurance, 12–20) must degrade to a labelled bar (web) or text (mobile) rather than an uncountable row of dots.
 - Phase colour is never the only carrier of meaning — every phase states its name in full-contrast text. `--c-lime` on a light surface is 3.27:1, fine for a graphic and not for a word.

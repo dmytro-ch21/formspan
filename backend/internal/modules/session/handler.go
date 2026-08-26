@@ -5,6 +5,7 @@ import (
 
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -334,8 +335,78 @@ func parseDay(s string, loc *time.Location) (time.Time, bool) {
 // movements; anything larger is a scrape of the catalog.
 const maxSuggestionIDs = 100
 
-// Suggestions answers "what should I load today" for a list of exercises,
-// from what the caller actually did last time.
+// maxInSessionSetEntries bounds `today_sets` (below). A real session logs a
+// few dozen sets at most across every exercise in it; anything past this is
+// either a client bug or an attempt to make this endpoint do more work than
+// "what should I load today" ever needs to.
+const maxInSessionSetEntries = 500
+
+// maxInSessionWeightKg is a sanity ceiling on one `today_sets` entry, not a
+// real-world claim about the heaviest lift ever performed. The heaviest
+// competition deadlift on record is under 500kg; 2000kg leaves an enormous
+// margin while still ruling out the entries that matter here — a value near
+// math.MaxFloat64 that parses as an ordinary finite float but overflows to
+// +Inf the moment several of them are summed for the average.
+const maxInSessionWeightKg = 2000.0
+
+// parseInSessionWeights reads `today_sets`: a comma-separated list of
+// `<exercise_id>:<weight_kg>` pairs, one per already-logged WORKING set for
+// that exercise so far in the session making this request. See the N191 note
+// on Progress (progression.go) for why this travels in the request rather
+// than being looked up server-side from a session id.
+//
+// A malformed entry is dropped rather than failing the whole request: this
+// is advisory data (see Plan.InSessionSignal), and refusing a legitimate
+// suggestion because one entry didn't parse would be a worse outcome than
+// quietly reasoning from the entries that did. The one thing this refuses
+// outright is too MANY entries — a bound, not a validation.
+func parseInSessionWeights(raw string) (map[string][]float64, error) {
+	out := map[string][]float64{}
+	if raw == "" {
+		return out, nil
+	}
+	items := strings.Split(raw, ",")
+	if len(items) > maxInSessionSetEntries {
+		return nil, errors.New("too many today_sets entries")
+	}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		exID, wStr, ok := strings.Cut(item, ":")
+		if !ok {
+			continue
+		}
+		exID = strings.TrimSpace(exID)
+		w, err := strconv.ParseFloat(strings.TrimSpace(wStr), 64)
+		// NOT just `w <= 0`: that alone lets NaN and +Inf through, because
+		// both comparisons are false for them (`NaN <= 0` is false by IEEE
+		// 754, `+Inf <= 0` is false because +Inf is positive). ParseFloat
+		// happily parses "NaN"/"Inf"/"Infinity" — found by backend-reviewer
+		// on N191, and confirmed: `today_sets=squat:NaN` reached
+		// applyInSessionSignal, produced an AverageWeightKg of NaN, and
+		// WriteJSON's json.Encode failed AFTER WriteHeader(200) had already
+		// gone out — an unrecoverable 200 with an empty body for every
+		// exercise in the request, not just the poisoned one. maxInSessionWeightKg
+		// also closes the finite-but-enormous case: 500 entries near
+		// math.MaxFloat64 sum to +Inf even though every individual value
+		// parses as ordinary and finite.
+		if err != nil || w <= 0 || w > maxInSessionWeightKg ||
+			math.IsNaN(w) || math.IsInf(w, 0) || exID == "" {
+			continue
+		}
+		out[exID] = append(out[exID], w)
+	}
+	return out, nil
+}
+
+// Suggestions answers "what should I load today" for a list of exercises.
+// The prescription itself (Code/Reason/TargetWeightKg/TargetReps) is still
+// purely what the caller did LAST TIME — see the N191 note on Progress in
+// progression.go for why. `today_sets` layers an ADDITIONAL, separately
+// labelled signal on top, when the caller has already logged working sets
+// for the same exercise earlier in the session making this request.
 func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
@@ -366,6 +437,13 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 	// just doesn't narrow anything.
 	goal := strings.TrimSpace(r.URL.Query().Get("goal"))
 
+	todaySets, err := parseInSessionWeights(r.URL.Query().Get("today_sets"))
+	if err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"too many today_sets entries")
+		return
+	}
+
 	efforts, err := h.repo.RecentEfforts(r.Context(), claims.UserID, ids)
 	if err != nil {
 		writeErr(w, r, err)
@@ -385,6 +463,7 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		// such — no history, so no claim.
 		in := efforts[id]
 		in.ExerciseID, in.Goal = id, goal
+		in.InSessionWorkingWeightsKg = todaySets[id]
 
 		s := Suggestion{ExerciseID: id, Plan: Progress(in, now)}
 

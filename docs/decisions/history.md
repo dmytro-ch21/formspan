@@ -40903,6 +40903,145 @@ against curl. **An empty result is also an answer**, and a much more
 interesting one: it would mean the request genuinely never reaches the server,
 which no evidence gathered here can currently distinguish.
 
+## 2026-08-25 — N191: a suggestion now sees today's own sets, as a note beside the plan, never inside it
+
+Reported from a device: *"today I have done a larger weight but it was telling
+me to do based on past set... it should consider current as well."*
+`Handler.Suggestions` built its `ProgressionInput` purely from
+`RecentEfforts`/`BestOneRMs` — completed, synced history — and nothing read a
+set already logged earlier in the session currently open. A refetch on
+mobile's own focus effect proved this wasn't a caching bug: the server
+genuinely had no signal about today's in-progress sets.
+
+**The product decision, which the ticket asked for explicitly rather than
+just an implementation.** Double progression's whole philosophy, stated in
+`progression.go`'s own doc comment, is evidence over a SESSION's pattern,
+never one exceptional set — a strong day and a warm-up mislabelled as working
+look identical from a single row. So "should today count" was never the
+question (it's the most recent evidence there is); "how" was, given that
+philosophy. Two designs were on the table:
+
+1. Fold today's sets in as just another `SessionEffort` and let the existing
+   machinery (`readyForLoad`, `stalledSessionsAt`, the stall/deload branches)
+   reason over it the same way it reasons over a finished session.
+2. Surface today's own working sets as a **separate, explicitly labelled
+   signal**, alongside an unchanged, purely historical prescription.
+
+(1) was rejected on inspection, not preference: every one of those functions
+assumes a FINISHED session — a set count that won't grow, a last set that
+really was the last one — and an in-progress session violates that on every
+request before the final set of the day. Set 1 of 3, read through
+`readyForLoad` as if it were the whole session, is a session that "failed"
+the rep range by definition, on every suggestion asked for before the
+athlete has even attempted set 2. Blending it in would have made the
+determinism this module is built on worse, not better, for exactly the class
+of bug this ticket was filed about.
+
+(2) is what shipped. `Plan` gained `InSessionSignal` (nil, or
+`{code, reason, average_weight_kg, working_sets}` with
+`code ∈ {in_session_above, in_session_below}`) — its own Code/Reason pair, so
+it satisfies the "argue with the reason" contract independently of `Plan`'s
+own. `Code`, `Reason`, `TargetWeightKg` and `TargetReps` stay a pure function
+of `Recent`, unchanged; a client that never adopts the new field sees exactly
+the recommendation it always has. The signal fires when the mean weight of
+today's own already-logged WORKING sets (warm-ups and unticked sets excluded)
+sits more than 10% off `TargetWeightKg` — reusing `deloadFraction`'s own
+number rather than inventing a second unexplained threshold in the same file,
+on the reasoning that this signal should read as the same order of magnitude
+as a deload, not a hair-trigger on ordinary set-to-set noise.
+
+**Deliberately NOT gated on "at least two sets."** The stall check waits for
+three sessions before acting because acting wrongly moves real weight onto a
+bar. This signal never acts — it only shows a sentence — so the
+mislabelled-warm-up risk the ticket raised is priced very differently here:
+the worst a single bad data point can do is display a misleading FYI the
+athlete can ignore, never mis-load a plan. Requiring several sets before
+saying anything would only have made the signal slower than the bug report
+that asked for it, for no corresponding safety gain.
+
+**The wire shape**, since the whole point was "not require the whole session
+to sync": the client sends today's own working-set weights straight in the
+request, `today_sets=<exercise_id>:<weight_kg>,...` on the existing
+`GET /v1/sessions/suggestions`, not a `session_id` the server would look up.
+The authoritative copy of "what have I already lifted today" lives on the
+device — `apps/mobile/lib/db.ts` writes SQLite before anything syncs — and a
+set is real evidence whether or not `ReplaceSets`'s debounced push has landed
+yet. Reading it back out of `RecentEfforts` instead (which, incidentally,
+already **would** surface an in-progress session's synced sets as `Recent[0]`,
+since `SQLWorkingSet` has no filter on the owning session being finished)
+would have tied the signal to sync succeeding first — a dead zone would
+silently disable the one thing an athlete standing in it most needs.
+Malformed `today_sets` entries are dropped rather than failing the whole
+request (this is advisory data); more than 500 entries is refused
+(`maxInSessionSetEntries`).
+
+**Both clients wired in**, since mobile-first doesn't mean web-only-partial:
+mobile's `fetchSuggestions` call (already firing on `useFocusEffect`) now
+carries `sets`, and a second call fires from `toggleDone` specifically on the
+tick-to-done transition — the moment a set's weight becomes real evidence,
+not on every keystroke, and not on an un-tick (a correction, not new
+evidence). Web's effect stays keyed on `exerciseKey` (unchanged, still "one
+request per exercise-list change, not per keystroke") plus a new
+`completedWorkingSetsKey`, a stable proxy over completed-working-set weights
+so a finished set retriggers the fetch without every typed digit doing the
+same. Both render the note as an additional line beside the existing
+reason — `apps/mobile/app/session/[id].tsx`'s `hintInSession` and
+`ProgressionCard.tsx`'s `in_session_signal` paragraph — never replacing it.
+
+**What was measured.** `progression_test.go` pins the decision itself: the
+standing prescription is byte-identical with and without in-session evidence
+present (same `Code`/`TargetWeightKg`/`TargetReps` as the pre-N191 baseline
+test), a single early set is sufficient to surface the signal (the ticket's
+own acceptance scenario), multiple sets average correctly, a sub-threshold
+delta stays silent, and `no_history`/`not_applicable` — which leave
+`TargetWeightKg` nil — never invent a signal from thin air. The threshold
+check and the malformed-entry filter were both mutation-tested (comment out
+the guard, confirm the covering test goes red, restore, confirm green) rather
+than trusted on inspection. `pnpm run verify` is green; the full
+`go test -p 1 -timeout 3m ./...` against a fresh migrated `vola_test_n191`
+passes at 39 packages / 1 skip (`TestLiveComplete`, unchanged) — the same
+tripwire count this file already tracks.
+
+**Two bugs found in review, both fixed before merge.** `backend-reviewer`
+caught that `strconv.ParseFloat` happily parses `"NaN"`/`"Inf"`/`"Infinity"`,
+and the original `w <= 0` filter let every one of them through — a NaN
+comparison is always false under IEEE 754, and `+Inf` is positive. A single
+`today_sets=squat:NaN` reached `applyInSessionSignal`, produced a
+non-finite `AverageWeightKg`, and `apihttp.WriteJSON`'s `json.Encode` then
+failed **after** `WriteHeader(200)` had already gone out — an unrecoverable
+200 with an empty body for the WHOLE suggestions list, not just the poisoned
+exercise. Fixed at two independent layers: `parseInSessionWeights`
+(`handler.go`) now rejects `NaN`/`±Inf` and anything past a
+`maxInSessionWeightKg` sanity ceiling (2000kg — nowhere near a real lift, but
+finite enough that summing 500 of them can never overflow), and
+`applyInSessionSignal` itself (`progression.go`) independently checks the
+computed average and delta are finite before ever building a signal — two
+guards because the second function has no way to know a future caller
+reused it against input that skipped the first. Both mutation-tested.
+
+`frontend-reviewer` caught that both clients were including **drop sets** in
+`today_sets`, filtered only by `contributesVolume`/`completed && !warmup`. A
+drop is always lighter than the set it hangs off *by definition* — that's
+the whole reason `countsAsSet` (used everywhere else a "set" is counted, not
+just volume) excludes it — so a session that went exactly to plan, with a
+drop on the last set, would still pull the in-session average down and
+manufacture a false `in_session_below` note. Both clients now filter with
+`countsAsSet` semantics (mobile) or the equivalent explicit predicate (web),
+matching the historical side, where `TargetWeightKg` is effectively derived
+from the top set and a drop — always lighter — can never win that
+comparison anyway.
+
+**Known gap, recorded rather than solved here.** The signal only fires when
+there is already a numeric `TargetWeightKg` to compare against — a genuinely
+first-ever exercise (`no_history`) gets no in-session awareness even after
+several heavy sets today, since there is no historical prescription for that
+evidence to disagree with. Today's own sets become tomorrow's history either
+way, so this is a narrower gap than it sounds, but it is a real one: an
+athlete's very first working sets on a brand-new movement get no live
+feedback at all. Left out of scope rather than folded in, because "what
+counts as a baseline when there is no history" is a different product
+question from the one this ticket asked.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

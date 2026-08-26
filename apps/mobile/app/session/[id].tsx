@@ -507,6 +507,60 @@ export default function SessionScreen() {
 
   const queued = useRef<LoggedSet[] | null>(null);
 
+  /**
+   * Refreshes the progression suggestions shown next to each exercise.
+   *
+   * Extracted out of `load` so `toggleDone` can call it too — see N191. The
+   * standing prescription (code/reason/target) stays history-only, but this
+   * request also carries whatever of THIS session's own working sets are
+   * already logged, so the server can flag when today's own numbers
+   * disagree with it — see `fetchSuggestions`'s doc comment.
+   *
+   * `currentSets` is a parameter rather than read off `sets` state so a
+   * caller mid-commit (`toggleDone`, which updates state and then calls this)
+   * hands over the sets it just committed, not a stale render's.
+   */
+  const refreshSuggestions = useCallback(
+    async (sport: string, workoutID: string | null, currentSets: LoggedSet[]) => {
+      if (!userId) return;
+      let goal: string | null = null;
+      if (workoutID) {
+        // Resolved once per session, not once per call. `load` runs under
+        // useFocusEffect, so it re-fires every time you come back from the
+        // exercise picker or the rest timer — and a workout's goal cannot
+        // change mid-session, so re-fetching it is pure waste.
+        //
+        // The cache is consulted first and is usually enough: the plan is
+        // already on the phone, and since schema v6 it carries the goal.
+        // That also makes this work with no signal at all, where the
+        // network path would silently fall back to the general rep range.
+        if (goalRef.current.workoutID === workoutID) {
+          goal = goalRef.current.goal;
+        } else {
+          const local = (await cachedWorkouts(userId, sport).catch(() => []))
+            .find((w) => w.id === workoutID);
+          // Advisory: a template deleted since must not stop the
+          // suggestions appearing, it just costs the narrower range.
+          goal =
+            local?.goal ??
+            (await getWorkout(getToken, workoutID)
+              .then((w) => w.goal)
+              .catch(() => null));
+          goalRef.current = { workoutID, goal };
+        }
+      }
+      setSuggestions(
+        await fetchSuggestions(
+          getToken,
+          currentSets.map((x) => x.exercise_id),
+          goal,
+          currentSets,
+        ),
+      );
+    },
+    [getToken, userId],
+  );
+
   // Local first, always. The network can only ever *add* to what's on
   // screen — it is never the thing the screen waits for.
   const load = useCallback(async () => {
@@ -541,47 +595,7 @@ export default function SessionScreen() {
         .catch(() => {});
 
       // Advice, not content — it simply doesn't appear offline.
-      //
-      // The workout's goal picks the rep range the rule progresses inside, so
-      // this is fetched even though it costs a request: without it a mobile
-      // session would advance on the general 5-8 range while web advanced the
-      // same session on 3-5, and the two clients would quietly disagree about
-      // what the athlete is doing.
-      (async () => {
-        let goal: string | null = null;
-        if (s.workout_id) {
-          // Resolved once per session, not once per focus. `load` runs under
-          // useFocusEffect, so it re-fires every time you come back from the
-          // exercise picker or the rest timer — and a workout's goal cannot
-          // change mid-session, so re-fetching it is pure waste.
-          //
-          // The cache is consulted first and is usually enough: the plan is
-          // already on the phone, and since schema v6 it carries the goal.
-          // That also makes this work with no signal at all, where the
-          // network path would silently fall back to the general rep range.
-          if (goalRef.current.workoutID === s.workout_id) {
-            goal = goalRef.current.goal;
-          } else {
-            const local = (await cachedWorkouts(userId, s.sport).catch(() => []))
-              .find((w) => w.id === s.workout_id);
-            // Advisory: a template deleted since must not stop the
-            // suggestions appearing, it just costs the narrower range.
-            goal =
-              local?.goal ??
-              (await getWorkout(getToken, s.workout_id)
-                .then((w) => w.goal)
-                .catch(() => null));
-            goalRef.current = { workoutID: s.workout_id, goal };
-          }
-        }
-        setSuggestions(
-          await fetchSuggestions(
-            getToken,
-            s.sets.map((x) => x.exercise_id),
-            goal,
-          ),
-        );
-      })().catch(() => {});
+      refreshSuggestions(s.sport, s.workout_id, s.sets).catch(() => {});
 
       // Tell the orchestrator something may have changed; it decides whether
       // that warrants a run. This used to be a fire-and-forget sync on every
@@ -594,7 +608,7 @@ export default function SessionScreen() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, id, userId]);
+  }, [getToken, id, userId, refreshSuggestions]);
 
   // Runs on mount and again on every return from the exercise picker, which
   // appends its set server-side — without this the new set wouldn't appear.
@@ -815,6 +829,14 @@ export default function SessionScreen() {
       ? fillForward(marked, index, measuresForSet(sets[index], loadTypeOf(exerciseID), measuresFor))
       : marked;
     commit(next);
+    // Ticking a set is the moment its weight becomes real evidence for the
+    // REST of today — see N191. Only on the way to done: un-ticking is a
+    // correction, and refreshing suggestions off a row someone just decided
+    // didn't happen would show a signal built on a set that, as far as the
+    // athlete is concerned, never occurred.
+    if (now && session) {
+      refreshSuggestions(session.sport, session.workout_id, next).catch(() => {});
+    }
     // A haptic, not a sound. This fires 20+ times a session — more than
     // anything else the app does — and a chime that often is the one thing
     // guaranteed to wear out its welcome. A buzz is felt through a pocket,
@@ -1625,6 +1647,15 @@ export default function SessionScreen() {
                       {/* The reason, verbatim from the API. It's the whole
                           point: a number you can argue with. */}
                       <Text style={styles.hintReason}>{hint.reason}</Text>
+                      {/* N191 — an ADDITIONAL note, never a replacement for
+                          the line above. The target/reason above are still
+                          purely last time's numbers; this says when today's
+                          own sets disagree with them, and leaves the athlete
+                          to decide, exactly as the API's own doc comment
+                          promises. */}
+                      {hint.in_session_signal != null && (
+                        <Text style={styles.hintInSession}>{hint.in_session_signal.reason}</Text>
+                      )}
                       {hint.last_weight_kg != null && (
                         /*
                           Three kinds of number on one line, joined by three
@@ -2937,6 +2968,11 @@ const styles = StyleSheet.create({
   */
   hintReported: { color: vola.textMuted, fontStyle: 'italic' },
   hintReason: { fontSize: 12, color: vola.textMuted },
+  // N191's in-session note — deliberately NOT `hintReason`'s muted tone. It's
+  // an FYI the standing prescription above hasn't seen, and reads as one:
+  // `vola.text`, the app's primary colour (already load-bearing elsewhere
+  // in this file), rather than a second muted line easy to skim past.
+  hintInSession: { fontSize: 12, color: vola.text, fontStyle: 'italic', marginTop: 2 },
   hintApply: {
     borderRadius: 999,
     paddingVertical: 10,

@@ -209,6 +209,39 @@ export default function SessionPage({
   );
 
   /**
+   * Today's own sets the athlete would call a SET — completed, not a
+   * warm-up, not a drop, weight recorded — the evidence `fetchSuggestions`
+   * sends on as `todaySets`. See N191.
+   *
+   * A drop is excluded deliberately, not just for parity with `countsAsSet`:
+   * it is always lighter than the set it hangs off by definition, so
+   * averaging it in would drag the mean below a `target_weight_kg` derived
+   * from the top set — a false "lighter day" note on a session that went
+   * exactly to plan. Found in review.
+   */
+  const completedWorkingSets = useMemo(
+    () =>
+      sets.filter(
+        (s) =>
+          s.completed && s.set_type !== "warmup" && s.set_type !== "drop" && s.weight_kg != null,
+      ),
+    [sets],
+  );
+  /**
+   * A stable key over `completedWorkingSets`, for the same reason
+   * `exerciseKey` above is one: `completedWorkingSets` is a new array
+   * reference on every render, and depending on it directly would refetch on
+   * every keystroke — exactly what `exerciseKey`'s own comment exists to
+   * avoid. This changes only when a working set's completed weight actually
+   * changes; editing an UNTICKED set, or anything about a warm-up, leaves it
+   * untouched.
+   */
+  const completedWorkingSetsKey = useMemo(
+    () => completedWorkingSets.map((s) => `${s.exercise_id}:${s.weight_kg}`).join(","),
+    [completedWorkingSets],
+  );
+
+  /**
    * Recommendations follow the exercise list, not just the initial load.
    *
    * This used to live inside `load`, which runs once on mount — so an exercise
@@ -226,6 +259,13 @@ export default function SessionPage({
    * Keyed on `exerciseKey`, so this is one request per change to the movement
    * list — not one per set, per row, or per render. That distinction has
    * bitten this codebase before.
+   *
+   * Also keyed on `completedWorkingSetsKey` (N191): finishing a heavier set
+   * than the standing plan expected should update the card for the REST of
+   * this exercise's sets without waiting for something else to trigger a
+   * refetch, and that key only moves on the same kind of "structural" change
+   * `exerciseKey` already gates on — a working set's completed weight, not
+   * every keystroke.
    */
   useEffect(() => {
     // Nothing to ask about. Deliberately does not clear the map: with no
@@ -234,12 +274,18 @@ export default function SessionPage({
     if (!exerciseKey) return;
 
     const controller = new AbortController();
-    fetchSuggestions(getToken, exerciseKey.split(","), goal, controller.signal)
+    fetchSuggestions(getToken, exerciseKey.split(","), goal, completedWorkingSets, controller.signal)
       // Advice, not content: a failed lookup leaves the session usable.
       .then(setSuggestions)
       .catch(() => {});
     return () => controller.abort();
-  }, [exerciseKey, goal, getToken]);
+    // completedWorkingSets is intentionally left out of the deps below: it is
+    // a fresh array reference on every render (see its own useMemo above), so
+    // depending on it directly would refetch on every keystroke.
+    // completedWorkingSetsKey is the stable proxy — the effect still reads the
+    // freshest completedWorkingSets value from whichever render it fires on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exerciseKey, goal, getToken, completedWorkingSetsKey]);
 
   const pending = useRef<LoggedSet[] | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);

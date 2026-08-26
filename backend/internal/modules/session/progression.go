@@ -39,6 +39,56 @@ import (
 // argue with, and every number it uses is in the response beside it. No model,
 // no hidden weighting — the standing rule for anything in this product that
 // tells someone what to do.
+//
+// # N191 — does today's own session count as evidence against itself
+//
+// Reported from a device: an athlete moved a meaningfully heavier weight on
+// an early set, and the suggestion for the exercise's NEXT set still read
+// last session's number — because RecentEfforts/BestOneRMs only ever query
+// completed, synced history. Nothing before this section read a set already
+// logged earlier in the session currently open.
+//
+// The product question was never "should today count" — it's the most
+// recent evidence there is — but "how", given this file's own standing rule
+// two paragraphs up: double progression reasons over a SESSION's pattern,
+// never one exceptional set, because a strong day and a warm-up mislabelled
+// as working look identical from a single row (see workingSetsWithWeight).
+// Folding today's sets in as just another SessionEffort and letting the
+// existing machinery run over it — readyForLoad, stalledSessionsAt, and the
+// rest — was considered and rejected: those functions assume a FINISHED
+// session, and an in-progress one violates that on every request before the
+// last set of the day. Set 1 of 3, read through readyForLoad as if it were
+// the whole session, is a session that "failed" the rep range by
+// definition, on every suggestion asked for before the athlete has even
+// attempted set 2.
+//
+// The decision: today's own working sets are surfaced as a SEPARATE,
+// explicitly labelled signal (Plan.InSessionSignal) alongside the unchanged,
+// purely historical prescription — never blended into TargetWeightKg or
+// TargetReps, and never a new SuggestionCode a client would have to branch
+// on as though it were a phase of the rule. Two things follow from that
+// split:
+//
+//   - The existing prescription's determinism is untouched. Code, Reason,
+//     TargetWeightKg and TargetReps stay a pure function of Recent, exactly
+//     as before this section existed — a client that hasn't been updated
+//     for N191 sees exactly the recommendation it always did.
+//   - The signal is deliberately NOT gated on "at least two sets" the way
+//     the stall check gates on three sessions. Requiring several sets
+//     before saying anything would guard against the mislabelled-warm-up
+//     case by making the signal slower than the thing it exists to report
+//     — and that guard is unnecessary here precisely because the signal
+//     never changes the prescription. The worst a mislabelled set can do is
+//     show a misleading FYI the athlete can ignore; it can never mis-load a
+//     plan. Contrast the stall check, where the same mistake would move
+//     real weight onto a bar.
+//
+// What this explicitly does NOT do, so a future change doesn't "fix" it
+// back into the thing it was written to avoid: it does not average today's
+// sets into the plan, it does not choose between today's and last session's
+// number on the athlete's behalf, and it changes nothing a client that
+// ignores the new field ever sees. See applyInSessionSignal, run through a
+// defer on every path out of Progress so no branch above has to remember it.
 
 // SuggestionCode is the machine-readable outcome. Clients branch on this;
 // they must not pattern-match Reason, which is prose and may change.
@@ -144,6 +194,15 @@ const progressionWindow = stallSessions
 // the ground is regained in a session or two rather than a block.
 const deloadFraction = 0.10
 
+// inSessionSignalThresholdFraction is how far today's own average has to sit
+// from the historically-derived TargetWeightKg before InSessionSignal is
+// worth surfacing at all — see the N191 note above. Reuses deloadFraction's
+// own number rather than inventing a second, unexplained threshold in the
+// same file: ten percent is already this file's answer to "how big a move is
+// worth acting on," and this signal is meant to read as the same order of
+// magnitude as a deload, not a hair-trigger on ordinary set-to-set noise.
+const inSessionSignalThresholdFraction = 0.10
+
 // maxIncrementFraction caps a jump relative to the bar.
 //
 // A fixed 2.5kg is 1.8% of a 140kg bench and 6% of a 40kg one — the same
@@ -192,6 +251,51 @@ type ProgressionInput struct {
 	Goal string
 	// Most recent first, capped at what the stall check needs.
 	Recent []SessionEffort
+
+	// InSessionWorkingWeightsKg is today's own already-logged WORKING sets
+	// for this exercise, so far, in THIS session — see the N191 note above.
+	//
+	// Client-supplied, not looked up: the authoritative copy of "what have I
+	// already lifted today" lives on the device (mobile writes SQLite first,
+	// see apps/mobile/app/session/[id].tsx), and a set is real evidence
+	// whether or not it has reached this server yet. Reading it back out of
+	// RecentEfforts instead would tie this signal to sync succeeding first —
+	// exactly the dependency N191 forbids, since a dead zone would silently
+	// disable the one thing an athlete standing in it most needs to see.
+	//
+	// Only the WEIGHT of each set travels, not the whole Set: weight is what
+	// the reported bug was about ("I did a larger weight"), and it's the one
+	// number this signal can compare against TargetWeightKg without
+	// inventing a second axis — reps, effort — that it does not reason
+	// about.
+	InSessionWorkingWeightsKg []float64
+}
+
+// InSessionSignalCode flags when today's own performance disagrees with the
+// standing, history-derived prescription above. A separate type from
+// SuggestionCode on purpose — see the N191 note on Progress for why this is
+// an additional field rather than a new value of Code.
+type InSessionSignalCode string
+
+const (
+	// InSessionAbove: today's own working sets, so far, average meaningfully
+	// heavier than the standing prescription.
+	InSessionAbove InSessionSignalCode = "in_session_above"
+	// InSessionBelow: the mirror case — today reads meaningfully lighter.
+	InSessionBelow InSessionSignalCode = "in_session_below"
+)
+
+// InSessionSignal is the note layered on top of a history-derived plan when
+// today's own working sets disagree with it — see the N191 doc note on
+// Progress. It carries its own Code and Reason so it satisfies the same
+// "argue with the reason" contract as Plan itself, plus exactly the numbers a
+// client needs to show why: what today averaged, and how many sets that
+// average is built from.
+type InSessionSignal struct {
+	Code            InSessionSignalCode `json:"code"`
+	Reason          string              `json:"reason"`
+	AverageWeightKg float64             `json:"average_weight_kg"`
+	WorkingSets     int                 `json:"working_sets"`
 }
 
 // Plan is a progression recommendation: what to load, for how many reps, and
@@ -233,6 +337,16 @@ type Plan struct {
 	SessionsAtLoad int  `json:"sessions_at_load"`
 	// True when every working set finished at or above the target reserve.
 	HitTargetEffort bool `json:"hit_target_effort"`
+
+	// InSessionSignal flags when today's own already-logged working sets
+	// (ProgressionInput.InSessionWorkingWeightsKg) diverge meaningfully from
+	// TargetWeightKg above — see the N191 note on Progress. Nil covers three
+	// cases alike: nothing logged yet today, no numeric prescription to
+	// compare against (SuggestNoHistory, SuggestNotApplicable), or today
+	// agrees closely enough with the plan that flagging it would be noise. A
+	// client that ignores this field sees exactly the recommendation it
+	// always has — this never rewrites TargetWeightKg or TargetReps itself.
+	InSessionSignal *InSessionSignal `json:"in_session_signal"`
 }
 
 // Suggestion is what a client shows next to an exercise before its first set:
@@ -260,9 +374,15 @@ type Suggestion struct {
 // Order is deliberate and mirrors how a coach reasons: is this even a loaded
 // lift, is there history, is that history still current, has it stalled, did
 // the last session complete the range, and only then — add reps or add load.
-func Progress(in ProgressionInput, now time.Time) Plan {
+//
+// p is a NAMED return specifically so applyInSessionSignal can run through a
+// single deferred call and see whatever p every branch below returns,
+// without every `return p` having to remember to route through it — see the
+// N191 note above.
+func Progress(in ProgressionInput, now time.Time) (p Plan) {
 	rng := repRangeForGoal(in.Goal)
-	p := Plan{RepRange: rng}
+	p = Plan{RepRange: rng}
+	defer func() { p = applyInSessionSignal(in, p) }()
 
 	if in.LoadType != "weight_reps" {
 		p.Code = SuggestNotApplicable
@@ -414,6 +534,74 @@ func Progress(in ProgressionInput, now time.Time) Plan {
 			"Repeat it until every set is comfortable, then the reps move."
 		return p
 	}
+}
+
+// applyInSessionSignal is Progress's last step on every path — see the N191
+// note above Progress and the doc comments on InSessionSignal and
+// ProgressionInput.InSessionWorkingWeightsKg.
+//
+// It may only ADD p.InSessionSignal. Every other field on p is left exactly
+// as the branch above computed it — Code, Reason, TargetWeightKg and
+// TargetReps stay a pure function of in.Recent, never of
+// in.InSessionWorkingWeightsKg. That split is the whole decision this
+// function exists to enforce, not an implementation detail of it.
+func applyInSessionSignal(in ProgressionInput, p Plan) Plan {
+	// Nothing to compare against — no numeric prescription (SuggestNoHistory
+	// and SuggestNotApplicable both leave TargetWeightKg nil) — or nothing
+	// logged yet today. Both are silence, not a signal.
+	if p.TargetWeightKg == nil || len(in.InSessionWorkingWeightsKg) == 0 {
+		return p
+	}
+	standing := *p.TargetWeightKg
+	if standing <= 0 {
+		return p
+	}
+
+	var sum float64
+	for _, w := range in.InSessionWorkingWeightsKg {
+		sum += w
+	}
+	n := len(in.InSessionWorkingWeightsKg)
+	avg := sum / float64(n)
+	// A second, independent guard against a non-finite average — the wire
+	// parser (handler.go's parseInSessionWeights) already refuses NaN, +/-Inf
+	// and anything past maxInSessionWeightKg per set, but that alone doesn't
+	// stop many ordinary, individually-finite values from OVERFLOWING to
+	// +Inf once summed (found in review, N191): this function has no way to
+	// know a future caller reused it against input that skipped that parser,
+	// and a non-finite AverageWeightKg reaching apihttp.WriteJSON fails the
+	// JSON encode AFTER the 200 status line is already written, corrupting
+	// the WHOLE response — every exercise in the request, not just this one.
+	if math.IsNaN(avg) || math.IsInf(avg, 0) {
+		return p
+	}
+
+	delta := (avg - standing) / standing
+	if math.IsNaN(delta) || math.IsInf(delta, 0) {
+		return p
+	}
+	if math.Abs(delta) < inSessionSignalThresholdFraction {
+		return p
+	}
+
+	sets := plural(n, "set")
+	if delta > 0 {
+		p.InSessionSignal = &InSessionSignal{
+			Code: InSessionAbove, AverageWeightKg: avg, WorkingSets: n,
+			Reason: "Today's own " + sets + " so far are meaningfully heavier " +
+				"than the plan above, which is still built from last time. " +
+				"The number here hasn't changed — that's your call to make if " +
+				"today's the real one.",
+		}
+	} else {
+		p.InSessionSignal = &InSessionSignal{
+			Code: InSessionBelow, AverageWeightKg: avg, WorkingSets: n,
+			Reason: "Today's own " + sets + " so far are meaningfully lighter " +
+				"than the plan above, which is still built from last time. " +
+				"Could be a lighter day — the number here hasn't changed.",
+		}
+	}
+	return p
 }
 
 // workingSetsWithWeight filters to the sets a decision can be made from.
