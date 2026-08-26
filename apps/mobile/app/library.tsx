@@ -21,7 +21,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { transportDiagnosis } from '@/lib/apiError';
+import { ApiError, transportDiagnosis } from '@/lib/apiError';
 import { getStanding } from '@/lib/bjj';
 import { stillWanted } from '@/lib/inflight';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -116,9 +116,16 @@ function describeError(err: unknown): string {
   const diagnosis = transportDiagnosis(err);
   if (diagnosis) return `${diagnosis} Pull down to try again.`;
 
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/\(401\)/.test(msg)) return 'Your session expired. Sign in again.';
-  return msg;
+  // Found under N62: this used to grep the error MESSAGE for the literal
+  // substring "(401)", which only ever matched because `fetchExercises`
+  // hand-rolled that exact string into a bare `Error`. Now that it throws
+  // `ApiError` through `apiRequest` — carrying the real status rather than a
+  // string baked at the call site — checking the status is both the more
+  // robust answer and the only one that still works: the server's own
+  // message never contained "(401)" to begin with.
+  if (err instanceof ApiError && err.status === 401) return 'Your session expired. Sign in again.';
+
+  return err instanceof Error ? err.message : String(err);
 }
 
 /**
