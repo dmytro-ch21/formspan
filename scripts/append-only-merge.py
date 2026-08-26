@@ -363,9 +363,21 @@ def install() -> int:
     # %O %A %B %L %P %X %S %Y — ancestor, ours, theirs, marker size, path,
     # and the three conflict labels git would have used itself.
     command = "python3 scripts/append-only-merge.py %O %A %B %L %P %X %S %Y"
+
+    # `.driver` FIRST, and the order is load-bearing. A half-registered driver
+    # — `.name` present, `.driver` absent — does not degrade to a normal merge:
+    # git REFUSES outright with `fatal: custom merge driver append-only lacks
+    # command line`, exit 128, and no merge of that path is possible at all.
+    # That is strictly worse than the conflict this exists to remove, and it is
+    # reachable by an install interrupted between two `git config` calls.
+    #
+    # Measured both states rather than reasoned about: `.name` without
+    # `.driver` fatals; `.driver` without `.name` merges perfectly, because
+    # `.name` is only a human-readable description. So writing `.driver` first
+    # makes every partial state a working state.
     for key, value in (
-        (f"merge.{DRIVER_NAME}.name", "keep both sides when both only appended"),
         (f"merge.{DRIVER_NAME}.driver", command),
+        (f"merge.{DRIVER_NAME}.name", "keep both sides when both only appended"),
         # Without this, `git checkout --merge` and friends fall back to the
         # built-in driver silently.
         (f"merge.{DRIVER_NAME}.recursive", "binary"),
@@ -687,6 +699,24 @@ def _end_to_end() -> None:
         repo, code = _two_branch_repo(tmp, "text", base, ours, theirs)
         check("end to end: WITHOUT the attribute the same merge conflicts",
               code != 0, "the driver is not what resolved case 1")
+
+    # An install interrupted between two `git config` calls must not be worse
+    # than no install. `.name` without `.driver` makes git REFUSE the merge
+    # (`fatal: … lacks command line`, exit 128) — no merge of that path is
+    # possible at all. `install()` therefore writes `.driver` first, and this
+    # asserts the property that makes that safe.
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _Repo(tmp, f"merge={DRIVER_NAME}")
+        repo.git("config", "--unset", f"merge.{DRIVER_NAME}.name")
+        repo.commit(base, "base")
+        repo.git("checkout", "-q", "-b", "theirs")
+        repo.commit(theirs, "theirs")
+        repo.git("checkout", "-q", "main")
+        repo.commit(ours, "ours")
+        code = repo.git("merge", "--no-edit", "theirs").returncode
+        check("end to end: `.driver` without `.name` still works", code == 0)
+        check("end to end: and it still keeps both entries",
+              "## B" in repo.doc() and "## C" in repo.doc())
 
 
 def _union_is_wrong() -> None:

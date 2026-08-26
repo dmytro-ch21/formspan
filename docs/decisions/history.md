@@ -41674,6 +41674,50 @@ merge that GitHub reported as `CONFLICTING` resolves clean, with **zero lines
 lost from base, ours or theirs** — checked by set difference, not by reading the
 diff.
 
+### The live A/B, and the two things it found that reasoning had not
+
+The synthetic cases prove the rule; they say nothing about the wiring. So the
+same merge was run twice on the real 41,000-line file, two branches off `main`
+each appending an entry at the same anchor, changing only whether the driver was
+registered:
+
+- **driver absent** — `CONFLICT (content): Merge conflict in
+  docs/decisions/history.md`, `UU` in `git status`. Today's behaviour.
+- **driver present** — `Auto-merging`, exit 0, both entries present exactly
+  once, ours above theirs, gap list still last, shape check green.
+
+And the refusal, on the same file: both branches editing one existing entry's
+heading produced an ordinary conflict with git's own labels (`HEAD`, the base
+SHA, `demo-d`) at the requested marker size. **The same case under
+`merge=union` merged clean and left the entry carrying two contradictory
+headings**, with nothing marking it — the rejection, reproduced on the real
+document rather than argued.
+
+Two defects surfaced only because this was run rather than reasoned about, and
+both were in the parts that felt obviously right:
+
+- **A half-registered driver is worse than none.** `merge.<name>.name` set with
+  `.driver` missing does not degrade to a normal merge — git refuses outright:
+  `fatal: custom merge driver append-only lacks command line`, exit 128, and no
+  merge of that path is possible at all. That state is reachable from an install
+  interrupted between two `git config` calls, and the first version wrote
+  `.name` first. Measured the other way too: `.driver` without `.name` merges
+  perfectly, because `.name` is only a description. So the install writes
+  `.driver` first, and a self-test case holds the property that makes it safe.
+  The claim being repaired — *"a missing install costs the benefit, never
+  correctness"* — is true of the fully-absent state and was false of the partial
+  one, which is exactly the kind of gap a written argument does not surface.
+
+- **The shape check's first act was a false positive, on the commit that added
+  it.** This entry quotes a diff3 hunk, so its own fenced block contains a
+  column-0 `## Open items …` line and four column-0 conflict markers — and a
+  fence-blind check reported all five. That is the cry-wolf shape
+  `check-verify-chain.py` warns about, in a repo whose narrative is largely
+  *about* merges. The check skips fenced blocks now, blanking those lines rather
+  than dropping them so reported line numbers stay real, and `--self-test`
+  holds both directions: a fenced example is not a finding, an unfenced decoy
+  still is.
+
 ### Installation, and how it fails
 
 `.gitattributes` is versioned; the driver definition is not, so `pnpm install`
