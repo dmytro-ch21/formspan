@@ -41042,6 +41042,155 @@ feedback at all. Left out of scope rather than folded in, because "what
 counts as a baseline when there is no history" is a different product
 question from the one this ticket asked.
 
+## 2026-08-26 — N188: worker execution gets a real sandbox, not just an env allowlist
+
+Follow-up to N141/#564, closing the last of that PR's own criteria: ac-verifier's
+finding was that "no production secret is readable from a worker" was true of
+the environment and the git clone, but not of the PROCESS itself — an
+unsandboxed worker inherits its host user's entire filesystem view regardless
+of its own env, so it could read `backend/.env.staging.local` from the primary
+checkout, `~/.netrc`, or anything else the host user can reach, by absolute
+path.
+
+`engine/internal/worker/sandbox.go` closes it: `Workspace.RunSandboxed` runs a
+command inside a Docker container whose ONLY visible host path is bind-mounted
+from that run's own workspace directory — a path outside it does not
+merely fail an env check, it does not exist in the sandboxed process's mount
+namespace. Proven by attempting the escape (mirroring
+`TestGitignoredSecretsCannotReachAWorkspace`'s pattern): a secret file planted
+outside the workspace, at a path shaped exactly like the primary checkout's
+own `backend/.env.staging.local`, is unreadable from inside the sandbox, with
+a positive control (`TestSandboxCanReadAndWriteInsideTheWorkspace`) proving the
+sandbox can still read/write its OWN files — without it, a sandbox that
+reached nothing would pass the escape test vacuously.
+
+Two things a real sandbox has to get right that a bare env allowlist never had
+to:
+
+- **Go's build/module caches are redirected INSIDE the workspace
+  (`/workspace/.sandbox-cache/...`), never mounted from the host's real
+  GOCACHE/GOMODCACHE.** N141's own review flagged sharing those as an accepted
+  cross-run trust link for the *pre-sandbox* worker; a real sandbox does not
+  carry that link forward, because mounting them would be a second, silent way
+  to reach outside the workspace — exactly what this file exists to close.
+  The cost is real: a fresh workspace's first sandboxed Go command pays a cold
+  cache.
+- **DATABASE_URL/TEST_DATABASE_URL have "localhost"/"127.0.0.1" rewritten to
+  `host.docker.internal`.** A container has its OWN loopback, separate from
+  the host's, so the run's own ephemeral database — created by N187's
+  work, on the host — would otherwise be unreachable from inside the very
+  sandbox meant to run gates against it. Verified both the rewrite and the
+  actual reachability against this project's real local Postgres
+  (`TestSandboxCanReachTheHostsEphemeralDatabase`), not assumed from reading
+  Docker's docs.
+
+**A real, sharp, host-specific trap surfaced while building this, and cost a
+confusing first test failure before it was diagnosed**: this host's Colima
+config shares only `$HOME` into its Docker VM (`mounts: []` in
+`~/.colima/default/colima.yaml`, "Colima default behaviour: $HOME is mounted
+as writable"). A bind mount from anywhere else — `t.TempDir()`'s
+`/var/folders/...` among them — comes back **silently empty** rather than
+erroring: measured directly, `docker run -v <temp-dir>:/workspace alpine ls
+/workspace` showed nothing, while the host side plainly had a file. The
+downstream symptom was a plain "no such file" from the test's own `cat`
+command, which read as a bug in the test rather than in where its WorkRoot
+was rooted. `RunSandboxed` now guards this generically (`verifyMount` checks
+for `.git`, present in every workspace Provision creates, before running
+anything else, and fails with a message naming the actual cause) rather than
+letting a caller's own command fail confusingly; the test suite itself moved
+its `WorkRoot` to a `$HOME`-scoped directory. Recorded in CLAUDE.md's Known
+gotchas too, since this is a property of Docker hosts in general (Docker
+Desktop and native Linux Docker typically share any path) that will keep
+being a fresh surprise on a Colima-backed one.
+
+**Mutation-tested, and the mutation itself needed two attempts to be
+meaningful.** The first mutation — bind-mounting the workspace's PARENT
+directory at a SEPARATE container path (`/outside`) — did NOT make the
+escape test fail, because the test passes the exact HOST absolute path to
+`cat`, and Docker only ever exposes a bind mount at whatever container path
+it was given, never at the host's own path string, so mounting more content
+at a *different* location doesn't make the literal secret path readable. The
+second, realistic mutation — mounting the workspace's parent at ITS OWN
+host path (`-v X:X`, the shape a "just share everything for convenience" bug
+would actually take) — did make the exact secret path readable inside the
+container, and the test caught it immediately. Restored and reconfirmed
+green, byte-identical to the committed file. The pre-flight mount guard was
+verified the same way: run against a deliberately wrong (`t.TempDir()`-based)
+WorkRoot and confirmed it produces the clear, named error rather than a
+downstream "no such file".
+
+**What is deliberately left open, and why, rather than absorbed silently.**
+Network egress from inside the sandbox is Docker's ordinary default (bridge)
+— reachable to the internet and, via `host.docker.internal`, to the host's
+own ports. Restricting that to an allowlist of legitimate hosts needs an
+application-level policy (which external hosts are legitimate — the
+workspace's own database, a module proxy, possibly the GitHub API) that does
+not exist yet, and enforcing it needs either a filtering proxy or
+container-level firewall rules — a distinct, nontrivial piece of work.
+Filed as N196/#622 rather than done here, per the criterion's own "either
+addressed here, or explicitly deferred with a stated reason."
+
+**Also deliberately out of scope**: wiring `RunSandboxed` into
+`devengine.RunGate`, which still shells out directly on the host. #604's own
+stated scope is `engine/internal/worker`, and every other piece of this
+package (`Provision`, `EnforceBudget`, `MigrateBackend`) has been built and
+tested with no live caller yet, same as this — the dispatcher that would
+actually drive gates through a real workspace is blocked on N145 (the GitHub
+App/org), not on anything in this package.
+
+`backend-reviewer` found two real blocking bugs in the first version above,
+since fixed. **A cancelled run orphaned its container.** `exec.CommandContext`
+SIGKILLs the `docker` CLI client on cancellation, but the daemon keeps the
+CONTAINER running regardless — `--rm` only fires when the container's own
+process exits on its own, so a wall-time budget cancel against a hung
+sandboxed command (this engine's normal way for a hung gate to die) would
+leak a running container the residue audit never sees. Fixed by naming every
+container and setting `cmd.Cancel` to force-remove it by name before killing
+the client; confirmed by cancelling a real 30-second sleep mid-flight and
+checking the Docker daemon directly for a survivor
+(`TestCancelledRunDoesNotLeaveAnOrphanedContainer`) — mutation-verified too:
+removing the `cmd.Cancel` line reproduced a real orphaned container
+(`engine-sandbox-44-1`, cleaned up by hand), and restoring it made the test
+pass again. **Host-shaped `PATH`/`HOME`/`TMPDIR`/`GOPATH` were being forwarded
+verbatim from macOS into the Linux container.** None of the tests caught this
+because they all ran `cat`/`sh`/`bash`, found via any reasonable `PATH` — the
+first real Go gate wired through this would have failed confusingly
+("go: command not found", or a temp-dir error) on what would read as a bug in
+the gate rather than in the sandbox. `sandboxEnv` now drops all four,
+letting the image's own defaults stand; `GOMODCACHE` was already pinned
+independently, so dropping `GOPATH` doesn't disturb it.
+
+Smaller fixes from the same review: a bare `NAME` (no `=`) in `env` is now
+dropped rather than forwarded — passed through, it becomes `docker run -e
+NAME`, which tells Docker to copy `NAME`'s value from the docker CLI's OWN
+environment, exactly the implicit host-env channel this file's doc comment
+claims is closed; `verifyMount` now distinguishes a genuine empty-mount
+(`test -e`'s exit 1) from any OTHER docker failure (daemon down, image pull
+failing) instead of misdiagnosing every failure as the same Colima trap;
+`rewriteHostForSandbox` returns a non-matching URL completely unchanged
+rather than re-serialized through `net/url`, and now also recognizes `::1`;
+and the mount-verification check is now cached per `Workspace` (an
+`atomic.Bool`) since the property it checks is fixed for the workspace's
+whole lifetime, so repeat `RunSandboxed` calls on the same workspace no
+longer pay a second container just to re-confirm it.
+
+`ac-verifier` also caught something the first version missed: two of the
+new tests baked in an assumption specific to THIS host's Colima config.
+`TestSandboxCanReachTheHostsEphemeralDatabase` depended on
+`host.docker.internal` resolving, which native Linux Docker (what CI's
+`ubuntu-latest` runners use) does not do by default — fixed by always
+passing `--add-host host.docker.internal:host-gateway` to `docker run`
+(verified as a no-op on this host, where it already resolved). And the
+original `TestVerifyMountCatchesAWorkRootDockerCannotShare` asserted that a
+`t.TempDir()`-based `WorkRoot` fails — true only on Colima's restrictive
+sharing; native Linux Docker and Docker Desktop for Mac both share more by
+default, so the same assertion could flip to a false failure on a different
+Docker host. Replaced with
+`TestVerifyMountCatchesAGenuinelyEmptyWorkspace`, which points at a
+directory that is actually empty (no `.git`) rather than relying on any
+one host's mount-sharing configuration — the same guard, tested a way that
+travels.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

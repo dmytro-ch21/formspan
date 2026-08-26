@@ -36,16 +36,27 @@
 // invasive to a resource other sessions constantly use, and out of scope
 // here.
 //
-// What this package does NOT provide: a process sandbox. Isolation here is
-// an explicit environment allowlist plus git-clone provenance, not a
-// container or chroot — a worker process runs as this host's own user and
-// can, like any process that user runs, read files by absolute path (its
-// own HOME, another working tree, whatever the host user can reach). The
-// credential surface this package closes is "handed to the worker" (env,
-// clone contents, clone remote config); it is not "unreachable by any means
-// from a worker's own code". Real filesystem/process sandboxing is tracked
-// separately (see the history entry this package's introduction links to)
-// rather than silently assumed here.
+// RunSandboxed (N188/#604) closes the gap this paragraph used to describe as
+// open: everything ABOVE narrows what a worker process is HANDED (its env,
+// the clone's contents, the database it can reach); none of it stops a
+// process from reading a path it was never handed at all, because a bare
+// `exec.Command` inherits its host user's full filesystem view regardless of
+// its own environment. RunSandboxed runs a command inside a container whose
+// ONLY visible host path is this workspace's own directory — a path outside
+// it does not exist in the sandboxed process's mount namespace, not merely
+// "isn't in Env()". See sandbox.go for the mechanism and its own tests for
+// the attempted-escape proof.
+//
+// What is still open, deliberately, and named rather than absorbed:
+// network egress from inside the sandbox is Docker's ordinary default
+// (reachable to the internet and, via host.docker.internal, to the host's
+// own ports) — NOT restricted to a specific allowlist of legitimate hosts,
+// which needs an application-level policy that does not exist yet (see this
+// package's history entry and its tracking ticket). And nothing outside this
+// package's own tests calls RunSandboxed yet — devengine.RunGate still
+// shells out directly on the host, unwired to the sandbox the same way the
+// rest of this package has been unwired since N141: there is still no live
+// dispatcher (blocked on N145) to wire it into.
 package worker
 
 import (
@@ -61,6 +72,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -95,6 +107,14 @@ type Workspace struct {
 	DBURL   string // connects as DBRole, never as the admin role
 	runner  *Runner
 	dropped bool
+
+	// mountVerified caches RunSandboxed's mount pre-flight check (see
+	// sandbox.go): the property it checks — whether this host's Docker
+	// actually shares ws.Dir — is fixed for this workspace's whole
+	// lifetime, so repeat calls skip the extra container after the first
+	// one succeeds. Atomic because RunSandboxed makes no promise about
+	// being called from one goroutine only.
+	mountVerified atomic.Bool
 }
 
 var slugRe = regexp.MustCompile(`[^a-z0-9-]+`)
