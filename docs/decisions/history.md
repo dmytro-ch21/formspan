@@ -41718,6 +41718,31 @@ both were in the parts that felt obviously right:
   holds both directions: a fenced example is not a finding, an unfenced decoy
   still is.
 
+### The branch hit the bug it fixes, and fixed it
+
+Not a constructed case. While this was in review, #621 landed on `main` with its
+own entry, and the branch went stale in exactly the way the ticket describes.
+The rebase:
+
+```
+Rebasing (3/6) append-only merge: docs/decisions/history.md: both sides only appended; kept both.
+Rebasing (4/6) append-only merge: docs/decisions/history.md: both sides only appended; kept both.
+Rebasing (5/6) append-only merge: docs/decisions/history.md: both sides only appended; kept both.
+Rebasing (6/6) append-only merge: docs/decisions/history.md: both sides only appended; kept both.
+```
+
+Exit 0. Four conflicts that would each have been a hand resolution of a 41,000-
+line prose file, and nothing to decide in any of them. Checked afterwards rather
+than assumed: **zero lines of `main`'s content missing**, both entries present
+exactly once, gap list still last.
+
+That is worth one caution. The comfortable failure is now the *quiet* one — a
+rebase that says nothing and is wrong. The driver refuses every hunk that could
+be, and the shape check runs in `verify` and CI on every PR, but neither reads
+whether an entry still makes sense beside the one that landed next to it. That
+was always true of a hand resolution too; it is easier to forget when nothing
+stops.
+
 ### Three findings from review, and all three were in the parts that felt safest
 
 The check suite was green and mutation-tested when review ran. It found three
