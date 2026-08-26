@@ -36,3 +36,21 @@ func (s *Store) RecordGates(ctx context.Context, runID int64, owner string, outc
 	}
 	return nil
 }
+
+// AddArtifact records one retained artifact reference under the run —
+// lease-guarded like AppendStep, so a dispossessed engine cannot write
+// artifact history into a run somebody else now owns.
+func (s *Store) AddArtifact(ctx context.Context, runID int64, owner, kind, ref string) error {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO agent_artifacts (run_id, kind, ref)
+		SELECT r.id, $3, $4 FROM agent_runs r
+		WHERE r.id = $1 AND r.lease_owner = $2 AND r.lease_expires_at > now()`,
+		runID, owner, kind, ref)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrLeaseLost
+	}
+	return nil
+}

@@ -51,6 +51,8 @@ type Run struct {
 	IssueNumber int
 	State       State
 	Risk        string
+	BaseSHA     string
+	Branch      string
 	LeaseOwner  string
 	LeaseExpiry time.Time
 	Attempt     int
@@ -68,7 +70,7 @@ func (s *Store) Claim(ctx context.Context, issue int, owner, deliveryID string) 
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO agent_runs (issue_number, state, trigger_delivery_id, lease_owner, lease_expires_at)
 		VALUES ($1, 'QUEUED', $2, $3, now() + $4)
-		RETURNING id, issue_number, state, risk, lease_owner, lease_expires_at, attempt`,
+		RETURNING id, issue_number, state, risk, base_sha, branch, lease_owner, lease_expires_at, attempt`,
 		issue, delivery, owner, s.LeaseTTL)
 	run, err := scanRun(row)
 	if err == nil {
@@ -182,9 +184,31 @@ func (s *Store) Transition(ctx context.Context, runID int64, owner string, to St
 // Get returns the run — diagnostics and tests.
 func (s *Store) Get(ctx context.Context, runID int64) (*Run, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, issue_number, state, risk, lease_owner, lease_expires_at, attempt
+		SELECT id, issue_number, state, risk, base_sha, branch, lease_owner, lease_expires_at, attempt
 		FROM agent_runs WHERE id = $1`, runID)
 	return scanRun(row)
+}
+
+// RecordProvisioning writes the two facts a workspace fixes at provision
+// time — the exact base SHA the clone was made from, and the branch it
+// checked out onto — into the durable run record. Without this, "base SHA
+// recorded per run" is only ever true of an in-memory Workspace struct that
+// dies with the environment; this is what makes it survive a process
+// restart and be visible to anything reading agent_runs directly. Lease-
+// guarded like AppendStep: a dispossessed engine cannot backdate a run it no
+// longer owns.
+func (s *Store) RecordProvisioning(ctx context.Context, runID int64, owner, baseSHA, branch string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE agent_runs SET base_sha = $3, branch = $4, updated_at = now()
+		WHERE id = $1 AND lease_owner = $2 AND lease_expires_at > now()`,
+		runID, owner, baseSHA, branch)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrLeaseLost
+	}
+	return nil
 }
 
 // AppendStep records one executed step under the run. It requires a live
@@ -253,7 +277,7 @@ func appendEventTx(ctx context.Context, tx pgx.Tx, runID int64, eventType string
 func scanRun(row pgx.Row) (*Run, error) {
 	var r Run
 	var state string
-	if err := row.Scan(&r.ID, &r.IssueNumber, &state, &r.Risk, &r.LeaseOwner, &r.LeaseExpiry, &r.Attempt); err != nil {
+	if err := row.Scan(&r.ID, &r.IssueNumber, &state, &r.Risk, &r.BaseSHA, &r.Branch, &r.LeaseOwner, &r.LeaseExpiry, &r.Attempt); err != nil {
 		return nil, err
 	}
 	r.State = State(state)
