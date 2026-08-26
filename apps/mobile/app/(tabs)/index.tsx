@@ -687,11 +687,17 @@ export default function TodayScreen() {
     // silence the thing that asks for more evidence to make them, or "off"
     // only means "off once it has something to say".
     if (!suggestionsOn || !funnel || suggestion || offers === null) return false;
-    // Reads the session list only when it has ANSWERED. `sessions.state`
-    // guarded rather than defaulted to `[]`: a zero BJJ count from a read that
-    // has not returned is the same false confidence the board exists to
-    // remove, and here it would show a "log more detail" prompt to an athlete
-    // who logs plenty.
+    // Reads the session list only when it has ANSWERED.
+    //
+    // **Its effect is redundant today, and it stays anyway.** Defaulted to `[]`
+    // the count would be 0, and `shouldOfferDetail` needs `>= 2`, so an
+    // unanswered read cannot currently produce the prompt either way — no
+    // mutation of this line changes any assertion. It is here because the
+    // arithmetic is what makes it harmless, not the intent: the moment that
+    // bound moves, or a second tier reads this list for something that fires on
+    // a LOW count, `[]` becomes a confident zero about an athlete whose history
+    // has not loaded. That is the exact shape this whole ticket is about, and
+    // it is cheaper to keep the guard than to remember the coupling.
     if (sessions.state !== 'ready') return false;
     const bjj = sessions.value.filter((x) => logsAfterwards(x.sport, modules)).length;
     return shouldOfferDetail(bjj, funnel.length, offers);

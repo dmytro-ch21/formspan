@@ -421,6 +421,38 @@ describe('it never claims an absence it has not checked', () => {
   });
 });
 
+describe('insight', () => {
+  // The Tier 0 offer, which is the only prompt that CREATES the evidence the
+  // suggestion tier reads. `fetchProficiency` is stubbed to `[]` — no
+  // technique-level detail has ever been recorded — and `readPref` to null, so
+  // the offer has never been shown. Two BJJ sessions is the lower bound.
+  it('offers the detail prompt once BJJ is being logged with nothing coming out', async () => {
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 'r1', sport: 'bjj' }),
+      session({ id: 'r2', sport: 'bjj' }),
+    ]);
+    render(<TodayScreen />);
+
+    expect(await screen.findByTestId('today-offer-detail')).toBeTruthy();
+  });
+
+  it('does not offer it on a single BJJ session', async () => {
+    // One is not a habit, and the first log should be uncomplicated. Without a
+    // negative case the bound above is unexercised in either direction.
+    mockListLocalSessions.mockResolvedValue([session({ id: 'r1', sport: 'bjj' })]);
+    render(<TodayScreen />);
+
+    expect(await screen.findByTestId('today-week-strip')).toBeTruthy();
+    expect(screen.queryByTestId('today-offer-detail')).toBeNull();
+  });
+
+  it('draws no Insight heading when there is nothing to say', async () => {
+    render(<TodayScreen />);
+    expect(await screen.findByTestId('today-week-strip')).toBeTruthy();
+    expect(screen.queryByText('Insight')).toBeNull();
+  });
+});
+
 describe('later', () => {
   it('shows the next planned day, with no button on it', async () => {
     mockListPlannedBetween.mockResolvedValue([

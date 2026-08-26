@@ -348,9 +348,25 @@ describe('the plan window', () => {
   });
 
   it('covers a full fortnight across a spring-forward boundary', () => {
-    // US DST starts 2026-03-08. `now + 14 * 86_400_000` lands an hour short and
-    // reports 2026-03-21; `addDays` keeps the calendar date. The suite runs in
-    // America/Los_Angeles precisely so this is visible.
-    expect(todayPlanWindow(new Date('2026-03-08T12:00:00')).to).toBe('2026-03-22');
+    // US DST starts 2026-03-08. A fortnight from 23:30 on the 1st is 23:30 on
+    // the 15th — but `now + 14 * 86_400_000` is fourteen exact 24-hour spans,
+    // and the hour the clocks gained pushes it to **00:30 on the 16th**, a day
+    // late. `addDays` keeps the calendar date. Measured, not reasoned:
+    // `addDays` → Sun Mar 15 23:30 PDT, milliseconds → Mon Mar 16 00:30 PDT.
+    // The suite runs in America/Los_Angeles precisely so this is visible.
+    //
+    // **The vector took two tries and both misses are worth recording.** A
+    // NOON vector cannot tell the two apart at all — an hour either side of
+    // midday is the same calendar day whichever arithmetic runs — so the first
+    // version of this test was green while the millisecond mutation survived.
+    // That is the N177 shape exactly: a fixture instant that fell on the same
+    // day either way. The second attempt moved to 00:30 with the sign of the
+    // shift backwards; spring-forward maps an instant to a LATER wall clock,
+    // so it also survived. Only mutating caught either.
+    //
+    // The live caller (`useTodayBoard`) normalises to noon before calling this,
+    // so today the guard protects a FUTURE caller rather than a current bug.
+    // It is cheaper to keep it correct than to remember the coupling.
+    expect(todayPlanWindow(new Date('2026-03-01T23:30:00')).to).toBe('2026-03-15');
   });
 });

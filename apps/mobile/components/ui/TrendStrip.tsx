@@ -21,6 +21,25 @@ import type { TrendWeek } from '@/lib/trend';
  * bar next to seven finished ones reads as a decline that has not happened
  * yet — the chart would report a slump every Monday morning.
  */
+/**
+ * **No caller, as of N179 (2026-08-26), and deliberately left in place.**
+ *
+ * It was Today's eight-week "have I been showing up" strip. N179 moved Today's
+ * analytical blocks to Progress and found that question already answered there
+ * by `TrainingSummary`, which draws a bar per week over a selectable span — so
+ * rendering this beside it would be two weekly-bar charts a few hundred points
+ * apart, which is the one-question-two-answers shape this repo has shipped
+ * twice.
+ *
+ * Not deleted, for two reasons. N179's acceptance criterion is *moved, not
+ * deleted*, and a redundant VIEW is a sweep for #591's implementation audit
+ * rather than a removal to slip into a ticket about relocating things. And it
+ * is the only weekly-bar renderer that is **purely local** — `TrainingSummary`
+ * fetches — so if Progress ever needs that answer offline, this is it.
+ *
+ * Its derivation, `weeklyDays` in `lib/trend.ts`, still has thirteen tests and
+ * is unaffected by any of this.
+ */
 export function TrendStrip({ weeks, testID }: { weeks: TrendWeek[]; testID?: string }) {
   // Against the tallest bar, floored at 3, so a quiet stretch does not inflate
   // one session into a full-height column. Not against 7: scaling to the

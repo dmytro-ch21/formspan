@@ -187,8 +187,11 @@ export function buildTodayBoard(input: {
  * PLAN_WINDOW_DAYS}) so LATER means the same thing on both screens.
  *
  * `addDays`, never `+ n * 86_400_000`: the millisecond form crosses a DST
- * boundary an hour short and lands on the previous calendar day, which
- * shortens the window by a day twice a year in every zone that shifts.
+ * boundary an hour short and lands on the previous calendar day, which shortens
+ * the window by a day twice a year in every zone that shifts. **Only visible
+ * within an hour of midnight**, and `useTodayBoard` normalises `now` to noon
+ * before calling this — so today the guard is protecting a future caller rather
+ * than fixing a live bug, and its test says so.
  */
 export function todayPlanWindow(now: Date): { from: string; to: string } {
   return {
