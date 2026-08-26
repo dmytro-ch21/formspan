@@ -314,10 +314,20 @@ export function moduleOffWithFoodLog(modules: Module[]): Module | undefined {
 /**
  * Does this DEPLOYMENT have a food log at all — on, off, doesn't matter?
  *
- * The tab bar's question, and it is deliberately not `hasFoodLog`. Every other
- * gate in this file asks whether a surface should be DRAWN; this one asks
- * whether a surface should be REACHABLE, and those come apart precisely in the
- * off-but-available state that N61 is about.
+ * The REACHABILITY question, and it is deliberately not `hasFoodLog`. Every
+ * other gate in this file asks whether a surface should be DRAWN; this one asks
+ * whether a surface should be reachable at all, and those come apart precisely
+ * in the off-but-available state that N61 is about.
+ *
+ * **It was the tab bar's question until N176 (#581), and has no caller today.**
+ * Food and Goals left the bottom bar for Train and Progress, so nothing is
+ * currently deciding whether to draw a link to the food log — Today's Fuel card
+ * asks the narrower `hasFoodLog`, and says in words what it is doing when the
+ * answer is no. Kept rather than deleted for two reasons: it is one third of a
+ * partition the tests pin as a partition (see the union assertion in
+ * `moduleGating.test.ts`, which is what stops the other two drifting apart),
+ * and it is the exact question N180 (#585) has to answer when it re-homes
+ * nutrition somewhere the bar no longer reaches.
  *
  * The Food and Goals tabs used to be hidden on `!hasFoodLog`, which erased 40%
  * of the primary navigation with nothing left behind to say why — and the two
@@ -325,11 +335,12 @@ export function moduleOffWithFoodLog(modules: Module[]): Module | undefined {
  * LINK, and #370's finding was that the destinations were never the problem:
  * they already explain themselves, and nothing linked to them. So the link
  * stays wherever the destination has something to say, and it is the screen
- * that distinguishes off from absent.
+ * that distinguishes off from absent. That rule outlives the tab: whatever
+ * links to the food log next inherits it.
  *
  * Which leaves exactly one case where hiding is still right, and it is the
  * third state: a deployment with no food-log module at all. There is nothing to
- * turn on, so a tab leading to "turn it on" would promise a feature the server
+ * turn on, so a link leading to "turn it on" would promise a feature the server
  * does not have — the same lie as hiding one it does, pointing the other way.
  *
  * Equal by construction to `hasFoodLog(m) || moduleOffWithFoodLog(m) !== undefined`,
@@ -410,4 +421,23 @@ export function labelFor(modules: Module[], key: string): string {
 export function usesBelt(sport: string, mods: Module[]): boolean {
   const m = moduleFor(mods, sport);
   return (m?.enabled && m.capabilities.facets.includes('belt')) ?? false;
+}
+
+/**
+ * Whether this discipline is logged after the fact rather than started and
+ * logged into.
+ *
+ * Keyed on the catalog kind rather than on `key === 'bjj'`, so a future
+ * discipline whose sessions are technique-shaped gets the right flow without
+ * the caller learning its name — the same reasoning that moved the sport list
+ * itself into the registry.
+ *
+ * Lived in `(tabs)/index.tsx` until N176 gave the Train tab a start action and
+ * a second caller. It is here rather than there for the reason `usesBelt` is: a
+ * predicate about what a module IS belongs with the module registry, and the
+ * one time this app kept a second copy of that kind of judgement the position
+ * vocabulary rotted across four files.
+ */
+export function logsAfterwards(sportKey: string, mods: Module[]): boolean {
+  return moduleFor(mods, sportKey)?.capabilities.catalog === 'techniques';
 }

@@ -12161,3 +12161,79 @@ replacement.
   across, and adds the ingredient without logging anything as a meal.
 - Blank fibre on the by-hand form stays *not stated*; a typed `0` stays `0`. A
   number that cannot be read disables the button rather than being taken as zero.
+
+## N176 — the bottom bar: Today · Train · Progress · Plan · You (`app/(tabs)/_layout.tsx`, `lib/tabs.ts`, `app/(tabs)/train.tsx`, `app/(tabs)/progress.tsx`)
+
+The bar read Today · Food · Plan · Goals · You. Food and Goals lose their
+buttons and keep their routes; Train and Progress arrive as shells that N177
+(#582) and N178 (#583) build out. Everything below is written so a failure names
+the athlete-visible defect rather than the file.
+
+### Happy path
+
+- Cold-launch. The bar reads **Today, Train, Progress, Plan, You**, left to
+  right, and each one navigates. Order is the product loop, not a preference —
+  a reordering is a failure, not a nitpick.
+- Plan is the same screen it always was. Open it, scroll the week, open a
+  template, start a session from it: **no behaviour may differ at all.** This
+  ticket renamed nothing and moved nothing there.
+- Train: press the primary action, pick a discipline, land in the session that
+  discipline uses. A strength pick lands on `/session/start?sport=…`; a BJJ pick
+  lands on `/bjj/log`, never on the set logger.
+- Train with a template chosen: the template is carried through
+  (`&workout=<id>`). Losing it means rebuilding the plan at the rack, which is
+  the thing the plan exists to avoid.
+- Progress: both rows open — the weight trend, and You. Neither is a dead end.
+
+### Food and Goals are gone from the bar and NOT gone
+
+- **Deep link both**: `vola://food` and `vola://goals` open the real screens with
+  their real data. A route that only *resolves* is not enough — check the day's
+  entries and the target actually render.
+- From Today with nutrition on: the Fuel and Logging cards still reach Food, and
+  Food still reaches Goals. Count the taps and record them — N180 (#585) owns
+  the friction question and needs the number.
+- Press back out of a deep-linked Food screen. It must not strand the athlete on
+  a tab-less screen.
+- A stale back-stack entry — be on Food, background the app, return — still
+  works. `href: null` keeps the route mounted; omitting it would not.
+
+### The regression this must not reintroduce
+
+- **Turn nutrition OFF in Sports.** Today must say so in words (dashed "Nutrition
+  is turned off"), and `vola://food` must still open a screen that explains
+  itself rather than a blank one or `+not-found`. The failure to watch for is
+  the athlete concluding the feature does not exist — that is what was reported
+  from a device as "not there" for BJJ.
+- **Turn every module off.** The bar still reads all five. Not four, not three.
+- **First frame of a cold start, on an account with nutrition ON.** Today must
+  never flash "Nutrition is turned off" before the real Fuel card. That is the
+  frame-hold in `_layout.tsx`; it is invisible in the suite and obvious on a
+  device if it breaks.
+
+### Untouched by this ticket — assert nothing changed
+
+- Log a strength set inline mid-session: same taps, same latency, works with the
+  phone in airplane mode.
+- Log a BJJ round: the three-tap / five-second floor is unchanged, and the
+  reflection stays optional.
+- Both of the above with no signal, then reconnect and confirm the sync.
+
+### Accessibility
+
+- VoiceOver over the bar: five tabs, each announcing its name, its position
+  ("3 of 5") and whether it is selected. The two new tabs must announce exactly
+  like the three old ones — one button implementation serves all five.
+- The active underline is decoration and must be silent; hearing a nameless
+  element after each tab name is the failure.
+- Largest accessibility text size: the bar still shows five labels. **`PROGRESS`
+  is the longest label the bar has ever carried** — it should truncate, never
+  wrap or push a neighbour off.
+
+### Needs a device — none of this is reachable from the suite
+
+- Safe areas on a phone with a home indicator: the bar sits above it, the
+  underline is not clipped, and no tab's label is cut off.
+- One-handed reach: all five within a thumb's arc at the bottom of the screen.
+- The label widths above — jest has no font metrics, so a screenshot is the only
+  evidence.

@@ -1,11 +1,11 @@
 import { Tabs } from 'expo-router';
 import { Pressable, StyleSheet, View, type PressableProps } from 'react-native';
 
-import { Icon, type IconName } from '@/components/ui/Icon';
+import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { useModules } from '@/lib/ModulesProvider';
-import { tabHidden } from '@/lib/tabs';
+import { OFF_BAR_ROUTES, TABS } from '@/lib/tabs';
 
 /**
  * The tab bar: an icon, a label, and an underline on the active one.
@@ -17,12 +17,10 @@ import { tabHidden } from '@/lib/tabs';
  * to acquire than a five-letter word, and this bar holds few enough
  * destinations that each shape stays learnable.
  *
- * That said "four" until Food arrived. The claim was always about
- * LEARNABILITY rather than the literal number, and the bar was already four
- * or five depending on whether any enabled discipline has a catalog — so a
- * variable count is the established state, not a new one. Food earns the slot
- * on frequency: it is logged three to six times a day, more than anything else
- * here, and the tab bar is the only fixed-position affordance the phone has.
+ * That said "four" until Food arrived, then "four or five" while the food-log
+ * gate was in force. It is **exactly five now, always** — Today · Train ·
+ * Progress · Plan · You — and the claim was always about LEARNABILITY rather
+ * than the literal number, so a fixed five is the easy case for it.
  *
  * The active mark moved from a dot above the label to a rule beneath it. A dot
  * is ambiguous about *what* it marks when there is now also an icon above the
@@ -35,71 +33,36 @@ import { tabHidden } from '@/lib/tabs';
  *
  * A hairline is the only separator, and it is the one seam worth keeping:
  * without it the labels read as content when a list scrolls behind them.
- */
-/**
- * Which tabs are hidden right now — and N61's answer for the tab bar.
  *
- * **This used to hide Food and Goals whenever nutrition was OFF**, on
- * `!hasFoodLog(modules)`. That erased two of five tabs — 40% of the primary
- * navigation — and left nothing behind saying why, so an athlete with
- * nutrition switched off did not see a reduced app, they saw a different,
- * smaller one. A surface that hides itself with no explanation is
- * indistinguishable from one that was never built, and it cannot even be
- * reported accurately, because the person reporting has no idea there is
- * anything to report. That is exactly what the user hit on a device with BJJ:
- * "bjj logging is not there and roadmaps curricula are not there". It was
- * there.
- *
- * **The answer is #370's, applied to chrome instead of content.** That fix
- * found the destinations were never the problem — `bjj/log` and friends
- * already say "BJJ tracking is off, turn it back on under Sports in your
- * profile" — and that NOTHING LINKED TO THEM while the module was off, so the
- * athlete never reached the screen that would explain itself. A tab IS the
- * link. So the link stays, and `food.tsx` and `goals.tsx` now explain
- * themselves the way the BJJ screens do.
- *
- * That is why this is not a placeholder tab, and why #468's dashed-versus-
- * card rule does not decide anything here: nothing is standing in for
- * anything. The real tab is present and leads to the real route; the route
- * says what state it is in.
- *
- * **The third state is the one case where hiding is still right.** A
- * deployment with no food-log module at all has nothing to turn on, so a tab
- * leading to "turn it on" would promise a feature the server does not have —
- * the same lie as hiding one it does. That is the whole of what `tabHidden`
- * asks, and the full reasoning lives on it in `lib/tabs.ts` — a route file
- * is not importable from a test, and this predicate was inline, untested and
- * wrong, which are not three unrelated facts.
- *
- * The Library used to be gated here too, on whether any enabled discipline
- * had a catalog. It is a row in You now, and deliberately NOT gated there —
- * see the comment on that row for why hiding it was the worse of the two
- * failures.
- *
- * `href: null` rather than omitting the <Tabs.Screen>. Omitting one does NOT
- * hide it — expo-router auto-injects every route file in this folder whether
- * declared or not, so the tab would come back with a filename-derived title.
- * `href: null` hides the button and keeps the route resolvable, which matters
- * for an in-flight router.push and for deep links — and which is why both
- * screens still need their own off-state even now the tab usually stays.
+ * **Which five, in what order, and which routes here hold no slot at all, are
+ * all decided in `lib/tabs.ts`** — including the reasoning N176 superseded and
+ * the reasoning it did not. This file draws the bar; that one says what is in
+ * it, and is where a proposal to add, remove or hide a tab has to argue itself.
  */
 export default function TabLayout() {
-  const { modules, ready } = useModules();
+  const { ready } = useModules();
   const accent = useAccent();
 
-  // Hold the frame until the cached module set has been read. This is the
-  // whole reason the cache exists: without it the first frames compute
-  // `tabHidden` from an empty list, so Food and Goals are ABSENT and
-  // then pop in — the tab bar visibly rearranging on every cold start, which is
-  // exactly what the provider's docstring says it prevents. `RootLayoutNav`
-  // already holds a frame this way for Clerk.
+  // Hold the frame until the cached module set has been read.
   //
-  // Still load-bearing after N61, and for the same reason: an empty list has no
-  // food-log capability in it either, so the pre-cache answer is still "hide
-  // both" and still wrong. Widening the gate did not remove the flash.
+  // **This no longer guards the BAR, and that half is genuinely gone.** It used
+  // to: Food and Goals were hidden on a food-log gate, an unread module list is
+  // empty, an empty list has no food-log capability in it, so the first frames
+  // computed "hide both" and the bar visibly rearranged on every cold start.
+  // N176 made all five slots unconditional, so the bar is now identical for an
+  // empty list and a full one — `everyTabIsUnconditional` in
+  // `lib/__tests__/tabBar.test.ts` is what says so, and is what turns red if a
+  // future ticket makes a tab conditional again without restoring that guard.
   //
-  // (This used to name `anyCatalog` and the Library tab, which N70 moved into
-  // You. Same failure, different tabs.)
+  // **It still guards the SCREENS, which is the larger half and always was.**
+  // `<Tabs>` mounts its initial route immediately, and `(tabs)/index.tsx` reads
+  // `useModules()` without reading `ready` — `foodEnabled` is `hasFoodLog([])`,
+  // which is false. Without this hold, Today renders the dashed "Nutrition is
+  // turned off" placeholder for the first frames of every cold start, on an
+  // account where nutrition is on. That is the N61 lie flashing rather than
+  // sticking, and `lib/modules.ts`'s `foodLogGate` docstring describes the same
+  // failure one level further down. `RootLayoutNav` holds a frame this way for
+  // Clerk, for the same reason.
   if (!ready) return null;
 
   return (
@@ -121,7 +84,6 @@ export default function TabLayout() {
           name={name}
           options={{
             title,
-            href: tabHidden(name, modules) ? null : undefined,
             tabBarIcon: ({ focused }) => (
               <Icon
                 name={icon}
@@ -131,6 +93,18 @@ export default function TabLayout() {
             ),
           }}
         />
+      ))}
+      {/*
+        Declared, not omitted. Omitting a `<Tabs.Screen>` does NOT hide it —
+        expo-router auto-injects every route file in this folder whether it is
+        declared or not, so leaving these out brings them back as a sixth and
+        seventh tab with filename-derived titles. `href: null` removes the
+        button and keeps the route resolvable, which is what an in-flight
+        `router.push`, a back-stack entry and every `vola://food` deep link
+        need — and which is why both screens still carry their own off-state.
+      */}
+      {OFF_BAR_ROUTES.map((name) => (
+        <Tabs.Screen key={name} name={name} options={{ href: null }} />
       ))}
     </Tabs>
   );
@@ -147,6 +121,11 @@ export default function TabLayout() {
  * already sets on every tab button. Deriving it rather than threading a second
  * source of truth means the underline cannot disagree with what a screen
  * reader announces.
+ *
+ * It is installed once as `screenOptions.tabBarButton`, never per screen, so
+ * every tab gets the same role, label and selected state — including the two
+ * N176 added. A per-screen override is how one tab ends up announcing itself
+ * differently from its four neighbours.
  */
 /**
  * Typed structurally rather than against `BottomTabBarButtonProps`. That type
@@ -182,24 +161,6 @@ function TabButton({ color, children, ...props }: TabButtonProps) {
     </View>
   );
 }
-
-const TABS = [
-  { name: 'index', title: 'Today', icon: 'dashboard' },
-  // Second, not last. Food is logged more often than anything else in this app
-  // — three to six times a day against once for a session — and the tab bar is
-  // the only fixed-position affordance the phone has. A card on Today would
-  // cost an extra tap every time, on a screen whose contents move.
-  { name: 'food', title: 'Food', icon: 'food' },
-  { name: 'workouts', title: 'Plan', icon: 'calendar' },
-  // Library's old slot, and the swap is the user's own call: they asked for
-  // the Library out of the bar ("we dont need a dedicated view") and for
-  // targets to live in a Goals tab. A catalog is browsed occasionally and
-  // deliberately, which is what a profile row is for; a target is the number
-  // every food decision is measured against, which is what a fixed slot is
-  // for. The bar holds what you check, not what you explore.
-  { name: 'goals', title: 'Goals', icon: 'goal' },
-  { name: 'you', title: 'You', icon: 'profile' },
-] as const satisfies readonly { name: string; title: string; icon: IconName }[];
 
 const styles = StyleSheet.create({
   bar: {
