@@ -56,8 +56,12 @@ file. Tooling here must not be able to repeat that, and this cannot — it has n
 notion of what a heading is.
 
 **It never reorders, rewrites or deduplicates.** The output for a resolved hunk
-is literally `ours_lines + theirs_lines`. `--self-test` asserts that equality
-rather than a property of it.
+is literally `ours_lines + theirs_lines`, and `--self-test` asserts that with a
+literal `==` on the whole output. It did not, for a while: the case *claimed*
+to pin the text and actually checked two substrings and their order, so
+injecting a stray line into every resolved hunk left the entire suite green.
+Found in review. The load-bearing property has to be the asserted one, not the
+one the comment describes.
 
 **It does not run on `docs/TASKS.md`.** That file is an archive now (1 of 21
 commits), and a tick is a line MODIFICATION, so the rule above would refuse it
@@ -84,11 +88,25 @@ bearing; losing an entry would be.
 in Markdown. A parser looking for 7-character markers could mis-frame on the
 file's own content.
 
-So the internal merge is generated with `--marker-size=40`. Forty repeated
-`<`, `|`, `=` or `>` characters cannot occur in this prose, and unresolved
+So the internal merge is generated with `--marker-size=40`, and unresolved
 hunks are re-rendered afterwards at the marker size git actually asked for
 (`%L`) with git's own labels (`%X`/`%S`/`%Y`), so what a human sees is
 indistinguishable from an ordinary conflict.
+
+**A bigger marker is not a guarantee, and this section used to claim it was**
+— *"forty repeated `<`, `|`, `=` or `>` characters cannot occur in this
+prose"*. That is an assumption about content, nothing enforced it, and review
+measured it false in effect: a 40-character run appearing as content is
+consumed as a marker, terminates the hunk early, and the line **disappears
+while the driver reports a clean resolve**. Character- and position-dependent,
+which is worse — `>` in the theirs section and `<` in a common region were both
+lost silently, `=` in the ours section happened to raise.
+
+The guarantee is `_reassemble`: the frame is rebuilt from the marker lines git
+*must* have emitted and compared byte for byte against git's output. A frame
+that mistook content for a marker cannot round-trip, so it raises and falls
+back. That closes the class rather than one character, and it does not care how
+large the marker is.
 
 ## Failing safe
 
@@ -101,6 +119,14 @@ The same is true if it is never installed: `.gitattributes` names a driver that
 `.git/config` may not define, and git then falls back to the built-in text
 merge. A missing install costs the benefit, never correctness. `--install`
 wires it up and `pnpm install` runs that via `postinstall`.
+
+Two limits on "falls back", stated rather than implied. A **half**-registered
+driver does not fall back — see `install()`. And if `python3` is missing at
+merge time the command cannot run at all, so this file never reaches its own
+fallback: git marks the path conflicted with `%A` left as ours-only and no
+markers. That is flagged (`UU`), not silent, and it is unreachable in practice
+because `postinstall` needs `python3` to register the driver in the first
+place — but it is a different shape from the promise above.
 
 ## Usage
 
@@ -156,11 +182,60 @@ def _merge_file(ours: str, base: str, theirs: str, marker_size: int,
     return proc.stdout.decode("utf-8", "surrogateescape"), proc.returncode
 
 
+# The exact marker lines git emits for the internal merge, given the labels
+# below. `_reassemble` rebuilds the output from these, so a frame that consumed
+# a CONTENT line as a marker cannot round-trip.
+INTERNAL_LABELS = ("ours", "base", "theirs")
+
+
+def _reassemble(parts: list[object]) -> str:
+    """Rebuild git's output from the frame, using the marker lines git MUST
+    have emitted rather than the ones that were actually consumed.
+
+    This is the guard that makes framing safe rather than assumed. `_frame`
+    recognises a marker by a 40-character run, and a 40-character run can also
+    be *content* — a decorative `====…` rule, or a future entry documenting
+    this driver's own internals. Consumed as a marker, it terminates the hunk
+    early: the real marker becomes prose, the content line disappears, and the
+    driver reports a clean resolve. Measured, and it is silent data loss rather
+    than the fall-back the rest of this file promises.
+
+    Round-tripping closes the whole class instead of blacklisting one
+    character. If the frame is right, this returns git's output byte for byte;
+    if any line was mistaken for a marker, the rebuilt text differs and
+    `_frame` raises, which falls back to a plain conflict.
+
+    Found in review, with all three characters measured: `>`×40 in the theirs
+    section and `<`×40 in a common region were both dropped silently, while
+    `=`×40 in the ours section happened to raise. Character-dependent silence is
+    exactly the shape this file exists to refuse.
+    """
+    out: list[str] = []
+    for part in parts:
+        if isinstance(part, str):
+            out.append(part)
+            continue
+        ours, base, theirs = part
+        out.append(f"{OPEN} {INTERNAL_LABELS[0]}\n")
+        out.extend(ours)
+        out.append(f"{BASE} {INTERNAL_LABELS[1]}\n")
+        out.extend(base)
+        out.append(f"{SEP}\n")
+        out.extend(theirs)
+        out.append(f"{CLOSE} {INTERNAL_LABELS[2]}\n")
+    return "".join(out)
+
+
 def _frame(text: str) -> list[object]:
     """Split diff3 output into plain strings and (ours, base, theirs) hunks.
 
     A state machine rather than a regex: the markers are only meaningful in
     sequence, and the documents this runs on quote them out of sequence.
+
+    The frame is then **round-tripped** against the input — see `_reassemble`.
+    A state machine alone cannot tell git's markers from content that looks
+    like them; the round trip can, and turns that from silent loss into a
+    fall-back.
     """
     parts: list[object] = []
     plain: list[str] = []
@@ -206,6 +281,12 @@ def _frame(text: str) -> list[object]:
         raise Unframeable("unterminated conflict hunk")
     if plain:
         parts.append("".join(plain))
+
+    if _reassemble(parts) != text:
+        raise Unframeable(
+            "the frame does not round-trip — a content line was probably "
+            "mistaken for a conflict marker"
+        )
     return parts
 
 
@@ -509,19 +590,62 @@ def self_test() -> int:
     check("the driver resolves the EOF case too", unresolved == 0)
     check("both EOF appends survive", "## Two" in merged and "## Three" in merged)
 
-    # ---- 6. Concatenation is verbatim, asserted as an equality -----------
-    # Not a property of the output — the literal `ours + theirs` text.
+    # ---- 6. Concatenation is verbatim, asserted as an EQUALITY -----------
+    # A literal `==` on the whole output, not substrings-and-ordering.
+    #
+    # This case used to be a substring+order check while its own comment
+    # claimed it pinned the literal text. Review measured the gap: injecting a
+    # stray line into every resolved hunk left the entire suite green. The
+    # driver's whole safety argument is that a resolved hunk is *exactly*
+    # `ours + theirs`, so a check that tolerates an extra, duplicated or
+    # reordered line does not test the load-bearing property at all.
     base = "head\n\nTAIL\n"
     ours = "head\n\nOURS-1\nOURS-2\n\nTAIL\n"
     theirs = "head\n\nTHEIRS-1\nTHEIRS-2\n\nTAIL\n"
     merged, unresolved = safe_resolve(base, ours, theirs)
-    check("resolved output is exactly ours-then-theirs",
-          unresolved == 0
-          and "OURS-1\nOURS-2" in merged
-          and "THEIRS-1\nTHEIRS-2" in merged
-          and merged.index("OURS-1") < merged.index("THEIRS-1")
-          and merged.endswith("TAIL\n"),
-          repr(merged))
+    expected = "head\n\nOURS-1\nOURS-2\n\nTHEIRS-1\nTHEIRS-2\n\nTAIL\n"
+    check("resolved output is EXACTLY ours-then-theirs, byte for byte",
+          unresolved == 0 and merged == expected,
+          f"got {merged!r} want {expected!r}")
+
+    # ---- 6b. A content line that LOOKS like an internal marker -----------
+    # The internal merge runs at marker size 40, and `_frame` recognises a
+    # marker by a 40-character run — which can also be content. Consumed as a
+    # marker it terminated the hunk early and the line vanished, with the
+    # driver reporting a clean resolve. Now `_frame` round-trips, so this
+    # falls back to a plain conflict instead of losing a line.
+    # Three characters x three positions, because the failure was
+    # character- AND position-dependent: `>` in the theirs section and `<` in a
+    # common region were dropped silently while `=` in the ours section
+    # happened to raise. A single placement would have proved almost nothing —
+    # the first version of this case put the run in the same place all three
+    # times and only one of them went red under mutation.
+    for ch in "<|=>":
+        run = ch * 45
+        for where, base_m, ours_m, theirs_m in (
+            # inside the lines ONLY ours added -> the hunk's ours section
+            ("the ours section",
+             "head\n\nTAIL\n",
+             f"head\n\nOURS-1\n{run}\nOURS-2\n\nTAIL\n",
+             "head\n\nTHEIRS-1\n\nTAIL\n"),
+            # inside the lines ONLY theirs added -> the hunk's theirs section
+            ("the theirs section",
+             "head\n\nTAIL\n",
+             "head\n\nOURS-1\n\nTAIL\n",
+             f"head\n\nTHEIRS-1\n{run}\nTHEIRS-2\n\nTAIL\n"),
+            # present in all three -> unchanged context around the hunk
+            ("a common region",
+             f"head\n\n{run}\n\nTAIL\n",
+             f"head\n\n{run}\n\nOURS-1\n\nTAIL\n",
+             f"head\n\n{run}\n\nTHEIRS-1\n\nTAIL\n"),
+        ):
+            merged_m, unresolved_m = safe_resolve(base_m, ours_m, theirs_m)
+            # Either the run survives exactly once, or the driver refused
+            # (unresolved > 0) / could not frame it (-1). What is forbidden is
+            # a CLEAN resolve that lost the line.
+            ok = merged_m.count(run) == 1 or unresolved_m != 0
+            check(f"a 45-char `{ch}` run in {where} is never silently dropped",
+                  ok, f"unresolved={unresolved_m} kept={merged_m.count(run)}")
 
     # ---- 7. Prose containing conflict markers does not confuse it --------
     # `history.md` documents merge conflicts, so it contains these characters.
@@ -583,6 +707,16 @@ def self_test() -> int:
           len(_unfenced(quoted_doc)) == len(quoted_doc.splitlines()))
     check("shape: fenced content really is blanked",
           "<<<<<<< ours" not in _unfenced(quoted_doc))
+
+    # The fail-OPEN direction review found: an unterminated fence blanks the
+    # tail, so a stranded entry below it became invisible. Caught without the
+    # fence, silent with it — now the fence itself is the finding.
+    blinded = good + "\n```\nan example nobody closed\n\n## 2026-01-01 — stranded\n\nprose.\n"
+    check("shape: an unterminated fence is reported, not trusted",
+          any("unterminated code fence" in p for p in history_problems(blinded)),
+          str(history_problems(blinded)))
+    check("shape: a balanced fence is not reported",
+          not any("unterminated" in p for p in history_problems(quoted_doc)))
 
     # ---- 10. The apparatus can fail --------------------------------------
     # CLAUDE.md's rule: check that a check can go red. Every case above would
@@ -842,22 +976,39 @@ def _unfenced(text: str) -> list[str]:
     That is what this corpus uses. Indented fences inside list items are not
     handled, and if one ever matters the fix is to teach this function, not to
     weaken a caller.
+
+    **An UNTERMINATED fence blanks everything after it, and that direction
+    fails open** — a stranded `## ` entry below an unbalanced fence would go
+    unreported, which is the one invariant this whole change exists to protect.
+    Measured in review: the identical defect is caught without the fence and
+    invisible with it. So `unterminated_fence` reports the condition and
+    `check_shape` treats it as a finding rather than trusting a blanked tail.
     """
+    return _unfenced_scan(text)[0]
+
+
+def unterminated_fence(text: str) -> int | None:
+    """Line number of an unclosed code fence, or None. See `_unfenced`."""
+    return _unfenced_scan(text)[1]
+
+
+def _unfenced_scan(text: str) -> tuple[list[str], int | None]:
     out: list[str] = []
     fence: str | None = None
-    for line in text.splitlines():
+    opened_at: int | None = None
+    for i, line in enumerate(text.splitlines()):
         opener = line.startswith("```") or line.startswith("~~~")
         if fence is None:
             if opener:
-                fence = line[:3]
+                fence, opened_at = line[:3], i + 1
                 out.append("")
                 continue
             out.append(line)
         else:
             out.append("")
             if line.startswith(fence):
-                fence = None
-    return out
+                fence, opened_at = None, None
+    return out, opened_at
 
 
 def history_problems(text: str) -> list[str]:
@@ -870,6 +1021,17 @@ def history_problems(text: str) -> list[str]:
     """
     problems: list[str] = []
     lines = _unfenced(text)
+
+    # Report this FIRST and keep going. Everything below reads a tail that an
+    # unterminated fence has blanked, so the findings under it are unreliable
+    # rather than absent — and silence here is the fail-open case.
+    opened_at = unterminated_fence(text)
+    if opened_at is not None:
+        problems.append(
+            f"{HISTORY}: unterminated code fence opened at line {opened_at}.\n"
+            "    Everything after it is invisible to the checks below, so a "
+            "stranded entry there would go unreported."
+        )
 
     headings = [i for i, l in enumerate(lines) if l == OPEN_ITEMS]
     mentions = sum(1 for l in lines if l and OPEN_ITEMS.lstrip("# ") in l)

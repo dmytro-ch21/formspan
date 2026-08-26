@@ -41718,6 +41718,52 @@ both were in the parts that felt obviously right:
   holds both directions: a fenced example is not a finding, an unfenced decoy
   still is.
 
+### Three findings from review, and all three were in the parts that felt safest
+
+The check suite was green and mutation-tested when review ran. It found three
+blocking defects anyway, each of which is the same shape: **an assumption stated
+in a docstring, with nothing enforcing it.**
+
+- **The parser could silently drop content, defeating "loss-free by
+  construction".** The *algorithm* is loss-free; the *parser* was not. `_frame`
+  recognises a marker by a 40-character run, and a 40-character run can also be
+  content — a decorative rule, or a future entry documenting this driver. Read
+  as a marker it terminates the hunk early, the real marker becomes prose, and
+  the line vanishes **while the driver reports a clean resolve.** Measured, and
+  character- and position-dependent, which is worse: `>` in the theirs section
+  and `<` in a common region were lost silently, `=` in the ours section
+  happened to raise. The docstring's mitigation was the sentence *"forty
+  repeated … characters cannot occur in this prose"* — an assertion about
+  content that nothing checked.
+
+  Fixed by round-tripping rather than by blacklisting a character: the frame is
+  rebuilt from the marker lines git *must* have emitted and compared byte for
+  byte against git's output, so a frame that mistook content for a marker
+  cannot reassemble and falls back. Twelve cases now cover four characters
+  across three positions, because the first version of that test put the run in
+  the same place three times and only one of them went red under mutation.
+
+- **The one assertion that was supposed to pin the concatenation did not.** Its
+  own comment said *"not a property of the output — the literal `ours + theirs`
+  text"*, and it checked two substrings and their order. Review injected a stray
+  line into every resolved hunk and the **entire suite stayed green.** The
+  driver's whole safety argument is that a resolved hunk is exactly
+  `ours + theirs`; the property carrying that argument was the one nothing
+  tested. It is a literal `==` on the whole output now, and the same mutation
+  goes red.
+
+- **The shape check went blind past an unclosed code fence, and that direction
+  failed OPEN.** `_unfenced` blanks fenced lines, so an unbalanced fence blanks
+  everything after it — and a stranded `## ` entry below one was invisible.
+  Measured both ways: caught without the fence, silent with it. The heading-
+  *count* half failed closed (a blanked heading reads as zero, which is
+  reported); the "after the gap list" half — the invariant this change exists to
+  protect — did not. An unterminated fence is now itself a finding.
+
+Worth stating for the next person: **all three survived a green suite, a
+negative control, and three passing mutation tests.** The mutations tested the
+guards that existed. Two of these findings were guards that did not.
+
 ### Installation, and how it fails
 
 `.gitattributes` is versioned; the driver definition is not, so `pnpm install`
