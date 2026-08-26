@@ -47,10 +47,30 @@
   /* The brand lime is only legible as a *fill* against dark. On light it
      becomes an outline/tint, and solid buttons use the navy instead. */
   --c-accent-fill: #0b1220;
-  --c-accent-on-fill: #b8ff2c;
+  --c-accent-on-fill: #d3ec52;
 
+  /* `--c-lime` is the BRAND hue, stepped per theme. This light step is a
+     derived dark-lime that has NOT moved with N183 — `#d3ec52` is 1.32:1 on
+     white, so light mode never renders the brand hex directly and re-deriving
+     the step is a light-mode change, which N183 is explicitly scoped out of.
+     Recomputing it against the new brand is queued as follow-up work.
+
+     Note this token is no longer the Library tile's `advance` colour: that is
+     `--c-tile-advance` below, split out so a brand change cannot silently move
+     a category. They are the same value in this theme, which is exactly the
+     coincidence the split exists to survive. */
   --c-lime: #6f9c00;
-  --c-lime-rule: #b8ff2c;
+  /* The nav's active rule and other hairline brand marks. Deliberately the same
+     value in both themes, and deliberately NOT theme-stepped: it is 1.32:1 on a
+     light card, which is why `bg-lime` rather than this is what fills a bar —
+     see the note in dashboard/proficiency/page.tsx. */
+  --c-lime-rule: #d3ec52;
+
+  /* The Library tile `advance` intent. One of four CATEGORICAL hues, validated
+     for CVD separation against danger/info and the achromatic hold — see
+     lib/libraryTiles.ts. Split from `--c-lime` by N183 because the brand moved
+     and a category must not move with it. Values unchanged in both themes. */
+  --c-tile-advance: #6f9c00;
   --c-green: #42f58d;
   --c-navy: #0b1220;
 
@@ -76,6 +96,9 @@
      These are deliberately NOT hue-validated — they carry no hue information,
      only letters. */
   --c-lime-ink: #4a6800;
+  /* The ink step for a tile's three-letter code, split alongside the hue above
+     for the same reason. Same value `--c-lime-ink` holds here. */
+  --c-tile-advance-ink: #4a6800;
   --c-info-ink: #1558c7;
   --c-danger-ink: #c0392b; /* already 4.69:1; kept as a token for symmetry */
 
@@ -116,11 +139,15 @@
   --c-text-muted: #949fb3;
   --c-text-dim: #667085;
 
-  --c-accent-fill: #b8ff2c;
+  --c-accent-fill: #d3ec52;
   --c-accent-on-fill: #0b1220;
 
-  --c-lime: #b8ff2c;
-  --c-lime-rule: #b8ff2c;
+  /* The brand hue, dark step — the brand hex itself, which is what dark is for.
+     13.83:1 on `surface`, 12.64:1 on `surface-raised`; matches
+     `apps/mobile/constants/Colors.ts`'s `lime` exactly, which is the point of
+     this whole block. */
+  --c-lime: #d3ec52;
+  --c-lime-rule: #d3ec52;
   --c-green: #42f58d;
   --c-navy: #0b1220;
 
@@ -132,9 +159,16 @@
      light value: a mid-blue that reads on white disappears on #10151f. */
   --c-info: #6bb6ff;
 
+  /* The tile `advance` hue keeps the value `--c-lime` held before N183: it is
+     a category, and it is validated against this mode's danger and info at
+     worst adjacent pair ΔE 21.7 CVD / 35.6 normal. Moving it with the brand
+     would have re-opened that measurement for free. */
+  --c-tile-advance: #b8ff2c;
+  --c-tile-advance-ink: #b8ff2c;
+
   /* On dark the hues already clear AA against their own wash (12.0:1, 5.8:1,
      7.2:1), so ink and hue are the same value here. */
-  --c-lime-ink: #b8ff2c;
+  --c-lime-ink: #d3ec52;
   --c-info-ink: #6bb6ff;
   --c-danger-ink: #ff6b6b;
   /* On dark, green already clears everything as-is (12.8:1 on `surface`), so
@@ -163,6 +197,8 @@
   --color-accent-on-fill: var(--c-accent-on-fill);
 
   --color-lime: var(--c-lime);
+  --color-tile-advance: var(--c-tile-advance);
+  --color-tile-advance-ink: var(--c-tile-advance-ink);
   --color-green: var(--c-green);
   --color-navy: var(--c-navy);
   --color-warn: var(--c-warn);

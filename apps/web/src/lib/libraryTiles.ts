@@ -24,7 +24,12 @@ export const ACCENT_CLASS: Record<Accent, { tile: string; text: string }> = {
   // darker ink step that carries only legibility. See globals.css — darkening
   // the hue itself to fix contrast costs the CVD separation the hue exists for.
   attack: { tile: "border-danger/40 bg-danger/10", text: "text-danger-ink" },
-  advance: { tile: "border-lime/40 bg-lime/10", text: "text-lime-ink" },
+  // `tile-advance`, NOT `lime`: this is a category, and `--c-lime` is the brand
+  // hue, which moved in N183. They were the same token until then; the split is
+  // what stops the next brand change from silently re-opening the CVD
+  // separation these four are validated for. Values are unchanged in both
+  // themes — see globals.css, and `tileAdvance` in the mobile palette.
+  advance: { tile: "border-tile-advance/40 bg-tile-advance/10", text: "text-tile-advance-ink" },
   defend: { tile: "border-info/40 bg-info/10", text: "text-info-ink" },
   // NOT surface-raised: in light mode that token is #ffffff, identical to the
   // card it sits on, so the achromatic tile rendered as an empty outline — the

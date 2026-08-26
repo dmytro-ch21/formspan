@@ -447,8 +447,11 @@ function Funnel({ summary }: { summary: BjjProficiencySummary }) {
                   colour at all — `@theme` exposes --color-lime and never
                   --color-lime-rule — so `bg-lime-rule` emitted no rule and the
                   bars rendered transparent. And it should not be added:
-                  --c-lime-rule is #b8ff2c in BOTH modes, which is 1.21:1 on a
-                  light card. --c-lime is theme-stepped and clears 3:1 in both. */}
+                  --c-lime-rule is the raw brand lime in BOTH modes — #d3ec52
+                  since N183, 1.32:1 on a light card, and it was #b8ff2c at
+                  1.21:1 before that, so the argument survived the brand change
+                  rather than being rescued by it. --c-lime is theme-stepped and
+                  clears 3:1 in both. */}
               <span className="w-10 shrink-0 text-right text-sm font-semibold tabular-nums">
                 {s.value}
               </span>

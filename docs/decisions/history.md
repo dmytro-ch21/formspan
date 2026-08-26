@@ -40104,6 +40104,121 @@ order IS transition order; timestamps tie at clock resolution).
 
 Diff proof of the constraint: nothing outside `engine/internal/runstate`
 changes — no worker, no gate, no reconciler code is touched.
+## 2026-08-25 — N183: the lime was doing six jobs, and only one of them was the brand
+
+The approved brand lime is `#D3EC52`. The app shipped `#B8FF2C`. The obvious
+change — replace the hex — is the one the ticket forbids, and it is worth
+recording *why* it is wrong rather than just that it was avoided, because the
+reason is arithmetic and it is checkable.
+
+**Six roles, one hex.** `#B8FF2C` appeared as: the brand accent; the Library
+tile `advance` intent; the BJJ RPE ramp's moderate step; the consistency grid's
+top step; `sportColors.strength`; and `macroColors.carbs`. Five of those encode
+a *reading*. This palette already had a rule for that — the `accents` note says
+"the accent is identity and interaction; everything that encodes a reading stays
+fixed" — and the brand lime was quietly breaking it, not by being wrong, but by
+being the same value as five things it had nothing to do with.
+
+**Two of the five could not have moved even if somebody wanted them to**, and
+that was measured by making the change and watching the build go red rather than
+by reasoning about it. `macroColors.carbs` at the brand lime drops fat-versus-
+carbs from ΔE 15.56 to **13.85** and calorie-ring-versus-carbs from 16.87 to
+**9.70**. `gridLevels[2]` at the brand lime drops the consistency ramp's 1→2 step
+from 15.35 to **12.46**. Both below the gate's floor of 15.
+
+**The other three would have failed nothing**, which is the whole reason the gate
+grew a new kind of check. `sportColors.strength` at the brand lime still clears
+every sport pair (worst 15.06, against a floor of 15) — a coincidence, not a
+design, and exactly the "clears by 0.12 is not a design" the tracker palette
+already records about itself.
+
+**And ΔE cannot police this boundary at all, which had to be checked before it
+was claimed.** The two limes measure **ΔE 3.05 apart under deuteranopia** (7.22
+with full colour vision). They are indistinguishable. That cuts both ways and
+both halves matter: the split costs **nothing** on screen, so there is no visual
+regression to argue about — and no separation threshold can ever express "these
+must not be the same thing", because a floor low enough to pass would pass
+anything. So `validate_palette.mjs` gained a section whose mechanism is
+**identity**, not measurement: five named semantic values asserted not to *be*
+the brand hex, with the note printed alongside them saying why the check is not a
+ΔE. Each of the five was mutated to `#D3EC52` and each goes red on its own.
+
+**What moved to `#D3EC52`:** `assets/brand/design-tokens.json` (the declared
+source of truth) and `README.md`; the seven kit SVGs still carrying the old
+gradient stop; mobile's `palette.lime`, `accent`, `accentInk` and the `green`
+accent theme; web's `--c-accent-fill`/`--c-accent-on-fill` (per theme),
+`--c-lime` (dark) and `--c-lime-rule` (both); admin's `--color-brand-lime`.
+
+**What stayed, under new names:** `palette.tileAdvance` and `palette.rpeModerate`
+on mobile, `--c-tile-advance` and `--c-tile-advance-ink` on web. Both render
+identically to before in both themes and in monochrome; the split is semantic,
+not visual. `gridLevels`, `setDone`, `sportColors.strength` and
+`macroColors.carbs` kept both their values and their names.
+
+**Two consumers were reading the brand where they meant something else, and a
+hex grep cannot see either.** They were found by classifying all thirty
+`vola.lime` call sites by role:
+
+- `TrainingSummary`'s bar drew its top step from `vola.lime` while its other two
+  steps came from `vola.gridLevels[0]` and `vola.gridRest` — the consistency
+  ramp with one member spelled differently. Left alone it would have rendered a
+  bar in the brand accent beside a calendar grid in the training ramp, ΔE 3.05
+  apart, with **nothing going red**: `gridLevels` itself is unmoved, so the gate
+  would still pass while two views of the same quantity stopped matching.
+- `bjj/log.tsx`'s RPE selector coloured its moderate step from `vola.lime`,
+  turning an effort reading into the brand accent on the day the brand moved.
+
+**A mono twin is not optional.** Splitting `tileAdvance` and `rpeModerate` out of
+`lime` without adding `mono.tileAdvance`/`mono.rpeModerate` would have left both
+in full colour in monochrome mode — the precise failure the metals and belt edges
+already shipped once. The gate throws on a missing key rather than checking, so
+that one is structural.
+
+**The brand lime had no check of its own before this**, which the split would
+have made permanent: `palette.lime` reached the gate only *through* the tile
+intent, because it was the tile intent. It is now held to 4.5:1 rather than the
+3:1 a meaningful fill needs, because it is routinely type — `sheetClose`,
+`renameAction`, `RecordsCard`'s `fresh`, `ProgressCard`'s `phaseLabel`. It
+measures 13.83:1 on `surface`, 12.64:1 on `surfaceRaised`, 14.89:1 for `bg`
+written on it.
+
+**Two stale claims found on the way and corrected rather than carried.**
+`apps/admin/src/app/globals.css` said its brand block was "duplicated verbatim in
+apps/web/src/app/globals.css. See the note there" — `apps/web` has no
+`--color-brand-*` and no such note, so anyone reconciling a brand value would
+have gone looking for a second copy that does not exist. And `Colors.ts` recorded
+"green and yellow sit ΔE 2.3–7.5 from `warn`"; the 2.3 could not be reproduced by
+the validator's own maths against any current value, so it is replaced with
+figures that can be (brand 6.48, yellow 5.50).
+
+**The brand kit was already half migrated, and nobody had said so.** `app-icons/`
+and both apps' `Brand.tsx` draw the approved folded check in `#D0E950` /
+`#9CC740` / `#71912F` and never contained `#B8FF2C` at all — so the PNG rasters
+generated from them needed no regeneration. `logos/` and `splash/` are a
+*different, older mark* (a rounded-stroke check on a `#42F58D`→lime gradient),
+and their lime stop moved here only so the kit stops contradicting its own token
+file. Re-cutting them from `logos/source/` is separate, unstarted work.
+
+**The accent picker: evaluated, not changed.** The ticket asks whether custom
+purple/blue/orange/yellow accents should stop recolouring global identity. The
+recommendation is **yes, eventually, and not in this ticket** — it is a
+behavioural change across every screen that reads `useAccent`, it collides
+directly with N176's navigation work, and it is orthogonal to reconciling a
+value. What was done instead is the cheap half that makes the argument legible:
+the `green` theme is labelled **VOLA** rather than "Green", since it is now the
+brand rather than a colour preference that happens to match. The key stays
+`green`, because it is stored in `PREF_ACCENT` rows.
+
+**Scoped out deliberately.** Web's light-mode lime step (`--c-lime: #6f9c00`) is
+a derived dark-lime for a white ground and has *not* been recomputed against the
+new brand — the ticket rules out a light-mode redesign, and `#D3EC52` is 1.32:1
+on white, so light mode never renders the brand hex directly anyway.
+
+**Not verified on a screen.** Every number here is CIEDE2000 and WCAG arithmetic,
+and none of it says whether the new lime *looks* right — on the tab bar, on the
+splash gradient, or beside the strength sport chip it is now ΔE 3.05 from. That
+is a phone question, and it is left open rather than asserted.
+
 
 ## 2026-08-25 — Three at once, because twelve in progress is a board that lies
 

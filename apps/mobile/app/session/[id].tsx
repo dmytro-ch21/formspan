@@ -1794,8 +1794,8 @@ export default function SessionScreen() {
             textStyle={styles.finishText}
             /*
               `accent.on`, not the default lime. This button's background IS
-              `accent.accent`, and on the default (green) palette that is
-              `#B8FF2C` — the exact value of `vola.lime`. A lime fill over a
+              `accent.accent`, and on the default (brand) palette that is
+              `#D3EC52` — the exact value of `vola.lime`. A lime fill over a
               lime button at 28% opacity is lime: the fill was mathematically
               invisible on the one button this control was built for. Every
               accent ships an `on` colour precisely because it reads against

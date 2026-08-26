@@ -34,7 +34,11 @@ import { vola } from '@/constants/Colors';
 
 /** What a technique is *for*. Colour groups by this; the code stays specific. */
 const ATTACK = vola.danger; //  finishing
-const ADVANCE = vola.lime; //   improving position
+// `vola.tileAdvance`, NOT `vola.lime`: these four are a categorical set the
+// gate checks pairwise, and `lime` is the brand accent, which moves when the
+// brand does. They were the same hex until N183 and the split is what stops the
+// next brand change from silently moving a category. See `Colors.ts`.
+const ADVANCE = vola.tileAdvance; // improving position
 const DEFEND = vola.info; //    getting out / keeping guard
 const HOLD = vola.tileHold; //  staying put — deliberately achromatic
 
