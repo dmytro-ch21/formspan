@@ -41581,8 +41581,14 @@ auto-merge that made a claim in a *different file* false.
 ||||||| base          ZERO lines
 ======= theirs        120 lines — the branch's own entry
 >>>>>>>
-## Open items / known gaps as of this entry
+  ## Open items / known gaps as of this entry     <- indented ON PURPOSE; see below
 ```
+
+(That last line is indented by two spaces so this example does not become the
+seventh decoy the paragraph below is about. `--check-shape` skips fenced blocks
+and would not have minded — but the recipe `CLAUDE.md` tells people to run,
+`grep -c '^## Open items …'`, counts column-0 matches anywhere in the file, and
+an entry *about* this trap that adds one to that count is the trap.)
 
 **One hunk, and its base section is empty.** Neither side deleted or changed
 anything; both only *added*, at the same anchor. Git conflicts here because the
