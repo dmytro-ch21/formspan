@@ -614,7 +614,15 @@ you cannot staff a ticket you have claimed, **un-claim it** — `Todo`, unassign
 position untouched — rather than leaving the board asserting something untrue.
 
 Then open your PR with **`closes #<issue>`** in the body, so merging closes the
-issue and moves it to `Done` without anyone remembering to.
+issue. **The board's `Status` does NOT follow — set it to `Done` by hand after
+the merge.** This line used to promise the move happened "without anyone
+remembering to"; measured on N187 and N188 (2026-08-26), both issues closed
+while the board still said `In Progress`, and the review that caught the
+discrepancy queried the board live: the built-in "Item closed" workflow on
+Projects board 2 is **disabled** (`enabled: false`). Until someone deliberately
+enables it, a closed issue at `In Progress` is the normal post-merge state, not
+somebody's mistake — the by-hand mutation is `updateProjectV2ItemFieldValue`
+(the `vola-ticket-sdlc` skill carries the recipe).
 
 **And note `docs/TASKS.md` is an ARCHIVE**, not the list — do not tick a line
 there to record any of this. The full account is in *The open list* above; it is

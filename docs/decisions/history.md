@@ -41366,6 +41366,69 @@ SQLite and that nothing on the screen touches a token, a fetch or a sync run —
 which is the property — but a phone in a basement is the only instrument for the
 claim itself.
 
+## 2026-08-26 — N197: five VOLA project skills, and the four from the wishlist deliberately not written
+
+The user brought a recommendation list (from an outside conversation) of
+official plugins plus nine proposed VOLA-specific project skills, and asked
+for "what we need so it aligns with our setup" — the selectivity was the
+instruction, not an economy. Five skills now live under `.claude/skills/`,
+alongside the existing `/pre-merge`:
+
+- **vola-ticket-sdlc** — the per-ticket pipeline as it is actually run,
+  reconstructed from the N141—N188 deliveries rather than from the design
+  doc: claim-with-cap-check, worktree, mutation discipline, the history-
+  heading rindex rule, commit-before-reviewers, the closingIssuesReferences
+  check, ci:checks counting, what standing merge authority does and does not
+  waive, and two facts no prose carried anywhere: **board Status does not
+  auto-sync when an issue closes** (measured on N187 and N188 — both
+  closed issues sat at In Progress until a hand mutation), and `gh pr merge
+  --delete-branch` fails from a worktree because it tries to check out main
+  locally, which the primary checkout already holds.
+- **vola-athlete-ux** — the decided product rules an agent can drift from
+  without noticing: the phone-only test, the N176 bar with `lib/tabs.ts` as
+  its source of truth and the nothing-hides rule, the no-shame constraint
+  including WHY day streaks are structurally banned, the one-question chart
+  carve-out with its two disqualifiers, and the logging speed floors.
+- **vola-offline-sync** — eight invariants (local-write-first, outbox
+  semantics, client-generated IDs as the idempotency mechanism, user-scoped
+  rows, the single Clerk broker, offline-is-never-signed-out, the dead-spot
+  question, AUTH_ROUTES) with the standing instruction that a refactor near
+  sync must prove them rather than preserve them by luck.
+- **vola-design-system** — pointer-first on purpose: `design-tokens.json`
+  owns every brand value and the skill names the file, not the hex, because
+  this repo has measured duplicated facts going stale within hours. Also
+  carries the one asymmetry that would otherwise mislead: `apps/web`'s
+  current look predates the design system and must not be used as the
+  reference.
+- **vola-testing** — the mandatory-coverage-by-change-type table, the
+  mutation discipline as a five-step sequence, the skip-count tripwire, and
+  the corrected statement of what a green local `verify` proves (its
+  `test:engine` link runs, but the Postgres-gated tests inside it skip
+  silently without `TEST_DATABASE_URL` — 22 skips, all green, measured).
+
+**The four not written, each with a reason rather than an omission.**
+`vola-architecture` and `vola-mobile`: their content IS CLAUDE.md's repo map
+and gotchas, which load into every session unconditionally — a skill copy
+adds a second place for the same facts to rot, and this file already records
+what duplicated numbers do. `vola-code-review`: exists, as `/pre-merge` plus
+the three agents in `.claude/agents/`. `vola-api-contracts`: three of its
+five proposed rules are the REST conventions section of CLAUDE.md; the
+remainder folded into vola-testing's endpoint row rather than earning a
+ninth trigger surface that overlaps three others.
+
+The writing rule all five follow, stated once here: **a skill indexes
+decisions, it does not re-decide them.** Every rule names where the
+authority lives (a file, a section, a history entry), volatile facts are
+referenced by pointing at their source of truth, and each skill ends with a
+"not covered here" section naming its neighbours — overlapping trigger
+surfaces giving conflicting advice is the documented failure mode of
+skill sprawl, and the fix is fewer skills with disjoint jobs.
+
+One grounding correction made along the way: the auto-memory's UX-direction
+note still carried the pre-N176 tab layout (Today / Plan / Log / Progress /
+Profile). The skill points at `lib/tabs.ts` instead of restating any layout,
+which is the same staleness lesson applied to memory files.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
