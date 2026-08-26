@@ -239,7 +239,10 @@ func TestCredentialedCloneURLIsNotPersistedInWorkspace(t *testing.T) {
 }
 
 func TestRoleConnectionURL(t *testing.T) {
-	got := roleConnectionURL("postgres://vola:vola_dev_only@localhost:5432/vola_test?sslmode=disable", "engine_role_1_ab", "sekret", "engine_run_1_ab")
+	got, err := roleConnectionURL("postgres://vola:vola_dev_only@localhost:5432/vola_test?sslmode=disable", "engine_role_1_ab", "sekret", "engine_run_1_ab")
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "postgres://engine_role_1_ab:sekret@localhost:5432/engine_run_1_ab?sslmode=disable"
 	if got != want {
 		t.Fatalf("roleConnectionURL = %q, want %q", got, want)
@@ -247,6 +250,17 @@ func TestRoleConnectionURL(t *testing.T) {
 	// The admin credentials must never survive into the run's own URL.
 	if strings.Contains(got, "vola_dev_only") || strings.Contains(got, ":vola@") {
 		t.Fatalf("admin credentials leaked into role URL: %q", got)
+	}
+}
+
+// TestRoleConnectionURLFailsClosedOnAnUnparseableAdminURL is the fix for the
+// blocking finding review raised: a parse failure must never fall back to
+// handing a caller the admin URL unchanged, which would be admin credentials
+// pointed at the admin's own database.
+func TestRoleConnectionURLFailsClosedOnAnUnparseableAdminURL(t *testing.T) {
+	_, err := roleConnectionURL("://not a valid url", "role", "pw", "db")
+	if err == nil {
+		t.Fatal("an unparseable admin URL was accepted rather than refused")
 	}
 }
 

@@ -40660,6 +40660,34 @@ by independently picking the board's top line, so the claim itself was
 authorized; the over-cap board state is recorded here because it is exactly
 the flood the policy exists to prevent, and nothing in this PR fixes it.
 
+`backend-reviewer` found one real blocking bug in the first version above,
+since fixed. **A failure between `CREATE ROLE` and the end of provisioning
+leaked the role (and, one step later, the database too)** — those branches
+only removed the clone directory and returned an error, so no `*Workspace`
+ever existed for a caller to `Teardown` or `AuditResidue`, and a role is
+cluster-global, invisible to any per-run check. Fixed with two cleanup
+helpers (`dropRole`, `dropDatabaseAndRole`) called from every fallible step
+after role creation, each one folded into the returned error rather than
+swallowed if the cleanup itself also fails. Directly unit-tested against
+real Postgres (`TestDropDatabaseAndRoleCleansUpBoth`,
+`TestDropRoleCleansUpARoleWithNoDatabase`), since forcing `Provision`'s own
+`CREATE DATABASE`/`ALTER DATABASE` calls to fail on cue isn't possible from
+outside — the ephemeral names carry a random suffix no caller can predict.
+
+Also from that review: `roleConnectionURL` no longer falls back to
+returning the admin URL unchanged on a parse failure — `pgx.Connect`
+accepts a `key=value` DSN this function's `net/url` parsing does not, so
+the old fallback was reachable and would have hemorrhaged admin
+credentials into a *"per-run"* connection string, silently, on the one path
+meant to prevent exactly that. It now returns an error and `Provision`
+fails closed. The package doc's isolation claim was also tightened: PUBLIC
+grants `TEMPORARY` as well as `CONNECT` by default, so a held connection
+under the per-run role can create a *temp* object (harmless to real data,
+but it blocks `DROP ROLE`) — `Teardown` now runs
+`pg_terminate_backend` for that role before dropping it, and the doc says
+"cannot create anything **durable**" rather than the broader claim it made
+before.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

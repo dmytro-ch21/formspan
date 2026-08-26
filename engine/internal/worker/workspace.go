@@ -25,12 +25,16 @@
 // explicit grants CAN still open a bare connection to vola_test (Postgres
 // grants CONNECT to PUBLIC by default, and revoking it from one named role
 // does not override that — ACL checks are additive, not subtractive), but
-// it CANNOT read, write, or create anything there (table/schema privileges
-// are NOT PUBLIC by default). So the honest claim is: a worker cannot touch
-// any pre-existing database's data or schema, but a per-role connect-only
-// probe against the shared server is not fully closable without revoking
-// PUBLIC's server-wide grant — invasive to a resource other sessions
-// constantly use, and out of scope here.
+// it CANNOT read, write, or create anything DURABLE there (table/schema
+// privileges are NOT PUBLIC by default). PUBLIC does also default to
+// TEMPORARY, so a session can create a temp object that dies with it —
+// harmless to that database's real data, but it can hold a connection open
+// under this role, which Teardown accounts for (see there). So the honest
+// claim is: a worker cannot touch any pre-existing database's real data or
+// schema, but a per-role connect-only probe against the shared server is
+// not fully closable without revoking PUBLIC's server-wide grant —
+// invasive to a resource other sessions constantly use, and out of scope
+// here.
 //
 // What this package does NOT provide: a process sandbox. Isolation here is
 // an explicit environment allowlist plus git-clone provenance, not a
@@ -170,9 +174,17 @@ func (r *Runner) Provision(ctx context.Context, runID int64, issue int, slug, ba
 			os.RemoveAll(ws.Dir)
 			return nil, fmt.Errorf("provision: create role: %w", err)
 		}
+		// From here on, a failure must not leak the role: every later step
+		// gets ws (and its already-created role) torn down before returning,
+		// the same discipline the store.RecordProvisioning branch below
+		// already followed. Found in review — the two branches this
+		// replaces only removed the clone directory, leaving a cluster-
+		// global role or database behind that AuditResidue could never see,
+		// because no *Workspace ever reached a caller able to run it.
 		if _, err := conn.Exec(ctx, fmt.Sprintf(`CREATE DATABASE %q`, ws.DBName)); err != nil {
+			cleanupErr := dropRole(ctx, conn, ws.DBRole)
 			os.RemoveAll(ws.Dir)
-			return nil, fmt.Errorf("provision: create db: %w", err)
+			return nil, provisionErr("create db", err, cleanupErr)
 		}
 		// Ownership, not a grant: the role gets full control of its OWN
 		// database (needed to apply migrations) and, by omission, nothing
@@ -181,10 +193,22 @@ func (r *Runner) Provision(ctx context.Context, runID int64, issue int, slug, ba
 		// already grants and which an explicit per-role REVOKE cannot
 		// override; see the package doc).
 		if _, err := conn.Exec(ctx, fmt.Sprintf(`ALTER DATABASE %q OWNER TO %q`, ws.DBName, ws.DBRole)); err != nil {
+			cleanupErr := dropDatabaseAndRole(ctx, conn, ws.DBName, ws.DBRole)
 			os.RemoveAll(ws.Dir)
-			return nil, fmt.Errorf("provision: assign db ownership: %w", err)
+			return nil, provisionErr("assign db ownership", err, cleanupErr)
 		}
-		ws.DBURL = roleConnectionURL(r.AdminDBURL, ws.DBRole, password, ws.DBName)
+		dbURL, err := roleConnectionURL(r.AdminDBURL, ws.DBRole, password, ws.DBName)
+		if err != nil {
+			// AdminDBURL failed to parse here even though it parsed fine at
+			// the pgx.Connect call above — pgx accepts key=value DSNs this
+			// function does not, so this is reachable, and the alternative
+			// (return the admin URL unchanged) would hand the worker admin
+			// credentials pointed at the admin's own database. Fail closed.
+			cleanupErr := dropDatabaseAndRole(ctx, conn, ws.DBName, ws.DBRole)
+			os.RemoveAll(ws.Dir)
+			return nil, provisionErr("build role connection url", err, cleanupErr)
+		}
+		ws.DBURL = dbURL
 	}
 
 	if store != nil {
@@ -304,6 +328,18 @@ func EnforceBudget(ctx context.Context, store *runstate.Store, runID int64, owne
 // statement one: a migration file is one or more full statements, including
 // dollar-quoted function bodies, and the extended protocol refuses more than
 // one command per Parse/Bind cycle.
+//
+// Two consequences worth knowing, found in review: this writes no
+// schema_migrations row, so a future gate that itself runs
+// backend/cmd/migrate (or `migrate status`) against this same database would
+// see version 0 over a fully-applied schema rather than the real version —
+// fine for a consumer that only reads the schema (go test, a functional
+// test), wrong for one that also runs migrate. And each file's statements
+// execute in one implicit transaction under the simple protocol, so a
+// migration using CREATE INDEX CONCURRENTLY (which cannot run inside a
+// transaction) would fail here even though golang-migrate itself has the
+// same restriction — parity holds today because no migration in this repo
+// uses it, not because this function does anything to guarantee it.
 func (ws *Workspace) MigrateBackend(ctx context.Context) error {
 	if ws.DBURL == "" {
 		return fmt.Errorf("migrate: no ephemeral database provisioned for this workspace")
@@ -387,6 +423,19 @@ func (ws *Workspace) Teardown(ctx context.Context) error {
 				if firstErr == nil {
 					firstErr = err
 				}
+			} else if _, err := conn.Exec(ctx,
+				`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = $1`, ws.DBRole); err != nil {
+				// A role can still hold a connection elsewhere on the server
+				// (PUBLIC grants CONNECT and TEMPORARY by default — see the
+				// package doc), and DROP ROLE refuses a role with a live
+				// session holding a temp object. Terminate first so Teardown
+				// doesn't fail on a role the change-under-test is still
+				// using, rather than only on one it created durable objects
+				// in (which WITH (FORCE) above already can't reach, since
+				// that only applies to ws.DBName's own connections).
+				if firstErr == nil {
+					firstErr = err
+				}
 			} else if _, err := conn.Exec(ctx, fmt.Sprintf(`DROP ROLE IF EXISTS %q`, ws.DBRole)); err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -462,28 +511,70 @@ func runGit(ctx context.Context, dir string, args ...string) error {
 // and pointed at the per-run database — never the admin role's credentials.
 // Parsed with net/url rather than string-split so it doesn't mis-handle
 // userinfo containing "@" or unescaped "/", IPv6 hosts, or a URL with no
-// path. Requires AdminDBURL to be genuine postgres://... URL syntax; a
-// key=value DSN is out of scope.
-func roleConnectionURL(adminURL, role, password, db string) string {
+// path. Returns an error rather than falling back to adminURL unchanged on a
+// parse failure: pgx.Connect accepts key=value DSN syntax this function does
+// not, so AdminDBURL parsing successfully at connect time does not guarantee
+// it parses here too, and handing a caller admin credentials pointed at the
+// admin's own database — silently, on the one path meant to prevent exactly
+// that — would be the staging-outage failure class this project has already
+// paid for once. Found in review; the caller must fail the whole
+// provisioning attempt on this error, not just this call.
+func roleConnectionURL(adminURL, role, password, db string) (string, error) {
 	u, err := url.Parse(adminURL)
 	if err != nil {
-		// Should not happen for the postgres:// URLs this project uses. No
-		// caller checks this return for an error, so there is nothing safer
-		// to do than hand back the input unchanged — callers should not be
-		// building an AdminDBURL that fails to parse in the first place.
-		return adminURL
+		return "", fmt.Errorf("parse admin url: %w", err)
 	}
 	u.User = url.UserPassword(role, password)
 	u.Path = "/" + db
-	return u.String()
+	return u.String(), nil
 }
 
 // quoteLiteral renders s as a single-quoted SQL string literal, doubling any
-// embedded quote. The passwords this guards are always our own generated hex
-// (never containing a quote), but the escaping is here so that remains true
-// by inspection rather than by convention.
+// embedded quote. This is a correct literal-quoter only under Postgres's
+// default standard_conforming_strings=on (true for this project's image),
+// where a plain '...' literal never interprets backslashes — it does NOT
+// also escape backslashes, which would be wrong under that mode without
+// switching to E'...' syntax. The passwords this guards are always our own
+// generated hex (see randomHex), which contains neither a quote nor a
+// backslash, so the distinction is moot in practice; callers must not reuse
+// this for content that isn't known to be hex.
 func quoteLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// dropRole drops a role this Provision attempt already created, on the
+// admin connection already in hand — best-effort cleanup for a failure
+// partway through provisioning, before any *Workspace exists for a caller
+// to Teardown or audit.
+func dropRole(ctx context.Context, conn *pgx.Conn, role string) error {
+	_, err := conn.Exec(ctx, fmt.Sprintf(`DROP ROLE IF EXISTS %q`, role))
+	return err
+}
+
+// dropDatabaseAndRole is dropRole's counterpart once the database also
+// exists — database first, since a role that still owns a database cannot
+// be dropped (the same ordering Teardown uses).
+func dropDatabaseAndRole(ctx context.Context, conn *pgx.Conn, db, role string) error {
+	var errs []error
+	if _, err := conn.Exec(ctx, fmt.Sprintf(`DROP DATABASE IF EXISTS %q WITH (FORCE)`, db)); err != nil {
+		errs = append(errs, fmt.Errorf("drop db: %w", err))
+	}
+	if err := dropRole(ctx, conn, role); err != nil {
+		errs = append(errs, fmt.Errorf("drop role: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+// provisionErr reports a provisioning failure alongside whether the
+// best-effort cleanup for it also failed — a cleanup error must never be
+// swallowed silently, or a caller reading only "provision failed" would have
+// no way to know a role or database was left behind for AuditResidue (which
+// never runs here, since no *Workspace exists yet) to have caught.
+func provisionErr(step string, err, cleanupErr error) error {
+	if cleanupErr != nil {
+		return fmt.Errorf("provision: %s: %w (cleanup also failed: %v)", step, err, cleanupErr)
+	}
+	return fmt.Errorf("provision: %s: %w", step, err)
 }
 
 // randomHex returns n random bytes, hex-encoded — used for the per-run

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -294,10 +295,19 @@ func TestPerRunRoleCannotReadWriteOrCreateInTheSharedDatabase(t *testing.T) {
 	defer adminConn.Close(context.Background())
 	err = adminConn.QueryRow(context.Background(),
 		`SELECT table_name FROM information_schema.tables WHERE table_schema='public' LIMIT 1`).Scan(&tableName)
-	if err == nil {
+	switch {
+	case err == nil:
 		if _, err := conn.Exec(context.Background(), fmt.Sprintf("SELECT * FROM %q LIMIT 1", tableName)); err == nil {
 			t.Fatalf("per-run role was able to read table %q in the shared database — isolation is broken", tableName)
 		}
+	case errors.Is(err, pgx.ErrNoRows):
+		// A genuinely empty shared database (CI's throwaway TEST_DATABASE_URL
+		// before anything migrates it) has no table to attempt reading — the
+		// CREATE-TABLE half above still ran, so this is not a vacuous test,
+		// but say so rather than let a silent skip look identical to a run.
+		t.Log("shared database has no tables; only the CREATE TABLE half of this probe ran")
+	default:
+		t.Fatal(err)
 	}
 }
 
@@ -441,5 +451,100 @@ func TestPerRunRoleIsDroppedAtTeardownAndAuditCatchesALeak(t *testing.T) {
 	}
 	if err := ws.AuditResidue(context.Background()); err != nil {
 		t.Fatalf("audit red after a clean teardown: %v", err)
+	}
+}
+
+// TestDropDatabaseAndRoleCleansUpBoth directly exercises the cleanup helper
+// Provision now calls on a partial-provisioning failure — the mechanism
+// itself, since forcing Provision's own CREATE DATABASE/ALTER DATABASE
+// steps to fail deterministically isn't possible from outside (the names
+// are generated internally, with a random suffix no caller can predict or
+// collide with in advance).
+func TestDropDatabaseAndRoleCleansUpBoth(t *testing.T) {
+	admin := os.Getenv("TEST_DATABASE_URL")
+	if admin == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	conn, err := pgx.Connect(context.Background(), admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+
+	suffix, err := randomHex(6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role := "engine_role_cleanup_test_" + suffix
+	db := "engine_run_cleanup_test_" + suffix
+
+	if _, err := conn.Exec(context.Background(),
+		fmt.Sprintf(`CREATE ROLE %q LOGIN PASSWORD 'x'`, role)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(context.Background(), fmt.Sprintf(`CREATE DATABASE %q`, db)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(context.Background(),
+		fmt.Sprintf(`ALTER DATABASE %q OWNER TO %q`, db, role)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := dropDatabaseAndRole(context.Background(), conn, db, role); err != nil {
+		t.Fatalf("dropDatabaseAndRole: %v", err)
+	}
+
+	var n int
+	if err := conn.QueryRow(context.Background(),
+		`SELECT count(*) FROM pg_database WHERE datname = $1`, db).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("dropDatabaseAndRole left the database behind")
+	}
+	if err := conn.QueryRow(context.Background(),
+		`SELECT count(*) FROM pg_roles WHERE rolname = $1`, role).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("dropDatabaseAndRole left the role behind")
+	}
+}
+
+// TestDropRoleCleansUpARoleWithNoDatabase covers the OTHER partial-failure
+// shape Provision now guards: CREATE ROLE succeeded but CREATE DATABASE
+// never ran, so only a bare role needs removing.
+func TestDropRoleCleansUpARoleWithNoDatabase(t *testing.T) {
+	admin := os.Getenv("TEST_DATABASE_URL")
+	if admin == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	conn, err := pgx.Connect(context.Background(), admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+
+	suffix, err := randomHex(6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role := "engine_role_bare_cleanup_test_" + suffix
+	if _, err := conn.Exec(context.Background(),
+		fmt.Sprintf(`CREATE ROLE %q LOGIN PASSWORD 'x'`, role)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := dropRole(context.Background(), conn, role); err != nil {
+		t.Fatalf("dropRole: %v", err)
+	}
+
+	var n int
+	if err := conn.QueryRow(context.Background(),
+		`SELECT count(*) FROM pg_roles WHERE rolname = $1`, role).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("dropRole left the role behind")
 	}
 }
