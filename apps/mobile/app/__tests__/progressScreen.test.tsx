@@ -86,8 +86,11 @@ jest.mock('@/lib/sync', () => ({
   }),
 }));
 
+// Mutable, because "the athlete's unit system is not known yet" is a state
+// under test — see the imperial guard at the foot of this file.
+let mockUnits: { units: string; unitsReady: boolean } = { units: 'metric', unitsReady: true };
 jest.mock('@/lib/useUnits', () => ({
-  useUnits: () => ({ units: 'metric', unitsReady: true, foodUnit: 'g' }),
+  useUnits: () => ({ ...mockUnits, foodUnit: 'g' }),
 }));
 
 const STRENGTH = {
@@ -152,7 +155,35 @@ beforeEach(() => {
   mockPlanned = deferred<unknown[]>();
   mockModules = [STRENGTH, bjj(true), nutrition(true)];
   mockModulesReady = true;
+  mockUnits = { units: 'metric', unitsReady: true };
 });
+
+/**
+ * Two smoothable clusters of weigh-ins, a week apart, for a today of
+ * 2026-08-26.
+ *
+ * `trendWeight` averages readings whose age is 0–6 days, and needs at least
+ * three — so BOTH ends have to be populated or the delta is null and no body
+ * insight is drawn at all. The older cluster is placed against the far end
+ * (2026-08-19), not against today: 2026-08-12 is exactly seven days from it and
+ * falls outside the window, which is the mistake this comment exists to stop
+ * somebody repeating.
+ */
+function weighIns() {
+  const days = [
+    '2026-08-14',
+    '2026-08-15',
+    '2026-08-16',
+    '2026-08-24',
+    '2026-08-25',
+    '2026-08-26',
+  ];
+  // 80 kg for the older week, 79 kg for this one — a clear 1 kg fall.
+  return days.map((measured_on, i) => ({
+    measured_on,
+    weight_kg: i < 3 ? 80 : 79,
+  }));
+}
 
 /** Settle every read with something ordinary, so the screen reaches content. */
 async function answerEverything() {
@@ -321,5 +352,64 @@ describe('what moved here from You', () => {
     await answerEverything();
     expect(screen.getByTestId('progress-weight-trend')).toBeTruthy();
     expect(screen.getByTestId('records-manage')).toBeTruthy();
+  });
+});
+
+/**
+ * #483 — a weight printed in the wrong system, for one frame.
+ *
+ * Every sentence "What changed" can produce about the body contains a weight,
+ * and there is no honest fallback: "1.0 kg" to an imperial athlete is wrong,
+ * and a unit-less "1.0" is worse. So the read is `checking` until the athlete's
+ * own system is known.
+ *
+ * The vector that separates a correct implementation from one that formats
+ * with a default is `unitsReady: false` WITH the check-ins already answered —
+ * a test that only ever runs with units ready cannot see the difference, and a
+ * test with no check-ins would pass against either because there is nothing to
+ * format.
+ */
+describe('the weight is never stated in a system nobody chose', () => {
+  it('withholds the body insight until the unit system is known', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-26T12:00:00'));
+    try {
+      mockUnits = { units: 'metric', unitsReady: false };
+      render(<ProgressScreen />);
+      mockSessions.resolve([]);
+      mockPlanned.resolve([]);
+      mockRecords.resolve([]);
+      mockFoodDays.resolve([]);
+      mockCheckins.resolve(weighIns());
+
+      await waitFor(() => expect(screen.getByTestId('records-state')).toBeTruthy());
+      // Still looking, rather than a figure in kilograms.
+      expect(screen.getByLabelText('Looking for what changed')).toBeTruthy();
+      expect(screen.queryByTestId('what-changed-body')).toBeNull();
+      expect(screen.queryByText(/kg/)).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('states it once the system is known, in that system', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-26T12:00:00'));
+    try {
+      mockUnits = { units: 'imperial', unitsReady: true };
+      render(<ProgressScreen />);
+      mockSessions.resolve([]);
+      mockPlanned.resolve([]);
+      mockRecords.resolve([]);
+      mockFoodDays.resolve([]);
+      mockCheckins.resolve(weighIns());
+
+      // 1 kg is 2.2 lb. Pinned to the athlete's system rather than to the
+      // storage unit, and to a literal rather than to a second call of the
+      // formatter — which would agree with any formatter, right or wrong.
+      const body = await screen.findByTestId('what-changed-body');
+      expect(body).toHaveTextContent(/2\.2lb over 7 days, smoothed\./);
+      expect(body).toHaveTextContent(/Your weight trend is falling/);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

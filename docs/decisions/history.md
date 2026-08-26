@@ -41365,6 +41365,125 @@ start on a device with the network disabled. The suite proves the three reads ar
 SQLite and that nothing on the screen touches a token, a fetch or a sync run —
 which is the property — but a phone in a basement is the only instrument for the
 claim itself.
+## N178 — Progress: the same analysis, in the order that answers the question (`app/(tabs)/progress.tsx`, `lib/progress.ts`, `components/progress/*`, `components/RecordsCard.tsx`, `app/(tabs)/you.tsx`)
+
+N176 put a Progress tab in the bar and left it an honest shell — two rows and a
+dashed panel saying where the answer lived *for now*. This is the tab.
+
+**It is a re-homing, not a new analytics stack, and that was the ticket's first
+instruction.** Every figure on the screen already existed: `WeekReview` has
+summed the week since Today needed it, `TrainingSummary` has drawn the
+consistency grid and the streak, `RecordsCard` has listed personal bests,
+`lib/anthropometry.ts` has smoothed body weight, and `app/goals/trend.tsx` has
+owned the weight chart. What did not exist was one place that read them together
+and said what they MEAN before showing what they are.
+
+### The order is the feature, and it is asserted rather than eyeballed
+
+Six sections: **This week → What changed → Training → Body → Nutrition →
+Goals**. The ticket calls that "checkable by reading the component tree", so
+each carries a `progress-section-*` testID and `progressScreen.test.tsx` pins
+the whole list in document order against a literal array. A second, narrower
+assertion pins `progress-section-changed` above `training-span-1m` — the span
+control on the first raw chart — because the claim the ticket actually makes is
+*interpretation before charts*, and a section wrapper is one indirection away
+from that.
+
+Neither assertion is derived from anything the screen exports. A test that reads
+its expectation off the implementation agrees with every implementation,
+including a reordered one.
+
+### `Reading<T>`: five kinds, because reality has five
+
+`lib/progress.ts` carries the tab's whole discipline in one union —
+`checking | unavailable | off | empty | ready`, with `stale` riding on the two
+answered kinds.
+
+This is not new thinking; it is `lib/nutrition.ts`'s `TargetView` /
+`EatenView` / `LoggedDaysView` generalised for a tab that is nothing BUT reads
+of history. The reason it earns a shared type here is that the
+empty-versus-unknown collapse has shipped on this codebase **three times, and
+every instance was an analytical surface**: a trend card telling an athlete with
+two years of weigh-ins to start logging on every cold open; a tracker screen
+telling somebody with a month of history that they track nothing; a card drawing
+its empty state during a fetch that had not answered. A Progress tab is where
+that bug goes to live.
+
+The load-bearing part is the **branch order** in `reading()`, not the type:
+`off` first (a module turned off must not render figures cached from before it
+was), then a value if one exists (an answer in hand beats the reason a later
+refresh failed), then `failed`, and `checking` as the default — which is the arm
+all three shipped bugs were missing. Twelve mutations were applied and all
+twelve go red; the vector that separates a correct classifier from a broken one
+is `{ value: null, failed: false }`, and nothing else does.
+
+`components/progress/Reading.tsx` renders the four non-content states, so no
+section computes its own empty-versus-loading. There is no way to render
+"nothing logged" from a `checking`, because `checking` never reaches the copy.
+
+### "What changed" may not say nothing changed until everything has answered
+
+`whatChanged` composes at most two insights from a fresh personal best, a
+week-on-week session delta, and a smoothed weight movement. Its branch order is
+the guard: anything to say → say it; **any source still `checking` → `checking`,
+never `quiet`**; any source `unavailable` → `unavailable`; only then `quiet`. The
+third step is nearly as easy to lose as the second, and without it a gym
+dead-spot renders a confident "nothing stands out" over what may have been an
+athlete's best week.
+
+Three smaller rules fell out of writing it. Percentages are refused — "up 200%"
+from one session to three is true and useless — so the comparison is in
+sessions, and it is drawn only when `reviewWeek` reports a `previous`, which it
+refuses to do when the count-bounded local list cannot reach past last Monday.
+The weight movement has a 0.1 kg noise floor. And neither direction is judged:
+which way an athlete wants the trend depends on the phase, which this block does
+not read.
+
+### What moved off You, and what deliberately did not
+
+`TrainingSummary`, `RecordsCard` and the **Position map** row are moved, not
+copied — there is one of each in the app. "Moved" is only checkable from the
+screen that lost them, so `youScreen.test.tsx` asserts their absence and
+`progressScreen.test.tsx` asserts their presence; either half alone is satisfied
+by a duplicate. Both assertions are on testIDs those components render
+*unconditionally*, so a re-add goes red whatever state its fetch is in — and
+You's stubs for the two were **deleted rather than kept**, since a stub that
+draws nothing would have made the absence assertion vacuous.
+
+The belt masthead and `RoadmapSummary` stayed. The line drawn: records and the
+consistency grid answer *is the training working*, which is Progress; a roadmap
+is closer to *who this athlete is*, which is You. N181 (#586) owns that screen
+and may move it.
+
+### `RecordsCard` stopped fetching, and that is the one behavioural change
+
+It owned its own `fetchRecords`, which was right while it was the only thing on
+the phone that wanted records. On Progress the "What changed" block reads the
+same list to decide whether anything is newly a best — and two components
+fetching `/v1/records` on one focus is a wasted request **and** two answers able
+to disagree with each other a few hundred points apart, which is the W2/W4 shape
+this repo keeps paying for. So the screen owns the read and the card renders it.
+The four states it juggled by hand became the `Reading` union; nothing about the
+rendering changed.
+
+No API or contract changed. Every endpoint the tab reads — `/v1/records`,
+`/v1/body/checkins`, the history rollup — is one an existing screen already
+called.
+
+### Two things this leaves open
+
+- **Achievements are named and not built.** `lib/accomplishments.ts` and
+  `GET /v1/bjj/accomplishments` exist, and the awards are shown on the session
+  that earned them and nowhere else — so a first submission win is visible for
+  one screen and then gone. The Goals section carries a dashed panel saying so
+  (#468's rule: a placeholder standing where content would stand is dashed),
+  rather than a heading over one row. A list belongs there.
+- **Running has no distance on the overview.** The ticket's sketch asks for
+  "running distance" beside the session counts, and `WeekReview`'s per-sport
+  split leads with time for any sport that produced no tonnage — which is right
+  for BJJ and merely adequate for running, where distance is the measure. That
+  is a change to `leadMeasure`, shared with Today, and was left alone rather
+  than made here.
 
 ## Open items / known gaps as of this entry
 

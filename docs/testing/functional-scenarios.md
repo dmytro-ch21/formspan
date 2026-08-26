@@ -12348,6 +12348,95 @@ the athlete-visible defect rather than the file.
 - The label widths above — jest has no font metrics, so a screenshot is the only
   evidence.
 
+## N178 — the Progress tab (`app/(tabs)/progress.tsx`, `lib/progress.ts`, `components/progress/*`)
+
+The shell N176 left becomes the real tab: recent context, then interpretation,
+then the drill-downs, then the charts. `TrainingSummary`, `RecordsCard` and the
+position-map row **move** here from You. Nothing new is computed — every figure
+already existed somewhere in the app.
+
+### Happy path
+
+- Open Progress on an account with a few weeks of training. Read down the
+  screen: **This week**, then **What changed**, then Training, Body, Nutrition,
+  Goals. Any chart above the "What changed" card is a failure, not a nitpick —
+  that order is the ticket.
+- "What changed" says at most **two** things and each is a sentence with the
+  evidence under it, never a bare number.
+- The span control on the training grid still switches 1W / 1M / 6M / 1Y, and
+  the grid still lays a month out as a calendar and a year as a heatmap. It is
+  the same component; nothing about it may differ from how it behaved on You.
+- Records still list, still show the medal, still open the exercise, and
+  **Choose** still opens the pinned-records screen.
+- Weight trend opens `/goals/trend` — the one weight-trend view. **Two different
+  weight-trend screens now existing is a failure**, and it is the specific one
+  the ticket names.
+- Check-ins opens today's check-in; Nutrition opens the target screen; Target
+  history opens the target history.
+
+### Empty and unknown are different, and this is the tab where that is tested
+
+Every one of these has shipped on this codebase, always on an analytical
+surface, so read them as regressions rather than as edge cases.
+
+- **Cold open on a slow connection, watch the FIRST frame.** No "Log a few sets
+  and your bests show up here", no "Nothing logged this week yet", no "Nothing
+  has moved much since last week". Spinners and dashes only. An athlete with two
+  years of history being told to start logging is the exact bug.
+- **Airplane mode, on an account with plenty of history.** Records say
+  "couldn't load", the week still renders from SQLite, "What changed" says it
+  could not read the history. Nothing anywhere says the athlete has nothing.
+- **A genuinely new account.** Now the invitations are correct and should
+  appear — this is the one state allowed to say "log a few sets".
+- **Load the tab, then lose signal and return to it.** Figures already on screen
+  stay, with "Showing the last figures loaded" beside them. They must not
+  disappear behind an error, and they must not be presented as fresh.
+
+### Each athlete profile
+
+- **Strength-only** (BJJ and running off): This week, What changed, the training
+  grid, records, weight trend, nutrition. No BJJ position-map row — but a line
+  saying BJJ is turned off and where to turn it on. **Silence there is the
+  failure**, not the row's absence.
+- **BJJ-only**: the week's sessions read in TIME, never "0 kg" — a mat week has
+  no tonnage and a fabricated zero is the trap. The position map is offered.
+  Records may legitimately be empty and must say so as an invitation, not as an
+  error.
+- **Multi-sport**: the per-sport split lists each discipline once, each with the
+  measure that discipline actually produces.
+- **Nutrition off**: no "food logged" line in This week at all, and the
+  Nutrition section's link is **still there** — the destination is what explains
+  the off state, and hiding the link is what leaves the athlete unable to reach
+  the explanation.
+- **Mid-week**: "food logged" reads *n* of the days ELAPSED, never of 7. "0 of
+  7" on a Monday morning counts days that have not happened as days the athlete
+  failed to log.
+
+### Moved, not copied
+
+- Open **You**. The training summary and the records list are gone from it, and
+  so is the Position map row. Finding either on both screens is the failure the
+  ticket is guarding against.
+- Nothing that was on You has become unreachable: the belt masthead, the roadmap
+  summary, Sequences, Library, People and the profile facts are all still there.
+
+### Accessibility
+
+- VoiceOver over "What changed": each insight is **one** stop reading the
+  headline and its evidence as a sentence. Two stops per insight is the failure.
+- The loading spinners announce what they are loading, not just "loading".
+- Largest accessibility text size: the "FOOD LOGGED / n of m days" row keeps
+  both halves on screen.
+
+### Needs a device — none of this is reachable from the suite
+
+- The three athlete profiles walked on real or seeded accounts, confirming each
+  sees a useful overview rather than a stack of empty sections.
+- The first frame of a cold start over a genuinely slow connection — the suite
+  can hold a promise open, but only a device shows how long the athlete looks at
+  it.
+- Scroll length: the tab should be readable without feeling like a report.
+
 ## Design tokens — the brand lime versus the readings that resemble it (N183)
 
 These are checks on the *palette*, not on a screen, and most of them are already

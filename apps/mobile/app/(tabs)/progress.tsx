@@ -260,6 +260,15 @@ export default function ProgressScreen() {
   );
 
   const bodyReading: Reading<BodyChange> = useMemo(() => {
+    // `unitsReady` gates the whole reading, not the formatting.
+    //
+    // Every sentence this produces contains a weight, and #483 is the bill for
+    // printing kilograms for a frame to somebody who thinks in pounds — the
+    // first frame being precisely when a card is read. There is no honest
+    // fallback string here: "0.6 kg" to an imperial athlete is wrong, and a
+    // unit-less "0.6" is worse. So the read simply has not answered yet, which
+    // is true, and `whatChanged` already knows what to do with that.
+    if (!unitsReady) return { state: 'checking' };
     if (checkins === null) return reading<BodyChange>({ value: null, failed: checkinsFailed });
     const today = dayString(now);
     const nowKg = trendWeight(checkins, today);
@@ -274,8 +283,10 @@ export default function ProgressScreen() {
     // `empty`, not `checking`, when the readings are too sparse: the read
     // ANSWERED, and the answer is that there is not enough to compare. The
     // block simply draws no body insight from it.
-    return value === null ? { state: 'empty', stale: checkinsFailed } : { state: 'ready', value, stale: checkinsFailed };
-  }, [checkins, now, checkinsFailed]);
+    return value === null
+      ? { state: 'empty', stale: checkinsFailed }
+      : { state: 'ready', value, stale: checkinsFailed };
+  }, [checkins, now, checkinsFailed, unitsReady]);
 
   const nutritionReading = useMemo(
     () =>
@@ -292,11 +303,13 @@ export default function ProgressScreen() {
 
   const changes = useMemo(
     () =>
-      whatChanged(
-        { week: weekReading, records: freshReading, body: bodyReading },
-        (kg) => (unitsReady ? formatWeight(kg, units) : `${kg.toFixed(1)} kg`),
+      // Never a bare number and never a hard-coded unit — `bodyReading` is
+      // `checking` until the athlete's own system is known, so this is only
+      // ever called with one in hand.
+      whatChanged({ week: weekReading, records: freshReading, body: bodyReading }, (kg) =>
+        formatWeight(kg, units),
       ),
-    [weekReading, freshReading, bodyReading, units, unitsReady],
+    [weekReading, freshReading, bodyReading, units],
   );
 
   return (
