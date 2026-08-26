@@ -41728,13 +41728,36 @@ and the command is deliberately a **repo-relative** path: an absolute one gets
 written from inside `.claude/worktrees/<name>` and dangles the moment that
 worktree is removed.
 
-### What this does not fix
+### What this does not fix, and the limit worth stating plainly
 
-`package.json`'s `verify` chain is the other file every task edits, and it is
-one line, so it is not append-shaped and this driver does nothing for it —
-`check-verify-chain.py` remains the thing that notices a dropped link. The
-driver also cannot help a **clean** auto-merge that makes a claim in another
-file false; that failure has no conflict in it to catch.
+**GitHub does not run custom merge drivers.** `refs/pull/N/merge` is computed on
+their servers, which will not execute a script out of this repository — so a PR
+whose base has moved **still reads `CONFLICTING`, and still receives zero check
+runs, until its author pushes a rebased head.** The driver does not make the
+rebase unnecessary.
+
+What it changes is what the rebase *costs*. `git rebase` consults
+`.gitattributes` exactly as `git merge` does, and that is the workflow this repo
+actually uses, so it was measured rather than inferred: a branch carrying its
+own entry, rebased onto a `main` that gained one while it was open —
+
+- **driver absent** — `CONFLICT (content)`, `could not apply`, `git rebase
+  --continue` and a hand resolution per cycle. Each of those is a chance to
+  resolve wrongly, and two defects landed that way this month.
+- **driver present** — exit 0, both entries present once each, the already-
+  landed one above the arriving one, gap list still last.
+
+So the honest claim is narrower than "PRs stop conflicting": **the rebase
+becomes a two-command reflex that cannot silently drop an entry**, which is
+already the documented fix for zero-checks in `CLAUDE.md`
+(`git rebase origin/main && git push --force-with-lease`). What was a manual
+merge of a 41,000-line prose file is now nothing to decide.
+
+Two other things it does not touch. `package.json`'s `verify` chain is the other
+file every task edits; it is one line, not append-shaped, so this does nothing
+for it — `check-verify-chain.py` remains the thing that notices a dropped link.
+And a **clean** auto-merge that makes a claim in another file false has no
+conflict in it to catch, by definition.
 
 ## Open items / known gaps as of this entry
 
