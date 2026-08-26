@@ -50,9 +50,10 @@ export default function TabLayout() {
   // empty, an empty list has no food-log capability in it, so the first frames
   // computed "hide both" and the bar visibly rearranged on every cold start.
   // N176 made all five slots unconditional, so the bar is now identical for an
-  // empty list and a full one — `everyTabIsUnconditional` in
-  // `lib/__tests__/tabBar.test.ts` is what says so, and is what turns red if a
-  // future ticket makes a tab conditional again without restoring that guard.
+  // empty list and a full one. `app/__tests__/tabLayout.test.tsx`'s
+  // "the bar does not depend on the module set" is what says so — both its
+  // cases, the unread list and the all-disabled one — and is what turns red if
+  // a future ticket makes a tab conditional again without restoring that guard.
   //
   // **It still guards the SCREENS, which is the larger half and always was.**
   // `<Tabs>` mounts its initial route immediately, and `(tabs)/index.tsx` reads

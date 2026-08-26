@@ -95,8 +95,8 @@ export const TABS = [
  * every route file in this folder whether it is declared or not, so an omitted
  * screen comes back as a sixth tab with a filename-derived title ("food"). That
  * is the failure this list exists to make impossible, and it is why
- * `everyTabRouteIsAccountedFor` below reads the directory rather than trusting
- * this array.
+ * `lib/__tests__/tabBar.test.ts`'s "is either a tab or deliberately off the
+ * bar, and never neither" READS THE DIRECTORY rather than trusting this array.
  */
 export const OFF_BAR_ROUTES: readonly string[] = ['food', 'goals'];
 
