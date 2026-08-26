@@ -52,12 +52,20 @@ import type { IconName } from '@/components/ui/Icon';
  * disappears and the route stays resolvable, which is what an in-flight
  * `router.push` and every deep link need.
  *
- * **`train.tsx` is deliberately NOT deleted**, and N176's work on it is being
- * re-homed rather than thrown away: #587 owns moving its sections into Plan and
- * rebases onto this array. Until it lands, note the honest state — **nothing in
- * the app links to `(tabs)/train` any more.** Its tab was its only entry point,
- * so between this change and #587 it is reachable by deep link alone. That is a
- * known, bounded gap owned by the next ticket, not an oversight here.
+ * **`train.tsx` is deliberately NOT deleted**, and N182 (#587) settled what it
+ * is for. N180 left an honest gap on the record — nothing in the app linked to
+ * `(tabs)/train` any more, its tab having been its only entry point — and #587
+ * audited the screen rather than re-homing it on faith. All four of its blocks
+ * were already drawn elsewhere by a screen that has a button (`Resume`,
+ * `Today`, `Quick start` and `Recent` by Today; `Later` by Plan's
+ * `WeekPlanner`), so the file is now a `<Redirect>` to Today and the route
+ * stays resolvable for `vola://train` and any in-flight `router.push`. The
+ * audit table is in that file's docstring.
+ *
+ * **So the gap is closed by a ruling, not by a link.** Train is not
+ * unreachable-and-undecided; it is retired, and the one thing Plan genuinely
+ * lacked — a planned day beyond the week `WeekPlanner` is showing — is now a
+ * block on Plan reading the same `lib/useTrainBoard.ts` Train read.
  *
  * ## The gate that used to live here, and why it is gone
  *
@@ -141,9 +149,12 @@ export const TABS = [
  * `lib/__tests__/tabBar.test.ts`'s "is either a tab or deliberately off the
  * bar, and never neither" READS THE DIRECTORY rather than trusting this array.
  *
- * **`train` is here rather than deleted.** N180 retires its BUTTON; #587 moves
- * its sections into Plan. Deleting the file to make this diff smaller would
- * throw away N177's work and break every `vola://train` link in flight.
+ * **`train` is here rather than deleted.** N180 retired its BUTTON; N182
+ * retired its CONTENTS, having measured that every block was already drawn by a
+ * screen with a button. What is left is a `<Redirect>` to Today, which is
+ * exactly what this list is for: deleting the file would break every
+ * `vola://train` link in flight, and omitting it from this array would put the
+ * route back on the bar as a sixth tab titled "train".
  */
 export const OFF_BAR_ROUTES: readonly string[] = ['train', 'goals'];
 

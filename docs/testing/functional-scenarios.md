@@ -12401,21 +12401,27 @@ a failure names the athlete-visible defect rather than the file.
 
 ### Train and Goals are off the bar and NOT gone
 
-- **Deep link both**: `vola://train` and `vola://goals` open the real screens
-  with their real data. A route that only *resolves* is not enough — check that
-  Train's sections and the target history actually render.
-- **Train has no in-app link until #587 lands.** Its tab was its only entry
-  point, so between N180 and that ticket a deep link is the only way in. That is
-  a known gap, not a defect to file — #587 moves its sections into Plan.
+- **Deep link both**: `vola://goals` opens the real screen with its real data. A
+  route that only *resolves* is not enough — check that the target history
+  actually renders.
+- **`vola://train` is now a REDIRECT to Today** — see the N182 section at the
+  end of this file. N180 recorded an honest gap here ("Train has no in-app link
+  until #587 lands"); N182 closed it by auditing the screen rather than
+  re-homing it on faith, and found every block already drawn elsewhere. So the
+  check is that the deep link lands on Today, not that Train's sections render.
 - From Today with nutrition on: the Fuel and Logging cards still reach Food.
   N180 **added** the tab as an entry point; it did not move these, and they must
   still work.
 - Press back out of a deep-linked Train screen. It must not strand the athlete on
   a tab-less screen.
-- A stale back-stack entry — be on Train, background the app, return — still
-  works. `href: null` keeps the route mounted; omitting it would not.
+- A stale back-stack entry pointing at Train — background the app on it, return
+  — lands on Today rather than erroring. **N182 changed what this checks**: you
+  can no longer *be* on Train, so the state to reproduce is a link or a
+  back-stack entry that still names it. `href: null` keeps the route mounted;
+  omitting it would not.
 - **`train.tsx` still exists.** If it has been deleted to tidy the diff, that is
-  the failure: N177's work is being re-homed, not discarded.
+  the failure — the route has to keep resolving. N182 replaced its BODY with a
+  redirect; it did not remove the file, and it must not be removed later either.
 
 ### The regression this must not reintroduce
 
@@ -12796,3 +12802,62 @@ grow a second copy of any of them.
   `Your own chains` is findable in the Library's header stack (which is ~300pt
   before the first result on a 4.7" screen — see the open gap in
   `docs/decisions/history.md`).
+
+## N182 — Plan owns the forward schedule, and Train is retired (`app/(tabs)/workouts.tsx`, `app/(tabs)/train.tsx`)
+
+**Supersedes the N177 section above.** Every scenario there describing what
+Train *renders* is now a scenario about Today or Plan; the `startSessionHref`
+and offline halves are unchanged and still apply, they are just reached from a
+different screen. The N177 section is left in place because its non-regression
+list is still the right list.
+
+The finding this rests on is worth restating, because the ticket was written on
+the opposite one: **Plan already rendered the forward schedule.** `WeekPlanner`
+has drawn seven authoring rows with template names, week arrows and a
+month-grid jump since long before either ticket, so "Plan holds no dates" was
+never true of `main`. What Plan lacked was a view of a plan *outside* the week
+on screen. That, and only that, is what moved.
+
+### Beyond this week
+
+- **Plan a session eight days out, then open Plan.** Under the week rows, a
+  `Beyond this week` line names it and its date. It has no button — starting
+  next week's session today is how a plan stops meaning anything.
+- **Plan a session three days out, then open Plan.** The line is **absent**. The
+  planner above is already drawing that day, and the same row twice on one
+  screen is the duplicate this block exists to avoid.
+- **Plan nothing at all.** No heading, no line, no "nothing planned ahead"
+  sentence. An athlete who plans nothing should not be told so on every visit.
+- **Cold open with the plan read still in flight.** Nothing is drawn — in
+  particular NOT the failure note. *Not looked yet* and *looked and failed* are
+  different sentences and only one of them is a fact.
+- **Corrupt or lock the local database, then open Plan.** The dashed note says
+  the rest of the plan could not be read. This is the only thing on the screen
+  that will say so: `WeekPlanner` deliberately renders an unreadable plan as an
+  empty week, so without this the athlete sees seven blank rows and is told
+  nothing.
+- **Airplane mode throughout.** All of the above still holds — every read behind
+  this block is SQLite.
+
+### Train is retired
+
+- **`vola://train` still opens the app** and lands on **Today**. It does not
+  error, does not show a blank screen, and does not strand the athlete on a
+  tab-less route.
+- **Train renders no schedule, no Recent, no Quick start and no Resume card.**
+  If any of them reappears, the app has two answers to one question again —
+  which is what N182 removed, and what W2/W4 cost twice before.
+- **`train.tsx` still exists and is still in `OFF_BAR_ROUTES`.** Deleting it
+  puts the route back on the bar as a sixth tab titled "train", and breaks every
+  `vola://train` link in flight.
+- **Everything Train used to offer is still reachable in one tab.** Resume and
+  the day's plans on Today; New log on Today for an unplanned session; Recent on
+  Today; the week and what is beyond it on Plan.
+
+- **NEEDS HUMAN EVIDENCE — open `vola://train` on a device** and confirm it
+  lands on Today rather than flashing an empty screen or bouncing. A redirect
+  rendered from a tab route is exactly the thing a test asserts structurally and
+  a phone asserts visually.
+- **NEEDS HUMAN EVIDENCE — plan something ten days out on a device**, open Plan,
+  and confirm the `Beyond this week` line reads correctly against the week rows
+  above it, at default and at the largest accessibility text size.

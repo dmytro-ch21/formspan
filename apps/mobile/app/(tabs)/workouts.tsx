@@ -23,6 +23,7 @@ import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { CurriculaStrip } from '@/components/CurriculaStrip';
 import { WeekPlanner } from '@/components/WeekPlanner';
+import { dayString, shortDate, weekDays } from '@/lib/calendar';
 import {
   enabledSports,
   labelFor,
@@ -31,7 +32,9 @@ import {
   moduleWithCatalog,
 } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
+import type { PlannedOffer, Source } from '@/lib/trainBoard';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { useTrainBoard } from '@/lib/useTrainBoard';
 import {
   listWorkouts,
   GOALS,
@@ -106,6 +109,35 @@ export default function WorkoutsScreen() {
   const [composing, setComposing] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+
+  // Refreshed on focus rather than ticked, and for the same reason Train's copy
+  // was: a tab screen stays mounted for the life of the process, so a `Date`
+  // captured at mount still says Sunday on Monday morning — and both the week
+  // this screen draws and the "beyond this week" boundary below are measured
+  // from it. Nothing here draws a running clock, so there is no interval.
+  const [now, setNow] = useState(() => new Date());
+  useFocusEffect(
+    useCallback(() => {
+      setNow(new Date());
+    }, []),
+  );
+  // The same hook Train read, unchanged — `later` is the soonest planned day
+  // strictly after today within `PLAN_WINDOW_DAYS`, off the same
+  // `planned_sessions` table `WeekPlanner` above reads. Only `later` is
+  // rendered here; see `NextPlannedBlock` for why the other three fields are
+  // not this screen's business.
+  //
+  // **The cost is named rather than hidden**, because review counted it: this
+  // adds a `listLocalSessions(userId, 30)` that only feeds `resume`/`today`/
+  // `recent`, none of which this screen draws, plus a second
+  // `listPlannedBetween` (a different window from the planner's) and a third
+  // `cachedWorkouts`. Accepted for now on two grounds — they are local SQLite
+  // reads over small tables on expo-sqlite's serial queue, and the ticket's
+  // criterion is *moved, not reimplemented*, which a bespoke later-only read
+  // would break. If Plan ever grows a heavier read, this is the term that
+  // compounds, and a `useTrainBoard` variant taking the fields it is asked for
+  // is the fix.
+  const board = useTrainBoard(userId ?? null, modules, now);
 
   // Unconditional across scopes even though only `mine` renders the pill. One
   // constant beats a conditional here; the `public` list simply ends ~100pt
@@ -389,6 +421,10 @@ export default function WorkoutsScreen() {
             scope === 'mine' ? (
               <View style={styles.planHeader}>
                 <WeekPlanner userId={userId ?? null} modules={modules} />
+                {/* Directly under the week, because it is the week's
+                    continuation and nothing else. See its docstring for why it
+                    is conditional rather than always drawn. */}
+                <NextPlannedBlock later={board.later} modules={modules} now={now} />
                 {/* Between the week and the templates: a roadmap is what you
                     are working over months, which sits naturally after "this
                     week" and before "what do I run today". Gated on a
@@ -585,6 +621,139 @@ export default function WorkoutsScreen() {
           load();
         }}
       />
+    </View>
+  );
+}
+
+/**
+ * The next planned day that the week above cannot show.
+ *
+ * ## Why this is not simply "Later, moved from Train"
+ *
+ * #587 was filed on the finding that Plan holds a template library and Train
+ * holds the calendar. Half of that is right — Train did hold `Later` — and half
+ * is not: `WeekPlanner`, directly above this, has drawn seven authoring rows
+ * with template names, week arrows and a month-grid jump since long before
+ * either ticket. **Plan already renders the forward schedule.** So lifting
+ * Train's `Later` here unchanged would have drawn the same planned day twice on
+ * one screen, a few hundred points apart — the W2/W4 duplicate shape, made
+ * worse by being visible in a single glance rather than across two tabs.
+ *
+ * What the week genuinely cannot show is a plan **outside** it. `WeekPlanner`
+ * opens on the current week and `refreshedAnchor` returns it there; `later`
+ * looks {@link PLAN_WINDOW_DAYS} ahead. So an athlete with nothing this week
+ * and a session booked on the 5th saw an empty planner and no hint the plan
+ * existed. That gap is what this block fills, and it is the only thing it says.
+ *
+ * **It is the soonest plan OVERALL, not the soonest plan beyond the week**, and
+ * the difference is worth knowing before reading the heading as a promise.
+ * `lib/trainBoard.ts` picks the first day strictly after today; this block then
+ * either shows it or defers. So an athlete with a session tomorrow *and* one on
+ * the 5th sees nothing here — tomorrow is in the week above, and that is the
+ * row answering "what is next". Widening it to "the soonest one outside the
+ * week" would mean drawing a second forward answer beside the planner's, which
+ * is the duplicate this block exists to avoid.
+ *
+ * The boundary is computed from `now` rather than from the planner's anchor.
+ * That is deliberate: the anchor is `WeekPlanner`'s private state, and lifting
+ * it out to make this pixel-perfect would couple an 827-line component to a
+ * three-line one for a case the athlete has to deliberately navigate into. Both
+ * directions drift, and both were raised in review: page the planner FORWARD
+ * and this row may briefly name a day now visible above it; page it BACK and a
+ * plan later this week is on screen nowhere. Transient duplicates and
+ * transient gaps, in states the athlete navigated to on purpose, against
+ * correctness in the state every visit starts in.
+ *
+ * ## Three states, and the fourth that is not a state
+ *
+ * `unread` draws nothing, because "we have not looked" is not "nothing is
+ * planned" — the collapse `lib/trainBoard.ts` exists to prevent. `unavailable`
+ * says so, and it is the ONLY honest signal on this screen when the plan read
+ * fails: `WeekPlanner` deliberately renders an unreadable plan as an empty
+ * week ("An unreadable plan is an empty week here, not an error banner"), so
+ * without this the athlete is shown seven blank rows and told nothing.
+ *
+ * A `ready` answer that falls inside the visible week draws nothing, and that
+ * is not a fourth state — it is this block deferring to the rows above, which
+ * are already saying it better.
+ */
+function NextPlannedBlock({
+  later,
+  modules,
+  now,
+}: {
+  later: Source<PlannedOffer | null>;
+  modules: ReturnType<typeof useModules>['modules'];
+  now: Date;
+}) {
+  // `unavailable` FIRST, and the two guards are deliberately not collapsed into
+  // one `!== 'ready'`. Doing that is the exact regression this shape prevents:
+  // it would put the failure note on screen during every cold open, asserting a
+  // failed read before the read has answered.
+  if (later.state === 'unavailable') {
+    return (
+      <View style={styles.nextSection}>
+        <SectionHeader label="Beyond this week" />
+        {/* #468's placeholder rule: dashed, because it stands WHERE the content
+            would stand rather than beside it. */}
+        <View style={styles.nextDashed} testID="plan-later-unavailable">
+          <Text style={styles.nextDashedText}>
+            The rest of your plan could not be read, so the week above may be
+            missing days.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Not-yet-answered and answered-with-nothing draw the same thing — nothing —
+  // and that is the one place they may be treated alike: neither ASSERTS
+  // anything, which is what separates both from the note above.
+  if (later.state !== 'ready' || later.value === null) return null;
+
+  const p = later.value;
+  // `weekDays` is the same Monday-anchored week `WeekPlanner` lays out, so this
+  // boundary and the rows above cannot disagree about where the week ends.
+  // String comparison, because `day` is `YYYY-MM-DD` and lexical order is date
+  // order — no `Date` is constructed, so no timezone can shift it.
+  if (p.day <= dayString(weekDays(now)[6])) return null;
+
+  const title = p.workoutName ?? `${labelFor(modules, p.sport)} session`;
+  const tone = sportColor(p.sport);
+  const glyph = sportIcon(p.sport);
+
+  return (
+    <View style={styles.nextSection}>
+      <SectionHeader label="Beyond this week" />
+      {/* No button, and that is the rule rather than an omission: starting a
+          session planned for next Tuesday today is how a plan stops meaning
+          anything. Today's New log is one tab away for an athlete who means it.
+          `text`, not `button`, so a screen reader is not told it acts. */}
+      <View
+        style={styles.nextRow}
+        // `accessible` is what makes the two below fire at all. Without it iOS
+        // does not group the row, so VoiceOver reads the title and the date as
+        // separate elements and this label — the one sentence that says what
+        // the row IS — is never announced, while the role is inert. Raised in
+        // review; a label that does not fire is worse than no label, because it
+        // reads as covered.
+        accessible
+        accessibilityRole="text"
+        accessibilityLabel={`Next planned: ${title}, ${shortDate(p.day)}`}
+        testID="plan-later"
+      >
+        {tone && glyph && (
+          <View style={[styles.nextDisc, { backgroundColor: sportTint(tone) }]}>
+            <Icon name={glyph} size={16} color={tone} />
+          </View>
+        )}
+        <View style={styles.nextText}>
+          <Text style={styles.nextTitle} numberOfLines={1}>
+            {title}
+          </Text>
+          <Text style={styles.nextWhen}>{shortDate(p.day)}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -834,6 +1003,44 @@ const styles = StyleSheet.create({
   // textMuted, not textDim: at 12pt this is small text and textDim measures
   // 3.96:1 on the card, below AA.
   curriculaOffNote: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
+
+  // The "Beyond this week" block. No horizontal margin of its own: the plan
+  // header renders inside the list's `contentContainerStyle`, which already
+  // pads 16, and this block lines up with the `Templates` heading below it
+  // rather than with the roadmaps card, which adds a second inset.
+  nextSection: { gap: 10 },
+  nextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: vola.surface,
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  nextDisc: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nextText: { flex: 1, gap: 1 },
+  nextTitle: { fontSize: 16, fontWeight: '700' },
+  // textMuted rather than textDim: at 12pt this is small text, and textDim
+  // measures 3.96:1 on `bg`, below AA's 4.5:1.
+  nextWhen: { fontSize: 12, color: vola.textMuted },
+  nextDashed: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: vola.lineSoft,
+    borderRadius: 14,
+    padding: 16,
+  },
+  nextDashedText: { fontSize: 13, lineHeight: 19, color: vola.textMuted },
+
   container: { flex: 1 },
   // A tab strip: a hairline under the whole row, and a 2pt accent bar under
   // whichever segment is selected. No fill on either.

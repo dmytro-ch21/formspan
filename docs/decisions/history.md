@@ -42475,6 +42475,185 @@ visible title (the same WCAG 2.5.3 fix this branch already made on two other
 cards); and the Retry button's re-read gained the liveness guard the rest of
 `useTodayBoard` already had.
 
+## 2026-08-26 — N182: Train is retired, and the ticket's own premise was wrong about Plan
+
+N180 (#631) took Train's tab button away after the user carried the N176 bar on
+their phone and reversed it — *"in fact Train tab which is instead of food is
+way less useful not sure what was the purpose"*. It left the route declared with
+`href: null` and recorded an honest gap: **nothing in the app linked to
+`(tabs)/train` any more.** N182 owned the other half — where Train's contents
+go — and the answer turned out to be nowhere, because they were already
+somewhere.
+
+### The ticket rested on a finding that does not survive reading `workouts.tsx`
+
+The amendment on #587 said: the tab named **Plan** renders `New workout`,
+`Workouts`, `Templates`, `VOLA template`, so it is "a library of reusable
+templates" that "holds no dates"; the tab named **Train** holds `Later`, "the
+athlete's actual forward schedule, and it is the only place in the app that
+shows it". A sharp, well-argued finding, and half of it is wrong.
+
+`app/(tabs)/workouts.tsx`'s `ListHeaderComponent`, under the `mine` scope, is
+`<WeekPlanner>` — **seven authoring day-rows with template names, arrows that
+step a week, a month grid that jumps to a distant one, plan and unplan** — and
+then `CurriculaStrip`, and then the `Templates` heading. Plan has rendered the
+forward schedule since long before either ticket. The list in the amendment is
+what you see reading the `renderItem` and the empty state; the planner is in the
+header above them.
+
+Two consequences, and neither is cosmetic:
+
+- **"Plan shows the forward schedule first, templates second" was already
+  true.** That acceptance criterion needed no code.
+- **Moving `Later` onto Plan unchanged would have drawn the same planned day
+  twice on one screen**, a few hundred points apart — the W2/W4 duplicate shape
+  that the ticket's *sibling* criterion exists to forbid, made worse by being
+  visible in a single glance rather than across two tabs.
+
+### So the audit was run properly, and every block on Train has an owner
+
+Measured against `f503c345` rather than assumed:
+
+| Train's block | Already drawn by |
+|---|---|
+| `Resume` | Today's `resume-session` card — literally the same `STALE_SESSION_MS`, which `index.tsx` imports from `lib/trainBoard.ts` |
+| `Today` | Today's `today-plan-*` `UpNextCard`s, off the same `owedOn` derivation |
+| `Quick start` | Today's floating **New log** pill → `PickSessionSheet` → the same `startSessionHref` |
+| `Recent` | Today's `Recent` section — same `SessionCard`, same heading, four rows instead of one-per-discipline |
+| `Later` | Plan's `WeekPlanner` rows, off the same `planned_sessions` table |
+
+A screen with no button, whose every block is drawn by a screen that has one,
+does not have a job. **Ruling: `train.tsx` is retired.** Its body is now a
+`<Redirect href="/(tabs)" />` and nothing else. Not deleted — `lib/tabs.ts`
+still lists it in `OFF_BAR_ROUTES`, and omitting it there puts the route back on
+the bar as a sixth tab titled "train", while deleting the file breaks every
+`vola://train` link in flight. Not a signpost screen either: the athlete who
+taps an old link never knew the screen had a name, they wanted to train, and
+Today is the screen that answers that.
+
+`lib/trainBoard.ts` and `lib/useTrainBoard.ts` survive and are still read — Plan
+reads `later` from them, Today reads `STALE_SESSION_MS`. N177's derivation was
+never the problem; the duplicate *rendering* of it was.
+
+### What Plan actually gained: the plan the week cannot show
+
+`WeekPlanner` opens on the current week and `refreshedAnchor` returns it there;
+`later` looks `PLAN_WINDOW_DAYS` (14) ahead. So an athlete with nothing this
+week and a session booked on the 5th saw seven empty rows and no hint the plan
+existed. `NextPlannedBlock` fills exactly that, and only that: it renders when
+the soonest planned day falls **outside** the week — `p.day > dayString(weekDays(now)[6])`,
+a string comparison on `YYYY-MM-DD` so no `Date` is constructed and no timezone
+can shift it — and defers to the rows above when it falls inside.
+
+The boundary is measured from `now`, not from the planner's private `anchor`.
+Lifting that state out of an 827-line component to make this pixel-exact would
+couple it to a three-line one for a case the athlete has to deliberately
+navigate into; page the planner two weeks forward and the line may briefly name
+a day now visible above it. A transient duplicate in a state the athlete chose,
+against a permanent one in the state every visit starts in.
+
+Three states, not two. `unavailable` says so and is checked **first**; *unread*
+and *ready-but-empty* both draw nothing, which is the one place they may be
+treated alike, because neither ASSERTS anything. Collapsing the first guard into
+`!== 'ready'` would put the failure note on screen during every cold open — that
+is mutation M4 below, and it goes red.
+
+The dashed note earns its place for a reason specific to this screen:
+`WeekPlanner` renders an unreadable plan as an empty week on purpose ("an
+unreadable plan is an empty week here, not an error banner"), so without this
+block an athlete whose database is locked sees seven blank rows and is told
+nothing at all.
+
+### `Recent` did NOT move, and that is a deliberate refusal
+
+The amendment asked for it. Today already renders a `Recent` section — same
+`SectionHeader label="Recent"`, same `SessionCard`, `testID="session-{id}"` —
+over a different derivation (last four sessions, versus newest-per-discipline
+capped at three). Putting a second one on Plan would be two lists with one
+heading over two derivations free to disagree, which is the exact failure the
+same ticket's next criterion forbids; and history is not future intent, which is
+the ticket's own product distinction. Recorded as `NOT MET, with reason` rather
+than quietly skipped.
+
+### Absence asserted from both sides
+
+`app/__tests__/planNextUp.test.tsx` proves Plan draws it;
+`app/__tests__/trainScreen.test.tsx` proves Train draws none of it, by the
+testIDs the old screen used. Either alone is satisfied by a copy — #583's
+lesson, applied.
+
+Six mutations, each checked to have APPLIED before the suite ran, each judged by
+jest's **exit code** rather than by grepping its output for a glyph it only
+prints in verbose mode (#585's harness reported three "red with 0 failing tests"
+doing exactly that), and each restored by re-running rather than by grepping the
+file:
+
+- **M1/M2** the week boundary, inverted each way — the "inside the week" and
+  "beyond the week" tests go red respectively;
+- **M3** the `unavailable` branch removed — the failure-note test goes red;
+- **M4** `unavailable` widened to `!== 'ready'` — the in-flight test goes red,
+  which is what gives that test teeth it would otherwise not have;
+- **M5** the redirect pointed at Plan — the destination test goes red;
+- **M6** Train made to render a `Later` block again — the absence test goes red.
+
+Baseline green in the same session, before and after: 179 suites, 2838 tests.
+Lint at 53 warnings, unchanged, against a ratchet of 53.
+
+### The criterion the amendment never touched, and the test that did not exist
+
+#587's **original** body asked for something the amendment left standing: *"a
+test should assert that logging a session's set does not change the template it
+came from"*, called out there as "a correctness requirement, not just a UX one".
+There was no such test in the repo. `lib/__tests__/templateNotMutated.test.ts`
+is it — against a real migrated database rather than a mock, because the claim
+is about which ROWS changed and an array mock can only report which functions
+were called.
+
+**And it was mutation-checked, because a guard like this is the archetype of a
+test that is true by construction.** Nothing on the write path touches
+`workout_cache` today, so all three assertions pass whether or not the guard
+means anything. The mutation is the plausible feature: `saveLocalSets` writing
+the achieved weights back onto the plan it came from. All three go red on it —
+the whole-row comparison, the target values, and the dirty flags — and green
+again on restore. The third matters on its own: a template flagged `dirty`
+without a value changing survives on this device and is overwritten on every
+other one at the next sync, which is the quiet half of that bug.
+
+### Review found five things and all five were taken
+
+Both reviewers returned no `[blocking]` findings. The suggestions acted on:
+`accessible` added to the new row (without it iOS does not group it, so the
+carefully worded label never fires — a label that does not fire is worse than
+none, because it reads as covered); the docstring now says `later` is the
+soonest plan **overall** rather than the soonest beyond the week, and records
+the backward-paging drift as well as the forward one; the unused
+`listLocalSessions` read is named as a cost rather than left implicit; the
+inside-the-week absence test is sequenced on a positive artifact of the *same*
+resolved read (`WeekPlanner` drawing the day) instead of on a heading that
+renders on first paint regardless; and the scenarios doc's "be on Train,
+background the app, return" line is reworded, since you can no longer be on
+Train.
+
+### What this leaves open
+
+- **`Recent` is one screen's, and another branch is moving it.** N179 (in
+  flight) removes Today's `Recent` section and rehomes the training calendar to
+  Progress. If that lands, the app has no newest-sessions list anywhere — a
+  calendar answers a different question. Whichever of the two merges second
+  should check, rather than assume the other left one.
+- **N179 also adds a `Later` block to Today**, read-only, from this same
+  `later`. Two blocks over one derivation on two tabs is defensible — Today's
+  answers *and after this?* while looking at the day, Plan's answers *is there
+  anything outside the week I am editing* — but it is one heading in two places
+  and worth a deliberate look once both have landed.
+- **`buildTrainBoard`'s `resume` and `today` fields now have no consumer.**
+  Kept rather than trimmed: they are a pure, fully-tested derivation, Today
+  already imports from the module, and N179 is editing both files. Trimming them
+  is a cleanup for whoever lands after that branch, not a change to make against
+  a moving file.
+- **The device check is owed.** A redirect rendered from a tab route is the kind
+  of thing a test asserts structurally and a phone asserts visually.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

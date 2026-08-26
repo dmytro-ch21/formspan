@@ -48,6 +48,12 @@ jest.mock('@/lib/sessionStore', () => ({
   cachedWorkouts: (...a: unknown[]) => mockCachedWorkouts(...a),
   cacheWorkouts: (...a: unknown[]) => mockCacheWorkouts(...a),
   createLocalWorkout: jest.fn(),
+  // Read by `lib/useTrainBoard.ts`, which this screen calls for the "beyond
+  // this week" block (N182). Stubbed rather than left out: a missing export
+  // here throws inside the hook's focus effect and takes down every test in
+  // this file, none of which is about sessions. `planNextUp.test.tsx` is where
+  // that block's behaviour is actually asserted.
+  listLocalSessions: jest.fn(async () => []),
 }));
 
 const mockListWorkouts = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve([]));
