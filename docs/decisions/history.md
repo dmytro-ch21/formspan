@@ -42686,6 +42686,200 @@ file green again in the same session.
 No other row moved, no new component was built, and the two-question
 structure N181 established — identity, then People, then App — is unchanged.
 
+## 2026-08-26 — N196: the sandbox's open network egress is now an explicit allowlist
+
+Follow-up from N188/#604's stated gap: `RunSandboxed`'s filesystem boundary
+was real, but a sandboxed process could still reach any host on the
+internet — Docker's ordinary default, deliberately left open because the
+sandbox needed the workspace's own ephemeral database (via
+`host.docker.internal`) and, for a fresh workspace, the Go module proxy.
+
+**Two measurements against this host's own Colima setup decided the
+mechanism, before any code was written.** `docker network create --internal`
+turned out to block EVERYTHING leaving that bridge, not just the internet —
+a container on it gets "Network is unreachable" dialing `host.docker.internal`
+too, which would have broken database access along with everything else if
+`--internal` were simply added to the sandbox's existing network. Separately,
+two containers on the SAME internal bridge reach each other fine (that never
+leaves the bridge), and a container attached to BOTH the internal bridge and
+Docker's ordinary default bridge has full internet + `host.docker.internal`
+reachability on its second leg. Those two facts compose into the design:
+
+- The sandboxed container's ONLY network is now a fresh `--internal` Docker
+  bridge, created per workspace — no route anywhere at all, not even to the
+  Docker host.
+- A small sidecar, **egressbroker** (`engine/internal/worker/egressbroker`,
+  embedded into the engine binary via `go:embed` and run with `go run .`
+  inside a container dual-homed onto that internal bridge and the default
+  one), is the sandbox's ONLY path to anything outside its own workspace. It
+  relays the workspace's own database to a FIXED target given at broker
+  startup (never sandboxed-input-controlled, so no allowlist check is needed
+  for it) and proxies HTTPS via HTTP CONNECT to an explicit allowlist
+  (`DefaultAllowedHosts`: `proxy.golang.org`, `sum.golang.org`,
+  `storage.googleapis.com` — the Go module proxy is GCS-backed and known to
+  redirect there — `registry.npmjs.org`, `github.com`, `api.github.com`,
+  `objects.githubusercontent.com`). `Sandbox.AllowedHosts` overrides the
+  default per call; there is no configuration that reaches the old
+  unrestricted behavior.
+- `sandboxEnv` now rewrites `DATABASE_URL`/`TEST_DATABASE_URL` to the
+  broker's relay (`egress-broker:15432`) rather than `host.docker.internal`
+  directly — unreachable from the sandboxed container post-N196, which is
+  the point — and injects `HTTP_PROXY`/`HTTPS_PROXY` (both cases) pointed at
+  the broker's CONNECT proxy (`egress-broker:8888`), so GOPROXY/npm/pnpm
+  reach their allowlisted hosts without the tools themselves needing to know
+  anything changed.
+
+**Rejected: container-level firewall rules (iptables/nftables in or around
+the container)**, the other option the ticket named. It needs root/
+CAP_NET_ADMIN on whatever host runs dockerd, which differs by environment
+(this project's own Colima VM locally, a CI runner, wherever the engine
+eventually deploys) and would be a bigger privilege grant to the engine
+process than anything this package has needed so far. The broker needs
+nothing beyond the `docker` CLI this package already shells out to
+everywhere else.
+
+**Verified, not assumed, at every step**, per this project's own testing
+discipline:
+
+- The `--internal`-blocks-everything and dual-homed-broker-reaches-both
+  claims above were measured directly with plain `docker` commands before
+  any Go code was written.
+- `TestSandboxCannotDialAnArbitraryExternalHostDirectly` — a raw `/dev/tcp`
+  dial from inside the sandbox to a public IP, bypassing `HTTP_PROXY`
+  entirely (what a hostile or simply proxy-unaware payload would do) — fails
+  with "Network is unreachable". Mutation-tested: removing `--internal` from
+  the network-create call turns this red as a real test failure.
+- `TestEgressBrokerProxiesAllowedHostsAndRefusesOthers` proves both
+  directions end to end: an allowlisted host relays real bytes through the
+  CONNECT tunnel (checked against a local TCP echo server, not merely "the
+  proxy said 200"), and a host never named in `AllowedHosts` gets 403 from
+  the proxy itself — before any dial is attempted on its behalf, even though
+  the broker could reach it. Mutation-tested: short-circuiting the broker's
+  allowlist check turns this red.
+- `TestTheResidueAuditCatchesALeakedEgressBroker` proves `AuditResidue`'s
+  new checks actually fire on a genuinely-still-running broker/network, not
+  merely that the code reads two fields. Mutation-tested.
+- All of N188's existing tests still pass, including
+  `TestSandboxCanReachTheHostsEphemeralDatabase` — now via the broker's
+  relay rather than `host.docker.internal` directly.
+
+**A second, unrelated leak was found and fixed while building this — the
+kind CLAUDE.md's "verify a check can fail" section keeps finding.**
+`ensureEgressBroker`'s own error-cleanup paths called `teardownEgressLocked`
+with the SAME context that had just caused the failure. For a cancelled
+run's context specifically, `exec.CommandContext` against an already-done
+context never even starts the process, so a cleanup call "using" a dead
+context is indistinguishable from not calling it at all — measured directly:
+`TestCancelledRunDoesNotLeaveAnOrphanedContainer`'s existing cancel-after-1s
+timing landed mid-`waitForBrokerReady` and left `engine-egress-44` and
+`engine-egress-broker-44` genuinely running (confirmed live via their own
+log line, not crash-looping) after the test reported PASS, because it only
+ever checked for a leaked *sandbox* container by name — a cancellation
+during broker startup means no sandbox container was ever created, so that
+check passed vacuously. Fixed the same way `RunSandboxed`'s own `cmd.Cancel`
+already handles this (plain, uncancelled cleanup, not the context that
+triggered it) — `teardownEgressLocked` now derives a fresh
+`context.WithTimeout(context.Background(), 30*time.Second)` for its own
+docker commands regardless of what it's called with, and
+`waitForBrokerReady` now checks `ctx.Err()` on each iteration instead of
+burning its full 15s wall-clock deadline once cancellation has already made
+success impossible. The existing test was extended to check for the leaked
+broker container/network alongside the sandbox container it already
+checked, and mutation-tested by reverting the fix: the extended test goes
+red, reproducing the exact leak measured above.
+
+**`backend-reviewer` and `ac-verifier` found six real issues, all fixed
+before this landed — recorded because two of them are exactly the shape
+this project's own "verify a check can fail" rule warns about.**
+
+- **[blocking] The allowlist was silently pinned by the first `RunSandboxed`
+  call.** `ensureEgressBroker` cache-hit on `brokerIP != ""` and ignored a
+  later call's `allowedHosts`/`dbTarget` entirely — so a second call on the
+  same workspace with a DIFFERENT `Sandbox.AllowedHosts` ran against the
+  first call's broker instead, contradicting `AllowedHosts`'s own doc
+  comment ("this sandbox's egress allowlist"). Fixed by recording what the
+  running broker was actually started with and erroring on a mismatch
+  rather than silently proceeding. Mutation-tested: removing the comparison
+  turns `TestASecondCallWithADifferentAllowlistIsRejectedNotSilentlyIgnored`
+  red.
+- **[blocking] A failed teardown could make `AuditResidue` report clean over
+  a live broker.** `teardownEgressLocked` clears `ws.egress.network`/
+  `.container` regardless of whether the underlying `docker rm`/
+  `network rm` actually succeeded (deliberately — so a retry has something
+  to retry against), which meant `AuditResidue` trusting those in-memory
+  fields could miss the most capable resource in the whole design: a
+  dual-homed container with real internet access. Fixed by having
+  `AuditResidue` ask Docker directly (`egressResidue`) — matching how the
+  function's OTHER checks already work (the directory check `os.Stat`s the
+  real filesystem, the DB checks query `pg_database`/`pg_roles`) —
+  matched by exact prefix in Go rather than Docker's own substring
+  `--filter name=`, which would otherwise misattribute one run's residue to
+  another's (`engine-egress-4-` is a substring of `engine-egress-44-...`).
+  Mutation-tested twice: reverting to the old field-trusting check turns
+  `TestTheResidueAuditCatchesALeakEvenWhenInMemoryStateSaysClean` red — a
+  test built to reproduce the exact scenario (fields cleared, resources
+  still running) the old code could not catch.
+- **DNS was a separate, unmeasured channel.** Docker's embedded resolver
+  (127.0.0.11 in every user-defined network) is a DIFFERENT path from
+  routing — `--internal` blocking every ROUTE says nothing about whether
+  the daemon still forwards external DNS lookups for that network, and on
+  an older Docker Engine it would, which is a full allowlist bypass via
+  `<stolen-data>.attacker.example` that never opens a connection this
+  package's escape test would see. Measured directly (Docker Engine
+  29.5.2): `getent hosts example.com` from inside the internal network
+  fails outright — this engine does not forward external lookups there.
+  Pinned as `TestSandboxCannotResolveArbitraryDNSEither` rather than left
+  as an unverified comment.
+- **Egress network/container names collided across concurrent test
+  runs — confirmed live, twice independently**, by `ac-verifier` and
+  `pre-merge-checker` running this same suite on this shared multi-agent
+  host at the same time as each other: `network with name engine-egress-51
+  already exists`. Names were keyed on bare `RunID`, which this package's
+  own tests use as small fixed integers; Docker network names are global to
+  the daemon. Fixed the same way `Provision` already solves it for
+  `Dir`/`DBName` — a random hex suffix, not a new convention.
+- **`TestSandboxCanReachTheHostsEphemeralDatabase` proved less than it
+  claimed.** `relayDB` accepts a client connection BEFORE dialing the real
+  database, so a bare "did the TCP connect succeed" check (the test's
+  original shape) would report REACHABLE even with an empty or wrong
+  `DB_TARGET` — `ac-verifier` proved this by running the broker with
+  `DB_TARGET` unset and getting the same REACHABLE output. Fixed by sending
+  Postgres's real SSLRequest wire-protocol packet and requiring the 'S'/'N'
+  byte back that only a genuine PostgreSQL server produces — a response
+  that PROVES the relay reached a live database, not merely that something
+  accepted a socket. Mutation-tested: forcing `dbTargetFor` to always
+  return empty turns the strengthened test red (`Connection reset by
+  peer`), where the old version would have stayed green.
+- **CONNECT was host-checked but not port-checked.** An allowlisted host
+  could tunnel to ANY port on it — `CONNECT github.com:22` really does get
+  you an SSH banner through the proxy, confirmed while mutation-testing the
+  fix (the broker has real internet access, so the mutated build relayed
+  GitHub's actual `SSH-...` banner). Broader than this file's own doc
+  comment ("HTTPS to an explicit allowlist"). Fixed: a bare hostname
+  allowlist entry now permits ONLY port 443; an entry already carrying its
+  own `:port` (needed for tests, which proxy to a synthetic local target)
+  permits only that exact pair.
+
+Two more (broker binding all interfaces rather than just the internal leg;
+`splice` dropping pipelined bytes sent before the CONNECT response and not
+supporting half-close) were left as real but lower-value follow-ups rather
+than expanding this PR further — neither weakens the allowlist itself, both
+are about robustness of an already-correctly-restricted channel.
+
+**Not done here, named rather than absorbed:** the broker's HTTPS proxy
+trusts every host on the allowlist completely once a CONNECT tunnel opens —
+it never inspects what flows through it beyond the CONNECT target itself, so
+a compromised or malicious payload FROM an allowlisted host (a poisoned
+package on `registry.npmjs.org`, say) is not something this closes; that is
+a supply-chain concern the allowlist was never meant to solve. Plain
+(non-CONNECT) HTTP proxying is also not implemented — every host on the
+default allowlist serves HTTPS only, so adding it now would be an untested
+path carrying no real traffic. And `devengine.RunGate` still shells out
+directly on the host, unwired to the sandbox the same way the rest of this
+package has been unwired since N141 — there is still no live dispatcher
+(blocked on N145) to wire any of this into.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

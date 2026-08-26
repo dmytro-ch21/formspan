@@ -33,9 +33,15 @@ import (
 const DefaultSandboxImage = "golang:1.26-bookworm"
 
 // Sandbox configures one sandboxed run. The zero value is valid — Image
-// defaults to DefaultSandboxImage.
+// defaults to DefaultSandboxImage, AllowedHosts defaults to
+// DefaultAllowedHosts (see egress.go).
 type Sandbox struct {
 	Image string
+	// AllowedHosts is this sandbox's egress allowlist — see egress.go for
+	// the enforcement mechanism. A nil/empty slice means DefaultAllowedHosts,
+	// NOT "no restriction" — there is no Sandbox configuration that reaches
+	// the unrestricted-egress behavior this package had before N196.
+	AllowedHosts []string
 }
 
 // sandboxRunCounter gives each RunSandboxed invocation a distinct container
@@ -80,15 +86,17 @@ const (
 // TEST_DATABASE_URL need redirecting to reach the right place FROM INSIDE
 // the sandbox rather than the host's).
 //
-// Networking is Docker's ordinary default (bridge) — reachable to the
-// internet and, via host.docker.internal, to the host's own ports.
-// Restricting that to a specific allowlist of legitimate hosts is
-// deliberately NOT done here: see the package doc and this ticket's history
-// entry for why, and N196/#622 for the follow-up. Requires `docker`
-// on PATH; this package's isolation guarantee depends on Docker's own
-// container boundary, so if Docker is unavailable this returns an error
-// rather than silently running unsandboxed — a fallback would be exactly
-// the "isolation is optional" failure this file exists to close.
+// Networking is restricted to an explicit allowlist (N196/#622) — the
+// sandboxed container's ONLY network is a fully `--internal` Docker bridge
+// (no route anywhere at all, not even to the Docker host — measured; see
+// egress.go's package doc), and a sidecar broker on that same bridge is its
+// only path to anything outside its own workspace: the workspace's own
+// ephemeral database (relayed to a fixed target the broker alone knows) and
+// HTTPS to sb.AllowedHosts (or DefaultAllowedHosts). Requires `docker` on
+// PATH; this package's isolation guarantee depends on Docker's own container
+// boundary, so if Docker is unavailable this returns an error rather than
+// silently running unsandboxed — a fallback would be exactly the "isolation
+// is optional" failure this file exists to close.
 func (ws *Workspace) RunSandboxed(ctx context.Context, sb Sandbox, dir string, env []string, command []string) (SandboxResult, error) {
 	if len(command) == 0 {
 		return SandboxResult{}, fmt.Errorf("sandbox: no command given")
@@ -100,6 +108,10 @@ func (ws *Workspace) RunSandboxed(ctx context.Context, sb Sandbox, dir string, e
 	image := sb.Image
 	if image == "" {
 		image = DefaultSandboxImage
+	}
+	allowedHosts := sb.AllowedHosts
+	if len(allowedHosts) == 0 {
+		allowedHosts = DefaultAllowedHosts
 	}
 	workdir := "/workspace"
 	if dir != "" {
@@ -124,6 +136,15 @@ func (ws *Workspace) RunSandboxed(ctx context.Context, sb Sandbox, dir string, e
 		ws.mountVerified.Store(true)
 	}
 
+	// The sandboxed container's ONLY path to anything beyond its own
+	// workspace directory — its own database, and the egress allowlist —
+	// goes through this broker, started (or reused, after the first call)
+	// on this workspace's own fully `--internal` network. See egress.go.
+	brokerIP, egressNetwork, err := ws.ensureEgressBroker(ctx, allowedHosts, dbTargetFor(ws))
+	if err != nil {
+		return SandboxResult{}, fmt.Errorf("sandbox: %w", err)
+	}
+
 	// Named so a cancelled run's cleanup (below) can force-remove the exact
 	// container rather than guessing — CommandContext SIGKILLs the `docker`
 	// CLI client on cancel, but the DAEMON keeps the container itself
@@ -134,13 +155,14 @@ func (ws *Workspace) RunSandboxed(ctx context.Context, sb Sandbox, dir string, e
 	name := fmt.Sprintf("engine-sandbox-%d-%d", ws.RunID, sandboxRunCounter.Add(1))
 	args := []string{
 		"run", "--rm", "--name", name,
-		// host.docker.internal resolves out of the box on Docker Desktop and
-		// this project's own Colima setup, but NOT on native Linux Docker
-		// (what CI's ubuntu-latest runners use) unless told to — this flag
-		// makes it resolve everywhere Docker 20.10+ runs, and is a no-op
-		// where it already worked (verified on this host: identical
-		// behavior with or without it).
-		"--add-host", "host.docker.internal:host-gateway",
+		// This container's ONLY network — a fully `--internal` bridge with
+		// no route anywhere at all. host.docker.internal is deliberately
+		// NOT added here any more (it is unreachable by construction on
+		// this network, which is the point); egress-broker is the one host
+		// this container CAN reach, and everything legitimate goes through
+		// it. See ensureEgressBroker.
+		"--network", egressNetwork,
+		"--add-host", egressBrokerHostname + ":" + brokerIP,
 		"-v", ws.Dir + ":/workspace",
 		"-w", workdir,
 	}
@@ -164,7 +186,7 @@ func (ws *Workspace) RunSandboxed(ctx context.Context, sb Sandbox, dir string, e
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := cmd.Run()
+	err = cmd.Run()
 
 	code := 0
 	if exitErr, ok := err.(*exec.ExitError); ok {
@@ -227,8 +249,20 @@ func verifyMount(ctx context.Context, hostDir, image string) error {
 //     as a bug in the gate rather than in the sandbox. Dropping them lets
 //     the image supply its own sane defaults; GOMODCACHE is pinned
 //     independently below regardless of GOPATH's value.
+//
+// N196/#622 changed WHAT DATABASE_URL/TEST_DATABASE_URL are rewritten TO —
+// egress-broker's relay, not host.docker.internal directly (unreachable from
+// this container by construction; see egress.go) — and adds
+// HTTP_PROXY/HTTPS_PROXY (both cases: the Go toolchain and most POSIX tools
+// read the uppercase form, but plenty of software only checks lowercase)
+// pointed at the broker's CONNECT proxy, so GOPROXY/npm/pnpm reach their
+// allowlisted hosts without the sandboxed process needing to know anything
+// changed. NO_PROXY exempts the broker's own hostname — defensive, since
+// nothing legitimate proxies to itself, but a future gate hard-coding
+// "http://egress-broker:8888" as a target for some other reason should not
+// silently loop through the CONNECT proxy to reach it.
 func sandboxEnv(env []string) []string {
-	out := make([]string, 0, len(env)+2)
+	out := make([]string, 0, len(env)+6)
 	for _, e := range env {
 		k, v, ok := strings.Cut(e, "=")
 		if !ok {
@@ -240,22 +274,31 @@ func sandboxEnv(env []string) []string {
 		case "PATH", "HOME", "TMPDIR", "GOPATH":
 			continue // host-shaped; let the image's own defaults stand
 		case "DATABASE_URL", "TEST_DATABASE_URL":
-			out = append(out, k+"="+rewriteHostForSandbox(v))
+			out = append(out, k+"="+rewriteHostForEgressBrokerRelay(v))
 		default:
 			out = append(out, e)
 		}
 	}
+	proxyURL := "http://" + egressBrokerHostname + ":" + proxyPort
 	return append(out,
 		"GOCACHE="+containerGoCache,
-		"GOMODCACHE="+containerGoModCache)
+		"GOMODCACHE="+containerGoModCache,
+		"HTTP_PROXY="+proxyURL, "http_proxy="+proxyURL,
+		"HTTPS_PROXY="+proxyURL, "https_proxy="+proxyURL,
+		"NO_PROXY="+egressBrokerHostname, "no_proxy="+egressBrokerHostname)
 }
 
 // rewriteHostForSandbox swaps a loopback host for host.docker.internal, the
-// address a container uses to reach a port bound on the host machine. A
-// non-loopback host (a real remote database, say) is returned EXACTLY
-// UNCHANGED, not re-serialized — so a URL shape this function doesn't
-// recognize is passed through byte-for-byte rather than risking a lossy
-// round-trip through net/url for a rewrite that was never needed.
+// address a container uses to reach a port bound on the host machine. Used
+// today by dbTargetFor (egress.go) to compute what the BROKER itself should
+// dial — the broker sits on Docker's ordinary default bridge, where this
+// still holds exactly as it always did. It is NOT what the sandboxed
+// container's own env is rewritten to any more; see
+// rewriteHostForEgressBrokerRelay for that. A non-loopback host (a real
+// remote database, say) is returned EXACTLY UNCHANGED, not re-serialized —
+// so a URL shape this function doesn't recognize is passed through
+// byte-for-byte rather than risking a lossy round-trip through net/url for a
+// rewrite that was never needed.
 func rewriteHostForSandbox(dbURL string) string {
 	u, err := url.Parse(dbURL)
 	if err != nil {

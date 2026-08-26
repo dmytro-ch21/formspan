@@ -47,12 +47,20 @@
 // "isn't in Env()". See sandbox.go for the mechanism and its own tests for
 // the attempted-escape proof.
 //
-// What is still open, deliberately, and named rather than absorbed:
-// network egress from inside the sandbox is Docker's ordinary default
-// (reachable to the internet and, via host.docker.internal, to the host's
-// own ports) — NOT restricted to a specific allowlist of legitimate hosts,
-// which needs an application-level policy that does not exist yet (see this
-// package's history entry and its tracking ticket). And nothing outside this
+// N196/#622 closed the gap this paragraph used to describe as open: network
+// egress from inside the sandbox used to be Docker's ordinary default,
+// reachable to the internet and, via host.docker.internal, to the host's
+// own ports. It is now restricted to an explicit allowlist — see egress.go
+// for the mechanism (a sidecar broker on a fully `--internal` network,
+// chosen and justified there) and DefaultAllowedHosts for what is on it by
+// default. What is still open, deliberately, and named rather than
+// absorbed: the broker's HTTPS proxy trusts every host on the allowlist
+// completely once a CONNECT tunnel opens — it does not inspect what flows
+// through it beyond the CONNECT target itself, so a compromised or
+// malicious payload FROM an allowlisted host (e.g. a poisoned package on
+// registry.npmjs.org) is not something this file defends against; that is
+// a supply-chain concern the allowlist was never meant to solve, only the
+// "reaches an arbitrary host at all" one. And nothing outside this
 // package's own tests calls RunSandboxed yet — devengine.RunGate still
 // shells out directly on the host, unwired to the sandbox the same way the
 // rest of this package has been unwired since N141: there is still no live
@@ -115,6 +123,12 @@ type Workspace struct {
 	// one succeeds. Atomic because RunSandboxed makes no promise about
 	// being called from one goroutine only.
 	mountVerified atomic.Bool
+
+	// egress is N196/#622's sidecar broker state — see egress.go. Started
+	// lazily on the first RunSandboxed call that needs network access and
+	// reused for the rest of this workspace's lifetime; torn down alongside
+	// everything else in Teardown.
+	egress egressBroker
 }
 
 var slugRe = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -428,8 +442,13 @@ func (ws *Workspace) RetainArtifact(name string, content []byte) (string, error)
 // survive by construction — they live outside the workspace.
 func (ws *Workspace) Teardown(ctx context.Context) error {
 	var firstErr error
-	if err := os.RemoveAll(ws.Dir); err != nil {
+	if err := ws.teardownEgress(ctx); err != nil {
 		firstErr = err
+	}
+	if err := os.RemoveAll(ws.Dir); err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
 	}
 	if ws.runner.AdminDBURL != "" && !ws.dropped {
 		conn, err := pgx.Connect(ctx, ws.runner.AdminDBURL)
@@ -482,6 +501,23 @@ func (ws *Workspace) AuditResidue(ctx context.Context) error {
 		// proof of removal — an audit that reads it as "clean" would trust
 		// exactly the thing it exists to verify.
 		return fmt.Errorf("audit: cannot verify workspace removal: %w", err)
+	}
+	// Asks Docker directly rather than trusting ws.egress's in-memory
+	// fields — found in review: teardownEgressLocked clears
+	// ws.egress.network/.container even when the underlying `docker rm`/
+	// `network rm` FAILED (the error is reported via firstErr, but the
+	// field is reset regardless, so a retry has something to retry against
+	// rather than "forgetting" what needs removing). That is the right
+	// choice for teardownEgressLocked's own retry-ability, but it means
+	// those fields no longer reliably reflect what is actually running —
+	// exactly the gap every OTHER check in this function avoids (the
+	// directory check os.Stats the real filesystem; the DB checks query
+	// pg_database/pg_roles directly). AuditResidue's own doc comment says
+	// it "VERIFIES the teardown rather than trusting it"; trusting a
+	// possibly-stale in-memory field was the one place that promise didn't
+	// hold.
+	if egressErr := ws.egressResidue(ctx, &residue); egressErr != nil {
+		return fmt.Errorf("audit: cannot verify egress broker/network removal: %w", egressErr)
 	}
 	if ws.runner.AdminDBURL != "" {
 		conn, err := pgx.Connect(ctx, ws.runner.AdminDBURL)

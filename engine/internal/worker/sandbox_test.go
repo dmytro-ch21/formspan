@@ -105,12 +105,25 @@ func TestSandboxEnvRewritesGoCachesAndDBHostAndLeavesEverythingElse(t *testing.T
 		t.Fatalf("a bare env name was forwarded, letting docker resolve it from the host's own environment:\n%s", joined)
 	}
 	// localhost must never reach the container either — its own loopback is
-	// not the host's.
+	// not the host's, and (post-N196) host.docker.internal isn't reachable
+	// from it at all any more, so the rewrite target is the egress broker's
+	// relay, not the host directly. See rewriteHostForEgressBrokerRelay.
 	if strings.Contains(joined, "@localhost:") {
 		t.Fatalf("localhost DB host survived rewriting:\n%s", joined)
 	}
-	if !strings.Contains(joined, "host.docker.internal:5432") {
-		t.Fatalf("DB host not rewritten to host.docker.internal:\n%s", joined)
+	if strings.Contains(joined, "host.docker.internal") {
+		t.Fatalf("DB host rewritten to host.docker.internal, which is UNREACHABLE from the sandboxed container post-N196:\n%s", joined)
+	}
+	if !strings.Contains(joined, "@"+egressBrokerHostname+":"+dbRelayPort+"/") {
+		t.Fatalf("DB host not rewritten to the egress broker's relay:\n%s", joined)
+	}
+	// N196: HTTP(S) traffic must be pointed at the broker's CONNECT proxy —
+	// GOPROXY/npm/pnpm have no other legitimate way out of this container.
+	wantProxy := "http://" + egressBrokerHostname + ":" + proxyPort
+	for _, k := range []string{"HTTP_PROXY=", "http_proxy=", "HTTPS_PROXY=", "https_proxy="} {
+		if !strings.Contains(joined, k+wantProxy) {
+			t.Fatalf("%s not set to the egress broker's proxy address:\n%s", strings.TrimSuffix(k, "="), joined)
+		}
 	}
 	// An ordinary, non-special entry must still survive verbatim.
 	if !strings.Contains(joined, "CI=1") {
@@ -211,8 +224,23 @@ func TestSandboxCanReadAndWriteInsideTheWorkspace(t *testing.T) {
 // TestSandboxCanReachTheHostsEphemeralDatabase proves the network-egress
 // half: a DB-backed gate running inside the sandbox needs to reach the
 // workspace's OWN ephemeral database, which Provision created on the HOST —
-// unreachable at "localhost" from inside a container with its own loopback,
-// which is exactly why sandboxEnv rewrites it to host.docker.internal.
+// unreachable at "localhost" from inside a container with its own loopback
+// (and, post-N196, unreachable at host.docker.internal too — the sandboxed
+// container's env now points DATABASE_URL at the egress broker's relay
+// instead; see rewriteHostForEgressBrokerRelay).
+//
+// A bare TCP connect is NOT enough to prove this any more, and used to be —
+// found in review, and confirmed by reproducing it: the broker's relay
+// ACCEPTS a client connection before it dials the real database (see
+// relayDB), so a plain "did /dev/tcp connect succeed" check would report
+// REACHABLE even with an empty or wrong DB_TARGET, since the client's own
+// TCP handshake completes against the relay's listener regardless of what
+// happens next. This sends Postgres's real SSLRequest packet (the 8-byte
+// wire-protocol message every client sends first, RFC-fixed: length=8,
+// request code 80877103) and requires an 'S' or 'N' byte back — a response
+// only a genuine PostgreSQL server produces, so getting one PROVES the
+// relay actually reached a live database, not merely that something
+// accepted a socket.
 func TestSandboxCanReachTheHostsEphemeralDatabase(t *testing.T) {
 	dockerAvailable(t)
 	admin := os.Getenv("TEST_DATABASE_URL")
@@ -232,14 +260,20 @@ func TestSandboxCanReachTheHostsEphemeralDatabase(t *testing.T) {
 	// before writing this test, so a failure here means the sandbox itself
 	// can't reach the database, not that some tool was missing.
 	script := `host_port=$(echo "$DATABASE_URL" | sed -E 's#.*@([^/]+)/.*#\1#'); ` +
-		`exec 3<>"/dev/tcp/${host_port%%:*}/${host_port##*:}" && echo REACHABLE`
+		`exec 3<>"/dev/tcp/${host_port%%:*}/${host_port##*:}" && ` +
+		`printf '\x00\x00\x00\x08\x04\xd2\x16\x2f' >&3 && ` +
+		`response=$(timeout 3 head -c 1 <&3 | od -An -tx1 | tr -d ' \n') && ` +
+		`echo "SSL_RESPONSE:$response"`
 	result, err := ws.RunSandboxed(context.Background(), Sandbox{}, "", ws.Env(),
 		[]string{"bash", "-c", script})
 	if err != nil || result.ExitCode != 0 {
 		t.Fatalf("sandbox could not reach the host's ephemeral database: %v (exit %d): %s", err, result.ExitCode, result.Output)
 	}
-	if !strings.Contains(result.Output, "REACHABLE") {
-		t.Fatalf("unexpected output: %s", result.Output)
+	// 0x53 = 'S' (server supports SSL), 0x4e = 'N' (plaintext only) — either
+	// is a genuine PostgreSQL wire-protocol response. Anything else (empty,
+	// a timeout, garbage) means we reached a socket but not a real database.
+	if !strings.Contains(result.Output, "SSL_RESPONSE:53") && !strings.Contains(result.Output, "SSL_RESPONSE:4e") {
+		t.Fatalf("connected to something, but it did not answer PostgreSQL's wire protocol — the relay may have accepted the socket without actually reaching a live database: %s", result.Output)
 	}
 }
 
@@ -317,19 +351,41 @@ func TestCancelledRunDoesNotLeaveAnOrphanedContainer(t *testing.T) {
 
 	// Give Docker a moment to actually process the removal, then check the
 	// daemon directly — this is the real proof, not just that our own call
-	// returned.
+	// returned. Checks the SANDBOX container (the original finding) and the
+	// egress broker container/network together (N196's own leak, found by
+	// reproducing it: cancelling mid-`waitForBrokerReady` used to leave
+	// `engine-egress-44`/`engine-egress-broker-44` running because the
+	// cleanup path inherited the same cancelled context that caused the
+	// failure — see teardownEgressLocked's doc comment). Checking only the
+	// sandbox container name (as this test originally did) would pass
+	// vacuously here: a cancellation during broker startup means RunSandboxed
+	// never got as far as creating a sandbox container AT ALL, so that half
+	// alone proves nothing about the broker leak this extends the test to
+	// catch.
 	deadline := time.Now().Add(10 * time.Second)
-	filter := fmt.Sprintf("name=engine-sandbox-%d-", ws.RunID)
+	sandboxFilter := fmt.Sprintf("name=engine-sandbox-%d-", ws.RunID)
+	egressFilter := fmt.Sprintf("name=engine-egress-%d", ws.RunID) // matches both engine-egress-N and engine-egress-broker-N
 	for {
-		out, err := exec.Command("docker", "ps", "-a", "--filter", filter, "--format", "{{.Names}}").CombinedOutput()
+		sandboxOut, err := exec.Command("docker", "ps", "-a", "--filter", sandboxFilter, "--format", "{{.Names}}").CombinedOutput()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.TrimSpace(string(out)) == "" {
+		egressOut, err := exec.Command("docker", "ps", "-a", "--filter", egressFilter, "--format", "{{.Names}}").CombinedOutput()
+		if err != nil {
+			t.Fatal(err)
+		}
+		egressNetOut, err := exec.Command("docker", "network", "ls", "--filter", egressFilter, "--format", "{{.Name}}").CombinedOutput()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(string(sandboxOut)) == "" &&
+			strings.TrimSpace(string(egressOut)) == "" &&
+			strings.TrimSpace(string(egressNetOut)) == "" {
 			return // clean — the fix worked
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("a cancelled sandboxed run left a container behind: %s", out)
+			t.Fatalf("a cancelled sandboxed run left something behind — sandbox containers: %q, egress containers: %q, egress networks: %q",
+				sandboxOut, egressOut, egressNetOut)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
