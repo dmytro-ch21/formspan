@@ -235,6 +235,11 @@ function entry(over: Partial<Entry> & { id: string }): Entry {
     carb_g: 10,
     fat_g: 5,
     fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
     ...over,
   };
 }

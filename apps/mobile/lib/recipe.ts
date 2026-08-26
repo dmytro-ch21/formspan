@@ -104,11 +104,32 @@ export function clampName(v: string): string {
  * mid-edit with an empty field, and `Infinity` on screen is worse than 0.
  */
 export function perServing(items: RecipeItem[], yieldServings: number): Macros {
-  const out: Macros = { kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0, fibre_g: null };
+  const out: Macros = {
+    kcal: 0,
+    protein_g: 0,
+    carb_g: 0,
+    fat_g: 0,
+    fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
+  };
   if (!(yieldServings > 0)) return out;
 
   let fibreSum = 0;
   let fibreStated = false;
+  let saturatedFatSum = 0;
+  let saturatedFatStated = false;
+  let sugarSum = 0;
+  let sugarStated = false;
+  let addedSugarSum = 0;
+  let addedSugarStated = false;
+  let sodiumSum = 0;
+  let sodiumStated = false;
+  let cholesterolSum = 0;
+  let cholesterolStated = false;
   for (const it of items) {
     out.kcal += it.kcal * it.quantity;
     out.protein_g += it.protein_g * it.quantity;
@@ -118,12 +139,37 @@ export function perServing(items: RecipeItem[], yieldServings: number): Macros {
       fibreSum += it.fibre_g * it.quantity;
       fibreStated = true;
     }
+    if (it.saturated_fat_g != null) {
+      saturatedFatSum += it.saturated_fat_g * it.quantity;
+      saturatedFatStated = true;
+    }
+    if (it.sugar_g != null) {
+      sugarSum += it.sugar_g * it.quantity;
+      sugarStated = true;
+    }
+    if (it.added_sugar_g != null) {
+      addedSugarSum += it.added_sugar_g * it.quantity;
+      addedSugarStated = true;
+    }
+    if (it.sodium_mg != null) {
+      sodiumSum += it.sodium_mg * it.quantity;
+      sodiumStated = true;
+    }
+    if (it.cholesterol_mg != null) {
+      cholesterolSum += it.cholesterol_mg * it.quantity;
+      cholesterolStated = true;
+    }
   }
   out.kcal /= yieldServings;
   out.protein_g /= yieldServings;
   out.carb_g /= yieldServings;
   out.fat_g /= yieldServings;
   out.fibre_g = fibreStated ? fibreSum / yieldServings : null;
+  out.saturated_fat_g = saturatedFatStated ? saturatedFatSum / yieldServings : null;
+  out.sugar_g = sugarStated ? sugarSum / yieldServings : null;
+  out.added_sugar_g = addedSugarStated ? addedSugarSum / yieldServings : null;
+  out.sodium_mg = sodiumStated ? sodiumSum / yieldServings : null;
+  out.cholesterol_mg = cholesterolStated ? cholesterolSum / yieldServings : null;
   return out;
 }
 
@@ -169,6 +215,11 @@ export function itemFromSavedFood(food: Food, quantity: number): RecipeItem {
     carb_g: food.carb_g,
     fat_g: food.fat_g,
     fibre_g: food.fibre_g,
+    saturated_fat_g: food.saturated_fat_g,
+    sugar_g: food.sugar_g,
+    added_sugar_g: food.added_sugar_g,
+    sodium_mg: food.sodium_mg,
+    cholesterol_mg: food.cholesterol_mg,
     source_food_id: food.id,
   };
 }

@@ -46,6 +46,11 @@ function entry(over: Partial<Entry> = {}): Entry {
     carb_g: 0,
     fat_g: 8,
     fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
     source_food_id: null,
     notes: '',
     ...over,
@@ -67,6 +72,11 @@ function food(over: Partial<Food> = {}): Food {
     carb_g: 0,
     fat_g: 8,
     fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
     ...over,
   };
 }
@@ -99,6 +109,30 @@ describe('dayTotals', () => {
 
   it('an empty day is zero, not null', () => {
     expect(dayTotals([]).kcal).toBe(0);
+  });
+
+  // The N52 label macros follow fibre's own rule, independently of one
+  // another — a day where only sodium was ever stated must not also report a
+  // confident zero for sugar.
+  it('reports each N52 label macro as null when nothing stated it', () => {
+    const t = dayTotals([entry(), entry({ id: 'e2' })]);
+    expect(t.saturated_fat_g).toBeNull();
+    expect(t.sugar_g).toBeNull();
+    expect(t.added_sugar_g).toBeNull();
+    expect(t.sodium_mg).toBeNull();
+    expect(t.cholesterol_mg).toBeNull();
+  });
+
+  it('sums each N52 label macro once anything states it, independently of the others', () => {
+    const t = dayTotals([
+      entry({ sodium_mg: 400 }),
+      entry({ id: 'e2', sugar_g: 12 }),
+    ]);
+    expect(t.sodium_mg).toBe(400);
+    expect(t.sugar_g).toBe(12);
+    // Neither entry stated saturated fat, so it stays null even though the
+    // day is not otherwise empty.
+    expect(t.saturated_fat_g).toBeNull();
   });
 });
 
@@ -341,6 +375,13 @@ describe('rescale', () => {
   it('keeps unstated fibre unstated', () => {
     expect(rescale(logged(), 4).fibre_g).toBeNull();
   });
+
+  it('rescales a stated N52 label macro and keeps an unstated one unstated', () => {
+    const m = rescale({ ...logged(), sodium_mg: 200 }, 3);
+    // Absolute at 2 servings was 200, so 3 servings is 300.
+    expect(m.sodium_mg).toBe(300);
+    expect(m.saturated_fat_g).toBeNull();
+  });
 });
 
 describe('scale', () => {
@@ -353,6 +394,13 @@ describe('scale', () => {
   it('keeps unstated fibre unstated rather than scaling a zero into existence', () => {
     expect(scale(food(), 2).fibre_g).toBeNull();
     expect(scale(food({ fibre_g: 3 }), 2).fibre_g).toBe(6);
+  });
+
+  it('scales each N52 label macro independently, null-preserving exactly as fibre is', () => {
+    const withLabelMacros = food({ saturated_fat_g: 2, sugar_g: null });
+    const m = scale(withLabelMacros, 2);
+    expect(m.saturated_fat_g).toBe(4);
+    expect(m.sugar_g).toBeNull();
   });
 });
 

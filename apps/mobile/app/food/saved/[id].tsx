@@ -171,6 +171,18 @@ export default function EditSavedFoodScreen() {
         // Blank stays absent. Clearing the field means "I never recorded this",
         // which is not the claim that this food contains no fibre.
         fibre_g: draft.fibre_g?.trim() ? parse(draft.fibre_g) : null,
+        // This screen has no fields for the N52 label macros, and unlike
+        // `source` below the local upsert writes these with `excluded.*`, not
+        // a COALESCE — so sending null here would BLANK them, not leave them
+        // alone. Carried through from the stored food instead, which is the
+        // `updateWithin` trap this repo has paid for three times on a
+        // different table, avoided here by never sending a value this screen
+        // did not read.
+        saturated_fat_g: food.saturated_fat_g,
+        sugar_g: food.sugar_g,
+        added_sugar_g: food.added_sugar_g,
+        sodium_mg: food.sodium_mg,
+        cholesterol_mg: food.cholesterol_mg,
         // **DELIBERATELY NOT SENT.** An unstated source means "keep what is
         // stored" all the way down — here, in the local upsert, and in the
         // server's own ON CONFLICT clause. Sending `food.source` back would

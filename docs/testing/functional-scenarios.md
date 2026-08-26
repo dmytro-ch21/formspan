@@ -12962,3 +12962,52 @@ on screen. That, and only that, is what moved.
 - **NEEDS HUMAN EVIDENCE — plan something ten days out on a device**, open Plan,
   and confirm the `Beyond this week` line reads correctly against the week rows
   above it, at default and at the largest accessibility text size.
+
+## N59 — the nutrition panel on food detail, and the grouped add-food choice (`apps/mobile/app/food/add.tsx`, `apps/mobile/app/food/describe.tsx`, `apps/mobile/components/food/NutritionPanel.tsx`, `apps/mobile/components/FoodQuantity.tsx`)
+
+### The nutrition panel
+
+- Open a catalog or saved food with a complete label (all five N52 fields
+  stated) and confirm the panel shows Total Fat, Sat Fat (indented),
+  Cholesterol, Sodium, Total Carbs, Fiber (indented), Sugars (indented), Added
+  Sugars (indented once more) and Protein, plus the large calorie number.
+- Change the amount (typed number, unit toggle, a portion chip) and confirm
+  **every value on the panel rescales**, not just the calorie number — this is
+  the criterion the panel exists for.
+- Open a food missing sat fat, sodium, or any subset of the five N52 fields
+  and confirm those rows read **`n/a`**, never `0`. A food that genuinely
+  states a zero (e.g. `sodium_mg: 0`) must still show `0mg`, not `n/a` — the
+  two must not collapse into each other.
+- Confirm there is **no "View Full Nutrition Label" button anywhere on this
+  screen** — refused deliberately (see the history.md entry); its reappearance
+  is a regression, not a completion.
+- Confirm the "LOG DETAILS" group shows only **Meal**, selectable without
+  leaving the sheet — no `Log Time` or `Mark as Planned` control anywhere (see
+  N204).
+
+### The sticky confirm bar
+
+- Focus the quantity field with the keyboard open and confirm the **Log**
+  button stays reachable above the keyboard — it lives in a
+  `KeyboardAwareFooter`, not the scrolling content.
+- Confirm there is exactly **one** confirm button on screen at a time (the
+  sticky one) — `FoodQuantity`'s own inline Log button is suppressed here.
+- Log a food and confirm the entry's macros match what the panel showed at the
+  moment of tapping, at the chosen quantity and meal.
+
+### The grouped add-food choice
+
+- From the add-food search screen, confirm **Scan a barcode**, **Photograph
+  it** and **Describe it** are presented together as one bordered row under
+  "Can't find it?", not as separate rows scattered below the results.
+- Tap **Scan a barcode** and confirm it opens the barcode scanner.
+- Tap **Photograph it** and confirm it opens the describe screen **with the
+  camera already open** — no extra tap to reach the camera.
+- Tap **Describe it** and confirm it opens the describe screen on the plain
+  typing view, camera **not** open.
+- **NEEDS HUMAN EVIDENCE — tap "Photograph it" on a device** and confirm the
+  camera opens exactly once, with no flicker or double permission prompt (the
+  auto-open effect carries a Strict-Mode guard this suite cannot exercise).
+- **NEEDS HUMAN EVIDENCE — hold a phone and read the nutrition panel** at
+  default text size and at the largest accessibility size, and confirm the
+  two-column layout still fits without truncating a label or a value.

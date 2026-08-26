@@ -68,6 +68,11 @@ type EntryRow = {
   carb_g: number;
   fat_g: number;
   fibre_g: number | null;
+  saturated_fat_g: number | null;
+  sugar_g: number | null;
+  added_sugar_g: number | null;
+  sodium_mg: number | null;
+  cholesterol_mg: number | null;
   source_food_id: string | null;
   notes: string;
   updated_at: string;
@@ -87,6 +92,11 @@ function toEntry(r: EntryRow): Entry {
     carb_g: r.carb_g,
     fat_g: r.fat_g,
     fibre_g: r.fibre_g,
+    saturated_fat_g: r.saturated_fat_g,
+    sugar_g: r.sugar_g,
+    added_sugar_g: r.added_sugar_g,
+    sodium_mg: r.sodium_mg,
+    cholesterol_mg: r.cholesterol_mg,
     source_food_id: r.source_food_id,
     notes: r.notes,
   };
@@ -120,11 +130,13 @@ export async function logFood(userId: string, input: NewEntry): Promise<string> 
   await db.runAsync(
     `INSERT INTO food_entries (
        id, user_id, eaten_on, meal, name, servings, serving_label,
-       kcal, protein_g, carb_g, fat_g, fibre_g, source_food_id, notes,
-       logged_at, updated_at, dirty, remote)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0)`,
+       kcal, protein_g, carb_g, fat_g, fibre_g,
+       saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
+       source_food_id, notes, logged_at, updated_at, dirty, remote)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0)`,
     id, userId, input.eaten_on, input.meal, input.name, input.servings, input.serving_label,
     input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
+    input.saturated_fat_g, input.sugar_g, input.added_sugar_g, input.sodium_mg, input.cholesterol_mg,
     input.source_food_id ?? null, input.notes ?? '', now, now,
   );
   if (input.source_food_id) await noteFoodUsed(userId, input.source_food_id, input.eaten_on);
@@ -138,10 +150,12 @@ export async function editEntry(userId: string, id: string, input: NewEntry): Pr
     `UPDATE food_entries
         SET eaten_on = ?, meal = ?, name = ?, servings = ?, serving_label = ?,
             kcal = ?, protein_g = ?, carb_g = ?, fat_g = ?, fibre_g = ?,
+            saturated_fat_g = ?, sugar_g = ?, added_sugar_g = ?, sodium_mg = ?, cholesterol_mg = ?,
             source_food_id = ?, notes = ?, dirty = 1, updated_at = ?, last_error = NULL
       WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     input.eaten_on, input.meal, input.name, input.servings, input.serving_label,
     input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
+    input.saturated_fat_g, input.sugar_g, input.added_sugar_g, input.sodium_mg, input.cholesterol_mg,
     input.source_food_id ?? null, input.notes ?? '', stamp(), id, userId,
   );
   if (r.changes === 0) throw new Error('That entry no longer exists on this device.');
@@ -304,18 +318,23 @@ export async function cacheEntries(
       await db.runAsync(
         `INSERT INTO food_entries (
            id, user_id, eaten_on, meal, name, servings, serving_label,
-           kcal, protein_g, carb_g, fat_g, fibre_g, source_food_id, notes,
-           logged_at, updated_at, dirty, remote)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+           kcal, protein_g, carb_g, fat_g, fibre_g,
+           saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
+           source_food_id, notes, logged_at, updated_at, dirty, remote)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
          ON CONFLICT(id) DO UPDATE SET
            eaten_on = excluded.eaten_on, meal = excluded.meal, name = excluded.name,
            servings = excluded.servings, serving_label = excluded.serving_label,
            kcal = excluded.kcal, protein_g = excluded.protein_g,
            carb_g = excluded.carb_g, fat_g = excluded.fat_g, fibre_g = excluded.fibre_g,
+           saturated_fat_g = excluded.saturated_fat_g, sugar_g = excluded.sugar_g,
+           added_sugar_g = excluded.added_sugar_g, sodium_mg = excluded.sodium_mg,
+           cholesterol_mg = excluded.cholesterol_mg,
            source_food_id = excluded.source_food_id, notes = excluded.notes, remote = 1
          WHERE food_entries.dirty = 0 AND food_entries.deleted_at IS NULL`,
         e.id, userId, e.eaten_on, e.meal, e.name, e.servings, e.serving_label,
         e.kcal, e.protein_g, e.carb_g, e.fat_g, e.fibre_g,
+        e.saturated_fat_g, e.sugar_g, e.added_sugar_g, e.sodium_mg, e.cholesterol_mg,
         e.source_food_id, e.notes, now, now,
       );
     }
@@ -404,8 +423,9 @@ export async function cacheTargets(
  */
 const FOOD_COL_NAMES = [
   'id', 'kind', 'name', 'brand', 'serving_label', 'serving_grams',
-  'kcal', 'protein_g', 'carb_g', 'fat_g', 'fibre_g', 'source',
-  'yield_servings', 'items',
+  'kcal', 'protein_g', 'carb_g', 'fat_g', 'fibre_g',
+  'saturated_fat_g', 'sugar_g', 'added_sugar_g', 'sodium_mg', 'cholesterol_mg',
+  'source', 'yield_servings', 'items',
 ] as const;
 
 const FOOD_COLS = FOOD_COL_NAMES.join(', ');
@@ -495,15 +515,19 @@ export async function saveFoodLocally(
   await db.runAsync(
     `INSERT INTO foods (
        id, user_id, kind, name, brand, serving_label, serving_grams,
-       kcal, protein_g, carb_g, fat_g, fibre_g, source,
+       kcal, protein_g, carb_g, fat_g, fibre_g,
+       saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source,
        yield_servings, items, created_at, updated_at,
        dirty, remote, cached_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,?)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,?)
      ON CONFLICT(id) DO UPDATE SET
        kind = excluded.kind, name = excluded.name, brand = excluded.brand,
        serving_label = excluded.serving_label, serving_grams = excluded.serving_grams,
        kcal = excluded.kcal, protein_g = excluded.protein_g, carb_g = excluded.carb_g,
        fat_g = excluded.fat_g, fibre_g = excluded.fibre_g,
+       saturated_fat_g = excluded.saturated_fat_g, sugar_g = excluded.sugar_g,
+       added_sugar_g = excluded.added_sugar_g, sodium_mg = excluded.sodium_mg,
+       cholesterol_mg = excluded.cholesterol_mg,
        -- **"excluded", NOT a COALESCE, and the asymmetry with "source" below is
        -- deliberate.** An absent "source" means "I am not claiming a
        -- provenance", so the stored one survives. An absent ingredient list
@@ -524,6 +548,7 @@ export async function saveFoodLocally(
        dirty = 1, updated_at = excluded.updated_at, last_error = NULL`,
     id, userId, input.kind, input.name, input.brand, input.serving_label, input.serving_grams,
     input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
+    input.saturated_fat_g, input.sugar_g, input.added_sugar_g, input.sodium_mg, input.cholesterol_mg,
     input.source ?? 'user',
     // A plain food must store NULL rather than 0 here: the server refuses
     // `kind: 'food'` carrying a yield at all, and 0 is a value.
@@ -660,6 +685,8 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
         kind: f.kind, name: f.name, brand: f.brand,
         serving_label: f.serving_label, serving_grams: f.serving_grams,
         kcal: f.kcal, protein_g: f.protein_g, carb_g: f.carb_g, fat_g: f.fat_g, fibre_g: f.fibre_g,
+        saturated_fat_g: f.saturated_fat_g, sugar_g: f.sugar_g, added_sugar_g: f.added_sugar_g,
+        sodium_mg: f.sodium_mg, cholesterol_mg: f.cholesterol_mg,
         // **A recipe MUST carry both of these or it is a permanent 400** — the
         // server's `Food.Validate` checks `(kind == recipe) != (yield_servings
         // != null)` and rejects either half of the mismatch, and `classify`
@@ -747,7 +774,10 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
           eaten_on: r.eaten_on, meal: r.meal as Meal, name: r.name,
           servings: r.servings, serving_label: r.serving_label,
           kcal: r.kcal, protein_g: r.protein_g, carb_g: r.carb_g, fat_g: r.fat_g,
-          fibre_g: r.fibre_g, source_food_id: r.source_food_id, notes: r.notes,
+          fibre_g: r.fibre_g,
+          saturated_fat_g: r.saturated_fat_g, sugar_g: r.sugar_g, added_sugar_g: r.added_sugar_g,
+          sodium_mg: r.sodium_mg, cholesterol_mg: r.cholesterol_mg,
+          source_food_id: r.source_food_id, notes: r.notes,
         });
         // COMPARE-AND-SWAP on updated_at: an edit that landed while this push
         // was in flight leaves the row dirty for the next pass rather than
@@ -854,15 +884,19 @@ async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
       await db.runAsync(
         `INSERT INTO foods (
            id, user_id, kind, name, brand, serving_label, serving_grams,
-           kcal, protein_g, carb_g, fat_g, fibre_g, source,
+           kcal, protein_g, carb_g, fat_g, fibre_g,
+           saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source,
            yield_servings, items,
            created_at, updated_at, cached_at, dirty, remote)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind, name = excluded.name, brand = excluded.brand,
            serving_label = excluded.serving_label, serving_grams = excluded.serving_grams,
            kcal = excluded.kcal, protein_g = excluded.protein_g,
            carb_g = excluded.carb_g, fat_g = excluded.fat_g, fibre_g = excluded.fibre_g,
+           saturated_fat_g = excluded.saturated_fat_g, sugar_g = excluded.sugar_g,
+           added_sugar_g = excluded.added_sugar_g, sodium_mg = excluded.sodium_mg,
+           cholesterol_mg = excluded.cholesterol_mg,
            -- The server is authoritative for a recipe's shape as much as for
            -- its numbers, and this branch only runs for "dirty = 0", so there
            -- is no local claim to protect. A recipe edited on the web arrives
@@ -889,6 +923,7 @@ async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
          WHERE foods.dirty = 0 AND foods.deleted_at IS NULL`,
         f.id, userId, f.kind, f.name, f.brand, f.serving_label, f.serving_grams,
         f.kcal, f.protein_g, f.carb_g, f.fat_g, f.fibre_g,
+        f.saturated_fat_g, f.sugar_g, f.added_sugar_g, f.sodium_mg, f.cholesterol_mg,
         // The INSERT arm: a real value, because the column is NOT NULL and an
         // explicitly-bound NULL does NOT fall through to a column DEFAULT in
         // SQLite — it fails the constraint. A brand-new row we are being told

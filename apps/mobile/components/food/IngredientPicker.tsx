@@ -319,6 +319,14 @@ export function IngredientPicker({
               carb_g: num('carb_g'),
               fat_g: num('fat_g'),
               fibre_g: manual.fibre_g.trim() === '' ? null : num('fibre_g'),
+              // No manual field for any of these either — an ingredient typed
+              // from the athlete's head states what they were asked for and
+              // nothing more.
+              saturated_fat_g: null,
+              sugar_g: null,
+              added_sugar_g: null,
+              sodium_mg: null,
+              cholesterol_mg: null,
               // Nothing to point at: this ingredient came from the athlete's
               // head, not from a row anything else owns.
               source_food_id: null,

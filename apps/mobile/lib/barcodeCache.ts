@@ -38,6 +38,11 @@ type CacheRow = {
   carb_g: number;
   fat_g: number;
   fibre_g: number | null;
+  saturated_fat_g: number | null;
+  sugar_g: number | null;
+  added_sugar_g: number | null;
+  sodium_mg: number | null;
+  cholesterol_mg: number | null;
   source: string;
 };
 
@@ -57,7 +62,8 @@ export async function cachedBarcode(
   const db = await getDb();
   const row = await db.getFirstAsync<CacheRow>(
     `SELECT name, brand, serving_label, serving_grams,
-            kcal, protein_g, carb_g, fat_g, fibre_g, source
+            kcal, protein_g, carb_g, fat_g, fibre_g,
+            saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source
        FROM barcode_cache
       WHERE user_id = ? AND barcode = ?`,
     userId,
@@ -75,6 +81,11 @@ export async function cachedBarcode(
       carb_g: row.carb_g,
       fat_g: row.fat_g,
       fibre_g: row.fibre_g,
+      saturated_fat_g: row.saturated_fat_g,
+      sugar_g: row.sugar_g,
+      added_sugar_g: row.added_sugar_g,
+      sodium_mg: row.sodium_mg,
+      cholesterol_mg: row.cholesterol_mg,
     },
     // Narrowed rather than asserted: the column is TEXT, so a row written by a
     // future build with a source this one does not know must not silently type
@@ -110,8 +121,9 @@ export async function rememberBarcode(
   await db.runAsync(
     `INSERT INTO barcode_cache
        (user_id, barcode, name, brand, serving_label, serving_grams,
-        kcal, protein_g, carb_g, fat_g, fibre_g, source, cached_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        kcal, protein_g, carb_g, fat_g, fibre_g,
+        saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source, cached_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (user_id, barcode) DO UPDATE SET
        name = excluded.name,
        brand = excluded.brand,
@@ -122,6 +134,11 @@ export async function rememberBarcode(
        carb_g = excluded.carb_g,
        fat_g = excluded.fat_g,
        fibre_g = excluded.fibre_g,
+       saturated_fat_g = excluded.saturated_fat_g,
+       sugar_g = excluded.sugar_g,
+       added_sugar_g = excluded.added_sugar_g,
+       sodium_mg = excluded.sodium_mg,
+       cholesterol_mg = excluded.cholesterol_mg,
        source = excluded.source,
        cached_at = excluded.cached_at`,
     userId,
@@ -135,6 +152,11 @@ export async function rememberBarcode(
     food.carb_g,
     food.fat_g,
     food.fibre_g,
+    food.saturated_fat_g,
+    food.sugar_g,
+    food.added_sugar_g,
+    food.sodium_mg,
+    food.cholesterol_mg,
     source,
     new Date().toISOString(),
   );

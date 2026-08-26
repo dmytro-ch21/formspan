@@ -142,6 +142,11 @@ describe('itemToEntry', () => {
     carb_g: 1,
     fat_g: 14,
     fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
     portion_confidence: 'low',
     assumption: 'assumed a medium egg',
   };
@@ -168,6 +173,11 @@ describe('itemToEntry', () => {
       // Null stays null: "not stated" is not zero, the same contract the rest
       // of the module holds.
       fibre_g: null,
+      saturated_fat_g: null,
+      sugar_g: null,
+      added_sugar_g: null,
+      sodium_mg: null,
+      cholesterol_mg: null,
     });
   });
 });

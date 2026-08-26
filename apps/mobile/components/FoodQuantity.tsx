@@ -29,6 +29,7 @@ import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import type { CatalogFood } from '@/lib/catalogApi';
 import { macrosForGrams, parseQuantity, quantityOptions } from '@/lib/foodQuantity';
+import type { Macros } from '@/lib/nutrition';
 import { useUnits } from '@/lib/UnitsProvider';
 import { foodUnitLabel, fromDisplayGrams, toDisplayGrams, type FoodUnit } from '@/lib/units';
 
@@ -39,6 +40,8 @@ export function FoodQuantity({
   onLog,
   busy,
   cta = 'Log',
+  onQuantityChange,
+  hideBuiltInFooter,
 }: {
   food: CatalogFood;
   onLog: (grams: number) => void;
@@ -52,6 +55,24 @@ export function FoodQuantity({
    * the existing callers honest rather than making them restate themselves.
    */
   cta?: string;
+  /**
+   * N59: reports the CURRENT quantity and its scaled macros on every change —
+   * this component already computes both for its own one-line summary, and a
+   * caller building a richer panel around it (the food-detail nutrition
+   * panel) reads the same numbers rather than keeping a second, potentially
+   * drifting copy of this component's state.
+   */
+  onQuantityChange?: (state: { grams: number; valid: boolean; macros: Macros }) => void;
+  /**
+   * N59: suppresses the built-in one-line summary AND the inline Log button,
+   * rendering nothing in their place. For `add.tsx`'s food-detail screen,
+   * where the confirm action has to live in a sticky footer above the
+   * keyboard rather than scroll away with the quantity fields — the caller
+   * drives its own button off `onQuantityChange` instead. Existing callers
+   * (the recipe ingredient picker) leave this unset and keep the original
+   * inline summary and button.
+   */
+  hideBuiltInFooter?: boolean;
 }) {
   const { foodUnit, setFoodUnit } = useUnits();
   const options = useMemo(() => quantityOptions(food, food.portions), [food]);
@@ -120,6 +141,18 @@ export function FoodQuantity({
   // BEFORE they log it.
   const macros = macrosForGrams(food, valid ? grams : 0);
 
+  // Reports on every change to the numbers themselves, never on a re-render
+  // that leaves them the same — `onLog`/`busy` are read fresh inside the
+  // callback the caller gets, so they are deliberately not in the dep list.
+  // `food` IS in the dep list, even though `add.tsx`'s only in-place swap
+  // (the partial search result upgrading to the full catalog fetch) carries
+  // identical per-100g figures either way: a future caller whose food's
+  // numbers genuinely change while mounted must not see a stale report.
+  useEffect(() => {
+    onQuantityChange?.({ grams: valid ? grams : 0, valid, macros });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grams, valid, food]);
+
   return (
     <View style={styles.wrap}>
       <Text style={styles.name}>{food.brand ? `${food.brand} ${food.name}` : food.name}</Text>
@@ -174,22 +207,26 @@ export function FoodQuantity({
         </View>
       )}
 
-      <Text style={styles.macros} testID="food-quantity-macros">
-        {valid
-          ? `${macros.kcal} kcal · ${macros.protein_g}P · ${macros.carb_g}C · ${macros.fat_g}F`
-          : 'Enter a quantity'}
-      </Text>
+      {!hideBuiltInFooter && (
+        <>
+          <Text style={styles.macros} testID="food-quantity-macros">
+            {valid
+              ? `${macros.kcal} kcal · ${macros.protein_g}P · ${macros.carb_g}C · ${macros.fat_g}F`
+              : 'Enter a quantity'}
+          </Text>
 
-      <Pressable
-        onPress={() => valid && !busy && onLog(grams)}
-        disabled={!valid || busy}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !valid || busy }}
-        testID="food-quantity-log"
-        style={[styles.log, (!valid || busy) && styles.logOff]}
-      >
-        <Text style={styles.logText}>{cta}</Text>
-      </Pressable>
+          <Pressable
+            onPress={() => valid && !busy && onLog(grams)}
+            disabled={!valid || busy}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !valid || busy }}
+            testID="food-quantity-log"
+            style={[styles.log, (!valid || busy) && styles.logOff]}
+          >
+            <Text style={styles.logText}>{cta}</Text>
+          </Pressable>
+        </>
+      )}
     </View>
   );
 }

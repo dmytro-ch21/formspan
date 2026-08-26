@@ -80,6 +80,11 @@ export function macrosForGrams(food: CatalogFood, grams: number): Macros {
     carb_g: round1(food.carb_g * s),
     fat_g: round1(food.fat_g * s),
     fibre_g: food.fibre_g == null ? null : round1(food.fibre_g * s),
+    saturated_fat_g: food.saturated_fat_g == null ? null : round1(food.saturated_fat_g * s),
+    sugar_g: food.sugar_g == null ? null : round1(food.sugar_g * s),
+    added_sugar_g: food.added_sugar_g == null ? null : round1(food.added_sugar_g * s),
+    sodium_mg: food.sodium_mg == null ? null : round1(food.sodium_mg * s),
+    cholesterol_mg: food.cholesterol_mg == null ? null : round1(food.cholesterol_mg * s),
   };
 }
 

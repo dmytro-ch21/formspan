@@ -29,7 +29,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/KeyboardAwareScroll';
@@ -70,6 +70,13 @@ export default function DescribeMealScreen() {
      * teach this phone the packet.
      */
     barcode?: string;
+    /**
+     * N59: set when the athlete tapped "Photograph" on the grouped add-food
+     * choice, rather than "Describe". Opens the camera immediately on arrival
+     * so that choice reads as its own destination rather than as "describe,
+     * then notice a photo button".
+     */
+    photo?: string;
   }>();
 
   const date = params.date ?? todayString();
@@ -280,6 +287,28 @@ export default function DescribeMealScreen() {
     },
     [locked, description, getToken, meal, receive],
   );
+
+  // Fires once, on arrival, and only for the "Photograph" choice — never for
+  // a plain visit to this screen (`q`-seeded or otherwise), which must still
+  // land on the typing view undisturbed. The `[params.photo]` dependency
+  // already stops this from re-firing on an ordinary re-render (typing a
+  // description, `busy` flipping) since that string value does not change.
+  //
+  // **The ref guards a narrower case the dependency array does not: React's
+  // Strict Mode double-invokes an effect once in development**, mount →
+  // cleanup → mount again, without actually remounting the component — so a
+  // `useRef` set during the first invocation survives into the second and
+  // stops the camera opening twice. `describePhoto.test.tsx`'s "fires once"
+  // test does not exercise Strict Mode (this harness does not wrap renders in
+  // it), so it cannot fail this specific guard — recorded here rather than
+  // left to look like coverage it is not.
+  const autoPhotoFired = useRef(false);
+  useEffect(() => {
+    if (params.photo !== '1' || autoPhotoFired.current) return;
+    autoPhotoFired.current = true;
+    void photograph(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.photo]);
 
   /**
    * Log every row, then leave.
@@ -848,6 +877,11 @@ function perServing(it: EstimatedItem): Macros {
     carb_g: it.carb_g / n,
     fat_g: it.fat_g / n,
     fibre_g: it.fibre_g == null ? null : it.fibre_g / n,
+    saturated_fat_g: it.saturated_fat_g == null ? null : it.saturated_fat_g / n,
+    sugar_g: it.sugar_g == null ? null : it.sugar_g / n,
+    added_sugar_g: it.added_sugar_g == null ? null : it.added_sugar_g / n,
+    sodium_mg: it.sodium_mg == null ? null : it.sodium_mg / n,
+    cholesterol_mg: it.cholesterol_mg == null ? null : it.cholesterol_mg / n,
   };
 }
 

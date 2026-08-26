@@ -43274,6 +43274,136 @@ and resolutions to be filled in after both return — see the PR.]
   has to dismiss on the fastest screen in the app.
 
 
+## 2026-08-26 — N59: a real nutrition panel on food detail, and the three ways in become one
+
+**Both halves of N59 landed, and the type change it required turned out to be
+the larger piece.** N52 (already shipped) added five wider label macros —
+saturated fat, sugar, added sugar, sodium, cholesterol — to the backend's
+`Macros` struct and the wire contract, but the mobile client never grew fields
+for any of them. Every mobile `Macros`-shaped type (`Entry`, `Food`,
+`CatalogFood`, `ScannedFood`, `RecipeItem`, `EstimatedItem`) still had only
+`fibre_g` beside the original four, so the five values existed on the wire and
+were dropped on arrival.
+
+**Made required-but-nullable, matching `fibre_g`'s own convention, deliberately
+not optional.** An optional field is how "unstated" and "forgot to pass it"
+become indistinguishable at every call site — exactly the failure this file's
+own history keeps recording under a different name. The cost of that choice
+was a real, mechanical blast radius: every construction site of a
+`Macros`-shaped object across the app needed the five fields added, surfaced
+by `tsc` one file at a time — roughly twenty production and test files in the
+end, not the dozen or so the first pass through `tsc --noEmit` found, because
+fixing the earlier errors kept revealing the next layer (`nutritionApi.ts`'s
+wire types extend `Macros` structurally, so callers building an argument
+object had to gain the fields before the compiler could even reach the ones
+further down the file).
+
+**The local SQLite cache needed the same widening, and that was the part `tsc`
+could not find.** `food_entries`, `foods` and `barcode_cache` all had a
+`fibre_g REAL` column and nothing past it — so a logged entry, a saved food or
+a cached barcode scan would silently drop the five new fields on every
+offline round trip, which is precisely the "logged meal keeps its numbers"
+guarantee N87 built and this would have quietly broken for the newer fields.
+Schema version bumped 24 → 25, a real `ALTER TABLE` (not a `CREATE TABLE IF
+NOT EXISTS`, which is a no-op against a table that already exists) on all
+three tables, routed through the existing `addColumnIfMissing` helper.
+`nutrition_targets` was deliberately NOT touched — `Target` has never carried
+these fields and its own comment says why: the local cache doesn't store
+`source` either, and a target is a narrower contract than a logged food on
+purpose.
+
+**Three functions had the exact same null-preserving pattern to extend, and
+all three got it independently rather than by a shared helper**: `dayTotals`
+and `Recipe.perServing` both sum a list and report null only when NOTHING in
+the list stated a figure — now doing that for five fields instead of one, each
+tracked with its own running sum and "was anything stated" flag, because a day
+where only sodium was ever logged must not report a confident zero for sugar
+just because sodium was found. `scale`/`rescale`/`macrosForGrams` all multiply
+a stated value and leave a null one alone — same shape, three call sites.
+Every one of these is now covered by a test that states a stated field and
+leaves another null, on the ground that a fixture asserting only the null case
+would pass under code that scaled every value into existence including the
+ones nobody ever measured.
+
+## The nutrition panel
+
+`components/food/NutritionPanel.tsx` — a large calorie number beside a
+label-style breakdown (Total Fat / Sat Fat indented / Cholesterol / Sodium /
+Total Carbs / Fiber indented / Sugars indented / Added Sugars indented once
+more / Protein), every value rendered through one shared `n/a`-or-number
+helper so a second inline `?? 0` cannot creep back in — the single
+most-repeated defect in this codebase's own history, first against `fibre_g`
+and now against exactly the fields N52 added.
+
+**Deliberately carries no "View Full Nutrition Label" button**, though the
+design reference asks for one. This panel already renders every macro the app
+tracks; a button promising a fuller label than the one already on screen would
+have nowhere to go and nothing to reveal — exactly the affordance N39 refused,
+just one layer further in. Asserted with a test so the refusal cannot be
+quietly reversed by someone restoring the button from the reference without
+re-reading why it isn't there.
+
+**"LOG DETAILS" ships with only `Meal` in it.** The design reference's group
+also shows `Log Time` and `Mark as Planned`, and both are refused rather than
+stubbed: nothing in this app lets an athlete edit when an entry was eaten
+(`logged_at` is stamped by the device clock at write time and never surfaced
+anywhere), and nothing in the nutrition or Plan domain models a "planned"
+entry at all. Filed as N204 for a real product decision on both. The
+reference's "OPTIONS" group is left out entirely and not even filed — it names
+no actual options, so there is nothing yet to write a follow-up about.
+
+**`FoodQuantity.tsx` gained two new, backward-compatible props rather than
+being forked.** `onQuantityChange` reports the current grams/validity/macros
+on every change — the same numbers the component already computes for its own
+one-line summary, now also read by a caller building a richer panel around it.
+`hideBuiltInFooter` suppresses the inline summary and Log button entirely,
+for the one caller (the food-detail picking view) whose confirm action now
+lives in a sticky footer instead. Both are optional and unset by every
+existing caller (`components/food/IngredientPicker.tsx`, recipe authoring),
+which keeps its original inline button and summary untouched.
+
+**The picking view in `app/food/add.tsx` is restructured onto
+`KeyboardAwareScreen`/`KeyboardAwareFooter`** — the same sticky-footer shape
+`bjj/reflect/[id].tsx` already uses — so the confirm button survives the
+keyboard opening over the quantity field rather than scrolling away with it.
+The nutrition panel and the meal picker (moved into this view from the search
+screen, so the athlete can change it without leaving the sheet) sit in the
+scrolling content above the sticky bar.
+
+## The grouped entry
+
+Photograph, describe and scan a barcode used to be two unrelated rows below
+the search results — "Scan a barcode" and "Describe a meal, or photograph it"
+(the second already bundled two of the three ways in, since `describe.tsx`
+has offered both a text field and a camera button on one screen since N92).
+They are now one bordered, three-option row under a single "Can't find it?"
+header, so all three read as one decision rather than as a row you notice and
+a second one you might.
+
+**Photograph gained its own destination without a new screen.**
+`describe.tsx` already had a camera button; a `photo=1` route param now makes
+it open the camera immediately on arrival, via a `useEffect` gated on that
+param and a ref that survives React Strict Mode's double effect invocation in
+development (documented honestly as unverifiable by this test harness, which
+does not render under Strict Mode — the dependency array is what the "fires
+once across an ordinary re-render" test actually proves). "Describe" still
+lands on the plain typing view. "Scan" is unchanged, first in the group
+because a packet with a barcode should never be described — N40 measured an
+estimator doubling a quantity it should have read off the label.
+
+## What is not done
+
+- **No device pass.** Everything here is Simulator/typechecker/test-suite
+  verified; nobody has held a phone and confirmed the sticky footer clears the
+  keyboard on a real device, or that the two-column panel reads at a glance on
+  a 4.7" screen the way the flat one-line summary it replaces was proven to.
+- **N204** (Log Time / Mark as Planned) is a real, unresolved product
+  question, not a deferred implementation detail — the ticket names what each
+  would need before either can be built.
+- The N52 backfill this entry describes only reaches the MOBILE client. Web's
+  nutrition surfaces were out of scope for N59 and were not audited for the
+  same gap.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

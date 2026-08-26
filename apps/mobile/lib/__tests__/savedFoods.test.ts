@@ -56,6 +56,11 @@ function draftItem(over: Partial<EstimatedItem> = {}): EstimatedItem {
     carb_g: 8,
     fat_g: 40,
     fibre_g: 3,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
     portion_confidence: 'medium',
     assumption: 'assumed a large skewer',
     ...over,
@@ -137,6 +142,11 @@ describe('a food saved from a draft', () => {
       carb_g: before.carb_g,
       fat_g: before.fat_g,
       fibre_g: before.fibre_g,
+      saturated_fat_g: before.saturated_fat_g,
+      sugar_g: before.sugar_g,
+      added_sugar_g: before.added_sugar_g,
+      sodium_mg: before.sodium_mg,
+      cholesterol_mg: before.cholesterol_mg,
       // No `source` — exactly what the edit screen sends, and what every build
       // that predates N114 sends.
     });
@@ -165,6 +175,11 @@ describe('a food saved from a draft', () => {
       carb_g: 40,
       fat_g: 4,
       fibre_g: 5,
+      saturated_fat_g: null,
+      sugar_g: null,
+      added_sugar_g: null,
+      sodium_mg: null,
+      cholesterol_mg: null,
     });
     expect((await localFood(USER, id))!.source).toBe('user');
   });
@@ -194,6 +209,11 @@ describe('logging a drafted food against the row it was saved as', () => {
       carb_g: item.carb_g,
       fat_g: item.fat_g,
       fibre_g: item.fibre_g,
+      saturated_fat_g: item.saturated_fat_g,
+      sugar_g: item.sugar_g,
+      added_sugar_g: item.added_sugar_g,
+      sodium_mg: item.sodium_mg,
+      cholesterol_mg: item.cholesterol_mg,
       source_food_id: foodId,
     });
 
@@ -219,6 +239,11 @@ describe('logging a drafted food against the row it was saved as', () => {
       carb_g: item.carb_g,
       fat_g: item.fat_g,
       fibre_g: item.fibre_g,
+      saturated_fat_g: item.saturated_fat_g,
+      sugar_g: item.sugar_g,
+      added_sugar_g: item.added_sugar_g,
+      sodium_mg: item.sodium_mg,
+      cholesterol_mg: item.cholesterol_mg,
       source_food_id: foodId,
     });
 
@@ -265,6 +290,11 @@ describe('pushing a drafted food and the entry that names it', () => {
       carb_g: item.carb_g,
       fat_g: item.fat_g,
       fibre_g: item.fibre_g,
+      saturated_fat_g: item.saturated_fat_g,
+      sugar_g: item.sugar_g,
+      added_sugar_g: item.added_sugar_g,
+      sodium_mg: item.sodium_mg,
+      cholesterol_mg: item.cholesterol_mg,
       source_food_id: foodId,
     });
 
@@ -320,6 +350,11 @@ describe('pushing a drafted food and the entry that names it', () => {
       carb_g: item.carb_g,
       fat_g: item.fat_g,
       fibre_g: item.fibre_g,
+      saturated_fat_g: item.saturated_fat_g,
+      sugar_g: item.sugar_g,
+      added_sugar_g: item.added_sugar_g,
+      sodium_mg: item.sodium_mg,
+      cholesterol_mg: item.cholesterol_mg,
       source_food_id: foodId,
     });
 
