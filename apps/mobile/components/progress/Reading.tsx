@@ -28,7 +28,25 @@ export function ReadingState({
   reading,
   /** What is missing, in the athlete's words: "your training", "your records". */
   subject,
-  /** The invitation shown when the answer really is "nothing yet". */
+  /**
+   * The invitation shown when the answer really is "nothing yet", or `null` to
+   * declare that this reading has no constructible `empty`.
+   *
+   * **Not optional, and `null` is not the same as omitting it.** A reading whose
+   * `reading()` call passes no `isEmpty` can never BE empty, so any copy given
+   * here is dead — and a test asserting that dead copy is absent passes against
+   * every implementation, including a broken one. Review found exactly that on
+   * the week reading: an `empty` string that could not be reached, guarded by an
+   * assertion that could not fail. **A five-kind union is not enough on its own
+   * if one of the kinds is unconstructible.**
+   *
+   * So the call site has to say which it is. `null` means "the value's own
+   * component owns the empty case" — which is the honest answer for the week,
+   * where `WeekReview` needs the totals object even when it holds zero sessions
+   * in order to tell "nothing logged" from "nothing logged against this week's
+   * plan". Discarding the value into a payload-free `empty` would lose that
+   * distinction, which is the opposite of the point.
+   */
   empty,
   /** Named when the module behind this is off — "BJJ", "Nutrition". */
   offLabel,
@@ -36,7 +54,7 @@ export function ReadingState({
 }: {
   reading: Reading<unknown>;
   subject: string;
-  empty: string;
+  empty: string | null;
   offLabel?: string;
   testID: string;
 }) {
@@ -53,8 +71,14 @@ export function ReadingState({
           {offLabel ?? 'This'} is turned off. Turn it back on under Sports in your profile and
           this fills in.
         </Text>
-      ) : (
+      ) : empty !== null ? (
         <Text style={styles.muted}>{empty}</Text>
+      ) : (
+        // Unreachable: `empty: null` is a declaration that this reading's
+        // `reading()` call passes no `isEmpty`, so the state cannot be built.
+        // Rendering nothing rather than throwing — a crash on the Progress tab
+        // would be a worse outcome than a blank card if the two ever drift.
+        null
       )}
     </View>
   );

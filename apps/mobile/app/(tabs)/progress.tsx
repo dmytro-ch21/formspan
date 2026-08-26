@@ -291,14 +291,32 @@ export default function ProgressScreen() {
   const nutritionReading = useMemo(
     () =>
       nutritionWeek(
-        // Gated on the module, like every food-shaped surface in this app: an
-        // athlete who has turned nutrition off must not be told "0 days
-        // logged" forever about a feature they do not have.
-        foodEnabled ? foodDays : { state: 'off' },
+        /*
+          Gated on the module, like every food-shaped surface in this app: an
+          athlete who has turned nutrition off must not be told "0 days logged"
+          forever about a feature they do not have.
+
+          **`modulesReady` is the load-bearing half**, and it is the same guard
+          the BJJ row twenty lines down already carries. Without it an empty
+          module list — which is what every cold start begins with — classifies
+          as `off`, and `off` is a claim about a SETTING NOBODY HAS READ YET.
+
+          It renders correctly today only by coincidence, because `NutritionLine`
+          happens to draw nothing for `off`. That is exactly the shape this tab
+          exists to refuse: the type would be lying, and the first consumer to
+          route this reading through `ReadingState` with an `offLabel` would put
+          "Nutrition is turned off" on screen during a normal load. Raised in
+          review, and fixed in the classification rather than in the render, so
+          the next consumer inherits the truth rather than the coincidence.
+
+          The cost is a dash for a frame or two on an account that does have
+          nutrition off. A dash claims nothing; "turned off" claims something.
+        */
+        foodEnabled ? foodDays : modulesReady ? { state: 'off' } : { state: 'checking' },
         weekDays(now).map(dayString),
         dayString(now),
       ),
-    [foodEnabled, foodDays, now],
+    [foodEnabled, modulesReady, foodDays, now],
   );
 
   const changes = useMemo(

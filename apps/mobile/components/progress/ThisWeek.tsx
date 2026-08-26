@@ -49,10 +49,23 @@ export function ThisWeek({
   }) {
   return (
     <RNView style={styles.wrap} testID="progress-section-week">
+      {/*
+        `empty: null` — the week reading is deliberately built with no
+        `isEmpty`, because a week with zero sessions is still an ANSWER whose
+        value `WeekReview` needs: it is what lets the card say "Nothing logged
+        against this week's plan yet" rather than the flat "Nothing logged yet",
+        and it still carries the planned count. Collapsing that into a
+        payload-free `empty` here would replace a distinction the component
+        already draws with a sentence that cannot.
+
+        This started life as a real `empty` string, and review caught it: the
+        copy was unreachable and the test asserting its absence could not fail.
+        See `ReadingState`'s note on the prop.
+      */}
       <ReadingState
         reading={week}
         subject="your week"
-        empty="Nothing logged this week yet."
+        empty={null}
         testID="progress-week-state"
       />
       {week.state === 'ready' && (

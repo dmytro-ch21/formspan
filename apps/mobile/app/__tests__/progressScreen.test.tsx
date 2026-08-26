@@ -237,7 +237,13 @@ describe('the first frame, with every read still outstanding', () => {
     // The three sentences this screen is allowed to say ONLY from an answer.
     // Each has shipped, on some screen, over a request in flight.
     expect(screen.queryByText(/Log a few sets and your bests show up here/)).toBeNull();
-    expect(screen.queryByText(/Nothing logged this week yet/)).toBeNull();
+    // `WeekReview`'s OWN empty verdict, not a string `ReadingState` was given
+    // for a state the week reading cannot construct. That was the first version
+    // of this line and it could not fail against any wiring — the copy was
+    // unreachable, so its absence was guaranteed. This one is reachable: it is
+    // what the card renders the moment an answer with zero sessions arrives,
+    // which the very next test in this file demonstrates.
+    expect(screen.queryByText('Nothing logged yet.')).toBeNull();
     expect(screen.queryByText(/Nothing has moved much since last week/)).toBeNull();
     expect(screen.queryByTestId('what-changed-quiet')).toBeNull();
 
@@ -267,6 +273,16 @@ describe('the first frame, with every read still outstanding', () => {
     // The failure must not have produced any of the empty-state copy.
     expect(screen.queryByText(/Log a few sets and your bests show up here/)).toBeNull();
     expect(screen.queryByTestId('what-changed-quiet')).toBeNull();
+  });
+
+  it('shows the empty week only once a week has actually been read', async () => {
+    // The other half of the assertion above, and what makes it fallible: the
+    // same sentence that must be absent on the first frame must APPEAR the
+    // moment an answer with zero sessions lands. A test that only checked the
+    // absence would pass against a screen that never rendered the card at all.
+    render(<ProgressScreen />);
+    await answerEverything();
+    expect(screen.getByText('Nothing logged yet.')).toBeTruthy();
   });
 
   it('says nothing stands out only once every read has answered', async () => {
@@ -301,6 +317,22 @@ describe('what each athlete sees', () => {
     // "BJJ is turned off" here would be a claim about a setting nobody read.
     expect(screen.queryByTestId('progress-bjj-positions')).toBeNull();
     expect(screen.queryByTestId('progress-bjj-off')).toBeNull();
+  });
+
+  it('does not call nutrition "off" while the module list is still loading', async () => {
+    // An empty module list is an unanswered question, not a "no" — the same
+    // guard the BJJ row carries. The vector that separates a correct
+    // implementation from one that reads absence as off is `ready: false` with
+    // an EMPTY list, which is what every cold start begins with.
+    //
+    // Asserted on the rendered dash rather than on the reading, because the
+    // reading is internal: `off` draws no line at all and `checking` draws
+    // "—", so the row's presence IS the classification. Without the fix the
+    // row is absent here and this goes red.
+    mockModulesReady = false;
+    mockModules = [];
+    render(<ProgressScreen />);
+    expect(within(screen.getByTestId('progress-week-nutrition')).getByText('—')).toBeTruthy();
   });
 
   it('drops the food line for an athlete with nutrition off, and keeps the link', async () => {
