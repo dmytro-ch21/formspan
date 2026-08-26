@@ -12251,9 +12251,17 @@ meaning something it did not.
   section `The brand is not a reading`. A run with no such section is a run
   against a validator that has lost the check — the absence, not a failure, is
   the thing to look for.
-- The Library tile `advance` colour, the BJJ RPE moderate step, the consistency
-  grid's top step, `sportColors.strength` and `macroColors.carbs` all still
-  render the value they rendered before the brand moved. Two views of the same
+- The brand lime is identical in all four of its homes — `design-tokens.json`,
+  mobile's `Colors.ts`, web's dark `--c-lime`, admin's `--color-brand-lime`. The
+  gate compares them; changing one and not the others is a red build.
+- The Library tile `advance` colour, the BJJ RPE moderate step, the progression
+  card's `add_load` phase, the consistency grid's top step,
+  `sportColors.strength` and `macroColors.carbs` all still render the value they
+  rendered before the brand moved.
+- **Web draws the same readings as mobile and must draw them in the same
+  colour.** The consistency heatmap and the weekly volume bars read
+  `--c-training`, not the brand — check a web heatmap cell against the mobile
+  calendar's top step, and the web volume bar against Today's weekly bar. Two views of the same
   quantity must agree: the Today screen's weekly bar and the calendar's grid draw
   the *same* ramp, so a trained bar and a lit calendar cell must be the same
   colour, not two limes ΔE 3 apart.

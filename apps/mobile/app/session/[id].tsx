@@ -2013,7 +2013,10 @@ export default function SessionScreen() {
 const UNKNOWN_PHASE = { label: '', color: vola.textMuted };
 
 const PROGRESSION_PHASE: Record<SuggestionCode, { label: string; color: string }> = {
-  add_load: { label: 'ADD LOAD', color: vola.lime },
+  // `progressionAdvance`, NOT `lime`. Every other colour in this map is a fixed
+  // semantic value; reading the brand here would make `add_load` the one entry
+  // that moves when the logo does. Same value as before N183. See Colors.ts.
+  add_load: { label: 'ADD LOAD', color: vola.progressionAdvance },
   add_reps: { label: 'ADD A REP', color: vola.green },
   deload: { label: 'DELOAD', color: vola.warn },
   hold: { label: 'HOLD', color: vola.textMuted },

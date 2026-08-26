@@ -336,7 +336,7 @@ function loadPalette() {
       lime: one('lime'), green: one('green'), info: one('info'),
       warn: one('warn'), danger: one('danger'), gridRest: one('gridRest'),
       tileHold: one('tileHold'), tileAdvance: one('tileAdvance'),
-      rpeModerate: one('rpeModerate'),
+      rpeModerate: one('rpeModerate'), progressionAdvance: one('progressionAdvance'),
       ramp: [...ramp[1].matchAll(/'(#[0-9A-Fa-f]{6})'/g)].map((m) => m[1]),
     },
     BELT: block('beltAccent', 5),
@@ -372,6 +372,7 @@ function loadPalette() {
       // the belt edges shipped exactly that way.
       tileAdvance: monoOne('tileAdvance'),
       rpeModerate: monoOne('rpeModerate'),
+      progressionAdvance: monoOne('progressionAdvance'),
       info: monoOne('info'),
       danger: monoOne('danger'),
       warn: monoOne('warn'),
@@ -421,6 +422,62 @@ separation('brand vs tileHold', P.lime, P.tileHold);
 separation('brand vs body text', P.lime, P.text, 8);
 
 /*
+  The brand lime has FOUR homes, and this is the only thing that keeps them
+  equal.
+
+  `assets/brand/design-tokens.json` is the declared source of truth per
+  CLAUDE.md; `apps/mobile/constants/Colors.ts` is what the phone renders;
+  `apps/web/src/app/globals.css`'s dark block is what the web app renders; and
+  `apps/admin/src/app/globals.css` carries the brand set for the console. Before
+  N183 the only thing joining them was a comment in the admin file asking the
+  next person to change all of them — **and that comment was already wrong**: it
+  said the block was "duplicated verbatim in apps/web/src/app/globals.css. See
+  the note there", where there is no such block and no such note.
+
+  A comment is not a guarantee. `scripts/check-brand-copies.mjs` exists because
+  a hand-copied brand component drifted within one commit, and the mitigation at
+  the time was exactly this kind of comment. So the four are read and compared
+  here instead — three of them by regex over files this script does not own,
+  which is fragile in one direction only: a rename makes the read throw rather
+  than silently pass, the same property `loadPalette` is built on.
+
+  Only the brand values are joined. The stepped light-mode variants are NOT
+  brand values — `--c-lime: #6f9c00` is a derived dark-lime for a white ground —
+  so they are deliberately outside this check.
+*/
+heading('The brand lime has four homes — they must agree');
+{
+  const read = (file, re, what) => {
+    const src = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    const m = src.match(re);
+    if (!m) throw new Error(`validate_palette: could not read ${what} from ${file} — moved or renamed?`);
+    return m[1].toLowerCase();
+  };
+  const homes = {
+    'assets/brand/design-tokens.json': read(
+      'assets/brand/design-tokens.json', /"lime":\s*"(#[0-9A-Fa-f]{6})"/, 'brand.lime'),
+    'apps/mobile/constants/Colors.ts': P.lime.toLowerCase(),
+    'apps/web (dark --c-lime)': read(
+      'apps/web/src/app/globals.css',
+      /:root\[data-theme="dark"\][\s\S]*?--c-lime:\s*(#[0-9A-Fa-f]{6})/, 'dark --c-lime'),
+    'apps/admin (--color-brand-lime)': read(
+      'apps/admin/src/app/globals.css', /--color-brand-lime:\s*(#[0-9A-Fa-f]{6})/, '--color-brand-lime'),
+  };
+  const values = [...new Set(Object.values(homes))];
+  for (const [where, hex] of Object.entries(homes)) {
+    const ok = hex === homes['assets/brand/design-tokens.json'];
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${where.padEnd(38)} ${hex}`);
+  }
+  if (values.length !== 1) {
+    failures.push(
+      `${group} — the brand lime differs across its homes: ` +
+        Object.entries(homes).map(([w, h]) => `${w}=${h}`).join(', ') +
+        `. Changing one and not the others is the shape this check exists for.`,
+    );
+  }
+}
+
+/*
   **The brand must not BE a reading**, and ΔE cannot enforce that — this is the
   one guard in this file whose mechanism is identity rather than measurement,
   so it is worth saying why out loud rather than leaving it looking lazy.
@@ -454,6 +511,7 @@ heading('The brand is not a reading — identity, because ΔE cannot carry this'
   const SEMANTIC = {
     'Library tile advance': P.tileAdvance,
     'BJJ RPE moderate': P.rpeModerate,
+    'progression add_load': P.progressionAdvance,
     'consistency grid top step': P.ramp[P.ramp.length - 1],
     'sportColors.strength': SPORTS.strength,
     'macroColors.carbs': MACRO.carbs,

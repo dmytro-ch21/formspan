@@ -35,17 +35,24 @@ const palette = {
    *
    * This value moved on 2026-08-25 (N183) from `#B8FF2C` to the approved brand
    * source, and the move is the *smaller* half of that change. The larger half
-   * is that "the lime hex" was doing six jobs at once, and only one of them is
-   * the brand:
+   * is that "the lime hex" was doing seven jobs at once, and only one of them
+   * is the brand:
    *
    *   1. the brand accent (this)                — moved to `#D3EC52`
    *   2. the Library tile `advance` intent      — `tileAdvance`, still `#B8FF2C`
    *   3. the BJJ RPE ramp's moderate step       — `rpeModerate`, still `#B8FF2C`
-   *   4. the consistency grid's top step        — `gridLevels[2]`, still `#B8FF2C`
-   *   5. a discipline's colour                  — `sportColors.strength`, still `#B8FF2C`
-   *   6. a macro's colour                       — `macroColors.carbs`, still `#B8FF2C`
+   *   4. the progression engine's `add_load`    — `progressionAdvance`, still `#B8FF2C`
+   *   5. the consistency grid's top step        — `gridLevels[2]`, still `#B8FF2C`
+   *   6. a discipline's colour                  — `sportColors.strength`, still `#B8FF2C`
+   *   7. a macro's colour                       — `macroColors.carbs`, still `#B8FF2C`
    *
-   * Five of the six encode a READING, and a reading whose colour follows the
+   * **It was six until review found the seventh**, and that is worth recording
+   * rather than tidying away: `progressionAdvance` was reached by classifying
+   * every `vola.lime` call site by role, missed on the first pass, and caught
+   * by a reviewer reading the same diff. A grep finds hexes; only reading finds
+   * a colour used for the wrong reason.
+   *
+   * Six of the seven encode a READING, and a reading whose colour follows the
    * brand is a reading nobody can learn — the same argument the `accents` note
    * below makes about the accent being a preference. Two of them are not even
    * a choice: moving `macroColors.carbs` to the brand drops fat-versus-carbs
@@ -53,8 +60,8 @@ const palette = {
    * **9.70**, and moving `gridLevels[2]` drops ramp 1→2 from 15.35 to
    * **12.46** — all below the gate's floor, and none of them a figure anyone
    * reasoned out: each was produced by making the change and watching the build
-   * go red. The other three would NOT have failed anything, which is why
-   * `validate_palette.mjs` grew an identity check for all five.
+   * go red. The other four would NOT have failed anything, which is why
+   * `validate_palette.mjs` grew an identity check covering all six.
    *
    * **The two limes are NOT distinguishable, and that is the point, not a
    * problem.** They measure ΔE 3.05 apart under deuteranopia (7.22 with full
@@ -96,6 +103,27 @@ const palette = {
    * Also this value is what `lime` used to be, so the ramp renders identically.
    */
   rpeModerate: '#B8FF2C',
+
+  /**
+   * The progression engine's "add load" phase — a status, not the brand.
+   *
+   * `PROGRESSION_PHASE` in `app/session/[id].tsx` (and `PHASE` in web's
+   * `ProgressionCard.tsx`) maps a `SuggestionCode` to a colour, and **every
+   * other member of that map is a fixed semantic value** — `green`, `warn`,
+   * `textMuted`. Left reading `lime`, `add_load` would have been the one entry
+   * in a status map that follows the logo, which is the asymmetry that makes
+   * this a bug rather than a preference.
+   *
+   * Caught in review rather than by the gate, and the gate could not have
+   * caught it: this set is **not** pairwise separable and never was. `add_load`
+   * versus `add_reps` measured **ΔE 10.97** under protanopia before N183 and
+   * would have been **7.98** at the brand lime — both under the floor, so no
+   * threshold moves. The set is legible because each row prints its label in
+   * full-contrast text and the dot is redundant encoding, which is what the
+   * comment above that map already says. Pinning the value keeps the 10.97
+   * rather than shipping a quieter one for nothing.
+   */
+  progressionAdvance: '#B8FF2C',
 
   /**
    * The consistency grid's ramp, and the one place in this palette whose
@@ -337,6 +365,7 @@ export const mono = {
   // monochrome; nothing here is a new value.
   tileAdvance: '#E7EBF1',
   rpeModerate: '#E7EBF1',
+  progressionAdvance: '#E7EBF1',
   green: '#C9D2E0',
   info: '#98A3B5',
   warn: '#B9C2D0',

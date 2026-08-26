@@ -66,11 +66,33 @@
      see the note in dashboard/proficiency/page.tsx. */
   --c-lime-rule: #d3ec52;
 
-  /* The Library tile `advance` intent. One of four CATEGORICAL hues, validated
-     for CVD separation against danger/info and the achromatic hold — see
-     lib/libraryTiles.ts. Split from `--c-lime` by N183 because the brand moved
-     and a category must not move with it. Values unchanged in both themes. */
+  /* The Library tile `advance` intent — one of four CATEGORICAL hues (see
+     lib/libraryTiles.ts). Split from `--c-lime` by N183 because the brand moved
+     and a category must not move with it. Value unchanged in both themes.
+
+     **No tool validates any token in this file.** `scripts/validate_palette.mjs`
+     reads `apps/mobile/constants/Colors.ts` and nothing else; the dark values
+     below happen to be checked only because they are the same hexes. Measured
+     by hand with that script's own maths, this light step is BELOW the ΔE 15
+     floor the mobile palette holds to — 10.00 against light `--c-danger` under
+     deuteranopia, 17.68 against `--c-info` under tritanopia — which is the same
+     band `--c-info`'s note below describes as "only legal with secondary
+     encoding". The tile's three-letter code is that encoding. Do not read this
+     comment as a validation claim; it is a measurement and a caveat. */
   --c-tile-advance: #6f9c00;
+
+  /* The training/consistency quantity — the heatmap's opacity steps
+     (dashboard/sessions/TrainingCalendar.tsx) and the weekly volume bars
+     (VolumeTrend.tsx). Split from `--c-lime` by N183: this is the web reading
+     of the same quantity mobile draws with `vola.gridLevels`, which did not
+     move, so leaving it on the brand would have given one measurement two
+     different colours on two surfaces. Value unchanged in both themes. */
+  --c-training: #6f9c00;
+
+  /* The progression engine's `add_load` phase (sessions/[id]/ProgressionCard).
+     A status, and the only member of that map that was ever the brand hue.
+     Value unchanged in both themes; see `progressionAdvance` in Colors.ts. */
+  --c-progression-advance: #6f9c00;
   --c-green: #42f58d;
   --c-navy: #0b1220;
 
@@ -159,12 +181,23 @@
      light value: a mid-blue that reads on white disappears on #10151f. */
   --c-info: #6bb6ff;
 
-  /* The tile `advance` hue keeps the value `--c-lime` held before N183: it is
-     a category, and it is validated against this mode's danger and info at
-     worst adjacent pair ΔE 21.7 CVD / 35.6 normal. Moving it with the brand
-     would have re-opened that measurement for free. */
+  /* The tile `advance` hue keeps the value `--c-lime` held before N183 — a
+     category, not the brand.
+
+     Measured for this change rather than copied: **ΔE 19.96 against this mode's
+     `--c-danger` under deuteranopia, 20.50 against `--c-info` under
+     tritanopia.** The first draft of this comment said "worst adjacent pair
+     ΔE 21.7 CVD / 35.6 normal", lifted from the `--c-info` note above — and
+     those are the figures `components/LibraryTile.tsx` explicitly records as
+     WRONG, hand-measured against a validator that did not exist. Review caught
+     it. `--c-info`'s copy of them is pre-existing and still stale. */
   --c-tile-advance: #b8ff2c;
   --c-tile-advance-ink: #b8ff2c;
+
+  /* See the light block: the web reading of mobile's `gridLevels` quantity, and
+     the `add_load` status. Both keep the value `--c-lime` held before N183. */
+  --c-training: #b8ff2c;
+  --c-progression-advance: #b8ff2c;
 
   /* On dark the hues already clear AA against their own wash (12.0:1, 5.8:1,
      7.2:1), so ink and hue are the same value here. */
@@ -199,6 +232,8 @@
   --color-lime: var(--c-lime);
   --color-tile-advance: var(--c-tile-advance);
   --color-tile-advance-ink: var(--c-tile-advance-ink);
+  --color-training: var(--c-training);
+  --color-progression-advance: var(--c-progression-advance);
   --color-green: var(--c-green);
   --color-navy: var(--c-navy);
   --color-warn: var(--c-warn);

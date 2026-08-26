@@ -40104,7 +40104,7 @@ order IS transition order; timestamps tie at clock resolution).
 
 Diff proof of the constraint: nothing outside `engine/internal/runstate`
 changes — no worker, no gate, no reconciler code is touched.
-## 2026-08-25 — N183: the lime was doing six jobs, and only one of them was the brand
+## 2026-08-25 — N183: the lime was doing seven jobs, and only one of them was the brand
 
 The approved brand lime is `#D3EC52`. The app shipped `#B8FF2C`. The obvious
 change — replace the hex — is the one the ticket forbids, and it is worth
@@ -40213,6 +40213,43 @@ brand rather than a colour preference that happens to match. The key stays
 a derived dark-lime for a white ground and has *not* been recomputed against the
 new brand — the ticket rules out a light-mode redesign, and `#D3EC52` is 1.32:1
 on white, so light mode never renders the brand hex directly anyway.
+
+**Review found three more instances of the exact shape this ticket is about,
+and one bad claim in the fix itself.** All four are recorded because the pattern
+is the lesson, not the individual fixes:
+
+- **`PROGRESSION_PHASE.add_load`**, on both surfaces. A `SuggestionCode` →
+  colour map whose *every other member* is a fixed semantic value (`green`,
+  `warn`, `textMuted`). Left on `lime` it would have been the one entry in a
+  status map that follows the logo. That asymmetry is what makes it a bug. It is
+  `progressionAdvance` / `--c-progression-advance` now — the seventh role, which
+  is why the count in this entry's title changed.
+- **Web's consistency heatmap** (`dashboard/sessions/TrainingCalendar.tsx`) drew
+  its five steps as opacity fractions of `--c-lime`, and **web's volume bars**
+  (`VolumeTrend.tsx`) are the verbatim sibling of the mobile bar this PR had
+  already re-pointed. So the first draft moved the *web* reading of a quantity
+  onto the brand while pinning the *mobile* one — one measurement, two surfaces,
+  two colours, and no test with an opinion. Precisely the failure the ticket
+  exists to prevent, introduced by the fix for it. Both read `--c-training` now.
+- **A comment in the fix quoted a debunked number.** The new dark
+  `--c-tile-advance` note claimed "worst adjacent pair ΔE 21.7 CVD / 35.6
+  normal", copied from the neighbouring `--c-info` comment — and those are the
+  figures `components/LibraryTile.tsx` explicitly records as *wrong*,
+  hand-measured against a validator that did not exist. This PR deleted a "2.3"
+  for that exact sin and then committed it. The real values are 19.96 and 20.50,
+  measured. A second claim, that the web tokens are "validated for CVD
+  separation", was simply false: **no tool validates any token in
+  `apps/web`** — `validate_palette.mjs` reads mobile's `Colors.ts` and nothing
+  else, and the light tile step is ΔE 10.00 from light `danger`, below the floor
+  and legal only because the tile prints its three-letter code.
+
+**So the gate grew a second identity check: the brand lime has four homes and
+they are now compared.** `design-tokens.json`, mobile's `Colors.ts`, web's dark
+`--c-lime` and admin's `--color-brand-lime` are read and asserted equal. Until
+now the only thing joining them was a comment telling the next person to change
+all of them — and that comment was itself wrong, claiming a duplicate block in
+`apps/web` that does not exist. Each of the four was mutated separately and each
+fails on its own.
 
 **Not verified on a screen.** Every number here is CIEDE2000 and WCAG arithmetic,
 and none of it says whether the new lime *looks* right — on the tab bar, on the

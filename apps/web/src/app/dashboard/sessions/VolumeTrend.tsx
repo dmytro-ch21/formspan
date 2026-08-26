@@ -81,13 +81,17 @@ export function VolumeTrend({
                 <span
                   aria-hidden="true"
                   className={`w-full rounded-t-[3px] transition-colors ${
+                    // `training`, not `lime`: these bars are a quantity, and
+                    // they are the web sibling of mobile's TrainingSummary bar,
+                    // which N183 re-pointed at `vola.gridLevels[2]`. Same
+                    // reading on two surfaces has to be the same colour.
                     v > 0
-                      ? "bg-lime group-hover:bg-green"
+                      ? "bg-training group-hover:bg-green"
                       : w.sessions > 0
                         ? // Trained, just not in this measure. Dimmed rather
                           // than absent, so the week still reads as a week
                           // that happened.
-                          "bg-lime/30 group-hover:bg-lime/50"
+                          "bg-training/30 group-hover:bg-training/50"
                         : "bg-line-soft"
                   }`}
                   // A trained week must never round to invisible: 2px is the
