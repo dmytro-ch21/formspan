@@ -78,6 +78,11 @@ import {
   type Module,
 } from '@/lib/modules';
 import { sessionHref, startSessionHref } from '@/lib/startSession';
+// The 24-hour boundary, imported rather than declared. It was a local constant
+// here and a second copy of the same number arrived on Train with N177 — one
+// edit and the two screens would disagree about what "stale" means, silently,
+// with each looking right on its own. Caught in review.
+import { STALE_SESSION_MS } from '@/lib/trainBoard';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
@@ -122,8 +127,6 @@ function fabClearance(fontScale: number): number {
   return 44 + 20 * fontScale;
 }
 
-/** Past this, an open session reads as abandoned rather than in progress. */
-const STALE_SESSION_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Completed, non-warm-up sets — the backend's own working-volume rule.

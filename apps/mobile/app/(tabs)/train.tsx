@@ -129,6 +129,21 @@ export default function TrainScreen() {
             accent={accent}
             onPress={() => router.push(sessionHref(resume.session, modules))}
           />
+        ) : board.resume.state === 'unavailable' ? (
+          /*
+            The session read is what failed, so this screen cannot tell whether
+            an unfinished session is sitting there — and Resume outranking
+            everything is exactly the rule it can no longer apply. Saying
+            "today's plan could not be read" here would be true and would
+            attribute the failure to the wrong thing, which is what the athlete
+            then goes looking for. Quick start below still works, and starting a
+            second session is recoverable; not knowing about the first is the
+            part worth stating.
+          */
+          <Dashed testID="train-resume-unavailable">
+            We could not check for an unfinished session, or read today&apos;s plan.
+            Quick start below still works.
+          </Dashed>
         ) : (
           <TodayBlock
             today={board.today}
@@ -200,7 +215,10 @@ export default function TrainScreen() {
               accessibilityRole="button"
               accessibilityLabel={`${off.map((m) => m.label).join(' and ')} turned off. Choose what you train.`}
               testID="train-off-sports"
-              hitSlop={8}
+              // 13 vertical, not 8: the row is one line of 13pt text on a 19pt
+              // line box, so 8 leaves the target around 35pt — under the 44pt
+              // floor for something a thumb has to find.
+              hitSlop={{ top: 13, bottom: 13, left: 8, right: 8 }}
             >
               <Text style={styles.offNote}>
                 {off.map((m) => m.label).join(' and ')}{' '}
@@ -328,14 +346,17 @@ function TodayBlock({
   modules: ReturnType<typeof useModules>['modules'];
   onStart: (p: PlannedOffer) => void;
 }) {
+  // Nothing at all until the read answers — the HEADING included, so this block
+  // agrees with Later and Recent about what "renders nothing" means. Rendering
+  // the empty state here is the collapse this screen's docstring is about, and
+  // it lasts one frame: exactly long enough to be read, exactly short enough
+  // never to reach a bug report.
+  if (today.state === 'unread') return null;
+
   return (
     <RNView style={styles.section}>
       <SectionHeader label="Today" />
-      {/* Nothing at all until the read answers. Rendering the empty state here
-          is the collapse this screen's docstring is about — and it is one
-          frame, which is exactly long enough to be read and exactly short
-          enough never to show up in a bug report. */}
-      {today.state === 'unread' ? null : today.state === 'unavailable' ? (
+      {today.state === 'unavailable' ? (
         <Dashed testID="train-today-unavailable">
           Today&apos;s plan could not be read. Quick start below still works.
         </Dashed>
@@ -349,6 +370,12 @@ function TodayBlock({
             logLabel={p.logsAfterwards ? 'Log' : 'Start'}
             onLog={() => onStart(p)}
             onOpen={() => onStart(p)}
+            // The card body is a larger target than the button inside it, and
+            // without this it announces "{title}, Today" — a noun with no verb.
+            // Matches the phrasing Today already uses for the same card.
+            accessibilityLabel={`${p.logsAfterwards ? 'Log' : 'Start'} ${
+              p.workoutName ?? `${labelFor(modules, p.sport)} session`
+            }, planned for today`}
             testID={`train-today-${p.id}`}
           />
         ))
@@ -499,7 +526,11 @@ const styles = StyleSheet.create({
   },
   resumeAction: {
     marginTop: 14,
-    height: 46,
+    // `minHeight`, like the quick chips: a fixed height around a label that
+    // grows with the text size clips it at the largest accessibility sizes.
+    minHeight: 46,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderRadius: 23,
     alignItems: 'center',
     justifyContent: 'center',
@@ -538,7 +569,9 @@ const styles = StyleSheet.create({
   choose: {
     alignItems: 'center',
     justifyContent: 'center',
-    height: 52,
+    minHeight: 52,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 26,
     borderWidth: 1,
     borderStyle: 'dashed',

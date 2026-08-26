@@ -1,6 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { dayString } from './calendar';
 import type { Module } from './modules';
 import { listPlannedBetween, type PlannedSession } from './plan';
 import type { Session } from './sessions';
@@ -43,6 +44,20 @@ import type { Workout } from './workouts';
  * fired from this hook: Today already asks the orchestrator on its own focus,
  * and a second screen requesting a run on every focus is a change to sync
  * behaviour that this ticket has no business making.
+ *
+ * ## Why there is no sequence guard, and the assumption that buys
+ *
+ * The focus read and the sync-completion read can overlap, and neither carries
+ * a sequence number. That is safe **because `expo-sqlite` runs a connection's
+ * async statements on a serial queue** — a query issued later cannot resolve
+ * before one issued earlier, so "an older answer overwrites a newer one" is not
+ * reachable. The per-effect `live` flag handles the other half: a read that
+ * lands after blur or unmount is dropped, and a re-focus re-reads.
+ *
+ * **If the database layer ever stops serialising** — a second connection, a
+ * pool — this is the first place last-write-wins breaks, and it will break
+ * silently. Add the sequence guard then; `app/(tabs)/index.tsx`'s `planSeq` is
+ * the shape to copy.
  */
 /** `unread` until a read settles; the reads never reset it back. */
 function useSource<T>(): [Source<T>, (v: T) => void, () => void] {
@@ -76,10 +91,21 @@ export function useTrainBoard(
 
   const { lastSyncAt } = useSyncState();
 
-  // Keyed on the DAY rather than on `now`. The window only moves when the
-  // calendar date does, and keying on the instant would re-read on every tick
-  // of the clock the screen keeps for staleness.
-  const { from, to } = useMemo(() => planWindow(now), [now]);
+  // Keyed on the DAY STRING, not on `now`.
+  //
+  // The screen mints a fresh `Date` on every focus, so a memo keyed on the
+  // object gets a new identity each time even when the window is unchanged —
+  // which changes `read`'s identity, which re-fires the sync effect below, so
+  // every focus after the first completed sync ran the three reads **twice**.
+  // Same data both times, so nothing rendered wrongly; it was duplicate I/O
+  // behind a comment that described the fix rather than the code. Found in
+  // review.
+  // **Noon**, not midnight, when the day is rebuilt into a `Date` for
+  // `planWindow`. Midnight local does not exist on a spring-forward date in
+  // some zones, and a `Date` built from one lands on the previous day; noon has
+  // twelve hours of slack either side of every DST shift there has ever been.
+  const today = dayString(now);
+  const { from, to } = useMemo(() => planWindow(new Date(`${today}T12:00:00`)), [today]);
 
   const read = useCallback(
     (alive: () => boolean) => {

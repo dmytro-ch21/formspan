@@ -59,10 +59,20 @@ export const STALE_SESSION_MS = 24 * 60 * 60 * 1000;
 /**
  * The unfinished session, and whether it still reads as running.
  *
- * The same 24-hour rule Today applies, and the same reason: a Resume button
- * reading 506:24:12 is not information. A stale one is still offered — it is
- * the only route to finishing or discarding it — it just stops claiming a
- * clock is running.
+ * The same 24-hour rule Today applies — literally the same constant now, since
+ * `app/(tabs)/index.tsx` imports {@link STALE_SESSION_MS} from here rather than
+ * keeping its own copy. The reason is unchanged: a Resume button reading
+ * 506:24:12 is not information. A stale session is still offered, it just stops
+ * claiming a clock is running.
+ *
+ * **It is not guaranteed to surface EVERY abandoned session**, and saying so
+ * matters because an earlier draft of this comment claimed it was "the only
+ * route to finishing or discarding it". The search runs over the 30 most recent
+ * sessions the hook reads, so a heavy trainer's session abandoned 31 sessions
+ * ago is invisible here — exactly the athlete whose forgotten session this is
+ * for. Today has the same limit over the same list, so this is parity rather
+ * than a regression, and fixing it means a dedicated `WHERE ended_at IS NULL`
+ * read that neither screen has.
  */
 export type ResumeOffer = {
   session: Session;

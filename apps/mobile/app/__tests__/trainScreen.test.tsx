@@ -242,6 +242,30 @@ describe("today's plan", () => {
     expect(mockPush).toHaveBeenCalledWith('/session/start?sport=strength&workout=w7');
   });
 
+  // The card BODY is a bigger target than the Log button inside it, and without
+  // its own label it announces "{title}, Today" — a noun with no verb, so a
+  // screen-reader user is told what the card is and not what tapping it does.
+  // The button's label is not a substitute: it is the smaller target.
+  it('announces what tapping the plan card will do', async () => {
+    mockListPlannedBetween.mockResolvedValue([
+      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, notes: '' },
+    ]);
+    render(<TrainScreen />);
+
+    const card = await screen.findByTestId('train-today-p1');
+    expect(card.props.accessibilityLabel).toBe('Start Strength session, planned for today');
+  });
+
+  it('announces Log rather than Start for a discipline logged afterwards', async () => {
+    mockListPlannedBetween.mockResolvedValue([
+      { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, notes: '' },
+    ]);
+    render(<TrainScreen />);
+
+    const card = await screen.findByTestId('train-today-p2');
+    expect(card.props.accessibilityLabel).toBe('Log BJJ session, planned for today');
+  });
+
   it('says Log rather than Start for a discipline logged afterwards', async () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, notes: '' },
@@ -337,6 +361,40 @@ describe('it never claims an absence it has not checked', () => {
 
     expect(await screen.findByTestId('train-recent-unavailable')).toBeTruthy();
     expect(screen.queryByTestId('train-recent-none')).toBeNull();
+  });
+
+  // **Which read failed is part of what the athlete is told.** When the SESSION
+  // read is the one that broke, the screen cannot tell whether an unfinished
+  // session is sitting there — so Resume outranking everything is the rule it
+  // has just lost the ability to apply. Blaming the plan would be true and
+  // would send the athlete looking in the wrong place. Found in review.
+  it('names the unfinished-session check when that is what failed', async () => {
+    mockListLocalSessions.mockRejectedValue(new Error('disk'));
+    render(<TrainScreen />);
+
+    expect(await screen.findByTestId('train-resume-unavailable')).toBeTruthy();
+    // And it does NOT fall through to the plan-shaped note, which is what a
+    // screen that only distinguished "ready" from "not ready" would show.
+    expect(screen.queryByTestId('train-today-unavailable')).toBeNull();
+  });
+
+  it('names the plan when the plan is the only thing that failed', async () => {
+    mockListPlannedBetween.mockRejectedValue(new Error('disk'));
+    render(<TrainScreen />);
+
+    expect(await screen.findByTestId('train-today-unavailable')).toBeTruthy();
+    expect(screen.queryByTestId('train-resume-unavailable')).toBeNull();
+  });
+
+  it('draws no Today heading at all while the plan read is in flight', async () => {
+    // The other two blocks return null entirely when unread. This one used to
+    // render its heading over nothing, so the three disagreed about what
+    // "renders nothing" meant.
+    mockListPlannedBetween.mockReturnValue(pending<PlannedSession[]>());
+    render(<TrainScreen />);
+
+    expect(await screen.findByTestId('train-quick-strength')).toBeTruthy();
+    expect(screen.queryByText('TODAY')).toBeNull();
   });
 
   it('does claim an empty day once the read has answered', async () => {
