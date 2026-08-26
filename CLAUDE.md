@@ -703,10 +703,19 @@ grep -c '^## Open items / known gaps as of this entry' docs/decisions/history.md
 **That count is now a check rather than a habit** — `pnpm run check:doc-merge`,
 in `verify` and in CI. It asserts exactly one line *is* the heading and that it
 is the **last** `## ` heading in the file, which is the invariant this section
-has described for four repairs and nothing ever read. It skips fenced code
-blocks, so quoting the heading or a conflict marker in an example is fine; and
-it was verified by reproducing the historical defect, which it reports at line
-16331 against the 16330 measured above.
+has described for four repairs and nothing ever read. Verified by reproducing
+the historical defect, which it reports at line 16331 against the 16330
+measured above. It also refuses an **unterminated** code fence, because that
+blanks the rest of the file to a fence-aware reader and a stranded entry below
+one was invisible.
+
+**When you quote this heading inside a code fence, indent it.** The check skips
+fenced blocks, so an example costs it nothing — but the `grep` above does not
+know what a fence is, and a column-0 heading inside one moves its answer from 1
+to 2. That is the recipe reporting a defect that is not there, which is how a
+habit gets abandoned. The check enforces the agreement, so a fenced example at
+column 0 fails it and tells you to indent. This branch tripped it while writing
+the entry describing the trap.
 
 Skip the entry only for truly trivial changes (typo fixes, formatting) that don't represent a decision anyone would need to know about later.
 
