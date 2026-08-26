@@ -71,11 +71,18 @@ export function RecordsCard({
         </Pressable>
       </RNView>
 
+      {/*
+        No `offLabel`: the records reading is built with a `failed` and an
+        `isEmpty` but no `enabled`, so `off` is unconstructible for it and a
+        label naming Strength would be dead configuration that also implies
+        records are module-gated when they are not. Same reasoning as the
+        `empty={null}` on the week — see `ReadingState`'s note. Add one here if
+        records ever do become gated.
+      */}
       <ReadingState
         reading={records}
         subject="your records"
         empty="Log a few sets and your bests show up here — no setup needed."
-        offLabel="Strength"
         testID="records-state"
       />
       <StaleNote reading={records} testID="records-stale" />
