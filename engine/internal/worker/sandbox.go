@@ -20,6 +20,8 @@ import (
 	"os/exec"
 	"path"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // DefaultSandboxImage is used when Sandbox.Image is empty. It carries the
@@ -35,6 +37,11 @@ const DefaultSandboxImage = "golang:1.26-bookworm"
 type Sandbox struct {
 	Image string
 }
+
+// sandboxRunCounter gives each RunSandboxed invocation a distinct container
+// name — needed so a cancelled run's cleanup (see RunSandboxed) can name the
+// exact container to force-remove, rather than guessing.
+var sandboxRunCounter atomic.Uint64
 
 // SandboxResult is one sandboxed command's outcome.
 type SandboxResult struct {
@@ -64,20 +71,20 @@ const (
 // not read-only, not mounted anywhere else in the container's tree, simply
 // absent from its filesystem namespace. env is passed through explicitly,
 // like Workspace.Env() — nothing from this process's own environment
-// reaches the container implicitly. Two entries are rewritten rather than
-// passed verbatim, both explained where they're defined: GOCACHE/
-// GOMODCACHE are redirected to a path inside the workspace instead of the
-// host's real cache (see containerGoCache above), and DATABASE_URL/
-// TEST_DATABASE_URL have "localhost"/"127.0.0.1" rewritten to
-// host.docker.internal — a sandboxed container has its OWN loopback,
-// separate from the host's, so the run's own ephemeral database (which
-// Provision created ON THE HOST) is otherwise unreachable from inside it.
+// reaches the container implicitly (not even via a bare `-e NAME` with no
+// value, which Docker would resolve from the docker CLI's own environment;
+// see sandboxEnv). Most entries are forwarded as given; sandboxEnv rewrites
+// or drops a few specific ones — see its own doc comment for the full list
+// and why (host-shaped PATH/HOME/TMPDIR/GOPATH would be actively wrong
+// inside a Linux container; GOCACHE/GOMODCACHE and DATABASE_URL/
+// TEST_DATABASE_URL need redirecting to reach the right place FROM INSIDE
+// the sandbox rather than the host's).
 //
 // Networking is Docker's ordinary default (bridge) — reachable to the
 // internet and, via host.docker.internal, to the host's own ports.
 // Restricting that to a specific allowlist of legitimate hosts is
 // deliberately NOT done here: see the package doc and this ticket's history
-// entry for why, and N-tracking-ticket for the follow-up. Requires `docker`
+// entry for why, and N196/#622 for the follow-up. Requires `docker`
 // on PATH; this package's isolation guarantee depends on Docker's own
 // container boundary, so if Docker is unavailable this returns an error
 // rather than silently running unsandboxed — a fallback would be exactly
@@ -107,13 +114,33 @@ func (ws *Workspace) RunSandboxed(ctx context.Context, sb Sandbox, dir string, e
 	// file" from the CALLER's command, which reads as a bug in the command
 	// rather than in where WorkRoot was configured. Confirming the mount
 	// worked before running anything else turns that into one clear,
-	// actionable error instead.
-	if err := verifyMount(ctx, ws.Dir, image); err != nil {
-		return SandboxResult{}, err
+	// actionable error instead. Cached on the workspace (mountVerified):
+	// the property is fixed for ws.Dir's whole lifetime, so only the FIRST
+	// call per workspace pays the extra container.
+	if !ws.mountVerified.Load() {
+		if err := verifyMount(ctx, ws.Dir, image); err != nil {
+			return SandboxResult{}, err
+		}
+		ws.mountVerified.Store(true)
 	}
 
+	// Named so a cancelled run's cleanup (below) can force-remove the exact
+	// container rather than guessing — CommandContext SIGKILLs the `docker`
+	// CLI client on cancel, but the DAEMON keeps the container itself
+	// running regardless (--rm only fires when the container's own process
+	// exits on its own), so without this a wall-time budget cancel against
+	// a hung command would leak a running container the residue audit
+	// never sees. Found in review.
+	name := fmt.Sprintf("engine-sandbox-%d-%d", ws.RunID, sandboxRunCounter.Add(1))
 	args := []string{
-		"run", "--rm",
+		"run", "--rm", "--name", name,
+		// host.docker.internal resolves out of the box on Docker Desktop and
+		// this project's own Colima setup, but NOT on native Linux Docker
+		// (what CI's ubuntu-latest runners use) unless told to — this flag
+		// makes it resolve everywhere Docker 20.10+ runs, and is a no-op
+		// where it already worked (verified on this host: identical
+		// behavior with or without it).
+		"--add-host", "host.docker.internal:host-gateway",
 		"-v", ws.Dir + ":/workspace",
 		"-w", workdir,
 	}
@@ -124,6 +151,16 @@ func (ws *Workspace) RunSandboxed(ctx context.Context, sb Sandbox, dir string, e
 	args = append(args, command...)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Cancel = func() error {
+		// Best-effort: the client process is about to be killed regardless
+		// (Go's default Cancel), but that alone leaves the container
+		// running on the daemon — force-remove it by the name we gave it.
+		// Errors here are deliberately swallowed: this already runs during
+		// cancellation, and the caller's own error is the one that matters.
+		exec.Command("docker", "rm", "-f", name).Run()
+		return cmd.Process.Kill()
+	}
+	cmd.WaitDelay = 5 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -142,33 +179,66 @@ func (ws *Workspace) RunSandboxed(ctx context.Context, sb Sandbox, dir string, e
 // content, by checking for .git — present in every workspace Provision
 // creates (a real git clone), so its absence inside the container means the
 // mount came back empty rather than that this particular workspace happens
-// to lack it.
+// to lack it. Exit code 1 from `test -e` means exactly that absence; any
+// OTHER failure (Docker itself unavailable, an image pull failing) is a
+// different problem and gets its own message rather than being misdiagnosed
+// as an empty mount — found in review, since attributing every failure to
+// "mount appears empty" would itself be the "confusing symptom, wrong
+// diagnosis" class this guard exists to end.
 func verifyMount(ctx context.Context, hostDir, image string) error {
 	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
 		"-v", hostDir+":/workspace", image, "test", "-e", "/workspace/.git")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf(
-			"sandbox: workspace mount appears empty inside the container — "+
-				"on this host's Docker setup (e.g. Colima sharing only $HOME "+
-				"into its VM by default), WorkRoot must be a path Docker "+
-				"actually shares into its VM, not just any temp directory: %w", err)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return nil
 	}
-	return nil
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return fmt.Errorf(
+			"sandbox: workspace mount appears empty inside the container — " +
+				"on this host's Docker setup (e.g. Colima sharing only $HOME " +
+				"into its VM by default), WorkRoot must be a path Docker " +
+				"actually shares into its VM, not just any temp directory")
+	}
+	return fmt.Errorf("sandbox: could not verify the workspace mount (is Docker running, and is %s pullable?): %w: %s",
+		image, err, strings.TrimSpace(stderr.String()))
 }
 
-// sandboxEnv rewrites the two env-var classes RunSandboxed's doc comment
-// names, leaving everything else untouched.
+// sandboxEnv rewrites or drops the env-var classes RunSandboxed's doc
+// comment names, leaving everything else untouched. Two classes are
+// dropped rather than forwarded, both found in review:
+//
+//   - A bare NAME with no "=" is never forwarded. Passed straight through to
+//     `docker run -e NAME` (no value), Docker copies NAME's value from the
+//     docker CLI's OWN environment — i.e. from the engine host process —
+//     which is exactly the implicit host-env channel this package's doc
+//     comment claims is closed. Workspace.Env() never produces one, but the
+//     guarantee should hold by construction, not by every caller happening
+//     to agree.
+//   - PATH, HOME, TMPDIR and GOPATH are HOST-shaped (this engine typically
+//     runs on macOS) and WRONG inside a Linux container: the image's own
+//     PATH already has Go on it and gets clobbered by the host's; TMPDIR
+//     would point at a macOS temp directory that doesn't exist in the
+//     container at all; HOME/GOPATH the same. Every test here runs
+//     cat/sh/bash (found via any reasonable PATH, which is why this went
+//     unnoticed) — the first real Go gate wired through this would fail
+//     confusingly on "go: command not found" or a temp-dir error that reads
+//     as a bug in the gate rather than in the sandbox. Dropping them lets
+//     the image supply its own sane defaults; GOMODCACHE is pinned
+//     independently below regardless of GOPATH's value.
 func sandboxEnv(env []string) []string {
 	out := make([]string, 0, len(env)+2)
 	for _, e := range env {
 		k, v, ok := strings.Cut(e, "=")
 		if !ok {
-			out = append(out, e)
-			continue
+			continue // never forward a bare name — see doc comment above
 		}
 		switch k {
 		case "GOCACHE", "GOMODCACHE":
 			continue // replaced below with container-local paths
+		case "PATH", "HOME", "TMPDIR", "GOPATH":
+			continue // host-shaped; let the image's own defaults stand
 		case "DATABASE_URL", "TEST_DATABASE_URL":
 			out = append(out, k+"="+rewriteHostForSandbox(v))
 		default:
@@ -182,21 +252,24 @@ func sandboxEnv(env []string) []string {
 
 // rewriteHostForSandbox swaps a loopback host for host.docker.internal, the
 // address a container uses to reach a port bound on the host machine. A
-// non-loopback host (a real remote database, say) is returned unchanged —
-// only "the workspace's own database, created on the host we're sandboxed
-// away from" needs this rewrite.
+// non-loopback host (a real remote database, say) is returned EXACTLY
+// UNCHANGED, not re-serialized — so a URL shape this function doesn't
+// recognize is passed through byte-for-byte rather than risking a lossy
+// round-trip through net/url for a rewrite that was never needed.
 func rewriteHostForSandbox(dbURL string) string {
 	u, err := url.Parse(dbURL)
 	if err != nil {
 		return dbURL
 	}
 	switch u.Hostname() {
-	case "localhost", "127.0.0.1":
+	case "localhost", "127.0.0.1", "::1":
 		newHost := "host.docker.internal"
 		if port := u.Port(); port != "" {
 			newHost += ":" + port
 		}
 		u.Host = newHost
+		return u.String()
+	default:
+		return dbURL
 	}
-	return u.String()
 }

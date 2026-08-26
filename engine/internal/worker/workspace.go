@@ -72,6 +72,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -106,6 +107,14 @@ type Workspace struct {
 	DBURL   string // connects as DBRole, never as the admin role
 	runner  *Runner
 	dropped bool
+
+	// mountVerified caches RunSandboxed's mount pre-flight check (see
+	// sandbox.go): the property it checks — whether this host's Docker
+	// actually shares ws.Dir — is fixed for this workspace's whole
+	// lifetime, so repeat calls skip the extra container after the first
+	// one succeeds. Atomic because RunSandboxed makes no promise about
+	// being called from one goroutine only.
+	mountVerified atomic.Bool
 }
 
 var slugRe = regexp.MustCompile(`[^a-z0-9-]+`)

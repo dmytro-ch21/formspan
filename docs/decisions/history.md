@@ -41138,6 +41138,59 @@ tested with no live caller yet, same as this — the dispatcher that would
 actually drive gates through a real workspace is blocked on N145 (the GitHub
 App/org), not on anything in this package.
 
+`backend-reviewer` found two real blocking bugs in the first version above,
+since fixed. **A cancelled run orphaned its container.** `exec.CommandContext`
+SIGKILLs the `docker` CLI client on cancellation, but the daemon keeps the
+CONTAINER running regardless — `--rm` only fires when the container's own
+process exits on its own, so a wall-time budget cancel against a hung
+sandboxed command (this engine's normal way for a hung gate to die) would
+leak a running container the residue audit never sees. Fixed by naming every
+container and setting `cmd.Cancel` to force-remove it by name before killing
+the client; confirmed by cancelling a real 30-second sleep mid-flight and
+checking the Docker daemon directly for a survivor
+(`TestCancelledRunDoesNotLeaveAnOrphanedContainer`) — mutation-verified too:
+removing the `cmd.Cancel` line reproduced a real orphaned container
+(`engine-sandbox-44-1`, cleaned up by hand), and restoring it made the test
+pass again. **Host-shaped `PATH`/`HOME`/`TMPDIR`/`GOPATH` were being forwarded
+verbatim from macOS into the Linux container.** None of the tests caught this
+because they all ran `cat`/`sh`/`bash`, found via any reasonable `PATH` — the
+first real Go gate wired through this would have failed confusingly
+("go: command not found", or a temp-dir error) on what would read as a bug in
+the gate rather than in the sandbox. `sandboxEnv` now drops all four,
+letting the image's own defaults stand; `GOMODCACHE` was already pinned
+independently, so dropping `GOPATH` doesn't disturb it.
+
+Smaller fixes from the same review: a bare `NAME` (no `=`) in `env` is now
+dropped rather than forwarded — passed through, it becomes `docker run -e
+NAME`, which tells Docker to copy `NAME`'s value from the docker CLI's OWN
+environment, exactly the implicit host-env channel this file's doc comment
+claims is closed; `verifyMount` now distinguishes a genuine empty-mount
+(`test -e`'s exit 1) from any OTHER docker failure (daemon down, image pull
+failing) instead of misdiagnosing every failure as the same Colima trap;
+`rewriteHostForSandbox` returns a non-matching URL completely unchanged
+rather than re-serialized through `net/url`, and now also recognizes `::1`;
+and the mount-verification check is now cached per `Workspace` (an
+`atomic.Bool`) since the property it checks is fixed for the workspace's
+whole lifetime, so repeat `RunSandboxed` calls on the same workspace no
+longer pay a second container just to re-confirm it.
+
+`ac-verifier` also caught something the first version missed: two of the
+new tests baked in an assumption specific to THIS host's Colima config.
+`TestSandboxCanReachTheHostsEphemeralDatabase` depended on
+`host.docker.internal` resolving, which native Linux Docker (what CI's
+`ubuntu-latest` runners use) does not do by default — fixed by always
+passing `--add-host host.docker.internal:host-gateway` to `docker run`
+(verified as a no-op on this host, where it already resolved). And the
+original `TestVerifyMountCatchesAWorkRootDockerCannotShare` asserted that a
+`t.TempDir()`-based `WorkRoot` fails — true only on Colima's restrictive
+sharing; native Linux Docker and Docker Desktop for Mac both share more by
+default, so the same assertion could flip to a false failure on a different
+Docker host. Replaced with
+`TestVerifyMountCatchesAGenuinelyEmptyWorkspace`, which points at a
+directory that is actually empty (no `.git`) rather than relying on any
+one host's mount-sharing configuration — the same guard, tested a way that
+travels.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

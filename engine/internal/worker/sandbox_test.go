@@ -2,11 +2,13 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func dockerAvailable(t *testing.T) {
@@ -53,6 +55,7 @@ func TestRewriteHostForSandbox(t *testing.T) {
 		{"127.0.0.1 rewritten", "postgres://u:p@127.0.0.1:5432/db", "postgres://u:p@host.docker.internal:5432/db"},
 		{"remote host unaffected", "postgres://u:p@db.example.com:5432/db", "postgres://u:p@db.example.com:5432/db"},
 		{"no port carries no colon", "postgres://u:p@localhost/db", "postgres://u:p@host.docker.internal/db"},
+		{"IPv6 loopback rewritten", "postgres://u:p@[::1]:5432/db", "postgres://u:p@host.docker.internal:5432/db"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -66,21 +69,40 @@ func TestRewriteHostForSandbox(t *testing.T) {
 func TestSandboxEnvRewritesGoCachesAndDBHostAndLeavesEverythingElse(t *testing.T) {
 	in := []string{
 		"CI=1",
-		"PATH=/usr/bin",
+		"PATH=/usr/bin:/opt/homebrew/bin", // host-shaped (macOS) — must be dropped, not forwarded
+		"HOME=/Users/host",                // same
+		"TMPDIR=/var/folders/xy/abc",      // same — doesn't exist inside the container at all
+		"GOPATH=/Users/host/go",           // same
 		"GOCACHE=/Users/host/Library/Caches/go-build",
 		"GOMODCACHE=/Users/host/go/pkg/mod",
 		"DATABASE_URL=postgres://engine_role_1_ab:pw@localhost:5432/engine_run_1_ab",
 		"TEST_DATABASE_URL=postgres://engine_role_1_ab:pw@localhost:5432/engine_run_1_ab",
+		"SOME_TOKEN", // a bare name with no "=" — must never be forwarded at all
 	}
 	out := sandboxEnv(in)
 	joined := strings.Join(out, "\n")
 
 	// The host's real caches must never reach the container.
-	if strings.Contains(joined, "/Users/host/") {
-		t.Fatalf("host cache path leaked into sandbox env:\n%s", joined)
+	if strings.Contains(joined, "/Users/host") || strings.Contains(joined, "/var/folders") {
+		t.Fatalf("a host-shaped path leaked into sandbox env:\n%s", joined)
 	}
 	if !strings.Contains(joined, "GOCACHE="+containerGoCache) || !strings.Contains(joined, "GOMODCACHE="+containerGoModCache) {
 		t.Fatalf("go caches not redirected inside the workspace:\n%s", joined)
+	}
+	// PATH/HOME/TMPDIR/GOPATH are host-shaped and wrong inside a Linux
+	// container — dropped entirely, not forwarded, so the image's own
+	// defaults stand.
+	for _, k := range []string{"PATH=", "HOME=", "TMPDIR=", "GOPATH="} {
+		if strings.Contains(joined, "\n"+k) || strings.HasPrefix(joined, k) {
+			t.Fatalf("%s was forwarded from the host instead of being dropped:\n%s", strings.TrimSuffix(k, "="), joined)
+		}
+	}
+	// A bare NAME (no "=") must never be forwarded — that shape tells
+	// `docker run -e NAME` to copy the value from docker CLI's OWN
+	// environment, exactly the implicit host-env channel this file exists
+	// to close.
+	if strings.Contains(joined, "SOME_TOKEN") {
+		t.Fatalf("a bare env name was forwarded, letting docker resolve it from the host's own environment:\n%s", joined)
 	}
 	// localhost must never reach the container either — its own loopback is
 	// not the host's.
@@ -90,8 +112,8 @@ func TestSandboxEnvRewritesGoCachesAndDBHostAndLeavesEverythingElse(t *testing.T
 	if !strings.Contains(joined, "host.docker.internal:5432") {
 		t.Fatalf("DB host not rewritten to host.docker.internal:\n%s", joined)
 	}
-	// Untouched entries must survive verbatim.
-	if !strings.Contains(joined, "CI=1") || !strings.Contains(joined, "PATH=/usr/bin") {
+	// An ordinary, non-special entry must still survive verbatim.
+	if !strings.Contains(joined, "CI=1") {
 		t.Fatalf("unrelated env entries were not preserved:\n%s", joined)
 	}
 }
@@ -229,21 +251,86 @@ func TestSandboxCanReachTheHostsEphemeralDatabase(t *testing.T) {
 // surfaces as a confusing "no such file" from whatever command the caller
 // happened to run; with it, RunSandboxed refuses clearly before running
 // anything.
-func TestVerifyMountCatchesAWorkRootDockerCannotShare(t *testing.T) {
+// This is deliberately NOT a test of the Colima-specific empty-mount trap
+// itself (t.TempDir() vs $HOME) — that behavior is host-config-dependent:
+// native Linux Docker (what CI's ubuntu-latest runners use) and Docker
+// Desktop for Mac both share more of the filesystem by default than this
+// project's own Colima setup does, so asserting "a t.TempDir()-based
+// WorkRoot fails" would itself be host-specific and could flip to a false
+// failure on a different Docker host. What IS portable everywhere Docker
+// runs is verifyMount's actual logic: a directory with no .git in it looks
+// exactly like an empty mount regardless of WHY it's empty, so pointing at
+// a genuinely empty (but Docker-shareable) directory exercises the same
+// guard without depending on any one host's mount-sharing configuration.
+func TestVerifyMountCatchesAGenuinelyEmptyWorkspace(t *testing.T) {
+	dockerAvailable(t)
+	empty := filepath.Join(sandboxWorkRoot(t), "no-git-here")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ws := &Workspace{Dir: empty}
+
+	_, err := ws.RunSandboxed(context.Background(), Sandbox{}, "", nil, []string{"cat", "anything"})
+	if err == nil {
+		t.Fatal("RunSandboxed succeeded against a workspace with no .git — the mount-verification guard did not fire")
+	}
+	if !strings.Contains(err.Error(), "mount appears empty") {
+		t.Fatalf("wrong error, or the guard's message changed without this test updating: %v", err)
+	}
+}
+
+// TestCancelledRunDoesNotLeaveAnOrphanedContainer is the fix for the
+// blocking finding review raised: exec.CommandContext SIGKILLs the `docker`
+// CLI client on cancel, but the DAEMON keeps a container running regardless
+// of its client dying — --rm only fires when the container's own process
+// exits on its own. Without cmd.Cancel force-removing it by name, a
+// cancelled sandboxed run (this engine's normal way for a hung gate to die,
+// via Budget.MaxWall) would leak a running container the residue audit
+// never sees.
+func TestCancelledRunDoesNotLeaveAnOrphanedContainer(t *testing.T) {
 	dockerAvailable(t)
 	src, first, _ := makeSourceRepo(t)
-	r := &Runner{RepoURL: src, WorkRoot: t.TempDir()}
-	ws, err := r.Provision(context.Background(), 43, 1, "bad-workroot", first, nil, "")
+	r := &Runner{RepoURL: src, WorkRoot: sandboxWorkRoot(t)}
+	ws, err := r.Provision(context.Background(), 44, 1, "cancel-orphan", first, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Teardown(context.Background())
 
-	_, err = ws.RunSandboxed(context.Background(), Sandbox{}, "", nil, []string{"cat", "README.md"})
-	if err == nil {
-		t.Fatal("RunSandboxed succeeded against a WorkRoot this host's Docker cannot share")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ws.RunSandboxed(ctx, Sandbox{}, "", nil, []string{"sleep", "30"})
+	}()
+
+	// Give the container time to actually start before cancelling — a
+	// cancel before it exists would prove nothing about cleanup.
+	time.Sleep(1 * time.Second)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("RunSandboxed did not return after its context was cancelled")
 	}
-	if !strings.Contains(err.Error(), "mount appears empty") {
-		t.Fatalf("wrong error, or the guard's message changed without this test updating: %v", err)
+
+	// Give Docker a moment to actually process the removal, then check the
+	// daemon directly — this is the real proof, not just that our own call
+	// returned.
+	deadline := time.Now().Add(10 * time.Second)
+	filter := fmt.Sprintf("name=engine-sandbox-%d-", ws.RunID)
+	for {
+		out, err := exec.Command("docker", "ps", "-a", "--filter", filter, "--format", "{{.Names}}").CombinedOutput()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(string(out)) == "" {
+			return // clean — the fix worked
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("a cancelled sandboxed run left a container behind: %s", out)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }
