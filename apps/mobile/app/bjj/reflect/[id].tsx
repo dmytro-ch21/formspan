@@ -47,6 +47,11 @@ import {
   type Sequence,
 } from '@/lib/sequences';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { fetchProficiency, type Proficiency } from '@/lib/proficiency';
+import { LEARNING_STATE_LABEL, displayLearningState } from '@/lib/learningState';
+import { LearningStateBadge } from '@/components/LearningStateBadge';
+import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
+import { RoadmapLine } from '@/components/RoadmapLine';
 
 /**
  * The reflection wizard — everything past the three-tap floor.
@@ -172,6 +177,43 @@ export default function ReflectScreen() {
     [persist],
   );
 
+  /**
+   * The cross-session technique funnel, fetched once — what lets a drilled or
+   * focus row say "Reliable" instead of just "Drilled".
+   *
+   * Fetched here rather than inside `DrilledStep`/`LiveStep` so both steps
+   * read the same snapshot from one request, matching the pattern `names`
+   * already sets for technique names in `LiveStep` below. Silent on failure —
+   * an accelerator, not a requirement: a learning-state badge that cannot be
+   * shown just does not render, the wizard's actual capture surface (chips,
+   * counters) is unaffected either way.
+   */
+  const [proficiency, setProficiency] = useState<ReadonlyMap<string, Proficiency>>(new Map());
+  useEffect(() => {
+    const c = new AbortController();
+    fetchProficiency(getToken, c.signal)
+      .then((rows) => setProficiency(new Map(rows.map((r) => [r.technique_id, r]))))
+      .catch(() => {});
+    return () => c.abort();
+  }, [getToken]);
+
+  /**
+   * The roadmaps this athlete is actively on — reference only. `RoadmapLine`
+   * is the SAME component Today renders; nothing about the roadmap itself is
+   * re-derived here, per the ticket's own rule not to rebuild it. Shown on
+   * the drilled step because that is where "what to work on" is being
+   * decided; an athlete on no roadmap sees nothing, which is the existing
+   * component's own behaviour on Today.
+   */
+  const [roadmaps, setRoadmaps] = useState<Curriculum[]>([]);
+  useEffect(() => {
+    const c = new AbortController();
+    listWorkingCurricula(getToken, c.signal)
+      .then(setRoadmaps)
+      .catch(() => {});
+    return () => c.abort();
+  }, [getToken]);
+
   function finish() {
     // Anything still waiting on the debounce goes now, before the screen
     // and its timer are gone.
@@ -257,12 +299,24 @@ export default function ReflectScreen() {
           <Text style={styles.stepTitle}>{current.title}</Text>
           <Text style={styles.stepBlurb}>{current.blurb}</Text>
 
+          {/* Reference only — the SAME component Today renders, not a second
+              copy of the roadmap. An athlete on no roadmap sees nothing here,
+              matching that component's own behaviour. */}
+          {current.key === 'drilled' &&
+            roadmaps.map((c) => <RoadmapLine key={c.id} curriculum={c} />)}
+
           {current.key === 'drilled' && (
             <DrilledStep
               userID={userId ?? ''}
-              detail={detail} onChange={persist} getToken={getToken} />
+              detail={detail}
+              onChange={persist}
+              getToken={getToken}
+              proficiency={proficiency}
+            />
           )}
-          {current.key === 'live' && <LiveStep detail={detail} onChange={persist} getToken={getToken} />}
+          {current.key === 'live' && (
+            <LiveStep detail={detail} onChange={persist} getToken={getToken} proficiency={proficiency} />
+          )}
           {current.key === 'note' && <NoteStep detail={detail} onChange={persistSoon} />}
         </KeyboardAwareScrollView>
 
@@ -313,11 +367,14 @@ function DrilledStep({
   onChange,
   getToken,
   userID,
+  proficiency,
 }: {
   detail: SessionDetail;
   onChange: (d: SessionDetail) => void;
   getToken: ReturnType<typeof useAuthToken>;
   userID: string;
+  /** The cross-session funnel, keyed by technique id — see `ReflectScreen`. */
+  proficiency: ReadonlyMap<string, Proficiency>;
 }) {
   // `accent` is taken below for the technique badge's own colour.
   const ui = useAccent();
@@ -605,13 +662,18 @@ function DrilledStep({
 
       {results.map((t) => {
         const [code, accent] = categoryBadge(t.category);
+        // What the search result already carries — showing it here, before
+        // it is even added, is what lets an athlete recognise a technique
+        // they already have reliable rather than finding out only after
+        // drilling it a fourth time.
+        const state = displayLearningState(proficiency, detail.tags, t.id);
         return (
           <Pressable
             key={t.id}
             onPress={() => add(t)}
             style={styles.result}
             accessibilityRole="button"
-            accessibilityLabel={`Add ${t.name}`}
+            accessibilityLabel={`Add ${t.name}, ${LEARNING_STATE_LABEL[state]}`}
             testID={`bjj-drilled-add-${t.id}`}
           >
             <LibraryTile code={code} accent={accent} />
@@ -621,6 +683,9 @@ function DrilledStep({
                 {t.position}
               </Text>
             </RNView>
+            {state !== 'seen' && (
+              <LearningStateBadge state={state} testID={`bjj-drilled-add-${t.id}-state`} />
+            )}
             <Text style={[styles.plus, { color: ui.ink }]}>＋</Text>
           </Pressable>
         );
@@ -644,12 +709,22 @@ function DrilledStep({
           <Text style={styles.label}>Drilled today</Text>
           {drilled.map((t) => {
             const name = nameFor(all, t.technique_id);
+            // The state THIS row justifies right now, including the drilled
+            // tag just added — so tapping "add" and landing here never shows
+            // a stale "Seen" for a technique the athlete just drilled.
+            const state = displayLearningState(proficiency, detail.tags, t.technique_id);
             return (
               <RNView key={t.technique_id ?? `${t.category}-${t.position}`} style={styles.drilledRow}>
                 <RNView style={styles.drilledHead}>
-                  <Text style={styles.drilledName} numberOfLines={2}>
-                    {name}
-                  </Text>
+                  <RNView style={styles.drilledNameCol}>
+                    <Text style={styles.drilledName} numberOfLines={2}>
+                      {name}
+                    </Text>
+                    <LearningStateBadge
+                      state={state}
+                      testID={`bjj-drilled-chip-${t.technique_id}-state`}
+                    />
+                  </RNView>
                   <Pressable
                     onPress={() => remove(t.technique_id)}
                     style={styles.drilledRemove}
@@ -776,10 +851,13 @@ function LiveStep({
   detail,
   onChange,
   getToken,
+  proficiency,
 }: {
   detail: SessionDetail;
   onChange: (d: SessionDetail) => void;
   getToken: ReturnType<typeof useAuthToken>;
+  /** The cross-session funnel, keyed by technique id — see `ReflectScreen`. */
+  proficiency: ReadonlyMap<string, Proficiency>;
 }) {
   const [position, setPosition] = useState('');
   const [focus, setFocus] = useState<Focus[]>([]);
@@ -922,11 +1000,18 @@ function LiveStep({
               </Text>
             ))}
           </RNView>
-          {rows.map((f) => (
+          {rows.map((f) => {
+            const state = displayLearningState(proficiency, detail.tags, f.technique_id);
+            return (
             <RNView key={f.technique_id} style={styles.gridRow}>
-              <Text style={styles.gridLabel} numberOfLines={2}>
-                {f.name}
-              </Text>
+              <RNView style={styles.gridLabelCol}>
+                <Text style={styles.gridLabel} numberOfLines={2}>
+                  {f.name}
+                </Text>
+                {state !== 'seen' && (
+                  <LearningStateBadge state={state} testID={`bjj-focus-${f.technique_id}-state`} />
+                )}
+              </RNView>
               {FUNNEL_OUTCOMES.map((o) => (
                 <Counter
                   key={o.event}
@@ -951,7 +1036,8 @@ function LiveStep({
                 />
               ))}
             </RNView>
-          ))}
+            );
+          })}
           <Text style={styles.footnote}>
             The techniques you&apos;re working on, and what you drilled today. “Missed” means you went for it and it
             didn&apos;t land, so missed plus landed is how often you went for it — and landed out of
@@ -1216,7 +1302,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   drilledHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  drilledName: { flex: 1, fontWeight: '600', fontSize: 14 },
+  drilledNameCol: { flex: 1, gap: 4 },
+  drilledName: { fontWeight: '600', fontSize: 14 },
   drilledRemove: {
     width: 32,
     height: 32,
@@ -1249,7 +1336,8 @@ const styles = StyleSheet.create({
   },
   gridHeadSpacer: { flex: 1.1, textAlign: 'left' },
   gridRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8 },
-  gridLabel: { flex: 1.1, fontSize: 14, fontWeight: '600' },
+  gridLabelCol: { flex: 1.1, gap: 4 },
+  gridLabel: { fontSize: 14, fontWeight: '600' },
 
   counter: {
     flex: 1,

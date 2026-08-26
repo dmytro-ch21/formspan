@@ -43151,6 +43151,129 @@ were cheap:**
   session can confirm the switcher stays hidden and Momentum stays on today
   throughout.
 
+## 2026-08-26 — N185 (#590): BJJ logging's visual pass — hierarchy, learning states, roadmap linkage, no new taps
+
+`docs/decisions/bjj-tracking-design.md` and this repo's own tap-budget history
+(the ≤3-tap, ≤5-second floor) were the two constraints going in. This was
+scoped as polish, not architecture, and the architecture stayed: zero
+interaction during training, prefill from last time, save the floor before
+reflection ever opens, reflection entirely optional. Touched only
+`apps/mobile/app/bjj/log.tsx` and `apps/mobile/app/bjj/reflect/[id].tsx`, plus
+two new small modules those files import.
+
+### Tap count — measured against the code, not assumed
+
+The floor's controls are unchanged: same kind picker, same gi tri-state, same
+duration/rounds pills, same RPE bars, same two buttons. Nothing was added to
+the required path — the one new element on `log.tsx` (a focus reminder) is a
+`<Text>` block with no `Pressable`, so it cannot add a tap by construction.
+**Before and after are identical**: the documented three-tap flow (pick kind,
+pick RPE, "Log it") is unchanged, and the absolute floor — accepting every
+default and pressing "Log it" once, since `session_rpe` is nullable end to end
+(`backend/internal/modules/bjj/session.go`) — was and remains one tap.
+**NEEDS HUMAN EVIDENCE** — this is read off the source, not timed on a device;
+see the checklist below.
+
+### What changed
+
+- **Hierarchy on `log.tsx`.** "Log it" is now the only full-weight button —
+  bigger, bolder. "Log and add detail" dropped from a second filled button the
+  same size as "Log it" (which read as a choice between two comparable
+  actions) to a plain text row, so looking optional and being optional finally
+  agree. The footnote now leads with "That's a complete session" immediately
+  under the primary button, before the optional row.
+- **Current focus surfaced on `log.tsx`.** A read-only "Focusing on" line
+  above the form, fed by the same `fetchFocus` the reflection wizard already
+  calls — no new endpoint, no control, silent on failure (an accelerator, same
+  convention as every other silent-catch fetch on these two screens).
+- **Learning states — Seen / Drilled / Used live / Reliable.** New module
+  `lib/learningState.ts`: a technique's state is read off `GET
+  /v1/bjj/proficiency` counts (`drilled`, `attempted`, `scored`), with
+  `attempted + scored` — not `attempted` alone — deciding "live at all",
+  mirroring the disjoint-sum rule `bjjSession.ts` already documents.
+  `RELIABLE_MIN_SCORED = 3` landed live is the bar for "Reliable" — a product
+  call, not a derived one, same footing as `suggestion.ts`'s own `MIN_DRILLED`.
+  `LearningStateBadge` (new component) renders the label as text, colour
+  redundant — the same "never colour alone" rule the RPE ramp and
+  `LibraryTile` already hold to — using fixed semantic tokens (`textDim` /
+  `info` / `warn` / `green`), never `useAccent()`, since a learning state is a
+  reading and the accent is a preference.
+
+  **The reachability trap this file's own gotchas warn about, handled
+  explicitly:** the cross-session funnel does not yet know about a technique
+  just drilled THIS session (it isn't synced yet), so reading the funnel alone
+  would show "Seen" on a technique the athlete just tapped "add" on.
+  `displayLearningState` takes the **better** of the funnel's reading and what
+  this session's own local tags alone justify — deliberately the MAX of the
+  two, never their SUM, because summing would double-count a technique whose
+  tags from a previous edit of this same session have already reached the
+  server. Badges show in the drilled-search results, the "drilled today" list,
+  and the live step's focus-row grid.
+- **Roadmap linkage, by reference.** `RoadmapLine` — the exact component
+  Today already renders — now also appears on the reflection wizard's drilled
+  step when the athlete is on a working roadmap (`listWorkingCurricula`,
+  already-existing endpoint). Nothing about the roadmap is re-derived; an
+  athlete on no roadmap sees nothing, matching that component's existing
+  behaviour elsewhere.
+- **No mandatory outcome matrix.** Nothing new is required; every addition is
+  either read-only (focus hint, roadmap line) or an annotation on an existing,
+  already-optional control (the learning-state badges).
+
+### Regression coverage, mutation-tested
+
+`app/__tests__/bjjReflectScreen.test.tsx` is new and covers the two properties
+the ticket's acceptance criteria named explicitly:
+
+- **Leaving reflection loses nothing.** Pressing "Done" with zero edits must
+  not call `saveLocalBjjDetail` at all (no blank overwrite of what `log.tsx`
+  already saved) and must still navigate back. Mutating `finish()` to persist
+  unconditionally turns this red; restoring returns it to green.
+- **An in-flight debounced note is flushed before "Done" can lose it.**
+  Asserted WITHOUT `waitFor` — an earlier draft of this test used `waitFor` and
+  passed even with the flush removed, because the untouched 700ms
+  `setTimeout` still landed the write in real wall-clock time inside
+  `waitFor`'s retry window regardless of whether `finish()` itself flushed
+  anything. Asserting immediately after the press (the mock records the call
+  synchronously, before its own promise resolves) is what actually pins "Done
+  flushes now" rather than "the debounce eventually happens anyway" — a
+  version of the "verify a check can fail" trap pointed at this session's own
+  first draft of the test.
+- **A Reliable badge is reachable, not dead code.** A technique the mocked
+  funnel already shows landed three times renders "Reliable" in the search
+  results and, after adding it, in the "drilled today" row. Mutating the
+  reliable threshold branch off in `learningState.ts` turns both this test and
+  five of `lib/__tests__/learningState.test.ts`'s own cases red.
+
+`lib/__tests__/learningState.test.ts` covers the pure module directly: each
+state boundary, the disjoint attempted/scored sum, the local-floor-vs-funnel
+MAX (never regressing below either reading, and never double-counting an
+already-synced session reopened for editing).
+
+### Reviewer findings and what was done about them
+
+`frontend-reviewer` and `ac-verifier` ran against this diff with the
+acceptance criteria and the tap-count comparison as design intent. [Findings
+and resolutions to be filled in after both return — see the PR.]
+
+### What this leaves open
+
+- **NEEDS HUMAN EVIDENCE** — everything a device is required for: real
+  tap-timing on the fastest valid log (the code-level count is unchanged, but
+  only a stopwatch on a phone confirms it); the learning-state badges' visual
+  correctness against a real athlete's technique history (colour contrast in
+  both themes, wrapping at real technique-name lengths); the roadmap line's
+  layout when it appears above a long technique-search list on a small
+  screen.
+- **Advanced roll statistics were already behind progressive disclosure**
+  (the live step's category grid is the whole capture surface; nothing more
+  advanced exists yet to gate) — nothing added here changes that, and nothing
+  here builds toward it.
+- **The focus hint and roadmap line are both silent-catch, best-effort
+  additions** — by design, matching every other accelerator fetch on these two
+  screens — so a slow or failed network shows less, never an error the athlete
+  has to dismiss on the fastest screen in the app.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

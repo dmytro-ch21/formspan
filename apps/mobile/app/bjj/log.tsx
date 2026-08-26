@@ -20,10 +20,12 @@ import {
   type Kind,
   type SessionDetail,
 } from '@/lib/bjjSession';
+import { fetchFocus, type Focus } from '@/lib/bjjFocus';
 import { useModules } from '@/lib/ModulesProvider';
 import { PREF_BJJ_LAST_LOG, readPref, writePref } from '@/lib/prefs';
 import { saveLocalBjjDetail, startLocalSession } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
+import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
  * Logging a BJJ session — the floor.
@@ -47,6 +49,17 @@ import { request as requestSync } from '@/lib/sync';
  *
  * The reflection wizard (what you drilled, what happened live) lives past
  * the "Add detail" action and is entirely optional.
+ *
+ * **N185 (#590) restyled this screen — hierarchy, never the floor.** "Log it"
+ * is now the only full-weight button; "add detail" dropped to a plain text
+ * row so LOOKING optional and BEING optional finally agree (it used to be a
+ * second filled button the same size as "Log it", which read as a choice
+ * between two comparable actions). A read-only focus reminder was added
+ * above the form — no `Pressable`, so it cannot add a tap. **Every control
+ * that was here before is still here, unchanged**: same picker, same chips,
+ * same RPE bars, same two buttons doing the same two things. The fastest
+ * valid log is still whatever it was — see the ticket's own before/after
+ * tap count in the PR description before touching this file again.
  */
 
 /** Mat-time presets, in minutes. A class is an hour; the rest are shorter. */
@@ -131,6 +144,27 @@ export default function LogBjjScreen() {
       cancelled = true;
     };
   }, [userId]);
+
+  /**
+   * Current focus, surfaced as a read-only reminder — never a control.
+   *
+   * "Surface current training focus where helpful": before class the athlete
+   * already knows what they intend to work; naming it here is what makes the
+   * intent visible on the ONE screen guaranteed to be open after every
+   * session, without adding anything to tap. Nothing here can change the
+   * floor's tap count — there is no Pressable in this block, only text — and
+   * a failed or slow fetch degrades to showing nothing, same as `LiveStep`'s
+   * silent-catch fetch of the same list.
+   */
+  const getToken = useAuthToken();
+  const [focus, setFocus] = useState<Focus[]>([]);
+  useEffect(() => {
+    const c = new AbortController();
+    fetchFocus(getToken, c.signal)
+      .then(setFocus)
+      .catch(() => {});
+    return () => c.abort();
+  }, [getToken]);
 
   const setKind = useCallback((kind: Kind) => {
     touchedRef.current = true;
@@ -255,6 +289,19 @@ export default function LogBjjScreen() {
             Talk it through with your keyboard’s mic and we’ll fill this in
           </Text>
         </Pressable>
+
+        {/* Read-only — no Pressable here, so this costs nothing on the tap
+            floor. A reminder of what the athlete already decided to work on,
+            not a suggestion made now: the same "plan vs. reading of the
+            evidence" distinction `RoadmapLine` documents. */}
+        {focus.length > 0 && (
+          <RNView style={styles.focusHint} testID="bjj-log-focus-hint">
+            <Text style={styles.focusHintLabel}>Focusing on</Text>
+            <Text style={styles.focusHintNames} numberOfLines={2}>
+              {focus.map((f) => f.name).join(' · ')}
+            </Text>
+          </RNView>
+        )}
 
         {/* 1. What it was. The only genuinely required choice. */}
         <Text style={styles.label}>What was it?</Text>
@@ -385,6 +432,10 @@ export default function LogBjjScreen() {
           onChange={(n) => setDraft((d) => ({ ...d, session_rpe: n }))}
         />
 
+        {/* The one button this screen needs. Everything above it is already a
+            complete, valid session — see the file header — so this is styled
+            as the single unambiguous primary action, not one of two equally
+            weighted buttons. */}
         <Pressable
           onPress={() => commit('done')}
           disabled={saving}
@@ -397,6 +448,17 @@ export default function LogBjjScreen() {
           </Text>
         </Pressable>
 
+        <Text style={styles.footnote}>
+          That’s a complete session — three taps, no more required. What you drilled and what
+          happened live are entirely optional, below, and never move.
+        </Text>
+
+        {/* Deliberately NOT a second filled button. Two same-weight CTAs read
+            as a choice between two comparable actions, and "add detail" is
+            not comparable to "log it" — it is an optional appendix to a
+            session that is already saved by the button above. Reduced to a
+            plain text row so looking optional and being optional finally
+            agree with each other. */}
         <Pressable
           onPress={() => commit('detail')}
           disabled={saving}
@@ -405,13 +467,8 @@ export default function LogBjjScreen() {
           accessibilityHint="Adds what you drilled and what happened in rolling"
           testID="bjj-log-detail"
         >
-          <Text style={styles.secondaryText}>Log and add detail →</Text>
+          <Text style={styles.secondaryText}>Log and add detail (optional) →</Text>
         </Pressable>
-
-        <Text style={styles.footnote}>
-          Logging takes three taps. The detail is optional and always will be — a session with just
-          this is a real session.
-        </Text>
       </ScrollView>
     </View>
   );
@@ -560,6 +617,18 @@ const styles = StyleSheet.create({
   },
   dictateLabel: { fontSize: 16, fontWeight: '800' },
   dictateBlurb: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
+
+  // Read-only reminder of the active focus list — no interactive styling on
+  // purpose, since nothing here is a control.
+  focusHint: { gap: 2, marginBottom: 4 },
+  focusHintLabel: {
+    fontSize: 11,
+    color: vola.textDim,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontWeight: '700',
+  },
+  focusHintNames: { fontSize: 13, color: vola.textMuted, fontWeight: '600' },
   kindGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   kindCard: {
     // Two per row, accounting for the 8pt gap.
@@ -643,23 +712,37 @@ const styles = StyleSheet.create({
   rpeNumber: { fontSize: 13, fontWeight: '700', color: vola.textDim },
   rpeNumberFilled: { color: vola.navy },
 
+  // The single primary action on this screen. Bigger and bolder than the
+  // "add detail" row below it is now, on purpose — see the render comment
+  // above this button.
   cta: {
     borderRadius: 12,
-    paddingVertical: 16,
+    paddingVertical: 18,
     alignItems: 'center',
     marginTop: 24,
   },
-  ctaText: { fontWeight: '700', fontSize: 16 },
+  ctaText: { fontWeight: '800', fontSize: 17 },
+  // No background fill, no border, no equal-weight competition with `cta`
+  // above — this used to be a second filled button the same size as "Log
+  // it", which read as two comparable choices when only one of them is.
+  // `minHeight`/`paddingVertical` still clear the 44pt target; the weight
+  // comes off the colour and size, not off the tap area.
   secondary: {
-    backgroundColor: vola.surfaceRaised,
-    borderRadius: 12,
-    paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 8,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingVertical: 12,
+    marginTop: 4,
   },
-  secondaryText: { fontWeight: '700', fontSize: 15 },
+  secondaryText: { fontWeight: '600', fontSize: 14, color: vola.textMuted },
   disabled: { opacity: 0.5 },
 
-  footnote: { color: vola.textDim, fontSize: 12, textAlign: 'center', marginTop: 12 },
+  footnote: {
+    color: vola.textDim,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 8,
+  },
   error: { color: vola.danger, fontSize: 14 },
 });

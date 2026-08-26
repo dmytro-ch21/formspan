@@ -3508,6 +3508,51 @@ own scenario because each looks fine while the other is broken.
   technique-catalog discipline never sees it. That is UI tidiness only — the
   endpoint's own auth is the real boundary.
 
+### N185 — hierarchy, learning states, roadmap linkage (`log.tsx`, `reflect/[id].tsx`)
+
+Visual/interaction refinement only — the tap-count and skippability scenarios
+above are unchanged and must still hold exactly as written. What follows is
+additive.
+
+- **The floor's tap count is unchanged.** The absolute minimum (accept every
+  default, tap "Log it" once) and the documented three-tap flow (kind, RPE,
+  Log it) both still hold. Any test asserting a tap count here should fail if
+  a `Pressable` is ever added above "Log it" in the render tree.
+- **"Log it" and "Log and add detail" read as unequal weight**, not as two
+  comparable buttons — a visual/snapshot-style assertion, not a behavioural
+  one, but worth pinning so a future edit cannot silently restore two
+  same-weight CTAs.
+- **The focus hint on `log.tsx` is read-only.** With an active focus list, the
+  names appear above the form; with none, nothing renders. Crucially: **it
+  contains no `Pressable`** — asserting this structurally is what stops the
+  "surface the focus" feature from quietly growing an in-place editor, which
+  would violate the mobile-first / no-desk-affordance rule for a screen this
+  ticket explicitly scoped as read-only.
+- **A technique's learning-state badge (Seen / Drilled / Used live / Reliable)
+  reflects real evidence**, not a placeholder: a technique the funnel already
+  shows landed three-plus times shows "Reliable" in the drilled-search
+  results, and after adding it, in the "drilled today" row too.
+- **A technique drilled for the first time in THIS session shows at least
+  "Drilled" immediately** — not a stale "Seen" — even before the reflection
+  has synced. This is the reachability case: a state that can only ever show
+  up after a round-trip to the server is effectively dead code for a session
+  still offline in the car park.
+- **Reopening an already-synced reflection and re-adding evidence for a
+  technique must not inflate its badge past what the funnel already shows.**
+  The display state is the better of the funnel's reading and the local
+  session's own tags — never their sum.
+- **The Belt Roadmap line, when the athlete is on one, appears above the
+  drilled step** — the same component Today renders, not a re-derived copy.
+  An athlete on no roadmap sees nothing added here.
+- **No mandatory outcome matrix was introduced.** Every addition here is
+  either read-only (the focus hint, the roadmap line) or an annotation on an
+  already-optional, already-existing control (the badges) — nothing new is
+  required to save a session or to finish reflection.
+- **NEEDS HUMAN EVIDENCE:** real tap-timing on a device for the fastest valid
+  log; the badges' colour/contrast and wrapping at real technique-name
+  lengths, in both themes; the roadmap line's layout above a long
+  technique-search result list on a small screen.
+
 ## Reading a BJJ session back (mobile)
 
 The half that was missing when logging shipped. Its absence did not read as an
