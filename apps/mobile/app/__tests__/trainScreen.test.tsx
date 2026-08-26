@@ -1,446 +1,68 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { render, screen } from '@testing-library/react-native';
 
 import TrainScreen from '../(tabs)/train';
-import type { Module } from '@/lib/modules';
-import type { PlannedSession } from '@/lib/plan';
-import type { Session } from '@/lib/sessions';
-import type { Workout } from '@/lib/workouts';
 
 /**
- * Train, as rendered — the half `lib/trainBoard.ts`'s tests cannot reach.
+ * Train is retired — the ABSENCE half of N182's pair.
  *
- * Two properties live only here, and both are ordering rules that a correct
- * derivation can still get wrong on screen:
+ * The reassignment this file covers is only half asserted by the Plan-side
+ * test (`app/__tests__/planNextUp.test.tsx`, which proves Plan draws the
+ * forward schedule). A move that is really a COPY satisfies that file
+ * perfectly, and this repo has shipped exactly that twice — W2 and W4 — so
+ * absence is asserted here, from the other side, against the same names.
  *
- * 1. **Resume outranks every other CTA.** The derivation says there is a
- *    session to resume; only the render decides whether that fact displaces
- *    today's Start button or merely sits above it.
- * 2. **A discipline routes to the screen that fits it.** BJJ goes to
- *    `/bjj/log`, not the set logger. That is one `if` in `lib/startSession.ts`,
- *    it has its own tests, and this file checks that the button on Train is
- *    genuinely wired to it rather than to a second copy.
+ * What must stay true:
  *
- * Everything is driven through mocked reads of the app's real functions, so a
- * failure here is a failure in this screen and not in SQLite.
+ * - the route still RESOLVES and still renders. `lib/tabs.ts` keeps `train` in
+ *   `OFF_BAR_ROUTES`, so `vola://train` and any in-flight `router.push` land
+ *   here; a screen that threw or rendered nothing would break both silently.
+ * - it renders none of the four blocks it used to. Each is drawn by a screen
+ *   that has a tab button — see the audit table in `app/(tabs)/train.tsx`.
+ *
+ * `expo-router` is re-mocked here rather than leaning on `jest.setup.js`,
+ * because the shared mock deliberately exports only what every screen needs and
+ * `Redirect` is not in it. Rendering it as an identifiable element is what lets
+ * the destination be asserted at all — a `null` stub would make "redirects to
+ * Today" and "renders nothing" the same observation.
  */
 
 jest.setTimeout(30_000);
 
-const mockListLocalSessions = jest.fn((..._a: unknown[]): Promise<Session[]> => Promise.resolve([]));
-const mockCachedWorkouts = jest.fn((..._a: unknown[]): Promise<Workout[]> => Promise.resolve([]));
-jest.mock('@/lib/sessionStore', () => ({
-  listLocalSessions: (...a: unknown[]) => mockListLocalSessions(...a),
-  cachedWorkouts: (...a: unknown[]) => mockCachedWorkouts(...a),
-}));
-
-const mockListPlannedBetween = jest.fn(
-  (..._a: unknown[]): Promise<PlannedSession[]> => Promise.resolve([]),
-);
-jest.mock('@/lib/plan', () => ({
-  listPlannedBetween: (...a: unknown[]) => mockListPlannedBetween(...a),
-}));
-
-const mockPush = jest.fn();
 jest.mock('expo-router', () => {
   const react = jest.requireActual<typeof import('react')>('react');
+  const { Text } = jest.requireActual<typeof import('react-native')>('react-native');
   return {
-    useRouter: () => ({ push: mockPush }),
-    // Runs the effect once on mount, which is what a focused screen does. The
-    // real one also re-runs on refocus; nothing here navigates away.
+    Redirect: ({ href }: { href: string }) =>
+      react.createElement(Text, { testID: 'redirect', accessibilityLabel: String(href) }, String(href)),
+    useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
     useFocusEffect: (cb: () => void | (() => void)) => react.useEffect(cb, [cb]),
   };
 });
 
-jest.mock('@clerk/clerk-expo', () => ({ useAuth: () => ({ userId: 'u1' }) }));
-
-jest.mock('@/lib/sync', () => ({
-  useSyncState: () => ({
-    syncing: false,
-    pending: 0,
-    deferred: 0,
-    lastSyncAt: null,
-    lastError: null,
-    online: true,
-  }),
-}));
-
-function mod(over: Partial<Module> & { key: string }): Module {
-  return {
-    key: over.key,
-    label: over.label ?? over.key,
-    is_sport: over.is_sport ?? true,
-    default_on: true,
-    enabled: over.enabled ?? true,
-    capabilities: {
-      catalog: '',
-      facets: [],
-      has_goals: false,
-      has_progression: false,
-      has_food_log: false,
-      record_kinds: [],
-      ...(over.capabilities ?? {}),
-    },
-  } as Module;
-}
-
-const strength = mod({
-  key: 'strength',
-  label: 'Strength',
-  capabilities: { catalog: 'exercises' } as Module['capabilities'],
-});
-const bjj = mod({
-  key: 'bjj',
-  label: 'BJJ',
-  capabilities: { catalog: 'techniques' } as Module['capabilities'],
+it('sends anything that still links to Train to Today', () => {
+  render(<TrainScreen />);
+  // Today, not Plan: an old `vola://train` link was tapped by somebody who
+  // wanted to train, and Today is the screen holding the resume card, the
+  // day's planned sessions and New log.
+  expect(screen.getByTestId('redirect').props.children).toBe('/(tabs)');
 });
 
-// `mock`-prefixed, because jest's module factory may not close over an
-// ordinary out-of-scope variable — the guard against uninitialised mocks.
-let mockModules: Module[] = [strength, bjj];
-jest.mock('@/lib/ModulesProvider', () => ({
-  useModules: () => ({ modules: mockModules, ready: true, stale: false, apply: jest.fn() }),
-}));
+it('renders none of the four blocks it used to', () => {
+  render(<TrainScreen />);
 
-// `...over` last, so `ended_at: null` in an override is what makes a session
-// unfinished and every field above is genuinely a default.
-function session(over: Partial<Session> & { id: string }): Session {
-  return {
-    user_id: 'u1',
-    workout_id: null,
-    sport: 'strength',
-    name: 'Legs',
-    started_at: new Date(Date.now() - 30 * 60_000).toISOString(),
-    ended_at: new Date().toISOString(),
-    notes: '',
-    sets: [],
-    created_at: '2026-08-26T09:00:00Z',
-    updated_at: '2026-08-26T09:00:00Z',
-    ...over,
-  };
-}
-
-/** Today's local calendar day, the way the app computes it. */
-function todayKey(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-beforeEach(() => {
-  mockModules = [strength, bjj];
-  mockPush.mockReset();
-  mockListLocalSessions.mockReset();
-  mockListLocalSessions.mockResolvedValue([]);
-  mockCachedWorkouts.mockReset();
-  mockCachedWorkouts.mockResolvedValue([]);
-  mockListPlannedBetween.mockReset();
-  mockListPlannedBetween.mockResolvedValue([]);
-});
-
-describe('resume outranks everything', () => {
-  it('offers Resume, and does not offer to start the day as well', async () => {
-    mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
-    mockListPlannedBetween.mockResolvedValue([
-      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, notes: '' },
-    ]);
-
-    render(<TrainScreen />);
-
-    await waitFor(() => expect(screen.getByTestId('train-resume')).toBeTruthy());
-    // The plan exists and is owed — the derivation would happily return it —
-    // and the screen still does not render a competing Start. Delete the
-    // `resume ?` branch and both of these go red.
-    expect(screen.queryByTestId('train-today-p1')).toBeNull();
-    expect(screen.queryByTestId('train-today-none')).toBeNull();
-  });
-
-  it('takes Resume to the session it names', async () => {
-    mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
-    render(<TrainScreen />);
-
-    fireEvent.press(await screen.findByTestId('train-resume'));
-    expect(mockPush).toHaveBeenCalledWith({ pathname: '/session/[id]', params: { id: 'open' } });
-  });
-
-  // The branch that must survive any rebuild of this screen. A BJJ session
-  // opened in the set logger renders a screen it can never fill, and the
-  // reflection behind it becomes unreachable.
-  it('takes a resumable BJJ session to the BJJ reader, not the set logger', async () => {
-    mockListLocalSessions.mockResolvedValue([
-      session({ id: 'roll', sport: 'bjj', name: 'Evening class', ended_at: null }),
-    ]);
-    render(<TrainScreen />);
-
-    fireEvent.press(await screen.findByTestId('train-resume'));
-    expect(mockPush).toHaveBeenCalledWith({ pathname: '/bjj/session/[id]', params: { id: 'roll' } });
-  });
-
-  // "0 working sets" on a mat session is not a neutral default — it reads as an
-  // abandoned session, and a BJJ session cannot legally hold a set at all (no
-  // BJJ exercises have existed since migration 000019). The chip is omitted,
-  // never zeroed, and a strength session with no sets yet still gets it because
-  // there the zero is true and about to change.
-  it('omits the set count on a discipline that cannot hold a set', async () => {
-    mockListLocalSessions.mockResolvedValue([
-      session({ id: 'roll', sport: 'bjj', name: 'Evening class', ended_at: null }),
-    ]);
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-resume')).toBeTruthy();
-    expect(screen.queryByText('0 working sets')).toBeNull();
-  });
-
-  it('shows the set count on a discipline that can hold one', async () => {
-    mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
-    render(<TrainScreen />);
-
-    expect(await screen.findByText('0 working sets')).toBeTruthy();
-  });
-
-  it('says a day-old session is unfinished rather than in progress', async () => {
-    mockListLocalSessions.mockResolvedValue([
-      session({
-        id: 'stale',
-        ended_at: null,
-        started_at: new Date(Date.now() - 30 * 60 * 60_000).toISOString(),
-      }),
-    ]);
-    render(<TrainScreen />);
-
-    expect(await screen.findByText('UNFINISHED')).toBeTruthy();
-    expect(screen.getByText('Finish or discard')).toBeTruthy();
-    expect(screen.queryByText('Resume')).toBeNull();
-  });
-});
-
-describe("today's plan", () => {
-  it('offers Start for a planned strength day', async () => {
-    mockListPlannedBetween.mockResolvedValue([
-      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: 'w7', notes: '' },
-    ]);
-    mockCachedWorkouts.mockResolvedValue([
-      {
-        id: 'w7',
-        owner_user_id: 'u1',
-        name: 'Push A',
-        sport: 'strength',
-        goal: null,
-        notes: '',
-        visibility: 'private',
-        items: [],
-        created_at: '',
-        updated_at: '',
-      } as Workout,
-    ]);
-
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-today-p1')).toBeTruthy();
-    expect(screen.getByText('Push A')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('up-next-log'));
-    // The template rides along, so the chooser does not reappear for a day
-    // whose plan is already decided.
-    expect(mockPush).toHaveBeenCalledWith('/session/start?sport=strength&workout=w7');
-  });
-
-  // The card BODY is a bigger target than the Log button inside it, and without
-  // its own label it announces "{title}, Today" — a noun with no verb, so a
-  // screen-reader user is told what the card is and not what tapping it does.
-  // The button's label is not a substitute: it is the smaller target.
-  it('announces what tapping the plan card will do', async () => {
-    mockListPlannedBetween.mockResolvedValue([
-      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, notes: '' },
-    ]);
-    render(<TrainScreen />);
-
-    const card = await screen.findByTestId('train-today-p1');
-    expect(card.props.accessibilityLabel).toBe('Start Strength session, planned for today');
-  });
-
-  it('announces Log rather than Start for a discipline logged afterwards', async () => {
-    mockListPlannedBetween.mockResolvedValue([
-      { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, notes: '' },
-    ]);
-    render(<TrainScreen />);
-
-    const card = await screen.findByTestId('train-today-p2');
-    expect(card.props.accessibilityLabel).toBe('Log BJJ session, planned for today');
-  });
-
-  it('says Log rather than Start for a discipline logged afterwards', async () => {
-    mockListPlannedBetween.mockResolvedValue([
-      { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, notes: '' },
-    ]);
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-today-p2')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('up-next-log'));
-    expect(mockPush).toHaveBeenCalledWith('/bjj/log');
-  });
-});
-
-describe('quick start', () => {
-  it('starts a strength session through the existing start flow', async () => {
-    render(<TrainScreen />);
-    fireEvent.press(await screen.findByTestId('train-quick-strength'));
-    expect(mockPush).toHaveBeenCalledWith('/session/start?sport=strength');
-  });
-
-  // Criterion 5 of the ticket, and the one that is silent when broken: a BJJ
-  // round pushed into the strength logger fails nothing.
-  it('sends BJJ to the BJJ log, never to the set logger', async () => {
-    render(<TrainScreen />);
-    fireEvent.press(await screen.findByTestId('train-quick-bjj'));
-    expect(mockPush).toHaveBeenCalledWith('/bjj/log');
-  });
-
-  it('drops a discipline that has been turned off', async () => {
-    mockModules = [strength, mod({ key: 'bjj', label: 'BJJ', enabled: false })];
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-quick-strength')).toBeTruthy();
-    expect(screen.queryByTestId('train-quick-bjj')).toBeNull();
-  });
-
-  // ...but still NAMES it. An athlete who cannot see a discipline cannot tell
-  // "turned off" from "not built" from "broken" — the one time that happened
-  // the user went looking on a real phone and reported working features as
-  // missing.
-  it('still says a turned-off discipline exists', async () => {
-    mockModules = [strength, mod({ key: 'bjj', label: 'BJJ', enabled: false })];
-    render(<TrainScreen />);
-
-    const note = await screen.findByTestId('train-off-sports');
-    expect(note).toBeTruthy();
-    fireEvent.press(note);
-    expect(mockPush).toHaveBeenCalledWith('/profile/edit');
-  });
-
-  it('offers the settings screen when nothing at all is enabled', async () => {
-    mockModules = [mod({ key: 'strength', enabled: false })];
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-choose-sports')).toBeTruthy();
-    expect(screen.queryByTestId('train-quick-start')).toBeNull();
-  });
-});
-
-describe('it never claims an absence it has not checked', () => {
-  /** A read that is still in flight when the assertion runs. */
-  const pending = <T,>() => new Promise<T>(() => {});
-
-  it('does not say the day is unplanned while the plan read is in flight', async () => {
-    mockListPlannedBetween.mockReturnValue(pending<PlannedSession[]>());
-    render(<TrainScreen />);
-
-    // Quick start proves the screen has rendered — so the absence below is a
-    // deliberate silence and not a test that asserted before the first paint.
-    expect(await screen.findByTestId('train-quick-strength')).toBeTruthy();
-    expect(screen.queryByTestId('train-today-none')).toBeNull();
-    expect(screen.queryByTestId('train-today-unavailable')).toBeNull();
-  });
-
-  it('does not say nothing was logged while the session read is in flight', async () => {
-    mockListLocalSessions.mockReturnValue(pending<Session[]>());
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-quick-strength')).toBeTruthy();
-    expect(screen.queryByTestId('train-recent-none')).toBeNull();
-  });
-
-  it('says the plan could not be read rather than showing an unplanned day', async () => {
-    mockListPlannedBetween.mockRejectedValue(new Error('disk'));
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-today-unavailable')).toBeTruthy();
-    expect(screen.queryByTestId('train-today-none')).toBeNull();
-  });
-
-  it('says the history could not be read rather than showing an empty one', async () => {
-    mockListLocalSessions.mockRejectedValue(new Error('disk'));
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-recent-unavailable')).toBeTruthy();
-    expect(screen.queryByTestId('train-recent-none')).toBeNull();
-  });
-
-  // **Which read failed is part of what the athlete is told.** When the SESSION
-  // read is the one that broke, the screen cannot tell whether an unfinished
-  // session is sitting there — so Resume outranking everything is the rule it
-  // has just lost the ability to apply. Blaming the plan would be true and
-  // would send the athlete looking in the wrong place. Found in review.
-  it('names the unfinished-session check when that is what failed', async () => {
-    mockListLocalSessions.mockRejectedValue(new Error('disk'));
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-resume-unavailable')).toBeTruthy();
-    // And it does NOT fall through to the plan-shaped note, which is what a
-    // screen that only distinguished "ready" from "not ready" would show.
-    expect(screen.queryByTestId('train-today-unavailable')).toBeNull();
-  });
-
-  it('names the plan when the plan is the only thing that failed', async () => {
-    mockListPlannedBetween.mockRejectedValue(new Error('disk'));
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-today-unavailable')).toBeTruthy();
-    expect(screen.queryByTestId('train-resume-unavailable')).toBeNull();
-  });
-
-  it('draws no Today heading at all while the plan read is in flight', async () => {
-    // The other two blocks return null entirely when unread. This one used to
-    // render its heading over nothing, so the three disagreed about what
-    // "renders nothing" meant.
-    mockListPlannedBetween.mockReturnValue(pending<PlannedSession[]>());
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-quick-strength')).toBeTruthy();
-    expect(screen.queryByText('TODAY')).toBeNull();
-  });
-
-  it('does claim an empty day once the read has answered', async () => {
-    // The mirror of the in-flight cases, and what stops them passing by the
-    // screen simply never rendering an empty state at all.
-    render(<TrainScreen />);
-    expect(await screen.findByTestId('train-today-none')).toBeTruthy();
-    expect(await screen.findByTestId('train-recent-none')).toBeTruthy();
-  });
-});
-
-describe('offline', () => {
-  it('renders and starts a session with every network read absent', async () => {
-    // The three reads this screen makes are SQLite. Nothing else is mocked in
-    // — no fetch, no token, no sync run is requested — so a screen that had
-    // grown a network dependency would fail here rather than on a phone in a
-    // basement.
-    mockListLocalSessions.mockResolvedValue([session({ id: 's1' })]);
-    render(<TrainScreen />);
-
-    fireEvent.press(await screen.findByTestId('train-quick-strength'));
-    expect(mockPush).toHaveBeenCalledWith('/session/start?sport=strength');
-    expect(screen.getByTestId('train-recent-s1')).toBeTruthy();
-  });
-});
-
-describe('later', () => {
-  it('shows the next planned day alongside a running session', async () => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-    mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
-    mockListPlannedBetween.mockResolvedValue([
-      { id: 'p9', day, sport: 'bjj', workoutId: null, notes: '' },
-    ]);
-
-    render(<TrainScreen />);
-
-    expect(await screen.findByTestId('train-later')).toBeTruthy();
-    expect(screen.getByText('BJJ session')).toBeTruthy();
-  });
-
-  it('draws no Later block at all when nothing is planned ahead', async () => {
-    render(<TrainScreen />);
-    expect(await screen.findByTestId('train-quick-strength')).toBeTruthy();
-    expect(screen.queryByTestId('train-later')).toBeNull();
-  });
+  // The schedule — moved to Plan, and the reason this file exists. Asserted by
+  // the testIDs the old screen used, so reinstating any of them fails here
+  // rather than quietly giving the app a second forward schedule.
+  expect(screen.queryByTestId('train-later')).toBeNull();
+  expect(screen.queryByTestId('train-recent-none')).toBeNull();
+  // Today's plan and Quick start — dropped, because Today draws both.
+  expect(screen.queryByTestId('train-today-none')).toBeNull();
+  expect(screen.queryByTestId('train-quick-start')).toBeNull();
+  // Resume — dropped, because Today's `resume-session` card is the same card
+  // off the same 24-hour constant.
+  expect(screen.queryByTestId('train-resume')).toBeNull();
+  // And no headings left behind by a block that was gutted but not removed.
+  expect(screen.queryByText('Later')).toBeNull();
+  expect(screen.queryByText('Recent')).toBeNull();
+  expect(screen.queryByText('Quick start')).toBeNull();
 });
