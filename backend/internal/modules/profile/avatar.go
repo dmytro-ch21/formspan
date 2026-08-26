@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
-	_ "image/jpeg" // decoders, registered by import for image.Decode
-	_ "image/png"
+	_ "image/png" // decoder, registered by import for image.Decode
+	"io"
 	"net/http"
 	"time"
 
@@ -61,7 +61,24 @@ const (
 	// — picked as a reasonable default for a small, cropped photo of a face,
 	// and worth revisiting against a real device photo if it ever looks soft.
 	avatarJPEGQuality = 85
+
+	// maxAvatarPixels bounds the DECODED image, which maxAvatarUploadBytes
+	// does not: compression ratio on a degenerate (flat-colour) image is
+	// effectively unbounded, so an 8 MiB-or-smaller file can still claim to
+	// be tens of thousands of pixels on a side. A 20,000×20,000 PNG easily
+	// compresses under 8 MiB and decodes to ~1.6 GB of pixel data — checked
+	// with DecodeConfig, which reads only the header, before the real
+	// decode ever allocates that buffer. 40 megapixels is far beyond any
+	// phone camera's real output.
+	maxAvatarPixels = 40_000_000
 )
+
+// httpAvatarClient bounds requests this package makes to object storage.
+// http.DefaultClient has no timeout of its own — only the caller's context
+// would bound a hung PUT/DELETE, and the handler's request context lives as
+// long as the athlete's own client is willing to wait, which for a backgrounded
+// app is indefinite. Raised in review.
+var httpAvatarClient = &http.Client{Timeout: 30 * time.Second}
 
 // resizeAvatar decodes an arbitrary image, fits it within avatarMaxDim on its
 // longer side (never upscaling a smaller source), and re-encodes as JPEG.
@@ -71,6 +88,20 @@ const (
 // avatar_test.go. Everything about validating the UPLOAD (size cap, content
 // sniffing) happens in the handler, before this is ever called.
 func resizeAvatar(raw []byte) ([]byte, error) {
+	// Header-only read FIRST — see maxAvatarPixels. This is what stops a
+	// small, highly-compressed image from being decoded into a multi-gigabyte
+	// pixel buffer before anything has checked its dimensions.
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("%w: not a readable image", ErrInvalidInput)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil, fmt.Errorf("%w: image has no content", ErrInvalidInput)
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > maxAvatarPixels {
+		return nil, fmt.Errorf("%w: image dimensions are too large", ErrInvalidInput)
+	}
+
 	src, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
 		return nil, fmt.Errorf("%w: not a readable image", ErrInvalidInput)
@@ -164,7 +195,7 @@ func (h *Handler) putObject(ctx context.Context, key, contentType string, body [
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.ContentLength = int64(len(body))
-	res, err := http.DefaultClient.Do(req)
+	res, err := httpAvatarClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -186,7 +217,7 @@ func (h *Handler) deleteAvatarObject(ctx context.Context, userID string) error {
 	if err != nil {
 		return err
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := httpAvatarClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -212,16 +243,15 @@ func parseAvatarUpload(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	}
 	defer file.Close()
 
-	raw := make([]byte, 0, 512<<10)
-	buf := make([]byte, 32<<10)
-	for {
-		n, rerr := file.Read(buf)
-		if n > 0 {
-			raw = append(raw, buf[:n]...)
-		}
-		if rerr != nil {
-			break
-		}
+	// io.ReadAll, not a hand-rolled loop that stops on the first error: a
+	// loop that treats ANY read error as "done" silently truncates a body
+	// that failed mid-read into a shorter, still-plausible-looking image —
+	// exactly what exercise.parseIdentifyRequest avoids by using ReadAll
+	// here too. The body is already capped by MaxBytesReader above, so this
+	// cannot itself be the unbounded read the cap exists to prevent.
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("%w: could not read the upload", ErrInvalidInput)
 	}
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("%w: the upload was empty", ErrInvalidInput)

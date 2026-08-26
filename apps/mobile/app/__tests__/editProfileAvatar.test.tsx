@@ -49,7 +49,14 @@ jest.mock('@/lib/useUnits', () => ({
 jest.mock('expo-router', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   return {
-    Stack: { Screen: () => null },
+    // Renders `headerRight`, unlike a bare `() => null` — this screen's Save
+    // button lives there (Stack.Screen's `options`), not in the scrolling
+    // body, so a mock that drops it entirely makes Save unreachable to any
+    // test.
+    Stack: {
+      Screen: ({ options }: { options?: { headerRight?: () => React.ReactNode } }) =>
+        options?.headerRight ? options.headerRight() : null,
+    },
     useRouter: () => ({ back: jest.fn(), push: jest.fn() }),
     // KeyboardAwareScrollView (used by this screen) calls this internally.
     useFocusEffect: (cb: () => void | (() => void)) => {
@@ -141,6 +148,33 @@ it('picking a photo from the library uploads it and shows the result', async () 
     expect.anything(),
     expect.anything(),
   );
+});
+
+/**
+ * Save and an avatar change are two different requests to two different
+ * endpoints, and nothing about them technically conflicts — but firing both
+ * at once is a confusing state for the athlete to be in, so the screen
+ * disables Save for the DURATION of an avatar upload, not just its own.
+ */
+it('disables Save while an avatar upload is in flight, and re-enables it after', async () => {
+  let resolveUpload: (p: typeof PROFILE) => void;
+  mockUploadAvatar.mockReturnValue(
+    new Promise((resolve) => {
+      resolveUpload = resolve;
+    }),
+  );
+  render(<EditProfileScreen />);
+  await screen.findByTestId('profile-avatar-row');
+
+  fireEvent.press(screen.getByTestId('profile-avatar-library'));
+
+  await waitFor(() => expect(screen.getByTestId('profile-save').props.accessibilityState?.disabled).toBe(true));
+
+  await act(async () => {
+    resolveUpload({ ...PROFILE, avatar_url: 'https://cdn.test/new.jpg' });
+  });
+
+  await waitFor(() => expect(screen.getByTestId('profile-save').props.accessibilityState?.disabled).toBe(false));
 });
 
 /**

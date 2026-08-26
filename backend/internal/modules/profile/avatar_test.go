@@ -3,7 +3,9 @@ package profile
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -11,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
@@ -44,6 +47,44 @@ func solidPNG(t *testing.T, w, h int) []byte {
 		t.Fatalf("encode fixture png: %v", err)
 	}
 	return buf.Bytes()
+}
+
+// fakePNGHeader is a real, valid PNG signature + IHDR chunk declaring
+// width×height, with NO pixel data behind it — image.DecodeConfig reads only
+// the header and returns successfully; a real image.Decode would fail past
+// this point, which is exactly why the pixel-budget check has to run BEFORE
+// the full decode and cannot be tested by actually allocating a giant image
+// (that would just reproduce the memory cost the guard exists to avoid).
+// This is the decompression-bomb shape for real: a tiny file, a huge
+// declared size — the file's byte size says nothing about the pixel count.
+func fakePNGHeader(t *testing.T, width, height uint32) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	buf.Write([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], width)
+	binary.BigEndian.PutUint32(ihdr[4:8], height)
+	ihdr[8] = 8 // bit depth
+	ihdr[9] = 2 // color type: truecolor
+	// compression, filter, interlace all 0 (ihdr[10:13] already zero)
+
+	writePNGChunk(&buf, "IHDR", ihdr)
+	return buf.Bytes()
+}
+
+func writePNGChunk(buf *bytes.Buffer, typ string, data []byte) {
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
+	buf.Write(lenBuf[:])
+	buf.WriteString(typ)
+	buf.Write(data)
+	crc := crc32.NewIEEE()
+	crc.Write([]byte(typ))
+	crc.Write(data)
+	var crcBuf [4]byte
+	binary.BigEndian.PutUint32(crcBuf[:], crc.Sum32())
+	buf.Write(crcBuf[:])
 }
 
 func decodedSize(t *testing.T, raw []byte) (int, int) {
@@ -105,6 +146,49 @@ func TestResizeAvatar_RefusesGarbage(t *testing.T) {
 	_, err := resizeAvatar([]byte("this is not an image, it is a sentence"))
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("want ErrInvalidInput for undecodable bytes, got %v", err)
+	}
+}
+
+// The decompression-bomb finding from review: maxAvatarUploadBytes bounds the
+// ENCODED file, but a highly-compressible image can declare almost any pixel
+// count in a file well under that cap — a 20,000×20,000 PNG (400 million
+// pixels, ~1.6 GB decoded as RGBA) is not an exotic attack shape, it is what
+// a flat-colour PNG naturally compresses to. This is why resizeAvatar checks
+// DecodeConfig's dimensions BEFORE the real decode: a fixture that actually
+// allocated 1.6 GB to prove this would reproduce the exact cost the guard
+// exists to avoid, so fakePNGHeader constructs just the header — a real,
+// checksummed IHDR chunk with no pixel data behind it, which is all
+// DecodeConfig ever reads.
+func TestResizeAvatar_RefusesImplausibleDimensions(t *testing.T) {
+	_, err := resizeAvatar(fakePNGHeader(t, 20_000, 20_000))
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput for a 20000x20000 declared image, got %v", err)
+	}
+	// NOT just errors.Is(err, ErrInvalidInput) — a header-only fixture with no
+	// real pixel data behind it ALSO fails the full image.Decode a few lines
+	// later, with the SAME sentinel wrapped ("not a readable image"), so a
+	// looser assertion here passes whether or not the pixel-budget guard
+	// exists at all. Measured: it does, mutating the guard away (`if false
+	// && …`) left this looser check green. The message is what proves the
+	// dimension check specifically fired, before the fixture's missing pixel
+	// data ever had a chance to fail the decode for an unrelated reason.
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Errorf("want a \"too large\" message from the dimension guard, got %v", err)
+	}
+}
+
+// The boundary the guard actually enforces, not just "very large is refused"
+// — a real, small, fully-valid image must not be caught by it.
+func TestResizeAvatar_AcceptsAnOrdinaryPhotoSize(t *testing.T) {
+	// A generous but entirely realistic phone-camera size — well under
+	// maxAvatarPixels (40MP) and nowhere near the fake-header test above.
+	out, err := resizeAvatar(solidJPEG(t, 4032, 3024))
+	if err != nil {
+		t.Fatalf("an ordinary 12MP photo must not be refused: %v", err)
+	}
+	w, h := decodedSize(t, out)
+	if w != avatarMaxDim || h != 384 {
+		t.Errorf("size = %dx%d, want %dx384", w, h, avatarMaxDim)
 	}
 }
 
@@ -289,6 +373,31 @@ func TestUploadAvatar_RejectsNonImageContent(t *testing.T) {
 	}
 	if len(fake.requests) != 0 {
 		t.Errorf("nothing should reach storage for a rejected upload, got %d requests", len(fake.requests))
+	}
+	if len(repo.setAvatarCalls) != 0 {
+		t.Errorf("SetAvatar must not be called for a rejected upload")
+	}
+}
+
+// maxAvatarUploadBytes is the OTHER half of the memory bound — the raw
+// upload cap, distinct from and complementary to the pixel-budget check
+// above. A body over the cap must be rejected before anything is read into
+// memory in full, never accepted and silently truncated.
+func TestUploadAvatar_RejectsAnOversizedBody(t *testing.T) {
+	fake := newFakeObjectStore(t)
+	repo := &spyRepo{}
+	h := NewHandler(repo, fake.store)
+
+	oversized := make([]byte, maxAvatarUploadBytes+1)
+	req := multipartAvatarRequest(t, "u1", oversized)
+	rec := httptest.NewRecorder()
+	h.UploadAvatar(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for a body over %d bytes", rec.Code, maxAvatarUploadBytes)
+	}
+	if len(fake.requests) != 0 {
+		t.Errorf("nothing should reach storage for an oversized upload, got %d requests", len(fake.requests))
 	}
 	if len(repo.setAvatarCalls) != 0 {
 		t.Errorf("SetAvatar must not be called for a rejected upload")

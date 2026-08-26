@@ -6,6 +6,8 @@ package profile
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"regexp"
 	"strings"
@@ -123,10 +125,26 @@ type Profile struct {
 // object per account and re-uploading overwrites it — which is also what
 // makes "replace" and "upload" the same code path.
 //
+// **Hashed, not the raw id, and this is load-bearing rather than cosmetic.**
+// A presigned URL's signature covers its PATH — objectstore.presign signs the
+// key straight into the URL — so whatever this function returns is what every
+// viewer of `avatar_url` receives, including other athletes reading a
+// PublicProfile. An earlier version returned `"avatars/" + userID + ".jpg"`
+// directly: PublicProfile.AvatarKey's own `json:"-"` tag and doc comment
+// argued the id never crosses the wire from that struct, and the argument was
+// false the moment the presigned URL built from it did the leaking instead.
+// SHA-256 keeps the key deterministic (so replace still overwrites, and
+// nothing needs to be stored beyond the HasAvatar boolean) while making the
+// object path reveal nothing about the account it belongs to — recovering the
+// user id from the hash needs either the id itself (to check a guess) or a
+// preimage attack on SHA-256, neither of which a viewer holding only the URL
+// has.
+//
 // Exported so `Handler` can presign it; the profiles table stores only
 // whether the object exists (HasAvatar), never this string.
 func AvatarKey(userID string) string {
-	return "avatars/" + userID + ".jpg"
+	sum := sha256.Sum256([]byte(userID))
+	return "avatars/" + hex.EncodeToString(sum[:]) + ".jpg"
 }
 
 // NewProfile is the input for onboarding. Module enablement isn't set here —

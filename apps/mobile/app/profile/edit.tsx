@@ -78,8 +78,12 @@ export default function EditProfileScreen() {
   // their own endpoints (POST/DELETE /profile/avatar), not this screen's
   // Save button.
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  // Separate from `saving`: an avatar change is its own request, and an
-  // athlete mid-upload should not also be able to fire the unrelated Save.
+  // Separate from `saving`: an avatar change is its own request, on its own
+  // endpoints. Both `save()`'s own guard and the Save button's `disabled`
+  // check this too — an athlete mid-upload should not also be able to fire
+  // the unrelated PATCH, even though the two touch disjoint fields and
+  // nothing would technically conflict; a double-submit affordance is a
+  // confusing state to be in regardless of whether it's safe.
   const [avatarBusy, setAvatarBusy] = useState(false);
 
   useEffect(() => {
@@ -125,7 +129,7 @@ export default function EditProfileScreen() {
     // Belt and braces: the form isn't rendered when `unavailable`, so this is
     // unreachable today. It stays because the cost of being wrong is
     // overwriting someone's profile with nulls.
-    if (saving || unavailable) return;
+    if (saving || avatarBusy || unavailable) return;
     setSaving(true);
     setError(null);
     try {
@@ -213,26 +217,42 @@ export default function EditProfileScreen() {
 
   async function pickAvatarFromLibrary() {
     if (avatarBusy) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setError('VOLA needs access to your photos to set one.');
-      return;
+    // The permission request and the picker itself can both reject — a
+    // camera-unavailable Simulator, an OS-level picker failure — not just
+    // resolve `canceled: true`. Unlike commitAvatar's own try/catch (which
+    // only covers the resize-then-upload it wraps), nothing upstream of it
+    // was catching this half, so a real rejection here was an unhandled
+    // promise rejection from a Pressable handler: silent to the athlete,
+    // caught only in review.
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setError('VOLA needs access to your photos to set one.');
+        return;
+      }
+      const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+      if (picked.canceled || !picked.assets[0]) return;
+      await commitAvatar(picked.assets[0].uri);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
-    const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
-    if (picked.canceled || !picked.assets[0]) return;
-    await commitAvatar(picked.assets[0].uri);
   }
 
   async function pickAvatarFromCamera() {
     if (avatarBusy) return;
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      setError('VOLA needs camera access to take a photo.');
-      return;
+    // See pickAvatarFromLibrary's comment — same reasoning, same gap.
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        setError('VOLA needs camera access to take a photo.');
+        return;
+      }
+      const picked = await ImagePicker.launchCameraAsync({ quality: 1 });
+      if (picked.canceled || !picked.assets[0]) return;
+      await commitAvatar(picked.assets[0].uri);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
-    const picked = await ImagePicker.launchCameraAsync({ quality: 1 });
-    if (picked.canceled || !picked.assets[0]) return;
-    await commitAvatar(picked.assets[0].uri);
   }
 
   async function removeMyAvatar() {
@@ -283,7 +303,12 @@ export default function EditProfileScreen() {
         options={{
           title: 'Edit profile',
           headerRight: () => (
-            <Pressable onPress={save} disabled={saving} hitSlop={12} testID="profile-save">
+            <Pressable
+              onPress={save}
+              disabled={saving || avatarBusy}
+              hitSlop={12}
+              testID="profile-save"
+            >
               <Text style={[styles.headerAction, { color: accent.ink }]}>
                 {saving ? 'Saving…' : 'Save'}
               </Text>

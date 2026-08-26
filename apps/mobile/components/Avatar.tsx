@@ -49,6 +49,15 @@ export function Avatar({
         source={{ uri: url }}
         style={dim}
         contentFit="cover"
+        // `cachePolicy` is currently DECORATIVE, worth knowing rather than
+        // trusting: expo-image keys its cache on the URI itself, and `url`
+        // is a presigned link whose signature rotates every time
+        // `getProfile` runs — so this rarely, if ever, hits. A stable key
+        // (`source.cacheKey`, e.g. the account's user id) would make it
+        // real, at the cost of needing an explicit cache-bust on replace so
+        // a new upload isn't served the old cached bytes under the same
+        // key. Not done here — one avatar per screen, so the miss rate
+        // costs little today.
         cachePolicy="memory-disk"
         transition={150}
         onError={() => setFailedURL(url ?? null)}
