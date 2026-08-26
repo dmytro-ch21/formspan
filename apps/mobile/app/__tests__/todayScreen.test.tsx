@@ -555,6 +555,143 @@ describe('later', () => {
   });
 });
 
+describe('the day switcher, restored on direct user instruction', () => {
+  // "we can go to before dates or future ones" — continuous navigation FROM
+  // Today, which is why it is a switcher on this screen rather than a link to
+  // Plan. See the note on `dayOffset` in the screen for the full reasoning and
+  // the `ac-verifier` criterion this reverses.
+
+  it('is hidden while a session is open', async () => {
+    // The only thing it drives is the OWED/DONE/REST section, which the
+    // resume card replaces entirely and which ignores viewDay by design — a
+    // visible switcher here would be a control that does nothing.
+    mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
+    render(<TodayScreen />);
+
+    expect(await screen.findByTestId('resume-session')).toBeTruthy();
+    expect(screen.queryByTestId('today-day')).toBeNull();
+  });
+
+  it('is shown, reading TODAY, when nothing is open', async () => {
+    render(<TodayScreen />);
+    expect(await screen.findByTestId('today-day')).toBeTruthy();
+    expect(screen.getByText('TODAY')).toBeTruthy();
+  });
+
+  it('steps forward to reveal a plan on tomorrow', async () => {
+    mockListPlannedBetween.mockResolvedValue([
+      { id: 'p9', day: dayFromNow(1), sport: 'strength', workoutId: null, notes: '' },
+    ]);
+    render(<TodayScreen />);
+
+    // Nothing is owed on today itself in this fixture.
+    expect(await screen.findByTestId('today-unplanned')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('today-day-next'));
+
+    expect(await screen.findByTestId('today-plan-p9')).toBeTruthy();
+    expect(screen.queryByTestId('today-unplanned')).toBeNull();
+  });
+
+  it('a plan owed on a browsed FUTURE day still routes through startSessionHref', async () => {
+    mockListPlannedBetween.mockResolvedValue([
+      { id: 'p9', day: dayFromNow(1), sport: 'bjj', workoutId: null, notes: '' },
+    ]);
+    render(<TodayScreen />);
+    await screen.findByTestId('today-unplanned');
+    fireEvent.press(screen.getByTestId('today-day-next'));
+
+    fireEvent.press(await screen.findByTestId('up-next-log'));
+    expect(mockPush).toHaveBeenCalledWith('/bjj/log');
+  });
+
+  it('steps to a past day with an unmet plan: no press, says Not logged', async () => {
+    mockListPlannedBetween.mockResolvedValue([
+      { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, notes: '' },
+    ]);
+    render(<TodayScreen />);
+    await screen.findByTestId('today-unplanned');
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    const card = await screen.findByTestId('today-plan-p1');
+    expect(screen.getByText('Not logged')).toBeTruthy();
+    // `past` drops the Log button and the press handler entirely.
+    expect(screen.queryByTestId('up-next-log')).toBeNull();
+    expect(card.props.accessibilityRole).toBe('text');
+  });
+
+  it('a past rest day says nothing was logged, not "rest counts"', async () => {
+    render(<TodayScreen />);
+    await screen.findByTestId('today-unplanned');
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    expect(await screen.findByText('Nothing was planned, and nothing logged.')).toBeTruthy();
+    expect(screen.queryByText(/Rest counts/)).toBeNull();
+  });
+
+  it('a future rest day does not say "rest counts" either — nothing has happened yet', async () => {
+    render(<TodayScreen />);
+    await screen.findByTestId('today-unplanned');
+    fireEvent.press(screen.getByTestId('today-day-next'));
+
+    expect(await screen.findByText('Nothing planned yet. Plan something here.')).toBeTruthy();
+    expect(screen.queryByText(/Rest counts/)).toBeNull();
+  });
+
+  it('a past day credits a session logged off-plan, in the past tense', async () => {
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 's1', started_at: `${dayFromNow(-1)}T09:00:00.000Z` }),
+    ]);
+    render(<TodayScreen />);
+    await screen.findByTestId('today-unplanned');
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    expect(await screen.findByText('You logged 1 session then anyway.')).toBeTruthy();
+  });
+
+  it('"planned and done" reads in the past tense for a browsed past day', async () => {
+    mockListPlannedBetween.mockResolvedValue([
+      { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, notes: '' },
+    ]);
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 's1', sport: 'strength', started_at: `${dayFromNow(-1)}T09:00:00.000Z` }),
+    ]);
+    render(<TodayScreen />);
+    await screen.findByTestId('today-unplanned');
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    expect(await screen.findByText('Everything planned was logged.')).toBeTruthy();
+    expect(screen.queryByText('That is everything planned.')).toBeNull();
+  });
+
+  it('pressing the label returns to today from anywhere', async () => {
+    render(<TodayScreen />);
+    await screen.findByTestId('today-day');
+    fireEvent.press(screen.getByTestId('today-day-next'));
+    fireEvent.press(screen.getByTestId('today-day-next'));
+    // Stepped away: the readout no longer says TODAY.
+    expect(screen.queryByText('TODAY')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('today-day-label'));
+    expect(await screen.findByText('TODAY')).toBeTruthy();
+  });
+
+  it('the label is a plain readout on today — no onPress, so no button role', async () => {
+    render(<TodayScreen />);
+    const label = await screen.findByTestId('today-day-label');
+    expect(label.props.accessibilityRole).toBe('text');
+  });
+
+  it('does NOT move LATER — it names the same next planned day regardless of viewDay', async () => {
+    mockListPlannedBetween.mockResolvedValue([
+      { id: 'later1', day: dayFromNow(3), sport: 'bjj', workoutId: null, notes: '' },
+    ]);
+    render(<TodayScreen />);
+    expect(await screen.findByTestId('today-later')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('today-day-next'));
+    expect(await screen.findByTestId('today-later')).toBeTruthy();
+  });
+});
+
 describe('the six blocks', () => {
   it('keeps Log Food one tap from Today', async () => {
     // The ticket's third test step: any additional confirmation step is a

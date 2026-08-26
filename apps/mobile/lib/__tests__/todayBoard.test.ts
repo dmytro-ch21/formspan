@@ -81,6 +81,7 @@ function build(input: {
   plans?: Source<PlannedSession[]>;
   workouts?: Source<Workout[]>;
   now?: Date;
+  viewDay?: Date;
 }) {
   return buildTodayBoard({
     sessions: input.sessions ?? ready<Session[]>([]),
@@ -88,6 +89,7 @@ function build(input: {
     workouts: input.workouts ?? ready<Workout[]>([]),
     modules: MODULES,
     now: input.now ?? NOW,
+    viewDay: input.viewDay,
   });
 }
 
@@ -295,6 +297,99 @@ describe('it never claims an absence it has not checked', () => {
   });
 });
 
+describe('viewDay: the restored day switcher, kept independent of `now`', () => {
+  /*
+   * The switcher removed by this ticket's first pass and restored on direct
+   * user instruction after review. Every test here distinguishes browsing a
+   * day from moving the clock — the exact bug a `viewDay` fed into
+   * `buildTrainBoard` in place of `now` would reintroduce.
+   */
+  const YESTERDAY = '2026-08-25';
+  const TOMORROW2 = '2026-08-28';
+
+  it('owes a plan on the VIEWED day, not on real today', () => {
+    const lead = build({
+      plans: ready([plan({ id: 'p1', day: TOMORROW })]),
+      viewDay: new Date(`${TOMORROW}T12:00:00`),
+    }).lead;
+    expect(kindOf(lead)).toBe('owed');
+    expect(lead).toMatchObject({ value: { plans: [{ id: 'p1' }] } });
+  });
+
+  it('ignores a plan on today while browsing a different day', () => {
+    // The mirror of the above: a plan that WOULD be owed on real today must
+    // not leak into a rest/done verdict about a day the athlete stepped to.
+    const lead = build({
+      plans: ready([plan({ id: 'today-plan', day: TODAY })]),
+      viewDay: new Date(`${TOMORROW}T12:00:00`),
+    }).lead;
+    expect(lead).toEqual({ state: 'ready', value: { kind: 'rest', loggedToday: 0 } });
+  });
+
+  it('counts sessions logged on the VIEWED day for the rest credit', () => {
+    const lead = build({
+      sessions: ready([session({ started_at: `${YESTERDAY}T09:00:00` })]),
+      viewDay: new Date(`${YESTERDAY}T12:00:00`),
+    }).lead;
+    expect(lead).toEqual({ state: 'ready', value: { kind: 'rest', loggedToday: 1 } });
+  });
+
+  it('does not count that same session while viewing a different day', () => {
+    const lead = build({
+      sessions: ready([session({ started_at: `${YESTERDAY}T09:00:00` })]),
+      viewDay: new Date(`${TODAY}T12:00:00`),
+    }).lead;
+    expect(lead).toEqual({ state: 'ready', value: { kind: 'rest', loggedToday: 0 } });
+  });
+
+  it('defaults viewDay to now when the caller omits it entirely', () => {
+    // The common case — nobody has touched the switcher — must not require
+    // every caller to compute and pass today's own date.
+    const withDefault = build({ plans: ready([plan({ id: 'p1' })]) }).lead;
+    const withExplicit = build({
+      plans: ready([plan({ id: 'p1' })]),
+      viewDay: NOW,
+    }).lead;
+    expect(withDefault).toEqual(withExplicit);
+  });
+
+  it('an open session still leads the screen while browsing yesterday', () => {
+    // Resume is computed from `now`, never from `viewDay` — a live session
+    // must not be hidden by stepping the switcher away from today, and
+    // stepping away must not retroactively make it stale either.
+    const open = session({ id: 'open', ended_at: null, started_at: `${TODAY}T09:00:00` });
+    const lead = build({
+      sessions: ready([open]),
+      viewDay: new Date(`${YESTERDAY}T12:00:00`),
+    }).lead;
+    expect(lead).toEqual({
+      state: 'ready',
+      value: { kind: 'resume', offer: { session: open, stale: false } },
+    });
+  });
+
+  it('LATER is unaffected by viewDay — it always follows real `now`', () => {
+    const board = build({
+      plans: ready([plan({ id: 'near', day: TOMORROW })]),
+      viewDay: new Date(`${TOMORROW2}T12:00:00`),
+    });
+    // Browsing to the 28th does not make the 27th's plan disappear from LATER
+    // just because the browsed day is now further out than it.
+    expect(board.later).toMatchObject({ state: 'ready', value: { id: 'near' } });
+  });
+
+  it('resolves the template name for a plan on the viewed day', () => {
+    // `toPlannedOffer` is the SAME helper Train's own `today` block calls —
+    // this is the guard that a change to naming logic lands on both screens.
+    const lead = build({
+      plans: ready([plan({ id: 'p1', day: TOMORROW, workoutId: 'w7' })]),
+      workouts: ready([{ id: 'w7', name: 'Push A' } as Workout]),
+      viewDay: new Date(`${TOMORROW}T12:00:00`),
+    }).lead;
+    expect(lead).toMatchObject({ value: { plans: [{ workoutName: 'Push A' }] } });
+  });
+});
+
 describe('later', () => {
   it('is the soonest planned day strictly after today', () => {
     const board = build({
@@ -368,5 +463,41 @@ describe('the plan window', () => {
     // so today the guard protects a FUTURE caller rather than a current bug.
     // It is cheaper to keep it correct than to remember the coupling.
     expect(todayPlanWindow(new Date('2026-03-01T23:30:00')).to).toBe('2026-03-15');
+  });
+
+  it('widens PAST to cover viewDay, when the switcher steps outside the week', () => {
+    // Stepping three weeks back must not silently ask a question this query
+    // cannot answer — the whole reason it is ONE bigger read rather than a
+    // second one.
+    const w = todayPlanWindow(
+      new Date('2026-08-26T12:00:00'),
+      new Date('2026-08-03T12:00:00'),
+    );
+    expect(w.from).toBe('2026-08-03');
+    expect(w.to).toBe('2026-09-09');
+  });
+
+  it('widens FUTURE to cover viewDay, past Train\'s own horizon', () => {
+    const w = todayPlanWindow(
+      new Date('2026-08-26T12:00:00'),
+      new Date('2026-10-01T12:00:00'),
+    );
+    expect(w.from).toBe('2026-08-24');
+    expect(w.to).toBe('2026-10-01');
+  });
+
+  it('does not widen at all when viewDay is already inside the window', () => {
+    // The common case: nobody has touched the switcher, or it is still within
+    // the current week / 14-day horizon. One read, unchanged shape.
+    const w = todayPlanWindow(
+      new Date('2026-08-26T12:00:00'),
+      new Date('2026-08-27T12:00:00'),
+    );
+    expect(w).toEqual(todayPlanWindow(new Date('2026-08-26T12:00:00')));
+  });
+
+  it('defaults viewDay to now, so a caller that never touched the switcher needs no second argument', () => {
+    const now = new Date('2026-08-26T12:00:00');
+    expect(todayPlanWindow(now, now)).toEqual(todayPlanWindow(now));
   });
 });

@@ -29,10 +29,16 @@ import type { Workout } from './workouts';
  *  2. **Two plan queries per refresh** — a week window and a single day —
  *     which is two answers to *is Thursday planned* on one screen.
  *  3. **A sequence guard** (`planSeq`) to stop the two racing each other, which
- *     only existed because the day stepper could fire them faster than they
- *     resolved.
+ *     only existed because the OLD switcher could fire both queries faster
+ *     than they resolved.
  *
  * One read, one state machine, and the three states kept apart on the way in.
+ * **The switcher is back** — restored on direct user instruction after this
+ * file first shipped with it removed — and consequence 2 stays fixed: stepping
+ * it widens the SAME query (`todayPlanWindow` takes the browsed day now) rather
+ * than adding a second one, and consequence 3 stays fixed for a different
+ * reason — see the window-change effect below, which needs no sequence number
+ * because SQLite's own serial queue already orders it.
  * {@link buildTodayBoard} keeps them apart on the way out.
  *
  * ## It shares `useSource` with Train rather than copying it
@@ -56,6 +62,15 @@ export function useTodayBoard(
   modules: Module[],
   /** The screen's clock, refreshed on focus and on foreground. */
   now: Date,
+  /**
+   * The day the switcher is showing. Defaults to `now` — most opens never
+   * touch it, and the common case should not have to pass this.
+   *
+   * Kept SEPARATE from `now` all the way down to `buildTodayBoard`, which is
+   * what stops stepping the switcher from silently moving what "stale" or
+   * "later" mean — see that module's own note.
+   */
+  viewDay: Date = now,
 ): {
   board: TodayBoard;
   /** The raw reads, for the blocks that need the rows rather than the board. */
@@ -70,14 +85,22 @@ export function useTodayBoard(
 
   const { lastSyncAt } = useSyncState();
 
-  // Keyed on the DAY STRING rather than on `now`: the screen mints a fresh
-  // `Date` on every focus, so a memo keyed on the object changes identity each
-  // time and re-fires every effect below — duplicate I/O for identical data.
-  // Same reasoning, and the same noon rebuild, as `useTrainBoard`: midnight
-  // local does not exist on a spring-forward date in some zones and a `Date`
-  // built from one lands on the previous day.
+  // Keyed on the DAY STRINGS rather than on the `Date` objects: the screen
+  // mints a fresh `now` on every focus, so a memo keyed on the object changes
+  // identity each time and re-fires every effect below — duplicate I/O for
+  // identical data. Same reasoning, and the same noon rebuild, as
+  // `useTrainBoard`: midnight local does not exist on a spring-forward date in
+  // some zones and a `Date` built from one lands on the previous day.
   const today = dayString(now);
-  const { from, to } = useMemo(() => todayPlanWindow(new Date(`${today}T12:00:00`)), [today]);
+  const viewDayKey = dayString(viewDay);
+  const { from, to } = useMemo(
+    () =>
+      todayPlanWindow(
+        new Date(`${today}T12:00:00`),
+        new Date(`${viewDayKey}T12:00:00`),
+      ),
+    [today, viewDayKey],
+  );
 
   const read = useCallback(
     (alive: () => boolean) => {
@@ -108,13 +131,16 @@ export function useTodayBoard(
     ],
   );
 
-  // No sequence guard, and this is the one thing that got SIMPLER rather than
-  // safer-by-addition. `expo-sqlite` runs a connection's async statements on a
-  // serial queue, so an older answer cannot resolve after a newer one; the
-  // `planSeq` ref this replaced existed because the day stepper could fire
-  // three reads per tap, and the stepper is gone. If the database layer ever
-  // stops serialising — a second connection, a pool — this is the first place
-  // last-write-wins breaks, and it will break silently.
+  // Still no sequence guard, EVEN WITH THE SWITCHER BACK. `expo-sqlite` runs a
+  // connection's async statements on a serial queue, so an older answer cannot
+  // resolve after a newer one — the `planSeq` ref this replaced existed because
+  // the OLD switcher fired three separate queries per tap and could get them
+  // out of order. This one fires at most ONE query per step, because
+  // `todayPlanWindow` widens a single range rather than adding a second query
+  // — see the window-change effect below — so there is nothing left to race.
+  // If the database layer ever stops serialising — a second connection, a pool
+  // — this is the first place last-write-wins breaks, and it will break
+  // silently.
   useFocusEffect(
     useCallback(() => {
       let live = true;
@@ -127,6 +153,31 @@ export function useTodayBoard(
       };
     }, [read]),
   );
+
+  /*
+   * Re-read whenever the plan WINDOW's shape changes — i.e., the switcher
+   * stepped `viewDay` outside the range already fetched. `read`'s own identity
+   * encodes `[userId, from, to]` (see its deps above), so this effect fires
+   * exactly when that range widens and not when `viewDay` merely moves WITHIN
+   * it, which is the common case and needs no extra read at all.
+   *
+   * The first run is skipped deliberately: the focus effect above already
+   * fetches this exact window on mount, and firing again here would be the
+   * duplicate-I/O bug `useTrainBoard`'s own history already records once —
+   * "every focus after the first completed sync ran the three reads twice".
+   */
+  const windowInitialised = useRef(false);
+  useEffect(() => {
+    if (!windowInitialised.current) {
+      windowInitialised.current = true;
+      return;
+    }
+    let live = true;
+    read(() => live);
+    return () => {
+      live = false;
+    };
+  }, [read]);
 
   // A completed sync is the second way rows arrive: a session or a plan made on
   // the web lands through the pull, and without this the screen is only ever as
@@ -178,8 +229,8 @@ export function useTodayBoard(
   const refresh = useCallback(() => read(() => live.current), [read]);
 
   const board = useMemo(
-    () => buildTodayBoard({ sessions, plans, workouts, modules, now }),
-    [sessions, plans, workouts, modules, now],
+    () => buildTodayBoard({ sessions, plans, workouts, modules, now, viewDay }),
+    [sessions, plans, workouts, modules, now, viewDay],
   );
 
   return { board, sessions, plans, refresh };

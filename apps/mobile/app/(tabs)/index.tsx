@@ -18,6 +18,7 @@ import { Text, View } from '@/components/Themed';
 
 import { Icon } from '@/components/ui/Icon';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
+import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { RoadmapLine } from '@/components/RoadmapLine';
 import { RoadmapOffer } from '@/components/RoadmapOffer';
 import { SectionHeader } from '@/components/ui/Section';
@@ -214,6 +215,36 @@ export default function TodayScreen() {
   const [picking, setPicking] = useState(false);
 
   /**
+   * How many days from real `now` the switcher has stepped. 0 is today.
+   *
+   * **Restored on direct user instruction, after this ticket had removed it.**
+   * The first pass read "Today is an orchestration layer" as meaning day
+   * browsing belongs on Plan alone (`WeekPlanner` already browses any day,
+   * week or month) and dropped the control entirely. The user's own words —
+   * "we can go to before dates or future ones" — are continuous navigation
+   * FROM Today, which a redirect to another tab does not satisfy, so it is
+   * back. `ac-verifier` had already marked "existing route behavior remains
+   * stable" MET on the grounds that Plan owns day-browsing; that verdict no
+   * longer describes what ships, and the PR says so.
+   *
+   * An OFFSET, not a `Date`, for the same reason `dayOffset` was one before:
+   * held as a date it would be anchored at mount and refreshed by nothing,
+   * while `now` re-reads on focus and on `AppState` — so leaving the app on
+   * this tab overnight and reopening it would move `now` to the new day while
+   * a captured date stayed on the old one.
+   */
+  const [dayOffset, setDayOffset] = useState(0);
+  const viewDay = useMemo(() => addDays(now, dayOffset), [now, dayOffset]);
+  const isToday = dayOffset === 0;
+  const isPast = dayOffset < 0;
+  /** "TODAY" when it is; the weekday and date otherwise. */
+  const dayLabel = isToday
+    ? 'TODAY'
+    : viewDay
+        .toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+        .toUpperCase();
+
+  /**
    * The plan, the session list and the workout cache — one read each, three
    * states each, and the ordering rule they feed.
    *
@@ -221,7 +252,11 @@ export default function TodayScreen() {
    * plain arrays, two overlapping queries and a sequence guard, none of which
    * could tell an empty answer from an unread one.
    */
-  const { board, sessions, refresh: refreshBoard } = useTodayBoard(userId ?? null, modules, now);
+  const {
+    board,
+    sessions,
+    refresh: refreshBoard,
+  } = useTodayBoard(userId ?? null, modules, now, viewDay);
 
   /**
    * The technique funnel, for the suggestion below it.
@@ -800,7 +835,46 @@ export default function TodayScreen() {
         <ScreenHeader title="Today" contentScrollsUnder={false} />
 
         <View style={styles.body}>
-          <Text style={styles.date}>{todayLabel(now)}</Text>
+          {/*
+            Steps the day the section below describes. Restored on direct
+            user instruction: "we can go to before dates or future ones" is
+            continuous navigation FROM Today, which a redirect to Plan does
+            not satisfy — see the note on `dayOffset` above for the full
+            reasoning and the criterion this reverses.
+
+            The label doubles as the way back: on any other day it is a button
+            reading that day's date, and pressing it returns to today. On
+            today it is a readout, because a control that does nothing is
+            worse than no control.
+
+            Hidden while a session is open, because the only thing it
+            drives — the section below — is replaced by the resume card, which
+            ignores `viewDay` entirely (see `buildTodayBoard`). Left visible it
+            would be a control that moved the date line and nothing else.
+          */}
+          {!resume && (
+            <PeriodSwitcher
+              label={dayLabel}
+              onPrev={() => setDayOffset((d) => d - 1)}
+              onNext={() => setDayOffset((d) => d + 1)}
+              onPress={isToday ? undefined : () => setDayOffset(0)}
+              icon="calendar"
+              prevLabel="Previous day"
+              nextLabel="Next day"
+              pressLabel="Back to today"
+              testID="today-day"
+            />
+          )}
+
+          <Text style={styles.date}>
+            {isToday || resume
+              ? todayLabel(now)
+              : viewDay.toLocaleDateString(undefined, {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                })}
+          </Text>
 
           {/* ── 1. NOW / NEXT ─────────────────────────────────────────────
               The screen's single primary. Everything below it is outlined,
@@ -812,6 +886,10 @@ export default function TodayScreen() {
             modules={modules}
             accent={accent}
             now={now}
+            viewDay={viewDay}
+            isToday={isToday}
+            isPast={isPast}
+            dayLabel={dayLabel}
             onOpenSession={(s) => router.push(sessionHref(s, modules))}
             onStart={startPlanned}
             onPlan={() => router.push('/(tabs)/workouts')}
@@ -1250,7 +1328,7 @@ export default function TodayScreen() {
  * | `unread` | **nothing at all** — the read has not answered |
  * | `unavailable` | a dashed note saying so, never an empty day |
  * | `resume` | the running session, and nothing competing with it |
- * | `owed` | one card per plan today has not met |
+ * | `owed` | one card per plan `viewDay` has not met |
  * | `done` | planned, and all of it logged |
  * | `rest` | a real rest day, including anything logged off-plan |
  *
@@ -1258,6 +1336,11 @@ export default function TodayScreen() {
  * read on every focus, so a spinner would flash on every return from a session
  * — and the block below it is 40pt away, so the layout does not jump into a
  * hole. Silence for one frame is the honest rendering; a sentence is not.
+ *
+ * **`viewDay`/`isToday`/`isPast`/`dayLabel` only reach the `owed`/`done`/
+ * `rest` copy** — `resume` and `unavailable` read neither, because the day
+ * switcher above this block is hidden the moment a session is open (see the
+ * screen's own render) and has nothing to say when the reads have failed.
  */
 function LeadBlock({
   lead,
@@ -1265,6 +1348,10 @@ function LeadBlock({
   modules,
   accent,
   now,
+  viewDay,
+  isToday,
+  isPast,
+  dayLabel,
   onOpenSession,
   onStart,
   onPlan,
@@ -1281,6 +1368,13 @@ function LeadBlock({
   modules: Module[];
   accent: ReturnType<typeof useAccent>;
   now: Date;
+  /** The day the switcher is showing. Only the OWED/DONE/REST copy reads it. */
+  viewDay: Date;
+  isToday: boolean;
+  /** A day already gone. Disables the plan cards' press and changes the copy. */
+  isPast: boolean;
+  /** "TODAY", or the weekday and date — what the copy says for a browsed day. */
+  dayLabel: string;
   onOpenSession: (s: Session) => void;
   onStart: (p: { sport: string; workoutId: string | null }) => void;
   onPlan: () => void;
@@ -1400,8 +1494,12 @@ function LeadBlock({
             key={p.id}
             sport={p.sport}
             title={p.workoutName ?? `${labelFor(modules, p.sport)} session`}
-            when="Today"
-            past={false}
+            when={isToday ? 'Today' : dayLabel}
+            // A day already gone is a statement, not a control — the same
+            // rule the plan card this replaced always drew: `past` drops the
+            // handler and the Log button and says `pastLabel` instead of
+            // dimming, because a blanket opacity took "Not logged" below AA.
+            past={isPast}
             pastLabel="Not logged"
             // The verb comes from the CATALOG KIND, not the module key — a
             // discipline logged after the fact says Log, and it is the same
@@ -1413,9 +1511,15 @@ function LeadBlock({
             // Names the card by the SAME string it shows — WCAG 2.5.3. Labelled
             // with the bare discipline while the card reads "BJJ session", Voice
             // Control's "tap BJJ session" matches nothing.
-            accessibilityLabel={`${
-              logsAfterwards(p.sport, modules) ? 'Log' : 'Start'
-            } ${p.workoutName ?? `${labelFor(modules, p.sport)} session`}, planned for today`}
+            accessibilityLabel={
+              isPast
+                ? `${p.workoutName ?? `${labelFor(modules, p.sport)} session`}, planned and not logged`
+                : `${
+                    logsAfterwards(p.sport, modules) ? 'Log' : 'Start'
+                  } ${p.workoutName ?? `${labelFor(modules, p.sport)} session`}, planned for ${
+                    isToday ? 'today' : dayLabel.toLowerCase()
+                  }`
+            }
             testID={`today-plan-${p.id}`}
           />
         ))}
@@ -1429,11 +1533,16 @@ function LeadBlock({
       distinction is the whole point: before this the screen said "Nothing
       planned for today" the moment you finished your last session, which is the
       one sentence that is flatly untrue at that exact moment.
+
+      Past tense for a browsed PAST day — "was logged" rather than "is logged" —
+      matching the wording the pre-N179 screen used for exactly this case.
     */
     return (
       <View style={styles.planDone} testID="today-all-done">
         <View style={styles.planMain}>
-          <Text style={styles.planDoneTitle}>That is everything planned.</Text>
+          <Text style={styles.planDoneTitle}>
+            {isPast ? 'Everything planned was logged.' : 'That is everything planned.'}
+          </Text>
           <Text style={styles.planEmptyMeta}>
             {value.planned === 1 ? '1 session' : `${value.planned} sessions`} logged against the
             plan.
@@ -1444,41 +1553,47 @@ function LeadBlock({
   }
 
   /*
-    A rest day, and a real state rather than a blank one.
+    A rest day, and a real state rather than a blank one — for whichever day
+    `viewDay` is showing, not always literal today.
 
-    Three things are true here and all three are said: nothing was scheduled;
-    rest is a training state rather than a gap; and — when it applies — the
-    athlete trained anyway, off-plan. That last line is why `loggedToday` exists
-    on the type. Somebody who lifted without planning it, reading only "Nothing
-    on the plan", has been told their session did not count.
+    Four things can be true and each has its own sentence: nothing was
+    scheduled; rest is a training state rather than a gap; the athlete trained
+    anyway, off-plan (`loggedToday`, on both a past day and today — somebody
+    who lifted without planning it, reading only "Nothing on the plan", has
+    been told their session did not count); and a FUTURE day has not happened
+    yet at all, so "rest counts" is the wrong sentence for it — nothing has
+    been rested from.
 
     The rest line is circulated by date rather than picked at random, so the
     same day always says the same thing, and none of the lines congratulate or
-    scold. See `lib/trend.ts`.
+    scold. `restLine(viewDay)`, not `restLine(now)` — the line has to describe
+    the day being shown. See `lib/trend.ts`.
   */
+  const restMeta = isPast
+    ? value.loggedToday > 0
+      ? `You logged ${value.loggedToday} ${
+          value.loggedToday === 1 ? 'session' : 'sessions'
+        } then anyway.`
+      : 'Nothing was planned, and nothing logged.'
+    : isToday
+      ? value.loggedToday > 0
+        ? `You logged ${value.loggedToday} ${
+            value.loggedToday === 1 ? 'session' : 'sessions'
+          } today anyway. Plan the next one here.`
+        : 'Rest counts — or plan something here, or log an unplanned session with New log.'
+      : 'Nothing planned yet. Plan something here.';
+
   return (
     <Pressable
       style={({ pressed }) => [styles.planEmpty, pressed && styles.planCardPressed]}
       onPress={onPlan}
       accessibilityRole="button"
-      accessibilityLabel={
-        value.loggedToday > 0
-          ? `${restLine(now)} You logged ${value.loggedToday} ${
-              value.loggedToday === 1 ? 'session' : 'sessions'
-            } today anyway. Open Plan to schedule something.`
-          : `${restLine(now)} Rest counts. Open Plan to schedule something.`
-      }
+      accessibilityLabel={`${restLine(viewDay)} ${restMeta}`}
       testID="today-unplanned"
     >
       <View style={styles.planMain}>
-        <Text style={styles.planEmptyTitle}>{restLine(now)}</Text>
-        <Text style={styles.planEmptyMeta}>
-          {value.loggedToday > 0
-            ? `You logged ${value.loggedToday} ${
-                value.loggedToday === 1 ? 'session' : 'sessions'
-              } today anyway. Plan the next one here.`
-            : 'Rest counts — or plan something here, or log an unplanned session with New log.'}
-        </Text>
+        <Text style={styles.planEmptyTitle}>{restLine(viewDay)}</Text>
+        <Text style={styles.planEmptyMeta}>{restMeta}</Text>
       </View>
       <Icon name="chevron" size={16} color={vola.textDim} />
     </Pressable>

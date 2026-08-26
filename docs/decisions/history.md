@@ -42410,6 +42410,71 @@ lowered 53 → 50** — the removed dashboard code took three findings with it.
   nothing in it touches a token, a fetch or a sync run — which is the property —
   but a phone in a basement is the only instrument for the claim.
 
+### Addendum, same day — the day switcher comes back, on direct user instruction, and closes a question this entry left open
+
+**The first version of this entry recorded the day stepper's removal as a
+deliberate scope call.** It was not the right call, and the correction did not
+come from re-reading the ticket — it came from the user walking the branch on a
+real device and saying, in these words: *"we can go to before dates or future
+ones... above it we will have that today."* That is continuous navigation FROM
+Today, and a redirect to Plan's `WeekPlanner` does not satisfy it. The switcher
+is back, on the strip above NOW/NEXT, and this reverses a criterion
+`ac-verifier` had already marked MET — *"existing route behavior remains
+stable," on the grounds that Plan owns day-browsing.* That verdict no longer
+describes what ships; `ac-verifier` was re-run after the restoration rather than
+left standing.
+
+**It is restored, not reintroduced unchanged.** The distinction was already
+mostly built into `lib/todayBoard.ts`, and generalising it to a browsed day
+turned out to need one new idea rather than a rewrite:
+
+- `buildTodayBoard` takes an optional `viewDay`, separate from `now`. `now`
+  stays the real clock — resume's staleness and LATER are measured against
+  it, unconditionally, and neither reads `viewDay` at all. Only the
+  OWED/DONE/REST section does. That separation is what stops browsing to last
+  Tuesday from silently moving what "stale" or "later" mean, which is the
+  exact bug a `viewDay` fed into `buildTrainBoard` in place of `now` would
+  reintroduce — and which the mutation harness checks directly (S2).
+- The owed computation for `viewDay` is built from `owedOn` and the newly
+  exported `toPlannedOffer` (lifted out of `trainBoard.ts`'s own `today`
+  block) rather than from a second closure — so a change to what "owed" means
+  still lands on Train and Today from one place, and only the DAY differs.
+- `todayPlanWindow` widens a SINGLE query to cover `viewDay` rather than
+  issuing a second one, which is the property N179 introduced this ticket to
+  get in the first place (the old screen ran two overlapping plan queries per
+  refresh and needed a sequence guard to keep them from racing). Stepping the
+  switcher three weeks in either direction widens the range; stepping within
+  the current week or the 14-day horizon costs nothing extra. `useTodayBoard`
+  fires that wider read only when the window's SHAPE actually changes — one
+  `useEffect` keyed on `read`'s own identity, guarded to skip the run that
+  coincides with the focus effect's own fetch on mount, which is the
+  duplicate-I/O bug this file's own history already records once.
+- The switcher itself is hidden the moment a session is open, for the same
+  reason it always was: the only thing it drives is a section the resume card
+  replaces entirely, and a control that does nothing is worse than no control.
+- Past-day copy is restored to the pre-N179 wording where it existed
+  ("Everything planned was logged.", "Nothing was planned, and nothing
+  logged.", `UpNextCard`'s `past` prop disabling the Log button and the press
+  target) and extended where N179 had added something the old screen never
+  had — the rest-day off-plan credit ("You logged N session(s) then anyway")
+  now applies on a past day too, and a FUTURE day gets its own sentence
+  ("Nothing planned yet") rather than inheriting "Rest counts", which is not
+  true of a day that has not happened.
+
+**Mutation-tested with the rest of the file, not separately.** 11 new
+mutations for the switcher's own logic, run together with the original 16 as
+one 25-mutation pass (one was a duplicate of an existing case and dropped):
+baseline green (91 tests across the three files, before and after), **25 of
+25 red**. `pnpm run verify` green afterward — 182 suites, 2950 mobile tests,
+`lint:mobile` still at 50 of 50.
+
+Three findings from `frontend-reviewer`'s first pass were folded in alongside
+this, all taken: the `unavailable` copy no longer claims both reads failed
+when only one did; the suggestion card's spoken label now matches its own
+visible title (the same WCAG 2.5.3 fix this branch already made on two other
+cards); and the Retry button's re-read gained the liveness guard the rest of
+`useTodayBoard` already had.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

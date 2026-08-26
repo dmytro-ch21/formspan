@@ -1068,10 +1068,43 @@ dashboard are marked where they moved.
   week, which is the same defect one level along.
 - **Recent sessions** → Train, from the same read; and reachable by date through
   the calendar on Progress.
-- **The day stepper** → gone entirely. Plan owns day browsing (`WeekPlanner`
-  has week arrows and a month grid), and Today answers *now* and *next*. Nothing
-  is unreachable; what is gone is a second, weaker planner on top of the screen
-  an athlete opens to decide the next ten minutes.
+
+**The day stepper is back on Today** (`today-day`), restored on direct user
+instruction after this ticket had first removed it — *"we can go to before
+dates or future ones"* is continuous navigation from Today, which a redirect to
+Plan does not satisfy. `WeekPlanner` still owns week/month browsing separately;
+this is a lighter, day-at-a-time control living above NOW/NEXT.
+
+- **Hidden while a session is open.** The only thing it drives — OWED/DONE/REST
+  — is replaced by the resume card, which ignores the browsed day by design.
+  `today-day` must not render beside `resume-session`.
+- **`today-day-prev` / `today-day-next`** step one day at a time, unbounded in
+  either direction. **`today-day-label`** reads `TODAY` on today and is a plain
+  readout there (no press, `accessibilityRole="text"`); on any other day it
+  reads the weekday and date and pressing it returns to today.
+- **A plan owed on the browsed day** renders exactly like today's, with the verb
+  from the catalog kind (`Log`/`Start`) and the correct destination
+  (`startSessionHref`) — a BJJ round on a future day must still go to
+  `/bjj/log`, never the set logger.
+- **A past day with an unmet plan is inert and says so.** `past` on `UpNextCard`
+  drops the Log button and the press handler, sets `accessibilityRole="text"`,
+  and shows "Not logged" — never dimmed (a blanket opacity took this below AA
+  once already).
+- **Rest-day copy varies by when the day is**, and none of the three
+  congratulate or scold: a past rest day says "Nothing was planned, and nothing
+  logged"; today says "Rest counts — or plan something here…"; a future day
+  says "Nothing planned yet. Plan something here." An off-plan session logged
+  on the browsed day is credited regardless of which of the three it is.
+- **"Planned and done" reads in the past tense for a past day** — "Everything
+  planned was logged" rather than "That is everything planned."
+- **LATER never moves.** It always names the soonest day after REAL today,
+  regardless of which day the switcher is showing — stepping the switcher does
+  not make LATER answer a different question.
+- **The plan read widens to cover the browsed day rather than issuing a second
+  query.** Stepping three weeks back or forward should still show the correct
+  plan/rest/done state for that day; nothing here should ever show a stale or
+  empty answer for a day genuinely outside what has loaded yet (it should
+  simply not have rendered the section at all until the wider read answers).
 
 **Gone, and should stay gone**
 
