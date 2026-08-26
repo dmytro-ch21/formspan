@@ -202,6 +202,21 @@ func (ws *Workspace) ensureEgressBroker(ctx context.Context, allowedHosts []stri
 	runArgs := []string{
 		"run", "-d", "--rm", "--name", containerName,
 		"--network", networkName,
+		// host.docker.internal resolves out of the box on Docker Desktop and
+		// this project's own Colima setup, but NOT on native Linux Docker
+		// (CI's ubuntu-latest runners) unless told to — the exact class of
+		// bug RunSandboxed's own comment already names for the SANDBOXED
+		// container, reproduced here for the BROKER: found by a real CI
+		// failure (both TestEgressBrokerProxiesAllowedHostsAndRefusesOthers
+		// and TestSandboxCanReachTheHostsEphemeralDatabase failed on
+		// ubuntu-latest — "502 Bad Gateway" and "connection reset by peer"
+		// respectively — while passing locally on Colima, which resolves it
+		// regardless of this flag, so the gap was invisible until CI ran
+		// it). `--add-host` is a `docker run`-time flag and this survives
+		// the LATER `docker network connect bridge` below unaffected — it
+		// writes an /etc/hosts entry, independent of which networks get
+		// attached afterward.
+		"--add-host", "host.docker.internal:host-gateway",
 		"-v", srcDir + ":/broker:ro",
 		"-w", "/broker",
 		"-e", "DB_TARGET=" + dbTarget,

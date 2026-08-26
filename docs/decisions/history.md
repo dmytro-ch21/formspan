@@ -42866,6 +42866,24 @@ supporting half-close) were left as real but lower-value follow-ups rather
 than expanding this PR further — neither weakens the allowlist itself, both
 are about robustness of an already-correctly-restricted channel.
 
+**A seventh issue only showed up in CI, and it is the exact class N188 already
+named.** All local runs (Colima) passed; `ubuntu-latest`'s `Backend (Go)` job
+failed two tests — `TestEgressBrokerProxiesAllowedHostsAndRefusesOthers`
+("502 Bad Gateway" instead of a relayed reply) and
+`TestSandboxCanReachTheHostsEphemeralDatabase` ("connection reset by peer"
+instead of a wire-protocol response) — both the broker failing to dial
+`host.docker.internal`. The cause: `ensureEgressBroker`'s `docker run` for the
+broker never carried `--add-host host.docker.internal:host-gateway`, which
+RunSandboxed's OWN comment already documents as resolving automatically on
+Docker Desktop and this project's Colima setup but NOT on native Linux Docker
+without it — the identical gap N188 closed for the sandboxed container,
+reopened here because the broker is a second container this PR introduced and
+the flag was only ever added to the first. Fixed by adding the same flag to
+the broker's `docker run`; it is a no-op locally (Colima already resolved it,
+which is exactly why this passed here and only failed on CI) and could only be
+confirmed by watching the real CI run go from red to green, not by anything
+runnable on this host.
+
 **Not done here, named rather than absorbed:** the broker's HTTPS proxy
 trusts every host on the allowlist completely once a CONNECT tunnel opens —
 it never inspects what flows through it beyond the CONNECT target itself, so
