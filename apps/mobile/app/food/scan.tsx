@@ -67,10 +67,12 @@ import {
   FALLBACK_SERVING_GRAMS,
   macrosForGrams,
   macrosForServings,
+  naturalUnitFor,
   parseQuantity,
   quantityOptions,
   servingBasisGrams,
   servingsForGrams,
+  type NaturalUnit,
   type QuantifiableFood,
 } from '@/lib/foodQuantity';
 import { MEALS, slotForClock, todayString, type Macros, type Meal } from '@/lib/nutrition';
@@ -136,6 +138,15 @@ export default function ScanBarcodeScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
   /** N426: the amount editor is a sheet, not an always-visible field. */
   const [amountSheetOpen, setAmountSheetOpen] = useState(false);
+  /**
+   * N426, found in review: which unit mode the athlete last explicitly
+   * chose (natural vs g/oz) — `FoodQuantity` remounts fresh every time the
+   * sheet reopens (the sheet is a `Modal`, whose children are gone while
+   * closed), so without this it always reopened in the packet's natural
+   * unit even after the athlete had deliberately switched to grams. `null`
+   * until an explicit switch happens, meaning "use the food's own default".
+   */
+  const [unitMode, setUnitMode] = useState<boolean | null>(null);
 
   /**
    * Speak the two messages that change in place.
@@ -198,6 +209,9 @@ export default function ScanBarcodeScreen() {
       // line and that report the screen must not show the PREVIOUS packet's
       // numbers under the new one's name (a scan-a-different-packet loop).
       setQuantity(null);
+      // Same reason: a unit mode chosen for the PREVIOUS packet must not
+      // carry over to this one — the new food gets its own default.
+      setUnitMode(null);
       setPhase({ kind: 'draft', code, food, source, cached });
     },
     [],
@@ -310,6 +324,19 @@ export default function ScanBarcodeScreen() {
   const quantifiable: QuantifiableFood | null = useMemo(() => {
     if (phase.kind !== 'draft') return null;
     return adaptForQuantity(phase.food);
+  }, [phase]);
+
+  /**
+   * N426, reported from a device: a discrete unit ("pieces") derived from
+   * the packet's own serving label — see `naturalUnitFor`'s doc for why this
+   * is deliberately narrow (one shape, parsed from the ONE label OFF gives
+   * us, `null` for anything else). Passed to `FoodQuantity` below; `null`
+   * for most products (no packet serving, or one that doesn't parse), which
+   * leaves the g/oz toggle exactly as N117 shipped it.
+   */
+  const naturalUnit: NaturalUnit | null = useMemo(() => {
+    if (phase.kind !== 'draft') return null;
+    return naturalUnitFor(phase.food.packet_serving_label, phase.food.packet_serving_grams);
   }, [phase]);
 
   /**
@@ -664,13 +691,17 @@ export default function ScanBarcodeScreen() {
           style={styles.amountRow}
           accessibilityRole="button"
           accessibilityLabel={`Amount, ${
-            effectiveQuantity ? amountSummary(phase.food, canWeigh, effectiveQuantity.servings) : 'not set'
+            effectiveQuantity
+              ? amountSummary(phase.food, canWeigh, effectiveQuantity.servings, naturalUnit)
+              : 'not set'
           }. Opens the amount editor.`}
           testID="scan-amount-row"
         >
           <Text style={styles.amountLabel}>Amount</Text>
           <Text style={styles.amountValue} testID="scan-amount-value">
-            {effectiveQuantity ? amountSummary(phase.food, canWeigh, effectiveQuantity.servings) : '—'}
+            {effectiveQuantity
+              ? amountSummary(phase.food, canWeigh, effectiveQuantity.servings, naturalUnit)
+              : '—'}
           </Text>
         </Pressable>
 
@@ -708,6 +739,9 @@ export default function ScanBarcodeScreen() {
             initialGrams={
               effectiveQuantity ? effectiveQuantity.servings * servingBasisGrams(phase.food) : undefined
             }
+            naturalUnit={naturalUnit}
+            initialUsingNatural={unitMode ?? undefined}
+            onUnitModeChange={setUnitMode}
             onLog={() => setAmountSheetOpen(false)}
             onQuantityChange={(q) =>
               setQuantity({
@@ -940,26 +974,32 @@ function defaultQuantityFor(
 }
 
 /**
- * The headline row's value (N426) — "2 pieces (25 g)" when the current
- * amount matches the packet's own serving, otherwise a plain "{grams} g" or,
- * for a food with no gram basis at all, "{servings} × {serving_label}".
+ * The headline row's value (N426) — "2 pieces (25 g)" whenever a natural
+ * unit is derivable, at whatever amount is currently set (not only the
+ * packet default — changing the amount to 3 pieces still reads "3 pieces
+ * (38 g)", not a bare gram figure once the athlete has moved off the
+ * default). Falls back to a plain "{grams} g" when no natural unit exists,
+ * or "{servings} × {serving_label}" for a food with no gram basis at all.
  *
- * Grams, not a fabricated "Pieces" unit — VOLA does not parse a piece-count
- * unit from Open Food Facts yet (N427). Showing the packet's OWN label when
- * the amount matches it gets the reference screenshot's readability ("2
- * pieces") without claiming a unit VOLA cannot actually convert.
+ * Never a fabricated unit: `naturalUnit` is `null` for the vast majority of
+ * products (no packet serving, or one `naturalUnitFor` cannot parse), and
+ * this function makes no claim beyond what that already-vetted derivation
+ * offers.
  */
-function amountSummary(food: ScannedFood, canWeigh: boolean, servings: number): string {
+function amountSummary(
+  food: ScannedFood,
+  canWeigh: boolean,
+  servings: number,
+  naturalUnit: NaturalUnit | null,
+): string {
   if (!canWeigh) {
     return `${trimmed(servings)} × ${food.serving_label}`;
   }
   const grams = Math.round(servings * servingBasisGrams(food));
-  if (
-    food.packet_serving_grams != null &&
-    food.packet_serving_label != null &&
-    Math.abs(grams - food.packet_serving_grams) < 1
-  ) {
-    return food.packet_serving_label;
+  if (naturalUnit) {
+    const count = Math.round((grams / naturalUnit.gramsPerUnit) * 100) / 100;
+    const word = count === 1 ? naturalUnit.word : naturalUnit.wordPlural;
+    return `${trimmed(count)} ${word} (${grams} g)`;
   }
   return `${grams} g`;
 }
@@ -1097,6 +1137,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 10,
+    // N426, found in review: same border `FoodQuantity`'s own input gained —
+    // an unbordered surface-fill read as static text, not an editable field.
+    borderWidth: 1,
+    borderColor: vola.line,
     backgroundColor: vola.surface,
     color: vola.text,
   },

@@ -14,9 +14,25 @@
  * for whichever one the caller decides to render, not a second copy of that
  * branch. Nothing here recomputes a macro; it only changes which container
  * the athlete's chosen control renders inside.
+ *
+ * ## The Done button and the keyboard (found in review, from a device)
+ *
+ * "Done" is a `KeyboardAwareFooter` (`components/KeyboardAwareScroll.tsx`,
+ * already built and used elsewhere in this app for exactly this shape —
+ * problem 3 in that file's own doc comment: *"a fixed footer is buried [...]
+ * it has to move"*) rather than a raw `KeyboardAvoidingView`. Without it, the
+ * keyboard that opens for the amount field covers the one button that closes
+ * the sheet — reachable by dismissing the keyboard first, but not obviously,
+ * which is exactly the "not noticeable" class of bug this file's other fix
+ * (the input's border, in `FoodQuantity.tsx`) is also about. `KeyboardAware-
+ * Footer` needs no `KeyboardAwareScreen` ancestor to work standalone — that
+ * context only coordinates with a sibling `KeyboardAwareScrollView`, which
+ * this sheet does not have (its content is short enough to need no scrolling)
+ * — it measures and pads itself regardless.
  */
 import { Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
 
+import { KeyboardAwareFooter } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
@@ -57,15 +73,19 @@ export function AmountSheet({
           </Pressable>
         </RNView>
         <View style={styles.body}>{children}</View>
-        <Pressable
-          onPress={onClose}
-          style={[styles.done, { backgroundColor: accent.accent }]}
-          accessibilityRole="button"
-          accessibilityLabel="Done editing the amount"
-          testID="amount-sheet-done"
-        >
-          <Text style={[styles.doneText, { color: accent.on }]}>Done</Text>
-        </Pressable>
+        {/* Same shape as `add.tsx`'s `pickingFooter` — padding on the footer
+            itself, a hairline separating it from the content above. */}
+        <KeyboardAwareFooter style={styles.footer}>
+          <Pressable
+            onPress={onClose}
+            style={[styles.done, { backgroundColor: accent.accent }]}
+            accessibilityRole="button"
+            accessibilityLabel="Done editing the amount"
+            testID="amount-sheet-done"
+          >
+            <Text style={[styles.doneText, { color: accent.on }]}>Done</Text>
+          </Pressable>
+        </KeyboardAwareFooter>
       </View>
     </Modal>
   );
@@ -84,9 +104,13 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 20, fontWeight: '800' },
   body: { flex: 1, paddingHorizontal: 20 },
+  footer: {
+    padding: 16,
+    backgroundColor: vola.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: vola.line,
+  },
   done: {
-    marginHorizontal: 20,
-    marginBottom: 24,
     minHeight: 46,
     borderRadius: 12,
     alignItems: 'center',

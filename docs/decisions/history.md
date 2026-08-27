@@ -46720,6 +46720,104 @@ Simulator.
   entry points to the sheet pattern; whether `add.tsx` should follow is an
   open question, not a decision made by omission here.
 
+## 2026-08-27 — N426 follow-up: a "pieces" unit, and two real device bugs
+
+Feedback on N426's first pass, from the same device: *"there should be
+ability to see servings/pieces of that product if i scan kinder it should
+give me 1 piece/grams/macros... it should give me the option to be able to
+change nicely the measurement unit. It should logically make sense."* Plus
+two concrete bugs: the keyboard covered the amount sheet's Done button, and
+the amount field didn't read as editable.
+
+### A "pieces" unit, derived honestly from the packet's own label
+
+N427 (#673) was filed to scope this properly rather than guess at it, and
+its own acceptance criteria already named the answer: *"a discrete count for
+a food whose OWN per-serving figures are already in per-piece terms... is
+derivable without more data than OFF states."* Kinder's packet label is
+literally `"2 pieces (25 g)"` — the count and the total weight are both
+already in hand, so one piece is `25 / 2 = 12.5 g`. No density, no per-item
+catalog fact, nothing this codebase didn't already have.
+
+`naturalUnitFor` (`lib/foodQuantity.ts`) parses exactly that one shape — a
+leading count, a word, matched against the packet's own label — and returns
+`null` for anything else: no label, no total, a zero/negative count, a label
+with no leading number. Deliberately narrow, matching N117's own discipline
+(never fabricate a unit the data doesn't support): a "pieces" toggle that
+sometimes shows the wrong weight would be a worse instance of the exact bug
+N117 fixed. It is NOT folded into `quantityOptions` (which also drives the
+portion chips) — that function already serves arbitrary catalog portions
+("1 large", "1 cup"), and blindly parsing those as natural units would
+produce nonsense ("a `large`?") for foods this was never asked about.
+
+`FoodQuantity.tsx` gained a `naturalUnit` prop (`null`/unset for every
+existing caller — `add.tsx`, the recipe picker — leaves today's g/oz-only
+toggle untouched) and a third toggle pill, shown FIRST and selected by
+DEFAULT when a natural unit exists: the packet's own terms are what the
+athlete actually read on the box, so that's what the field opens showing.
+Switching to g/oz still CONVERTS rather than relabels — the same rule the
+existing toggle already enforced, now proven for a third axis too. The
+"Amount" summary row on the main card (outside the sheet) reads the same
+way: `"2 pieces (25 g)"` at any amount that resolves to a whole-ish count,
+not only the packet default.
+
+### Two device bugs, both found from actually using the sheet
+
+- **The keyboard covered the Done button.** The amount sheet's footer is a
+  sibling of the scroll-free body, and nothing repositioned it when the
+  keyboard opened — reachable by dismissing the keyboard first, but not
+  obviously. Fixed with `KeyboardAwareFooter`
+  (`components/KeyboardAwareScroll.tsx`), already built and used elsewhere
+  in this app for exactly this shape (`add.tsx`'s own picking-screen
+  footer) — not a new mechanism, the existing one applied to a screen that
+  hadn't adopted it yet. It needs no `KeyboardAwareScreen`/scroll-view
+  ancestor to work standalone; without one, its footer-registration context
+  read just no-ops.
+- **The amount field didn't read as editable.** A plain surface-colour fill
+  with no border looked like static text. Fixed by giving `FoodQuantity`'s
+  input (and `scan.tsx`'s `ServingsFallback` input) the same border this
+  app's other editable numeric field already has
+  (`entry/[id].tsx`'s `input` style) — matching an existing convention,
+  not inventing a new affordance.
+
+### A lint-rule interaction, found while fixing the above
+
+Adding the `usingNatural` branch to the pre-existing "sync display from an
+external unit change" effect newly tripped `react-hooks/set-state-in-effect`
+on a `setState` call that was already there, already correct, and already
+covered by an adjacent `exhaustive-deps` suppression for the identical
+reason. This app's lint gate is a warning RATCHET at its ceiling (50/50,
+documented repeatedly in this file), so one new warning fails the build. A
+"latest ref" mirror of the state (updated during render, read in the effect)
+was the first attempt and tripped a DIFFERENT rule, `react-hooks/refs`
+("cannot update ref during render") — this codebase's ESLint config
+forbids that pattern outright. Resolved with a targeted, commented
+`eslint-disable-next-line react-hooks/set-state-in-effect` on the one
+`setText` call, matching the file's own existing precedent of suppressing a
+single rule on a single, reasoned-through line rather than the whole effect.
+
+### Verification
+
+`naturalUnitFor`'s guards mutation-tested (each dropped independently,
+confirmed to make a real test go red — not a compile error — restored,
+confirmed green by re-running). `pnpm run verify` green, twice (once before
+finding the lint interaction above, once after). 210 mobile suites / 3250
+tests, including new coverage for: the pieces toggle opening by default and
+converting correctly both directions, typing a piece count logging the
+right scaled macros, a portion chip re-rendering in whichever unit is
+currently selected, and — a real test-authoring bug I found while writing
+these — my own first assertion for the "glasses" pluralisation case asserted
+the WRONG expected value (the plural instead of the correct singular
+"glass"), caught only by actually reading the failure rather than trusting
+the test's own comment.
+
+### What is not done
+
+- Volume units (cups, tbsp, tsp, fl oz) — N427's other half — still need a
+  density fact this codebase has no source for. Untouched here.
+- The device comparison against the reference screenshots remains N426's own
+  outstanding `NEEDS HUMAN EVIDENCE` criterion.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

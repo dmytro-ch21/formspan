@@ -14400,3 +14400,45 @@ on screen. That, and only that, is what moved.
 - No change to authorization or the wire contract on any endpoint — this
   ticket is a client-side layout change only, reusing macro data the app
   already fetches and displays elsewhere (`add.tsx`'s food-detail screen).
+
+## N426 follow-up — a "pieces" unit, plus a keyboard and an affordance bug (`apps/mobile/components/FoodQuantity.tsx`, `apps/mobile/lib/foodQuantity.ts`, `apps/mobile/components/food/AmountSheet.tsx`, `apps/mobile/app/food/scan.tsx`)
+
+### Happy path
+
+- Scan the Kinder bar (or any product whose packet label states a count,
+  e.g. "2 pieces (25 g)"). Confirm the amount sheet opens with the third
+  toggle pill ("pieces") already selected and the field reading "2", not
+  "25".
+- Confirm the Amount row on the card (outside the sheet) also reads in
+  pieces — "2 pieces (25 g)" — matching the sheet.
+- Type a different piece count (e.g. "4") and confirm every macro on the
+  card doubles once the sheet closes.
+- Tap "g" — confirm the field CONVERTS to "25", not a relabel of "2".
+  Tap the pieces pill again — confirm it converts back to "2".
+- Open the sheet, tap into the amount field, confirm the keyboard opens
+  and the "Done" button is still fully visible and tappable above it.
+- Confirm the amount field itself reads as an editable box (a visible
+  border), not plain text, both in the sheet and in the no-gram-basis
+  fallback control.
+
+### Edge cases and errors
+
+- Scan a product with NO packet serving stated at all. Confirm no third
+  toggle pill appears — the field opens in grams exactly as before this
+  change, no fabricated unit offered.
+- Scan a product whose label doesn't parse cleanly into a count (e.g. no
+  leading number, or a zero count). Confirm the same — grams only, no
+  pieces pill.
+- Tap a portion chip (when one exists) while the pieces pill is selected.
+  Confirm the field re-renders in pieces, correctly converted — not left
+  in the old unit or reset to grams.
+- Change the piece count to something that is NOT a whole multiple of the
+  packet's own serving (e.g. 3 pieces on a 2-piece packet). Confirm the
+  card's Amount row still reads sensibly ("3 pieces (38 g)"), not a bare
+  gram figure or a stale packet label.
+
+### Auth / security
+
+- No change to authorization or the wire contract — this is a pure
+  client-side display/input change, deriving the unit from a field
+  (`packet_serving_label`) the app already receives and stores.

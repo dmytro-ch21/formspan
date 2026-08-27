@@ -277,16 +277,85 @@ describe('a resolved barcode', () => {
       expect(screen.getByTestId('nutrition-panel-protein_g-value')).toHaveTextContent('0.5g');
     });
 
-    it('opens the amount pre-filled to the packet’s own serving, not 100 g', async () => {
+    /**
+     * N426: opens in the packet's OWN unit ("2 pieces"), not grams — the
+     * user's own words, reported after N426's first pass: "if I scan kinder
+     * it should give me 1 piece/grams/macros... the measurement unit should
+     * logically make sense." The underlying gram amount is still 25 g (the
+     * packet's own serving, N117) — only the DISPLAY defaults to pieces.
+     */
+    it('opens in the packet’s own unit — pieces — not grams', async () => {
       await scan();
       await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
-      // The default amount is 25 g (the packet's own), not 100 g.
-      expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
+      // "2", not "25" — the field opens showing pieces, matching the box.
+      expect(screen.getByTestId('food-quantity-input').props.value).toBe('2');
+      // The pieces pill is selected by default.
+      expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(true);
       // The unchanged arithmetic basis still reads "Per 100 g" — checkable.
       expect(screen.getByText('Per 100 g')).toBeTruthy();
-      // The packet's own serving offered as a selectable, already-selected chip.
+      // The packet's own serving still offered as a selectable, already-selected chip.
       expect(screen.getByTestId('food-portion-25')).toBeTruthy();
+    });
+
+    /**
+     * Switching to grams CONVERTS the displayed number (2 pieces = 25 g),
+     * the same rule the existing g/oz toggle already enforces — and leaves
+     * the underlying amount, and therefore what gets logged, unchanged.
+     */
+    it('switching to grams converts the pieces count, it does not relabel it', async () => {
+      await scan();
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('food-unit-g'));
+      expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
+      expect(screen.getByTestId('food-unit-g').props.accessibilityState.selected).toBe(true);
+      expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(false);
+    });
+
+    /**
+     * Found in review, alongside the reset-on-reopen amount bug: without
+     * remembering the CHOSEN unit mode (not just the amount), reopening the
+     * sheet after explicitly switching to grams silently switched the
+     * DISPLAY back to pieces — the number was still right (`initialGrams`
+     * already covers that), but the unit the athlete had deliberately
+     * picked was not.
+     */
+    it('remembers grams was chosen, rather than reopening back in pieces', async () => {
+      await scan();
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('food-unit-g'));
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('amount-sheet-done'));
+      });
+
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
+      expect(screen.getByTestId('food-unit-g').props.accessibilityState.selected).toBe(true);
+      expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(false);
+    });
+
+    /**
+     * Typing a piece count converts to grams correctly and logs the scaled
+     * macros — not just the display, the actual number that gets saved.
+     */
+    it('typing a piece count logs the correctly scaled macros', async () => {
+      await scan();
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      fireEvent.changeText(screen.getByTestId('food-quantity-input'), '4');
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('amount-sheet-done'));
+      });
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('scan-log'));
+      });
+      // 4 pieces = 50 g = double the box's own 140 kcal / 0.5 g protein.
+      const entry = mockLogFood.mock.calls[0][1];
+      expect(entry.kcal).toBe(280);
+      expect(entry.protein_g).toBe(1);
     });
 
     it('logs the box’s own numbers when confirmed without touching the amount', async () => {
