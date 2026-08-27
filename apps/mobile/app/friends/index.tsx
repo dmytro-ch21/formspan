@@ -9,6 +9,7 @@ import {
   View as RNView,
 } from 'react-native';
 
+import { Avatar } from '@/components/Avatar';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 
 import { Text, View } from '@/components/Themed';
@@ -217,6 +218,7 @@ export default function FriendsScreen() {
         )}
         {result && (
           <RNView style={styles.card} testID="friends-result">
+            <Avatar url={result.avatar_url} handle={result.username} size={40} />
             <RNView style={styles.cardBody}>
               <Text style={styles.cardName}>@{result.username}</Text>
               {result.display_name && <Text style={styles.muted}>{result.display_name}</Text>}
@@ -259,6 +261,7 @@ export default function FriendsScreen() {
             <Text style={styles.label}>WANT TO BE YOUR FRIEND</Text>
             {requests.incoming.map((c) => (
               <RNView key={c.username} style={styles.card} testID={`friends-incoming-${c.username}`}>
+                <Avatar url={c.avatar_url} handle={c.username} size={40} />
                 <RNView style={styles.cardBody}>
                   <Text style={styles.cardName}>@{c.username}</Text>
                   {c.display_name && <Text style={styles.muted}>{c.display_name}</Text>}
@@ -298,6 +301,7 @@ export default function FriendsScreen() {
             <Text style={styles.label}>WAITING ON</Text>
             {requests.outgoing.map((c) => (
               <RNView key={c.username} style={styles.card} testID={`friends-outgoing-${c.username}`}>
+                <Avatar url={c.avatar_url} handle={c.username} size={40} />
                 <RNView style={styles.cardBody}>
                   <Text style={styles.cardName}>@{c.username}</Text>
                 </RNView>
@@ -325,6 +329,7 @@ export default function FriendsScreen() {
             ) : (
               friends.map((c) => (
                 <RNView key={c.username} style={styles.card} testID={`friends-row-${c.username}`}>
+                  <Avatar url={c.avatar_url} handle={c.username} size={40} />
                   <RNView style={styles.cardBody}>
                     <Text style={styles.cardName}>@{c.username}</Text>
                     {c.display_name && <Text style={styles.muted}>{c.display_name}</Text>}

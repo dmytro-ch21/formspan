@@ -202,7 +202,11 @@ func main() {
 	friendRepo := friend.NewPostgresRepository(pool)
 	workoutRepo := workout.NewPostgresRepository(pool)
 	sequenceHandler := sequence.NewHandler(sequenceRepo)
-	friendHandler := friend.NewHandler(friendRepo)
+	// photoStore, again: N205 wires uploaded avatars into the friends list
+	// the same way profile's own lookup already presigns them — see
+	// friend.Handler.present. nil in the same supported states (no bucket
+	// configured), which the handler already degrades to "no avatars" for.
+	friendHandler := friend.NewHandler(friendRepo, photoStore)
 
 	// THE SHARE REGISTRY. This is the only place that knows both that
 	// "sequence" is a shareable kind of thing and which module owns it — the
@@ -239,7 +243,9 @@ func main() {
 	// answering the pending row. A feed item is not answerable, so it would
 	// need a read/unread flag — the second source of truth that module was
 	// built to avoid.
-	feedHandler := feed.NewHandler(feed.NewPostgresRepository(pool, friendRepo))
+	// photoStore, again — N205: a feed row can now carry the owner's avatar,
+	// presigned the same way friend.Handler.present does theirs.
+	feedHandler := feed.NewHandler(feed.NewPostgresRepository(pool, friendRepo), photoStore)
 
 	notificationHandler := notification.NewHandler(notification.NewCounts(notification.Registry{
 		"friend_requests": friendRepo,

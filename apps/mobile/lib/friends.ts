@@ -15,6 +15,12 @@ import type { TokenGetter } from './useAuthToken';
 export type FriendCard = {
   username: string;
   display_name: string | null;
+  /**
+   * A short-lived presigned URL to this person's uploaded avatar (N205).
+   * Absent — never null — when they have no avatar; `Avatar` falls back to
+   * the monogram on its own, so a screen just passes this straight through.
+   */
+  avatar_url?: string;
   /** Accepted-at for friends; requested-at for pending rows. */
   since: string;
 };
@@ -27,6 +33,7 @@ export type FriendRequests = {
 export type PublicProfile = {
   username: string;
   display_name: string | null;
+  avatar_url?: string;
 };
 
 /** Exact-match handle lookup — the search half of this screen. */

@@ -11,7 +11,7 @@
  * change keys the chime off the action name or moves it into `act` itself,
  * the removal tests below go red.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import FriendsScreen from '../friends/index';
 
@@ -40,10 +40,11 @@ jest.mock('@/lib/friends', () => ({
   lookupUser: (...a: unknown[]) => mockLookupUser(...a),
 }));
 
-const card = (username: string) => ({
+const card = (username: string, over: Record<string, unknown> = {}) => ({
   username,
   display_name: null,
   since: '2026-08-01T00:00:00Z',
+  ...over,
 });
 
 beforeEach(() => {
@@ -98,4 +99,79 @@ it('confirms SENDING a friend request', async () => {
 
   await waitFor(() => expect(mockSendFriendRequest).toHaveBeenCalled());
   expect(mockPlay).toHaveBeenCalledWith('success');
+});
+
+/**
+ * N205: this screen must render the REAL Avatar component for each row —
+ * friends, incoming requests, and outgoing requests all share `FriendCard` —
+ * not a monogram computed inline. `Avatar`'s own testIDs (`avatar-photo` /
+ * `avatar-monogram`, pinned in `components/__tests__/Avatar.test.tsx`) are
+ * the evidence: a hand-rolled disc would not produce either one.
+ */
+describe('avatars (N205)', () => {
+  it('renders the uploaded avatar for a friend who has one', async () => {
+    mockListFriends.mockResolvedValue([card('gina', { avatar_url: 'https://example.test/gina.jpg' })]);
+
+    render(<FriendsScreen />);
+
+    const row = await screen.findByTestId('friends-row-gina');
+    expect(within(row).getByTestId('avatar-photo')).toBeTruthy();
+    expect(within(row).queryByTestId('avatar-monogram', { includeHiddenElements: true })).toBeNull();
+  });
+
+  it('falls back to the monogram for a friend with no avatar', async () => {
+    mockListFriends.mockResolvedValue([card('hank')]);
+
+    render(<FriendsScreen />);
+
+    const row = await screen.findByTestId('friends-row-hank');
+    expect(within(row).getByTestId('avatar-monogram', { includeHiddenElements: true })).toBeTruthy();
+    expect(within(row).queryByTestId('avatar-photo')).toBeNull();
+  });
+
+  it('renders avatars on incoming and outgoing request rows too', async () => {
+    mockListRequests.mockResolvedValue({
+      incoming: [card('rhonda', { avatar_url: 'https://example.test/rhonda.jpg' })],
+      outgoing: [card('sam')],
+    });
+
+    render(<FriendsScreen />);
+
+    const incoming = await screen.findByTestId('friends-incoming-rhonda');
+    expect(within(incoming).getByTestId('avatar-photo')).toBeTruthy();
+
+    const outgoing = await screen.findByTestId('friends-outgoing-sam');
+    expect(within(outgoing).getByTestId('avatar-monogram', { includeHiddenElements: true })).toBeTruthy();
+  });
+
+  // The fourth wiring site: the search-result card is fed by `PublicProfile`
+  // (lookupUser), not `FriendCard` — a different type sharing the same
+  // `avatar_url` field, so this is not redundant with the three tests above.
+  it('renders the real avatar on the search-result card too', async () => {
+    mockLookupUser.mockResolvedValue({
+      username: 'kai',
+      display_name: null,
+      avatar_url: 'https://example.test/kai.jpg',
+    });
+
+    render(<FriendsScreen />);
+    fireEvent.changeText(await screen.findByTestId('friends-search'), 'kai');
+    fireEvent.press(screen.getByTestId('friends-search-go'));
+
+    const result = await screen.findByTestId('friends-result');
+    expect(within(result).getByTestId('avatar-photo')).toBeTruthy();
+    expect(within(result).queryByTestId('avatar-monogram', { includeHiddenElements: true })).toBeNull();
+  });
+
+  it('falls back to the monogram on the search-result card for someone with no avatar', async () => {
+    mockLookupUser.mockResolvedValue({ username: 'leo', display_name: null });
+
+    render(<FriendsScreen />);
+    fireEvent.changeText(await screen.findByTestId('friends-search'), 'leo');
+    fireEvent.press(screen.getByTestId('friends-search-go'));
+
+    const result = await screen.findByTestId('friends-result');
+    expect(within(result).getByTestId('avatar-monogram', { includeHiddenElements: true })).toBeTruthy();
+    expect(within(result).queryByTestId('avatar-photo')).toBeNull();
+  });
 });

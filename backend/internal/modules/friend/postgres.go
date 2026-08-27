@@ -2,6 +2,8 @@ package friend
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -9,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// avatarKey mirrors profile.AvatarKey BYTE FOR BYTE — same input, same
+// output — because it must resolve to the exact storage object an athlete's
+// own profile.Handler.present presigns for them. Duplicated rather than
+// imported: this codebase's modules do not import a sibling module (see
+// profile.ValidActivityLevel's doc comment for the same call, made before, and
+// feed.Detail's for the same call made about a wire shape rather than a
+// function) — `TestAvatarKeyMatchesProfilesAvatarKey` in this package's test
+// file is where the "no cross-module import" rule bends, exactly as
+// `TestDetailMatchesTheCardsWireShape` already does in `feed`, and it pins
+// this copy against `profile.AvatarKey` directly so the two cannot drift
+// silently.
+//
+// Hashed, never the raw user id — see profile.AvatarKey's doc comment for why
+// that is load-bearing rather than cosmetic: a presigned URL's signature
+// covers its full path, so whatever this returns is what every friend who can
+// see a Card's AvatarURL receives.
+func avatarKey(userID string) string {
+	sum := sha256.Sum256([]byte(userID))
+	return "avatars/" + hex.EncodeToString(sum[:]) + ".jpg"
+}
 
 type PostgresRepository struct {
 	pool *pgxpool.Pool
@@ -123,11 +146,26 @@ func (r *PostgresRepository) Remove(ctx context.Context, callerID, username stri
 // username tiebreak is part of the same argument: a bare timestamp DESC can
 // tie, and ties reorder between queries, which wobbles the ETag of a body
 // nobody changed.
+// p.user_id is selected ONLY to build the hashed AvatarKey below — it is
+// never assigned to a Card field directly, and setCardAvatar discards it the
+// moment the key exists. Same discipline profile.GetByUsername documents at
+// its own equivalent line.
 const cardSelect = `
-	SELECT p.username, p.display_name, %s
+	SELECT p.user_id, p.username, p.display_name, p.has_avatar, %s
 	FROM friendships f
 	JOIN profiles p ON p.user_id = CASE WHEN f.user_a = $1 THEN f.user_b ELSE f.user_a END
 	WHERE (f.user_a = $1 OR f.user_b = $1)`
+
+// setCardAvatar fills in c's AvatarKey from a raw user id, iff hasAvatar —
+// the same has_avatar-gated construction profile.GetByUsername uses, so a
+// no-avatar row never presigns a URL for an object that was never written.
+func setCardAvatar(c *Card, userID string, hasAvatar bool) {
+	if !hasAvatar {
+		return
+	}
+	key := avatarKey(userID)
+	c.AvatarKey = &key
+}
 
 func (r *PostgresRepository) Friends(ctx context.Context, callerID string) ([]Card, error) {
 	rows, err := r.pool.Query(ctx,
@@ -156,10 +194,13 @@ func (r *PostgresRepository) Pending(ctx context.Context, callerID string) (Requ
 	defer rows.Close()
 	for rows.Next() {
 		var c Card
+		var userID string
+		var hasAvatar bool
 		var requestedBy string
-		if err := rows.Scan(&c.Username, &c.DisplayName, &c.Since, &requestedBy); err != nil {
+		if err := rows.Scan(&userID, &c.Username, &c.DisplayName, &hasAvatar, &c.Since, &requestedBy); err != nil {
 			return out, translate(err, "pending scan")
 		}
+		setCardAvatar(&c, userID, hasAvatar)
 		if requestedBy == callerID {
 			out.Outgoing = append(out.Outgoing, c)
 		} else {
@@ -174,9 +215,12 @@ func scanCards(rows pgx.Rows) ([]Card, error) {
 	out := []Card{}
 	for rows.Next() {
 		var c Card
-		if err := rows.Scan(&c.Username, &c.DisplayName, &c.Since); err != nil {
+		var userID string
+		var hasAvatar bool
+		if err := rows.Scan(&userID, &c.Username, &c.DisplayName, &hasAvatar, &c.Since); err != nil {
 			return nil, translate(err, "scan")
 		}
+		setCardAvatar(&c, userID, hasAvatar)
 		out = append(out, c)
 	}
 	return out, rows.Err()

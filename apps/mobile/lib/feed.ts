@@ -32,6 +32,12 @@ export type FeedItem = {
   /** The owner's handle, resolved live, so a rename propagates. */
   from: string;
   display_name: string | null;
+  /**
+   * A short-lived presigned URL to the owner's uploaded avatar (N205).
+   * Absent — never null — when they have no avatar; `Avatar` falls back to
+   * the monogram on its own, so `FeedRow` just passes this straight through.
+   */
+  avatar_url?: string;
   sport: string;
   name: string;
   started_at: string;

@@ -43831,6 +43831,99 @@ had cited 186/2966, the pre-rebase counts.
   giving Swap/Remove their own icon-only compact row — but that would be a
   second pass with its own device evidence, not folded in here.
 
+### 2026-08-26 — N205: uploaded avatars now reach the friends list and the feed (#652, closing #378)
+
+N12 built avatar upload/replace/remove, the monogram fallback, server-side
+resize and the admin takedown, but deliberately left the friends list and the
+social feed showing text-only rows / the derived monogram — recorded in N12's
+own "What is not done" section above as a real, separable next step. This is
+that step: `friend.Card` and `feed.Item` now carry `avatar_url` the same way
+`profile.PublicProfile` already does, and both mobile screens render the real
+`Avatar` component instead of a hand-rolled monogram disc.
+
+**The backend change mirrors N12's mechanism exactly, and does not reinvent
+it.** Both `friend.Card` and `feed.Item` gained a `json:"-"` `AvatarKey
+*string` field (nil when the person has no avatar) and an `AvatarURL string
+`json:"avatar_url,omitempty"`` field. `cardSelect` (friend) and `pageQuery`
+(feed) now also select `p.user_id` and `p.has_avatar` — `user_id` ONLY to
+build the hashed key, never assigned to a struct field, discarded the moment
+the key exists, exactly as `profile.GetByUsername` already documents at its
+own equivalent line. `friend.Handler` and `feed.Handler` each gained a
+`store *objectstore.Store` (nil-safe, same supported "no bucket configured"
+state as `profile.Handler`) and a `present` method that mints a presigned
+`AvatarURL` per row, mirroring `profile.Handler.presentPublic` down to its
+failure mode — a presign failure is logged, never turned into a request
+failure, so a friends list or feed page cannot 500 over one signature.
+
+**The hash function itself is duplicated, not imported — deliberately, and
+pinned rather than merely asserted.** `profile.AvatarKey`'s doc comment is
+explicit about why the key is `sha256(user_id)` rather than the raw id: a
+presigned URL's signature covers its full path, so whatever the key function
+returns is what every viewer of `avatar_url` receives, including a friend
+reading this card or this feed row. This codebase's modules do not import a
+sibling (`profile.ValidActivityLevel`'s doc comment states the same rule for
+a validation list; `feed.Detail`'s states it for a wire shape), so `friend`
+and `feed` each carry their own byte-for-byte copy of the hash rather than
+importing `profile` for one function. The one exception both packages take —
+same one `feed_test.go` already took for `Detail` against `sessioncard.Detail`
+— is in the TEST file: `TestAvatarKeyMatchesProfilesAvatarKey` in both
+`friend` and `feed` imports `profile` and asserts the local copy equals
+`profile.AvatarKey` output for the same input, so the two cannot drift
+silently. Mutation-verified in both packages: broke the local hash (wrong
+prefix, and separately, the raw id spliced into the key) and confirmed only
+that comparison test went red; restored, confirmed green by re-running.
+
+**has-avatar / no-avatar is its own guard, tested and mutated separately from
+the hash.** `setCardAvatar` (friend) and the scan loop's `if hasAvatar`
+branch (feed) are what stop a no-avatar row from presigning a URL for an
+object that was never written. New Postgres tests cover both list endpoints
+in both states: `TestFriendsCardsCarryAvatarKeyOnlyWhenHasAvatar` and
+`TestPendingCardsCarryAvatarKeyOnlyWhenHasAvatar` (both halves of the pending
+inbox, not just one — they share `cardSelect`, so both are pinned rather than
+assuming one covers the other) for `friend`;
+`TestTheRowCarriesAnAvatarKeyOnlyWhenTheOwnerHasOne` and
+`TestTheRowCarriesNoAvatarKeyWhenTheOwnerHasNone` for `feed`. Mutation-verified:
+dropped the has-avatar gate in each package (every card/row gets a key
+unconditionally) and confirmed the no-avatar-side assertions went red;
+restored, confirmed green. All existing `friend` and `feed` Postgres tests
+still pass unmodified.
+
+**Mobile**: `apps/mobile/app/friends/index.tsx` renders `<Avatar url={...}
+handle={...} />` ahead of every card body — the search result, incoming
+requests, outgoing requests, and the friends list itself, all four sharing
+`FriendCard`/`PublicProfile`'s new `avatar_url` field. `apps/mobile/app/social
+/index.tsx`'s `FeedRow` had its own inline monogram disc (`monogramFor(item
+.from)`, `styles.avatar`/`styles.avatarText`) replaced outright with `<Avatar
+url={item.avatar_url} handle={item.from} size={38} />` — the dead styles were
+removed rather than left orphaned. Neither screen reimplements the
+photo-fails-to-load fallback; that stays entirely inside `Avatar` (N12's own
+`onError` handling), which is the point of routing through the shared
+component instead of each screen growing its own `url ? photo : monogram`
+check. New tests in `friendsScreen.test.tsx` and `socialScreen.test.tsx`
+assert `avatar-photo` renders for a has-avatar row and `avatar-monogram` for a
+no-avatar row, scoped per-row with `within()` since both testIDs repeat across
+a list. Mutation-verified: hardcoded `url={null}` at each call site in turn,
+confirmed the corresponding has-avatar test went red, restored, confirmed
+green.
+
+`apps/mobile/lib/friends.ts`'s `FriendCard` and `PublicProfile`, and
+`apps/mobile/lib/feed.ts`'s `FeedItem`, all gained an optional `avatar_url`
+field — absent, never null, matching the wire's `omitempty`.
+`contracts/public.openapi.yaml`'s `FriendCard` and `FeedItem` schemas gained
+the same `avatar_url` property N12 gave `PublicProfile`, word for word.
+
+**No migration.** `has_avatar` already exists on `profiles` — N12 added it —
+so both modules only needed to select and join a column that was already
+there.
+
+**Closes #378 alongside #652.** #378 (N12) was left open specifically because
+ac-verifier flagged this gap during N12's own review — its stated motivation
+and steps-to-test step 1 ("confirm both appear for a friend") assumed exactly
+this wiring, which N12's acceptance criteria did not literally require. This
+PR closes both: #652 is the ticket for this work, #378 is the ticket whose
+remaining gap it fills.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

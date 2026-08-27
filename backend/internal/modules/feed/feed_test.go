@@ -3,6 +3,8 @@ package feed
 import (
 	"testing"
 	"time"
+
+	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
 )
 
 // FeedWindowDays is what N13's "configurable in one place" claim actually
@@ -32,5 +34,20 @@ func TestFeedWindowIsAWholeNumberOfDays(t *testing.T) {
 	if FeedWindow%(24*time.Hour) != 0 {
 		t.Fatalf("FeedWindow (%v) is not a whole number of days — FeedWindowDays() "+
 			"would silently floor it rather than report the true window", FeedWindow)
+	}
+}
+
+// TestAvatarKeyMatchesProfilesAvatarKey pins this package's own avatarKey
+// (postgres.go) against profile.AvatarKey directly. It is one of the few
+// places this package is allowed to import a sibling module — see
+// avatarKey's own doc comment for the argument, which is the same one this
+// file's `Detail` already relies on against `sessioncard.Detail` in
+// postgres_test.go. Without this, the two hash functions could drift and a
+// feed row would silently presign the wrong object.
+func TestAvatarKeyMatchesProfilesAvatarKey(t *testing.T) {
+	for _, id := range []string{"a_user", "fd_alice", "some-other-id-42", ""} {
+		if got, want := avatarKey(id), profile.AvatarKey(id); got != want {
+			t.Errorf("avatarKey(%q) = %q, want %q (profile.AvatarKey)", id, got, want)
+		}
 	}
 }

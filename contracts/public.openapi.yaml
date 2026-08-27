@@ -1734,6 +1734,14 @@ components:
         display_name:
           type: string
           nullable: true
+        avatar_url:
+          type: string
+          description: >
+            A short-lived presigned URL to the owner's uploaded avatar —
+            already resized server-side, never the original (N205, mirroring
+            PublicProfile.avatar_url exactly). Omitted (absent from the
+            response body, not null) when the owner has no avatar; the
+            monogram is the fallback in every client.
         sport:
           type: string
         name:
@@ -1914,13 +1922,21 @@ components:
     FriendCard:
       type: object
       description: >
-        One person as the social lists show them — the same two public fields
-        as PublicProfile plus the relationship timestamp. Never a user id:
-        the social API addresses everyone by handle, in both directions.
+        One person as the social lists show them — the same public fields as
+        PublicProfile plus the relationship timestamp. Never a user id: the
+        social API addresses everyone by handle, in both directions.
       required: [username, display_name, since]
       properties:
         username: { type: string }
         display_name: { type: string, nullable: true }
+        avatar_url:
+          type: string
+          description: >
+            A short-lived presigned URL to this person's uploaded avatar —
+            already resized server-side, never the original (N205, mirroring
+            PublicProfile.avatar_url exactly). Omitted (absent from the
+            response body, not null) when they have no avatar; the monogram
+            is the fallback in every client.
         since:
           type: string
           format: date-time
