@@ -209,10 +209,25 @@ export type LoggedSet = {
    * read. So the value a client holds is always catalog-derived — but that
    * rests on the server continuing to ignore it, which is why the contract
    * marks it response-only rather than leaving it to this comment.
-   * Absent (older responses, or a set logged offline before sync) means 1, so
-   * `totalWeightKg` treats undefined as 1 rather than as zero.
+   *
+   * THREE STATES, and collapsing any two of them is the bug (#425):
+   *
+   *  - a NUMBER is a known factor — from the server, or looked up locally
+   *    from the exercise catalog after an offline swap (see `swapExercise`).
+   *  - `undefined` is the LEGACY default: an older response, or any set
+   *    logged before the server started sending a factor at all. Reads as
+   *    1 — under-reporting a dumbbell set is a smaller lie than erasing its
+   *    volume, and this is the one case where that guess is the best
+   *    available answer, because nothing on the device could ever resolve it.
+   *  - `null` is EXPLICITLY UNRESOLVED — an offline swap whose new exercise's
+   *    `implements` was not in the local catalog (a pre-payload cache row).
+   *    Unlike `undefined`, resolving this IS possible, imminently, on the
+   *    next sync — so guessing 1 here would be the exact "reports half its
+   *    eventual tonnage" defect #425 was filed for. `totalWeightKg`
+   *    returns `null` rather than a number, and a caller must not display a
+   *    tonnage it computed from one.
    */
-  load_factor?: number;
+  load_factor?: number | null;
 
   /**
    * How the implement was held. `undefined`/null is UNRECORDED, and that is
@@ -669,13 +684,33 @@ export function swapExercise(
           // Invisible and unclearable is the same shape as the sync wedge
           // above, minus the 400 that would at least announce it.
           grip: null,
-          // CLEARED, always — a factor describes the exercise, so it cannot
-          // survive becoming a different one. Swapping dumbbells for a barbell
-          // kept the ×2 and counted the barbell double; and because the pull
-          // skips dirty rows, that fabricated number survives a whole offline
-          // session, one tab from the Today header. Undefined reads as 1 until
-          // the server answers, which is the safe direction.
-          load_factor: undefined,
+          // LOOKED UP, never carried over — a factor describes the exercise,
+          // so the OLD one cannot survive becoming a different movement.
+          // Swapping dumbbells for a barbell used to keep the ×2 and count
+          // the barbell double; and because the pull skips dirty rows, that
+          // fabricated number survived a whole offline session, one tab from
+          // the Today header.
+          //
+          // `to.implements` is what fixes it (#425): the picker's `Exercise`
+          // — whether freshly fetched or read back from `cachedExercises`,
+          // which round-trips the server's whole payload — carries the NEW
+          // exercise's own factor, so a swap performed with zero signal still
+          // lands on the right tonnage the moment a weight is typed. That
+          // covers the ordinary case, because `implements` has been on every
+          // catalog response since migration 000057, long before this field
+          // existed on the TS type.
+          //
+          // `?? null`, not `?? 1` or `?? undefined`, for the residual case
+          // where it genuinely is not there — a cache row from before
+          // `payload_json` existed, hitting `cachedExercises`'s reconstructed
+          // fallback, which has no `implements` to hand back. Defaulting to 1
+          // there is exactly the bug this fixes, just with extra steps: a
+          // silent guess that is right for a barbell and wrong, by half, for
+          // a swapped-in pair of dumbbells. `null` is the honest answer —
+          // "not yet known" — and `totalWeightKg`/`describeSet` read it as
+          // exactly that, showing no tonnage rather than a wrong one until
+          // the next sync corrects it from the server.
+          load_factor: to.implements ?? null,
           reps: sameShape ? s.reps : null,
           weight_kg: sameShape ? s.weight_kg : null,
           seconds: sameShape ? s.seconds : null,
@@ -795,9 +830,17 @@ export function describeSet(
   // Derived from the total rather than from `load_factor == 2`, so a factor
   // this code has never seen still annotates, and 1 / 0 / undefined — which
   // `totalWeightKg` already flattens to "times one" — say nothing at all.
+  //
+  // `total == null` (the EXPLICITLY-UNRESOLVED state, #425) falls into the
+  // same "say nothing" branch as "times one" — `null !== s.weight_kg` is
+  // true, so the guard below needs its own null check rather than relying on
+  // that comparison. Silence is correct either way: an athlete reading plain
+  // `30kg` cannot tell "this is the whole story" from "the total is not
+  // known yet", but neither claims a total this row does not have, which is
+  // what "absent beats wrong" means here.
   const total = totalWeightKg(s);
   const shown =
-    s.weight_kg != null && total !== s.weight_kg
+    s.weight_kg != null && total != null && total !== s.weight_kg
       ? `${w} (${formatWeight(total, units)} total)`
       : w;
   if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${shown}`);
@@ -1127,12 +1170,23 @@ export function reorderGroups(
  * Undefined and zero both mean one. Every set logged before the server started
  * sending a factor has none, and reading that as zero would erase their volume
  * rather than merely under-reporting the dumbbell ones.
+ *
+ * **`null` returns `null`, not a guessed number (#425).** That is the
+ * EXPLICITLY-UNRESOLVED state `LoggedSet.load_factor`'s doc describes — an
+ * offline exercise swap whose new exercise's factor could not be found in the
+ * local catalog. `undefined` and `0` both fail toward under-reporting, which
+ * is the right default when nothing will ever tell the client more. `null` is
+ * different: the true factor is knowable, imminently, on the next sync — so
+ * guessing here is not a safe fallback, it is the "reports half its eventual
+ * tonnage" bug itself. A caller receiving `null` must not display a number it
+ * computed from this — see `describeSet` and `localVolume`.
  */
 export function totalWeightKg(set: {
   weight_kg: number | null;
-  load_factor?: number;
-}): number {
+  load_factor?: number | null;
+}): number | null {
   if (set.weight_kg == null) return 0;
+  if (set.load_factor === null) return null;
   const factor = set.load_factor && set.load_factor > 1 ? set.load_factor : 1;
   return set.weight_kg * factor;
 }
@@ -1429,8 +1483,44 @@ export function localVolume(sets: LoggedSet[]): Volume {
       // the finish-card sat next to a Today header and a calendar that had all
       // been converted, so one session read half on one screen and double on
       // another. Same phone, same session.
-      if (s.weight_kg != null) v.tonnage_kg += s.reps * totalWeightKg(s);
+      //
+      // `total == null` is the EXPLICITLY-UNRESOLVED state (#425) — an
+      // offline swap whose factor could not be looked up. Its contribution is
+      // left OUT of the sum rather than guessed, which under-counts this
+      // number by exactly that set's tonnage until sync resolves it. That is
+      // deliberate: `hasUnresolvedLoad` below is what tells a caller the
+      // total itself is not trustworthy yet, so it can withhold the whole
+      // figure rather than show a number that is merely a little short. See
+      // its own doc for why the two functions divide the work this way
+      // instead of `Volume.tonnage_kg` itself carrying the unknown.
+      if (s.weight_kg != null) {
+        const total = totalWeightKg(s);
+        if (total != null) v.tonnage_kg += s.reps * total;
+      }
     }
   }
   return v;
+}
+
+/**
+ * True when any set `localVolume` would count carries an EXPLICITLY
+ * UNRESOLVED `load_factor` (`null`) — an offline exercise swap whose new
+ * exercise's `implements` was not in the local catalog.
+ *
+ * A caller checks this BEFORE trusting `localVolume(sets).tonnage_kg`.
+ * `Volume` itself stays a plain `number` — it mirrors the server's response
+ * shape (`session.Volume` on the wire), and a nullable field there would leak
+ * this mobile-only, offline-swap-specific state into a type synced sessions
+ * decode into too. Splitting the two is what lets `localVolume` under-count
+ * by the unresolved set's own tonnage (see its comment) while this function
+ * gives the session screen what it needs to show "—" instead of that
+ * under-count — which is the "absent beats wrong" rule #425 asks for, applied
+ * to the one number an athlete actually reads after a swap.
+ */
+export function hasUnresolvedLoad(
+  sets: Pick<LoggedSet, 'completed' | 'set_type' | 'weight_kg' | 'load_factor'>[],
+): boolean {
+  return sets.some(
+    (s) => contributesVolume(s) && s.weight_kg != null && s.load_factor === null,
+  );
 }

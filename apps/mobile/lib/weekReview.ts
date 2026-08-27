@@ -84,7 +84,21 @@ function accumulate(sessions: Session[]): { totals: WeekTotals; bySport: SportTo
     let sessionVolume = 0;
     for (const set of s.sets) {
       if (contributesVolume(set) && set.weight_kg != null && set.reps != null) {
-        sessionVolume += totalWeightKg(set) * set.reps;
+        // `null` is the EXPLICITLY-UNRESOLVED state (#425) — an offline swap
+        // whose factor was not in the local catalog yet. Left out of THIS
+        // sum rather than guessed, so a week's total under-counts by one
+        // set's own tonnage until it syncs, then corrects.
+        //
+        // A DELIBERATE DEPARTURE from the session screen's own Volume tile,
+        // which withholds the WHOLE figure instead — see
+        // `TrainingCalendar.tsx`'s `sessionVolume` for the full reasoning,
+        // which this mirrors: the session tile is the number read moments
+        // after the swap that caused it, worth withholding entirely; a
+        // week's aggregate spans several sessions, and blanking all of it
+        // over one unresolved set in one of them would hide more real
+        // information than the under-count costs.
+        const total = totalWeightKg(set);
+        if (total != null) sessionVolume += total * set.reps;
       }
     }
     seconds += sessionSeconds;

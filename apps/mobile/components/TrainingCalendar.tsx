@@ -63,7 +63,27 @@ function sessionVolume(s: Session): number {
   let kg = 0;
   for (const set of s.sets) {
     if (contributesVolume(set) && set.weight_kg != null && set.reps != null) {
-      kg += totalWeightKg(set) * set.reps;
+      // `null` is the EXPLICITLY-UNRESOLVED state (#425) — an offline swap
+      // whose factor was not in the local catalog yet. Left out of THIS sum
+      // rather than guessed, so a month tile under-counts by one set's own
+      // tonnage until it syncs, then corrects.
+      //
+      // A DELIBERATE DEPARTURE from the session screen's own Volume tile,
+      // which withholds the WHOLE figure rather than show any number derived
+      // from an unresolved set — recorded here because a future reader
+      // finding two different answers to "what does #425 do" should find the
+      // reasoning, not just the asymmetry. The session tile is the number an
+      // athlete reads moments after making the swap, on the same screen that
+      // caused it — the exact "reports half its eventual tonnage" case the
+      // ticket is about, and worth withholding entirely rather than showing
+      // wrong. A month's aggregate is a dozen-plus sessions read together;
+      // blanking the whole month because ONE session has one unresolved set
+      // would hide far more real, correct information than the one set's own
+      // under-count costs — a worse trade in the other direction. Both
+      // choices satisfy "absent beats wrong" for the number each screen is
+      // actually answering; they are not the same number.
+      const total = totalWeightKg(set);
+      if (total != null) kg += total * set.reps;
     }
   }
   return kg;

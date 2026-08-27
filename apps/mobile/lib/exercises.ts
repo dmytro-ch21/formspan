@@ -60,6 +60,29 @@ export type Exercise = {
    * rather than as `total`.
    */
   load_mode?: 'total' | 'per_side';
+  /**
+   * How many implements of `weight_kg` move in one rep — the tonnage factor.
+   * 1 for a barbell or a single dumbbell, 2 for a pair.
+   *
+   * Mirrors `apps/web/src/lib/api.ts`'s `Exercise.implements` field for field
+   * for field, and exists here for the same reason `swapExercise` needs it:
+   * an offline exercise swap has only the local catalog to consult, and this
+   * is the one place that catalog carries the new exercise's real factor.
+   * `exercise_cache.payload_json` stores the whole API object verbatim, so
+   * this is already ON DISK for any exercise fetched since `implements`
+   * existed on the wire (migration 000057, long before this field was typed
+   * here) — declaring it costs nothing new offline, it only lets the client
+   * read what the server already sent.
+   *
+   * Optional because a row cached before this field was DECLARED (not
+   * before the server sent it) has no typed access to it, and the pre-v10
+   * reconstruction fallback in `cachedExercises` genuinely has no value to
+   * put here. Absent must read as UNKNOWN, not as 1 — see `swapExercise` and
+   * the `load_factor` sentinel on `LoggedSet`. Guessing 1 here is exactly the
+   * "reports half its eventual tonnage" bug (#425): the wrong default is
+   * silent and only self-corrects on the next sync.
+   */
+  implements?: number;
   is_unilateral: boolean;
   instructions: string;
   /**

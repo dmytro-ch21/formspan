@@ -1,5 +1,12 @@
 import type { Exercise } from '../exercises';
-import { describeSet, swapExercise, totalWeightKg, type LoggedSet } from '../sessions';
+import {
+  describeSet,
+  hasUnresolvedLoad,
+  localVolume,
+  swapExercise,
+  totalWeightKg,
+  type LoggedSet,
+} from '../sessions';
 
 /**
  * `weight_kg` is what is stamped on the implement, because that is what an
@@ -30,6 +37,23 @@ describe('what was actually moved', () => {
     // A bodyweight or timed set. Zero here is the truth, not a fallback.
     expect(totalWeightKg({ weight_kg: null, load_factor: 2 })).toBe(0);
   });
+
+  it('returns null rather than a guess when the factor is EXPLICITLY unresolved (#425)', () => {
+    // `null` is not the same absence as `undefined`/`0` above — see the field's
+    // own doc on `LoggedSet.load_factor`. An offline swap that could not look
+    // up the new exercise's factor sets this, and the whole point is that
+    // `totalWeightKg` must not paper over it with 1: the true factor is
+    // knowable, imminently, on the next sync, so guessing here is exactly the
+    // "reports half its eventual tonnage" bug rather than a safe fallback.
+    expect(totalWeightKg({ weight_kg: 30, load_factor: null })).toBeNull();
+  });
+
+  it('is still zero, not null, when there is no weight — the factor cannot matter', () => {
+    // `weight_kg == null` is checked first, so an unresolved factor on a
+    // bodyweight/timed set (which should never happen, but costs nothing to
+    // guard) does not turn an honest zero into a suppressed unknown.
+    expect(totalWeightKg({ weight_kg: null, load_factor: null })).toBe(0);
+  });
 });
 
 const set = (over: Partial<LoggedSet> = {}): LoggedSet => ({
@@ -48,22 +72,44 @@ const set = (over: Partial<LoggedSet> = {}): LoggedSet => ({
   ...over,
 });
 
-const barbell = { id: 'bench-press', load_type: 'weight_reps' } as Exercise;
+const barbell = { id: 'bench-press', load_type: 'weight_reps', implements: 1 } as Exercise;
+const inclineDumbbell = {
+  id: 'incline-dumbbell-press',
+  load_type: 'weight_reps',
+  implements: 2,
+} as Exercise;
+// A cache row from before `implements` was DECLARED on the TS type — the
+// residual case `swapExercise` cannot resolve locally. See the field's own
+// doc on `Exercise.implements` and `cachedExercises`'s pre-v10 fallback.
+const undeclaredFactor = { id: 'cable-fly', load_type: 'weight_reps' } as Exercise;
 
-describe('swapping an exercise', () => {
-  it('does not carry the old exercise’s factor onto the new one', () => {
+describe('swapping an exercise (#425 — an offline swap must not reset the factor to a guess)', () => {
+  it('looks up the new exercise’s own factor rather than carrying the old one forward', () => {
     // A factor describes the MOVEMENT, so it cannot survive becoming a
-    // different one. Swapping a pair of dumbbells for a barbell kept the ×2
-    // and counted the barbell double — a number this feature invents, not one
-    // it fails to correct.
+    // different one. Swapping a pair of dumbbells for a barbell used to keep
+    // the ×2 and count the barbell double — a number this feature invented,
+    // not one it failed to correct.
     //
-    // It does not self-heal offline either: the pull skips dirty rows, so the
-    // doubled figure survives the whole session, one tab from the Today header.
+    // It did not self-heal offline either: the pull skips dirty rows, so the
+    // doubled figure survived the whole session, one tab from the Today
+    // header. The fix is not "clear it and hope" — `barbell.implements` is
+    // right there in the picker's own `Exercise`, offline included (see
+    // `cacheExercises`), so the correct factor is available immediately.
     const [swapped] = swapExercise([set()], 'dumbbell-bench-press', barbell, 'weight_reps');
     expect(swapped.exercise_id).toBe('bench-press');
-    expect(swapped.load_factor).toBeUndefined();
+    expect(swapped.load_factor).toBe(1);
     // And the number that actually reaches a volume sum is the honest one.
     expect(totalWeightKg(swapped)).toBe(30);
+  });
+
+  it('carries the new factor correctly for a dumbbell-to-dumbbell swap too, not just down to one', () => {
+    // The bug this replaces was not "always resets to 1" — it was "always
+    // resets to whatever undefined happens to mean", which is 1 today. A fix
+    // that only handled the ×2-to-×1 direction would still guess wrong the
+    // moment somebody swapped one pair of dumbbells for another.
+    const [swapped] = swapExercise([set()], 'dumbbell-bench-press', inclineDumbbell, 'weight_reps');
+    expect(swapped.load_factor).toBe(2);
+    expect(totalWeightKg(swapped)).toBe(60);
   });
 
   it('keeps the weight when the shape matches, which is why the factor had to go', () => {
@@ -72,6 +118,18 @@ describe('swapping an exercise', () => {
     // factor reachable — so this pins both halves together.
     const [swapped] = swapExercise([set()], 'dumbbell-bench-press', barbell, 'weight_reps');
     expect(swapped.weight_kg).toBe(30);
+  });
+
+  it('sets the factor to EXPLICITLY UNRESOLVED, never to a guessed 1, when the catalog has no answer', () => {
+    // The residual case: a cache row from before `implements` was declared on
+    // this type. Reading it as `undefined` (⇒ 1) here would be the exact
+    // "reports half its eventual tonnage" bug #425 was filed for — the
+    // athlete just swapped exercises with intent, on this screen, right now,
+    // which is a sharper case than an old row nobody is currently reading.
+    const [swapped] = swapExercise([set()], 'dumbbell-bench-press', undeclaredFactor, 'weight_reps');
+    expect(swapped.load_factor).toBeNull();
+    // And it propagates: no number is better than a wrong one here.
+    expect(totalWeightKg(swapped)).toBeNull();
   });
 });
 
@@ -114,6 +172,16 @@ describe('saying so on the row', () => {
     expect(describeSet(set({ load_factor: 0 }), 'metric')).toBe('10 × 30kg');
   });
 
+  it('says nothing — not "(30kg total)", not a crash — when the factor is EXPLICITLY unresolved (#425)', () => {
+    // The offline-swap case: `totalWeightKg` returns `null` here, not a
+    // number, so the `total !== s.weight_kg` comparison this used to rely on
+    // (`null !== 30` is true) would have annotated a set with no known total
+    // at all — the exact "reports half its eventual tonnage" bug, just
+    // spelled differently. Plain `30kg` is the honest answer: it claims no
+    // total, rather than a wrong one.
+    expect(describeSet(set({ load_factor: null }), 'metric')).toBe('10 × 30kg');
+  });
+
   it('converts both numbers, not just the one that was typed', () => {
     // The trap in writing this by hand: format the entered weight through the
     // unit system and the total through neither, and an imperial athlete gets
@@ -146,5 +214,96 @@ describe('saying so on the row', () => {
     // not as a segment of its own, where it would read as another measure
     // alongside RIR.
     expect(describeSet(set({ rir: 2 }), 'metric')).toBe('10 × 30kg (60kg total) · 2 RIR');
+  });
+});
+
+/**
+ * `hasUnresolvedLoad` and `localVolume`'s own tonnage sum, together — the
+ * session screen's Volume tile checks the first before trusting the second
+ * (#425). Split from "saying so on the row" above because these are about the
+ * SESSION total, not one set's own line.
+ */
+describe('the session total, when one set in it is unresolved', () => {
+  it('flags a session containing an unresolved set', () => {
+    expect(hasUnresolvedLoad([set({ load_factor: null })])).toBe(true);
+  });
+
+  it('does not flag an ordinary session', () => {
+    expect(hasUnresolvedLoad([set(), set({ load_factor: 1, weight_kg: 100 })])).toBe(false);
+  });
+
+  it('does not confuse LEGACY-absent (`undefined`) with EXPLICITLY-unresolved (`null`)', () => {
+    // The distinction the whole `load_factor` design rests on. `undefined` is
+    // every set logged before the server sent a factor at all — ordinary,
+    // common, and not something a swap or a sync will ever resolve further.
+    // Treating it the same as `null` here would hide the Volume tile on
+    // countless untouched historical sessions, for no reason connected to
+    // #425 at all — a `===` weakened to `==` reproduces exactly this.
+    expect(hasUnresolvedLoad([set({ load_factor: undefined })])).toBe(false);
+  });
+
+  it('ignores an unresolved set that would not have contributed anyway', () => {
+    // A warm-up, or one never marked complete. Neither counts toward
+    // `localVolume`'s sum, so an unresolved factor on one is not a reason to
+    // hide a session's whole total.
+    expect(hasUnresolvedLoad([set({ load_factor: null, set_type: 'warmup' })])).toBe(false);
+    expect(hasUnresolvedLoad([set({ load_factor: null, completed: false })])).toBe(false);
+  });
+
+  it('ignores an unresolved factor on a set with no weight at all', () => {
+    // A bodyweight or timed set carries no tonnage regardless of its factor,
+    // so an unresolved one there is not a reason to hide the total either.
+    expect(hasUnresolvedLoad([set({ load_factor: null, weight_kg: null })])).toBe(false);
+  });
+
+  it('under-counts rather than guessing, in the sum itself', () => {
+    // `localVolume` leaves the unresolved set's tonnage OUT — it does not
+    // guess 1 (300kg) or throw. This number is exactly what a caller must
+    // NOT display without first checking `hasUnresolvedLoad`; the session
+    // screen's own guard is what turns this under-count into a withheld "—"
+    // rather than a silently wrong figure.
+    const sets = [set(), set({ load_factor: null, weight_kg: 50, exercise_id: 'cable-fly' })];
+    expect(hasUnresolvedLoad(sets)).toBe(true);
+    // 10 x 30kg x 2 from the resolved set; the unresolved one contributes 0.
+    expect(localVolume(sets).tonnage_kg).toBe(600);
+  });
+});
+
+/**
+ * `apps/web/src/lib/__tests__/loadFactor.test.ts` mirrors this file — same
+ * filename, same fixture shape (`exercise_id: 'dumbbell-bench-press'`,
+ * `weight_kg: 30`, `load_factor: 2`), same expected numbers — for the
+ * "the two surfaces agree" acceptance criterion on #425.
+ *
+ * **Said plainly, in the spirit of the backend's own
+ * `TestTheRuleIsSharedNotCopied`: this cannot import web's implementation.**
+ * `apps/mobile/lib/sessions.ts` imports `expo-crypto` at module scope for
+ * `randomUUID`, which has no resolution under web's Vitest environment, so a
+ * cross-app import fails before either function under test runs — the two
+ * apps share no package, and the mobile-first platform rule is exactly why
+ * mobile's copy has to keep working with zero signal. What this file and its
+ * web twin CAN do, and do, is assert byte-for-byte identical expectations
+ * against a fixture that is byte-for-byte identical by inspection — so a
+ * change to either formula that the other does not also get shows up as a
+ * failing assertion in ONE of the two files, on the next run of THIS repo's
+ * test suite, rather than as a silent drift only a shared runtime could catch.
+ * That is real protection with a real gap in it, not full parity, and this
+ * says so rather than letting the comment claim more than the mechanism does.
+ */
+describe('parity with apps/web (see the doc comment above)', () => {
+  it('agrees with web’s totalWeightKg on the canonical #425 fixture', () => {
+    // web: totalWeightKg({ weight_kg: 30, load_factor: 2 }) === 60
+    expect(totalWeightKg({ weight_kg: 30, load_factor: 2 })).toBe(60);
+  });
+
+  it('agrees with web’s sessionVolume on the same fixture summed over a whole session', () => {
+    // web: sessionVolume([set()]).tonnage_kg === 600  (10 reps x 30kg x 2)
+    expect(localVolume([set()]).tonnage_kg).toBe(600);
+  });
+
+  it('agrees with web’s describeSetWeight on the annotated string', () => {
+    // web: describeSetWeight({ weight_kg: 30, load_factor: 2 }, 'metric')
+    //        === '30kg (60kg total)'
+    expect(describeSet(set({ reps: null }), 'metric')).toBe('30kg (60kg total)');
   });
 });

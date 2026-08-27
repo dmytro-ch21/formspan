@@ -99,6 +99,7 @@ import {
   emptySet,
   setOrdinals,
   localVolume,
+  hasUnresolvedLoad,
   soloReps,
   withSetChange,
   fetchSuggestions,
@@ -1291,7 +1292,17 @@ export default function SessionScreen() {
                 icon="barbell"
                 tone={vola.green}
                 value={
-                  unitsReady && volume.tonnage_kg > 0
+                  // `hasUnresolvedLoad` is the "absent beats wrong" guard
+                  // (#425): an offline exercise swap this session made has a
+                  // set whose `load_factor` could not be resolved locally, so
+                  // `localVolume`'s own sum left that set's tonnage out
+                  // rather than guessing it — which means the number here is
+                  // a silent UNDER-count, not merely a stale one, and
+                  // displaying it would be the exact "reports half its
+                  // eventual tonnage" bug this exists to fix. Sync corrects
+                  // it; until then the tile says nothing rather than a
+                  // number that changes on its own with no explanation.
+                  unitsReady && volume.tonnage_kg > 0 && !hasUnresolvedLoad(sets)
                     ? formatVolume(volume.tonnage_kg, units)
                     : '—'
                 }

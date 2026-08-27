@@ -643,6 +643,19 @@ export function swapExercise(
           //     every write and has no control anywhere that can clear it.
           assisted_reps: null,
           grip: null,
+          // LOOKED UP, not carried over — `load_factor` describes the
+          // exercise, so the OLD one cannot survive becoming a different
+          // movement (#425). Web never had this line at all until now, which
+          // was worse than mobile's bug in the same family: mobile at least
+          // cleared the stale factor to a safe default, so a swap here could
+          // leave a barbell set carrying a dumbbell's ×2 and reading DOUBLE,
+          // silently, for as long as the row went unsaved.
+          //
+          // `to.implements` is always known here — unlike mobile's version of
+          // this line, web has no offline path, so `to` is always a live
+          // catalog fetch and `implements` is on every response (required in
+          // the OpenAPI schema). There is no "unresolved" state to guard.
+          load_factor: to.implements,
           reps: sameShape ? s.reps : null,
           weight_kg: sameShape ? s.weight_kg : null,
           seconds: sameShape ? s.seconds : null,
@@ -789,6 +802,90 @@ export function swapSuggestions(base: Exercise, all: Exercise[]): SwapSuggestion
 }
 
 /**
+ * What was actually moved, which is not always the number that was typed.
+ *
+ * `weight_kg` holds what is stamped on the implement — for a PAIR of
+ * dumbbells that is ONE of the two, so the total is double.
+ *
+ * Mirrors `apps/mobile/lib/sessions.ts`'s function of the same name field for
+ * field — `loadFactor.test.ts` in each app pins the two to the same fixture
+ * (#425). The one asymmetry between them is deliberate: mobile's version
+ * returns `number | null`, because an offline exercise swap there can leave
+ * `load_factor` EXPLICITLY UNRESOLVED (`null`) until the next sync. Web has no
+ * such state — every `Exercise` this app renders came from a live fetch, so
+ * `implements` (and therefore the `load_factor` a swap assigns from it) is
+ * always known. If web ever grows an offline mode, this function is the first
+ * place that stops being true.
+ */
+export function totalWeightKg(set: {
+  weight_kg: number | null;
+  load_factor?: number;
+}): number {
+  if (set.weight_kg == null) return 0;
+  // Absent (or 0/1) means one, never zero — an older row's volume must
+  // under-report at worst, never vanish.
+  const factor = set.load_factor && set.load_factor > 1 ? set.load_factor : 1;
+  return set.weight_kg * factor;
+}
+
+/**
+ * The per-hand disclosure, named — `"30kg (60kg total)"` for a pair of
+ * dumbbells, plain `"30kg"` for anything the athlete would already read as
+ * the whole story.
+ *
+ * Mirrors mobile's `describeSet` field for field on the weight clause
+ * specifically (`apps/mobile/lib/sessions.ts`; `loadFactor.test.ts` in each
+ * app pins the two to the same fixture — #425). Not the whole of
+ * `describeSet`: reps, RPE and the rest of that summary are rendered by this
+ * page's own editable cells already, and duplicating them here would be a
+ * second, competing description of the same row rather than the one gap this
+ * function exists to close — web never named which reading a dumbbell weight
+ * used.
+ *
+ * Derived from the TOTAL, not from `load_mode`/`perSide`: a one-arm dumbbell
+ * row is typed per hand but its factor is 1, and annotating it "(X total)"
+ * would be a straight lie. See `describeSet`'s own tests, which this mirrors.
+ */
+export function describeSetWeight(
+  set: { weight_kg: number | null; load_factor?: number },
+  units: UnitSystem,
+): string {
+  const w = formatWeight(set.weight_kg, units);
+  const suffix = weightTotalSuffix(set, units);
+  return suffix ? `${w} ${suffix}` : w;
+}
+
+/**
+ * The `"(60kg total)"` fragment on its own — extracted from
+ * `describeSetWeight` above so `SetRow`'s weight cell can render it beside
+ * an EDITABLE number input rather than a second, plain-text copy of the
+ * weight (which `describeSetWeight`'s full string would otherwise force).
+ *
+ * **This is the load-bearing reason it is a function and not two call sites
+ * agreeing by eye.** The parity test in `loadFactor.test.ts` pins
+ * `describeSetWeight`, and a UI that recomputed the same "differs from the
+ * total" condition inline — as an earlier version of this file did — could
+ * drift from what the test actually covers without either one failing:
+ * `describeSetWeight` staying right while the rendered page went stale, or
+ * the reverse. Routing both through this one function is what makes a test
+ * on `describeSetWeight` a test of what the athlete actually sees.
+ *
+ * Returns `null` rather than `''` for "no annotation" — a falsy string and
+ * an absent one both render nothing in JSX, but `null` is the one that
+ * cannot be mistaken for a zero-total case if this is ever logged or
+ * compared directly.
+ */
+export function weightTotalSuffix(
+  set: { weight_kg: number | null; load_factor?: number },
+  units: UnitSystem,
+): string | null {
+  const total = totalWeightKg(set);
+  return set.weight_kg != null && total !== set.weight_kg
+    ? `(${formatWeight(total, units)} total)`
+    : null;
+}
+
+/**
  * A session's own volume and set count, computed client-side.
  *
  * This lives here rather than inline in the sessions list because the same
@@ -801,7 +898,11 @@ export function swapSuggestions(base: Exercise, all: Exercise[]): SwapSuggestion
  * Every one of those was a hand-rolled copy of a rule that has a name on the
  * server, in a component file where nothing in `lib/__tests__` could reach it.
  * The mobile app learned the same lesson from `localVolume`, which was missed
- * twice for exactly the same reason and now lives in `lib/sessions.ts`.
+ * twice for exactly the same reason and now lives in `lib/sessions.ts`. This
+ * function used to be a FOURTH hand-rolled copy of the `load_factor` half of
+ * that rule, inline in its own reduce — it now goes through `totalWeightKg`
+ * above instead, for the same reason the other three were pulled out: two
+ * copies is how the middle one drifts and nothing notices.
  *
  * The two figures deliberately disagree about drops, which is the whole point
  * of the split:
@@ -821,13 +922,7 @@ export function sessionVolume(sets: LoggedSet[]): {
   return {
     working_sets: working.filter((s) => s.set_type !== "drop").length,
     tonnage_kg: working.reduce(
-      (sum, s) =>
-        sum +
-        (s.reps ?? 0) *
-          (s.weight_kg ?? 0) *
-          // Absent means one, never zero — an older row's volume must
-          // under-report at worst, never vanish.
-          (s.load_factor && s.load_factor > 1 ? s.load_factor : 1),
+      (sum, s) => sum + (s.reps ?? 0) * totalWeightKg(s),
       0,
     ),
   };

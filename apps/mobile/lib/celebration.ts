@@ -1,4 +1,5 @@
 import type { ExerciseRecords, PersonalRecord } from './records';
+import { hasUnresolvedLoad, type SetType } from './sessions';
 
 /**
  * What a finished session gets to say about itself.
@@ -31,6 +32,22 @@ export type SessionSummary = {
   reps: number;
   /** Kilograms. Structurally zero for BJJ — see `statsFor`. */
   tonnageKg: number;
+  /**
+   * True when `tonnageKg` is a silent UNDER-count — this session swapped an
+   * exercise offline and the new one's `load_factor` could not be resolved
+   * from the local catalog, so `localVolume` left that set's tonnage out of
+   * the sum rather than guessing it (#425). `statsFor` reads this to withhold
+   * the Volume tile entirely rather than celebrate a number that is wrong by
+   * an unknown amount and will change, unexplained, the moment this syncs.
+   *
+   * Optional, not because it can legitimately be unknown, but so a caller
+   * building a `SessionSummary` by hand for a sport with no tonnage at all —
+   * `bjj/session/[id].tsx` sets `tonnageKg: 0` directly, never through
+   * `summariseSession` — has nothing new to supply. `statsFor`'s BJJ branch
+   * returns before this is ever read there either way; the optionality is
+   * belt-and-braces, not load-bearing.
+   */
+  tonnageUnknown?: boolean;
   /** BJJ only. */
   rounds?: number;
   matMinutes?: number;
@@ -240,7 +257,13 @@ export function statsFor(
 
   stats.push({ label: 'Sets', value: String(summary.sets) });
   if (summary.reps > 0) stats.push({ label: 'Reps', value: String(summary.reps) });
-  if (summary.tonnageKg > 0) {
+  // `!summary.tonnageUnknown` — a positive number here can still be wrong
+  // (#425): an unresolved offline swap makes `tonnageKg` a silent
+  // under-count, and a celebration card is exactly the "moments after" case
+  // the ticket is about. Omitting it here follows the same rule the omitted-
+  // for-BJJ case above already lives by — say nothing rather than something
+  // that reads as an achievement and is not the true number.
+  if (summary.tonnageKg > 0 && !summary.tonnageUnknown) {
     stats.push({ label: 'Volume', value: formatTonnage(summary.tonnageKg) });
   }
   return stats;
@@ -295,7 +318,14 @@ export function summariseSession(
     sport: string;
     started_at: string;
     ended_at: string | null;
-    sets: { exercise_id: string; completed: boolean; reps: number | null }[];
+    sets: {
+      exercise_id: string;
+      completed: boolean;
+      reps: number | null;
+      set_type: SetType;
+      weight_kg: number | null;
+      load_factor?: number | null;
+    }[];
   },
   volume: { working_sets: number; total_reps: number; tonnage_kg: number; hardest_rpe: number },
   effortTracked: boolean,
@@ -321,6 +351,11 @@ export function summariseSession(
     sets: volume.working_sets,
     reps: volume.total_reps,
     tonnageKg: volume.tonnage_kg,
+    // See the field's own doc — `volume.tonnage_kg` (passed in, usually
+    // `localVolume`'s result) already left an unresolved set's tonnage OUT
+    // rather than guessing it, so this session's `sets` is what still knows
+    // whether that happened.
+    tonnageUnknown: hasUnresolvedLoad(logged),
     hardestRpe: effortTracked ? volume.hardest_rpe : null,
     records: [],
     recordExerciseIDs: exerciseIDs,
