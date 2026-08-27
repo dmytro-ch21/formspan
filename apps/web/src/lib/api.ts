@@ -833,25 +833,6 @@ export function sessionVolume(sets: LoggedSet[]): {
   };
 }
 
-/**
- * Has NO callers today — see L8, which is about whether it should exist at all.
- * Left in place rather than deleted here, because that is L8's decision and not
- * this ticket's; `units` is required for the reason above so that whoever
- * revives it cannot revive the metric-by-default bug with it.
- */
-export function describeSet(s: LoggedSet, units: UnitSystem): string {
-  const parts: string[] = [];
-  if (s.reps != null && s.weight_kg != null)
-    parts.push(`${s.reps} × ${formatWeight(s.weight_kg, units)}`);
-  else if (s.reps != null) parts.push(`${s.reps} reps`);
-  else if (s.weight_kg != null) parts.push(formatWeight(s.weight_kg, units));
-  if (s.seconds != null) parts.push(`${s.seconds}s`);
-  if (s.distance_m != null) parts.push(formatDistance(s.distance_m, units));
-  if (s.rpe != null) parts.push(`RPE ${s.rpe}`);
-  else if (s.rir != null) parts.push(`${s.rir} RIR`);
-  return parts.join(" · ") || "Not recorded";
-}
-
 export type UnitSystemPref = "metric" | "imperial";
 
 export type Profile = {
