@@ -45096,6 +45096,107 @@ needs web — judged an acceptable reduction per the discussion above, not a
 corner-cut, since the mobile-first rule's test is "can the athlete decide and
 act on the phone", not "can they browse a month of history on it".
 
+## 2026-08-27 — N81: correcting a food day more than a day ago, on a phone (#415)
+
+**Filed by the phone-impossible audit** (`docs/decisions/phone-impossible-audit.md`,
+PR #398/#372), and the clearest case the audit's own categories didn't quite
+catch: the capability was **present** — mobile's Food tab always had a day
+stepper and could edit any entry once you were looking at the right day — and
+**unusable**, because the only way to reach a day was ±1 at a time. Web has a
+six-week list and a date jump; mobile had a **±1-day stepper only**. Fixing a
+day three months back was up to ninety taps on the arrows. Nominally reduced,
+practically absent — which is why it was filed separately from the flatly
+`✗ mobile` rows the rest of the audit found.
+
+**What shipped.** The day switcher's label (`apps/mobile/app/(tabs)/food.tsx`)
+now opens a month-grid jump — the same shape `WeekPlanner` already uses for its
+own week switcher on Plan (`monthOpen`, `monthAnchor`, a `Modal` gated so the
+grid is never built while closed), adapted from picking a WEEK to picking a
+DAY. A day three months back is now two taps: the label, then the cell. The
+±1-day arrows are unchanged and stay exactly what they were — the "check
+yesterday" gesture — the grid is the addition, not a replacement.
+
+**Why the same shape as `WeekPlanner`, not a new one.** `PeriodSwitcher`'s own
+doc comment already states the convention this screen wasn't following: "the
+label, when it is pressable, opens the calendar that jumps somewhere distant."
+Food's label used to do something else entirely — jump straight back to today,
+and only when not already there — which is why the calendar icon next to it
+was quietly lying about what a tap would do. Matching the convention fixes
+both the ticket and that small pre-existing mismatch in one move, and it means
+the app now has ONE month-grid jump idiom rather than two that could drift
+apart. "Back to today" didn't disappear; it moved to a `Today` button inside
+the sheet, one tap in, matching `WeekPlanner`'s identical `plan-month-today`
+button exactly.
+
+**Bounded to the past, matching web's own precedent for this specific
+control.** Web's "Go to a day" jump field on `/dashboard/nutrition/days`
+carries `max={now}` — a day that hasn't happened yet has nothing to correct.
+The mobile grid disables (not merely dims) any cell after today the same way,
+with `accessibilityState={{ disabled: true }}` so it reads as genuinely inert
+rather than styled that way. This is a bound on the JUMP specifically, not on
+the day screen generally — the pre-existing ±1-day stepper still steps forward
+past today unrestricted, which is out of this ticket's scope and untouched.
+
+**A day already logged gets a mark.** `localLoggedDays(userId, from, to)`
+already existed for `confidence.ts`'s own purposes; the grid reuses it,
+local-only and on open (not kept live — a jump target doesn't need to track a
+sync, the day behind it already does), the same read shape `WeekPlanner` uses
+for its own "planned" dot.
+
+**The grid opens on the shown day's month, not the calendar's own.** `openMonth`
+reads `on` (the day currently on screen), not `new Date()` — otherwise
+reopening the grid from three months out would land back on the CURRENT month
+every time, turning "I was just there" into three more taps to page back.
+
+**Design doc corrected on the exclusivity, per the ticket's fourth
+criterion.** `nutrition-design.md` §4's platform table carried a footnote on
+an already-`✅/✅` row — "correcting a past day is desk work" — asserted rather
+than argued for, and wrong in the specific way this ticket names: editing an
+entry was never desk-only, *reaching* a distant one was. The footnote is
+removed and a dedicated paragraph added explaining what changed and why,
+matching the pattern the N72/N86/N84/N87 corrections above it already use.
+`system-design.md` was checked and carries no day-jump-specific exclusivity
+claim, only the general "nothing a user needs weekly may be desktop-only" rule
+this closes rather than contradicts.
+
+**Tests, `apps/mobile/app/__tests__/foodDayJump.test.tsx`, all against the real
+screen rather than a hand-built prop** (matching `foodTargetRow.test.tsx`'s own
+discipline): opening the grid from the label; the grid opening on — and
+reopening on — the shown day's month, not the calendar's last position or
+today's; picking a day two/three months back landing the screen on it; a day
+that hasn't happened yet being genuinely disabled rather than merely styled;
+the sheet's own `Today` button; a logged day carrying the mark and an empty
+one not; and the ±1-day arrows working unchanged. The perf-gate test
+(`Date.prototype.toLocaleDateString` call count, closed vs. open) mirrors
+`weekPlanner.test.tsx`'s identical test over its own grid, measured rather
+than guessed: 0 calls with the grid closed, exactly 100 once the pinned
+August's ~42 cells are built, 50 as the midpoint bound in both directions.
+
+**Guards mutation-tested**, each mutated and confirmed to fail its covering
+test before being restored and re-verified green by re-running (never by
+reading the diff): the future-day `disabled` guard, the `{monthOpen && (...)}`
+gate that keeps the grid from being built while closed, the `on`-not-`new
+Date()` anchor that makes the grid reopen where you left it, and the
+`monthDays.has(cell.key)` logged-day mark. The logged-day test deliberately
+uses two PAST days rather than a future "logged" one — an earlier draft used a
+future date and passed against a cell whose accessibility label read both
+"logged" and "hasn't happened yet" at once, which is not a state that means
+anything; a mutation that zeroed the guard still passed that version of the
+test, because the future-day text alone satisfied a loose regex match by
+accident.
+
+**NEEDS HUMAN EVIDENCE, per #415's own criterion**: exercised on a real device,
+with the web app closed.
+
+Open gap this leaves: the grid has no lower bound and no jump-by-typed-date
+fallback the way web's date input does — reaching a day from, say, three years
+back still means paging the grid a month at a time rather than typing a date.
+Judged acceptable for now: the audit's complaint was specifically about the
+~90-tap case (a few months), which this closes in two taps, and a typed-date
+fallback on mobile is a small, separable follow-up rather than something this
+ticket needed to also solve.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

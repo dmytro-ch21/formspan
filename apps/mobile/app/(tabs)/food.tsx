@@ -25,10 +25,10 @@
 
 import { useAuth } from '@clerk/clerk-expo';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
-import { Text } from '@/components/Themed';
+import { Text, View } from '@/components/Themed';
 import { ModuleOffNotice } from '@/components/ModuleOffNotice';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
@@ -40,8 +40,8 @@ import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { addDays, dayString } from '@/lib/calendar';
-import { cacheTargets, localEntries, localTargetView, removeEntry } from '@/lib/foodLog';
+import { addDays, addMonths, dayString, monthGrid, startOfMonth, weekDays } from '@/lib/calendar';
+import { cacheTargets, localEntries, localLoggedDays, localTargetView, removeEntry } from '@/lib/foodLog';
 import {
   bySlot,
   eatenFrom,
@@ -93,6 +93,19 @@ export default function FoodScreen() {
     view: { state: 'checking' },
   });
   const { userId } = useAuth();
+
+  // N81/#415 — the month grid the day switcher's label opens, so a day months
+  // back is a couple of taps rather than up to ninety on the ±1-day arrows.
+  // Same shape as `WeekPlanner`'s `monthOpen` sheet, one grid convention
+  // rather than two: `monthOpen` gates whether it's built at all (see the
+  // comment on the `Modal` below), `monthAnchor` is the MONTH the sheet is
+  // showing — separate from `dayOffset`, because paging the grid to look for
+  // a day must not move the screen behind it until a day is actually picked
+  // — and `monthDays` is which of that month's days already have an entry, so
+  // the grid can mark them the way `WeekPlanner`'s marks a planned day.
+  const [monthOpen, setMonthOpen] = useState(false);
+  const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()));
+  const [monthDays, setMonthDays] = useState<Set<string>>(new Set());
 
   // N61: this tab is REACHABLE with nutrition off now — see `(tabs)/_layout.tsx`
   // for why hiding it was the worse failure — so the screen has to say what
@@ -215,6 +228,59 @@ export default function FoodScreen() {
   // honest state rather than a rewording. Found in review.
   const budget = isToday ? mealBudgetLine(eaten, view) : null;
 
+  const todayKey = dayString(new Date());
+  // Weekday abbreviations for the grid's head row, read off any Monday-first
+  // week rather than hard-coded — `WeekPlanner` does the same for the same
+  // reason: `toLocaleDateString` is what makes "MON…SUN" become the reader's
+  // own locale instead of English no matter what device this runs on.
+  const monthHeadDays = weekDays(new Date());
+
+  /**
+   * Which days of the open month already have an entry — the grid's only
+   * per-cell fact beyond the date itself.
+   *
+   * Local-only and on-demand, matching `WeekPlanner`'s identical read of
+   * planned days: a jump target doesn't need to track a live sync, the day
+   * behind it already does, and `localLoggedDays` is a SQLite read so this
+   * works with no signal, same as the rest of this screen.
+   */
+  const monthSeq = useRef(0);
+  const loadMonth = useCallback(
+    async (month: Date) => {
+      if (!userId) return;
+      monthSeq.current += 1;
+      const seq = monthSeq.current;
+      const cells = monthGrid(month).flat();
+      try {
+        const days = await localLoggedDays(userId, cells[0].key, cells[cells.length - 1].key);
+        if (seq !== monthSeq.current) return;
+        setMonthDays(new Set(days));
+      } catch {
+        // An unreadable month is a grid of bare dates — the dots are a hint,
+        // and the day behind this sheet is the surface that must be right.
+        if (seq !== monthSeq.current) return;
+        setMonthDays(new Set());
+      }
+    },
+    [userId],
+  );
+
+  function openMonth() {
+    // The month the day ON SCREEN belongs to, not the calendar's own month —
+    // opening from three months out should not need three extra taps to page
+    // back to where you already are.
+    const anchor = startOfMonth(new Date(`${on}T00:00:00`));
+    setMonthAnchor(anchor);
+    loadMonth(anchor);
+    setMonthOpen(true);
+  }
+
+  function stepMonth(n: number) {
+    const next = addMonths(monthAnchor, n);
+    setMonthAnchor(next);
+    loadMonth(next);
+  }
+
   async function onDelete(id: string) {
     if (!userId) return;
     // The day this delete belongs to, captured BEFORE any await. Without it,
@@ -249,7 +315,7 @@ export default function FoodScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <RNView style={styles.screen}>
       <ScrollView
         contentContainerStyle={[styles.container, { paddingBottom: TAB_BAR_CLEARANCE + 40 }]}
         contentInsetAdjustmentBehavior="never"
@@ -263,16 +329,25 @@ export default function FoodScreen() {
             not readable. */}
         <ScreenHeader title="Food" contentScrollsUnder={false} />
 
-        <View style={styles.body}>
+        <RNView style={styles.body}>
           <PeriodSwitcher
             label={isToday ? 'Today' : on}
             onPrev={() => setDayOffset((d) => d - 1)}
             onNext={() => setDayOffset((d) => d + 1)}
-            onPress={isToday ? undefined : () => setDayOffset(0)}
+            // N81/#415: this used to jump straight back to today and only when
+            // NOT on today — the pill's only job was "undo my navigation".
+            // That left the calendar icon promising something it didn't do
+            // (`PeriodSwitcher`'s own doc comment: "the label, when it is
+            // pressable, opens the calendar that jumps somewhere distant") and
+            // left correcting a day three months back at up to ninety taps on
+            // the arrows, which is the whole ticket. Always opens the month
+            // grid now, matching `WeekPlanner`'s identical control — "back to
+            // today" moved to that sheet's own Today button, one tap in.
+            onPress={openMonth}
             icon="calendar"
             prevLabel="Previous day"
             nextLabel="Next day"
-            pressLabel="Back to today"
+            pressLabel="Open the calendar to jump to another day."
             testID="food-day"
           />
 
@@ -294,7 +369,7 @@ export default function FoodScreen() {
             testID="food-target"
           />
 
-          <View style={styles.summary}>
+          <RNView style={styles.summary}>
             {/* `showTarget={false}`: the row above has just said it, in bigger
                 type and with somewhere to go. Two statements of one number
                 within a thumb's width read as a bug in the number. */}
@@ -304,7 +379,7 @@ export default function FoodScreen() {
               showTarget={false}
               testID="food-remaining"
             />
-          </View>
+          </RNView>
 
           {/* Water and anything else being tracked, for the day on screen.
               Above the meals because a tap is one gesture and a meal is a flow
@@ -358,7 +433,7 @@ export default function FoodScreen() {
             </Text>
           ) : (
             slots.map((slot) => (
-            <View key={slot.meal} style={styles.slot}>
+            <RNView key={slot.meal} style={styles.slot}>
               <SectionHeader
                 label={`${MEAL_LABELS[slot.meal]}${slot.kcal > 0 ? ` · ${Math.round(slot.kcal)} kcal` : ''}`}
               />
@@ -391,18 +466,18 @@ export default function FoodScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={`${e.name}, ${Math.round(e.kcal)} calories`}
                   >
-                    <View style={styles.rowMain}>
+                    <RNView style={styles.rowMain}>
                       <Text style={styles.rowName} numberOfLines={1}>
                         {e.name}
                       </Text>
                       <Text style={styles.rowServing}>
                         {trimZero(e.servings)} × {e.serving_label}
                       </Text>
-                    </View>
-                    <View style={styles.rowRight}>
+                    </RNView>
+                    <RNView style={styles.rowRight}>
                       <Text style={styles.rowKcal}>{Math.round(e.kcal)}</Text>
                       <Text style={styles.rowProtein}>{Math.round(e.protein_g)} g P</Text>
-                    </View>
+                    </RNView>
                   </Pressable>
                 </SwipeToDelete>
               ))}
@@ -416,17 +491,171 @@ export default function FoodScreen() {
                 <Icon name="plus" size={13} color={accent.ink} />
                 <Text style={[styles.addText, { color: accent.ink }]}>Add</Text>
               </Pressable>
-            </View>
+            </RNView>
           )))}
-        </View>
+        </RNView>
       </ScrollView>
-    </View>
+
+      {/*
+        The month grid, opened from the day switcher's label — N81/#415. The
+        ±1-day arrows are the "check yesterday" gesture and stay exactly as
+        they were; this is the other half, for a day the arrows would take
+        ninety taps to reach. Same component and the same jump-target shape
+        Plan already uses for its week switcher (`WeekPlanner`'s `monthOpen`
+        sheet) — one grid convention in the app rather than two, and this
+        screen's version differs only in what a tap on a cell means: a DAY,
+        not a week.
+      */}
+      <Modal
+        visible={monthOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setMonthOpen(false)}
+      >
+        {/* Gated on `monthOpen`, matching `WeekPlanner`: children are built by
+            the parent before `Modal` ever sees them, so an ungated grid does
+            ~42 `toLocaleDateString` calls on every render of a tab the athlete
+            keeps open, whether the sheet is showing or not. */}
+        {monthOpen && (
+          <View style={styles.sheet} lightColor={vola.bg} darkColor={vola.bg}>
+            <RNView style={styles.sheetHead}>
+              {/* One tap back to today from wherever the grid has paged to —
+                  `openMonth` opens on the day ON SCREEN's month, so from three
+                  months out this is the only way back that isn't the sheet's
+                  own Close button landing you on a day you didn't mean. */}
+              <Pressable
+                onPress={() => {
+                  setDayOffset(0);
+                  setMonthOpen(false);
+                }}
+                hitSlop={12}
+                style={styles.sheetToday}
+                accessibilityRole="button"
+                accessibilityLabel="Today, back to this day"
+                testID="food-month-today"
+              >
+                <Text style={styles.close}>Today</Text>
+              </Pressable>
+
+              <RNView style={styles.sheetSwitcher}>
+                <PeriodSwitcher
+                  label={monthAnchor
+                    .toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+                    .toUpperCase()}
+                  onPrev={() => stepMonth(-1)}
+                  onNext={() => stepMonth(1)}
+                  prevLabel="Previous month"
+                  nextLabel="Next month"
+                  testID="food-month"
+                />
+              </RNView>
+              <Pressable
+                onPress={() => setMonthOpen(false)}
+                hitSlop={12}
+                style={styles.sheetClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                testID="food-month-close"
+              >
+                <Text style={styles.close}>Done</Text>
+              </Pressable>
+            </RNView>
+
+            <ScrollView contentContainerStyle={styles.sheetBody}>
+              <Text style={styles.sheetHint}>Pick a day to correct.</Text>
+
+              <RNView style={styles.gridHead}>
+                {monthHeadDays.map((d) => (
+                  <Text key={d.toISOString()} style={styles.gridHeadCell}>
+                    {d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3).toUpperCase()}
+                  </Text>
+                ))}
+              </RNView>
+
+              {monthGrid(monthAnchor).map((row) => (
+                <RNView key={row[0].key} style={styles.gridRow}>
+                  {row.map((cell) => {
+                    const isToday = cell.key === todayKey;
+                    const isShown = cell.key === on;
+                    const logged = monthDays.has(cell.key);
+                    // No day past today has anything to correct — the same
+                    // bound web's own jump field holds with `max={now}` on
+                    // `/dashboard/nutrition/days`. The ±1-day arrows are
+                    // untouched by this and can still step forward; only this
+                    // grid, which exists for CORRECTING a day, draws the line.
+                    const future = offsetFromToday(cell.key) > 0;
+                    return (
+                      <Pressable
+                        key={cell.key}
+                        disabled={future}
+                        style={[styles.gridCell, isShown && styles.gridCellShown]}
+                        onPress={() => {
+                          setDayOffset(offsetFromToday(cell.key));
+                          setMonthOpen(false);
+                        }}
+                        accessibilityRole="button"
+                        // The highlight is the only signal that this cell is
+                        // the day behind the sheet, and a tint says nothing to
+                        // a screen reader — the same gap `WeekPlanner`'s own
+                        // grid closes with `selected` here.
+                        accessibilityState={{ selected: isShown, disabled: future }}
+                        accessibilityLabel={[
+                          cell.date.toLocaleDateString(undefined, {
+                            weekday: 'long',
+                            day: 'numeric',
+                            month: 'long',
+                          }),
+                          isToday ? 'today' : null,
+                          logged ? 'logged' : null,
+                          future ? "hasn't happened yet" : null,
+                        ]
+                          .filter(Boolean)
+                          .join(', ')}
+                        testID={`food-month-day-${cell.key}`}
+                      >
+                        <Text
+                          style={[
+                            styles.gridDate,
+                            !cell.inMonth && styles.gridSpill,
+                            isToday && styles.gridToday,
+                            future && styles.gridFuture,
+                          ]}
+                        >
+                          {cell.date.getDate()}
+                        </Text>
+                        {/* Always rendered, so a dot appearing never shifts the
+                            row's height as you page through months. */}
+                        <RNView style={[styles.gridDot, logged && styles.gridDotOn]} />
+                      </Pressable>
+                    );
+                  })}
+                </RNView>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+      </Modal>
+    </RNView>
   );
 }
 
 /** 1.5 stays 1.5; 1.0 becomes 1. Nobody writes "1.0 × 100 g". */
 function trimZero(n: number): string {
   return String(Math.round(n * 100) / 100);
+}
+
+/**
+ * The signed day offset of a `YYYY-MM-DD` key from today, in whole days.
+ *
+ * Both sides parsed as UTC midnight and diffed there, matching `shortDate`'s
+ * own rule for a stored day string: UTC has no DST, so this is exact where
+ * local millisecond arithmetic would drift by an hour across a transition —
+ * and a month-grid cell can be a whole DST boundary away from today.
+ */
+function offsetFromToday(key: string): number {
+  const day = Date.parse(`${key}T00:00:00Z`);
+  const today = Date.parse(`${dayString(new Date())}T00:00:00Z`);
+  return Math.round((day - today) / 86_400_000);
 }
 
 const styles = StyleSheet.create({
@@ -476,4 +705,53 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   addText: { fontSize: 13, fontWeight: '600' },
+
+  // The month-jump sheet — N81/#415. Styling matches `WeekPlanner`'s own
+  // month grid exactly (same tokens, same sizes) rather than a fresh set: one
+  // grid convention in the app, not two that could quietly drift apart.
+  sheet: { flex: 1 },
+  sheetSwitcher: { flex: 1 },
+  sheetToday: { minWidth: 52 },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.line,
+  },
+  sheetClose: { marginLeft: 'auto' },
+  close: { fontSize: 14, fontWeight: '700', color: vola.lime },
+  sheetBody: { padding: 14, gap: 2 },
+  sheetHint: { fontSize: 12, color: vola.textDim, paddingBottom: 10 },
+
+  gridHead: { flexDirection: 'row', paddingBottom: 6 },
+  gridHeadCell: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    color: vola.textDim,
+  },
+  gridRow: { flexDirection: 'row' },
+  gridCell: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  gridCellShown: { backgroundColor: vola.surface },
+  gridDate: { fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  gridSpill: { color: vola.textDim, opacity: 0.5 },
+  gridToday: { color: vola.lime, fontWeight: '800' },
+  // A day that hasn't happened yet — nothing to correct there. Dimmer than a
+  // spill day (0.35 vs 0.5) because a spill day is one tap from being the
+  // shown month and this one is not reachable at all; the two must not read
+  // the same.
+  gridFuture: { color: vola.textDim, opacity: 0.35 },
+  gridDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'transparent' },
+  gridDotOn: { backgroundColor: vola.lime },
 });

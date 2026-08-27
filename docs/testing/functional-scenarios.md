@@ -8639,6 +8639,62 @@ a scenario that spoils two at once cannot tell which guard fired:
 - **Signing out and signing in as somebody else shows none of the first
   athlete's food**, from the local database, with the network off.
 
+### Correcting a distant day — the month-jump grid (N81, #415)
+
+Before this, the day screen's only navigation was the ±1-day arrows — fixing a
+day three months back was up to ninety taps. The grid is what makes that
+bounded; the arrows are unchanged, and every scenario in the section above
+still applies to them.
+
+**Happy path**
+
+- **Tap the day label (not the arrows) to open the month grid.** It opens on
+  the MONTH OF THE DAY CURRENTLY ON SCREEN, not always the current month — step
+  a few days into last month with the arrows first, then open the grid, and
+  confirm it shows last month, not this one.
+- **Picking a day in the grid closes it and lands the day screen on that day**
+  — the entries, target and remaining figures all belong to the picked day, not
+  the day the grid was opened from.
+- **The month switcher inside the sheet pages independently of the day
+  screen.** Paging the grid three months back must not move the day screen's
+  own date until a day is actually tapped — cancel out (Done) after paging and
+  confirm the day screen is exactly where it was.
+- **The sheet's own `Today` button returns to today and closes the sheet**,
+  from any month the grid has paged to — this is where "back to today" lives
+  now; the day label no longer does that by itself.
+- **A day that already has an entry is marked** in the grid (a dot, matching
+  Plan's own "planned" mark on `WeekPlanner`'s month grid) — pick two adjacent
+  days, one logged and one not, and confirm only the logged one carries it.
+  This is local-only (SQLite), so it must work with the network off.
+
+**Edge cases and errors**
+
+- **A day later than today cannot be picked.** Open the grid on the current
+  month: every cell after today must be visibly dimmed and genuinely inert —
+  tapping one must not close the sheet or move the day screen. This mirrors
+  web's own bound (`max={now}` on `/dashboard/nutrition/days`'s "Go to a day"
+  field) — there is nothing to correct on a day that hasn't happened.
+- **The ±1-day arrows are NOT bounded by this** — they may still step past
+  today (pre-existing behaviour, out of this ticket's scope). Only the grid,
+  which exists specifically for correcting a day, draws that line.
+- **The grid must not be built while the sheet is closed.** Not user-visible,
+  but worth a device spot-check on a low-end phone: opening Food should not
+  pay the cost of formatting ~42 cells' worth of dates on every mount.
+- **Reopening the grid after picking a day from a different month shows that
+  day's month again**, not the month the grid happened to be paged to before
+  the pick, and not always the current month.
+
+**Auth / security**
+
+- No new endpoint. The "logged" mark reads local SQLite only
+  (`localLoggedDays`), scoped to the signed-in athlete the same way every other
+  local read on this screen already is.
+
+- **NEEDS HUMAN EVIDENCE** — exercised on a real device, with the web app
+  closed: open Food, tap the day label, page back a few months, pick a day,
+  confirm the meals/target/remaining figures for that day render correctly,
+  and confirm a future day in the grid is visibly and actually unpickable.
+
 ## The BJJ position map (`GET /v1/bjj/positions`, mobile `/bjj/positions`)
 
 ### The aggregate
