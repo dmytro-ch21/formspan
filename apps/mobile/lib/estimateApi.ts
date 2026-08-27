@@ -231,6 +231,43 @@ export function estimateErrorMessage(err: unknown): string {
 }
 
 /**
+ * Whether another estimate would be refused before it's even tried (F17,
+ * #403).
+ *
+ * `remaining <= 0` rather than `=== 0`: the quota is server-authoritative and
+ * this client has no business asserting it can't go negative, only that
+ * anything at or under zero means "no".
+ */
+export function isQuotaExhausted(quota: EstimateQuota | null): boolean {
+  return quota != null && quota.remaining <= 0;
+}
+
+/**
+ * "You've used all 25 estimates for today. More at 3:40 PM." — said BEFORE
+ * the athlete fires a request that cannot succeed, rather than after (F17,
+ * #403). `quota.resets_at` was already parsed onto every response and never
+ * rendered; this is the first place that reads it.
+ *
+ * A clock time, not a countdown: the daily window can be many hours out, so
+ * "in 11 hours" is a number nobody is still reading it against by the time it
+ * matters, while a clock time is checkable at a glance whenever the athlete
+ * next looks — the same choice `savedAgo` makes for the opposite reason
+ * (there, precision would be false; here, a countdown would just go stale).
+ *
+ * Falls back to a plain statement when `resets_at` is absent or unparseable
+ * — an exhausted quota with nothing to compute a time from is a server
+ * contract this client cannot narrate more precisely than that.
+ */
+export function quotaResetMessage(quota: EstimateQuota): string {
+  const when = quota.resets_at ? Date.parse(quota.resets_at) : NaN;
+  if (Number.isNaN(when)) {
+    return "You've used all your estimates for today.";
+  }
+  const clock = new Date(when).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `You've used all ${quota.limit} estimates for today. More at ${clock}.`;
+}
+
+/**
  * Turn a draft item into something the log can take.
  *
  * The draft's shape is already the log's shape — that is not a coincidence,

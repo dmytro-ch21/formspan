@@ -1,4 +1,4 @@
-import { ApiError } from './apiError';
+import { ApiError, parseRetryAfterMs } from './apiError';
 import { API_BASE, netFetch, type NetFetchOptions } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 import { newTraceId, traceparent } from './trace';
@@ -57,6 +57,10 @@ export async function apiRequest<T>(
       body?.error?.message ?? `Request failed (${res.status}).`,
       body?.error?.code ?? 'unknown',
       res.status,
+      // Read BEFORE the Response falls out of scope — this is the whole
+      // point of the change (F17, #403): every one of this function's
+      // callers used to lose the header along with the rest of the Response.
+      parseRetryAfterMs(res.headers?.get('Retry-After')),
     );
   }
   return body as T;

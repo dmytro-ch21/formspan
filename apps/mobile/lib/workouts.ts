@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { ApiError } from './apiError';
+import { ApiError, parseRetryAfterMs } from './apiError';
 import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
@@ -202,6 +202,7 @@ async function request<T>(
       body?.error?.message ?? `Request failed (${res.status}).`,
       body?.error?.code ?? 'unknown',
       res.status,
+      parseRetryAfterMs(res.headers?.get('Retry-After')),
     );
   }
   return body as T;

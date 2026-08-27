@@ -13358,3 +13358,63 @@ on screen. That, and only that, is what moved.
   surface: seeing a friend's avatar requires nothing beyond what already
   gates seeing their card or feed row (an accepted friendship, or a pending
   request naming them).
+
+## F17 — Retry-After reaches the client (`apps/mobile/lib/apiError.ts`, `apiRequest.ts`, `identifyApi.ts`, `sync.ts`, `estimateApi.ts`, `app/food/describe.tsx`, `app/session/[id]/identify.tsx`)
+
+### Happy path
+
+- Trigger a 429 on `POST /v1/exercises/identify` (spam identify requests
+  past the rate limit) and confirm the error text says a specific wait —
+  "Wait N seconds"/"Wait about N minutes" — not "Give it a few minutes",
+  and confirm the hint line beneath it reads about waiting, not "Take
+  another photo, or search instead."
+- Trigger a 429 on `POST /v1/nutrition/estimate` repeatedly until
+  `quota.remaining` reaches 0; confirm the "Work it out" button, both photo
+  buttons, and "Estimate it again" (when a saved-food draft is showing) all
+  become disabled, and that a message states the day's limit and a clock
+  time the quota resets.
+- With the quota exhausted, confirm the currently-drafted rows can still be
+  edited and logged normally — logging spends nothing, and must not be
+  gated by the same check that disables new estimate requests.
+- Force a transient sync failure (kill the API mid-push) and confirm the
+  retry ladder behaves as before when the failure carries no
+  `Retry-After` (5s/15s/60s/300s).
+- Force the global rate limiter to 429 a sync push with a `Retry-After`
+  **longer** than the ladder's current step; confirm the next retry waits
+  for the server's figure, not the shorter ladder step.
+- Force the same with a `Retry-After` **shorter** than the current ladder
+  step; confirm the retry does NOT fire early — the ladder is a floor.
+
+### Edge cases and errors
+
+- A 429 on identify with no `Retry-After` header at all (a deploy that
+  doesn't send one) falls back to the vague "Give it a few minutes"
+  wording rather than crashing or showing "Wait undefined seconds".
+- **NEEDS HUMAN EVIDENCE** — confirm on a real device that a genuinely
+  rate-limited identify request (not a mocked one) shows the server's
+  actual advertised wait, and that the number is one an athlete can
+  plausibly wait out rather than a nonsense value — this exercises the
+  real header round-trip through React Native's `fetch`, which this
+  ticket's suite mocks.
+- A 422 (deterministic "no machine matched") and a 400 (unreadable photo)
+  on identify still show the "retake" hint, unchanged by this ticket — a
+  429 must not have widened into either of those.
+- `quota.remaining` exactly 1 (the last unit) leaves every quota-spending
+  control enabled; exactly 0 disables them immediately on the response
+  that reports it, with no extra tap needed to notice.
+- A quota-exhausted response with `resets_at: null` shows a plain "used
+  all your estimates for today" statement rather than a broken or
+  placeholder clock time.
+- A sync run where multiple outboxes (e.g. sessions and trackers) each hit
+  a 429 with different `Retry-After` values: the next retry waits for the
+  LONGER of the two, not whichever outbox happened to run first.
+- A sync run that fails without any `Retry-After` immediately after one
+  that did carry a long wait: the old wait does not carry over — the next
+  failure is governed by the ladder alone.
+
+### Auth / security
+
+- No change to authorization on any endpoint — this ticket only threads an
+  already-public response header (`Retry-After`) through client code that
+  previously discarded it, and adds client-side-only quota/backoff state
+  derived from responses the client was already receiving.

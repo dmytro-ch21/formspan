@@ -311,6 +311,32 @@ it('still hints after a failed identification', async () => {
   expect(screen.getByTestId('identify-hint')).toHaveTextContent(/Take another photo/i);
 });
 
+/**
+ * F17 (#403). Before this fix, a 429 fell through to `retake` and rendered
+ * "Take another photo, or search instead." under a failure no new photo could
+ * fix — the same bytes, resent, would be refused again for the same reason. A
+ * rate-limited athlete needs to be told to WAIT, and the message needs to say
+ * the real figure rather than inventing "a few minutes".
+ */
+it('says wait, not retake, when the identify request is rate-limited', async () => {
+  mockIdentify.mockRejectedValue(new ApiError('slow down', 'rate_limited', 429, 47_000));
+  render(<IdentifyMachineScreen />);
+  await act(async () => {
+    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+  });
+
+  await waitFor(() => expect(screen.getByTestId('identify-error')).toBeTruthy());
+  expect(screen.getByTestId('identify-error')).toHaveTextContent(/wait 47 seconds/i);
+  expect(screen.getByTestId('identify-error')).not.toHaveTextContent(/a few minutes/i);
+
+  const hint = screen.getByTestId('identify-hint');
+  expect(hint).not.toHaveTextContent(/take another photo/i);
+  // Positive, not just the absence of the old wording — a regression that
+  // routed a 429 to a DIFFERENT wrong hint (e.g. the bare "You can try
+  // again.") would satisfy the negative assertion above and pass here anyway.
+  expect(hint).toHaveTextContent(/wait/i);
+});
+
 /** The error must actually be spoken — the attribute alone is Android-only. */
 it('announces the error to a screen reader', async () => {
   mockFetchExercise.mockRejectedValue(new ApiError('exercise not found', 'not_found', 404));

@@ -9,7 +9,15 @@
  * own history).
  */
 
-import { describeMeal, itemToEntry, photographMeal, type EstimatedItem } from '../estimateApi';
+import {
+  describeMeal,
+  isQuotaExhausted,
+  itemToEntry,
+  photographMeal,
+  quotaResetMessage,
+  type EstimatedItem,
+  type EstimateQuota,
+} from '../estimateApi';
 import { DEFAULT_TIMEOUT_MS, SLOW_REQUEST_TIMEOUT_MS } from '../authedFetch';
 
 const mockFetch = jest.fn();
@@ -192,6 +200,66 @@ describe('itemToEntry', () => {
  * left on the default this would have surfaced as a mystery timeout on the text
  * path only. Raised in review.
  */
+/**
+ * F17 (#403) — the boundary that gates every quota-spending control on the
+ * describe screen.
+ */
+describe('isQuotaExhausted', () => {
+  function quota(remaining: number): EstimateQuota {
+    return { used: 25 - remaining, limit: 25, remaining, resets_at: null };
+  }
+
+  it('is false with one estimate still left — THE transition case', () => {
+    // Pinned at remaining = 1, not remaining = 10: a `< 0` guard (off by one
+    // in the direction that would let a doomed request through) and a
+    // `<= 0` guard agree everywhere except exactly here.
+    expect(isQuotaExhausted(quota(1))).toBe(false);
+  });
+
+  it('is true at remaining = 0 — the actual boundary, not merely "some small number"', () => {
+    expect(isQuotaExhausted(quota(0))).toBe(true);
+  });
+
+  it('is true even if the server ever reports a negative remaining', () => {
+    // Defensive rather than expected: `<= 0`, not `=== 0`, because this
+    // client has no business asserting the server can't go negative — only
+    // that anything at or under zero means no more requests.
+    expect(isQuotaExhausted(quota(-1))).toBe(true);
+  });
+
+  it('is false before any estimate has been made — quota is null before the first response', () => {
+    expect(isQuotaExhausted(null)).toBe(false);
+  });
+});
+
+describe('quotaResetMessage', () => {
+  it('states the limit and a clock time when resets_at parses', () => {
+    const msg = quotaResetMessage({
+      used: 25,
+      limit: 25,
+      remaining: 0,
+      resets_at: '2026-08-27T15:40:00.000Z',
+    });
+    expect(msg).toMatch(/25 estimates/);
+    expect(msg).toMatch(/more at/i);
+  });
+
+  it('falls back to a plain statement when resets_at is null', () => {
+    const msg = quotaResetMessage({ used: 25, limit: 25, remaining: 0, resets_at: null });
+    expect(msg).toMatch(/used all your estimates for today/i);
+    // Not the templated form — there is no clock time to put in it.
+    expect(msg).not.toMatch(/more at/i);
+  });
+
+  it('falls back the same way when resets_at is present but unparseable', () => {
+    // A stale server, a proxy, or a future field change could all put
+    // something here `Date.parse` cannot read — matches the same defensive
+    // pattern `savedAgo` already uses elsewhere in this file's sibling screen.
+    const msg = quotaResetMessage({ used: 25, limit: 25, remaining: 0, resets_at: 'not-a-date' });
+    expect(msg).toMatch(/used all your estimates for today/i);
+  });
+});
+
 describe('the deadline each estimate path asks for', () => {
   const deadlineOf = () => {
     const opts = mockFetch.mock.calls[0][2] as { timeoutMs?: number } | undefined;

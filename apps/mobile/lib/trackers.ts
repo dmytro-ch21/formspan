@@ -26,7 +26,7 @@ import { randomUUID } from 'expo-crypto';
 import type { SQLiteBindValue } from 'expo-sqlite';
 
 import { dayString } from './calendar';
-import { ApiError, isOffline, isPermanentRejection } from './apiError';
+import { ApiError, isOffline, isPermanentRejection, retryAfterOf } from './apiError';
 import { getDb, withTransaction } from './db';
 import type { RenderStyle, Tracker, TrackerEntry, TrackerUnit } from './trackerModel';
 import * as api from './trackersApi';
@@ -650,12 +650,20 @@ export type TrackerSyncResult = {
   failed: number;
   error?: string;
   errorKind?: 'offline' | 'permanent' | 'transient';
+  /** The largest `Retry-After` seen this run, in ms (F17, #403). */
+  retryAfterMs?: number;
 };
 
 function classify(err: unknown): 'offline' | 'permanent' | 'transient' {
   if (isOffline(err)) return 'offline';
   if (isPermanentRejection(err)) return 'permanent';
   return 'transient';
+}
+
+/** Fold one failure's `Retry-After` into the run's running maximum. */
+function noteRetryAfter(result: { retryAfterMs?: number }, err: unknown): void {
+  const ms = retryAfterOf(err);
+  if (ms != null) result.retryAfterMs = Math.max(result.retryAfterMs ?? 0, ms);
 }
 
 function worseKind(
@@ -771,6 +779,7 @@ async function push(userId: string, getToken: TokenGetter): Promise<TrackerSyncR
       result.failed += 1;
       result.error = result.error ?? message;
       result.errorKind = worseKind(result.errorKind, kind);
+      noteRetryAfter(result, err);
       // The same CAS on the failure branch, and for the same reason: without it
       // an edit made while this push was in flight is stomped by the failure of
       // the payload that preceded it.
@@ -831,6 +840,7 @@ async function push(userId: string, getToken: TokenGetter): Promise<TrackerSyncR
       result.failed += 1;
       result.error = result.error ?? message;
       result.errorKind = worseKind(result.errorKind, kind);
+      noteRetryAfter(result, err);
       await db.runAsync(
         `UPDATE tracker_entries SET last_error = ? WHERE id = ? AND user_id = ? AND updated_at = ?`,
         message, e.id, userId, e.updated_at,

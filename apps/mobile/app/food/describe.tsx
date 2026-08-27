@@ -41,8 +41,10 @@ import { parseOr } from '@/lib/draftNumber';
 import {
   describeMeal,
   estimateErrorMessage,
+  isQuotaExhausted,
   itemToEntry,
   photographMeal,
+  quotaResetMessage,
   savedFoodFrom,
   type EstimateQuota,
   type EstimatedItem,
@@ -155,13 +157,25 @@ export default function DescribeMealScreen() {
   const locked = busy || saving;
 
   /**
+   * Whether the day's estimate quota is spent (F17, #403).
+   *
+   * Held apart from `locked`: `locked` also gates Log/Remove/field-editing,
+   * none of which asks the server for a new estimate, so folding this in
+   * would freeze an athlete's ALREADY-DRAFTED rows because a LATER request
+   * would be refused — a quota unit is spent on asking, not on logging what
+   * was already asked for. This only gates the three actions that spend one:
+   * describing, photographing, and "estimate it again".
+   */
+  const quotaExhausted = isQuotaExhausted(quota);
+
+  /**
    * Ask the server. `reuse: false` is the "estimate it again" path.
    *
    * The default is left UNSENT rather than passed as `true`, so the decision
    * lives on the server and this screen cannot drift from it.
    */
   const describe = useCallback(async (reuse = true) => {
-    if (!description.trim() || locked) return;
+    if (!description.trim() || locked || quotaExhausted) return;
     // Read BEFORE the await: `estimate` is replaced by `receive`, and this is
     // the food the request is being made against.
     const replaces = reuse ? null : (estimate?.match?.food_id ?? null);
@@ -177,11 +191,11 @@ export default function DescribeMealScreen() {
     } finally {
       setBusy(false);
     }
-  }, [description, locked, getToken, meal, receive, estimate]);
+  }, [description, locked, quotaExhausted, getToken, meal, receive, estimate]);
 
   const photograph = useCallback(
     async (fromCamera: boolean) => {
-      if (locked) return;
+      if (locked || quotaExhausted) return;
       // Guarded, because the caller is `void photograph(...)`: a throw from
       // the permission prompt or the picker (already open, OS-level failure)
       // would otherwise be an unhandled rejection, and the observable is a
@@ -285,7 +299,7 @@ export default function DescribeMealScreen() {
         setBusy(false);
       }
     },
-    [locked, description, getToken, meal, receive],
+    [locked, quotaExhausted, description, getToken, meal, receive],
   );
 
   // Fires once, on arrival, and only for the "Photograph" choice — never for
@@ -498,19 +512,33 @@ export default function DescribeMealScreen() {
 
       <Pressable
         onPress={() => void describe()}
-        style={[styles.primary, { backgroundColor: accent.accent }, busy && styles.off]}
+        style={[
+          styles.primary,
+          { backgroundColor: accent.accent },
+          (busy || quotaExhausted) && styles.off,
+        ]}
         accessibilityRole="button"
         accessibilityLabel="Work it out"
         // Dimming is a sighted-only signal. Without the state, a screen reader
         // announces an ordinary button that then does nothing.
-        disabled={locked || !description.trim()}
-        accessibilityState={{ disabled: busy || !description.trim() }}
+        disabled={locked || !description.trim() || quotaExhausted}
+        accessibilityState={{ disabled: busy || !description.trim() || quotaExhausted }}
         testID="describe-submit"
       >
         <Text style={[styles.primaryText, { color: accent.on }]}>
           {busy ? 'Working it out…' : 'Work it out'}
         </Text>
       </Pressable>
+
+      {/* F17 (#403): said BEFORE a doomed request, not after. `quota` is
+          fetched from the LAST response, so this is silent on a screen the
+          athlete has not used yet today — it can only appear once a request
+          this session has already reported the count. */}
+      {quotaExhausted && quota ? (
+        <Text style={styles.error} testID="describe-quota-exhausted">
+          {quotaResetMessage(quota)}
+        </Text>
+      ) : null}
 
       <SectionHeader label="Or photograph it" />
       {/* Stated BEFORE the camera opens. A privacy consequence discovered
@@ -529,22 +557,22 @@ export default function DescribeMealScreen() {
       <View style={styles.photoRow}>
         <Pressable
           onPress={() => void photograph(true)}
-          style={[styles.secondary, busy && styles.off]}
+          style={[styles.secondary, (busy || quotaExhausted) && styles.off]}
           accessibilityRole="button"
           accessibilityLabel="Take a photo of this meal"
-          disabled={locked}
-          accessibilityState={{ disabled: busy }}
+          disabled={locked || quotaExhausted}
+          accessibilityState={{ disabled: busy || quotaExhausted }}
           testID="describe-camera"
         >
           <Text style={styles.secondaryText}>Take a photo</Text>
         </Pressable>
         <Pressable
           onPress={() => void photograph(false)}
-          style={[styles.secondary, busy && styles.off]}
+          style={[styles.secondary, (busy || quotaExhausted) && styles.off]}
           accessibilityRole="button"
           accessibilityLabel="Choose a photo from your library"
-          disabled={locked}
-          accessibilityState={{ disabled: busy }}
+          disabled={locked || quotaExhausted}
+          accessibilityState={{ disabled: busy || quotaExhausted }}
           testID="describe-library"
         >
           <Text style={styles.secondaryText}>Choose one</Text>
@@ -597,11 +625,15 @@ export default function DescribeMealScreen() {
                 onPress={() => void describe(false)}
                 accessibilityRole="button"
                 accessibilityLabel="Estimate this again instead of reusing the saved food"
-                disabled={locked}
-                accessibilityState={{ disabled: locked }}
+                // Spends a quota unit exactly like the primary submit button
+                // does, so it is gated on the same exhausted check (F17,
+                // #403) — this used to stay tappable after the quota ran
+                // out and fire a request that could only come back refused.
+                disabled={locked || quotaExhausted}
+                accessibilityState={{ disabled: locked || quotaExhausted }}
                 testID="describe-regenerate"
               >
-                <Text style={[styles.regenerate, locked && styles.off]}>
+                <Text style={[styles.regenerate, (locked || quotaExhausted) && styles.off]}>
                   Not right? Estimate it again — uses one estimate
                 </Text>
               </Pressable>

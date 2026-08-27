@@ -22,7 +22,7 @@
 
 import { randomUUID } from 'expo-crypto';
 
-import { isPermanentRejection, isTransportFailure } from './apiError';
+import { isPermanentRejection, isTransportFailure, retryAfterOf } from './apiError';
 import { getDb, withTransaction } from './db';
 import type { Entry, Food, Macros, Meal, RecipeItem, Target, TargetView } from './nutrition';
 import * as api from './nutritionApi';
@@ -622,6 +622,8 @@ export type FoodSyncResult = {
   failed: number;
   error?: string;
   errorKind?: 'offline' | 'permanent' | 'transient';
+  /** The largest `Retry-After` seen this run, in ms (F17, #403). */
+  retryAfterMs?: number;
 };
 
 function classify(err: unknown): 'offline' | 'permanent' | 'transient' {
@@ -636,6 +638,12 @@ function worseKind(
   if (a === 'offline' || b === 'offline') return 'offline';
   if (a === 'permanent' || b === 'permanent') return 'permanent';
   return a ?? b;
+}
+
+/** Fold one failure's `Retry-After` into the run's running maximum. */
+function noteRetryAfter(result: { retryAfterMs?: number }, err: unknown): void {
+  const ms = retryAfterOf(err);
+  if (ms != null) result.retryAfterMs = Math.max(result.retryAfterMs ?? 0, ms);
 }
 
 let inFlight: Promise<FoodSyncResult> | null = null;
@@ -733,6 +741,7 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
       result.failed += 1;
       result.error = result.error ?? message;
       result.errorKind = worseKind(result.errorKind, kind);
+      noteRetryAfter(result, err);
       await db.runAsync(
         `UPDATE foods SET last_error = ? WHERE id = ? AND user_id = ? AND updated_at = ?`,
         message, f.id, userId, f.updated_at,
@@ -795,6 +804,7 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
       result.failed += 1;
       result.error = result.error ?? message;
       result.errorKind = worseKind(result.errorKind, kind);
+      noteRetryAfter(result, err);
       // THE SAME COMPARE-AND-SWAP AS THE SUCCESS PATH, and for the same reason.
       // Without it, an edit made while this push was in flight is stomped by
       // the failure of the payload that PRECEDED it: `dirty` is cleared on a

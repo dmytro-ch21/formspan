@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
-import { isOffline } from './apiError';
+import { isOffline, retryAfterOf } from './apiError';
 import { countPendingSessions, countPendingWorkouts, syncSessions } from './sessionStore';
 import { countPendingPlans, syncPlans } from './plan';
 import { pendingFoodCount, syncFood } from './foodLog';
@@ -79,6 +79,16 @@ export type SyncState = {
  * is usually a person walking out of a basement, and a schedule that has
  * drifted to an hour would leave a finished workout unsynced long after the
  * phone had signal again. The last entry repeats.
+ *
+ * **This is a FLOOR, not the whole answer (F17, #403).** A 429 tells us
+ * exactly how long the server wants us to wait, via `Retry-After`, and this
+ * ladder used to be blind to it — a 300s server limit got hit again at the
+ * 5s/15s/60s marks before the ladder ever caught up, three wasted attempts
+ * against a budget the server had already named. `schedule()` now takes the
+ * LONGER of this ladder's step and the most recent run's `Retry-After`, never
+ * the shorter: a server delay under the current step must not shorten it —
+ * the ladder already backs off for reasons the server said nothing about
+ * (repeated transient failures), and a lenient 429 must not undo that.
  */
 const BACKOFF_MS = [5_000, 15_000, 60_000, 300_000];
 
@@ -94,6 +104,17 @@ let state: SyncState = {
 const listeners = new Set<(s: SyncState) => void>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 let failures = 0;
+/**
+ * The longest `Retry-After` the most recent run's failures carried, in ms —
+ * 0 when none did (F17, #403).
+ *
+ * Deliberately recomputed FRESH from each run's own failures rather than
+ * accumulated across runs: a run that fails for an unrelated reason (offline,
+ * a 5xx) has no `Retry-After` to report, and `schedule()` reading a stale
+ * value from three runs ago would hold up a sync the server said nothing
+ * about this time. `run()` overwrites this every time it emits a failure.
+ */
+let pendingRetryAfterMs = 0;
 /** Set while a run is in flight, so overlapping requests coalesce. */
 let running: Promise<void> | null = null;
 /** A change arrived while a run was in flight — run once more after it. */
@@ -133,6 +154,7 @@ export function setSyncIdentity(userID: string | null, getToken: TokenGetter | n
     creds = null;
     cancelTimer();
     failures = 0;
+    pendingRetryAfterMs = 0;
     // Not a "synced" state — an unknown one. Reporting 0 pending for a
     // signed-out app would let the UI claim everything is safely on the
     // server when we simply have no one to ask about.
@@ -308,6 +330,17 @@ async function run(reason: string): Promise<void> {
           ),
           trackerResult.errorKind,
         ),
+        // The MAXIMUM across all five, not the last one seen (F17, #403):
+        // whichever queue hit the longest server-advertised wait is the one
+        // that should set the pace, the same reasoning `errorKind`'s ranking
+        // above already applies to classification.
+        retryAfterMs: Math.max(
+          sessionResult.retryAfterMs ?? 0,
+          planResult.retryAfterMs ?? 0,
+          sequenceResult.retryAfterMs ?? 0,
+          foodResult.retryAfterMs ?? 0,
+          trackerResult.retryAfterMs ?? 0,
+        ),
       };
 
       // The account may have changed while this ran.
@@ -317,6 +350,9 @@ async function run(reason: string): Promise<void> {
 
       if (result.failed > 0) {
         failures++;
+        // Recomputed from THIS run's failures, not accumulated — see the
+        // module-level doc comment on `pendingRetryAfterMs`.
+        pendingRetryAfterMs = result.retryAfterMs;
         const kind: SyncErrorKind = result.errorKind ?? 'transient';
         emit({
           lastError: result.error ?? 'Sync failed.',
@@ -335,6 +371,7 @@ async function run(reason: string): Promise<void> {
         retry = kind !== 'permanent';
       } else {
         failures = 0;
+        pendingRetryAfterMs = 0;
         emit({ lastError: null, lastSyncAt: Date.now(), online: true });
       }
     } catch (err) {
@@ -342,6 +379,11 @@ async function run(reason: string): Promise<void> {
       // switch mid-run leaves the previous athlete's error on screen.
       if (creds?.userID !== userID) return;
       failures++;
+      // Defensive, not load-bearing: the five outboxes above catch per-row
+      // and never throw a raw `ApiError` up to here, so this branch is for
+      // something unexpected — but if it ever IS one, the same rule applies
+      // as everywhere else: recomputed fresh, not accumulated.
+      pendingRetryAfterMs = retryAfterOf(err) ?? 0;
       emit({
         lastError: err instanceof Error ? err.message : String(err),
         // **`isOffline`, deliberately narrow.** This drives the word
@@ -400,7 +442,14 @@ function schedule(): void {
   // a failing run is suspended on an await — so this can be reached with
   // failures === 0 and read BACKOFF_MS[-1], i.e. undefined, i.e. setTimeout
   // fires immediately.
-  const wait = BACKOFF_MS[Math.max(0, Math.min(failures - 1, BACKOFF_MS.length - 1))];
+  const step = BACKOFF_MS[Math.max(0, Math.min(failures - 1, BACKOFF_MS.length - 1))];
+  // THE LADDER IS A FLOOR (F17, #403). `Math.max`, never `??` and never a
+  // straight substitution: a server delay SHORTER than the current step must
+  // not shorten it (the ladder is already backing off for reasons the server
+  // said nothing about), and a server delay LONGER than the step must be
+  // honoured rather than burning a retry under it. Equal to the step changes
+  // nothing either way, which is exactly what "floor" means at the boundary.
+  const wait = Math.max(step, pendingRetryAfterMs);
   timer = setTimeout(() => {
     timer = null;
     request('backoff');

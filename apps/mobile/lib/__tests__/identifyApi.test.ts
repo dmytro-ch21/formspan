@@ -1,4 +1,4 @@
-import { identifyErrorMessage, isRetryable } from '../identifyApi';
+import { identifyErrorMessage, identifyHint, isRetryable } from '../identifyApi';
 import { ApiError, OfflineError, RequestDroppedError, TimeoutError } from '../apiError';
 
 /**
@@ -31,6 +31,42 @@ describe('isRetryable', () => {
     expect(isRetryable(new ApiError('down', 'internal', 503))).toBe(true);
     expect(isRetryable(new Error('network'))).toBe(true);
     expect(isRetryable(null)).toBe(true);
+  });
+});
+
+/**
+ * `identifyHint` — a different question from `isRetryable` above (F17, #403).
+ *
+ * The 429 test in `isRetryable` above is untouched and must stay that way:
+ * 429 is correctly non-retryable, and this block is not arguing otherwise.
+ * What it pins is that the SCREEN's hint for a 429 is not folded into either
+ * `retry` or `retake` — before this fix it fell through to `retake`, which
+ * told a rate-limited athlete to reshoot a photo that had nothing to do with
+ * the refusal.
+ */
+describe('identifyHint', () => {
+  it('says WAIT for a 429, not retake — a new photo cannot fix a rate limit', () => {
+    expect(identifyHint(new ApiError('slow down', 'rate_limited', 429))).toBe('wait');
+  });
+
+  it('still says retake for a 422 — the deterministic, photo-is-the-problem case', () => {
+    expect(identifyHint(new ApiError('nope', 'invalid_input', 422))).toBe('retake');
+  });
+
+  it('says retake for a 400 too — an unreadable photo, same remedy as a 422', () => {
+    expect(identifyHint(new ApiError('bad', 'invalid_input', 400))).toBe('retake');
+  });
+
+  it('says retry for anything isRetryable already says yes to', () => {
+    expect(identifyHint(new ApiError('down', 'internal', 503))).toBe('retry');
+    expect(identifyHint(new Error('network'))).toBe('retry');
+    expect(identifyHint(null)).toBe('retry');
+  });
+
+  it('gives 429 its own distinct value — not equal to either retry or retake', () => {
+    const wait = identifyHint(new ApiError('slow down', 'rate_limited', 429));
+    expect(wait).not.toBe('retry');
+    expect(wait).not.toBe('retake');
   });
 });
 
@@ -71,6 +107,35 @@ describe('identifyErrorMessage', () => {
       identifyErrorMessage(new ApiError('x', 'c', s)),
     );
     expect(new Set(msgs).size).toBe(5);
+  });
+
+  /**
+   * F17 (#403). The two branches this pins are: "the response carried a
+   * `Retry-After`" and "it did not" — a real fork in `identifyErrorMessage`,
+   * not a round-trip of a value the test itself set on a header. Nothing
+   * here touches `parseRetryAfterMs`; `apiError.test.ts` owns that boundary.
+   */
+  describe('on a 429', () => {
+    it('says the server-computed wait when the response carried one', () => {
+      const msg = identifyErrorMessage(new ApiError('slow down', 'rate_limited', 429, 47_000));
+      expect(msg).toMatch(/wait 47 seconds/i);
+      expect(msg).not.toMatch(/a few minutes/i);
+    });
+
+    it('falls back to the vague wording only when there is truly nothing to report', () => {
+      // The 4th constructor argument left OFF entirely — not "0", which is a
+      // real answer ("retry now") and must not collapse into "unknown".
+      const msg = identifyErrorMessage(new ApiError('slow down', 'rate_limited', 429));
+      expect(msg).toMatch(/a few minutes/i);
+    });
+
+    it('a zero-second wait is reported as zero, not folded into the vague fallback', () => {
+      const msg = identifyErrorMessage(new ApiError('slow down', 'rate_limited', 429, 0));
+      // waitPhrase(0) reads "Wait 1 second" (never "0 seconds") — asserted in
+      // full here so this test would fail if that floor were ever dropped.
+      expect(msg).toMatch(/wait 1 second/i);
+      expect(msg).not.toMatch(/a few minutes/i);
+    });
   });
 });
 

@@ -215,6 +215,154 @@ describe('retry scheduling', () => {
   });
 });
 
+/**
+ * THE LADDER IS A FLOOR (F17, #403) — `schedule()`'s `Math.max(step,
+ * pendingRetryAfterMs)`.
+ *
+ * Per the ticket's own warning about repeating F15's trap: a test that only
+ * checks "a 429 with `Retry-After` eventually retries" would pass against
+ * either of the two wrong implementations — substituting the server's value
+ * outright (which would let a SHORT server delay shorten the ladder) or
+ * ignoring it entirely (which burns retries under a LONG one). Every case
+ * below is pinned at the actual transition: `BACKOFF_MS[0]` is 5_000ms, and
+ * each test's server delay sits deliberately on one side of that exact
+ * number, asserted by settling to just short of the true wait and then just
+ * past it — never a value comfortably clear of the boundary.
+ *
+ * Mutation-verified (recorded in the PR): reverting `Math.max(step,
+ * pendingRetryAfterMs)` to plain `step` (ignore the server) turns the
+ * "honoured" test red; reverting it to plain `pendingRetryAfterMs` (ignore
+ * the ladder) turns the "not shortened" test red. Both mutations leave every
+ * OTHER test in this file green, including the pre-existing "retries a
+ * transient failure" test — which is exactly the "true by construction"
+ * failure mode these tests exist to catch, since that pre-existing test never
+ * sets `retryAfterMs` at all.
+ */
+describe('the ladder is a floor, not a ceiling', () => {
+  it('a server delay SHORTER than the ladder step does not shorten the wait', async () => {
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    // 4_000ms < BACKOFF_MS[0] (5_000ms).
+    mockSync.mockResolvedValue({ ...failed('transient'), retryAfterMs: 4_000 });
+    await syncNow();
+
+    const before = mockSync.mock.calls.length;
+    // Past the server's own 4s wait, but short of the ladder's 5s step.
+    await settle(4_300);
+    expect(mockSync.mock.calls.length).toBe(before);
+
+    await settle(1_000); // now past the ladder's step (5_300ms total)
+    expect(mockSync.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('a server delay LONGER than the ladder step is honoured, not raced past', async () => {
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    // 8_000ms > BACKOFF_MS[0] (5_000ms).
+    mockSync.mockResolvedValue({ ...failed('transient'), retryAfterMs: 8_000 });
+    await syncNow();
+
+    const before = mockSync.mock.calls.length;
+    // Past the ladder's own step, but short of the server's 8s wait.
+    await settle(5_300);
+    expect(mockSync.mock.calls.length).toBe(before);
+
+    await settle(3_000); // now past the server's wait (8_300ms total)
+    expect(mockSync.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('a server delay EQUAL to the ladder step changes nothing either way', async () => {
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue({ ...failed('transient'), retryAfterMs: 5_000 });
+    await syncNow();
+
+    const before = mockSync.mock.calls.length;
+    await settle(4_900);
+    expect(mockSync.mock.calls.length).toBe(before);
+
+    await settle(400); // 5_300ms total
+    expect(mockSync.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('a run with no Retry-After at all is unaffected — the ladder alone decides', async () => {
+    // The control: no `retryAfterMs` key, matching every ordinary transient
+    // failure. If the floor logic ever defaulted the MISSING case to
+    // something other than 0, this is what would catch it.
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue(failed('transient'));
+    await syncNow();
+
+    const before = mockSync.mock.calls.length;
+    await settle(4_900);
+    expect(mockSync.mock.calls.length).toBe(before);
+    await settle(400);
+    expect(mockSync.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('the longest of FIVE outboxes wins, not whichever happens to run last', async () => {
+    // Mirrors the existing "trackers in the merge" / "food in the merge"
+    // cases: the merge point is `Math.max` across all five results, not the
+    // session result alone. Sessions get the SHORT delay and trackers the
+    // long one, so a merge that only looked at `sessionResult.retryAfterMs`
+    // would honour 4_000ms and this test would go red.
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue({ ...failed('transient'), retryAfterMs: 4_000 });
+    (syncTrackers as jest.Mock).mockResolvedValue({
+      pushed: 0,
+      failed: 1,
+      error: 'cup rate-limited',
+      errorKind: 'transient',
+      retryAfterMs: 8_000,
+    });
+    // `finally`, not a bare statement at the end — an assertion failure above
+    // would otherwise skip the restore and leak the 8s-retryAfterMs tracker
+    // mock into whichever test runs next in this file.
+    try {
+      await syncNow();
+
+      const before = mockSync.mock.calls.length;
+      await settle(5_300); // past the ladder step AND the shorter delay
+      expect(mockSync.mock.calls.length).toBe(before); // still not past 8s
+
+      await settle(3_000); // past 8_300ms total
+      expect(mockSync.mock.calls.length).toBeGreaterThan(before);
+    } finally {
+      (syncTrackers as jest.Mock).mockResolvedValue({ pushed: 0, failed: 0 });
+    }
+  });
+
+  it('resets to 0 after a clean run — a wait from one failure does not haunt the next', async () => {
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue({ ...failed('transient'), retryAfterMs: 8_000 });
+    await syncNow();
+
+    // A clean run in between — via the manual Retry path, same as an
+    // athlete's own tap — must clear the remembered wait.
+    mockSync.mockResolvedValue(ok());
+    await syncNow();
+
+    mockSync.mockResolvedValue(failed('transient')); // no retryAfterMs this time
+    await syncNow();
+
+    const before = mockSync.mock.calls.length;
+    // If the old 8s wait were still in effect, nothing would have retried yet
+    // at 5_300ms — but a fresh transient failure with no Retry-After should
+    // retry at the ladder's own step.
+    await settle(5_300);
+    expect(mockSync.mock.calls.length).toBeGreaterThan(before);
+  });
+});
+
 it('syncNow actually attempts rather than being stolen by a queued re-fire', async () => {
   // run()'s finally re-fires when dirtyAgain is set, occupying `running` in
   // the same microtask that resolves a single `await running` — so a manual
