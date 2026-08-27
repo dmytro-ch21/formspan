@@ -796,7 +796,7 @@ export function WeekPlanner({
  * `<SelectAllTextInput>` to trigger it, per that file's own `INPUT_TAGS`
  * comment on `SelectAllTextInput` counting as an input in its own right.
  */
-function WeekThemeRow({
+export function WeekThemeRow({
   weekStart,
   getToken,
   reloadAt,
@@ -813,24 +813,35 @@ function WeekThemeRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  // Whether a read has ever SUCCEEDED for this mounted instance — a "no theme
+  // this week" answer counts, `false` (the never-loaded default) does not.
+  // Ref, not state: flipping it must never itself trigger a render.
+  const loadedOnce = useRef(false);
 
   // Reads on mount, on focus (`reloadAt`) and whenever a sync finishes
   // (`lastSyncAt`) — a theme set on web while the app was backgrounded should
-  // not wait for a manual pull. Does NOT depend on `weekStart`: this
-  // component is remounted by its `key` whenever the week changes, so a
-  // dependency on `weekStart` would only ever fire on the render that already
-  // ran it as the mount effect.
+  // not wait for a manual pull. `weekStart` is IN the dependency array (it
+  // has to be, for the closure inside `.then`/`.catch` to read the right
+  // value) but is inert in practice: this component is remounted by its
+  // `key` whenever the shown week changes, so by the time this effect could
+  // see a new `weekStart` the whole instance — and this ref — is already gone.
   useEffect(() => {
     let live = true;
     fetchThemes(getToken, { from: weekStart, to: weekStart })
       .then((ts) => {
-        if (live) setWeekTheme(ts[0] ?? null);
+        if (!live) return;
+        loadedOnce.current = true;
+        setWeekTheme(ts[0] ?? null);
       })
       .catch(() => {
-        // Offline, or the endpoint is unreachable. No theme, no error — this
-        // is decoration on a screen that must work in a basement, same as
-        // Today's identical read.
-        if (live) setWeekTheme(null);
+        // Offline, or the endpoint is unreachable. On the FIRST read for this
+        // week this degrades honestly to "no theme", matching Today's
+        // identical read. On a background refetch (`reloadAt`/`lastSyncAt`
+        // firing while a theme is already correctly on screen) it must NOT
+        // stomp what is already shown — a transient failure on refocus would
+        // otherwise flash "+ Theme" for a week that has one, and tapping that
+        // opens a blank draft that could overwrite the real title on save.
+        if (live && !loadedOnce.current) setWeekTheme(null);
       });
     return () => {
       live = false;
@@ -838,6 +849,10 @@ function WeekThemeRow({
   }, [getToken, weekStart, reloadAt, lastSyncAt]);
 
   async function save() {
+    // A fast double-tap, or a keyboard-submit landing on top of a tap: Save's
+    // own `disabled={busy}` does not gate `onSubmitEditing`, so this is the
+    // one guard against two overlapping requests for the same edit.
+    if (busy) return;
     const title = cleanThemeTitle(draft);
     setBusy(true);
     try {
@@ -864,6 +879,16 @@ function WeekThemeRow({
     }
   }
 
+  // A human-readable date for VoiceOver, matching how every other date-bearing
+  // accessibility label in this file reads (`Plan ${weekday}, ${day} ${month}`
+  // above) — the raw `YYYY-MM-DD` in `weekStart` is fine as a wire value and
+  // wrong to speak aloud digit group by digit group.
+  const weekLabel = new Date(`${weekStart}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+
   if (editing) {
     return (
       <RNView style={styles.themeEditRow} testID="plan-theme-edit">
@@ -877,7 +902,7 @@ function WeekThemeRow({
           maxLength={MAX_THEME_TITLE}
           returnKeyType="done"
           onSubmitEditing={save}
-          accessibilityLabel={`Theme for the week of ${weekStart}`}
+          accessibilityLabel={`Theme for the week of ${weekLabel}`}
           testID="plan-theme-input"
         />
         <Pressable
@@ -886,6 +911,10 @@ function WeekThemeRow({
           hitSlop={10}
           accessibilityRole="button"
           accessibilityState={{ disabled: busy, busy }}
+          // Fixed, rather than left to the text child: the child reads "…"
+          // while `busy`, and without this VoiceOver would announce "ellipsis,
+          // button" mid-save instead of "Save, button, busy".
+          accessibilityLabel="Save"
           testID="plan-theme-save"
         >
           <Text style={[styles.themeAction, { color: accentInk }, busy && styles.themeActionDisabled]}>

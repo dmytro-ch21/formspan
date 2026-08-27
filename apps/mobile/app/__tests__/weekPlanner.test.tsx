@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
-import { WeekPlanner } from '@/components/WeekPlanner';
+import { WeekPlanner, WeekThemeRow } from '@/components/WeekPlanner';
 import type { Module } from '@/lib/modules';
 
 /**
@@ -439,5 +439,65 @@ describe('the week theme', () => {
     expect(screen.queryByTestId('plan-theme-edit')).toBeNull();
     expect(mockSetTheme).not.toHaveBeenCalled();
     expect(mockDeleteTheme).not.toHaveBeenCalled();
+  });
+
+  it('a submit-editing landing on top of a Save tap sends only one request', async () => {
+    // Never resolves — `busy` stays true for the life of the test, so a
+    // second trigger arriving before the first PUT settles is exactly the
+    // race under test.
+    mockSetTheme.mockReturnValue(new Promise(() => {}));
+    render(<WeekPlanner userId="u1" modules={modules} />);
+    await waitFor(() => expect(mockFetchThemes).toHaveBeenCalled());
+
+    fireEvent.press(screen.getByTestId('plan-theme-open'));
+    fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Deload week');
+
+    fireEvent.press(screen.getByTestId('plan-theme-save'));
+    // The Save Pressable's own `disabled={busy}` covers a second TAP once
+    // React has re-rendered with `busy: true` — this exercises the other
+    // trigger, `onSubmitEditing`, which is not gated by `disabled` at all.
+    fireEvent(screen.getByTestId('plan-theme-input'), 'submitEditing');
+
+    expect(mockSetTheme).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('WeekThemeRow read resilience', () => {
+  const props = {
+    weekStart: '2026-08-03',
+    getToken: mockGetToken,
+    lastSyncAt: null,
+    accentInk: '#000000',
+  };
+
+  it('a background refetch failure does not clear an already-shown theme', async () => {
+    mockFetchThemes
+      .mockResolvedValueOnce([{ week_start: '2026-08-03', title: 'Guard retention', notes: '' }])
+      .mockRejectedValueOnce(new Error('offline'));
+
+    const { rerender } = render(<WeekThemeRow {...props} reloadAt={0} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('plan-theme-open')).toHaveTextContent('Guard retention'),
+    );
+
+    // A refocus or a sync completing while camped on the same week — the
+    // component is NOT remounted (no key change; `weekStart` is unchanged),
+    // so this is the one path where a failure could stomp what is already
+    // correctly on screen.
+    rerender(<WeekThemeRow {...props} reloadAt={1} />);
+    await waitFor(() => expect(mockFetchThemes).toHaveBeenCalledTimes(2));
+    // Real timers here (the file's fake-timer setup explicitly excludes
+    // `setTimeout`), giving the rejected promise's `.catch` a tick to run.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(screen.getByTestId('plan-theme-open')).toHaveTextContent('Guard retention');
+  });
+
+  it('a failed FIRST read shows the themeless state, not stale UI', async () => {
+    mockFetchThemes.mockRejectedValueOnce(new Error('offline'));
+
+    render(<WeekThemeRow {...props} reloadAt={0} />);
+
+    await waitFor(() => expect(screen.getByTestId('plan-theme-open')).toHaveTextContent('+ Theme'));
   });
 });
