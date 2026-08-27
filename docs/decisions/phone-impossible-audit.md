@@ -38,7 +38,7 @@ Counts at the time of the sweep: **26 web routes, 46 mobile routes.**
 | 5 | Manage saved foods — list, edit, delete | `nutrition/recipes` | mobile `deleteFood` is documented as having *"No production caller yet"* | open |
 | 6 | The nutrition analytical surface — intake vs bodyweight vs training load, 7-day mean, adherence % | `/dashboard/nutrition` | none | **closed by N84 ([#674](https://github.com/dmytro-ch21/formspan/pull/674))** — `app/goals/nutritionTrend.tsx`, a reduced ONE-metric form (7-day mean kcal against today's live target); the three-way join stays web-only, which the carve-out requires rather than merely permits. |
 | 7 | Author a weekly training theme | `/dashboard/calendar` (`setTheme`) | `lib/themes.ts`: *"read-only on the phone… no write path here on purpose"* | open |
-| 8 | Create / edit / delete your own curriculum or roadmap | `curricula/new`, `[id]/edit` | mobile `lib/curriculum.ts` exports only `getCurriculum`, `enroll`, `archive` | **closed by N83 ([#PR_NUMBER](https://github.com/dmytro-ch21/formspan/pull/PR_NUMBER))** |
+| 8 | Create / edit / delete your own curriculum or roadmap | `curricula/new`, `[id]/edit` | mobile `lib/curriculum.ts` exports only `getCurriculum`, `enroll`, `archive` | **closed by N83 ([#676](https://github.com/dmytro-ch21/formspan/pull/676))** |
 | 9 | View, edit, copy or delete a sequence | `sequences/*` | mobile can only *capture* one inside `bjj/reflect/[id]` — **no list or detail screen exists** | **read-back by N80 ([#449](https://github.com/dmytro-ch21/formspan/pull/449)); edit/copy/delete still open** |
 | 10 | The technique funnel as a browsable surface | `/dashboard/proficiency` | mobile `fetchProficiency` feeds the Today card only | **closed by N84 ([#674](https://github.com/dmytro-ch21/formspan/pull/674))** — `app/bjj/proficiency.tsx`, a straight port of web's `bucketOf` bucketing reshaped into a scrollable list rather than a wide table. Not a chart, so the mobile-chart carve-out was never in play for this row. |
 | 11 | Per-exercise load over time | `records` + `LoadHistoryChart` | mobile has no `fetchLoadHistory` | **closed by N84 ([#674](https://github.com/dmytro-ch21/formspan/pull/674))** — `app/records/[exerciseId]/trend.tsx`, one fixed metric ("Top set"), the same range-chip shape `app/goals/trend.tsx` uses. First real consumer of N56's shared trend layer beyond weight. |
@@ -127,7 +127,7 @@ Each is superseded on the exclusivity, not on the design.
 | `functional-scenarios.md` | "Building and refining [sequences] stay on web"; "No browse or detail screen on mobile" — **corrected on the exclusivity by N80 ([#449](https://github.com/dmytro-ch21/formspan/pull/449))**: reading is now on both, building is still web-only, and that is allowed |
 | `functional-scenarios.md` | Themes "Authored on web, read on the phone… **no way to author one on the phone**, deliberately" |
 | `functional-scenarios.md` | "Session list paging, search and filters (`GET /v1/sessions`, `apps/web` History)" — **corrected on the exclusivity by N85 ([#671](https://github.com/dmytro-ch21/formspan/pull/671))**: mobile now has a reduced but real search/browse screen (`apps/mobile/app/session/history.tsx`) hitting the same backend filter; the backend scenarios were already platform-agnostic and are unchanged |
-| `curriculum-and-gameplan-design.md` | "roadmap *building* and the full funnel on web" — **corrected on the exclusivity by N83 ([#PR_NUMBER](https://github.com/dmytro-ch21/formspan/pull/PR_NUMBER))**: web's two-pane builder stays the richer way to build one, the phone now has a reduced (single reorderable list, up/down rather than drag-and-drop) but complete authoring flow |
+| `curriculum-and-gameplan-design.md` | "roadmap *building* and the full funnel on web" — **corrected on the exclusivity by N83 ([#676](https://github.com/dmytro-ch21/formspan/pull/676))**: web's two-pane builder stays the richer way to build one, the phone now has a reduced (single reorderable list, up/down rather than drag-and-drop) but complete authoring flow |
 | `system-design.md` | *"nothing a user needs weekly may be desktop-only"* — this one is not an assignment but a rule, and #1–#6 violate it. Nutrition is daily. |
 
 ### The inverse — mobile-only capabilities
@@ -156,7 +156,7 @@ add a finding here, file it too, and put the id in this table.
 | [#414](https://github.com/dmytro-ch21/formspan/issues/414) | Shared-sequence read-back | 9 |
 | [#415](https://github.com/dmytro-ch21/formspan/issues/415) | Past-day food jump | *reduced-to-impossible* |
 | [#416](https://github.com/dmytro-ch21/formspan/issues/416) | Theme authoring | 7 |
-| [#417](https://github.com/dmytro-ch21/formspan/issues/417) | Curriculum authoring | 8 — **closed by N83 ([#PR_NUMBER](https://github.com/dmytro-ch21/formspan/pull/PR_NUMBER))** |
+| [#417](https://github.com/dmytro-ch21/formspan/issues/417) | Curriculum authoring | 8 — **closed by N83 ([#676](https://github.com/dmytro-ch21/formspan/pull/676))** |
 | [#418](https://github.com/dmytro-ch21/formspan/issues/418) | The three analytical surfaces | 6, 10, 11 |
 | [#419](https://github.com/dmytro-ch21/formspan/issues/419) | Session search and the 20-row cap | 12 |
 
