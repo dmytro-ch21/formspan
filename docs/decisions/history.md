@@ -43924,6 +43924,28 @@ PR closes both: #652 is the ticket for this work, #378 is the ticket whose
 remaining gap it fills.
 
 
+## 2026-08-27 — L3: deleted `dropsOf` (#382)
+
+`apps/mobile/lib/sessions.ts`'s `dropsOf` had no caller anywhere in the app —
+only test-only references in `setDetail.test.ts` (`which set a drop came
+off`). It existed to mirror `backend/internal/modules/session/session.go`'s
+`DropsOf`, in anticipation of some future screen reading a drop group as a
+unit rather than as a positional run of rows, and that consumer never showed
+up. L2 (#381), closed the same week as "accepted cost", confirmed nothing on
+the client is about to start reading drop groups differently — the
+parent/drop relationship stays positional. That made keeping a second,
+unexercised implementation of the server's grouping rule the wrong default:
+dead code that mirrors a server behaviour is exactly the kind that drifts
+silently out of agreement with it, per the ticket's framing.
+
+Deleted the function and its now-orphaned test block. Confirmed via
+`grep -rn "dropsOf" apps/mobile` (zero hits after) and a full `pnpm run
+verify` (196 mobile test suites / 3062 tests still pass, nothing else
+referenced it). The backend's `DropsOf` (Go) is untouched — it's the real
+grouping logic the server itself uses to validate/persist drop runs, not dead
+code, and out of scope for this ticket. No functional-scenarios.md update:
+removing genuinely dead code has no user-facing or API-surface behavior.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

@@ -1228,28 +1228,6 @@ export function emptyDropSet(from: LoggedSet, position: number): LoggedSet {
 }
 
 /**
- * The drop sets hanging off the set at `i` — the consecutive `drop` rows
- * immediately following it, of the same exercise.
- *
- * Mirrors the server's `DropsOf`, including the contiguity rule rather than
- * "nearest preceding": a drop after a DIFFERENT exercise breaks the run and is
- * orphaned, so a stray row can never attach reps to somebody else's lift. The
- * two implementations have to agree, because the relationship exists only as
- * order — there is no id linking a drop to its parent, and there cannot be one
- * while the server replaces every row on save.
- */
-export function dropsOf(sets: LoggedSet[], i: number): LoggedSet[] {
-  if (i < 0 || i >= sets.length || sets[i].set_type === 'drop') return [];
-  const out: LoggedSet[] = [];
-  for (let j = i + 1; j < sets.length; j++) {
-    if (sets[j].set_type !== 'drop') break;
-    if (sets[j].exercise_id !== sets[i].exercise_id) break;
-    out.push(sets[j]);
-  }
-  return out;
-}
-
-/**
  * Drop every measure the server will refuse, turning it back into "not
  * recorded".
  *

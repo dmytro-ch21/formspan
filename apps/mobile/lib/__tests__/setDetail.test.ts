@@ -1,5 +1,4 @@
 import {
-  dropsOf,
   emptyDropSet,
   setOrdinals,
   soloReps,
@@ -68,40 +67,6 @@ describe('a drop set', () => {
     expect(drop.rir).toBeNull();
     expect(drop.rpe).toBeNull();
     expect(drop.assisted_reps ?? null).toBeNull();
-  });
-});
-
-describe('which set a drop came off', () => {
-  const sets = [
-    set({ position: 0, reps: 3 }),
-    set({ position: 1, set_type: 'drop', reps: 8, weight_kg: 84 }),
-    set({ position: 2, set_type: 'drop', reps: 6, weight_kg: 60 }),
-    set({ position: 3, reps: 3 }),
-  ];
-
-  it('takes the consecutive run that follows it', () => {
-    expect(dropsOf(sets, 0).map((d) => d.weight_kg)).toEqual([84, 60]);
-    expect(dropsOf(sets, 3)).toEqual([]);
-  });
-
-  it('is never claimed by a drop itself', () => {
-    expect(dropsOf(sets, 1)).toEqual([]);
-  });
-
-  it('stops at a different exercise, so a stray row is orphaned not stolen', () => {
-    // Contiguity, matching the server. Attaching across exercises would put
-    // reps under a lift they were never performed on — worse than showing an
-    // orphan.
-    const mixed = [
-      set({ exercise_id: 'squat', position: 0 }),
-      set({ exercise_id: 'bench-press', position: 1, set_type: 'drop' }),
-    ];
-    expect(dropsOf(mixed, 0)).toEqual([]);
-  });
-
-  it('is safe at the edges', () => {
-    for (const i of [-1, 99]) expect(dropsOf(sets, i)).toEqual([]);
-    expect(dropsOf([], 0)).toEqual([]);
   });
 });
 
