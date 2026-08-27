@@ -43946,6 +43946,46 @@ grouping logic the server itself uses to validate/persist drop runs, not dead
 code, and out of scope for this ticket. No functional-scenarios.md update:
 removing genuinely dead code has no user-facing or API-surface behavior.
 
+## 2026-08-26 — N206 hardening follow-up: guarding a mixed-criteria roadmap note, and documenting the one-directional drilled-tag coupling
+
+Small standalone follow-up, not tied to any open issue. During an earlier,
+now-abandoned review pass on #654 (merged as #656, N206 above), a
+`frontend-reviewer` mutation-verified two small hardening issues in the merged
+code that never made it into that PR. Both are latent/cosmetic — not live
+bugs — redone here against current `main`.
+
+**1. `apps/mobile/lib/roadmapView.ts`, `evidenceNoteOf`.** The drilled-only
+explanation branch (added by N206: "You have live evidence for this, but it
+counts classes drilled…") fired off `c.target_drilled_sessions !== null`
+alone. A "mixed-criteria" item — one that ALSO carries `target_scored`,
+`target_defended` or `min_hit_rate` — would get that note even though
+`measuresOf` is already counting the same live evidence toward the other
+criterion one line above it, a direct contradiction. Today's `curricula.json`
+has zero such items (58 drilled-criterion items, all drilled-only, confirmed
+by inspection), so this was latent rather than live, but nothing in the
+schema forbids authoring one via admin `/content`. Fix: the branch now also
+requires `target_scored === null && target_defended === null &&
+min_hit_rate === null`, matching the "drilled-only" state the note's wording
+already assumed. Added a regression test constructing a mixed-criteria item
+(`target_drilled_sessions` + `target_scored`, live scored evidence, zero
+drilled evidence) asserting `evidenceNoteOf` returns `null`; mutation-verified
+by removing the new guard clause, confirming the test fails as a genuine
+assertion failure (not a compile error), then restoring and re-running green.
+
+**2. `apps/mobile/lib/bjjSession.ts`, `removeDrilledTechnique`'s docstring.**
+The comment said un-saying the drilled tag and un-saying live evidence "must
+not un-say the other" — true when it was written, but N206's backfill in
+`bumpTechniqueOutcome` (same file) makes the coupling one-directional: an
+athlete can remove a technique's drilled chip, then tap any live counter
+(attempted/scored/defended) for it, and the backfill silently re-adds the
+drilled tag. The resurrected chip is visible and removable again, so this
+remains accepted behaviour — the docstring (and the matching inline comment
+inside the function) were just stale. No behavior change, documentation only.
+
+Reviewed with a `frontend-reviewer` pass on the diff; no blocking findings.
+`pnpm run verify` green.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

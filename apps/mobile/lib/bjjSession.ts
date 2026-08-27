@@ -273,7 +273,15 @@ export function bumpTechniqueOutcome(
  * from the live step's focus rows, which are reachable whether or not the
  * technique was drilled today, so nothing is stranded — and "I did not
  * actually drill this" and "I did not hit this live" became different
- * statements. Un-saying one must not un-say the other.
+ * statements this function can un-say independently.
+ *
+ * That independence is one-directional, though (N206): `bumpTechniqueOutcome`
+ * above backfills a `drilled` tag the first time a live outcome is recorded
+ * for a technique in a session. So removing the drilled chip here, then
+ * tapping any live counter for the same technique afterward, silently
+ * resurrects it — the tag reappears as a normal, removable chip, which is
+ * accepted behaviour, just worth knowing before you assume this function's
+ * effect is permanent within a session.
  */
 export function removeDrilledTechnique(tags: Tag[], techniqueID: string | null | undefined): Tag[] {
   // A nullish id matches every UNTAGGED row, and the API sends
@@ -290,8 +298,9 @@ export function removeDrilledTechnique(tags: Tag[], techniqueID: string | null |
   // behind stranded evidence with no control to edit it. Live outcomes now come
   // from the focus rows in the live step, which are reachable whether or not
   // the technique was drilled today. So "I did not actually drill this" and "I
-  // did not hit this live" are different statements, and un-saying one must not
-  // un-say the other.
+  // did not hit this live" are different statements — but only one-directionally
+  // (see the docstring above): a live outcome logged afterward re-backfills the
+  // drilled tag via `bumpTechniqueOutcome`.
   return tags.filter((t) => !(t.technique_id === techniqueID && t.event === 'drilled'));
 }
 

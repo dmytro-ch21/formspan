@@ -404,6 +404,26 @@ describe('what would count — the drilled-against-a-live-criterion explanation'
     );
   });
 
+  it('does not fire the N206 explanation on a mixed-criteria item — it would contradict measuresOf', () => {
+    // Guard added as a hardening follow-up to N206: an item that carries
+    // `target_drilled_sessions` ALONGSIDE `target_scored` (or `target_defended`
+    // / `min_hit_rate`) already has its live evidence counted by `measuresOf`
+    // toward that other criterion, one line above this note. Firing the
+    // drilled-only explanation here would tell the athlete their scored
+    // evidence "counts classes drilled" while the measure right above says it
+    // counts toward "Landed live" instead — a direct contradiction. Today's
+    // seed data has no such item (58 drilled-criterion items are all
+    // drilled-only), but nothing in the schema forbids authoring one via
+    // admin `/content`.
+    const item = technique(
+      'mixed-criteria-item',
+      0,
+      { target_drilled_sessions: 6, target_scored: 12 },
+      { drilled_sessions: 0, scored: 5 },
+    );
+    expect(evidenceNoteOf(item, true)).toBeNull();
+  });
+
   it('does not invent the N206 explanation with no evidence of any kind', () => {
     const item = technique(
       'breakfall',
