@@ -130,6 +130,17 @@ async function scan(code = CODE) {
   });
 }
 
+/**
+ * N426: the amount editor lives in a sheet, not an always-visible field —
+ * "Amount" on the card is a tap target that opens it, and the field/portion
+ * chips/servings-fallback control mount only once the sheet is open. Every
+ * test below that reads or types into that control opens the sheet first.
+ */
+async function openAmountSheet() {
+  await waitFor(() => expect(screen.getByTestId('scan-amount-row')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('scan-amount-row'));
+}
+
 describe('a resolved barcode', () => {
   beforeEach(() => mockLookup.mockResolvedValue({ status: 'found', food: OATS, source: 'off' }));
 
@@ -141,7 +152,9 @@ describe('a resolved barcode', () => {
   it('proposes an entry and logs nothing until it is confirmed', async () => {
     await scan();
     await waitFor(() => expect(screen.getByTestId('scan-name')).toBeTruthy());
-    expect(screen.getByTestId('scan-name')).toHaveTextContent('Rolled oats');
+    // N426: name and brand render as ONE line now (`displayName`), matching
+    // the reference screenshot's single title bar rather than two lines.
+    expect(screen.getByTestId('scan-name')).toHaveTextContent('Flahavans Rolled oats');
     expect(mockLogFood).not.toHaveBeenCalled();
   });
 
@@ -154,6 +167,7 @@ describe('a resolved barcode', () => {
    */
   it('logs the scaled figures once confirmed', async () => {
     await scan();
+    await openAmountSheet();
     await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
     fireEvent.changeText(screen.getByTestId('food-quantity-input'), '80');
     await act(async () => {
@@ -182,6 +196,7 @@ describe('a resolved barcode', () => {
    */
   it('keeps a half serving a half rather than rounding it away', async () => {
     await scan();
+    await openAmountSheet();
     await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
     fireEvent.changeText(screen.getByTestId('food-quantity-input'), '6');
     fireEvent.changeText(screen.getByTestId('food-quantity-input'), '60');
@@ -222,8 +237,23 @@ describe('a resolved barcode', () => {
 
     beforeEach(() => mockLookup.mockResolvedValue({ status: 'found', food: KINDER, source: 'off' }));
 
+    /**
+     * N426: the headline "Amount" row must show the packet's own serving on
+     * FIRST LOOK — before the athlete has ever tapped it open — which is the
+     * reference screenshot's whole point ("Amount: 2 Pieces" pre-filled).
+     */
+    it('shows the packet’s own serving on the Amount row before the sheet is ever opened', async () => {
+      await scan();
+      await waitFor(() => expect(screen.getByTestId('scan-amount-value')).toBeTruthy());
+      expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('2 pieces (25 g)');
+      // The nutrition grid already reflects that default too, not a bare summary line.
+      expect(screen.getByTestId('nutrition-panel-kcal')).toHaveTextContent('140');
+      expect(screen.getByTestId('nutrition-panel-protein_g-value')).toHaveTextContent('0.5g');
+    });
+
     it('opens the amount pre-filled to the packet’s own serving, not 100 g', async () => {
       await scan();
+      await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
       // The default amount is 25 g (the packet's own), not 100 g.
       expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
@@ -235,7 +265,7 @@ describe('a resolved barcode', () => {
 
     it('logs the box’s own numbers when confirmed without touching the amount', async () => {
       await scan();
-      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('scan-log')).toBeTruthy());
       await act(async () => {
         fireEvent.press(screen.getByTestId('scan-log'));
       });
@@ -369,15 +399,23 @@ describe('the local cache', () => {
 
     it('offers a servings count, never a fabricated grams field', async () => {
       await scan();
+      await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
       expect(screen.queryByTestId('food-quantity-input')).toBeNull();
       // States what the number is per, same as the grams path.
       expect(screen.getByText('Per 1 egg')).toBeTruthy();
     });
 
+    /** N426: the Amount row itself must not fabricate a gram figure either. */
+    it('shows the servings count on the Amount row, never a gram figure', async () => {
+      await scan();
+      await waitFor(() => expect(screen.getByTestId('scan-amount-value')).toBeTruthy());
+      expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('1 × 1 egg');
+    });
+
     it('logs the food’s own numbers for the default 1 serving', async () => {
       await scan();
-      await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('scan-log')).toBeTruthy());
       await act(async () => {
         fireEvent.press(screen.getByTestId('scan-log'));
       });
@@ -389,6 +427,7 @@ describe('the local cache', () => {
 
     it('scales every macro when the servings count changes', async () => {
       await scan();
+      await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
       fireEvent.changeText(screen.getByTestId('scan-servings-fallback'), '2');
       await act(async () => {

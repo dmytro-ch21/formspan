@@ -6,8 +6,10 @@
  */
 import {
   canLogByWeight,
+  displayName,
   gramsBasisFromLabel,
   macrosForGrams,
+  macrosForServings,
   parseQuantity,
   quantityOptions,
   servingBasisGrams,
@@ -256,5 +258,48 @@ describe('servingsForLabelGrams', () => {
 
   test('null for a label with no honest gram basis, rather than inventing one', () => {
     expect(servingsForLabelGrams('1 egg', 250)).toBeNull();
+  });
+});
+
+/**
+ * N426: the shared name/brand guard, moved out of `scan.tsx` into here so
+ * `FoodQuantity.tsx` can use the same check (it previously had none — the
+ * bug this fixes was found there, not in `scan.tsx`, which already had this
+ * exact table of cases as an unshared private function).
+ */
+describe('displayName', () => {
+  test('folds the brand in when the name does not already state it', () => {
+    expect(displayName({ name: 'Chocolate Nut Granola', brand: 'nutrail' })).toBe(
+      'nutrail Chocolate Nut Granola',
+    );
+  });
+
+  test('does not repeat the brand when the name already contains it', () => {
+    expect(displayName({ name: 'Kinder Chocolate', brand: 'Kinder' })).toBe('Kinder Chocolate');
+  });
+
+  test('is case-insensitive about the match', () => {
+    expect(displayName({ name: 'KINDER Chocolate', brand: 'kinder' })).toBe('KINDER Chocolate');
+  });
+
+  test('a blank brand is not prepended', () => {
+    expect(displayName({ name: 'Banana', brand: '' })).toBe('Banana');
+  });
+});
+
+/**
+ * N426: the servings-based scaling `ServingsFallback` uses for a food with
+ * no gram basis — a sibling of `macrosForGrams`, not a re-derivation, so
+ * both share `scaleMacros` underneath.
+ */
+describe('macrosForServings', () => {
+  test('scales every macro by the servings count directly, no gram basis involved', () => {
+    const scaled = macrosForServings(banana, 2);
+    expect(scaled.kcal).toBe(178);
+    expect(scaled.protein_g).toBeCloseTo(2.2, 5);
+  });
+
+  test('keeps a null macro null rather than turning it into zero', () => {
+    expect(macrosForServings(banana, 2).added_sugar_g).toBeNull();
   });
 });

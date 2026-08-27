@@ -45,6 +45,23 @@ export type QuantifiableFood = Macros &
   };
 
 /**
+ * Name and brand, without repeating the brand when it is already in the name
+ * (N426, found in review) — a scanned "Kinder Chocolate" whose brand is
+ * "Kinder" must read as "Kinder Chocolate", not the literal, wrong
+ * "Kinder Kinder Chocolate" a naive `${brand} ${name}` produces.
+ *
+ * Shared by every caller that renders a food's name — `scan.tsx` had its own
+ * copy of this exact check before N426 (`FoodQuantity` did not, which is
+ * where the duplicate-name bug actually surfaced) — so a future caller gets
+ * the guard automatically rather than needing to remember to add it.
+ */
+export function displayName(food: Pick<QuantifiableFood, 'name' | 'brand'>): string {
+  if (!food.brand) return food.name;
+  if (food.name.toLowerCase().includes(food.brand.toLowerCase())) return food.name;
+  return `${food.brand} ${food.name}`;
+}
+
+/**
  * The gram basis one "serving" of this food represents.
  *
  * `serving_grams` is nullable on the wire — an egg has no honest gram weight —

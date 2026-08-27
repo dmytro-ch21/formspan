@@ -14351,3 +14351,52 @@ on screen. That, and only that, is what moved.
   requests — no new endpoint, no new permission surface, and no cross-user
   data path. Confirm a signed-out state still routes to sign-in before any
   of the above is reachable, unchanged from before this ticket.
+
+## N426 — The scan-confirm screen reads as a nutrition-facts card, not a bare number field (`apps/mobile/app/food/scan.tsx`, `apps/mobile/components/food/AmountSheet.tsx`, `apps/mobile/components/food/NutritionPanel.tsx`, `apps/mobile/components/FoodQuantity.tsx`, `apps/mobile/lib/foodQuantity.ts`)
+
+### Happy path
+
+- Scan a barcode for a product with a real printed serving (a Kinder bar,
+  `009800512041`). Confirm the "Amount" row shows the packet's own serving
+  (e.g. "2 pieces (25 g)") IMMEDIATELY — before ever tapping it — not a
+  dash or a placeholder.
+- Confirm the nutrition grid below the Amount row already reflects that
+  default (hero calorie number, Total Fat / Sat Fat / Cholesterol / Sodium
+  / Total Carbs / Fiber / Sugars / Protein), matching what the box states,
+  on first look.
+- Tap the "Amount" row. Confirm it opens a sheet (not an inline field) with
+  the same amount control, defaulted to the same value shown on the card.
+- Change the amount inside the sheet; confirm the grid on the CARD (behind
+  the sheet) updates once the sheet is closed, without a save/reopen.
+- Confirm the food's name and brand appear exactly ONCE on the card, and
+  are not repeated a second time when the amount sheet is open.
+- Log without ever opening the sheet; confirm the entry saved matches the
+  default shown on the card (the packet's own serving), not a fallback or
+  an error — the "Log it" button must not require opening the sheet first.
+
+### Edge cases and errors
+
+- Scan a food with NO honest gram weight (an AI-described item cached
+  against a barcode, e.g. "1 egg"). Confirm the Amount row shows a
+  servings count ("1 × 1 egg"), never a fabricated gram figure, both on
+  the card and inside the sheet.
+- Scan a product whose name already states its brand (e.g. "Kinder
+  Chocolate", brand "Kinder"). Confirm the card title reads "Kinder
+  Chocolate", not the doubled "Kinder Kinder Chocolate".
+- Scan a product whose brand is NOT in its name (e.g. "HONEY NUT protein
+  nut granola", brand "nutrail"). Confirm the brand still appears,
+  prepended once.
+- **NEEDS HUMAN EVIDENCE** — on a device, compare the redesigned card
+  side-by-side against the reference screenshots for information
+  hierarchy (hero number placement, macro grid legibility, Amount row
+  prominence) — not pixel-for-pixel matching, VOLA's own visual language
+  applied to the reference's shape.
+- Open the amount sheet, then dismiss it without changing anything
+  (swipe down or tap Close). Confirm the card's Amount row and nutrition
+  grid are unchanged.
+
+### Auth / security
+
+- No change to authorization or the wire contract on any endpoint — this
+  ticket is a client-side layout change only, reusing macro data the app
+  already fetches and displays elsewhere (`add.tsx`'s food-detail screen).

@@ -155,3 +155,31 @@ test('an outside unit change does not fight the athlete mid-keystroke', () => {
   fireEvent.changeText(screen.getByTestId('food-quantity-input'), '10');
   expect(screen.getByTestId('food-quantity-input').props.value).toBe('10');
 });
+
+/**
+ * N426, found in review: a food whose NAME already states its brand — a
+ * scanned "Kinder Chocolate" whose brand is "Kinder" — used to render the
+ * literal, wrong "Kinder Kinder Chocolate" via a naive `${brand} ${name}`.
+ * Screen-reported against a device running this exact product.
+ */
+test('does not repeat the brand when the name already states it', () => {
+  render(
+    <FoodQuantity
+      food={{ ...egg, name: 'Kinder Chocolate', brand: 'Kinder' }}
+      onLog={jest.fn()}
+    />,
+  );
+  expect(screen.getByText('Kinder Chocolate')).toBeTruthy();
+  expect(screen.queryByText('Kinder Kinder Chocolate')).toBeNull();
+});
+
+/**
+ * N426: the scan screen's amount sheet already shows the food's name on the
+ * card behind it — `hideName` is how that caller avoids showing it a SECOND
+ * time inside the sheet, which is the duplicate-DISPLAY half of the same bug
+ * the test above fixes the duplicate-TEXT half of.
+ */
+test('hideName suppresses the name line entirely', () => {
+  render(<FoodQuantity food={egg} onLog={jest.fn()} hideName />);
+  expect(screen.queryByText('Egg')).toBeNull();
+});

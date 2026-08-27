@@ -27,7 +27,13 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { macrosForGrams, parseQuantity, quantityOptions, type QuantifiableFood } from '@/lib/foodQuantity';
+import {
+  displayName,
+  macrosForGrams,
+  parseQuantity,
+  quantityOptions,
+  type QuantifiableFood,
+} from '@/lib/foodQuantity';
 import type { Macros } from '@/lib/nutrition';
 import { useUnits } from '@/lib/UnitsProvider';
 import { foodUnitLabel, fromDisplayGrams, toDisplayGrams, type FoodUnit } from '@/lib/units';
@@ -41,6 +47,7 @@ export function FoodQuantity({
   cta = 'Log',
   onQuantityChange,
   hideBuiltInFooter,
+  hideName,
 }: {
   food: QuantifiableFood;
   onLog: (grams: number) => void;
@@ -72,6 +79,17 @@ export function FoodQuantity({
    * inline summary and button.
    */
   hideBuiltInFooter?: boolean;
+  /**
+   * N426: suppresses this component's own name/brand line — for a caller
+   * (the scan screen's amount sheet) that already shows the food's name on
+   * the screen behind this control, where repeating it would be the second
+   * copy of the exact duplicate-display bug that motivated this prop.
+   * Existing callers (the recipe ingredient picker, `add.tsx`'s `picking`
+   * screen, which show the name nowhere else) leave this unset and keep
+   * today's single name line, now via the shared `displayName` guard below
+   * rather than a raw `${brand} ${name}` that could repeat the brand.
+   */
+  hideName?: boolean;
 }) {
   const { foodUnit, setFoodUnit } = useUnits();
   const options = useMemo(() => quantityOptions(food, food.portions), [food]);
@@ -154,7 +172,7 @@ export function FoodQuantity({
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.name}>{food.brand ? `${food.brand} ${food.name}` : food.name}</Text>
+      {!hideName && <Text style={styles.name}>{displayName(food)}</Text>}
 
       <View style={styles.row}>
         <TextInput

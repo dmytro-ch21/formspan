@@ -48,6 +48,8 @@ import { AccessibilityInfo, ActivityIndicator, Pressable, StyleSheet, TextInput,
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { FoodQuantity } from '@/components/FoodQuantity';
+import { AmountSheet } from '@/components/food/AmountSheet';
+import { NutritionPanel } from '@/components/food/NutritionPanel';
 import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
@@ -61,8 +63,13 @@ import { CameraView, useCameraPermissions } from '@/lib/cameraModule';
 import { logFood } from '@/lib/foodLog';
 import {
   canLogByWeight,
+  displayName,
+  FALLBACK_SERVING_GRAMS,
+  macrosForGrams,
   macrosForServings,
   parseQuantity,
+  quantityOptions,
+  servingBasisGrams,
   servingsForGrams,
   type QuantifiableFood,
 } from '@/lib/foodQuantity';
@@ -127,6 +134,8 @@ export default function ScanBarcodeScreen() {
   );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** N426: the amount editor is a sheet, not an always-visible field. */
+  const [amountSheetOpen, setAmountSheetOpen] = useState(false);
 
   /**
    * Speak the two messages that change in place.
@@ -184,11 +193,10 @@ export default function ScanBarcodeScreen() {
    */
   const openDraft = useCallback(
     (code: string, food: ScannedFood, source: CachedSource, cached: boolean) => {
-      // Reset, not left stale — whichever amount control mounts next
-      // (`FoodQuantity` or `ServingsFallback`) reports the new food's default
-      // amount within the same tick, but between this line and that report
-      // the screen must not show the PREVIOUS packet's numbers under the new
-      // one's name (a scan-a-different-packet loop).
+      // Reset, not left stale — `defaultQuantity` below is re-derived for the
+      // new food within the same tick, but between this
+      // line and that report the screen must not show the PREVIOUS packet's
+      // numbers under the new one's name (a scan-a-different-packet loop).
       setQuantity(null);
       setPhase({ kind: 'draft', code, food, source, cached });
     },
@@ -277,60 +285,6 @@ export default function ScanBarcodeScreen() {
   }, []);
 
   /**
-   * Confirm the draft.
-   *
-   * `quantity` is already resolved to a `servings` count and the macros for
-   * it — see the state declaration above. Nothing is re-derived here; the
-   * numbers on screen are the numbers logged.
-   *
-   * The two amount controls arrive at `servings` differently, and that
-   * difference is the fix for a real bug (found in review): `FoodQuantity`
-   * (grams-based) reports grams, converted via `servingsForGrams` — the SAME
-   * helper `add.tsx`'s `logCatalog` uses for a catalog food, NOT a hardcoded
-   * `grams / 100`, because `phase.food.serving_grams` is 100 for a barcode
-   * this build resolved fresh but is not guaranteed 100 for every
-   * `ScannedFood`. `ServingsFallback` reports a servings count directly, for
-   * a food with NO gram basis at all (`serving_grams: null` — the
-   * AI-cached-as-barcode path in `describe.tsx`, e.g. "1 egg"). Routing that
-   * food through the grams control instead would silently invent a 100 g
-   * basis it never stated — exactly what N117's own acceptance criteria
-   * forbid ("a serving whose gram weight is unknown does not silently
-   * become 100 g"), and a regression against this screen's own pre-N117
-   * behaviour, which was basis-agnostic (a bare "servings" count) precisely
-   * because it never assumed a gram weight either.
-   */
-  const confirm = useCallback(async () => {
-    if (phase.kind !== 'draft' || !userId || confirming.current || !quantity?.valid) return;
-    confirming.current = true;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await logFood(userId, {
-        eaten_on: date,
-        meal,
-        name: displayName(phase.food),
-        servings: quantity.servings,
-        serving_label: phase.food.serving_label,
-        ...quantity.macros,
-        // No `source_food_id`: that column is a foreign key into the athlete's
-        // OWN saved foods, and a scanned product is not one of those. Pointing
-        // it at a cache row would be a dangling reference the moment the cache
-        // is cleared.
-        source_food_id: null,
-      });
-      requestSync('barcode scanned');
-      router.back();
-    } catch (err) {
-      setSaveError(
-        `${err instanceof Error && err.message ? err.message : 'That could not be saved.'} Nothing was logged.`,
-      );
-    } finally {
-      confirming.current = false;
-      setSaving(false);
-    }
-  }, [phase, userId, quantity, date, meal, router]);
-
-  /**
    * `phase.food` adapted for `FoodQuantity` (N117) — MEMOISED, and that is
    * load-bearing rather than tidiness. A fresh object literal every render
    * would give `FoodQuantity`'s internal `[grams, valid, food]` effect a new
@@ -355,15 +309,81 @@ export default function ScanBarcodeScreen() {
    */
   const quantifiable: QuantifiableFood | null = useMemo(() => {
     if (phase.kind !== 'draft') return null;
-    const food = phase.food;
-    return {
-      ...food,
-      portions:
-        food.packet_serving_grams != null && food.packet_serving_label != null
-          ? [{ seq: 0, label: food.packet_serving_label, grams: food.packet_serving_grams }]
-          : [],
-    };
+    return adaptForQuantity(phase.food);
   }, [phase]);
+
+  /**
+   * The default `quantity` for the current draft, computed directly rather
+   * than seeded by an effect (N426, found in review — an effect calling
+   * `setQuantity` here trips `react-hooks/set-state-in-effect`, and this
+   * app's lint gate is a warning RATCHET with zero headroom; a derived
+   * value has no such cost, and is simpler besides). `quantity` itself
+   * (the state below) holds only what an amount control has actually
+   * REPORTED; `effectiveQuantity` is what the screen shows and logs before
+   * that ever happens — the packet's own serving on first look, matching
+   * the reference screenshot, not a "—" until the sheet is opened once.
+   */
+  const defaultQuantity = useMemo(() => {
+    if (phase.kind !== 'draft' || !quantifiable) return null;
+    return defaultQuantityFor(phase.food, quantifiable);
+  }, [phase, quantifiable]);
+  const effectiveQuantity = quantity ?? defaultQuantity;
+
+  /**
+   * Confirm the draft.
+   *
+   * `effectiveQuantity` is already resolved to a `servings` count and the
+   * macros for it — either reported by an amount control, or (if the
+   * athlete never opened the sheet) the same default `defaultQuantityFor`
+   * computed above. Nothing is re-derived here; the numbers on screen are
+   * the numbers logged.
+   *
+   * The two amount controls arrive at `servings` differently, and that
+   * difference is the fix for a real bug (found in review): `FoodQuantity`
+   * (grams-based) reports grams, converted via `servingsForGrams` — the SAME
+   * helper `add.tsx`'s `logCatalog` uses for a catalog food, NOT a hardcoded
+   * `grams / 100`, because `phase.food.serving_grams` is 100 for a barcode
+   * this build resolved fresh but is not guaranteed 100 for every
+   * `ScannedFood`. `ServingsFallback` reports a servings count directly, for
+   * a food with NO gram basis at all (`serving_grams: null` — the
+   * AI-cached-as-barcode path in `describe.tsx`, e.g. "1 egg"). Routing that
+   * food through the grams control instead would silently invent a 100 g
+   * basis it never stated — exactly what N117's own acceptance criteria
+   * forbid ("a serving whose gram weight is unknown does not silently
+   * become 100 g"), and a regression against this screen's own pre-N117
+   * behaviour, which was basis-agnostic (a bare "servings" count) precisely
+   * because it never assumed a gram weight either.
+   */
+  const confirm = useCallback(async () => {
+    if (phase.kind !== 'draft' || !userId || confirming.current || !effectiveQuantity?.valid) return;
+    confirming.current = true;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await logFood(userId, {
+        eaten_on: date,
+        meal,
+        name: displayName(phase.food),
+        servings: effectiveQuantity.servings,
+        serving_label: phase.food.serving_label,
+        ...effectiveQuantity.macros,
+        // No `source_food_id`: that column is a foreign key into the athlete's
+        // OWN saved foods, and a scanned product is not one of those. Pointing
+        // it at a cache row would be a dangling reference the moment the cache
+        // is cleared.
+        source_food_id: null,
+      });
+      requestSync('barcode scanned');
+      router.back();
+    } catch (err) {
+      setSaveError(
+        `${err instanceof Error && err.message ? err.message : 'That could not be saved.'} Nothing was logged.`,
+      );
+    } finally {
+      confirming.current = false;
+      setSaving(false);
+    }
+  }, [phase, userId, effectiveQuantity, date, meal, router]);
 
   // ---- render ------------------------------------------------------------
   // Every hook is above this line. Nothing below may introduce one: a hook
@@ -623,9 +643,8 @@ export default function ScanBarcodeScreen() {
 
       <View style={styles.card}>
         <Text style={styles.name} testID="scan-name">
-          {phase.food.name}
+          {displayName(phase.food)}
         </Text>
-        {phase.food.brand ? <Text style={styles.brand}>{phase.food.brand}</Text> : null}
         {/* The ARITHMETIC basis every amount below is computed against —
             always "100 g" for a resolved barcode (unchanged by N117), or the
             food's own stated serving (e.g. "1 egg") for the AI-cached path
@@ -635,25 +654,50 @@ export default function ScanBarcodeScreen() {
             own criterion). */}
         <Text style={styles.serving}>Per {phase.food.serving_label}</Text>
 
+        {/* N426: Amount is the headline row, not a field buried in the
+            middle of the card — reported against a reference screenshot
+            where the amount is the first thing the athlete acts on. Tapping
+            it opens the editor rather than showing it inline; the editor
+            itself (below, in the sheet) is unchanged N117 machinery. */}
+        <Pressable
+          onPress={() => setAmountSheetOpen(true)}
+          style={styles.amountRow}
+          accessibilityRole="button"
+          accessibilityLabel={`Amount, ${
+            effectiveQuantity ? amountSummary(phase.food, canWeigh, effectiveQuantity.servings) : 'not set'
+          }. Opens the amount editor.`}
+          testID="scan-amount-row"
+        >
+          <Text style={styles.amountLabel}>Amount</Text>
+          <Text style={styles.amountValue} testID="scan-amount-value">
+            {effectiveQuantity ? amountSummary(phase.food, canWeigh, effectiveQuantity.servings) : '—'}
+          </Text>
+        </Pressable>
+
+        <View style={styles.divider} />
+
+        {/* N426: the same hero-calorie-and-macro-grid layout `add.tsx`'s
+            food-detail screen already ships (N59) — this screen was the one
+            place in the app that still summarised a food as one line of
+            text ("Logs as X kcal, Y g protein") instead of a real
+            breakdown. */}
+        <NutritionPanel macros={effectiveQuantity?.macros ?? ZERO_MACROS} />
+      </View>
+
+      <AmountSheet visible={amountSheetOpen} onClose={() => setAmountSheetOpen(false)}>
         {canWeigh ? (
           // N117: the amount an athlete actually had, in grams or ounces,
           // defaulting to the packet's own printed serving when one is known
           // (via `quantifiable.portions` above) rather than always "100 g" —
           // every macro recalculates live as it changes. `hideBuiltInFooter`
-          // because the summary line and Log button below are this screen's
-          // own — a meal slot picker and provenance line sit around them that
-          // `FoodQuantity`'s built-in footer knows nothing about.
+          // and `hideName`: the sheet has its own "Done" action and the
+          // food's name is already on the card behind this sheet.
           <FoodQuantity
             // Never null here: `quantifiable` is null only when
             // `phase.kind !== 'draft'`, and this branch already established
             // it is. TypeScript cannot see across the `if` above, hence `!`.
             food={quantifiable!}
-            // Unreachable with `hideBuiltInFooter` set — this screen's own
-            // "Log it" button below is the real confirm path — but wired
-            // rather than a no-op for the same reason `add.tsx`'s `picking`
-            // view is: so it is not a silent trap if the footer is ever
-            // hidden differently.
-            onLog={() => void confirm()}
+            onLog={() => setAmountSheetOpen(false)}
             onQuantityChange={(q) =>
               setQuantity({
                 servings: servingsForGrams(phase.food, q.grams),
@@ -662,6 +706,7 @@ export default function ScanBarcodeScreen() {
               })
             }
             hideBuiltInFooter
+            hideName
             busy={saving}
           />
         ) : (
@@ -670,13 +715,7 @@ export default function ScanBarcodeScreen() {
           // see the `confirm` doc comment above for why.
           <ServingsFallback food={phase.food} onChange={setQuantity} />
         )}
-
-        <Text style={styles.total} testID="scan-total">
-          {quantity?.valid
-            ? `Logs as ${Math.round(quantity.macros.kcal)} kcal, ${Math.round(quantity.macros.protein_g)} g protein`
-            : 'Enter an amount'}
-        </Text>
-      </View>
+      </AmountSheet>
 
       {/* Says where the numbers came from, because the two are not equally
           trustworthy. Open Food Facts is crowd-sourced and can be wrong in
@@ -697,12 +736,12 @@ export default function ScanBarcodeScreen() {
         style={[
           styles.primary,
           { backgroundColor: accent.accent },
-          (saving || !quantity?.valid) && styles.off,
+          (saving || !effectiveQuantity?.valid) && styles.off,
         ]}
         accessibilityRole="button"
         accessibilityLabel={`Log ${phase.food.name}`}
-        disabled={saving || !quantity?.valid}
-        accessibilityState={{ disabled: saving || !quantity?.valid }}
+        disabled={saving || !effectiveQuantity?.valid}
+        accessibilityState={{ disabled: saving || !effectiveQuantity?.valid }}
         testID="scan-log"
       >
         <Text style={[styles.primaryText, { color: accent.on }]}>
@@ -832,12 +871,92 @@ function messageForLookupFailure(err: unknown): string {
   return 'The food lookup could not be reached. Try again in a moment.';
 }
 
-/** Brand and name, without repeating the brand when it is already in the name. */
-function displayName(food: ScannedFood): string {
-  if (!food.brand) return food.name;
-  if (food.name.toLowerCase().includes(food.brand.toLowerCase())) return food.name;
-  return `${food.brand} ${food.name}`;
+/**
+ * `phase.food` adapted for `FoodQuantity`/`quantityOptions` (N117, factored
+ * out for N426) — the packet's own serving becomes a single PORTION CHIP,
+ * `serving_grams` stays the unchanged arithmetic basis. Shared by the
+ * `quantifiable` memo (what `FoodQuantity` itself renders) and
+ * `defaultQuantityFor` below (what seeds `quantity` before the sheet ever
+ * opens) so the two can never compute a different default from each other.
+ */
+function adaptForQuantity(food: ScannedFood): QuantifiableFood {
+  return {
+    ...food,
+    portions:
+      food.packet_serving_grams != null && food.packet_serving_label != null
+        ? [{ seq: 0, label: food.packet_serving_label, grams: food.packet_serving_grams }]
+        : [],
+  };
 }
+
+/**
+ * The default `quantity` for a freshly opened draft (N426) — computed
+ * directly, without mounting `FoodQuantity`/`ServingsFallback`, so the
+ * "Amount" headline row reads correctly on first look rather than "—" until
+ * the athlete taps it open. Mirrors `FoodQuantity`'s own `initial` (the
+ * first `quantityOptions` entry) and `ServingsFallback`'s own default text
+ * ("1") exactly — this is not a second source of truth, it is the same
+ * arithmetic run one render earlier.
+ */
+function defaultQuantityFor(
+  food: ScannedFood,
+  adapted: QuantifiableFood,
+): { servings: number; valid: boolean; macros: Macros } {
+  if (!canLogByWeight(food)) {
+    return { servings: 1, valid: true, macros: macrosForServings(food, 1) };
+  }
+  const options = quantityOptions(adapted, adapted.portions);
+  const grams = options[0]?.grams ?? FALLBACK_SERVING_GRAMS;
+  return { servings: servingsForGrams(food, grams), valid: true, macros: macrosForGrams(adapted, grams) };
+}
+
+/**
+ * The headline row's value (N426) — "2 pieces (25 g)" when the current
+ * amount matches the packet's own serving, otherwise a plain "{grams} g" or,
+ * for a food with no gram basis at all, "{servings} × {serving_label}".
+ *
+ * Grams, not a fabricated "Pieces" unit — VOLA does not parse a piece-count
+ * unit from Open Food Facts yet (N427). Showing the packet's OWN label when
+ * the amount matches it gets the reference screenshot's readability ("2
+ * pieces") without claiming a unit VOLA cannot actually convert.
+ */
+function amountSummary(food: ScannedFood, canWeigh: boolean, servings: number): string {
+  if (!canWeigh) {
+    return `${trimmed(servings)} × ${food.serving_label}`;
+  }
+  const grams = Math.round(servings * servingBasisGrams(food));
+  if (
+    food.packet_serving_grams != null &&
+    food.packet_serving_label != null &&
+    Math.abs(grams - food.packet_serving_grams) < 1
+  ) {
+    return food.packet_serving_label;
+  }
+  return `${grams} g`;
+}
+
+/** Drops a trailing `.0` a plain `String()` would otherwise keep on some inputs. */
+function trimmed(n: number): string {
+  return String(Math.round(n * 100) / 100);
+}
+
+/**
+ * `NutritionPanel`'s required shape before the amount control has reported
+ * in — the same "nothing to show yet" instant `quantity` being null already
+ * covers, made concrete rather than a second null-check inside the panel.
+ */
+const ZERO_MACROS: Macros = {
+  kcal: 0,
+  protein_g: 0,
+  carb_g: 0,
+  fat_g: 0,
+  fibre_g: null,
+  saturated_fat_g: null,
+  sugar_g: null,
+  added_sugar_g: null,
+  sodium_mg: null,
+  cholesterol_mg: null,
+};
 
 function provenanceCopy(source: CachedSource, cached: boolean): string {
   const where = cached ? ' Held on this phone, so it works offline.' : '';
@@ -928,8 +1047,20 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
   },
   name: { fontSize: 16, fontWeight: '700' },
-  brand: { fontSize: 13, color: vola.textMuted },
   serving: { fontSize: 12, color: vola.textDim },
+  // N426: the headline row — "Amount" on the left, the current value on the
+  // right, the whole row tappable. Visually the most prominent editable
+  // thing in the card, matching the reference's own "Amount" row.
+  amountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  amountLabel: { fontSize: 14, color: vola.textMuted, fontWeight: '600' },
+  amountValue: { fontSize: 16, color: vola.text, fontWeight: '700' },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: vola.line, marginVertical: 4 },
   fallbackRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   fallbackInput: {
     flex: 1,
@@ -941,7 +1072,6 @@ const styles = StyleSheet.create({
     color: vola.text,
   },
   fallbackUnit: { fontSize: 13, color: vola.textMuted, flexShrink: 1 },
-  total: { fontSize: 12, color: vola.textMuted, marginTop: 8, fontWeight: '600' },
   provenance: { fontSize: 12, color: vola.textDim, lineHeight: 17 },
   primary: {
     minHeight: 46,

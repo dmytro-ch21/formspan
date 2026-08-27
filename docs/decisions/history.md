@@ -46605,6 +46605,121 @@ switched day's totals with no "logged to yesterday" confirmation — matches
 this screen's existing pattern for every other browsed-day write here
 (`Log food`, the day-link) rather than introducing a new one.
 
+## 2026-08-27 — N426: the scan-confirm screen reads as a nutrition-facts card, not a bare number field
+
+N117 (#506, same day, same device report) fixed the scan-confirm screen's
+*numbers* — defaulting to the packet's own serving instead of always
+"100 g". The user's verdict after installing it: **"even worse... this is
+what we need"**, alongside two screenshots of a competitor app and the
+words *"copy the whole thing what we need just in our vola style."* N117
+fixed what the screen SAID; this ticket is about what it LOOKED like — a
+bare "Servings/Calories/Protein" triple field with no visual hierarchy,
+against a reference with a hero calorie number, a real macro grid, and
+"Amount" as the headline row rather than a field buried mid-card.
+
+### The macro grid already existed — it just wasn't on this screen
+
+`components/food/NutritionPanel.tsx` (N59) already renders exactly the
+reference's shape — hero kcal number on the left, Total Fat / Sat Fat /
+Cholesterol / Sodium / Total Carbs / Fiber / Sugars / Protein on the right,
+`n/a` rather than a fabricated `0` for anything the data doesn't state — and
+`app/food/add.tsx`'s catalog flow already used it. The scan screen was the
+one place in the app that still summarised a food as one line of text
+("Logs as X kcal, Y g protein"). Most of this ticket is that screen
+adopting a component that already shipped, not a new one.
+
+### What is new: Amount as a headline row, edited in a sheet
+
+The reference's "Amount" row is the first thing the athlete acts on, not a
+field competing with three others for attention. `scan.tsx` now shows it
+that way — label + current value, tappable — and editing opens a new
+`AmountSheet` (`components/food/AmountSheet.tsx`, a `Modal` styled after the
+existing `InfoSheet.tsx` pattern) rather than showing the field inline.
+
+`AmountSheet` takes `children` rather than hardcoding `FoodQuantity`: the
+scan screen has two amount controls depending on the food (`FoodQuantity`
+when it has an honest gram basis, `ServingsFallback` when it does not,
+N117), and the sheet is a shared shell for whichever one the caller
+chooses — not a second copy of that branch.
+
+**A real functional gap, caught before it shipped rather than after**: the
+first version seeded the "Amount" row's value from an effect that fired
+once `FoodQuantity`/`ServingsFallback` mounted — which only happens once
+the sheet is opened. The row read "—" on first look, which is the exact
+failure the reference screenshot was reported against (the box's own
+serving should be visible immediately, not after an extra tap). Fixed by
+computing the default directly (`defaultQuantityFor`, in `scan.tsx`) rather
+than waiting for a control to mount and report it — the same arithmetic
+`FoodQuantity`'s own `initial` uses, run one render earlier. This also
+turned out to be the right fix for a second problem: seeding it via a
+`useEffect` calling `setQuantity` tripped `react-hooks/set-state-in-effect`,
+and this app's lint gate is a warning ratchet with zero headroom (50/50
+already used) — a derived value (`quantity ?? defaultQuantity`) has neither
+cost and is simpler code besides.
+
+### A real bug, found in review, fixed at the shared root
+
+`FoodQuantity.tsx`'s own name line built `${brand} ${name}` with no check
+for whether `name` already stated the brand — `scan.tsx` had exactly this
+guard as a private function, but `FoodQuantity` did not, and it is
+`FoodQuantity` a scanned "Kinder Chocolate" (brand "Kinder") actually
+rendered through. The result: the literal, wrong "Kinder Kinder Chocolate"
+on screen, visible in the device screenshot the fix was reported against.
+
+Fixed by moving the guard into `foodQuantity.ts` as a shared `displayName`
+export, used by both `FoodQuantity.tsx` and `scan.tsx` (which previously had
+its own private copy) — one function instead of two copies that could drift
+again. `FoodQuantity` also gained a `hideName` prop for the amount-sheet
+case specifically: the food's name is already shown on the card behind the
+sheet, so showing it a second time inside would be the display half of the
+same duplicate-information bug the text half was just fixed for.
+`add.tsx`'s existing usage (which shows the name nowhere else) leaves
+`hideName` unset and is unaffected — same single name line as before, now
+via the shared, brand-aware helper instead of a bespoke unguarded one.
+
+### What this deliberately does not do — and why, in its own ticket
+
+The reference's unit picker (Pieces / Ounces / Pounds for the Kinder bar;
+Teaspoons / Tablespoons / Cups / Fluid Ounces / Liters for a granola — a
+different list per food) needs data this codebase does not parse: Open Food
+Facts' `serving_quantity_unit` is only ever accepted when it is literally
+`"g"` (`packetServingFrom`, N117) — a piece count or a volume unit is
+refused rather than guessed at, for the same reason a "ml" serving is
+refused rather than treated as grams. Faking a "Pieces" unit that does not
+actually convert would be a new instance of the exact bug N117 fixed.
+Filed as its own ticket, **N427 (#673)**, rather than dropped silently —
+the amount summary shown here falls back to the packet's OWN label ("2
+pieces (25 g)") when the current amount matches it, and to a plain gram
+figure otherwise, which gets the reference's readability without claiming
+a unit VOLA cannot honestly offer.
+
+### Verification
+
+`pnpm run verify` — full chain green, twice (before and after the
+`react-hooks/set-state-in-effect` fix). 202 mobile suites / 3182 tests,
+including new coverage: the Amount row's default value before the sheet is
+ever opened (the exact regression the effect-based first version had), the
+`displayName`/`hideName` fix at both the pure-function level
+(`lib/__tests__/foodQuantity.test.ts`) and the rendered-component level
+(`components/__tests__/foodQuantity.test.tsx`), and `macrosForServings`'
+own coverage (shared `scaleMacros` refactor, `foodQuantity.ts`). Built and
+launched clean on the iOS Simulator (fresh CocoaPods install, 0 errors) to
+confirm the app compiles and runs on this branch — the confirm-card
+redesign itself needs a real camera to reach (same constraint N117's own
+device-check criterion already had) and could not be exercised in the
+Simulator.
+
+### What is not done
+
+- **The device check is still owed.** No suite can confirm the redesigned
+  card actually reads well next to the reference on a real phone — that is
+  this ticket's own `NEEDS HUMAN EVIDENCE` criterion, not yet ticked.
+- **N427** (the unit picker) is deliberately out of scope here, as above.
+- `add.tsx`'s inline (non-sheet) `FoodQuantity` usage is untouched — this
+  redesign targeted the reported screen (scan) rather than converting both
+  entry points to the sheet pattern; whether `add.tsx` should follow is an
+  open question, not a decision made by omission here.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
