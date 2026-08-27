@@ -44148,6 +44148,27 @@ data-integrity guard with no new user-facing or API-surface behavior — the ski
 behavior itself is unchanged, only now pinned by tests that fail if it
 regresses.
 
+## 2026-08-27 — L8: deleted `describeSet` in `apps/web` (#387)
+
+`apps/web/src/lib/api.ts`'s `describeSet` had zero callers — confirmed with
+`grep -rn "describeSet" apps/web apps/admin`, which returned only its own
+definition, and a repo-wide grep that found no test referencing it either.
+The ticket's own framing ("formats raw `${weight}kg`, ignoring the athlete's
+unit preference") had already gone stale by the time this ticket was picked
+up: a prior units refactor (N105, #489) had left the function taking a
+`UnitSystem` parameter and calling `formatWeight`/`formatDistance` correctly,
+with a comment pointing back at this ticket to decide whether it should exist
+at all. So the "wrong" half of the trap was already fixed in passing; only
+"dead" was left, and dead-with-no-caller is still the wrong end state per the
+ticket's acceptance criteria ("it does not stay as-is").
+
+Deleted the function. `formatWeight`, `formatDistance` and the `UnitSystem`
+import it used are still exercised elsewhere in the same file (an
+`Insight`-formatting helper a few lines above it), so nothing else went
+orphan. No test existed for it to delete alongside it. No
+`functional-scenarios.md` update: removing dead code with no caller has no
+user-facing or API-surface behavior.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
