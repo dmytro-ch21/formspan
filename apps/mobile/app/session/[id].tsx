@@ -4,7 +4,12 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'react-native';
 
-import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/KeyboardAwareScroll';
+import {
+  KeyboardAwareFooter,
+  KeyboardAwareScreen,
+  KeyboardAwareScrollView,
+  useEnsureVisible,
+} from '@/components/KeyboardAwareScroll';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 
 import { useCountdown } from '@/components/Countdown';
@@ -1206,7 +1211,14 @@ export default function SessionScreen() {
     : 0;
 
   return (
-    <View style={styles.container} testID="session-screen">
+    /* The scroll view and the Finish footer below it are siblings
+       compensating for the same keyboard — `KeyboardAwareScreen` is how they
+       find that out. Without it both would inset for the keyboard, and the
+       surplus shows up as a blank band above the footer, exactly as it did
+       on the reflection wizard before this file existed. See
+       `needsPlatformKeyboardInset`. */
+    <KeyboardAwareScreen>
+      <View style={styles.container} testID="session-screen">
       <Stack.Screen
         options={{
           title: session.name || 'Session',
@@ -1226,10 +1238,11 @@ export default function SessionScreen() {
         // used to be restated here. They were the wrapper's defaults already,
         // and restating the inset is now actively unsafe: it is no longer a
         // constant but a value the wrapper computes from whether a
-        // `KeyboardAwareFooter` shares the screen. Pinning it `true` here would
-        // silently defeat that coordination the day this screen grows a finish
-        // bar, and bring back the blank band the wizard just lost. The wrapper
-        // is the authority — see `needsPlatformKeyboardInset`.
+        // `KeyboardAwareFooter` shares the screen — which, since N184, this one
+        // does whenever the session is still open. Pinning it `true` here
+        // would silently defeat that coordination and bring back the blank
+        // band the wizard lost. The wrapper is the authority — see
+        // `needsPlatformKeyboardInset`.
       >
         {/* Three numbers while you train — time, sets, reps — and volume
             on top once you finish.
@@ -1351,41 +1364,6 @@ export default function SessionScreen() {
             <View key={g.exerciseID + g.indices[0]} style={styles.group}>
               <View style={styles.groupHead}>
                 <Text style={styles.groupName}>{exercise?.name ?? g.exerciseID}</Text>
-                {/* Order and removal live on the exercise, not on a set:
-                    "the rack is taken, do legs first" moves a movement and
-                    everything logged under it. Buttons rather than a drag
-                    handle — a long-press-and-drag is a poor bet with one hand
-                    and a bar to get back to, and it fights the scroll view.
-                    Hidden at the ends rather than disabled, so there is no
-                    dead target to aim at between sets. */}
-                {!finished && (
-                  <Pressable
-                    disabled={gi === 0}
-                    onPress={() => moveGroup(gi, -1)}
-                    hitSlop={10}
-                    style={[styles.moveChip, gi === 0 && styles.moveChipOff]}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: gi === 0 }}
-                    accessibilityLabel={`Move ${exercise?.name ?? 'this exercise'} earlier`}
-                    testID={`up-${g.exerciseID}`}
-                  >
-                    <Text style={styles.moveChipText}>↑</Text>
-                  </Pressable>
-                )}
-                {!finished && (
-                  <Pressable
-                    disabled={gi === groups.length - 1}
-                    onPress={() => moveGroup(gi, 1)}
-                    hitSlop={10}
-                    style={[styles.moveChip, gi === groups.length - 1 && styles.moveChipOff]}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: gi === groups.length - 1 }}
-                    accessibilityLabel={`Move ${exercise?.name ?? 'this exercise'} later`}
-                    testID={`down-${g.exerciseID}`}
-                  >
-                    <Text style={styles.moveChipText}>↓</Text>
-                  </Pressable>
-                )}
                 {!finished && (
                   <Pressable
                     onPress={() => startRest(g.exerciseID)}
@@ -1475,7 +1453,58 @@ export default function SessionScreen() {
                     <Text style={styles.unitChipText}>{weightUnit(unitFor(g.exerciseID))}</Text>
                   </Pressable>
                 )}
-                {!finished && (
+              </View>
+              {/* Reorder, swap, remove — structural moves on the EXERCISE,
+                  made every so often rather than every set. Split onto their
+                  own row, below the name and the per-set chips above, so the
+                  thing read between every set (what is this, is it resting,
+                  what unit) is not competing for attention with a control
+                  reached for maybe once a session. Muted rather than hidden:
+                  still one tap each, still in the same place every time —
+                  just not shouting as loud as the header they used to share.
+
+                  "Swap" used to render in `accent.ink`, the one colour this
+                  screen reserves for what was earned (see the drop-set
+                  indentation note below) — which made a rarely-used control
+                  brighter than Rest, Time and the unit chips it sat beside.
+                  `textMuted` now matches those three; only Remove keeps a
+                  colour of its own, because destructive is a real distinction
+                  the other three don't share. */}
+              {!finished && (
+                <View style={styles.groupActions}>
+                  {/* Order and removal live on the exercise, not on a set:
+                      "the rack is taken, do legs first" moves a movement and
+                      everything logged under it. Buttons rather than a drag
+                      handle — a long-press-and-drag is a poor bet with one hand
+                      and a bar to get back to, and it fights the scroll view.
+                      Dimmed rather than hidden at the ends (see `moveChipOff`),
+                      so there is no dead target to aim at between sets and a
+                      screen reader still gets to announce "unavailable"
+                      rather than losing the control outright. */}
+                  <Pressable
+                    disabled={gi === 0}
+                    onPress={() => moveGroup(gi, -1)}
+                    hitSlop={10}
+                    style={[styles.moveChip, gi === 0 && styles.moveChipOff]}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: gi === 0 }}
+                    accessibilityLabel={`Move ${exercise?.name ?? 'this exercise'} earlier`}
+                    testID={`up-${g.exerciseID}`}
+                  >
+                    <Text style={styles.moveChipText}>↑</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={gi === groups.length - 1}
+                    onPress={() => moveGroup(gi, 1)}
+                    hitSlop={10}
+                    style={[styles.moveChip, gi === groups.length - 1 && styles.moveChipOff]}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: gi === groups.length - 1 }}
+                    accessibilityLabel={`Move ${exercise?.name ?? 'this exercise'} later`}
+                    testID={`down-${g.exerciseID}`}
+                  >
+                    <Text style={styles.moveChipText}>↓</Text>
+                  </Pressable>
                   <Pressable
                     // openPicker flushes first — the swap screen reads the
                     // session back, so an unsaved edit still in flight would
@@ -1488,10 +1517,8 @@ export default function SessionScreen() {
                     accessibilityLabel={`Swap ${exercise?.name ?? 'this exercise'} for another`}
                     testID={`swap-${g.exerciseID}`}
                   >
-                    <Text style={[styles.swapText, { color: accent.ink }]}>Swap</Text>
+                    <Text style={styles.swapText}>Swap</Text>
                   </Pressable>
-                )}
-                {!finished && (
                   <Pressable
                     onPress={() => removeGroup(gi)}
                     hitSlop={10}
@@ -1501,8 +1528,8 @@ export default function SessionScreen() {
                   >
                     <Text style={styles.removeGroupText}>Remove</Text>
                   </Pressable>
-                )}
-              </View>
+                </View>
+              )}
               {/* A drop does not get a set number. "225x3 then 185x8" is ONE
                   set with a drop off it — numbering them 3 and 4 tells the
                   athlete they did four sets when they did three, and that
@@ -1812,10 +1839,80 @@ export default function SessionScreen() {
           </Pressable>
         )}
 
-        {!finished ? (
-          /* Held, not tapped. This screen is operated one-handed with wet
-             hands between sets, and finishing is not undoable from the phone —
-             it was a single tap with no confirmation of any kind. */
+        {finished && (
+          <>
+            <Text style={styles.muted}>Finished — this session is read-only.</Text>
+            {/*
+              Read-only is not the same as finished with. The card that opened
+              the moment this session ended is still the card it deserves, and
+              until now dismissing that modal was the end of it.
+
+              NOT gated on `worthCelebrating`. That gate exists to stop the app
+              congratulating someone for opening and closing a session — praise
+              nobody asked for. Sharing is the opposite: the athlete asked, and
+              refusing to hand them a thin card would be the app overruling
+              them about their own training.
+            */}
+            {sessionShare.error && (
+              <Text style={styles.muted} accessibilityLiveRegion="polite">
+                {sessionShare.error}
+              </Text>
+            )}
+            <ShareSessionButton
+              share={sessionShare}
+              label="Share this session"
+              style={styles.share}
+              testID="session-share"
+            />
+          </>
+        )}
+
+        {/* The `Alert` this replaces said only "This can't be undone." — which
+            a hold says better, and without a dialog. Contrast the two deletes
+            that kept theirs: those state a fact the button cannot carry (how
+            many logged sets go with it, that it is removed everywhere and not
+            just here). */}
+        <HoldToConfirm
+          label="Delete session"
+          holdingLabel="Keep holding to delete…"
+          confirmTitle="Delete session?"
+          confirmBody="This can't be undone."
+          style={styles.deleteButton}
+          textStyle={styles.deleteText}
+          fillColor={vola.danger}
+          destructive
+          testID="session-delete"
+          onConfirm={async () => {
+            try {
+              // Writes a tombstone (or hard-deletes a session the server never
+              // saw). The delete travels out through the ordinary push path,
+              // so there is no fire-and-forget DELETE here any more — that one
+              // both raced the push and was silently lost whenever it failed,
+              // which offline was always.
+              await deleteLocalSession(userId!, id!);
+              requestSync('session-deleted');
+              router.back();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+            }
+          }}
+        />
+      </KeyboardAwareScrollView>
+
+      {/* N184 — Finish, pinned below the scroll rather than scrolled with it.
+
+          It used to sit at the very end of the content, after every exercise
+          and "+ Add exercise" — reachable only by scrolling past the whole
+          workout, which is exactly backwards for the one control every
+          session ends with. A `KeyboardAwareFooter` is a SIBLING of the
+          scroll view, so it stays on screen (and, per its own doc comment,
+          above the keyboard) without anything here having to compute that.
+
+          Still a hold, not a tap — see the control's own comment for why —
+          and still gone entirely once the session is finished: a read-only
+          session has nothing left to confirm. */}
+      {!finished && (
+        <KeyboardAwareFooter style={styles.finishFooter}>
           <HoldToConfirm
             label="Finish session"
             holdingLabel="Keep holding to finish…"
@@ -1883,65 +1980,8 @@ export default function SessionScreen() {
               }
             }}
           />
-        ) : (
-          <>
-            <Text style={styles.muted}>Finished — this session is read-only.</Text>
-            {/*
-              Read-only is not the same as finished with. The card that opened
-              the moment this session ended is still the card it deserves, and
-              until now dismissing that modal was the end of it.
-
-              NOT gated on `worthCelebrating`. That gate exists to stop the app
-              congratulating someone for opening and closing a session — praise
-              nobody asked for. Sharing is the opposite: the athlete asked, and
-              refusing to hand them a thin card would be the app overruling
-              them about their own training.
-            */}
-            {sessionShare.error && (
-              <Text style={styles.muted} accessibilityLiveRegion="polite">
-                {sessionShare.error}
-              </Text>
-            )}
-            <ShareSessionButton
-              share={sessionShare}
-              label="Share this session"
-              style={styles.share}
-              testID="session-share"
-            />
-          </>
-        )}
-
-        {/* The `Alert` this replaces said only "This can't be undone." — which
-            a hold says better, and without a dialog. Contrast the two deletes
-            that kept theirs: those state a fact the button cannot carry (how
-            many logged sets go with it, that it is removed everywhere and not
-            just here). */}
-        <HoldToConfirm
-          label="Delete session"
-          holdingLabel="Keep holding to delete…"
-          confirmTitle="Delete session?"
-          confirmBody="This can't be undone."
-          style={styles.deleteButton}
-          textStyle={styles.deleteText}
-          fillColor={vola.danger}
-          destructive
-          testID="session-delete"
-          onConfirm={async () => {
-            try {
-              // Writes a tombstone (or hard-deletes a session the server never
-              // saw). The delete travels out through the ordinary push path,
-              // so there is no fire-and-forget DELETE here any more — that one
-              // both raced the push and was silently lost whenever it failed,
-              // which offline was always.
-              await deleteLocalSession(userId!, id!);
-              requestSync('session-deleted');
-              router.back();
-            } catch (err) {
-              setError(err instanceof Error ? err.message : String(err));
-            }
-          }}
-        />
-      </KeyboardAwareScrollView>
+        </KeyboardAwareFooter>
+      )}
 
       {/* OUTSIDE the scroll view, deliberately — a `ScrollView` clips its
           content, and the capture reads the real native view. See
@@ -2010,6 +2050,7 @@ export default function SessionScreen() {
         />
       )}
     </View>
+    </KeyboardAwareScreen>
   );
 }
 
@@ -2773,12 +2814,15 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 12,
   },
-  // Wraps rather than overflows: the header now carries up to six controls
-  // (move up/down, rest, unit, swap, remove) beside a name that can be long
-  // ("Barbell Bulgarian Split Squat"). On a narrow phone they drop to a
-  // second line instead of squeezing the name to an ellipsis or pushing the
-  // last control off-screen. `groupName` keeps flex:1 so it still takes the
-  // slack on a wide screen.
+  // Wraps rather than overflows: the header carries the name plus up to four
+  // per-set chips (rest, mode, duration unit, weight unit — "run" joins them
+  // only mid-workout) beside a name that can be long ("Barbell Bulgarian
+  // Split Squat"). On a narrow phone they drop to a second line instead of
+  // squeezing the name to an ellipsis or pushing the last chip off-screen.
+  // `groupName` keeps flex:1 so it still takes the slack on a wide screen.
+  //
+  // Reorder/swap/remove used to live on this same row — see `groupActions`
+  // below for why they moved.
   groupHead: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2788,7 +2832,25 @@ const styles = StyleSheet.create({
     columnGap: 10,
   },
   groupName: { flex: 1, minWidth: 140, fontSize: 16, fontWeight: '700' },
-  swapText: { fontWeight: '600', fontSize: 14 },
+  // The structural row below the name: reorder, swap, remove. Left-aligned
+  // and wrapping independently of `groupHead`, so a long name pushing the
+  // per-set chips to a second line does not also reflow these.
+  groupActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    rowGap: 4,
+    columnGap: 14,
+  },
+  // `textMuted`, matching Rest/Time/the unit chips — see the `groupActions`
+  // comment at the call site for why this is no longer `accent.ink`.
+  swapText: {
+    fontWeight: '600',
+    fontSize: 13,
+    color: vola.textMuted,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
   restChip: {
     borderWidth: 1,
     borderColor: vola.line,
@@ -3033,6 +3095,24 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   primaryText: { fontWeight: '700', fontSize: 15 },
+  // The footer `Finish` sits in, a sibling of the scroll view — see the
+  // `KeyboardAwareFooter` call site. A hairline rather than a filled ground:
+  // the screen behind it is already themed, and a full-width fill would read
+  // as a second surface competing with the card boundaries above it.
+  //
+  // `paddingBottom: 28`, matching the reflection wizard's own footer rather
+  // than picking a fresh number — that one was device-verified against the
+  // home-indicator safe area, and this hold target sits exactly as close to
+  // the bottom edge as that one does. `frontend-reviewer` flagged the
+  // original 20 here as untested and closer to the indicator than the
+  // wizard's verified value.
+  finishFooter: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 28,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: vola.lineSoft,
+  },
   finish: {
     borderRadius: 12,
     paddingVertical: 16,

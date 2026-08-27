@@ -237,6 +237,28 @@ describe('who lifts the field when the keyboard appears', () => {
     // means nothing ever lifts there.
     expect(nativeScrollsFocusedFieldClear('android')).toBe(false);
   });
+
+  // N184 — a `KeyboardAwareFooter` on screen (the session screen's sticky
+  // Finish) runs `automaticallyAdjustKeyboardInsets` OFF on every platform,
+  // including iOS — see `needsPlatformKeyboardInset`. Without this, iOS was
+  // told "the platform already does it" on a screen where the platform had
+  // just been switched off, and neither mechanism lifted the field. Found by
+  // `frontend-reviewer` from this file's own doc comments, not from a device.
+  it('does NOT leave it to iOS when a lifting footer has switched the platform mechanism off', () => {
+    expect(nativeScrollsFocusedFieldClear('ios', true)).toBe(false);
+  });
+
+  it('still leaves it to iOS when there is no footer — the default, unchanged', () => {
+    expect(nativeScrollsFocusedFieldClear('ios', false)).toBe(true);
+    // And the parameter is optional, so every existing call site (none of
+    // which knows about footers) keeps its old answer.
+    expect(nativeScrollsFocusedFieldClear('ios')).toBe(true);
+  });
+
+  it('Android never leaves it to the platform, footer or not', () => {
+    expect(nativeScrollsFocusedFieldClear('android', true)).toBe(false);
+    expect(nativeScrollsFocusedFieldClear('android', false)).toBe(false);
+  });
 });
 
 describe('the finished-session guard', () => {

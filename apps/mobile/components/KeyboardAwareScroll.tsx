@@ -71,17 +71,23 @@ import {
  * and the field you just tapped stays hidden. That is precisely the gym
  * report, and the only case `useEnsureVisible` exists to handle.
  *
- * **So on iOS the keyboard listeners deliberately do not scroll.** They only
- * record where the keyboard is. Scrolling from them as well would race the
- * native adjustment: `offset.current` lags behind (it updates from throttled
- * `onScroll` events), so a JS scroll computed after the native one has landed
- * uses a stale offset and drags the list back down — hiding the field again,
- * intermittently, depending which won. Two mechanisms doing one job is worse
- * than either alone.
+ * **So on iOS the keyboard listeners deliberately do not scroll — UNLESS
+ * nothing native is going to.** They only record where the keyboard is, and
+ * scrolling from them as well would race the native adjustment:
+ * `offset.current` lags behind (it updates from throttled `onScroll` events),
+ * so a JS scroll computed after the native one has landed uses a stale offset
+ * and drags the list back down — hiding the field again, intermittently,
+ * depending which won. Two mechanisms doing one job is worse than either
+ * alone.
  *
  * Android needs the opposite, because `automaticallyAdjustKeyboardInsets` is
  * `@platform ios`: nothing there lifts the field for us, so the show event
- * has to.
+ * has to. **A screen with a `KeyboardAwareFooter` is, for this purpose, iOS
+ * running with that prop off** — see `needsPlatformKeyboardInset` — so it
+ * needs exactly the same JS-driven lift Android always has, on both
+ * platforms. `nativeScrollsFocusedFieldClear` takes `hasLiftingFooter`
+ * precisely so this file's own claim about "what iOS already does" stays
+ * true instead of describing a mechanism that screen just switched off.
  *
  * **Measured, not assumed.** The target comes from `measureInWindow` rather
  * than a row index, because set rows differ in height by the exercise's
@@ -147,12 +153,24 @@ export function keyboardEventNames(os: string): {
  * genuinely scrolls, it does not merely inset. Android has no equivalent.
  *
  * This decides whether the show listener scrolls or only records, and it is
- * wrong in a different way in each direction: `true` on Android means nothing
- * ever lifts, `false` on iOS means two mechanisms fight over one scroll
- * position with a stale offset between them.
+ * wrong in a different way in each direction: `true` when nothing lifts
+ * natively means nothing ever lifts at all; `false` when something already
+ * does means two mechanisms fight over one scroll position with a stale
+ * offset between them.
+ *
+ * **`hasLiftingFooter` matters because it is what `automaticallyAdjustKeyboard-
+ * Insets` is conditioned on** — see `needsPlatformKeyboardInset`. A screen with
+ * a `KeyboardAwareFooter` runs with that prop OFF, on every platform, so the
+ * native iOS mechanism this function otherwise defers to is not running
+ * either. Ignoring that (as this used to) left iOS with NEITHER mechanism on
+ * such a screen: the prop that scrolls the field is off, and this function
+ * still claimed iOS "already does it" and told the JS listener to stand down.
+ * The gap is invisible on a short screen with one field near the top (the
+ * reflection wizard's note step) and real on a long one — a set row low in a
+ * multi-exercise session is exactly the case `useEnsureVisible` exists for.
  */
-export function nativeScrollsFocusedFieldClear(os: string): boolean {
-  return os === 'ios';
+export function nativeScrollsFocusedFieldClear(os: string, hasLiftingFooter = false): boolean {
+  return os === 'ios' && !hasLiftingFooter;
 }
 
 /**
@@ -263,8 +281,14 @@ export function useEnsureVisible(): EnsureVisible {
  *
  * `scrollToY` is the one difference between the containers — `scrollTo` on a
  * ScrollView, `scrollToOffset` on a FlatList.
+ *
+ * `hasLiftingFooter` comes from each caller's own `FooterCtx` read rather than
+ * from a context read in here, so this stays a plain hook a screen without a
+ * `KeyboardAwareScreen` ancestor can still call — `FooterCtx` defaults to "no
+ * footer" and every caller already reads it for `needsPlatformKeyboardInset`;
+ * this is the second, footer-aware use of the exact same boolean.
  */
-function useKeyboardAware(scrollToY: (y: number) => void) {
+function useKeyboardAware(scrollToY: (y: number) => void, hasLiftingFooter: boolean) {
   /** Current scroll offset — the scroll APIs are absolute, there is no scrollBy. */
   const offset = useRef(0);
   /** Absolute Y of the top of the keyboard; null when it is down. */
@@ -320,12 +344,18 @@ function useKeyboardAware(scrollToY: (y: number) => void) {
 
   useEffect(() => {
     const names = keyboardEventNames(Platform.OS);
-    const nativeHandlesIt = nativeScrollsFocusedFieldClear(Platform.OS);
+    // `hasLiftingFooter` matters here exactly as it does to
+    // `needsPlatformKeyboardInset`: a `KeyboardAwareFooter` on screen runs
+    // `automaticallyAdjustKeyboardInsets` OFF, so iOS is not natively lifting
+    // anything either — this is what makes N184 a footer-aware read rather
+    // than a bare `Platform.OS` check.
+    const nativeHandlesIt = nativeScrollsFocusedFieldClear(Platform.OS, hasLiftingFooter);
     const track = (e: { endCoordinates: { screenY: number } }) => {
       keyboardTop.current = e.endCoordinates.screenY;
-      // Deliberately does NOT scroll on iOS: the platform is already doing
-      // it for this very event, and a second scroll from here would race it
-      // with a stale offset. Android gets no such help, so there it must.
+      // Deliberately does NOT scroll when something native already will: a
+      // second scroll from here would race the native adjustment with a
+      // stale offset. Where nothing native is running — Android always,
+      // iOS with a lifting footer — the show event has to.
       if (!nativeHandlesIt) scrollClear(focused.current);
     };
     const subs = [
@@ -342,7 +372,7 @@ function useKeyboardAware(scrollToY: (y: number) => void) {
     ];
     if (names.changeFrame) subs.push(Keyboard.addListener(names.changeFrame, track));
     return () => subs.forEach((s) => s.remove());
-  }, [scrollClear]);
+  }, [scrollClear, hasLiftingFooter]);
 
   const ensureVisible = useCallback<EnsureVisible>(
     (node) => {
@@ -484,8 +514,10 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, ScrollViewProps>(
     const scrollToY = useCallback((y: number) => {
       scrollRef.current?.scrollTo({ y, animated: true });
     }, []);
-    const { ensureVisible, handleScroll, setContainer } = useKeyboardAware(scrollToY);
+    // Read before `useKeyboardAware` so the hook can decide whether iOS is
+    // natively lifting the field — see that hook's own doc comment.
     const { hasFooter } = useContext(FooterCtx);
+    const { ensureVisible, handleScroll, setContainer } = useKeyboardAware(scrollToY, hasFooter);
 
     return (
       <Ctx.Provider value={ensureVisible}>
@@ -542,8 +574,10 @@ export function KeyboardAwareFlatList<ItemT>({ onScroll, ...props }: FlatListPro
   const scrollToY = useCallback((y: number) => {
     innerRef.current?.scrollToOffset({ offset: y, animated: true });
   }, []);
-  const { ensureVisible, handleScroll, setContainer } = useKeyboardAware(scrollToY);
+  // Read before `useKeyboardAware` — see the `KeyboardAwareScrollView` call
+  // site for why.
   const { hasFooter } = useContext(FooterCtx);
+  const { ensureVisible, handleScroll, setContainer } = useKeyboardAware(scrollToY, hasFooter);
 
   return (
     <Ctx.Provider value={ensureVisible}>

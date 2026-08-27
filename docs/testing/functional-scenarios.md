@@ -764,6 +764,63 @@ Domain: a training session that **actually happened**, and the sets in it — re
   obvious scenario — "the repair screen should then show the delete's error" —
   is one a test would correctly fail.
 
+### Session screen header and Finish placement (N184, mobile, `app/session/[id].tsx`)
+
+Visual/interaction refinement only — nothing below changes the engine
+(`sessionStore`, set transforms, rest-timer logic, sync). The properties above
+this subsection (carry-forward, warm-up exclusion, save serialisation, the
+timer surface, grip, N4's timed sets) are unchanged and still apply; this adds
+scenarios for the header split and the Finish footer specifically.
+
+- **The fastest normal-set path is still two taps.** "+ Set" (carrying the
+  previous weight/reps forward), then the row's ✓. Anything that adds a tap
+  to this — a confirmation, an extra screen, a control moved somewhere that
+  needs opening first — is a regression per N184's own acceptance criterion,
+  not a judgement call.
+- **The exercise header is two rows.** Name, Rest, the reps/time chip, the
+  duration-unit chip, "Run all" and the kg/lb chip sit on the first row —
+  everything touched per set. Reorder (↑/↓), Swap and Remove sit on a second,
+  visually quieter row below. Every control keeps its own testID
+  (`up-`, `down-`, `rest-`, `mode-`, `duration-`, `run-`, `unit-`, `swap-`,
+  `remove-group-`, each suffixed with the exercise id) and its own
+  accessibilityLabel — confirm none of them silently merged or moved behind a
+  menu.
+- **Reorder stays visible-but-disabled at the ends**, on the second row now
+  rather than the first — the first exercise's "move earlier" and the last
+  exercise's "move later" are dimmed, not hidden, and still announce
+  `accessibilityState.disabled` to a screen reader.
+- **Swap reads as a structural control, not an accent one.** It renders in the
+  same muted tone as Rest/Time/the unit chips, not the app's accent colour —
+  confirm it does not visually outrank the header row it used to share.
+  Remove keeps its own destructive colour; that one did not change.
+- **A very long exercise name still wraps sanely.** With a long name
+  ("Barbell Bulgarian Split Squat") plus every optional chip present (dual
+  mode, timed, weighted, runnable), the header row wraps to a second line
+  without pushing the reorder/swap/remove row anywhere but directly below the
+  name.
+- **Finish is reachable without scrolling.** With enough exercises logged that
+  the content overflows the screen, Finish must be visible (as a pinned
+  footer below the scroll content) without scrolling to the bottom — this is
+  the discoverability gap N184 exists to close.
+- **Finish disappears, and only Finish, once the session ends.** After
+  confirming Finish, the footer is gone entirely (nothing left to confirm on
+  a read-only record); Delete session and the Share button remain exactly
+  where they were, inline in the scrolled content, unpromoted.
+- **NEEDS HUMAN EVIDENCE — the numeric keypad and the Finish footer, on a
+  device.** Open a set's weight field (numeric keyboard up), and confirm
+  Finish is not obscured underneath it — the footer is meant to lift clear of
+  the keyboard via `KeyboardAwareFooter`, which nothing in the suite can
+  actually raise a keyboard to prove.
+- **NEEDS HUMAN EVIDENCE — background the app with a field focused and the
+  Finish footer visible**, then foreground it: the in-progress entry and the
+  footer's position must be exactly as they were, matching this screen's
+  existing backgrounding guarantee for everything else on it.
+- **Untouched by this ticket — assert nothing changed.** The rest timer's own
+  top-of-screen bar/card (`components/Timer.tsx`), the completed-set row
+  tint, and the suggestion hint's position directly above "+ Set" (previous
+  performance, still visible at the point of entry) are all pinned by their
+  own existing behaviour and were not touched here.
+
 ## Progression rules — double progression (`GET /v1/sessions/suggestions`, both clients)
 
 Domain: what to load today and for how many reps, computed from the caller's own last few sessions. The thing in the product that advises rather than records, so it follows the standing rule — deterministic, and it always states its evidence.
