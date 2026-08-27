@@ -5888,11 +5888,16 @@ paths:
         FINISHED.
 
 
-        **The feed reaches back 3 days and no further.** A rolling 72 hours
-        against `ended_at`, not a count of calendar days — there is no timezone
-        in the comparison, so it cannot acquire one. The window applies to BOTH
-        the page and `total`, so the count never promises rows the list will not
-        return.
+        **The feed reaches back a limited, rolling window and no further —
+        read `window_days` off the response rather than assuming a number.**
+        (N13, #379: this description used to hardcode "3 days", one of three
+        independent copies of that figure across mobile and this file, none
+        of which could notice the other two going stale. `window_days` is
+        now the one source of truth all of them read.) The window is a
+        rolling DURATION against `ended_at`, not a count of calendar days —
+        there is no timezone in the comparison, so it cannot acquire one. It
+        applies to BOTH the page and `total`, so the count never promises
+        rows the list will not return.
 
 
         Nothing is deleted, and this is not retention: the owner's own history,
@@ -5938,7 +5943,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items, total, limit, offset]
+                required: [items, total, limit, offset, window_days]
                 properties:
                   items:
                     type: array
@@ -5952,6 +5957,14 @@ paths:
                       has done that the reader may not see.
                   limit: { type: integer }
                   offset: { type: integer }
+                  window_days:
+                    type: integer
+                    description: >
+                      How far back the feed reaches, in days (N13, #379). The
+                      one place a client reads this number — never hardcode
+                      it in copy, here or on the client: this field is what
+                      keeps "showing the last N days" from going stale the
+                      day the window changes.
         "400":
           description: limit or offset is not a non-negative integer.
           content:

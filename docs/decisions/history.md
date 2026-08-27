@@ -43546,6 +43546,71 @@ about the *sequence* our own code performs, which any HTTP server can verify.
 - `docs/testing/functional-scenarios.md` has the N12 entry, including the
   device-check steps above as `NEEDS HUMAN EVIDENCE`.
 
+### 2026-08-26 — N13: the feed window is now read off the response, not hardcoded in three places (#379)
+
+The 3-day feed window (`feed.FeedWindow`) existed as one Go constant and
+three independent English copies of "3 days": the OpenAPI description for
+`GET /feed`, and two hand-written strings on `apps/mobile/app/social/index.tsx`
+(the empty state and the "showing the last N days" footer note). None of the
+three could ever notice the other two going stale, and none of them could
+notice the constant itself changing.
+
+**The fix is the same shape as `bjj.DraftQuota.Limit`**: compute the number
+once, server-side, and put it on the response so every client reads it
+instead of re-stating it in its own words.
+
+- `feed.Page` gained a `window_days` field (`backend/internal/modules/feed/feed.go`),
+  set from a new `FeedWindowDays()` helper
+  (`backend/internal/modules/feed/postgres.go`) that converts the existing
+  `FeedWindow` duration to a whole number of days. `List()` sets it on the
+  ONE `Page` value every return path shares, including the no-friends and
+  no-longer-friends early returns, so a client can never observe a page
+  missing it.
+- `TestFeedWindowIsAWholeNumberOfDays` pins the assumption `FeedWindowDays()`
+  actually depends on: `FeedWindow` has to be a whole multiple of 24h, or the
+  integer division silently floors it rather than reporting the true window.
+  Mutation-verified: changed `FeedWindow` to `80 * time.Hour`, confirmed this
+  test (and only this one) went red, restored, confirmed green.
+- The two existing Postgres-backed feed tests
+  (`TestAnAthleteWithNoFriendsGetsAnEmptyListNotAnError`,
+  `TestTheFeedReachesBackThreeDaysAndNoFurther`) now also assert
+  `page.WindowDays == FeedWindowDays()`. Mutation-verified by dropping
+  `WindowDays: FeedWindowDays()` from the `Page{}` literal in `List()`: both
+  went red, restored, confirmed green. `TestTheWindowIsThreeDays`, which pins
+  the literal `72 * time.Hour` value, was deliberately left untouched — N13
+  exposes the number, it does not change it.
+- `contracts/public.openapi.yaml`: the `/feed` response schema gained a
+  required `window_days` integer field, and the endpoint description no
+  longer states "3 days" as prose — it points at the field instead.
+- `apps/mobile/lib/feed.ts`'s `FeedPage` type gained `window_days: number`.
+  `apps/mobile/app/social/index.tsx` reads it into a `windowDays` state
+  variable (set alongside `items`/`total` in both `load()` and `loadMore()`,
+  so it is never stale relative to what is on screen) and both copy sites
+  now call a small local `windowLabel(days)` helper
+  (`` `${days} day${days === 1 ? '' : 's'}` ``) instead of writing "3 days"
+  themselves. Mutation-verified: broke the singular case (`` `${days} days` ``
+  unconditionally), confirmed the new "pluralizes a one-day window correctly"
+  test went red, restored, confirmed green. A second new test
+  (`states the feed window using window_days from the response, not a
+  hardcoded number`) resolves the feed with `window_days: 7` and asserts the
+  screen's copy says "7 days" and never "3 days" — the acceptance criteria's
+  own worked example (change the constant to 7, confirm every surface says
+  seven) exercised directly, without touching the server's real constant.
+
+**Why `window_days` rather than reusing `FeedWindow`'s duration on the
+wire.** The mobile copy wants a day count, not an ISO-8601 duration or a
+Go-formatted `"72h0m0s"` — converting is a client-side job no client should
+have to redo identically, so the one conversion happens once, server-side,
+next to the constant it is converting.
+
+**What this does not touch.** The window is still a rolling *duration*
+against `ended_at`, not a count of calendar days — there is no timezone in
+the comparison, and `window_days` is a display convenience derived from it,
+not a new source of truth. Changing `FeedWindow` to a non-whole-day value
+remains possible in the Go type system; `TestFeedWindowIsAWholeNumberOfDays`
+is what turns that into a loud test failure instead of a silently wrong
+`window_days` on every response.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

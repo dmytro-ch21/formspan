@@ -37,7 +37,7 @@ jest.setTimeout(30_000);
 configure({ asyncUtilTimeout: 10_000 });
 
 const mockFeed = jest.fn((..._a: unknown[]): Promise<unknown> =>
-  Promise.resolve({ items: [], total: 0, limit: 30, offset: 0 }),
+  Promise.resolve({ items: [], total: 0, limit: 30, offset: 0, window_days: 3 }),
 );
 jest.mock('@/lib/feed', () => ({
   ...jest.requireActual('@/lib/feed'),
@@ -105,7 +105,7 @@ const session = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
-  mockFeed.mockReset().mockResolvedValue({ items: [], total: 0, limit: 30, offset: 0 });
+  mockFeed.mockReset().mockResolvedValue({ items: [], total: 0, limit: 30, offset: 0, window_days: 3 });
   mockFriends.mockReset().mockResolvedValue([]);
   mockCounts.mockReset().mockResolvedValue({});
   mockProfile.mockReset().mockResolvedValue({ share_training_with_friends: true });
@@ -137,7 +137,7 @@ it('still loads for a first-run account with no profile yet', async () => {
   // `getProfile` 404s until an athlete saves one. Inside a `Promise.all` that
   // rejected the whole load, so the feed — which had succeeded — never showed.
   mockProfile.mockRejectedValue(new ApiError('profile not found', 'not_found', 404));
-  mockFeed.mockResolvedValue({ items: [session()], total: 1, limit: 30, offset: 0 });
+  mockFeed.mockResolvedValue({ items: [session()], total: 1, limit: 30, offset: 0, window_days: 3 });
 
   render(<SocialScreen />);
 
@@ -148,7 +148,7 @@ it('still loads for a first-run account with no profile yet', async () => {
 });
 
 it('renders who trained, not just what', async () => {
-  mockFeed.mockResolvedValue({ items: [session()], total: 1, limit: 30, offset: 0 });
+  mockFeed.mockResolvedValue({ items: [session()], total: 1, limit: 30, offset: 0, window_days: 3 });
   render(<SocialScreen />);
 
   await screen.findByTestId('feed-s1');
@@ -169,4 +169,48 @@ it('offers the nudge only to someone who has not opted in', async () => {
 
   await waitFor(() => expect(screen.queryByTestId('social-empty')).toBeTruthy());
   expect(screen.queryByTestId('social-nudge')).toBeNull();
+});
+
+// N13 (#379): the window used to be two hardcoded "3 days" strings on this
+// screen, tied to nothing. These pin the copy to `window_days` FROM THE
+// RESPONSE, not to the number 3 itself — changing the server's window (the
+// acceptance criteria's own worked example is 7) must change what these
+// render, with no touch to this file.
+it('states the feed window using window_days from the response, not a hardcoded number', async () => {
+  mockFriends.mockResolvedValue([{ username: 'rhonda', display_name: null, since: '2026-01-01' }]);
+  mockFeed.mockResolvedValue({ items: [], total: 0, limit: 30, offset: 0, window_days: 7 });
+
+  render(<SocialScreen />);
+
+  const empty = await screen.findByTestId('social-empty');
+  // A plain string here would be checked for an EXACT match against the
+  // testID's full text content (RN's toHaveTextContent, unlike jest-dom's,
+  // does not default to substring) — a regex is what asks "does this text
+  // appear anywhere", which is the actual question.
+  expect(empty).toHaveTextContent(/7 days/);
+  expect(empty).not.toHaveTextContent(/3 days/);
+});
+
+it('pluralizes a one-day window correctly', async () => {
+  mockFeed.mockResolvedValue({
+    items: [session()],
+    total: 1,
+    limit: 30,
+    offset: 0,
+    window_days: 1,
+  });
+
+  render(<SocialScreen />);
+
+  await screen.findByTestId('feed-s1');
+  const note = await screen.findByText(/Showing the last/);
+  // toHaveTextContent, not `.props.children.join('')` — the latter assumes
+  // the Text node's children arrive as an array, which is true today only
+  // because the copy is interpolated JSX; toHaveTextContent reads the
+  // rendered text regardless of how it got composed. `\b` after each pattern
+  // is what tells "1 day" and "1 days" apart — a plain `toContain('1 day')`
+  // would also match "1 days", so the negative assertion is load-bearing
+  // (mutation-verified: an always-plural windowLabel fails this test).
+  expect(note).toHaveTextContent(/1 day\b/);
+  expect(note).not.toHaveTextContent(/1 days\b/);
 });

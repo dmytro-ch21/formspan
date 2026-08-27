@@ -501,6 +501,14 @@ func TestAnAthleteWithNoFriendsGetsAnEmptyListNotAnError(t *testing.T) {
 	if len(page.Items) != 0 || page.Total != 0 {
 		t.Fatalf("unexpected rows: %+v", page)
 	}
+	// N13 (#379): WindowDays is set on `page :=`'s initial value, before any
+	// of the early returns this test exercises — this is the return path
+	// most likely to be missed by an edit that moves the assignment into the
+	// query-and-scan branch instead, since it is the one path that never
+	// reaches that code at all.
+	if page.WindowDays != FeedWindowDays() {
+		t.Fatalf("window_days = %d on the no-friends path, want %d", page.WindowDays, FeedWindowDays())
+	}
 }
 
 func TestClampLimit(t *testing.T) {

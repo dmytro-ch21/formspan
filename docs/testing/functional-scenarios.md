@@ -13081,3 +13081,39 @@ on screen. That, and only that, is what moved.
 - `DELETE /v1/admin/users/{userID}/avatar` must 401/403 for a non-admin
   caller, even with a valid token for their own account — an athlete must not
   be able to clear another athlete's avatar through the admin route.
+
+## N13 — the feed window is read off the response, not hardcoded (`GET /v1/feed`, `apps/mobile/app/social/index.tsx`)
+
+### Happy path
+
+- With the server's `FeedWindow` at its current value (3 days), confirm
+  `GET /v1/feed` returns a `window_days` field equal to 3 on every response,
+  including the very first page and an empty-feed response (no friends, or
+  friends but nothing shared).
+- On the Social screen with at least one friend and no shared sessions,
+  confirm the empty-state copy reads "...in the last 3 days...".
+- On the Social screen with a full page of shared sessions (item count
+  reaches `total`), confirm the footer note reads "Showing the last 3 days".
+- With fewer sessions than `total` (a "Load more" state), confirm the footer
+  note is absent — it only appears once every available row has loaded.
+
+### Edge cases and errors
+
+- **Change `feed.FeedWindow` on the server to 7 days (or any value the
+  acceptance criteria's own worked example names) and confirm, without
+  touching any mobile code, that both the empty-state copy and the footer
+  note change to "7 days" — this is the property the ticket exists to
+  guarantee, and it is the one thing this scenario list cannot exercise for
+  you (it needs a real server rebuild).**
+- Confirm a 1-day window renders "1 day" (singular), not "1 days" —
+  covered by `apps/mobile/app/__tests__/socialScreen.test.tsx`'s
+  "pluralizes a one-day window correctly", but worth a manual spot-check if
+  `FeedWindow` is ever set that low.
+- Confirm a client built against the OLD response shape (missing
+  `window_days`) does not crash — `windowDays` starts `null` and both copy
+  sites fall back to a literal `3` until the first real response lands.
+
+### Auth / security
+
+- No change to authorization on `GET /v1/feed` — this ticket only adds a
+  field to an already-authenticated response.
