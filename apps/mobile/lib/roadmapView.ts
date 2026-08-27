@@ -286,6 +286,14 @@ function whatWouldCount(c: NonNullable<CurriculumItem['criteria']>): string {
  * cheap second line of defence if another path ever bypasses the backfill.
  * Without it, the athlete sees a bare "0/6" beside a class they know they
  * logged, with nothing explaining why.
+ *
+ * This branch is gated to items whose ONLY criterion is
+ * `target_drilled_sessions` — `target_scored`/`target_defended`/
+ * `min_hit_rate` must all be null. A "mixed" item (drilled plus one of those)
+ * has that same live evidence already counted by `measuresOf` toward its own
+ * criterion one line up, so this note would directly contradict it. Today's
+ * seed data has no such item, but nothing in the schema forbids one, and
+ * admin `/content` can author one.
  */
 export function evidenceNoteOf(item: CurriculumItem, enrolled: boolean): string | null {
   const c = item.criteria;
@@ -297,7 +305,12 @@ export function evidenceNoteOf(item: CurriculumItem, enrolled: boolean): string 
   // a concept is never explained; this is that promise being kept in code
   // rather than borrowed from a constraint in another file.
   if (!enrolled || item.kind === 'concept' || c === null || p == null) return null;
-  if (c.target_drilled_sessions !== null) {
+  if (
+    c.target_drilled_sessions !== null &&
+    c.target_scored === null &&
+    c.target_defended === null &&
+    c.min_hit_rate === null
+  ) {
     if (p.drilled_sessions > 0) return null;
     if (p.scored <= 0 && p.attempts <= 0 && p.defended <= 0) return null;
     return 'You have live evidence for this, but it counts classes drilled — log it on "What did you drill?" to move it.';
