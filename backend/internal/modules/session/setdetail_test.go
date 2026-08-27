@@ -84,6 +84,53 @@ func TestADropNeverAttachesToADifferentExercise(t *testing.T) {
 	}
 }
 
+// L7 (#386): nothing at the write path stops a client sending a session
+// whose first row is a `drop` — `validateSets` accepts any `ValidSetType`
+// regardless of position, and `ReplaceSets` persists the row as sent. The
+// guarantee this pins is downstream of that: DropsOf must never let a
+// leading drop — one with nothing before it at all, not merely a
+// different exercise — become a parent that gathers the drops after it.
+// Skipped is the safe reading; attached is the misattribution this ticket
+// exists to keep from ever becoming the behaviour.
+func TestADropAsTheSessionsFirstRowNeverBecomesAParent(t *testing.T) {
+	sets := []Set{
+		{ExerciseID: "bench", SetType: SetTypeDrop, Reps: ptrInt(8), WeightKg: ptrF(80)},
+		{ExerciseID: "bench", SetType: SetTypeDrop, Reps: ptrInt(6), WeightKg: ptrF(60)},
+		{ExerciseID: "bench", SetType: SetTypeWorking, Reps: ptrInt(3), WeightKg: ptrF(102.5)},
+	}
+	// The session-leading drop must never be treated as a valid parent —
+	// even though the two rows after it are same-exercise drops that would
+	// otherwise look like a legitimate attached run.
+	if got := DropsOf(sets, 0); got != nil {
+		t.Fatalf("the session's leading drop claimed drops of its own: %+v", got)
+	}
+	// And the working set that eventually follows must not reach backward
+	// and pick up the orphaned pair either — DropsOf only ever looks
+	// forward from a genuine parent.
+	if got := DropsOf(sets, 2); got != nil {
+		t.Fatalf("the working set at the end picked up the leading drops: %+v", got)
+	}
+}
+
+// L7 (#386), steps-to-test #2: a drop sandwiched between two DIFFERENT
+// exercises must attach to neither. `TestADropNeverAttachesToADifferentExercise`
+// above already pins the two-set shape; this is the three-set shape named in
+// the ticket, with real neighbours on both sides so there is no bounds check
+// doing the work by accident.
+func TestADropBetweenTwoUnrelatedExercisesIsSkipped(t *testing.T) {
+	sets := []Set{
+		{ExerciseID: "squat", SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(140)},
+		{ExerciseID: "deadlift", SetType: SetTypeDrop, Reps: ptrInt(3), WeightKg: ptrF(100)},
+		{ExerciseID: "row", SetType: SetTypeWorking, Reps: ptrInt(8), WeightKg: ptrF(60)},
+	}
+	if got := DropsOf(sets, 0); got != nil {
+		t.Fatalf("a deadlift drop attached to the squat set before it: %+v", got)
+	}
+	if got := DropsOf(sets, 2); got != nil {
+		t.Fatalf("a deadlift drop attached to the row set after it: %+v", got)
+	}
+}
+
 func TestDropsOfIsSafeAtTheEdges(t *testing.T) {
 	sets := []Set{{ExerciseID: "bench", SetType: SetTypeWorking}}
 	for _, i := range []int{-1, 1, 99} {

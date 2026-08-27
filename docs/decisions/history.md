@@ -44067,6 +44067,87 @@ device-observable behavior (share targets, temp-file cleanup) a review of the
 diff cannot confirm.
 
 
+## 2026-08-27 — L7: pinning the drop-adjacency skip rather than constraining it (#386)
+
+`DropsOf` in `backend/internal/modules/session/session.go` is the entirety of
+the "skip rather than misattribute" logic the ticket describes — there is no
+separate write-path guard. `validateSets` (`handler.go`) accepts any
+`ValidSetType`, `drop` included, with no positional check, and `ReplaceSets`
+persists whatever ordered list it is given. So the ticket's framing is literal:
+nothing stops a client writing a stray `drop` row into the database. What
+already existed is downstream of that — `DropsOf` is a read-time function meant
+to find which drops belong to a given set, and it refuses to treat a `drop` row
+as a valid parent (so a leading drop can never gather others) and breaks its
+forward scan the moment `ExerciseID` changes (so a drop after an unrelated
+exercise attaches to nothing). The row is still written and still readable as
+its own set; it simply never appears as anyone's child.
+
+**Correction, found in `backend-reviewer`'s pass on this PR: `DropsOf` has zero
+production callers anywhere in the repo** (Go or TypeScript, excluding tests —
+confirmed by a repo-wide grep). The attachment behavior an athlete actually
+sees lives entirely in client code, in `apps/mobile/app/session/[id].tsx`'s own
+inline positional walk (around the `ordinals`/`isDrop` logic that decides which
+set number a drop borrows), which has no equivalent reusable function and is
+not exercised by anything added here. So this PR pins a currently-unused
+backend helper, not the behavior an athlete experiences — acceptance criterion
+2 ("silent misattribution never becomes the behaviour") is only **partially**
+protected: the backend half is pinned, the client half — the half that
+matters — is not. Left as an explicit gap and a follow-up rather than
+addressed here, since pinning the mobile-side ordinal walk with a jest test is
+separate, additional scope.
+
+**Path taken: B, test-pin — not a DB/repository constraint.** The domain
+comment on `DropsOf` already explains why a real constraint doesn't fit: the
+parent/drop relationship is deliberately positional rather than a foreign key,
+because `ReplaceSets` deletes and reinserts every row of a session on every
+save, regenerating `session_sets.id` each time — a `parent_set_id` would dangle
+on the first edit after being set. There is no column pair a Postgres CHECK
+could examine (adjacency is a property of the *ordering of rows*, not of any
+one row), and rejecting the whole `ReplaceSets` write over one stray row would
+also change today's actual behavior — the safe failure the ticket explicitly
+says to preserve — into a harder one. A test that fails the moment the skip
+becomes an attach is the equally-safe, better-fitting option the acceptance
+criteria offer, and it's what the ticket's own steps-to-test describe.
+
+Added two tests to `setdetail_test.go`, matching the ticket's steps 1 and 2
+directly (step 2 already had partial coverage from
+`TestADropNeverAttachesToADifferentExercise`; these add the exact shapes named
+in the ticket):
+
+- `TestADropAsTheSessionsFirstRowNeverBecomesAParent` — a session whose first
+  row is a `drop`, followed by more same-exercise drops and then a working set.
+  Asserts the leading drop never claims the drops after it, and the working set
+  at the end never reaches backward past them either.
+- `TestADropBetweenTwoUnrelatedExercisesIsSkipped` — a drop of one exercise
+  sandwiched between working sets of two *different* exercises (squat / a
+  deadlift drop / row). Asserts it attaches to neither neighbour.
+
+**Mutation-verified per step 3 of the ticket, exactly as asked.** Baseline: all
+drop-related tests green. Mutated `DropsOf` to attach-to-previous — removed the
+"candidate parent is itself a drop" guard and the `ExerciseID` adjacency check,
+so it started gathering trailing `drop` rows unconditionally. Result: four
+tests failed as genuine assertion failures (not a compile error) —
+`TestDropsAttachToTheSetTheyCameOff`, `TestADropNeverAttachesToADifferentExercise`,
+and both new tests — each printing the misattached rows in its failure message.
+Restored `DropsOf` to its original form and re-ran: all green again, and `git
+diff --stat` on `session.go` shows no change survives (only the new test file
+differs from `origin/main`).
+
+**Criterion 3 ("revisited together with L2 if the positional model changes")
+is satisfied by inaction, not overlooked.** L2 (#381) closed this same week as
+"accepted cost" — the drop/parent relationship stays positional, nothing about
+that model is changing. Per the criterion's own wording, since the model didn't
+change, there is nothing to revisit; L3 (#382) already removed the client-side
+`dropsOf` mirror on the same reasoning, leaving the Go `DropsOf` here as the one
+*remaining* implementation — not the operative one, per the correction above;
+it currently has no caller, and the operative logic lives in the mobile
+screen's own inline walk.
+
+No `docs/testing/functional-scenarios.md` update: this is an internal
+data-integrity guard with no new user-facing or API-surface behavior — the skip
+behavior itself is unchanged, only now pinned by tests that fail if it
+regresses.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
