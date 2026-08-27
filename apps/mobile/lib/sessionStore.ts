@@ -8,6 +8,7 @@ import {
   isPermanentRejection,
   isTransportFailure,
   isUnknownGrip,
+  retryAfterOf,
 } from './apiError';
 import { getDb, withTransaction } from './db';
 import type { Exercise } from './exercises';
@@ -972,6 +973,16 @@ export type SessionSyncResult = {
   deferred: number;
   error?: string;
   errorKind?: SyncErrorKind;
+  /**
+   * The largest `Retry-After` seen on any row this run, in milliseconds
+   * (F17, #403) — `undefined` when nothing failed with one.
+   *
+   * A MAXIMUM, not the last one seen: several rows can fail in one run, and
+   * the point of carrying this at all is to feed `sync.ts`'s backoff, which
+   * cares about the longest wait the server actually asked for, not
+   * whichever row happened to fail last.
+   */
+  retryAfterMs?: number;
 };
 
 /**
@@ -984,6 +995,19 @@ function worseKind(a: SyncErrorKind | undefined, b: SyncErrorKind): SyncErrorKin
   if (a === 'offline' || b === 'offline') return 'offline';
   if (a === 'permanent' || b === 'permanent') return 'permanent';
   return 'transient';
+}
+
+/**
+ * Fold one row's `Retry-After` into the run's running maximum (F17, #403).
+ *
+ * Mutates `result` in place, matching how `result.errorKind` is already
+ * accumulated at every one of these call sites — a returned value here would
+ * need the same `result.retryAfterMs = noteRetryAfter(...)` boilerplate at
+ * every one of them for no benefit.
+ */
+function noteRetryAfter(result: { retryAfterMs?: number }, err: unknown): void {
+  const ms = retryAfterOf(err);
+  if (ms != null) result.retryAfterMs = Math.max(result.retryAfterMs ?? 0, ms);
 }
 
 function classify(err: unknown): SyncErrorKind {
@@ -1247,6 +1271,7 @@ async function runSync(
       result.failed++;
       result.error = err instanceof Error ? err.message : String(err);
       result.errorKind = worseKind(result.errorKind, classify(err));
+      noteRetryAfter(result, err);
       await noteRowError(db, 'workout_cache', w.id, userID, err);
     }
   }
@@ -1272,6 +1297,7 @@ async function runSync(
       result.failed++;
       result.error = err instanceof Error ? err.message : String(err);
       result.errorKind = worseKind(result.errorKind, classify(err));
+      noteRetryAfter(result, err);
       await noteRowError(db, 'local_sessions', row.id, userID, err);
     }
   }
@@ -1329,6 +1355,7 @@ async function runSync(
     // Classified even when a push already failed: the kinds combine, and the
     // pull failing offline is worth knowing regardless of what the push hit.
     result.errorKind = worseKind(result.errorKind, classify(err));
+    noteRetryAfter(result, err);
   }
 
   return result;

@@ -1,4 +1,4 @@
-import { transportDiagnosis } from './apiError';
+import { ApiError, transportDiagnosis, waitPhrase } from './apiError';
 import { apiRequest } from './apiRequest';
 import { SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
@@ -116,8 +116,17 @@ export function identifyErrorMessage(err: unknown): string {
       // message — "could not identify" alone leaves the athlete pressing the
       // same button on the same machine.
       return 'Could not tell which machine that is. Try a straighter shot of the whole machine, with the label in frame.';
-    case 429:
-      return 'That is a lot of photos in a short while. Give it a few minutes, or search for the exercise instead.';
+    case 429: {
+      // F17 (#403): this used to invent "a few minutes" while the real
+      // figure sat unread on the response. `retryAfterMs` is only ever
+      // absent if the response genuinely carried no `Retry-After` — a
+      // deploy without the header, not the ordinary case — so the vague
+      // fallback stays, but only for that.
+      const wait = err instanceof ApiError && err.retryAfterMs != null
+        ? waitPhrase(err.retryAfterMs)
+        : 'Give it a few minutes';
+      return `That is a lot of photos in a short while. ${wait}, or search for the exercise instead.`;
+    }
     case 400:
       return 'That photo could not be read. Try taking another.';
     case 503:
@@ -145,4 +154,25 @@ export function identifyErrorMessage(err: unknown): string {
 export function isRetryable(err: unknown): boolean {
   const status = (err as { status?: number } | null)?.status;
   return status !== 422 && status !== 400 && status !== 429;
+}
+
+/**
+ * The hint under a failed identification's error box — a different question
+ * from `isRetryable` (F17, #403).
+ *
+ * A 429 is correctly non-retryable — `isRetryable` above stays exactly as it
+ * was, and its own test (`identifyApi.test.ts`) keeps asserting that — but
+ * "do not auto-retry" and "tell the athlete to retake the photo" are not the
+ * same statement. Before this fix they were collapsed into one boolean, so a
+ * rate-limited athlete read "Take another photo, or search instead." under a
+ * failure no new photo could fix: the identical bytes would be refused again
+ * a second later for the identical reason a first photo already sitting in
+ * the queue would be. `retry` and `retake` are both about whether the SAME
+ * request would succeed; `wait` is about WHEN it would, which is the thing a
+ * 429 actually answers.
+ */
+export function identifyHint(err: unknown): 'retry' | 'retake' | 'wait' {
+  const status = (err as { status?: number } | null)?.status;
+  if (status === 429) return 'wait';
+  return isRetryable(err) ? 'retry' : 'retake';
 }

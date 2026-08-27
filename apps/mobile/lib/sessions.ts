@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
-import { ApiError } from './apiError';
+import { ApiError, parseRetryAfterMs } from './apiError';
 import { formatDuration, type DurationUnit } from './duration';
 import type { Exercise } from './exercises';
 import { isDualMode, setModeOf } from './setMode';
@@ -837,6 +837,7 @@ async function request<T>(
       body?.error?.message ?? `Request failed (${res.status}).`,
       body?.error?.code ?? 'unknown',
       res.status,
+      parseRetryAfterMs(res.headers?.get('Retry-After')),
     );
   }
   return body as T;

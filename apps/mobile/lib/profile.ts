@@ -1,4 +1,4 @@
-import { ApiError, isNotFound } from './apiError';
+import { ApiError, isNotFound, parseRetryAfterMs } from './apiError';
 import { apiRequest } from './apiRequest';
 import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
@@ -137,6 +137,10 @@ async function request<T>(
       body?.error?.message ?? `Request failed (${res.status}).`,
       body?.error?.code ?? 'unknown',
       res.status,
+      // F17 (#403): the fifth hand-rolled request builder found by review —
+      // the other four (apiRequest.ts, sessions.ts, workouts.ts, plansApi.ts)
+      // already read this before the Response fell out of scope.
+      parseRetryAfterMs(res.headers?.get('Retry-After')),
     );
   }
   return body as T;

@@ -26,6 +26,23 @@ export class ApiError extends Error {
     message: string,
     readonly code: string,
     readonly status: number,
+    /**
+     * `Retry-After`, already converted to milliseconds — or `undefined` when
+     * the response carried none (F17, #403).
+     *
+     * A type change, not a call-site change: before this the four hand-rolled
+     * request helpers (`apiRequest.ts`, `sessions.ts`, `workouts.ts`,
+     * `plansApi.ts`) all read `res.status` and the JSON envelope and then
+     * discarded the `Response` — so a server that had computed exactly how
+     * long to wait had nowhere to put the number. Every caller kept inventing
+     * its own wait instead ("a few minutes", a hard-coded backoff ladder).
+     *
+     * Parsed once, here, rather than by every caller: `parseRetryAfterMs`
+     * handles both forms HTTP allows even though this server only ever sends
+     * delay-seconds, so a future proxy or route that sends an HTTP-date does
+     * not need a second parser written for it.
+     */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -242,4 +259,81 @@ export function isUnknownGrip(err: unknown): boolean {
  */
 export function isNotFound(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404;
+}
+
+/**
+ * `Retry-After`, in milliseconds — or `undefined` when the header is absent
+ * or unparseable (F17, #403).
+ *
+ * HTTP allows two forms: a whole number of delay-seconds, or an HTTP-date.
+ * This server only ever sends the first — every writer (`ratelimit/middleware.go`,
+ * `identify_handler.go`, `reflect_handler.go`, `estimate_handler.go`) is
+ * `strconv.Itoa` on a rounded-up second count, confirmed by grep before
+ * writing this — but both are parsed anyway so this stays the one place that
+ * needs to change if a proxy or a future route ever sends the other form.
+ *
+ * `now` is a parameter, not a bare `Date.now()` call, so the HTTP-date branch
+ * is testable without the test racing a real clock.
+ */
+export function parseRetryAfterMs(
+  header: string | null | undefined,
+  now: () => number = Date.now,
+): number | undefined {
+  if (!header) return undefined;
+  const trimmed = header.trim();
+  if (!trimmed) return undefined;
+
+  // Delay-seconds: digits only, per RFC 9110 — no sign, no decimal point.
+  // What this server actually sends, always.
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) ? seconds * 1000 : undefined;
+  }
+
+  // HTTP-date fallback. Requires at least one letter before trying
+  // `Date.parse` at all — every real HTTP-date has one (a weekday name, a
+  // month name, "GMT"), and `Date.parse` is FAR more lenient than RFC 9110:
+  // `Date.parse('-5')` does not return `NaN`, it resolves to a real instant
+  // (year -5), which without this guard turned a malformed delay-seconds
+  // value into a "successfully parsed" wait instead of `undefined`. Found by
+  // this file's own boundary test for a rejected sign.
+  if (!/[a-zA-Z]/.test(trimmed)) return undefined;
+
+  // A date already in the past is "you may retry now", not a parse failure —
+  // clamped to 0 rather than going negative, which would otherwise make a
+  // caller's `Math.max` treat it as "no wait" anyway but for the wrong reason
+  // if that caller ever stops using `Math.max`.
+  const when = Date.parse(trimmed);
+  if (Number.isNaN(when)) return undefined;
+  return Math.max(0, when - now());
+}
+
+/** The `Retry-After` an `ApiError` carried, or `undefined` for anything else. */
+export function retryAfterOf(err: unknown): number | undefined {
+  return err instanceof ApiError ? err.retryAfterMs : undefined;
+}
+
+/**
+ * "Wait 47 seconds" / "Wait about 2 minutes" — the phrase every 429 surface
+ * composes into its own sentence, so the rounding rule lives in one place
+ * instead of drifting across identify, sync and the estimate quota banner.
+ *
+ * **Under a minute, rounds UP and only up**: undershooting would let an
+ * athlete (or this app, retrying automatically) act before the server's own
+ * window has actually opened — the exact incentive F15 fixed on the server
+ * side, repeated here on the client if this rounded the other way. That
+ * guarantee is deliberately NOT extended to the minute branch below: at or
+ * above a minute this rounds to the NEAREST minute (so "89 seconds" reads
+ * "about 1 minute", a few seconds short of the true wait), because
+ * second-level precision on "wait four minutes" is false confidence no
+ * server promise backs, and the athlete reading it is not about to retry to
+ * the exact second regardless of which way a whole minute rounds.
+ */
+export function waitPhrase(ms: number): string {
+  const totalSeconds = Math.max(1, Math.ceil(ms / 1000));
+  if (totalSeconds < 60) {
+    return `Wait ${totalSeconds} second${totalSeconds === 1 ? '' : 's'}`;
+  }
+  const minutes = Math.max(1, Math.round(totalSeconds / 60));
+  return `Wait about ${minutes} minute${minutes === 1 ? '' : 's'}`;
 }

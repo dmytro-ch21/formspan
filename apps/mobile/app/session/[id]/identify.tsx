@@ -12,8 +12,8 @@ import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
   identifyErrorMessage,
+  identifyHint,
   identifyMachine,
-  isRetryable,
   type MachineIdentification,
 } from '@/lib/identifyApi';
 import { prepareImageForUpload, type UploadableImage } from '@/lib/imageUpload';
@@ -68,18 +68,24 @@ export default function IdentifyMachineScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
-   * The hint under an error, as three states rather than a boolean.
+   * The hint under an error, as four states rather than a boolean.
    *
-   * `retry` and `retake` are both about the IDENTIFICATION. A COMMIT failure is
-   * about neither, and forcing it into one of them reproduces the very
-   * contradiction this task was filed to remove: `setRetryable(false)` put
-   * "Take another photo, or search instead." under "Try again when you have
-   * signal", and `true` put "You can try again." under "Session not found on
-   * this device". Both messages already name their own remedy and the
-   * shortlist is still tappable, so the honest third option is to say nothing.
-   * Raised in review, on the fix for the first version of this bug.
+   * `retry`, `retake` and `wait` are all about the IDENTIFICATION. A COMMIT
+   * failure is about none of them, and forcing it into one of them reproduces
+   * the very contradiction this task was filed to remove: `setRetryable(false)`
+   * put "Take another photo, or search instead." under "Try again when you
+   * have signal", and `true` put "You can try again." under "Session not
+   * found on this device". Both messages already name their own remedy and
+   * the shortlist is still tappable, so the honest option for a commit failure
+   * is to say nothing extra. Raised in review, on the fix for the first
+   * version of this bug.
+   *
+   * `wait` is F17 (#403)'s addition: a 429 is not `retry` (nothing should
+   * auto-resend it) and it is not `retake` either (a rate limit is not a bad
+   * photo, and telling an athlete to reshoot advises an action that cannot
+   * possibly help). `identifyHint` computes which of the four applies.
    */
-  const [hint, setHint] = useState<'retry' | 'retake' | 'none'>('retry');
+  const [hint, setHint] = useState<'retry' | 'retake' | 'wait' | 'none'>('retry');
   const [result, setResult] = useState<MachineIdentification | null>(null);
 
   /**
@@ -181,9 +187,10 @@ export default function IdentifyMachineScreen() {
     } catch (err) {
       setError(identifyErrorMessage(err));
       // A 422 is DETERMINISTIC — the same photo yields the same refusal — so
-      // the screen offers "Take another" rather than "Try again". One word
-      // apart, opposite in effect: a retry button there cannot work.
-      setHint(isRetryable(err) ? 'retry' : 'retake');
+      // the screen offers "Take another" rather than "Try again". A 429 is
+      // neither: the same photo would succeed once the wait is over, so
+      // `identifyHint` says `wait` rather than folding it into either one.
+      setHint(identifyHint(err));
     } finally {
       setBusy(false);
     }
@@ -302,7 +309,17 @@ export default function IdentifyMachineScreen() {
             </Text>
             {hint === 'none' ? null : (
               <Text style={styles.errorHint} testID="identify-hint">
-                {hint === 'retry' ? 'You can try again.' : 'Take another photo, or search instead.'}
+                {/* `wait` is its own line rather than falling into `retake`'s
+                    "Take another photo" — the error text above already states
+                    the server's own wait, and this hint used to just repeat
+                    "take another photo" under it, which told a rate-limited
+                    athlete to do the one thing that could not help (F17,
+                    #403). */}
+                {hint === 'retry'
+                  ? 'You can try again.'
+                  : hint === 'wait'
+                    ? 'Wait it out — search instead if you need the exercise sooner.'
+                    : 'Take another photo, or search instead.'}
               </Text>
             )}
           </View>

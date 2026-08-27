@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 
 import { apiRequest } from './apiRequest';
 import { getDb } from './db';
-import { isPermanentRejection, isTransportFailure } from './apiError';
+import { isPermanentRejection, isTransportFailure, retryAfterOf } from './apiError';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -211,12 +211,20 @@ export type SequenceSyncResult = {
   failed: number;
   error?: string;
   errorKind?: 'offline' | 'permanent' | 'transient';
+  /** The largest `Retry-After` seen this run, in ms (F17, #403). */
+  retryAfterMs?: number;
 };
 
 function classify(err: unknown): 'offline' | 'permanent' | 'transient' {
   if (isTransportFailure(err)) return 'offline';
   if (isPermanentRejection(err)) return 'permanent';
   return 'transient';
+}
+
+/** Fold one failure's `Retry-After` into the run's running maximum. */
+function noteRetryAfter(result: { retryAfterMs?: number }, err: unknown): void {
+  const ms = retryAfterOf(err);
+  if (ms != null) result.retryAfterMs = Math.max(result.retryAfterMs ?? 0, ms);
 }
 
 function worseKind(
@@ -296,6 +304,7 @@ async function push(userId: string, getToken: TokenGetter): Promise<SequenceSync
       result.failed += 1;
       result.error = result.error ?? message;
       result.errorKind = worseKind(result.errorKind, kind);
+      noteRetryAfter(result, err);
       await db.runAsync(`UPDATE sequences SET last_error = ? WHERE id = ?`, message, r.id);
       if (kind === 'permanent') {
         // A 4xx will not become a 2xx. Stop owing it, keep the row and the

@@ -1,7 +1,13 @@
 import { randomUUID } from 'expo-crypto';
 import type * as SQLite from 'expo-sqlite';
 
-import { ApiError, isNotFound, isPermanentRejection, isTransportFailure } from '@/lib/apiError';
+import {
+  ApiError,
+  isNotFound,
+  isPermanentRejection,
+  isTransportFailure,
+  retryAfterOf,
+} from '@/lib/apiError';
 import { dayString } from '@/lib/calendar';
 import { getDb } from '@/lib/db';
 import {
@@ -219,12 +225,20 @@ export type PlanSyncResult = {
   deferred: number;
   error?: string;
   errorKind?: 'offline' | 'permanent' | 'transient';
+  /** The largest `Retry-After` seen this run, in ms (F17, #403). */
+  retryAfterMs?: number;
 };
 
 function classify(err: unknown): 'offline' | 'permanent' | 'transient' {
   if (isTransportFailure(err)) return 'offline';
   if (isPermanentRejection(err)) return 'permanent';
   return 'transient';
+}
+
+/** Fold one failure's `Retry-After` into the run's running maximum. */
+function noteRetryAfter(result: { retryAfterMs?: number }, err: unknown): void {
+  const ms = retryAfterOf(err);
+  if (ms != null) result.retryAfterMs = Math.max(result.retryAfterMs ?? 0, ms);
 }
 
 /** Keep the most actionable classification seen this run. */
@@ -336,6 +350,7 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
       result.failed++;
       result.error = err instanceof Error ? err.message : String(err);
       result.errorKind = worseKind(result.errorKind, classify(err));
+      noteRetryAfter(result, err);
       await noteRowError(db, row.id, userId, err);
     }
   }
@@ -482,6 +497,7 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
       result.error = err instanceof Error ? err.message : String(err);
     }
     result.errorKind = worseKind(result.errorKind, classify(err));
+    noteRetryAfter(result, err);
   }
 
   return result;
