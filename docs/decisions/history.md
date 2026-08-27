@@ -44982,7 +44982,7 @@ that judgment turns out wrong in practice (an athlete building a 40-item
 syllabus one-handed, say), that is its own ticket rather than a reason to
 reopen this one.
 
-## 2026-08-27 — N82: weekly training themes, authored on the phone (#PENDING_PR_N82)
+## 2026-08-27 — N82: weekly training themes, authored on the phone (#677)
 
 Closed the phone-impossible audit's row 7 — setting a week's theme (the
 one-sentence "what is this week for", `PUT /v1/themes/{weekStart}`) was
