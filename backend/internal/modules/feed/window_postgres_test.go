@@ -53,6 +53,11 @@ func TestTheFeedReachesBackThreeDaysAndNoFurther(t *testing.T) {
 			t.Fatalf("a week-old session is still in the feed: %v", got)
 		}
 	}
+	// N13 (#379): a real, populated page — not just the no-friends shortcut
+	// — reports the same window it enforced.
+	if page.WindowDays != FeedWindowDays() {
+		t.Fatalf("window_days = %d, want %d", page.WindowDays, FeedWindowDays())
+	}
 
 	// The count must agree with the list — the half that has bitten this file
 	// twice, and the reason the window lives in `visibleFrom` rather than

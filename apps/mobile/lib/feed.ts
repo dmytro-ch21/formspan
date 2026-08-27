@@ -79,6 +79,14 @@ export type FeedPage = {
   total: number;
   limit: number;
   offset: number;
+  /**
+   * How far back the feed reaches, in days (N13). The ONE place to read
+   * this — the window used to be stated as a bare "3 days" in two separate
+   * strings on this screen, with nothing tying either to the server's real
+   * constant. Read it off every response rather than hardcoding a number in
+   * copy; it is present on every page, including an empty first page.
+   */
+  window_days: number;
 };
 
 /** Matches the server's own default. Stated here so the first request does not

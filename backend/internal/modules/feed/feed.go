@@ -158,6 +158,15 @@ type Page struct {
 	Total  int    `json:"total"`
 	Limit  int    `json:"limit"`
 	Offset int    `json:"offset"`
+	// WindowDays is FeedWindow (postgres.go), reported rather than left
+	// implicit — N13 (#379). Before this, the value existed only as a Go
+	// constant plus three independently hand-written copies of "3 days" (two
+	// mobile strings, one line of OpenAPI prose), none of which could ever
+	// notice the other two going stale. Same shape as `bjj.DraftQuota.Limit`:
+	// the number is computed server-side, once, and a client renders it
+	// rather than re-stating it — so "configurable in one place" is actually
+	// true of the COPY too, not just the SQL clause it always drove.
+	WindowDays int `json:"window_days"`
 }
 
 // Friends is the social-graph test, satisfied by the friend module. Declared

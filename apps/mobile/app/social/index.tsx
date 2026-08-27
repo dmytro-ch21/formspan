@@ -35,6 +35,19 @@ import { getProfile, type Profile } from '@/lib/profile';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
+ * "3 days" / "1 day" — the feed window read as copy (N13, #379).
+ *
+ * The ONE place this screen turns `window_days` into words. Before this, the
+ * window was two independently hand-written "3 days" strings below; both now
+ * call this instead of stating a number themselves, so a server-side change
+ * to the window (or a translation of this file) has one call site to find,
+ * not two to remember.
+ */
+function windowLabel(days: number): string {
+  return `${days} day${days === 1 ? '' : 's'}`;
+}
+
+/**
  * Social — what your training partners have been doing.
  *
  * **MOBILE ONLY.** The web app sees shared content and manages friends; a feed
@@ -211,6 +224,14 @@ export default function SocialScreen() {
 
   const [items, setItems] = useState<FeedItem[] | null>(null);
   const [total, setTotal] = useState(0);
+  // Read from the server on every load, never assumed (N13, #379) — the two
+  // copy sites below used to each hardcode "3 days" independently, and
+  // neither could tell if the other, or the server's own window, changed.
+  // Set alongside `items`, in the same response, so it is never stale
+  // relative to what is actually on screen — null only before the first
+  // load ever completes, exactly like `items`, and both copy sites that
+  // read it are already gated on `items !== null`.
+  const [windowDays, setWindowDays] = useState<number | null>(null);
   const [friendCount, setFriendCount] = useState<number | null>(null);
   const [waiting, setWaiting] = useState(0);
   const [sharing, setSharing] = useState<boolean | null>(null);
@@ -260,6 +281,7 @@ export default function SocialScreen() {
         if (c.signal.aborted) return;
         setItems(page.items);
         setTotal(page.total);
+        setWindowDays(page.window_days);
         setFriendCount(friends.length);
         setWaiting(counts.friend_requests ?? 0);
         setSharing(profile.share_training_with_friends);
@@ -297,6 +319,7 @@ export default function SocialScreen() {
           return [...prev, ...page.items.filter((i) => !seen.has(i.id))];
         });
         setTotal(page.total);
+        setWindowDays(page.window_days);
       })
       .catch((err: unknown) => {
         setLoadError(err instanceof Error ? err.message : String(err));
@@ -412,7 +435,16 @@ export default function SocialScreen() {
               <Text style={styles.muted}>
                 {friendCount === 0
                   ? 'Add a training partner, and their sessions show up here once they choose to share them.'
-                  : 'Nobody you train with has shared a session in the last 3 days — older ones drop off, and sharing is off until someone turns it on.'}
+                  : // Within THIS app run, windowDays is set in the same
+                    // response as items, so it is never null once this
+                    // branch can render (items !== null, friendCount > 0).
+                    // The ?? 3 fallback is not dead code, though: it is what
+                    // an athlete sees if their build is talking to an OLDER
+                    // backend that predates `window_days` (a rollback, or a
+                    // stale API) — `window_days` would arrive as `undefined`
+                    // there, and 3 is the correct window for exactly that
+                    // backend, not a guess.
+                    `Nobody you train with has shared a session in the last ${windowLabel(windowDays ?? 3)} — older ones drop off, and sharing is off until someone turns it on.`}
               </Text>
             </View>
           )
@@ -427,7 +459,7 @@ export default function SocialScreen() {
             feed — on an empty one the message above already carries it, and two
             statements of the same rule on one screen is nagging. */}
         {items !== null && items.length > 0 && items.length >= total && (
-          <Text style={styles.windowNote}>Showing the last 3 days</Text>
+          <Text style={styles.windowNote}>Showing the last {windowLabel(windowDays ?? 3)}</Text>
         )}
 
         {items !== null && items.length < total && (

@@ -87,6 +87,20 @@ const visibleFrom = `
 // session list are untouched and complete; this is a window on one surface.
 const FeedWindow = 3 * 24 * time.Hour
 
+// FeedWindowDays reports FeedWindow the way copy wants it — a count of days,
+// not a duration — for `Page.WindowDays` (N13, #379).
+//
+// This is the ONE conversion, and everything that used to say "3 days" in its
+// own words (two mobile strings, one line of OpenAPI prose) now reads this
+// number off the response instead. Assumes FeedWindow is a whole multiple of
+// 24h, which TestFeedWindowIsAWholeNumberOfDays pins — a window that were not
+// would silently floor here (`72h` and, say, `80h` both round-trip through
+// integer division without complaint), which is a worse failure than the
+// stale prose this replaces, because there would be nothing left to grep for.
+func FeedWindowDays() int {
+	return int(FeedWindow / (24 * time.Hour))
+}
+
 // pageQuery is a const rather than an inline string so a test can EXPLAIN the
 // SQL the repository actually runs.
 //
@@ -150,7 +164,10 @@ const workingVolume = `
 	), 0) AS tonnage_kg`
 
 func (r *PostgresRepository) List(ctx context.Context, userID string, limit, offset int) (Page, error) {
-	page := Page{Items: []Item{}, Limit: limit, Offset: offset}
+	// WindowDays set here, on the ONE Page value every return path below
+	// shares — including the no-friends and no-longer-friends early returns —
+	// so a client can never observe a Page missing it.
+	page := Page{Items: []Item{}, Limit: limit, Offset: offset, WindowDays: FeedWindowDays()}
 
 	ids, err := r.friends.FriendIDs(ctx, userID)
 	if err != nil {
