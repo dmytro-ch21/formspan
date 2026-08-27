@@ -43452,6 +43452,100 @@ restored to green.
   different fetch entirely. Out of scope for this ticket; worth its own
   ticket if the same drift is suspected there.
 
+## 2026-08-26 — N12: real uploaded avatars, and the moderation answer they needed before shipping
+
+Athletes can now upload, replace and remove a real avatar (`POST`/`DELETE
+/v1/profile/avatar`), server-side resized to fit within 512×512, re-encoded to
+JPEG, and written to the same private R2 bucket check-in photos already use —
+under a deterministic key (`avatars/<user_id>.jpg`), so "replace" and "upload"
+are the same request and there is never more than one object per account. The
+monogram (`lib/monogram.ts`) is unchanged and is still the fallback — for an
+account with no avatar, and now also when a real photo fails to load
+(`components/Avatar.tsx`'s `onError`), which a naive `url ? photo : monogram`
+check would not have caught.
+
+### Why bytes go through the API here, unlike a check-in photo
+
+`objectstore`'s own doc comment is explicit that progress-photo bytes must
+never flow through this process — proxying multi-megabyte bodies through a
+Go process sized for JSON is exactly the failure mode presigned direct-to-R2
+uploads exist to avoid. N12's own acceptance criteria make a different demand
+of an avatar than a check-in photo ever needed: **the original is never
+served to other athletes**, only a resized copy is — and nothing between a
+client and R2 can do that resizing; only code that sees the bytes can. So
+this endpoint proxies a capped, small upload (8 MiB, matching
+`exercise.maxIdentifyBody`'s reasoning) the same way `exercise.IdentifyHandler`
+already proxies a machine photo to a vision API, for the same structural
+reason: the direct-to-storage path cannot serve this particular requirement.
+Resizing uses `golang.org/x/image/draw` (Catmull-Rom) — a new direct
+dependency, the first image-processing one this backend has taken on
+deliberately (identify's vision call never decodes an image itself), added
+because nothing in the standard library does high-quality scaling.
+
+### The moderation answer, written down as N12's own acceptance criteria required
+
+**No in-app report flow yet.** A friend cannot flag an avatar from the app.
+The answer that exists today: `DELETE /v1/admin/users/{userID}/avatar`
+(`RequireAdmin`, the same allowlist as every other admin route), reachable
+from a new "Moderation" section on the admin console's User Detail page
+(`AvatarModeration.tsx`) — an operator removes an account's avatar there,
+initiated however a complaint reaches them today (email, a DM), the same way
+every other admin action in this console already works. `activity.UserSummary`
+gained a `has_avatar` boolean (via the same `profiles` LEFT JOIN that already
+supplies `display_name`) so that button is real rather than always-enabled —
+no image is rendered in the console itself; an operator who needs to see it
+opens the account in the app.
+
+This is the minimum viable answer, chosen deliberately over building a report
+button + flag column + admin queue in the same PR: the admin-only takedown
+closes the acceptance criterion ("how a reported avatar is removed and by
+whom") without the added surface area of a first, unused report path. An
+in-app report flow is real future work, not a corner cut silently — see
+"What is not done" below.
+
+### The upload-failure-safety property, and how it is proven rather than asserted
+
+**Order matters, and it is opposite on upload versus removal, deliberately:**
+
+- **Upload**: resize (in memory) → write the object to R2 → *then* record
+  `has_avatar = true`. A failure at either of the first two steps leaves the
+  database untouched — a failed replace keeps the previous avatar showing, a
+  failed first upload leaves the monogram up. Never a half-set state.
+- **Removal**: clear `has_avatar` → *then* best-effort delete the object. A
+  delete that fails afterward leaves an orphaned object nobody can reach
+  (`present()` only ever presigns when `HasAvatar` is true) — invisible
+  rather than unsafe, versus the alternative of telling the athlete "removed"
+  while the flag still said otherwise.
+
+Both orderings were mutation-tested, not merely reasoned about: reversing
+either one (`backend/internal/modules/profile/avatar_test.go`,
+`apps/mobile/app/__tests__/editProfileAvatar.test.tsx`) turns the covering
+test red as a genuine assertion failure, confirmed, then restored to green.
+The handler-level tests run against a real `httptest.Server` standing in for
+R2 — not a claim about how R2 behaves (that would be exactly the "stub built
+from an assumption" CLAUDE.md warns against; `presign.go`'s own tests already
+check the SigV4 algorithm against AWS's published vectors), only a claim
+about the *sequence* our own code performs, which any HTTP server can verify.
+
+### What is not done
+
+- **No in-app report flow.** See "the moderation answer" above — this is the
+  scope cut, not an oversight, and it is real future work.
+- **The avatar is not wired into the friends list or the social feed.**
+  `apps/mobile/app/friends/index.tsx` still renders text-only rows; the feed
+  still shows the monogram it already had. Both are real, separable next
+  steps — extending `friend.Card` and `feed`'s author info the same way
+  `PublicProfile` gained `avatar_url` here — deliberately left out of this PR
+  to keep it to the vertical slice the acceptance criteria actually asked
+  for, rather than fanning this one ticket out across three more backend
+  modules.
+- **No device pass.** Everything here is unit/integration-test and
+  typechecker verified; nobody has held a phone and confirmed the camera and
+  library pickers, the resized image actually looks acceptable, or that a
+  removed avatar's monogram appears everywhere it should on a real device.
+- `docs/testing/functional-scenarios.md` has the N12 entry, including the
+  device-check steps above as `NEEDS HUMAN EVIDENCE`.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

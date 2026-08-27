@@ -1955,6 +1955,13 @@ components:
           type: string
           nullable: true
           description: The human name beside the handle, or null if never set.
+        avatar_url:
+          type: string
+          description: >
+            A short-lived presigned URL to the athlete's uploaded avatar —
+            already resized server-side, never the original. Omitted
+            (absent from the response body, not null) when no avatar is
+            set; the monogram is the fallback in every client.
 
     Profile:
       type: object
@@ -2110,6 +2117,12 @@ components:
         updated_at:
           type: string
           format: date-time
+        avatar_url:
+          type: string
+          description: >
+            A short-lived presigned URL to the athlete's own uploaded
+            avatar. Omitted (absent, not null) when none is set — see
+            POST/DELETE /profile/avatar.
 
     ProfileCreate:
       type: object
@@ -4277,7 +4290,7 @@ components:
         The previous `activity_count`/`last_activity_at` were removed: they
         read a table with no writer and were 0/null for every user.
       required:
-        [user_id, display_name, session_count, last_session_at, set_count, modules, created_at]
+        [user_id, display_name, session_count, last_session_at, set_count, modules, created_at, has_avatar]
       properties:
         user_id:
           type: string
@@ -4285,6 +4298,13 @@ components:
           type: string
           nullable: true
           description: Null when the user never completed onboarding.
+        has_avatar:
+          type: boolean
+          description: >
+            Whether this account has an uploaded avatar (N12) — no URL here,
+            just the fact that decides whether "Remove avatar" is a real
+            button on this account's page. An operator who needs to actually
+            see the image looks at the account in the app.
         session_count:
           type: integer
           description: Sessions logged, all time.
@@ -6196,6 +6216,77 @@ paths:
             `already_exists`; the message says which fact ("that username is
             taken") — distinct from the create-time 409, which means the
             profile itself already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /profile/avatar:
+    post:
+      summary: Upload or replace the authenticated caller's avatar
+      operationId: uploadAvatar
+      description: >
+        Upload and replace are the same request: the stored object's key is
+        deterministic per account, so a second upload simply overwrites the
+        first. The image is **resized server-side** and the original is
+        discarded — only the resized copy is ever written to storage or
+        served to another athlete (N12).
+
+
+        A failed upload never leaves a half-set avatar: the object write
+        happens before the account is marked as having one, so a failed
+        replace leaves the PREVIOUS avatar in place, and a failed first
+        upload leaves the monogram showing.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [avatar]
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+                  description: >
+                    JPEG or PNG, sniffed from the bytes rather than the
+                    part's declared Content-Type. Resized server-side to fit
+                    within 512x512 (never upscaled) and re-encoded to JPEG.
+      responses:
+        "200":
+          description: The caller's profile, with the new avatar_url set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "400":
+          description: Not a readable JPEG/PNG, or no avatar part sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503":
+          description: Object storage is not configured on this environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      summary: Remove the authenticated caller's avatar
+      operationId: removeAvatar
+      description: >
+        The account's own removal. Clears has_avatar on the account first,
+        then best-effort deletes the stored object — so a delete that fails
+        on the storage side still leaves the athlete-facing state correct
+        (the monogram is back) rather than reporting success while the
+        object secretly remains reachable.
+      responses:
+        "204": { description: Removed. The monogram is the fallback now. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503":
+          description: Object storage is not configured on this environment.
           content:
             application/json:
               schema:
@@ -11271,6 +11362,35 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /admin/users/{userID}/avatar:
+    delete:
+      summary: Remove a specific user's avatar (admin-only, N12)
+      operationId: adminClearAvatar
+      description: >
+        VOLA's moderation answer for an avatar, as things stand today: no
+        in-app report flow exists, so a takedown is initiated however a
+        complaint reaches an operator (email, a DM) — the same way every
+        other admin action in this console is. Clears has_avatar on the
+        target account first, then best-effort deletes the stored object.
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204": { description: Removed. }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Object storage is not configured on this environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /contests:
     get:

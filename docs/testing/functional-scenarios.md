@@ -13029,3 +13029,55 @@ on screen. That, and only that, is what moved.
   one occur naturally)** and confirm it does not read as an offline message —
   a dead network and "the server rejected this" should look visibly
   different to the athlete.
+
+## N12 — real uploaded avatars (`apps/mobile/app/profile/edit.tsx`, `apps/mobile/components/Avatar.tsx`, `apps/admin/src/app/users/[id]/AvatarModeration.tsx`, `POST`/`DELETE /v1/profile/avatar`, `DELETE /v1/admin/users/{userID}/avatar`)
+
+### Upload, replace, remove (mobile — Edit profile)
+
+- From Edit profile, tap "Take photo", grant camera permission, take a photo
+  and confirm it appears as the avatar (replacing the monogram) once the
+  upload finishes.
+- Tap "Choose photo" instead and pick one from the library; confirm the same.
+- With an avatar already set, tap "Replace" and pick a different photo;
+  confirm the new one replaces the old one rather than adding a second.
+- Tap "Remove"; confirm the monogram returns immediately.
+- Deny camera or library permission when prompted; confirm a clear message
+  appears and nothing crashes — no upload is attempted.
+- **NEEDS HUMAN EVIDENCE — take a photo on a real device and look at the
+  result.** The server resizes to fit within 512×512 and re-encodes to JPEG;
+  confirm a real face photo still reads clearly at that size and the upload
+  completes in a reasonable time on ordinary signal.
+- **NEEDS HUMAN EVIDENCE — kill the network mid-upload** (airplane mode right
+  after tapping a photo) and confirm the previous avatar (or the monogram, if
+  there was none) is still showing afterward — never a broken image, never a
+  stuck spinner.
+
+### The fallback (`Avatar` component, used wherever an avatar renders)
+
+- With no avatar set, confirm the monogram (initials + colour, derived from
+  the handle) renders.
+- With an avatar set and the network then cut, confirm a screen that has
+  already loaded keeps showing the cached image rather than a broken one.
+- **NEEDS HUMAN EVIDENCE — let a presigned avatar URL actually expire** (or
+  simulate a 404 on the image request) and confirm the screen falls back to
+  the monogram rather than showing a broken-image icon.
+
+### Moderation (admin console — User Detail)
+
+- Open an account that has an avatar; confirm the Moderation section shows
+  "Remove avatar" rather than "No avatar uploaded."
+- Click it and confirm the section updates to "No avatar uploaded" without a
+  page reload, and that the athlete's app now shows the monogram for that
+  account.
+- Open an account with no avatar; confirm the section reads "No avatar
+  uploaded" with no button.
+- **NEEDS HUMAN EVIDENCE — exercise the moderation path end to end on a real
+  account**: upload an avatar as an athlete, remove it as an admin, confirm
+  the athlete's own app reflects the removal next time it loads the profile.
+
+### Security / auth
+
+- `POST`/`DELETE /v1/profile/avatar` must 401 without a valid token.
+- `DELETE /v1/admin/users/{userID}/avatar` must 401/403 for a non-admin
+  caller, even with a valid token for their own account — an athlete must not
+  be able to clear another athlete's avatar through the admin route.

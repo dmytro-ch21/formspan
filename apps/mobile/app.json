@@ -43,15 +43,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "VOLA uses your photos so you can attach a progress picture to a check-in. Pictures stay private to your account and are never shown to anyone else.",
-          "cameraPermission": "VOLA uses the camera so you can photograph a meal to estimate it, photograph a gym machine to identify it, or scan a barcode off a food packet. A photo is sent to VOLA to be read and is not stored; a barcode is decoded on your phone and never leaves it.",
+          "photosPermission": "VOLA uses your photos so you can attach a progress picture to a check-in, or set a profile photo. Progress pictures stay private to your account; a profile photo is visible to other athletes.",
+          "cameraPermission": "VOLA uses the camera so you can photograph a meal to estimate it, photograph a gym machine to identify it, scan a barcode off a food packet, or take a profile photo. A meal, machine or barcode photo is read and not stored; a barcode never leaves your phone; a profile photo is stored, resized, and visible to other athletes.",
           "microphonePermission": false
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "VOLA uses the camera so you can photograph a meal to estimate it, photograph a gym machine to identify it, or scan a barcode off a food packet. A photo is sent to VOLA to be read and is not stored; a barcode is decoded on your phone and never leaves it.",
+          "cameraPermission": "VOLA uses the camera so you can photograph a meal to estimate it, photograph a gym machine to identify it, scan a barcode off a food packet, or take a profile photo. A meal, machine or barcode photo is read and not stored; a barcode never leaves your phone; a profile photo is stored, resized, and visible to other athletes.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }

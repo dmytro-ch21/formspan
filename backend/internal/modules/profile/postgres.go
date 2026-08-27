@@ -25,7 +25,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 func (r *PostgresRepository) Get(ctx context.Context, userID string) (*Profile, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, food_unit, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
+		SELECT user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, food_unit, track_effort, share_training_with_friends, share_training_details, activity_level, has_avatar, created_at, updated_at
 		FROM profiles WHERE user_id = $1`, userID)
 	return scanProfile(row)
 }
@@ -36,14 +36,24 @@ func (r *PostgresRepository) GetByUsername(ctx context.Context, username string)
 	// scan rather than a table walk. Only public-card columns are selected —
 	// the row's private fields never enter this code path at all.
 	var p PublicProfile
+	var userID string
+	var hasAvatar bool
 	err := r.pool.QueryRow(ctx, `
-		SELECT username, display_name FROM profiles
-		WHERE lower(username) = lower($1)`, username).Scan(&p.Username, &p.DisplayName)
+		SELECT user_id, username, display_name, has_avatar FROM profiles
+		WHERE lower(username) = lower($1)`, username).
+		Scan(&userID, &p.Username, &p.DisplayName, &hasAvatar)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, translatePgError(err)
+	}
+	// userID is scanned only to build this key, then discarded — it never
+	// reaches the struct as itself, only embedded inside a key string that is
+	// `json:"-"` on PublicProfile. See AvatarKey's doc comment.
+	if hasAvatar {
+		key := AvatarKey(userID)
+		p.AvatarKey = &key
 	}
 	return &p, nil
 }
@@ -56,7 +66,7 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewPr
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO profiles (user_id, display_name, date_of_birth, sex, height_cm)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, food_unit, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
+		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, food_unit, track_effort, share_training_with_friends, share_training_details, activity_level, has_avatar, created_at, updated_at
 	`, userID, in.DisplayName, dob, in.Sex, in.HeightCM)
 	p, err := scanProfile(row)
 	if err != nil {
@@ -94,7 +104,7 @@ func (r *PostgresRepository) Update(ctx context.Context, userID string, in Profi
 			activity_level = COALESCE($11, activity_level),
 			updated_at = now()
 		WHERE user_id = $1
-		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, food_unit, track_effort, share_training_with_friends, share_training_details, activity_level, created_at, updated_at
+		RETURNING user_id, username, display_name, date_of_birth, sex, height_cm, unit_system, food_unit, track_effort, share_training_with_friends, share_training_details, activity_level, has_avatar, created_at, updated_at
 	`, userID, in.Username, in.DisplayName, dob, in.Sex, in.HeightCM, in.UnitSystem, in.TrackEffort, in.ShareTrainingWithFriends, in.ShareTrainingDetails, in.ActivityLevel, in.FoodUnit)
 	p, err := scanProfile(row)
 	if err != nil {
@@ -159,7 +169,7 @@ func scanProfile(row pgx.Row) (*Profile, error) {
 	var dob *time.Time
 	err := row.Scan(&p.UserID, &p.Username, &p.DisplayName, &dob, &p.Sex, &p.HeightCM,
 		&p.UnitSystem, &p.FoodUnit, &p.TrackEffort, &p.ShareTrainingWithFriends, &p.ShareTrainingDetails,
-		&p.ActivityLevel, &p.CreatedAt, &p.UpdatedAt)
+		&p.ActivityLevel, &p.HasAvatar, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -168,6 +178,36 @@ func scanProfile(row pgx.Row) (*Profile, error) {
 	}
 	p.DateOfBirth = formatDate(dob)
 	return &p, nil
+}
+
+// SetAvatar and ClearAvatar are single-column updates rather than routed
+// through Update/ProfileUpdate: has_avatar is never something a PATCH sets —
+// it is a FACT about what UploadAvatar/RemoveAvatar just did to storage, not
+// a preference a client states. Mixing it into the nil-means-unchanged PATCH
+// contract would let a client assert "I have an avatar" without ever having
+// uploaded one.
+func (r *PostgresRepository) SetAvatar(ctx context.Context, userID string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE profiles SET has_avatar = true, updated_at = now() WHERE user_id = $1`, userID)
+	if err != nil {
+		return fmt.Errorf("profile: set avatar: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepository) ClearAvatar(ctx context.Context, userID string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE profiles SET has_avatar = false, updated_at = now() WHERE user_id = $1`, userID)
+	if err != nil {
+		return fmt.Errorf("profile: clear avatar: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func parseDate(s *string) (*time.Time, error) {

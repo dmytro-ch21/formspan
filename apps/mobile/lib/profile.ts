@@ -1,4 +1,5 @@
 import { ApiError, isNotFound } from './apiError';
+import { apiRequest } from './apiRequest';
 import { netFetch } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 import { newTraceId, traceparent } from './trace';
@@ -54,6 +55,16 @@ export type Profile = {
    * parses; read it as `?? null` rather than assuming it is present.
    */
   activity_level?: string | null;
+  /**
+   * A short-lived presigned URL to the athlete's uploaded avatar (N12) —
+   * already resized server-side. **Absent, not null, when there is none** —
+   * the server omits the key entirely rather than sending an empty string,
+   * so `profile.avatar_url` is the whole check; there is no third state to
+   * misread. The monogram (`lib/monogram.ts`) is the fallback everywhere
+   * this is absent, and everywhere a real image FAILS to load — a network
+   * blip must not turn into a broken-image icon.
+   */
+  avatar_url?: string;
 };
 
 /** The fields the edit screen can change. Omitted keys are left alone. */
@@ -184,6 +195,33 @@ export function setActivityLevel(
 
 export function getProfile(getToken: TokenGetter): Promise<Profile> {
   return request<Profile>(getToken, '/profile');
+}
+
+/**
+ * Upload or replace the avatar — the same call either way, because the
+ * server's storage key is deterministic per account (N12).
+ *
+ * Multipart, like `identifyMachine` — a photo has no sensible JSON
+ * transport, and `apiRequest` (not this file's own `request`, which always
+ * sets `Content-Type: application/json`) is what leaves the boundary token
+ * to the runtime.
+ */
+export function uploadAvatar(
+  getToken: TokenGetter,
+  photo: { uri: string; mimeType: string },
+): Promise<Profile> {
+  const form = new FormData();
+  form.append('avatar', {
+    uri: photo.uri,
+    name: 'avatar.jpg',
+    type: photo.mimeType,
+  } as unknown as Blob);
+  return apiRequest<Profile>(getToken, '/profile/avatar', { method: 'POST', body: form });
+}
+
+/** Remove the avatar. The monogram is the fallback everywhere it was shown. */
+export async function removeAvatar(getToken: TokenGetter): Promise<void> {
+  await apiRequest<void>(getToken, '/profile/avatar', { method: 'DELETE' });
 }
 
 /**

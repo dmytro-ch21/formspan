@@ -1,7 +1,10 @@
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
 
+import { Avatar } from '@/components/Avatar';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -9,7 +12,13 @@ import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { setModules } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
-import { getProfile, updateProfile, type ProfilePatch } from '@/lib/profile';
+import {
+  getProfile,
+  removeAvatar,
+  updateProfile,
+  uploadAvatar,
+  type ProfilePatch,
+} from '@/lib/profile';
 import { fromFeetInches, heightUnit, toFeetInches, type UnitSystem } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -63,11 +72,25 @@ export default function EditProfileScreen() {
   // longer save a date-of-birth fix — the whole screen bricked by a field
   // they didn't touch.
   const [loadedUsername, setLoadedUsername] = useState<string | null>(null);
+  // The presigned URL from the last load or the last successful
+  // upload/remove — never patched into `patch` alongside the other fields,
+  // because there is no PATCH-able field here: avatar changes go through
+  // their own endpoints (POST/DELETE /profile/avatar), not this screen's
+  // Save button.
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  // Separate from `saving`: an avatar change is its own request, on its own
+  // endpoints. Both `save()`'s own guard and the Save button's `disabled`
+  // check this too — an athlete mid-upload should not also be able to fire
+  // the unrelated PATCH, even though the two touch disjoint fields and
+  // nothing would technically conflict; a double-submit affordance is a
+  // confusing state to be in regardless of whether it's safe.
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   useEffect(() => {
     getProfile(getToken)
       .then((p) => {
         setLoadedUsername(p.username);
+        setAvatarUrl(p.avatar_url ?? null);
         setPatch({
           username: p.username ?? undefined,
           display_name: p.display_name,
@@ -106,7 +129,7 @@ export default function EditProfileScreen() {
     // Belt and braces: the form isn't rendered when `unavailable`, so this is
     // unreachable today. It stays because the cost of being wrong is
     // overwriting someone's profile with nulls.
-    if (saving || unavailable) return;
+    if (saving || avatarBusy || unavailable) return;
     setSaving(true);
     setError(null);
     try {
@@ -163,6 +186,92 @@ export default function EditProfileScreen() {
     }
   }
 
+  /**
+   * Shared by both sources (N12) — the downscale-then-upload sequence is
+   * identical whether the photo came from the camera or the library, and
+   * duplicating it per source is exactly the bug class `checkin/[date].tsx`
+   * and `identify.tsx` already avoid by keeping it in one place each.
+   */
+  async function commitAvatar(uri: string) {
+    setAvatarBusy(true);
+    setError(null);
+    try {
+      // Downscaled before it leaves the phone, same 1080px/0.8 the checkin
+      // and identify screens use — bandwidth on a raw 4-5MB camera frame.
+      // The server does its OWN authoritative resize (to 512px, discarding
+      // whatever this produces) so this is purely a courtesy to the upload,
+      // never the property "the original is never served" relies on.
+      const shrunk = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1080 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      const updated = await uploadAvatar(getToken, { uri: shrunk.uri, mimeType: 'image/jpeg' });
+      setAvatarUrl(updated.avatar_url ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function pickAvatarFromLibrary() {
+    if (avatarBusy) return;
+    // The permission request and the picker itself can both reject — a
+    // camera-unavailable Simulator, an OS-level picker failure — not just
+    // resolve `canceled: true`. Unlike commitAvatar's own try/catch (which
+    // only covers the resize-then-upload it wraps), nothing upstream of it
+    // was catching this half, so a real rejection here was an unhandled
+    // promise rejection from a Pressable handler: silent to the athlete,
+    // caught only in review.
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setError('VOLA needs access to your photos to set one.');
+        return;
+      }
+      const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+      if (picked.canceled || !picked.assets[0]) return;
+      await commitAvatar(picked.assets[0].uri);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function pickAvatarFromCamera() {
+    if (avatarBusy) return;
+    // See pickAvatarFromLibrary's comment — same reasoning, same gap.
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        setError('VOLA needs camera access to take a photo.');
+        return;
+      }
+      const picked = await ImagePicker.launchCameraAsync({ quality: 1 });
+      if (picked.canceled || !picked.assets[0]) return;
+      await commitAvatar(picked.assets[0].uri);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function removeMyAvatar() {
+    if (avatarBusy) return;
+    setAvatarBusy(true);
+    setError(null);
+    try {
+      await removeAvatar(getToken);
+      // The monogram returning immediately, without waiting on a re-fetch —
+      // the removal itself is the fact that changed, and there is nothing
+      // else this response could tell us.
+      setAvatarUrl(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.centre}>
@@ -194,7 +303,12 @@ export default function EditProfileScreen() {
         options={{
           title: 'Edit profile',
           headerRight: () => (
-            <Pressable onPress={save} disabled={saving} hitSlop={12} testID="profile-save">
+            <Pressable
+              onPress={save}
+              disabled={saving || avatarBusy}
+              hitSlop={12}
+              testID="profile-save"
+            >
               <Text style={[styles.headerAction, { color: accent.ink }]}>
                 {saving ? 'Saving…' : 'Save'}
               </Text>
@@ -209,6 +323,53 @@ export default function EditProfileScreen() {
             {error}
           </Text>
         )}
+
+        {/* N12: the avatar. `handle` falls back to '' for an account that
+            hasn't claimed a username yet — the same "no handle" case
+            monogramFor already documents handling with a '?' rather than
+            crashing, so this screen needs no extra guard for it. */}
+        <View style={styles.avatarRow} testID="profile-avatar-row">
+          <Avatar url={avatarUrl} handle={loadedUsername ?? patch.username ?? ''} size={72} />
+          <View style={styles.avatarActions}>
+            {avatarBusy ? (
+              <ActivityIndicator accessibilityLabel="Updating your photo" />
+            ) : (
+              <>
+                <Pressable
+                  onPress={pickAvatarFromCamera}
+                  hitSlop={8}
+                  testID="profile-avatar-camera"
+                  accessibilityRole="button"
+                  accessibilityLabel="Take a photo"
+                >
+                  <Text style={[styles.avatarAction, { color: accent.ink }]}>Take photo</Text>
+                </Pressable>
+                <Pressable
+                  onPress={pickAvatarFromLibrary}
+                  hitSlop={8}
+                  testID="profile-avatar-library"
+                  accessibilityRole="button"
+                  accessibilityLabel="Choose from library"
+                >
+                  <Text style={[styles.avatarAction, { color: accent.ink }]}>
+                    {avatarUrl ? 'Replace' : 'Choose photo'}
+                  </Text>
+                </Pressable>
+                {avatarUrl && (
+                  <Pressable
+                    onPress={removeMyAvatar}
+                    hitSlop={8}
+                    testID="profile-avatar-remove"
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove photo"
+                  >
+                    <Text style={[styles.avatarAction, styles.avatarRemove]}>Remove</Text>
+                  </Pressable>
+                )}
+              </>
+            )}
+          </View>
+        </View>
 
         <Field
           label="Name"
@@ -465,6 +626,10 @@ function Field({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  avatarRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 8 },
+  avatarActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, flexShrink: 1 },
+  avatarAction: { fontSize: 14, fontWeight: '600' },
+  avatarRemove: { color: vola.danger },
   heightRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   heightBox: { flex: 1 },
   heightUnit: { color: vola.textMuted, fontSize: 15 },

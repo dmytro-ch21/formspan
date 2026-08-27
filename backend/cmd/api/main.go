@@ -79,7 +79,29 @@ func main() {
 	}
 	defer pool.Close()
 
-	profileHandler := profile.NewHandler(profile.NewPostgresRepository(pool))
+	// Private object storage — check-in photos AND, since N12, avatars. Nil
+	// when unconfigured, which is a supported state: local dev and CI have no
+	// bucket, and every endpoint that needs it says so rather than failing. A
+	// PARTIAL config is fatal here, on purpose: three of four values set is
+	// somebody halfway through setting it up, and starting anyway hides it
+	// until a photo — or an avatar — vanishes.
+	//
+	// Created here, before profileHandler, rather than beside bodyHandler
+	// further down: profile.NewHandler needs it too now, and constructing it
+	// twice would mean two Stores presigning against the same bucket with no
+	// way to keep them agreeing on credentials if one ever diverged.
+	photoStore, err := objectstore.New(objectstore.Config{
+		Endpoint:  os.Getenv("R2_ENDPOINT"),
+		Bucket:    os.Getenv("R2_BUCKET"),
+		AccessKey: os.Getenv("R2_ACCESS_KEY_ID"),
+		SecretKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
+	})
+	if err != nil {
+		logger.Error("object storage misconfigured", "error", err)
+		os.Exit(1)
+	}
+
+	profileHandler := profile.NewHandler(profile.NewPostgresRepository(pool), photoStore)
 	bjjRepo := bjj.NewPostgresRepository(pool)
 	bjjHandler := bjj.NewHandler(bjjRepo)
 	bjjSessionHandler := bjj.NewSessionHandler(bjjRepo)
@@ -245,21 +267,8 @@ func main() {
 	planHandler := plan.NewHandler(plan.NewPostgresRepository(pool))
 	themeHandler := theme.NewHandler(theme.NewPostgresRepository(pool))
 
-	// Private object storage for check-in photos. Nil when unconfigured, which
-	// is a supported state — local dev and CI have no bucket, and the photo
-	// endpoints then say so rather than failing. A PARTIAL config is fatal
-	// here, on purpose: three of four values set is somebody halfway through
-	// setting it up, and starting anyway hides it until a photo vanishes.
-	photoStore, err := objectstore.New(objectstore.Config{
-		Endpoint:  os.Getenv("R2_ENDPOINT"),
-		Bucket:    os.Getenv("R2_BUCKET"),
-		AccessKey: os.Getenv("R2_ACCESS_KEY_ID"),
-		SecretKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
-	})
-	if err != nil {
-		logger.Error("object storage misconfigured", "error", err)
-		os.Exit(1)
-	}
+	// photoStore is created earlier now (beside profileHandler), since N12
+	// gave profile a second consumer of it.
 	bodyHandler := body.NewHandler(body.NewPostgresRepository(pool), photoStore)
 	nutritionRepo := nutrition.NewPostgresRepository(pool)
 	nutritionHandler := nutrition.NewHandler(nutritionRepo)
@@ -676,6 +685,11 @@ func main() {
 	mux.Handle("GET /v1/activities", verifier.RequireAuth(http.HandlerFunc(activityHandler.List)))
 	mux.Handle("GET /v1/profile/exercise-units", verifier.RequireAuth(http.HandlerFunc(profileHandler.ExerciseUnits)))
 	mux.Handle("PUT /v1/profile/exercise-units/{exerciseID}", verifier.RequireAuth(http.HandlerFunc(profileHandler.SetExerciseUnit)))
+	// N12: upload/replace and remove are the same endpoint pair either way —
+	// the avatar's object key is deterministic per user, so "replace" is just
+	// "upload" a second time.
+	mux.Handle("POST /v1/profile/avatar", verifier.RequireAuth(http.HandlerFunc(profileHandler.UploadAvatar)))
+	mux.Handle("DELETE /v1/profile/avatar", verifier.RequireAuth(http.HandlerFunc(profileHandler.RemoveAvatar)))
 	mux.Handle("GET /v1/exercises", verifier.RequireAuth(http.HandlerFunc(exerciseHandler.List)))
 	mux.Handle("GET /v1/exercises/{exerciseID}", verifier.RequireAuth(http.HandlerFunc(exerciseHandler.Get)))
 	// POST rather than GET because the photo is the request body, and BEFORE
@@ -764,6 +778,10 @@ func main() {
 	mux.Handle("GET /v1/admin/users/{userID}", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminGetUser)))
 	mux.Handle("GET /v1/admin/users/{userID}/activities", verifier.RequireAdmin(http.HandlerFunc(activityHandler.AdminListUserActivities)))
 	mux.Handle("GET /v1/admin/users/{userID}/bjj/standing", verifier.RequireAdmin(http.HandlerFunc(bjjHandler.AdminGetStanding)))
+	// N12's moderation answer: an admin can remove any account's avatar.
+	// There is no in-app report flow yet — a takedown is initiated however a
+	// complaint reaches an operator today, same as every other admin action.
+	mux.Handle("DELETE /v1/admin/users/{userID}/avatar", verifier.RequireAdmin(http.HandlerFunc(profileHandler.AdminClearAvatar)))
 
 	healthRepo := health.NewPostgresRepository(pool)
 	healthHandler := health.NewHandler(healthRepo)

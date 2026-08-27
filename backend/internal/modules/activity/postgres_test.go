@@ -361,6 +361,126 @@ func TestPostgresRepository_ListUsers_StoredTogglesBeatDefaults(t *testing.T) {
 	}
 }
 
+// N12: has_avatar rides the same shared projection (userSummaryCols) that
+// ListUsers and GetUser both use, so one test against ListUsers alone would
+// leave GetUser's copy of the scan unpinned — and it is a SEPARATE Scan call
+// in postgres.go, not shared code, so a slip in either one's column order
+// would not be caught by testing only the other.
+func TestPostgresRepository_HasAvatar(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	repo := NewPostgresRepository(pool)
+	withAvatar := "test_user_has_avatar"
+	withoutAvatar := "test_user_no_avatar"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = ANY($1)`,
+			[]string{withAvatar, withoutAvatar}); err != nil {
+			t.Logf("cleanup: delete profiles: %v", err)
+		}
+	})
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO profiles (user_id, has_avatar) VALUES ($1, true), ($2, false)`,
+		withAvatar, withoutAvatar); err != nil {
+		t.Fatalf("insert profiles: %v", err)
+	}
+
+	got, err := repo.GetUser(ctx, withAvatar)
+	if err != nil {
+		t.Fatalf("get user (with avatar): %v", err)
+	}
+	if !got.User.HasAvatar {
+		t.Errorf("GetUser: HasAvatar = false, want true")
+	}
+
+	gotNone, err := repo.GetUser(ctx, withoutAvatar)
+	if err != nil {
+		t.Fatalf("get user (without avatar): %v", err)
+	}
+	if gotNone.User.HasAvatar {
+		t.Errorf("GetUser: HasAvatar = true, want false")
+	}
+
+	users, err := repo.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	byID := map[string]bool{}
+	for _, u := range users {
+		byID[u.UserID] = u.HasAvatar
+	}
+	if !byID[withAvatar] {
+		t.Errorf("ListUsers: %s HasAvatar = false, want true", withAvatar)
+	}
+	if byID[withoutAvatar] {
+		t.Errorf("ListUsers: %s HasAvatar = true, want false", withoutAvatar)
+	}
+}
+
+// A profileless user (real: someone who trained without onboarding — see
+// TestPostgresRepository_ListUsers_IncludesProfilelessUsers) has NO profiles
+// row for has_avatar to come from at all. The LEFT JOIN means p.has_avatar
+// scans as SQL NULL there, and NULL is not "unknown" for this column the way
+// it legitimately is for DisplayName — nobody without a profile row can have
+// uploaded an avatar, so COALESCE(p.has_avatar, false) has to be exact, not a
+// placeholder. Scanning a NULL straight into a Go bool without the COALESCE
+// would error outright ("cannot scan NULL into *bool"), so this is also the
+// test that would catch a dropped COALESCE immediately rather than
+// intermittently — it only reproduces for a user with no profile at all.
+func TestPostgresRepository_HasAvatar_ProfilelessUserReadsFalse(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	repo := NewPostgresRepository(pool)
+	userID := "test_user_avatar_no_profile"
+	activityID := "test_activity_avatar_no_profile"
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM activities WHERE id = $1`, activityID); err != nil {
+			t.Logf("cleanup: delete activity: %v", err)
+		}
+	})
+	// Same trick TestPostgresRepository_ListUsers_IncludesProfilelessUsers
+	// uses: a row in activities is enough to make this user id exist, with
+	// no profiles row backing it at all.
+	if _, err := repo.Create(ctx, NewActivity{
+		ID:         activityID,
+		UserID:     userID,
+		Kind:       "test",
+		OccurredAt: time.Now().Truncate(time.Second).UTC(),
+		RequestID:  "req_avatar_no_profile",
+		TraceID:    "trace_avatar_no_profile",
+	}); err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	got, err := repo.GetUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+	if got.User.HasAvatar {
+		t.Errorf("a profileless user must read HasAvatar = false, not true")
+	}
+}
+
 // ListByUser is reachable by both a user (self-scoped) and an admin, and until
 // this bound existed it returned every row an account had ever accumulated.
 // apihttp.ConditionalGet now buffers the whole response body to hash it, so an

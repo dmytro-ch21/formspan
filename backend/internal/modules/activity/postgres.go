@@ -147,7 +147,13 @@ const userSummaryCols = `
 	COALESCE(
 		(SELECT array_agg(m.module_key || ':' || m.enabled ORDER BY m.module_key)
 		   FROM profile_modules m WHERE m.user_id = u.user_id),
-		'{}')`
+		'{}'),
+	-- COALESCE, not a bare read: a profileless user (the whole reason userIDs
+	-- does not start FROM profiles) has p.has_avatar NULL from the LEFT JOIN,
+	-- and NULL is not "unknown whether they have an avatar" here — nobody
+	-- without a profile row can have uploaded one. False is exact, not a
+	-- default standing in for missing data, the way DisplayName's NULL is.
+	COALESCE(p.has_avatar, false)`
 
 // userIDs enumerates every user the system knows about, from every table that
 // records one — then LEFT JOINs profiles for the name.
@@ -199,7 +205,7 @@ func (r *PostgresRepository) ListUsers(ctx context.Context) ([]UserSummary, erro
 		var u UserSummary
 		var stored []string
 		if err := rows.Scan(&u.UserID, &u.DisplayName, &u.CreatedAt,
-			&u.SessionCount, &u.LastSessionAt, &u.SetCount, &stored); err != nil {
+			&u.SessionCount, &u.LastSessionAt, &u.SetCount, &stored, &u.HasAvatar); err != nil {
 			return nil, fmt.Errorf("activity: scan user: %w", err)
 		}
 		u.Modules = resolveEnabled(stored)
@@ -247,7 +253,7 @@ func (r *PostgresRepository) GetUser(ctx context.Context, userID string) (*UserD
 	var d UserDetail
 	var stored []string
 	if err := br.QueryRow().Scan(&d.User.UserID, &d.User.DisplayName, &d.User.CreatedAt,
-		&d.User.SessionCount, &d.User.LastSessionAt, &d.User.SetCount, &stored); err != nil {
+		&d.User.SessionCount, &d.User.LastSessionAt, &d.User.SetCount, &stored, &d.User.HasAvatar); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}

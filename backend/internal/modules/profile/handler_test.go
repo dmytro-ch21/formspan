@@ -23,7 +23,7 @@ import (
 // red rather than quietly green.
 func updateResponse(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	h := NewHandler(nil) // never reached: every case stops at validation
+	h := NewHandler(nil, nil) // never reached: every case stops at validation
 	req := httptest.NewRequest(http.MethodPatch, "/v1/profile", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.Update(rec, req)
@@ -105,7 +105,7 @@ func (lookupRepo) GetByUsername(_ context.Context, u string) (*PublicProfile, er
 
 func lookupResponse(t *testing.T, segment string) *httptest.ResponseRecorder {
 	t.Helper()
-	h := NewHandler(lookupRepo{})
+	h := NewHandler(lookupRepo{}, nil) // nil store: presentPublic is a no-op with no AvatarKey set anyway
 	req := httptest.NewRequest(http.MethodGet, "/v1/users/"+segment, nil)
 	req.SetPathValue("username", segment)
 	rec := httptest.NewRecorder()
