@@ -89,7 +89,7 @@ phone-only athlete can build, reorder, rename and delete a plan.
 
 | Capability | Note |
 |---|---|
-| Correct a past day's food | Web has a six-week list **and a date jump**; mobile has a **±1-day stepper only**. "Fix a day three months ago" is ~90 taps. This is nominally reduced and practically impossible. |
+| ~~Correct a past day's food~~ | **Closed by N81 ([#PENDING_PR_N81](https://github.com/dmytro-ch21/formspan/pull/PENDING_PR_N81))**. Was: web has a six-week list **and a date jump**; mobile has a **±1-day stepper only**. "Fix a day three months ago" is ~90 taps. This was nominally reduced and practically impossible. Now: the day switcher's label opens a month-grid jump (same shape as `WeekPlanner`'s own month sheet on Plan), so a day months back is a couple of taps — the ±1-day arrows are unchanged and stay the "check yesterday" gesture. |
 | ~~Browse session history~~ | **Closed by N85 ([#671](https://github.com/dmytro-ch21/formspan/pull/671))**, and moved to row 12 above. Was: mobile read local SQLite only, and the server pull was `limit: 20` (`sessionStore.ts`), so on a fresh install older sessions were unreachable on the phone at all. Now: `/session/history` queries the server directly, and the sync's fresh-install case pages through the same server in bounded requests so the local cache itself stops being permanently stuck at 20 too. |
 | Set the BJJ focus list | Mobile accepts a proposal; it cannot hand-pick from the funnel. |
 | Round map, training totals, records for a given exercise | Genuine reduced forms, working as intended. |
@@ -154,7 +154,7 @@ add a finding here, file it too, and put the id in this table.
 | [#412](https://github.com/dmytro-ch21/formspan/issues/412) | Recipe authoring | 4 |
 | [#413](https://github.com/dmytro-ch21/formspan/issues/413) | Saved-food management | 5 |
 | [#414](https://github.com/dmytro-ch21/formspan/issues/414) | Shared-sequence read-back | 9 |
-| [#415](https://github.com/dmytro-ch21/formspan/issues/415) | Past-day food jump | *reduced-to-impossible* |
+| [#415](https://github.com/dmytro-ch21/formspan/issues/415) | Past-day food jump | *reduced-to-impossible* — **closed by N81 ([#PENDING_PR_N81](https://github.com/dmytro-ch21/formspan/pull/PENDING_PR_N81))** |
 | [#416](https://github.com/dmytro-ch21/formspan/issues/416) | Theme authoring | 7 — **closed by N82 ([#677](https://github.com/dmytro-ch21/formspan/pull/677))** |
 | [#417](https://github.com/dmytro-ch21/formspan/issues/417) | Curriculum authoring | 8 — **closed by N83 ([#676](https://github.com/dmytro-ch21/formspan/pull/676))** |
 | [#418](https://github.com/dmytro-ch21/formspan/issues/418) | The three analytical surfaces | 6, 10, 11 |

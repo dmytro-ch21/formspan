@@ -63,7 +63,7 @@ logs, web authors and analyses.**
 
 | | Mobile | Web |
 |---|---|---|
-| Log an item, edit an entry | ✅ | ✅ (correcting a past day is desk work) |
+| Log an item, edit an entry | ✅ | ✅ |
 | Save a food from what you just ate | ✅ | ✅ |
 | Build a recipe from scratch | ✅ | ✅ |
 | Set / explain the target | ✅ | ✅ |
@@ -108,6 +108,22 @@ is now a web ticket, not a mobile one.
 numbers they were logged with; the edit changes what the next portion logs. Same
 rule as `nutrition_entries` and `nutrition_targets` — see the N87 entry in
 `history.md` for the two alternatives that were refused.
+
+**Correcting a past day (N81, #415).** The "Log an item, edit an entry" row's
+web column used to carry a footnote — "correcting a past day is desk work" —
+that this table never argued for; it just asserted it. Both surfaces could
+already edit an entry once you were looking at the right day. What was
+actually desk-only was *reaching* a distant day at all: web has a six-week list
+and a date jump, mobile had a **±1-day stepper only**, and "fix a day three
+months back" was up to ninety taps on it — nominally reduced, practically
+impossible, per the phone-impossible audit
+(`docs/decisions/phone-impossible-audit.md`). The day switcher's label now
+opens a month grid — the same jump-target shape `WeekPlanner` already uses for
+its own week switcher on Plan — so a distant day is a couple of taps rather
+than a trip to a desk. The ±1-day arrows are unchanged and remain the "check
+yesterday" gesture; the grid is the addition, not a replacement. Matching
+web's own "Go to a day" field, the grid does not offer a day that has not
+happened yet — there is nothing there to correct.
 
 **Mobile gets no chart.** Each candidate was tested against the N5 carve-out and
 each fails on its own terms: 7-day calorie bars fail "the decision is made away
