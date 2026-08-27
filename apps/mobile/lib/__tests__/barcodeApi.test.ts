@@ -23,6 +23,8 @@ const FOOD: ScannedFood = {
   brand: 'Flahavans',
   serving_label: '40 g',
   serving_grams: 40,
+  packet_serving_label: null,
+  packet_serving_grams: null,
   kcal: 150,
   protein_g: 5.2,
   carb_g: 26.4,

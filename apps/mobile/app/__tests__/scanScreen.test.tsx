@@ -145,10 +145,17 @@ describe('a resolved barcode', () => {
     expect(mockLogFood).not.toHaveBeenCalled();
   });
 
+  /**
+   * N117: the amount field is GRAMS now, not a bare "servings" multiplier —
+   * OATS' basis is 40 g (`serving_grams: 40`), so typing "80" is the same
+   * two servings the old test typed directly, and proves the grams-to-
+   * servings arithmetic (`servingsForGrams`) still lands on the same number
+   * a reader of `nutrition_entries.servings` has always expected.
+   */
   it('logs the scaled figures once confirmed', async () => {
     await scan();
-    await waitFor(() => expect(screen.getByTestId('scan-servings')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('scan-servings'), '2');
+    await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '80');
     await act(async () => {
       fireEvent.press(screen.getByTestId('scan-log'));
     });
@@ -165,18 +172,23 @@ describe('a resolved barcode', () => {
   });
 
   /**
-   * A decimal typed into the servings field must survive being typed. `"1."`
-   * round-tripped through `Number` becomes `1`, and the next keystroke makes
-   * 15 — ten times the intended portion. `parseOr` is what stops it.
+   * A fractional amount must survive to what gets logged, not round or
+   * truncate to a whole number. Typed as two separate keystrokes ("6" then
+   * "60", each a complete `fireEvent.changeText` value rather than a
+   * concatenation) to match how the field is actually driven — the old
+   * `scan-servings` version of this test pinned the equivalent property
+   * (`"1."` then `"1.5"`) against `parseOr`; `parseQuantity`
+   * (`lib/foodQuantity.ts`) is the control that replaced it (N117).
    */
-  it('keeps a half serving a half rather than fifteen', async () => {
+  it('keeps a half serving a half rather than rounding it away', async () => {
     await scan();
-    await waitFor(() => expect(screen.getByTestId('scan-servings')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('scan-servings'), '1.');
-    fireEvent.changeText(screen.getByTestId('scan-servings'), '1.5');
+    await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '6');
+    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '60');
     await act(async () => {
       fireEvent.press(screen.getByTestId('scan-log'));
     });
+    // 60 g / 40 g basis = 1.5 servings.
     expect(mockLogFood.mock.calls[0][1].servings).toBe(1.5);
   });
 
@@ -184,6 +196,55 @@ describe('a resolved barcode', () => {
     await scan();
     await waitFor(() => expect(mockRemember).toHaveBeenCalled());
     expect(mockRemember).toHaveBeenCalledWith('u1', CODE, OATS, 'off');
+  });
+
+  /**
+   * N117 (#506) — reported from a device: scanning a Kinder bar showed
+   * "Per 100 g", 560 kcal, with a bare "Servings" field defaulting to 1 —
+   * matching the box (140 kcal for its own stated "2 Pieces (25g)") needed
+   * computing 25/100 by hand first. This is that exact product, and the
+   * screen must now open ALREADY matching the box.
+   */
+  describe('a food with the packet’s own serving stated', () => {
+    const KINDER = {
+      name: 'Kinder Chocolate',
+      brand: 'Kinder',
+      serving_label: '100 g',
+      serving_grams: 100,
+      packet_serving_label: '2 pieces (25 g)',
+      packet_serving_grams: 25,
+      kcal: 560,
+      protein_g: 2,
+      carb_g: 52,
+      fat_g: 36,
+      fibre_g: 0,
+    };
+
+    beforeEach(() => mockLookup.mockResolvedValue({ status: 'found', food: KINDER, source: 'off' }));
+
+    it('opens the amount pre-filled to the packet’s own serving, not 100 g', async () => {
+      await scan();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      // The default amount is 25 g (the packet's own), not 100 g.
+      expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
+      // The unchanged arithmetic basis still reads "Per 100 g" — checkable.
+      expect(screen.getByText('Per 100 g')).toBeTruthy();
+      // The packet's own serving offered as a selectable, already-selected chip.
+      expect(screen.getByTestId('food-portion-25')).toBeTruthy();
+    });
+
+    it('logs the box’s own numbers when confirmed without touching the amount', async () => {
+      await scan();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('scan-log'));
+      });
+      const entry = mockLogFood.mock.calls[0][1];
+      // 140 kcal / 2 g protein — what the box says, not 560 / 2.
+      expect(entry.kcal).toBe(140);
+      expect(entry.protein_g).toBe(0.5);
+      expect(entry.servings).toBe(0.25);
+    });
   });
 
   it('normalises a UPC-A before looking it up', async () => {
@@ -278,6 +339,66 @@ describe('the local cache', () => {
     await scan();
     await waitFor(() => expect(screen.getByTestId('scan-provenance')).toBeTruthy());
     expect(screen.getByTestId('scan-provenance')).toHaveTextContent(/not read off the packet/i);
+  });
+
+  /**
+   * Found in review, not in the original report: `describe.tsx` caches an
+   * AI-drafted food against a barcode with `serving_grams: null` — a
+   * described "1 egg" has no honest gram weight. Routing that food through
+   * the grams-based `FoodQuantity` control would silently invent a 100 g
+   * basis it never stated, which is exactly the fabricated-basis bug N117's
+   * own acceptance criteria forbid, and a REGRESSION against this screen's
+   * pre-N117 behaviour, which was basis-agnostic (a bare "servings" count).
+   */
+  describe('a food with no honest gram weight', () => {
+    const EGG = {
+      name: 'A large egg',
+      brand: '',
+      serving_label: '1 egg',
+      serving_grams: null,
+      packet_serving_label: null,
+      packet_serving_grams: null,
+      kcal: 78,
+      protein_g: 6,
+      carb_g: 0.6,
+      fat_g: 5,
+      fibre_g: 0,
+    };
+
+    beforeEach(() => mockCached.mockResolvedValue({ food: EGG, source: 'ai' }));
+
+    it('offers a servings count, never a fabricated grams field', async () => {
+      await scan();
+      await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
+      expect(screen.queryByTestId('food-quantity-input')).toBeNull();
+      // States what the number is per, same as the grams path.
+      expect(screen.getByText('Per 1 egg')).toBeTruthy();
+    });
+
+    it('logs the food’s own numbers for the default 1 serving', async () => {
+      await scan();
+      await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('scan-log'));
+      });
+      const entry = mockLogFood.mock.calls[0][1];
+      expect(entry.kcal).toBe(78);
+      expect(entry.protein_g).toBe(6);
+      expect(entry.servings).toBe(1);
+    });
+
+    it('scales every macro when the servings count changes', async () => {
+      await scan();
+      await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
+      fireEvent.changeText(screen.getByTestId('scan-servings-fallback'), '2');
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('scan-log'));
+      });
+      const entry = mockLogFood.mock.calls[0][1];
+      expect(entry.kcal).toBe(156);
+      expect(entry.protein_g).toBe(12);
+      expect(entry.servings).toBe(2);
+    });
   });
 });
 

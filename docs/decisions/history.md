@@ -44390,6 +44390,186 @@ it.
 **Open, deliberately left for later:** `apps/web` and `apps/admin` have no 429 handling today and call none of the three AI endpoints, per the ticket's own scoping — but `ApiError`'s new field is shaped so a web port is a call-site change, not a second implementation. The `Retry-After` header this project actually sends is always integer delay-seconds; the HTTP-date parsing path is real per RFC 9110 and unit-tested, but has never been exercised against a live response, because no route here produces one to exercise it against.
 
 
+## 2026-08-27 — N117: a scanned food defaults to the packet's own serving, not "100 g"
+
+Reported from a device, with a photo of the packet: scanning a Kinder
+Chocolate bar's barcode showed `Per 100 g`, 560 kcal, with a "Servings" field
+defaulting to 1 — logging as-is would log 560 kcal for "1 serving," which is
+wrong against the box, which states `Serv. size: 2 Pieces (25g)`, 140 kcal.
+Matching the box required computing `25/100` by hand before typing anything.
+This ticket already existed as N117 (#506, "An AI or barcode food logs per
+serving only") with acceptance criteria framing the fix as "default to
+100 g, let the athlete change the amount" — amended in place with this report
+to something more specific: default to the **packet's own printed serving**
+when the provider states one, not always 100 g.
+
+### The data was already there, unused
+
+Open Food Facts' response for this exact barcode (verified against the live
+API, not assumed): `serving_size: "2 pieces (25 g)"`, `serving_quantity: 25`,
+`serving_quantity_unit: "g"` — three fields `backend/internal/modules/food/barcode.go`
+never asked for. A repo-wide grep for `serving_size|serving_quantity|product_quantity`
+returned zero hits before this change. The fields were parsed and discarded by
+comment-documented deliberate choice: "the packet's own serving size is
+available upstream and deliberately not used yet — mixing two serving bases
+in one response is how a doubled quantity happens."
+
+### The design: additive, not a redefinition
+
+The obvious-looking fix — repoint `ServingLabel`/`ServingGrams` at the
+packet's serving — is exactly the two-bases mixup that comment warns against:
+those two fields mean "the amount every macro represents" everywhere they are
+read (`plausible()`'s bounds, `food_barcode_cache`'s CHECKs, every client that
+scales by them), and the macros themselves stay reliably per-100g (the one
+basis Open Food Facts states on every product; `_serving` fields are present
+but measured to sometimes disagree with the physical label — this Kinder
+bar's own `proteins_100g: 2` doesn't match its printed "Protein 2g **per
+serving**," a crowd-sourcing data-quality issue already disclosed in-app and
+out of scope here).
+
+So the fix is additive: two new fields, `PacketServingLabel`/
+`PacketServingGrams` (wire: `packet_serving_label`/`packet_serving_grams`),
+nil unless Open Food Facts states a serving **in grams** — a Coca-Cola can's
+`serving_quantity_unit: "ml"` (measured) is refused rather than treated as
+grams, since converting needs a density this codebase does not store.
+`ServingLabel`/`ServingGrams` are completely unchanged, still always
+`"100 g"` / `100`.
+
+**Threaded end to end**: `backend/internal/modules/food/barcode.go`
+(`packetServingFrom`, mutation-tested: dropping either the unit check or the
+quantity check is caught by a real test failure, not just a compile error) →
+`food.go`'s `BarcodeFood` struct → `postgres.go`'s `food_barcode_cache`
+read/write (migration `000077`, additive columns, `packet_serving_label`
+`CHECK` mirrors the existing 40-char bound) → `contracts/public.openapi.yaml`
+→ `apps/mobile/lib/barcodeApi.ts`'s `ScannedFood` type → the local SQLite
+`barcode_cache` cache (`apps/mobile/lib/db.ts` schema version 25 → 26,
+`apps/mobile/lib/barcodeCache.ts`).
+
+### The client: reuse, not a second control
+
+`apps/mobile/app/food/scan.tsx` used to hand-roll its own Servings/Calories/
+Protein fields — exactly what N117's original body already flagged
+("Coordinate rather than build the control twice") against N59's
+`FoodQuantity`/`foodQuantity.ts` (amount-in-grams, g/oz toggle, portion
+chips), which shipped since and which the catalog path (`add.tsx`) already
+uses. This PR makes the scan screen use them too:
+
+- `lib/foodQuantity.ts` gained a `QuantifiableFood` type — `Macros &
+  Pick<CatalogFood, 'name'|'brand'|'serving_grams'> & {portions?}` — the
+  actual contract `macrosForGrams`/`quantityOptions` need, narrower than the
+  full `CatalogFood` they were typed against before (which `ScannedFood`
+  structurally satisfies apart from `id`/`category`, neither read). `
+  FoodQuantity.tsx`'s prop type relaxed the same way.
+- `scan.tsx` builds one `QuantifiableFood` per draft: `serving_grams: 100`
+  (the unchanged arithmetic basis) plus a single **portion chip** synthesised
+  from `packet_serving_label`/`packet_serving_grams` when present.
+  `quantityOptions` treats the first portion as the default amount, so a
+  Kinder bar's field opens already at `25`, labelled `2 pieces (25 g)` — the
+  math underneath is still `perHundredG * (grams/100)`, unchanged, for that
+  starting amount and every amount after it.
+- The camera viewfinder (`styles.cameraWrap`) was also reported "too short" —
+  fixed `height: 280` (roughly a third of a typical screen) replaced with
+  `flex: 1, minHeight: 420`, filling whatever the hint text and "Describe it
+  instead" link below don't need rather than a second device-specific magic
+  number.
+
+### A real bug found and fixed mid-implementation
+
+`confirm()`'s first draft computed `servings: quantity.grams / 100` — a
+hardcoded division, reasoned from "the barcode-resolved basis is always
+100." That's true for a **fresh** Open Food Facts resolve, but not for every
+`ScannedFood`: the AI-cached-as-barcode path in `describe.tsx` stores
+whatever the drafted item's own serving was (frequently not 100), and this
+very test suite's `OATS` fixture uses `serving_grams: 40`. A hardcoded `/100`
+would have logged a `servings` figure inconsistent with the `serving_label`
+stored beside it on the same row — the macros would stay correct (computed
+by `FoodQuantity` against the real basis) while `servings` silently
+disagreed with them. Fixed to `servingsForGrams(phase.food, quantity.grams)`,
+the same helper `add.tsx`'s `logCatalog` already uses for a catalog food.
+
+Caught by writing the test with the OATS fixture's 40 g basis rather than a
+100 g one — a fixture that happened to be 100 would have let this pass
+silently.
+
+### A second bug, caught by the test suite hard-crashing
+
+The first working version of the `QuantifiableFood` adapter was a fresh
+object literal computed inline in the render branch, not memoised. Since
+`FoodQuantity`'s own internal effect is keyed on `[grams, valid, food]`, a
+new `food` reference every render fired `onQuantityChange` → `setQuantity` →
+re-render → a new `quantifiable` object → the effect again — an infinite
+loop with nothing on screen to show for it. `jest` caught this the hard way:
+`app/__tests__/scanScreen.test.tsx` OOM'd the worker process rather than
+merely timing out. Fixed by moving the computation into a `useMemo` keyed on
+`phase` (a `useState` value, stable across renders that don't call
+`setPhase`), placed with the component's other hooks above every conditional
+return — the same ordering constraint the file's own comment already
+documents from the BJJ-session black-screen incident.
+
+### A third bug, caught by review rather than the suite
+
+`frontend-reviewer` (via `/pre-merge`) found what the suite did not: the
+AI-cached-as-barcode path in `describe.tsx` caches a described food with
+`serving_grams: null` — a described "1 egg" has no honest gram weight — and
+`quantifiable` was feeding that food to `FoodQuantity` regardless.
+`servingBasisGrams`'s existing 100 g fallback (documented as safe because
+"every USDA-seeded row IS per 100 g," which is true for the catalog and false
+for this path) then silently gave the amount field a gram basis the food
+never stated — the exact failure N117's own acceptance criteria name
+("a serving whose gram weight is unknown does not silently become 100 g"),
+and a **regression** against this screen's own pre-N117 behaviour: the old
+hand-rolled "Servings ×1" field was basis-agnostic and got this one right by
+construction.
+
+Fixed by branching on `canLogByWeight(phase.food)`: a food with a real gram
+basis still gets `FoodQuantity`; a food without one gets a new
+`ServingsFallback` control — a plain servings multiplier, no gram claim,
+using a new `macrosForServings` alongside `macrosForGrams` in
+`foodQuantity.ts` (both now share one `scaleMacros` helper rather than
+duplicating the per-field rounding). `confirm()` was restructured so both
+controls resolve to one common `{ servings, macros }` shape, closing the
+two-sources-of-truth risk the second bug above was already about.
+`scanScreen.test.tsx` gained a fixture with `serving_grams: null` pinning
+that no grams field is offered and that the food's own numbers (not a
+fabricated 100 g basis) are what gets logged, at 1 serving and at 2.
+
+### Verification
+
+Backend: `packetServingFrom`'s two safety guards (the gram-unit check, the
+positive-quantity check) mutation-tested — each dropped independently,
+confirmed to make a real test go red, restored, confirmed green by
+re-running. `TestBarcodeCacheRoundTrips` extended and run against a real
+Postgres (`vola_test_n117`, migrated from empty through `000077`, dropped
+after) to prove the new columns survive the real schema, not just typecheck
+against it. Mobile: `scanScreen.test.tsx` gained two device-shaped tests
+against the exact reported product (the amount field opens at `25`, labelled
+`2 pieces (25 g)`; confirming without touching it logs `140` kcal / `0.5` g
+protein — OFF's own crowd-sourced protein figure, not the box's, which is the
+disclosed crowd-data limitation this ticket does not claim to fix) plus three
+more pinning the no-gram-basis fix above. `schema.test.ts` gained the
+standard per-version migration pair (stamped-25 device gains the columns;
+re-running is not an error) and every existing `user_version: 25` assertion
+updated to `26`. `pnpm run verify` — full chain green, 197 mobile suites /
+3085 tests.
+
+### What is not done
+
+- **No retroactive fix for already-cached rows.** A barcode cached before
+  this shipped keeps `packet_serving_label`/`packet_serving_grams` null
+  until it is looked up again — `ON CONFLICT` only fires on a fresh
+  `CacheBarcode` call, and nothing re-fetches an existing cache row
+  speculatively. The athlete sees the old "100 g" default until they rescan
+  or the row's `fetched_at` triggers a refresh elsewhere in the pipeline (out
+  of scope here).
+- **The OFF protein anomaly on this exact product is not corrected.**
+  `proteins_100g: 2` doesn't match the box's "Protein 2g per serving" — this
+  is the crowd-sourced-data caveat the scan screen already discloses
+  ("worth a glance against the packet"), not something this ticket's fix
+  changes or could change.
+- `docs/testing/functional-scenarios.md` updated with the new scan-flow
+  scenarios below.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

@@ -33,6 +33,8 @@ type CacheRow = {
   brand: string;
   serving_label: string;
   serving_grams: number | null;
+  packet_serving_label: string | null;
+  packet_serving_grams: number | null;
   kcal: number;
   protein_g: number;
   carb_g: number;
@@ -62,6 +64,7 @@ export async function cachedBarcode(
   const db = await getDb();
   const row = await db.getFirstAsync<CacheRow>(
     `SELECT name, brand, serving_label, serving_grams,
+            packet_serving_label, packet_serving_grams,
             kcal, protein_g, carb_g, fat_g, fibre_g,
             saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source
        FROM barcode_cache
@@ -76,6 +79,11 @@ export async function cachedBarcode(
       brand: row.brand,
       serving_label: row.serving_label,
       serving_grams: row.serving_grams,
+      // Column exists back to schema 20; these two arrived at 26 (N117). A
+      // row cached before then reads back `null` for both — the same "no
+      // packet serving stated" a fresh miss reports, never a fabricated one.
+      packet_serving_label: row.packet_serving_label ?? null,
+      packet_serving_grams: row.packet_serving_grams ?? null,
       kcal: row.kcal,
       protein_g: row.protein_g,
       carb_g: row.carb_g,
@@ -121,14 +129,17 @@ export async function rememberBarcode(
   await db.runAsync(
     `INSERT INTO barcode_cache
        (user_id, barcode, name, brand, serving_label, serving_grams,
+        packet_serving_label, packet_serving_grams,
         kcal, protein_g, carb_g, fat_g, fibre_g,
         saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source, cached_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (user_id, barcode) DO UPDATE SET
        name = excluded.name,
        brand = excluded.brand,
        serving_label = excluded.serving_label,
        serving_grams = excluded.serving_grams,
+       packet_serving_label = excluded.packet_serving_label,
+       packet_serving_grams = excluded.packet_serving_grams,
        kcal = excluded.kcal,
        protein_g = excluded.protein_g,
        carb_g = excluded.carb_g,
@@ -147,6 +158,8 @@ export async function rememberBarcode(
     food.brand,
     food.serving_label,
     food.serving_grams,
+    food.packet_serving_label,
+    food.packet_serving_grams,
     food.kcal,
     food.protein_g,
     food.carb_g,

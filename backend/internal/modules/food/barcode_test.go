@@ -52,6 +52,119 @@ func TestResolveHappyPath(t *testing.T) {
 	if got.ExternalID == nil || *got.ExternalID != "5690550000001" {
 		t.Fatal("resolved food lost its upstream identifier")
 	}
+	// `goodProduct` carries no serving fields at all — the ordinary case,
+	// most products on Open Food Facts don't state one. ServingLabel/
+	// ServingGrams stay pinned at "100 g" (unchanged, N117 does not touch
+	// them); PacketServingLabel/PacketServingGrams stay nil — no fabricated
+	// suggestion for a product that offered none.
+	if got.ServingLabel != SeedServingLabel || got.ServingGrams == nil || *got.ServingGrams != 100 {
+		t.Fatalf("serving = %q / %v, want the 100 g pin unchanged", got.ServingLabel, got.ServingGrams)
+	}
+	if got.PacketServingLabel != nil || got.PacketServingGrams != nil {
+		t.Fatalf("packet serving = %v / %v, want nil with no serving data upstream", got.PacketServingLabel, got.PacketServingGrams)
+	}
+}
+
+// N117: the packet's own serving is offered as a client-side default AMOUNT,
+// additive to (never replacing) the unchanged per-100g macros. Fixture
+// measured against the live API for barcode 009800512041 (Kinder Chocolate)
+// — the exact product reported confusing: the box says "Serv. size: 2 Pieces
+// (25g)", 140 kcal, and the app showed "Per 100 g", 560 kcal, with no way to
+// see the box's own numbers without computing 25/100 by hand first.
+const kinderProduct = `{"status":1,"product":{"product_name":"Kinder Chocolate","brands":"Kinder",
+	"serving_size":"2 pieces (25 g)","serving_quantity":25,"serving_quantity_unit":"g",
+	"nutriments":{"energy-kcal_100g":560,"proteins_100g":2,"carbohydrates_100g":52,"fat_100g":36,"fiber_100g":0}}}`
+
+func TestResolveOffersThePacketsOwnServingAlongsideTheUnchangedMacros(t *testing.T) {
+	off := offServer(t, 200, kinderProduct)
+	got, err := off.Resolve(context.Background(), "0009800512041")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ServingLabel/ServingGrams — "the amount the macros below represent" —
+	// are UNCHANGED by this ticket: still always "100 g".
+	if got.ServingLabel != SeedServingLabel || got.ServingGrams == nil || *got.ServingGrams != 100 {
+		t.Fatalf("serving = %q / %v, want the unchanged 100 g pin", got.ServingLabel, got.ServingGrams)
+	}
+	if got.KCal != 560 || got.ProteinG != 2 {
+		t.Fatalf("macros = %+v, want the unchanged per-100g basis", got)
+	}
+	// PacketServingLabel/PacketServingGrams — the NEW, additive suggestion —
+	// carry the packet's own serving.
+	if got.PacketServingLabel == nil || *got.PacketServingLabel != "2 pieces (25 g)" {
+		t.Fatalf("packet serving label = %v, want the packet's own", got.PacketServingLabel)
+	}
+	if got.PacketServingGrams == nil || *got.PacketServingGrams != 25 {
+		t.Fatalf("packet serving grams = %v, want 25", got.PacketServingGrams)
+	}
+}
+
+// N117: a serving stated in a unit other than grams must NOT become
+// `PacketServingGrams` — grams-only, same as `ServingGrams`, and treating a
+// volume as a weight is a silent wrong number, not a convenience. Fixture
+// measured against the live API for a Coca-Cola can barcode.
+const colaProduct = `{"status":1,"product":{"product_name":"Coca-Cola","brands":"Coca-Cola",
+	"serving_size":"1 can (354.9 mL)","serving_quantity":354.9,"serving_quantity_unit":"ml",
+	"nutriments":{"energy-kcal_100g":42,"proteins_100g":0,"carbohydrates_100g":10.6,"fat_100g":0,"fiber_100g":0}}}`
+
+func TestResolveDoesNotTreatAMillilitreServingAsGrams(t *testing.T) {
+	off := offServer(t, 200, colaProduct)
+	got, err := off.Resolve(context.Background(), "0049000028911")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PacketServingLabel != nil || got.PacketServingGrams != nil {
+		t.Fatalf("packet serving = %v / %v, want nil for a non-gram unit, not 354.9", got.PacketServingLabel, got.PacketServingGrams)
+	}
+}
+
+// packetServingFrom's own guards, each mutation-shaped: every one of these
+// should return (nil, nil), and each covers a DIFFERENT reason to.
+func TestPacketServingFromReturnsNilRatherThanAFabricatedServing(t *testing.T) {
+	twentyFive := 25.0
+	zero := 0.0
+	negative := -5.0
+	cases := map[string]struct {
+		size string
+		qty  *float64
+		unit string
+	}{
+		"no quantity at all":        {"2 pieces (25 g)", nil, "g"},
+		"zero quantity":             {"2 pieces (25 g)", &zero, "g"},
+		"negative quantity":         {"2 pieces (25 g)", &negative, "g"},
+		"non-gram unit":             {"1 can (354.9 mL)", &twentyFive, "ml"},
+		"blank unit":                {"2 pieces (25 g)", &twentyFive, ""},
+		"blank label despite a qty": {"", &twentyFive, "g"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			label, grams := packetServingFrom(c.size, c.qty, c.unit)
+			if label != nil || grams != nil {
+				t.Fatalf("packetServingFrom(%q, %v, %q) = %v, %v — want nil, nil", c.size, c.qty, c.unit, label, grams)
+			}
+		})
+	}
+}
+
+func TestPacketServingFromUsesThePacketsServingWhenWellFormed(t *testing.T) {
+	twentyFive := 25.0
+	// Uppercase unit, measured as lowercase live but tolerate either.
+	label, grams := packetServingFrom("2 pieces (25 g)", &twentyFive, "G")
+	if label == nil || *label != "2 pieces (25 g)" || grams == nil || *grams != 25 {
+		t.Fatalf("packetServingFrom = %v, %v, want the packet's own 2 pieces (25 g) / 25", label, grams)
+	}
+}
+
+func TestPacketServingFromTruncatesAnOverlongLabelToTheColumnsCheck(t *testing.T) {
+	// food_barcode_cache.serving_label CHECK (length BETWEEN 1 AND 40) —
+	// truncate here rather than let an oversized crowd-sourced string 500 at
+	// the cache write.
+	qty := 10.0
+	long := strings.Repeat("x", 60)
+	label, _ := packetServingFrom(long, &qty, "g")
+	if label == nil || len(*label) != 40 {
+		t.Fatalf("label = %v, want length 40", label)
+	}
 }
 
 // **A well-formed barcode the database does not hold comes back HTTP 404 with

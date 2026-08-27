@@ -307,6 +307,25 @@ type BarcodeFood struct {
 	ServingLabel string   `json:"serving_label"`
 	ServingGrams *float64 `json:"serving_grams"`
 
+	// PacketServingLabel/PacketServingGrams are the packet's OWN printed
+	// serving — "2 pieces (25 g)" for a Kinder bar — additive to and
+	// deliberately separate from ServingLabel/ServingGrams above (N117).
+	//
+	// ServingLabel/ServingGrams mean "the amount every macro on this struct
+	// represents" everywhere they are read, and that is always 100 g here —
+	// redefining them to the packet's serving while the macros stayed
+	// per-100g would be the exact two-serving-bases mixup this file's history
+	// already warns against, just moved into the wire contract.
+	//
+	// These two exist ONLY so a client can pick a better STARTING amount than
+	// "100 g" — a Kinder bar opens to "2 Pieces (25 g)" / 140 kcal instead of
+	// "100 g" / 560 kcal — while still computing every amount, including that
+	// starting one, as `perHundredG * (grams/100)` against the fields above.
+	// Both nil when Open Food Facts states no serving in grams; never a
+	// fabricated number standing in for an absent one.
+	PacketServingLabel *string  `json:"packet_serving_label"`
+	PacketServingGrams *float64 `json:"packet_serving_grams"`
+
 	KCal     float64  `json:"kcal"`
 	ProteinG float64  `json:"protein_g"`
 	CarbG    float64  `json:"carb_g"`
@@ -365,6 +384,12 @@ func (b *BarcodeFood) plausible() bool {
 		}
 	}
 	if b.ServingGrams != nil && *b.ServingGrams <= 0 {
+		return false
+	}
+	// PacketServingGrams (N117) is a suggested amount, not a macro — but a
+	// non-positive one is exactly as wrong to show as a non-positive
+	// ServingGrams above, for the same reason.
+	if b.PacketServingGrams != nil && *b.PacketServingGrams <= 0 {
 		return false
 	}
 	return true

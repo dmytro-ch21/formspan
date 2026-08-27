@@ -398,6 +398,11 @@ const CREATE_BARCODE_CACHE = `
     brand TEXT NOT NULL DEFAULT '',
     serving_label TEXT NOT NULL,
     serving_grams REAL,
+    -- N117: the packet's OWN serving, additive to serving_label/serving_grams
+    -- above (which stay "the amount the macros below represent", always
+    -- "100 g"). Null when Open Food Facts states none in grams.
+    packet_serving_label TEXT,
+    packet_serving_grams REAL,
     kcal REAL NOT NULL,
     protein_g REAL NOT NULL DEFAULT 0,
     carb_g REAL NOT NULL DEFAULT 0,
@@ -553,7 +558,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 25;
+const SCHEMA_VERSION = 26;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1092,6 +1097,17 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       await addColumnIfMissing(db, table, 'sodium_mg', 'REAL');
       await addColumnIfMissing(db, table, 'cholesterol_mg', 'REAL');
     }
+  }
+
+  if (current < 26) {
+    // N117: the packet's own serving — "2 pieces (25 g)" for a Kinder bar —
+    // additive to `serving_label`/`serving_grams`, which stay exactly what
+    // they always were ("100 g", the amount `kcal`/`protein_g`/etc. on this
+    // row represent). Only `barcode_cache`: neither `foods` nor
+    // `food_entries` is scanned from a packet, so neither has a "the packet
+    // also said" to remember.
+    await addColumnIfMissing(db, 'barcode_cache', 'packet_serving_label', 'TEXT');
+    await addColumnIfMissing(db, 'barcode_cache', 'packet_serving_grams', 'REAL');
   }
 
   // The day query the card runs on every render of Today.

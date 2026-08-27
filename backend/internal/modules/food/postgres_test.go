@@ -382,8 +382,15 @@ func TestBarcodeCacheRoundTrips(t *testing.T) {
 	}
 
 	fibre := 0.5
+	// N117: PacketServingLabel/PacketServingGrams set too, alongside the
+	// unchanged ServingLabel/ServingGrams, so the round trip proves BOTH
+	// pairs survive the real schema — not just the four columns this test
+	// already covered before this ticket.
+	packetLabel := "2 pieces (25 g)"
+	packetGrams := 25.0
 	in := BarcodeFood{
 		Name: "Skyr, plain", Brand: "Siggi's", ServingLabel: "100 g",
+		PacketServingLabel: &packetLabel, PacketServingGrams: &packetGrams,
 		KCal: 63, ProteinG: 11, CarbG: 4, FatG: 0.2, FibreG: &fibre,
 	}
 	if err := repo.CacheBarcode(ctx, barcode, in, OpenFoodFactsProvider); err != nil {
@@ -395,6 +402,12 @@ func TestBarcodeCacheRoundTrips(t *testing.T) {
 	}
 	if got.Name != in.Name || got.KCal != in.KCal {
 		t.Fatalf("cached food = %+v, want %+v", got, in)
+	}
+	if got.PacketServingLabel == nil || *got.PacketServingLabel != packetLabel {
+		t.Fatalf("packet serving label = %v, want %q", got.PacketServingLabel, packetLabel)
+	}
+	if got.PacketServingGrams == nil || *got.PacketServingGrams != packetGrams {
+		t.Fatalf("packet serving grams = %v, want %v", got.PacketServingGrams, packetGrams)
 	}
 	if provider != OpenFoodFactsProvider {
 		t.Fatalf("provider = %q — ODbL attribution depends on it", provider)
