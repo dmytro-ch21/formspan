@@ -974,14 +974,95 @@ export function applySuggestions(
 
 export async function listSessions(
   getToken: TokenGetter,
-  opts: { limit?: number } = {},
+  // `offset` added for N85's fresh-install backfill (`sessionStore.ts`
+  // `runSync`), which pages through a device's full history in bounded
+  // requests rather than one unbounded pull. Kept on this function, rather
+  // than only on `listSessionsPage` below, so the sync path's existing
+  // `listSessions as pullSessions` import and its test mocks (which all
+  // return a plain array) don't have to change shape.
+  opts: { limit?: number; offset?: number } = {},
   signal?: AbortSignal,
 ): Promise<Session[]> {
   // Every session carries all of its sets, so a screen showing five recent
   // ones must not pull the API's default fifty.
-  const qs = opts.limit ? `?limit=${opts.limit}` : '';
+  const qs = sessionQS(opts);
   const b = await request<{ sessions: Session[] }>(getToken, `/sessions${qs}`, {}, signal);
   return b.sessions ?? [];
+}
+
+/** One page of sessions, plus how many the filter matched in total — the
+ * mobile mirror of apps/web's `SessionPage` (`apps/web/src/lib/api.ts`). */
+export type SessionPage = {
+  sessions: Session[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+/**
+ * The full session query the backend's `GET /v1/sessions` supports (see
+ * `backend/internal/modules/session/handler.go`'s `List`): a name search,
+ * a sport filter, a date range, and paging.
+ */
+export type SessionQuery = {
+  limit?: number;
+  offset?: number;
+  sport?: string;
+  from?: string;
+  to?: string;
+  /** Free text matched against the session name, case-insensitively. */
+  q?: string;
+  /** IANA zone `from`/`to` are resolved in — see `listSessionsPage`'s note on
+   *  why the search screen always sends this. */
+  tz?: string;
+};
+
+function sessionQS(opts: SessionQuery): string {
+  const p = new URLSearchParams();
+  if (opts.limit) p.set('limit', String(opts.limit));
+  if (opts.offset) p.set('offset', String(opts.offset));
+  if (opts.sport) p.set('sport', opts.sport);
+  if (opts.from) p.set('from', opts.from);
+  if (opts.to) p.set('to', opts.to);
+  if (opts.q) p.set('q', opts.q);
+  if (opts.tz) p.set('tz', opts.tz);
+  const query = p.toString();
+  return query ? `?${query}` : '';
+}
+
+/**
+ * N85 — the network-backed search VOLA's mobile session history did not
+ * have. `listSessions` above returns a bare array because the sync path that
+ * calls it never needed anything else; a search/browse screen needs the
+ * `total` a page reports itself for, so this is a second function rather
+ * than a breaking change to the first one's return type.
+ *
+ * This is a direct hit against `GET /v1/sessions` — it does not go through
+ * local SQLite — because the whole point is to reach sessions the device may
+ * never have pulled down (see `docs/decisions/phone-impossible-audit.md`
+ * row 12: a fresh install's local cache holds at most the routine sync's
+ * most recent rows). It therefore needs a connection; callers should fall
+ * back to `listLocalSessions` (`sessionStore.ts`) and say so when this
+ * throws offline, the way `apps/mobile/app/session/history.tsx` does.
+ *
+ * A period filter's `from`/`to` should be sent alongside a `tz` — the
+ * backend resolves both in that zone (`handler.go`'s `List`), and web's
+ * `apps/web/src/lib/api.ts` already does this. Without it, a session logged
+ * near midnight can fall on the wrong side of a period boundary compared to
+ * what web shows for the same athlete, the same filter, the same moment.
+ */
+export async function listSessionsPage(
+  getToken: TokenGetter,
+  opts: SessionQuery = {},
+  signal?: AbortSignal,
+): Promise<SessionPage> {
+  const b = await request<SessionPage>(getToken, `/sessions${sessionQS(opts)}`, {}, signal);
+  return {
+    sessions: b.sessions ?? [],
+    total: b.total ?? 0,
+    limit: b.limit ?? 0,
+    offset: b.offset ?? 0,
+  };
 }
 
 export async function getSession(

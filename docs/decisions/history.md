@@ -44589,6 +44589,136 @@ updated to `26`. `pnpm run verify` — full chain green, 197 mobile suites /
 **NEEDS HUMAN EVIDENCE, per the ticket's own criterion.** #383's "steps to test" were never run on a device — verified at the repository layer only. Logging a real dumbbell set and reading both the per-hand total on web and the session Volume tile after an offline swap, on a phone, is still owed.
 
 
+## 2026-08-27 — N85: session history stops being a fresh-install trap, and gets a phone-side search
+
+**A direct instance of the mobile-first hard rule.** `docs/decisions/phone-impossible-audit.md`
+row 12: `/dashboard/sessions` has name search, a sport filter and a paged list;
+the phone's month sheet had none of it. Two separate bugs hid behind that one
+line, and only one of them was about search.
+
+**The sharp half wasn't search, it was data loss.** `sessionStore.ts`'s routine
+sync pull asked the server for `limit: 20` and nothing more, on every sync
+trigger — screen focus, an edit, a session start. That is fine for staying
+caught up on what changed recently. It is not fine as the ONLY pull a fresh
+install ever gets: an athlete restoring their phone landed with the 20 most
+recent sessions in local SQLite and no path to anything older, ever, with
+nothing on screen saying so. `TrainingCalendar`'s month sheet already scaled
+its own *query* limit up to 2,000 when paging back through months — and it
+made no difference, because the rows behind that limit had never been pulled
+down from the server in the first place. Widening a `SELECT` over an empty
+well does not fill the well.
+
+**The fix is a backfill, not a bigger routine pull.** `runSync` now checks
+`SELECT COUNT(*) FROM local_sessions WHERE user_id = ?` once per run; on an
+established device (count > 0) nothing changes — the ordinary 20-row pull runs
+exactly as before. On a device that has never held a row for this athlete, it
+pages through the server instead: 200 rows at a time (matching the backend's
+own `maxLimit`, so a full page is never mistaken for the last one), stopping
+on a short page or after 10 pages — 2,000 sessions, deliberately the same
+ceiling `TrainingCalendar.tsx` already documents for the same reason. Detected
+by an empty table rather than a persisted "backfilled" flag: the first landed
+page makes the table non-empty, so the branch stops firing on its own with
+nothing to keep in sync with reality, and no schema migration was needed.
+
+**The soft half is a new screen, not a bigger month sheet.**
+`apps/mobile/app/session/history.tsx` is a reduced form of web's page, per
+CLAUDE.md's rule — a capability may be richer on web, it may not be absent on
+the phone. What's reduced: one filter row instead of a toolbar, no bulk
+actions, no side pane. What's NOT reduced: the name search and sport filter
+both call `GET /v1/sessions` with the exact same `q`/`sport`/`from`/`to`
+parameters web's page sends (`lib/sessions.ts` grew `listSessionsPage`,
+mirroring `apps/web/src/lib/api.ts`'s `SessionQuery`/`sessionQS` almost
+verbatim), so a search on the phone finds exactly what the same search finds
+on a laptop. The period control reuses `SPANS`/`spanRange` from
+`lib/history.ts` — the same four presets (1W/1M/6M/1Y, all ending today) the
+check-in trend chart already uses, plus "All" — rather than inventing a
+second vocabulary; CLAUDE.md's mobile-chart carve-out already blessed presets
+ending today as the mobile-appropriate alternative to a start/end picker, and
+a picker stays web's job. Pagination is a "Show older (N more)" button reading
+`total` off the response, the same shape `app/social/index.tsx`'s feed already
+uses — not infinite scroll, not one unbounded query.
+
+**Deliberately network-first, not a local-SQLite screen.** The whole point is
+reaching sessions the device may never have pulled down, so a screen that only
+read `listLocalSessions` would just be a smaller, sadder version of the bug
+it exists to fix. Offline (or the API unreachable), it falls back to
+`listLocalSessions` and SAYS SO (`session-history-offline`) — rendering that
+fallback silently would make "couldn't reach the server" indistinguishable
+from "you have no older sessions", which is the exact silent-cap failure this
+ticket was filed against. A genuine server error (not a transport failure)
+shows the error and does not fall back to the local cache, so a real 4xx/5xx
+is never quietly hidden behind a plausible-looking partial list.
+
+**Entry point.** `TrainingCalendar`'s month sheet grew a "Search all sessions"
+link below its month totals, closing the sheet and navigating to
+`/session/history` — the only entry point today, reached from the Progress
+tab (the sole place `TrainingCalendar` renders).
+
+**Docs corrected on the exclusivity, not the design**, per CLAUDE.md's own
+instruction for this situation: `docs/testing/functional-scenarios.md`'s
+"Session list paging, search and filters" section heading named only
+`apps/web` History; it now names both clients, keeps the backend scenarios
+(already platform-agnostic) unchanged, and adds mobile-specific ones —
+including the fresh-install and offline-fallback cases above.
+`docs/decisions/phone-impossible-audit.md` row 12 moves from `open` to closed,
+and its "Reduced on mobile" table drops from two watched rows to one (the
+past-day-food gap, #415, is unrelated and still open).
+
+**Tests.** `lib/__tests__/sessionsApi.test.ts` pins the querystring builder
+(including that `offset: 0` is dropped the same deliberate way every other
+falsy filter is, and that a bare response defaults `total`/`limit`/`offset`
+to `0` rather than `undefined`). `lib/__tests__/historyBackfill.test.ts`
+exercises the fresh-install loop against a real migrated SQLite fixture: it
+pages through several 200-row responses and stops on a short one, stops at
+exactly 10 pages against a server that never runs out, makes exactly one
+20-row request on an established device even when that page comes back full
+(guarding against the loop accidentally comparing against the 200-row
+backfill threshold on the ordinary path), and confirms the fresh-install
+check is scoped per `user_id` rather than tripped by another account's rows
+in the same local database. `app/__tests__/sessionHistoryScreen.test.tsx`
+pins the offline-vs-error distinction and the load-more pagination. Every new
+guard was mutation-verified — temporarily broken, confirmed the covering test
+failed as a real assertion (not a crash), restored, and reconfirmed green by
+re-running rather than by reading the diff.
+
+**Open / NEEDS HUMAN EVIDENCE**, per the ticket's own acceptance criteria:
+exercised on a real device with the web app closed — specifically, a fresh
+install (or cleared app data) on an account with more than 20 historical
+sessions, confirming the 21st-and-older sessions are both backfilled locally
+and findable through `/session/history`'s search.
+
+**Fixed in review, before this PR opened.** `frontend-reviewer` found a real
+race: tapping "Show older" on a slow connection, then changing a filter
+before it resolved, let the OLD page's response land after `load()` had
+already replaced `items` for the NEW filter — `loadMore` appended stale rows
+and overwrote `total` with the wrong query's count, silently. Fixed by
+routing `loadMore` through the SAME `AbortController` ref `load()` already
+uses, so either function aborting the other's in-flight request is enough;
+`app/__tests__/sessionHistoryScreen.test.tsx` gained a reproduction that
+fails against the un-fixed code and passes against the fix (confirmed both
+ways). Independently, both reviewers flagged the offline fallback ignoring
+the active search/sport/period filters while the chips still showed them
+selected; `matchesFilters` now narrows `listLocalSessions`'s result the same
+way the server query would, and the offline banner and empty-state copy say
+so. `tz` also joined `listSessionsPage`'s query (mirroring web's
+`localZone()` call), so a period boundary near midnight resolves in the same
+zone on both clients. Two cosmetic items from the same pass: the chip rows'
+`accessibilityRole="tablist"` was a mismatch against `button`-role children
+(dropped), and a comment miscited `maxLimit`'s file as `session.go` (it's
+`session/postgres.go`).
+
+**A narrower gap than the routine 20-row cap, left open rather than
+papered over**: the fresh-install backfill is detected by an empty
+`local_sessions` table and never repeats once anything lands — so a device
+that logs exactly one session OFFLINE, before its first successful sync,
+permanently disables the backfill for that account once that first sync
+finally runs (the table is no longer empty). The athlete still gets that one
+session's own history correctly; what they lose is the paginated catch-up
+for everything else. Worth a persisted "backfill done" flag instead of an
+inferred one if this turns out to matter in practice — not done here because
+it was not measured to happen, and the inferred version needed no schema
+migration.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
