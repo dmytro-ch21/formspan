@@ -509,6 +509,28 @@ components:
         brand: { type: string, maxLength: 80 }
         serving_label: { type: string, example: "100 g" }
         serving_grams: { type: number, nullable: true }
+        packet_serving_label:
+          type: string
+          nullable: true
+          maxLength: 40
+          example: "2 pieces (25 g)"
+          description: >
+            The PACKET's own printed serving (N117) — additive to and
+            deliberately separate from `serving_label`/`serving_grams` above,
+            which stay "the amount every macro on this object represents"
+            (always "100 g") and are untouched by this pair. A client uses
+            this only to pick a better STARTING amount than "100 g" for its
+            "how much" field — e.g. a Kinder bar's own box states "2 pieces
+            (25g)" — while every amount, including that one, is still computed
+            as `kcal_per_100g * (grams / 100)`, same arithmetic as any other
+            gram figure. Null when Open Food Facts states no serving in grams
+            (most products) — never a fabricated one, and never derived from a
+            non-gram unit (a can's `354.9 mL` is not `354.9 g`).
+        packet_serving_grams:
+          type: number
+          nullable: true
+          example: 25
+          description: The packet's own serving, in grams. Paired with `packet_serving_label` above; both null or both present.
         kcal: { type: number }
         protein_g: { type: number }
         carb_g: { type: number }

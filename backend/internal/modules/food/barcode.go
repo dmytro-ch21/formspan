@@ -142,7 +142,21 @@ type offResponse struct {
 	Product struct {
 		ProductName string `json:"product_name"`
 		Brands      string `json:"brands"`
-		Nutriments  struct {
+		// The packet's own serving — a SIBLING of `nutriments`, not a field
+		// inside it (measured against the live API, not guessed). `serving_size`
+		// is what a person reads on the box ("2 pieces (25 g)"); `serving_quantity`
+		// is that same serving's mass, `serving_quantity_unit` the unit it is IN.
+		// The unit matters: a liquid's is `"ml"` (measured: a Coca-Cola can gives
+		// `serving_quantity: 354.9, serving_quantity_unit: "ml"`), and
+		// `BarcodeFood.PacketServingGrams` (N117), which these three feed via
+		// `packetServingFrom` below, is grams-only — using an `ml` figure as
+		// grams would mislabel a volume as a weight, which is the g/ml
+		// conversion N117 explicitly says needs density this codebase does
+		// not store.
+		ServingSize         string   `json:"serving_size"`
+		ServingQuantity     *float64 `json:"serving_quantity"`
+		ServingQuantityUnit string   `json:"serving_quantity_unit"`
+		Nutriments          struct {
 			KCal    *float64 `json:"energy-kcal_100g"`
 			Protein *float64 `json:"proteins_100g"`
 			Carbs   *float64 `json:"carbohydrates_100g"`
@@ -230,17 +244,30 @@ func (o *OpenFoodFacts) Resolve(ctx context.Context, barcode string) (*BarcodeFo
 	}
 	brand = truncate(brand, 80)
 
+	packetLabel, packetGrams := packetServingFrom(parsed.Product.ServingSize, parsed.Product.ServingQuantity, parsed.Product.ServingQuantityUnit)
 	grams := 100.0
 	id := barcode
 	out := &BarcodeFood{
 		Name:  truncate(name, 120),
 		Brand: brand,
 		// Per 100 g, matching the catalog, because that is the basis Open Food
-		// Facts states these values on. The packet's own serving size is
-		// available upstream and deliberately not used yet — mixing two
-		// serving bases in one response is how a doubled quantity happens.
-		ServingLabel: SeedServingLabel,
-		ServingGrams: &grams,
+		// Facts states these values on. UNCHANGED by N117 — `ServingLabel`/
+		// `ServingGrams` mean "the amount these macros represent" everywhere
+		// else that reads them, and redefining that here would be exactly the
+		// two-serving-bases mixup this comment used to warn about, just moved
+		// into the wire contract instead of out of it.
+		//
+		// The packet's own serving (N117) is `PacketServingLabel`/
+		// `PacketServingGrams` below instead — an ADDITIVE pair, nil unless
+		// Open Food Facts states one in grams, that a client uses only to pick
+		// its STARTING amount (so a Kinder bar opens to "2 Pieces (25 g)" /
+		// 140 kcal instead of "100 g" / 560 kcal), while the arithmetic stays
+		// `perHundredG * (grams/100)` against the fields on THIS struct,
+		// unchanged, for every amount including that starting one.
+		ServingLabel:       SeedServingLabel,
+		ServingGrams:       &grams,
+		PacketServingLabel: packetLabel,
+		PacketServingGrams: packetGrams,
 		// Rounded to the scale `food_barcode_cache` stores, so a cold answer
 		// and a warm one are the same number. Without this a value like
 		// 99.99999999999999 (kJ->kcal conversions produce them) is served raw
@@ -304,6 +331,36 @@ func milligramsFromGrams(g *float64) *float64 {
 	}
 	v := *g * gramsToMilligrams
 	return &v
+}
+
+// packetServingFrom decides whether the packet's own printed serving is
+// usable as the STARTING amount a client should default to (N117), returning
+// (nil, nil) when it is not — never a fabricated number.
+//
+// Three reasons it returns nil, each measured against the live API rather
+// than assumed:
+//
+//   - `quantity` is nil or <= 0 — most products carry no serving at all.
+//   - `unit` is not `"g"` — measured: a Coca-Cola can gives
+//     `serving_quantity: 354.9, serving_quantity_unit: "ml"`.
+//     `PacketServingGrams` is grams-only, same as `ServingGrams` throughout
+//     this schema (`food_barcode_cache`, `food_catalog`, `nutrition_foods`
+//     all store one `serving_grams` column with no unit alongside it), and
+//     converting ml to g needs a density this codebase does not store —
+//     N117 says so explicitly. Labelling a volume as a weight would be a
+//     silent, wrong number, which is worse than offering nothing.
+//   - `size` is blank — the label with no number behind it ("2 pieces (25 g)"
+//     read by the athlete, but the field empty) is rarer than the reverse,
+//     but a bare gram figure with no words is a worse suggestion than none.
+func packetServingFrom(size string, quantity *float64, unit string) (label *string, grams *float64) {
+	size = strings.TrimSpace(size)
+	unit = strings.TrimSpace(strings.ToLower(unit))
+	if quantity == nil || *quantity <= 0 || unit != "g" || size == "" {
+		return nil, nil
+	}
+	l := truncate(size, 40)
+	g := *quantity
+	return &l, &g
 }
 
 // round2 matches NUMERIC(_, 2), the scale every macro column here uses.

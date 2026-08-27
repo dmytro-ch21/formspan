@@ -28,6 +28,23 @@ import type { Macros } from './nutrition';
 export const FALLBACK_SERVING_GRAMS = 100;
 
 /**
+ * The narrowest shape these functions actually need — deliberately NOT
+ * `CatalogFood` itself.
+ *
+ * A barcode scan (`ScannedFood`, `lib/barcodeApi.ts`) has every field here and
+ * neither `id` nor `category`, which `CatalogFood` carries only because it is
+ * a row in OUR catalog. Typing `macrosForGrams`/`quantityOptions` against the
+ * full `CatalogFood` would force the scan screen (N117) to fabricate an `id`
+ * and a `category` just to satisfy the compiler for a food that has neither —
+ * so this is the actual contract, and `CatalogFood` satisfies it structurally
+ * with nothing extra to add.
+ */
+export type QuantifiableFood = Macros &
+  Pick<CatalogFood, 'name' | 'brand' | 'serving_grams'> & {
+    portions?: CatalogPortion[];
+  };
+
+/**
  * The gram basis one "serving" of this food represents.
  *
  * `serving_grams` is nullable on the wire — an egg has no honest gram weight —
@@ -72,8 +89,29 @@ export function servingsForGrams(
  * from any per-gram figure, because that is what the catalog states and
  * re-deriving would introduce a second source for one fact.
  */
-export function macrosForGrams(food: CatalogFood, grams: number): Macros {
-  const s = servingsForGrams(food, grams);
+export function macrosForGrams(food: QuantifiableFood, grams: number): Macros {
+  return scaleMacros(food, servingsForGrams(food, grams));
+}
+
+/**
+ * The macros for a plain SERVINGS multiplier — no gram basis involved.
+ *
+ * For a food with no honest gram weight (`serving_grams: null` — an
+ * AI-described "1 egg", cached against a barcode by `describe.tsx`),
+ * `macrosForGrams`'s model does not apply: there is no gram basis to scale
+ * against that would not be invented, and `servingBasisGrams`'s 100 g
+ * fallback exists for the catalog case, not this one. This is the
+ * basis-agnostic form the scan screen used everywhere before N117 (typing a
+ * "servings" count directly) — kept as its own function so a caller
+ * (`canLogByWeight` is how it decides) reaches for it deliberately instead
+ * of routing an ungrammed food through the grams control and silently
+ * fabricating a basis it never stated.
+ */
+export function macrosForServings(food: Macros, servings: number): Macros {
+  return scaleMacros(food, servings);
+}
+
+function scaleMacros(food: Macros, s: number): Macros {
   return {
     kcal: round1(food.kcal * s),
     protein_g: round1(food.protein_g * s),

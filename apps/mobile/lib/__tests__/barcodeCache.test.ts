@@ -24,15 +24,19 @@ const OATS: ScannedFood = {
   brand: 'Flahavans',
   serving_label: '40 g',
   serving_grams: 40,
+  // Real values, not null, deliberately: "round-trips a scanned food" below
+  // does a deep `toEqual` against the read-back row, so these are what
+  // actually exercise the N117 migration's new `barcode_cache` columns rather
+  // than merely typechecking against them.
+  packet_serving_label: '1/2 cup (40 g)',
+  packet_serving_grams: 40,
   kcal: 150,
   protein_g: 5.2,
   carb_g: 26.4,
   fat_g: 2.8,
   fibre_g: 3.6,
-  // Real values, not null, deliberately: "round-trips a scanned food" below
-  // does a deep `toEqual` against the read-back row, so these are what
-  // actually exercises the N59 migration's new `barcode_cache` columns rather
-  // than merely typechecking against them.
+  // Real values, not null, deliberately — same reason as the pair above:
+  // this row exercises the N59 migration's columns.
   saturated_fat_g: 0.5,
   sugar_g: 1.1,
   added_sugar_g: null,
@@ -86,6 +90,23 @@ it('overwrites an existing row rather than duplicating it', async () => {
 it('keeps a null fibre null rather than turning it into zero', async () => {
   await rememberBarcode('u1', '4006381333931', { ...OATS, fibre_g: null }, 'off');
   expect((await cachedBarcode('u1', '4006381333931'))!.food.fibre_g).toBeNull();
+});
+
+/**
+ * N117: most products on Open Food Facts state no packet serving at all —
+ * the ordinary case, not the exotic one. Null in must stay null out, never
+ * fabricated into a stray "100 g" the athlete never saw on a box.
+ */
+it('keeps a null packet serving null rather than inventing one', async () => {
+  await rememberBarcode(
+    'u1',
+    '4006381333931',
+    { ...OATS, packet_serving_label: null, packet_serving_grams: null },
+    'off',
+  );
+  const hit = await cachedBarcode('u1', '4006381333931');
+  expect(hit!.food.packet_serving_label).toBeNull();
+  expect(hit!.food.packet_serving_grams).toBeNull();
 });
 
 describe('provenance', () => {

@@ -439,6 +439,10 @@ export default function DescribeMealScreen() {
             brand: '',
             serving_label: it.serving_label,
             serving_grams: null,
+            // No packet serving — this food was described, not scanned from a
+            // packet Open Food Facts has data on. Never invented (N117).
+            packet_serving_label: null,
+            packet_serving_grams: null,
             // Per SERVING, because that is what the cache stores and what the
             // scan screen scales. The draft's figures are the total for the
             // item, so they are divided back out by its own servings count.

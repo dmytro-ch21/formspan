@@ -27,8 +27,7 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import type { CatalogFood } from '@/lib/catalogApi';
-import { macrosForGrams, parseQuantity, quantityOptions } from '@/lib/foodQuantity';
+import { macrosForGrams, parseQuantity, quantityOptions, type QuantifiableFood } from '@/lib/foodQuantity';
 import type { Macros } from '@/lib/nutrition';
 import { useUnits } from '@/lib/UnitsProvider';
 import { foodUnitLabel, fromDisplayGrams, toDisplayGrams, type FoodUnit } from '@/lib/units';
@@ -43,7 +42,7 @@ export function FoodQuantity({
   onQuantityChange,
   hideBuiltInFooter,
 }: {
-  food: CatalogFood;
+  food: QuantifiableFood;
   onLog: (grams: number) => void;
   busy?: boolean;
   /**

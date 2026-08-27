@@ -451,11 +451,13 @@ func (r *PostgresRepository) LookupBarcode(ctx context.Context, barcode string) 
 	)
 	err := r.pool.QueryRow(ctx, `
 		SELECT name, brand, serving_label, serving_grams,
+		       packet_serving_label, packet_serving_grams,
 		       kcal, protein_g, carb_g, fat_g, fibre_g,
 		       saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
 		       provider, external_id
 		FROM food_barcode_cache WHERE barcode = $1`, barcode).Scan(
 		&f.Name, &f.Brand, &f.ServingLabel, &f.ServingGrams,
+		&f.PacketServingLabel, &f.PacketServingGrams,
 		&f.KCal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG,
 		&f.SaturatedFatG, &f.SugarG, &f.AddedSugarG, &f.SodiumMG, &f.CholesterolMG,
 		&provider, &f.ExternalID)
@@ -472,14 +474,17 @@ func (r *PostgresRepository) CacheBarcode(ctx context.Context, barcode string, f
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO food_barcode_cache (
 			barcode, provider, name, brand, serving_label, serving_grams,
+			packet_serving_label, packet_serving_grams,
 			kcal, protein_g, carb_g, fat_g, fibre_g,
 			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
 			external_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (barcode) DO UPDATE SET
 			provider = EXCLUDED.provider,
 			name = EXCLUDED.name, brand = EXCLUDED.brand,
 			serving_label = EXCLUDED.serving_label, serving_grams = EXCLUDED.serving_grams,
+			packet_serving_label = EXCLUDED.packet_serving_label,
+			packet_serving_grams = EXCLUDED.packet_serving_grams,
 			kcal = EXCLUDED.kcal, protein_g = EXCLUDED.protein_g,
 			carb_g = EXCLUDED.carb_g, fat_g = EXCLUDED.fat_g, fibre_g = EXCLUDED.fibre_g,
 			saturated_fat_g = EXCLUDED.saturated_fat_g, sugar_g = EXCLUDED.sugar_g,
@@ -488,6 +493,7 @@ func (r *PostgresRepository) CacheBarcode(ctx context.Context, barcode string, f
 			external_id = EXCLUDED.external_id,
 			fetched_at = now()`,
 		barcode, provider, f.Name, f.Brand, f.ServingLabel, f.ServingGrams,
+		f.PacketServingLabel, f.PacketServingGrams,
 		f.KCal, f.ProteinG, f.CarbG, f.FatG, f.FibreG,
 		f.SaturatedFatG, f.SugarG, f.AddedSugarG, f.SodiumMG, f.CholesterolMG,
 		f.ExternalID)

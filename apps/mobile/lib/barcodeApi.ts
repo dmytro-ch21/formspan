@@ -47,10 +47,24 @@ import type { TokenGetter } from './useAuthToken';
 export type ScannedFood = Macros & {
   name: string;
   brand: string;
-  /** What one serving IS, as the packet states it: "100 g", "1 bar (45 g)". */
+  /**
+   * "The amount every macro on this food represents" — always "100 g" for a
+   * scanned product, unchanged by N117. This is the ARITHMETIC basis, not a
+   * suggestion: every amount, including the packet's own serving below, is
+   * computed as `perHundredG * (grams/100)` against this.
+   */
   serving_label: string;
   /** Null where the packet gives no honest gram weight. Never invented. */
   serving_grams: number | null;
+  /**
+   * The packet's OWN printed serving — "2 pieces (25 g)" for a Kinder bar —
+   * additive to and deliberately separate from `serving_label`/`serving_grams`
+   * above (N117). A client uses this only to pick a better STARTING amount
+   * than "100 g"; it never changes what the macros are per. Null when Open
+   * Food Facts states no serving in grams (most products): never invented.
+   */
+  packet_serving_label: string | null;
+  packet_serving_grams: number | null;
 };
 
 /**

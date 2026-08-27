@@ -13418,3 +13418,54 @@ on screen. That, and only that, is what moved.
   already-public response header (`Retry-After`) through client code that
   previously discarded it, and adds client-side-only quota/backoff state
   derived from responses the client was already receiving.
+
+## N117 — A scanned food defaults to the packet's own serving, not "100 g" (`apps/mobile/app/food/scan.tsx`, `apps/mobile/components/FoodQuantity.tsx`, `apps/mobile/lib/foodQuantity.ts`, `apps/mobile/lib/barcodeApi.ts`, `apps/mobile/lib/barcodeCache.ts`, `backend/internal/modules/food/barcode.go`)
+
+### Happy path
+
+- Scan a barcode for a product whose serving Open Food Facts states in grams
+  (e.g. a Kinder Chocolate bar, `009800512041`). Confirm the amount field
+  opens already at the packet's own gram figure (25 for this product), with
+  a matching portion chip selected and labelled with the box's own words
+  ("2 pieces (25 g)") — not "100 g".
+- Confirm the "Per 100 g" note above the amount field is present and
+  unchanged regardless of the packet serving shown — it is the arithmetic
+  basis, not the suggested amount.
+- Change the amount field; confirm every visible macro (calories, protein
+  in the summary line) recalculates immediately, with no save-and-reopen.
+- Log without touching the amount field; confirm the entry saved matches
+  the box's own stated calories for its own stated serving, not the
+  per-100g figure.
+- Scan a barcode for a product Open Food Facts states NO serving for (most
+  products). Confirm the amount field opens at 100 g, matching prior
+  behavior — no regression for the common case.
+- Toggle the amount's unit between grams and ounces; confirm the number
+  CONVERTS (100 g → ~3.5 oz) rather than being relabelled onto the same
+  digits.
+
+### Edge cases and errors
+
+- Scan a barcode whose provider states a serving in a non-gram unit (a
+  canned drink stating `354.9 mL`). Confirm the amount field opens at
+  100 g — the packet's serving must NOT be silently treated as grams.
+- Scan the SAME barcode twice in a row (second scan hits the local device
+  cache). Confirm the packet-serving default still appears on the
+  cache-hit path, not only on a fresh network resolve.
+- **NEEDS HUMAN EVIDENCE** — on a device with this build's schema
+  migration applied over an EXISTING install (not a fresh install), confirm
+  a previously-cached barcode still resolves without error and the new
+  packet-serving default applies on its next fresh lookup.
+- Log a food from the AI-describe flow that later caches itself against a
+  barcode (the "this barcode will find it next time" path); confirm
+  re-scanning that barcode still works and shows a sensible default amount
+  (no packet-serving suggestion is expected here — that path has none).
+- Confirm the barcode scanner's camera viewfinder is visibly taller than
+  before across at least two device sizes (a compact and a Pro Max-class
+  phone) — this was reported specifically as "too short".
+
+### Auth / security
+
+- No change to authorization on the barcode lookup endpoint — this ticket
+  only adds two additional read-only fields (`packet_serving_label`,
+  `packet_serving_grams`) to an already-public response shape, with no new
+  write surface and no change to who can call the endpoint.
