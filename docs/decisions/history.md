@@ -43986,6 +43986,87 @@ Reviewed with a `frontend-reviewer` pass on the diff; no blocking findings.
 `pnpm run verify` green.
 
 
+## 2026-08-27 — L5: releasing the share card's temp file, on a delay (#384)
+
+`apps/mobile/lib/shareCard.ts`'s `shareCard` wrote a PNG into the cache
+directory (`captureRef(..., { result: 'tmpfile' })`) per share and never
+deleted it — 1.6 MB now, after #232 fixed the 10.5 MB export-size bug this
+ticket's own body corrects the record on. The prior comment gave two reasons
+for leaving it alone and both were wrong: `react-native-view-shot` already
+exports `releaseCapture(uri)`, native on both platforms, so no third
+dependency was needed; and the file was never "1-2 MB", it was 10.5 MB until
+#232 landed. What was actually true, and the reason this stayed open rather
+than being a one-line fix: calling `releaseCapture` right after `shareAsync`
+resolves is only safe if the share target has finished reading the file by
+then, and that turned out to be a real question rather than a formality.
+
+**Reading the native modules answered "is it safe", not "guess and see".**
+`expo-sharing`'s `shareAsync` resolves to `Promise<void>` — no signal
+distinguishing a completed share from a dismissed sheet, on either platform:
+
+- **iOS** (`SharingModule.swift`) resolves from
+  `UIActivityViewController.completionWithItemsHandler`, called once
+  regardless of `completed`/`activityType`, after the activity (and any
+  follow-up UI it presents) is dismissed. For a well-behaved extension this
+  is after it has called `completeRequest` — the safer of the two platforms.
+- **Android** (`SharingModule.kt`) resolves from `OnActivityResult` wrapping
+  `startActivityForResult` on an `Intent.createChooser` intent. That fires
+  once the **chooser** activity finishes handing off to the picked target,
+  which is structurally earlier than the target having read the
+  `content://` URI — a target that reads the stream lazily (after its own
+  compose UI finishes drawing, say) can still be mid-read after this
+  resolves.
+
+So an immediate release risks the exact "share silently produces nothing"
+failure the ticket named. The fix delays the release by `RELEASE_DELAY_MS`
+(1.5s, in `shareCard.ts`) rather than firing on the same tick — three times
+the 500ms `react-native-view-shot` uses internally between its own
+successive captures, longer because this is releasing into an external app's
+hand-off rather than the library's own next capture. **This narrows the race,
+it does not close it**
+— a slow enough reader on a loaded device could still lose it — which is
+exactly why criterion 2 (device verification against every share target:
+Messages, Mail, Instagram, Files, AirDrop) is `NEEDS HUMAN EVIDENCE` rather
+than something this PR could certify itself.
+
+Release is scheduled from one `finally` around the existing `shareAsync`
+try/catch, which turned out to cover both criterion 1 and criterion 3 in the
+same code path: `shareAsync` resolves identically whether the athlete
+completed a share or dismissed the sheet (see above), so "successful share"
+and "cancelled share" are the same outcome at this API and always were — the
+ticket's two acceptance criteria describe one code path, not two. Also
+scheduled on a genuine `shareAsync` rejection, so a real share failure
+doesn't orphan the file either. The scheduled release itself runs inside its
+own `try`/`catch` (criterion 4): `releaseCapture`'s native side never
+rejects, but the JS wrapper reads the native module off `NativeModules`
+first and would throw synchronously if it were ever missing, and a cleanup
+step must never be the reason a share the athlete already saw complete gets
+reported as failed.
+
+New tests in `shareCard.test.ts` (fake timers): release never fires while
+`shareAsync` is still pending; release fires only after the delay elapses,
+not on the same tick; release fires after a resolved share (covering both
+"completed" and "cancelled", which are the same mock — documented in the
+test as such since a future `shareAsync` that DOES distinguish them must not
+silently stop covering cancel); release fires after a rejected share; and a
+throwing `releaseCapture` never surfaces as a failed `shareCard` result.
+Mutation-verified three separate guards by hand: removing the `try`/`catch`
+around `releaseCapture` (test goes red — the release throw propagates out of
+`advanceTimersByTimeAsync` and fails the test); removing the delay (the
+"not before the delay elapses" assertion goes red); and scheduling the
+release only on the success path (the "real share failure" test goes red).
+All three restored and reconfirmed green afterward.
+
+**Issue #232 (the export-size fix this ticket's body references) is
+untouched** — deliberately out of scope, per the user's own call on which
+issue owns which half of the original bug report; not closed or folded here.
+
+`docs/testing/functional-scenarios.md` gained a Session Card Sharing section
+with the ticket's four steps-to-test as scenarios, since this has real
+device-observable behavior (share targets, temp-file cleanup) a review of the
+diff cannot confirm.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

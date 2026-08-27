@@ -1,6 +1,6 @@
 import { PixelRatio } from 'react-native';
 
-import { CARD_EXPORT_WIDTH, cardCaptureSize, shareCard } from '../shareCard';
+import { CARD_EXPORT_WIDTH, RELEASE_DELAY_MS, cardCaptureSize, shareCard } from '../shareCard';
 
 /**
  * The exported card has to be the same size from every phone.
@@ -105,7 +105,10 @@ describe('cardCaptureSize elsewhere — pixels, already final', () => {
  * cannot show: the export could compute the right number and still pass the
  * constant, which is the shape the bug had.
  */
-jest.mock('react-native-view-shot', () => ({ captureRef: jest.fn() }));
+jest.mock('react-native-view-shot', () => ({
+  captureRef: jest.fn(),
+  releaseCapture: jest.fn(),
+}));
 jest.mock('expo-sharing', () => ({
   isAvailableAsync: jest.fn(async () => true),
   shareAsync: jest.fn(async () => {}),
@@ -113,6 +116,9 @@ jest.mock('expo-sharing', () => ({
 
 describe('shareCard', () => {
   it('captures at the converted size, not the pixel constant', async () => {
+    // Fake timers so the release this now schedules (see the describe block
+    // below) never leaves a real 1.5s timeout pending past this test.
+    jest.useFakeTimers();
     const { captureRef } = jest.requireMock('react-native-view-shot');
     captureRef.mockResolvedValue('file:///tmp/card.png');
     const spy = jest.spyOn(PixelRatio, 'get').mockReturnValue(3);
@@ -129,6 +135,136 @@ describe('shareCard', () => {
       expect(opts.width).not.toBe(CARD_EXPORT_WIDTH);
     } finally {
       spy.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+});
+
+/*
+ * L5 (#384): the temp file `captureRef` writes has to be deleted, but not so
+ * early that the share sheet — or the app the athlete picked from it — is
+ * still reading it. See the module comment in `shareCard.ts` for the full
+ * argument; these tests cover what is observable without a device: that
+ * `releaseCapture` is called with the right URI, that it is called after a
+ * delay rather than on the same tick, that a cancelled share (which
+ * `expo-sharing` resolves identically to a completed one — there is no
+ * distinct outcome to test separately) still triggers it, that a real share
+ * failure still triggers it, and that `releaseCapture` throwing can never
+ * surface as a share failure.
+ *
+ * What these tests do NOT pin: `RELEASE_DELAY_MS`'s actual magnitude. They
+ * import the constant rather than a literal, so a future change to its
+ * value (including shrinking it to 0) stays green here — the number is a
+ * tuning knob justified by the module comment's reasoning, not something
+ * this suite can validate on its own. Acceptance criterion 2's device pass
+ * is what that number answers to.
+ */
+describe('shareCard — temp file release', () => {
+  const uri = 'file:///tmp/card.png';
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    const { captureRef, releaseCapture } = jest.requireMock('react-native-view-shot');
+    captureRef.mockReset().mockResolvedValue(uri);
+    releaseCapture.mockReset();
+    const { shareAsync, isAvailableAsync } = jest.requireMock('expo-sharing');
+    isAvailableAsync.mockReset().mockResolvedValue(true);
+    shareAsync.mockReset();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('does not release before shareAsync settles', async () => {
+    const { shareAsync } = jest.requireMock('expo-sharing');
+    const { releaseCapture } = jest.requireMock('react-native-view-shot');
+    // A share that never settles — the capture must never be released while
+    // shareAsync is still pending, whatever the delay is set to.
+    shareAsync.mockReturnValue(new Promise(() => {}));
+
+    shareCard({ current: {} } as never);
+    await jest.advanceTimersByTimeAsync(RELEASE_DELAY_MS * 10);
+
+    expect(releaseCapture).not.toHaveBeenCalled();
+  });
+
+  it('releases the capture after a completed share, once the delay elapses', async () => {
+    const { shareAsync } = jest.requireMock('expo-sharing');
+    const { releaseCapture } = jest.requireMock('react-native-view-shot');
+    shareAsync.mockResolvedValue(undefined);
+
+    const result = await shareCard({ current: {} } as never);
+    expect(result).toEqual({ ok: true });
+
+    // Not released on the same tick shareAsync resolves — that is the whole
+    // point of the delay.
+    expect(releaseCapture).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(RELEASE_DELAY_MS - 1);
+    expect(releaseCapture).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(1);
+    expect(releaseCapture).toHaveBeenCalledTimes(1);
+    expect(releaseCapture).toHaveBeenCalledWith(uri);
+  });
+
+  it('releases the capture after a cancelled share too', async () => {
+    // `expo-sharing`'s `shareAsync` resolves the same way whether the
+    // athlete picked a target or dismissed the sheet (see `SharingModule.swift`
+    // / `SharingModule.kt` in the module comment) — so this is the same
+    // mock as "completed", asserted separately because criterion 3 names it
+    // as its own case and a future `shareAsync` that DOES distinguish the
+    // two must not silently stop releasing on cancel.
+    const { shareAsync } = jest.requireMock('expo-sharing');
+    const { releaseCapture } = jest.requireMock('react-native-view-shot');
+    shareAsync.mockResolvedValue(undefined);
+
+    const result = await shareCard({ current: {} } as never);
+    expect(result).toEqual({ ok: true });
+
+    await jest.advanceTimersByTimeAsync(RELEASE_DELAY_MS);
+    expect(releaseCapture).toHaveBeenCalledWith(uri);
+  });
+
+  it('releases the capture after a real share failure too', async () => {
+    const { shareAsync } = jest.requireMock('expo-sharing');
+    const { releaseCapture } = jest.requireMock('react-native-view-shot');
+    shareAsync.mockRejectedValue(new Error('boom'));
+
+    const result = await shareCard({ current: {} } as never);
+    expect(result).toEqual({ ok: false, reason: 'failed', message: 'boom' });
+
+    await jest.advanceTimersByTimeAsync(RELEASE_DELAY_MS);
+    expect(releaseCapture).toHaveBeenCalledWith(uri);
+  });
+
+  it('never lets a failed release surface as a share failure', async () => {
+    const { shareAsync } = jest.requireMock('expo-sharing');
+    const { releaseCapture } = jest.requireMock('react-native-view-shot');
+    shareAsync.mockResolvedValue(undefined);
+    releaseCapture.mockImplementation(() => {
+      throw new Error('file already gone');
+    });
+    // Silences the __DEV__ console.warn AND lets the assertion below prove
+    // it actually fires — without this the warn just prints past the test.
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const result = await shareCard({ current: {} } as never);
+      expect(result).toEqual({ ok: true });
+
+      // The throw happens inside the scheduled release, after `shareCard`
+      // has already returned — advancing the fake timers must not throw out
+      // of this test, which is exactly what a missing try/catch would do.
+      await expect(jest.advanceTimersByTimeAsync(RELEASE_DELAY_MS)).resolves.toBeUndefined();
+      expect(releaseCapture).toHaveBeenCalledWith(uri);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'shareCard: releaseCapture failed',
+        expect.any(Error),
+      );
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 });
