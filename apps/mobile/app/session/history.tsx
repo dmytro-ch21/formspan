@@ -85,7 +85,12 @@ function sessionVolumeKg(s: Session): number {
   let kg = 0;
   for (const set of s.sets) {
     if (contributesVolume(set) && set.weight_kg != null && set.reps != null) {
-      kg += totalWeightKg(set) * set.reps;
+      // `null` is #425's explicitly-unresolved state (an offline exercise
+      // swap whose implement factor wasn't in the local catalog yet) — left
+      // out of this sum rather than guessed, matching `TrainingCalendar.tsx`'s
+      // own `sessionVolume`, which this function otherwise mirrors.
+      const total = totalWeightKg(set);
+      if (total != null) kg += total * set.reps;
     }
   }
   return kg;
