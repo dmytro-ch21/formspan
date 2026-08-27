@@ -298,7 +298,7 @@ export function CurriculumEditor({
               onRemove={() => removePhase(idx)}
               upDisabled={idx === 0}
               downDisabled={idx === phases.length - 1}
-              removeLabel={`Remove phase ${idx + 1}`}
+              itemLabel={`phase ${idx + 1}`}
               testIDPrefix={`curriculum-phase-${idx}`}
             />
           </RNView>
@@ -415,16 +415,25 @@ function BuilderHeader({
   );
 }
 
-/** Up/down/remove, shared by the phase list and the item list — the same
- *  three controls `workout/[id].tsx`'s `ItemRow` draws, laid out the same
- *  way, so an athlete who has reordered a workout already knows this. */
+/**
+ * Up/down/remove, shared by the phase list and the item list — the same
+ * three controls `workout/[id].tsx`'s `ItemRow` draws, laid out the same
+ * way, so an athlete who has reordered a workout already knows this.
+ *
+ * **`itemLabel` names the row in all three announcements**, not only the
+ * remove one — "Move up"/"Move down" repeated identically across forty rows
+ * tells a screen-reader user nothing about which row they just moved,
+ * exactly the gap `workout/[id].tsx`'s own reorder buttons still carry (see
+ * that file if you're fixing this there too; it's parity, not a new
+ * regression). Mobile is where it matters most, so it gets the fix here.
+ */
 function RowActions({
   onUp,
   onDown,
   onRemove,
   upDisabled,
   downDisabled,
-  removeLabel,
+  itemLabel,
   testIDPrefix,
 }: {
   onUp: () => void;
@@ -432,7 +441,9 @@ function RowActions({
   onRemove: () => void;
   upDisabled: boolean;
   downDisabled: boolean;
-  removeLabel: string;
+  /** The row's own name — "Knee cut", "phase 2" — used to build all three
+   *  accessibility labels below. */
+  itemLabel: string;
   testIDPrefix: string;
 }) {
   return (
@@ -442,7 +453,7 @@ function RowActions({
         disabled={upDisabled}
         style={[styles.smallButton, upDisabled && styles.disabled]}
         accessibilityRole="button"
-        accessibilityLabel="Move up"
+        accessibilityLabel={`Move ${itemLabel} up`}
         accessibilityState={{ disabled: upDisabled }}
         testID={`${testIDPrefix}-up`}
       >
@@ -453,7 +464,7 @@ function RowActions({
         disabled={downDisabled}
         style={[styles.smallButton, downDisabled && styles.disabled]}
         accessibilityRole="button"
-        accessibilityLabel="Move down"
+        accessibilityLabel={`Move ${itemLabel} down`}
         accessibilityState={{ disabled: downDisabled }}
         testID={`${testIDPrefix}-down`}
       >
@@ -463,7 +474,7 @@ function RowActions({
         onPress={onRemove}
         style={styles.smallButton}
         accessibilityRole="button"
-        accessibilityLabel={removeLabel}
+        accessibilityLabel={`Remove ${itemLabel}`}
         testID={`${testIDPrefix}-remove`}
       >
         <Text style={[styles.smallButtonText, styles.removeText]}>✕</Text>
@@ -636,7 +647,7 @@ function ItemRow({
         onRemove={onRemove}
         upDisabled={index === 0}
         downDisabled={index === total - 1}
-        removeLabel={`Remove ${title}`}
+        itemLabel={title}
         testIDPrefix={`curriculum-item-${index}`}
       />
     </RNView>

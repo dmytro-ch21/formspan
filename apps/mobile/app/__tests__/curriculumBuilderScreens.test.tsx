@@ -354,4 +354,25 @@ describe('editing an existing curriculum', () => {
     expect(mockDeleteCurriculum).toHaveBeenCalledWith(expect.any(Function), 'c1');
     expect(mockReplace).toHaveBeenCalledWith('/curriculum');
   });
+
+  /**
+   * A failed delete used to be silent — `deleteNow`'s catch set `error`, but
+   * the only branch that ever rendered it was the initial-load failure, so a
+   * hold-to-confirm could fire, the overlay flash and vanish, and the
+   * athlete would have no way to tell the curriculum still exists.
+   * frontend-reviewer's finding on this PR.
+   */
+  it('shows an error and stays put when the delete request fails', async () => {
+    render(<EditCurriculumScreen />);
+    await waitFor(() => expect(screen.getByTestId('curriculum-delete')).toBeTruthy());
+
+    mockDeleteCurriculum.mockRejectedValue(new Error('offline'));
+    await act(async () => fireEvent.press(screen.getByTestId('curriculum-delete')));
+
+    expect(screen.getByTestId('curriculum-delete-error')).toHaveTextContent('offline');
+    expect(mockReplace).not.toHaveBeenCalledWith('/curriculum');
+    // The curriculum is still here to retry against — this is not the
+    // initial-load-failed state, which would have unmounted the editor.
+    expect(screen.getByTestId('curriculum-name')).toBeTruthy();
+  });
 });

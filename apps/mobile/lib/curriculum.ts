@@ -285,6 +285,13 @@ export type CurriculumWrite = {
   name?: string;
   description?: string;
   belt?: string | null;
+  /** Present for parity with the server's `CurriculumWrite` and with
+   *  `apps/web`'s copy of this type, but neither this app's builder nor
+   *  web's ever sends it: `track` is a VOLA-content grouping hint
+   *  ("belt"/"foundations"/"syllabus") an athlete's own curriculum has no
+   *  business claiming — see `lib/syllabuses.ts`'s `official` filtering for
+   *  why a stranger's `track: "belt"` would otherwise pose as VOLA content.
+   *  Inert on this path deliberately, not an oversight. */
   track?: string | null;
   visibility?: Visibility;
   /** Only read when `items` is present — the two replace together, because an

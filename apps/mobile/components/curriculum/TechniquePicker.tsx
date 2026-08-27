@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
@@ -45,11 +45,9 @@ export function TechniquePicker({
   const [catalog, setCatalog] = useState<TechniqueSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    abortRef.current = controller;
     fetchTechniques(getToken, controller.signal)
       .then((list) => {
         if (!controller.signal.aborted) {

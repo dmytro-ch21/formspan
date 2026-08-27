@@ -43,10 +43,18 @@ export default function EditCurriculumScreen() {
     }
   }, [getToken, id]);
 
-  // On focus, not on mount — matching `curriculum/[id].tsx`'s own load, and
-  // for the same reason: a save elsewhere (or the app backgrounded mid-edit)
-  // should be reflected if this screen is revisited rather than showing a
-  // stale copy for the life of the process.
+  // On focus, not on mount — matching `curriculum/[id].tsx`'s own load, so
+  // the `curriculum` state itself is never staler than it has to be.
+  //
+  // **This does NOT re-seed `CurriculumEditor`'s draft.** Its name/items/
+  // etc. are seeded once from `existing` via a lazy `useState` initializer,
+  // which does not re-run when the `existing` prop changes underneath it —
+  // so a refetch here updates what THIS screen would render if it re-mounted,
+  // not what the athlete is currently typing into. Harmless today because
+  // nothing else currently links out from this screen while it's open (there
+  // is no second editor of the same curriculum to race), but worth fixing
+  // properly (e.g. keying `CurriculumEditor` on something that changes per
+  // save, such as a future `updated_at`) before anything does.
   useFocusEffect(
     useCallback(() => {
       void load();
@@ -56,6 +64,7 @@ export default function EditCurriculumScreen() {
   const deleteNow = useCallback(async () => {
     if (!curriculum) return;
     setDeleting(true);
+    setError(null);
     try {
       await deleteCurriculum(getToken, curriculum.id);
       router.replace('/curriculum');
@@ -110,18 +119,36 @@ export default function EditCurriculumScreen() {
         onSaved={(c: Curriculum) => router.replace(`/curriculum/${c.id}`)}
         onCancel={() => router.back()}
         footer={
-          <HoldToConfirm
-            label="Delete curriculum"
-            holdingLabel="Keep holding to delete…"
-            confirmTitle="Delete curriculum?"
-            confirmBody={`"${curriculum.name}" will be removed. This can't be undone.`}
-            style={styles.deleteButton}
-            textStyle={styles.deleteText}
-            fillColor={vola.danger}
-            destructive
-            testID="curriculum-delete"
-            onConfirm={() => void deleteNow()}
-          />
+          <>
+            <HoldToConfirm
+              label="Delete curriculum"
+              holdingLabel="Keep holding to delete…"
+              confirmTitle="Delete curriculum?"
+              confirmBody={`"${curriculum.name}" will be removed. This can't be undone.`}
+              style={styles.deleteButton}
+              textStyle={styles.deleteText}
+              fillColor={vola.danger}
+              destructive
+              testID="curriculum-delete"
+              onConfirm={() => void deleteNow()}
+            />
+            {/* A failed delete used to be silent: `deleteNow`'s catch set
+                `error`, but the only branch that ever rendered it was the
+                initial-load failure above — a HoldToConfirm can fire, the
+                overlay flash and vanish, and the athlete would have no way
+                to tell the curriculum still exists. Rendered here, next to
+                the control that just failed, matching where
+                `curriculum/[id].tsx`'s own delete-confirm errors surface. */}
+            {error && (
+              <Text
+                style={styles.deleteError}
+                accessibilityLiveRegion="polite"
+                testID="curriculum-delete-error"
+              >
+                {error}
+              </Text>
+            )}
+          </>
         }
       />
       {deleting && (
@@ -138,6 +165,7 @@ const styles = StyleSheet.create({
   error: { color: vola.danger, fontSize: 14, textAlign: 'center' },
   deleteButton: { alignItems: 'center', paddingVertical: 16, marginTop: 8 },
   deleteText: { color: vola.danger, fontWeight: '600' },
+  deleteError: { color: vola.danger, fontSize: 13, textAlign: 'center', marginTop: 4 },
   overlay: {
     position: 'absolute',
     top: 0,
