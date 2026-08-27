@@ -5569,8 +5569,8 @@ on next-moves — see below.
 
 ## Weekly training themes (`/v1/themes`)
 
-One sentence per week about what the week is for. Authored on web, read on the
-phone.
+One sentence per week about what the week is for. Authored on **both** web and
+the phone (N82, #416) — read on the phone regardless.
 
 ### The property that matters most
 
@@ -5612,15 +5612,40 @@ phone.
   not a state the model has.
 - Escape cancels without saving.
 
-### Mobile (read-only)
+### Mobile (read AND author, N82)
 
 - Today shows this week's theme above the week's numbers, and **nothing at all**
-  when there is none — no "no theme set" row.
-- **There is no way to author one on the phone**, deliberately. Planning is a
-  desk activity.
-- **Offline → no theme and no error.** It is deliberately not cached: a stale
-  theme is worse than none, since it would describe a block the athlete has
-  already moved on from.
+  when there is none — no "no theme set" row. Today itself stays read-only —
+  its own card does not open an editor.
+- **Plan (`(tabs)/workouts.tsx`'s `WeekPlanner` header) is where a theme is
+  set on the phone.** A row under the week switcher shows the shown week's
+  theme, or a "+ Theme" affordance when there is none — always visible here,
+  unlike web's hover-only reveal, which has no equivalent on a touch screen.
+  Tapping either opens a one-field editor (title only, matching web) with
+  Save and Cancel.
+- Setting a theme from this editor calls the same `PUT /v1/themes/{weekStart}`
+  web's calendar uses, for the **shown** week's Monday — assert this against
+  a navigated (non-current) week too, not just the default one.
+- Editing an existing theme prefills the field with its current title (this is
+  an edit, not a blank form) and saving replaces it, one `PUT`.
+- **Clearing the text and saving DELETEs the theme**, matching web: a week
+  with an empty title is not a state the model has. Saving an empty draft on
+  an already-themeless week makes no request at all — there is nothing to
+  clear.
+- **Navigating to another week while the editor is open drops the draft**
+  rather than saving it onto the week just navigated to, and Cancel does the
+  same without navigating.
+- **Offline → no theme and no error**, on both Today's read and Plan's editor.
+  Read is deliberately not cached: a stale theme is worse than none, since it
+  would describe a block the athlete has already moved on from. A save
+  attempted offline should surface as a visible error (an `Alert`, matching
+  how `WeekPlanner` reports every other failed write) rather than silently
+  discard the athlete's edit.
+- The reduction against web, and it is the only one: mobile shows and edits
+  **one week at a time**, navigated with the same arrows/month-jump the rest
+  of `WeekPlanner` uses, rather than web's whole month of editable rows at
+  once. The field itself — one line of prose, 80 characters, title only — is
+  full parity, not a cut-down version.
 
 
 ## VOLA Workouts
