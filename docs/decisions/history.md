@@ -43611,6 +43611,116 @@ remains possible in the Go type system; `TestFeedWindowIsAWholeNumberOfDays`
 is what turns that into a loud test failure instead of a silently wrong
 `window_days` on every response.
 
+## 2026-08-27 — N206: Progress's duplicate "THIS WEEK", a BJJ drilled-milestone that never moved, and a jagged Log BJJ grid
+
+Three small, unrelated mobile bugs, all surfaced by the user off one real
+device session and fixed together in one PR to stay inside the fleet's
+three-tickets-in-progress cap (#654).
+
+### 1. "THIS WEEK" rendered twice on Progress
+
+`app/(tabs)/progress.tsx` pairs `<SectionHeader label="This week" />` with
+`<ThisWeek>`, and `ThisWeek` renders `<WeekReview>` — which still carried its
+own internal `"THIS WEEK"` label, a holdover from when `WeekReview` was a
+standalone Today card with no section header of its own. The two labels
+stacked directly on top of each other. Fix: dropped `WeekReview`'s internal
+label; its `{met}/{planned} planned` pill now right-aligns alone in the head
+row (`justifyContent: 'flex-end'`, single child).
+
+### 2. A drilled-only BJJ roadmap milestone never counted a real class
+
+`breakfall-backward` (and every fundamental like it) carries only a
+`target_drilled_sessions` criterion, read server-side as `COUNT(DISTINCT
+session_id) FILTER (WHERE event = 'drilled')`. But `event: 'drilled'` was
+written **exclusively** by the drilled-step technique picker
+(`DrilledStep.add()`) — the live Missed/Landed/Stopped-theirs counters on
+Step 2, which are the *only* control most focus techniques ever show (typing
+the same technique into the picker a second time is a slower, separate
+action), wrote `attempted`/`scored`/`defended` tags only. An athlete who
+tapped "Landed" five times for a breakfall — because that was the only
+counter offered for it — never moved the drilled count, and
+`roadmapView.ts`'s `evidenceNoteOf` explicitly suppressed its explanation
+whenever an item had a drilled criterion, so the athlete saw a bare,
+unexplained "0/6".
+
+Fix, two parts:
+- `bumpTechniqueOutcome` (`lib/bjjSession.ts`) now backfills one `event:
+  'drilled'` tag, count 1, the first time any live outcome
+  (attempted/scored/defended) is recorded for a technique that doesn't
+  already have one — landing, missing, or getting stopped on a technique is
+  itself proof it was drilled that session. Taking a live count back to zero
+  does **not** remove the backfilled tag, mirroring the asymmetry
+  `removeDrilledTechnique` already documents in the other direction: once a
+  session has evidence the technique was drilled, undoing a tap shouldn't
+  erase that.
+- `evidenceNoteOf` now explains the one case it used to return `null` for
+  unconditionally: a drilled-only item with live evidence but still zero
+  drilled evidence (covers sessions logged before this fix synced, and is a
+  cheap second line of defence against any path that bypasses the backfill).
+  The note's wording was corrected during review from "Landed live evidence
+  for this…" to "You have live evidence for this…" — the branch fires from
+  `scored`, `attempts` or `defended` alone, and "Landed" specifically names
+  only `scored`, so the original wording was wrong for an item worked
+  entirely through Missed (attempts) or Stopped-theirs (defended).
+
+### 3. Jagged two-column grid on Log BJJ's "Everything else" step
+
+The `LIVE_ROWS` row label (`app/bjj/reflect/[id].tsx`) had no `flex`, so each
+label ("Submissions" vs "Passes") took its own intrinsic text width, leaving
+a different amount of free space per row for the two `flex: 1` counters — the
+columns drifted row to row, and didn't line up under the fixed `flex: 1.1`
+`gridHeadSpacer` header either. The sibling "Working on & drilled today" grid
+above it already used `gridLabelCol` (`flex: 1.1`) correctly. Fix: wrapped
+the live-rows label in the same `gridLabelCol`, with `numberOfLines={2}` for
+parity — one column grid now shared by both grids and the header row.
+
+### Verification
+
+`pnpm run verify` — full chain green, including new/updated unit coverage:
+`bjjFunnel.test.ts` gained a `backfills a drilled tag (N206)` block
+(mutation-shaped: first bump adds the tag, a second bump doesn't duplicate
+it, a pre-existing drilled tag isn't duplicated, a decrement never backfills)
+and updated its "clamps a decrement at zero" test to assert the backfilled
+tag survives the decrement rather than the row list going empty.
+`roadmapView.test.ts` gained the live-evidence-only explanation case and its
+silent counterpart (zero evidence of any kind). No device pass — this is a
+data/logic and layout fix, not a criterion this project routes through
+`NEEDS HUMAN EVIDENCE`.
+
+**Mutation-tested during review, and two real coverage gaps closed as a
+result**, both in `bumpTechniqueOutcome`'s backfill guard:
+- The `delta > 0` check was only exercised on the `i === -1` (new-row) path —
+  the existing "never backfills on a decrement" test returns early on that
+  branch before the guard is ever reached, so a `delta > 0` check dropped
+  entirely from the `else` (existing-row) branch survived every existing
+  test. Added a decrement-of-an-existing-row case that reaches the guard
+  directly.
+- The dedup check (`!next.some(t => t.technique_id === techniqueID && t.event
+  === 'drilled')`) was only ever exercised with either zero drilled tags in
+  the array or the SAME technique's own drilled tag — nothing distinguished
+  "matches this technique" from "any drilled tag exists in the session."
+  Added a case where a different technique (armbar) already has a drilled
+  tag and confirms the backfill for the technique under test still fires.
+
+Same exercise on `evidenceNoteOf` found two more: the `p.drilled_sessions >
+0` early-return and the three-way `scored`/`attempts`/`defended` OR each
+individually survived a mutation with no test catching it (existing coverage
+only exercised drilled-alone and scored-triggered-evidence, never both
+guards together or the attempts-only branch). Added a case with both drilled
+AND live evidence present (expects `null`, since the measure above it already
+shows the number) and an attempts-only evidence case (the third of the three
+counters, previously untested).
+
+### What is not done
+
+- The auto-backfill only covers logging going forward. A session logged
+  before this fix synced still reads 0 drilled classes for a
+  live-evidence-only technique — `evidenceNoteOf`'s new branch explains that
+  case rather than retroactively fixing the count; nothing server-side
+  recomputes `drilled_sessions` from historical `scored`/`attempted`/
+  `defended` tags.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

@@ -354,6 +354,82 @@ describe('what would count — the drilled-against-a-live-criterion explanation'
     expect(evidenceNoteOf(item, true)).toBeNull();
   });
 
+  it('explains a drilled-only item worked purely through live evidence (N206)', () => {
+    // The bug this covers: a focus technique whose only criterion is
+    // `target_drilled_sessions` (a breakfall) is worked exclusively through
+    // the live Missed/Landed/Stopped-theirs counters — the drilled-step
+    // picker is a separate, slower control nobody has a reason to reach for.
+    // Before N206's backfill in `bumpTechniqueOutcome`, that left
+    // `drilled_sessions` at 0 forever, with a bare unexplained "0/6" — this is
+    // the one case `measuresOf` alone cannot make legible.
+    const item = technique(
+      'breakfall',
+      0,
+      { target_drilled_sessions: 6 },
+      { drilled_sessions: 0, scored: 5 },
+    );
+    expect(evidenceNoteOf(item, true)).toBe(
+      'You have live evidence for this, but it counts classes drilled — log it on "What did you drill?" to move it.',
+    );
+  });
+
+  it('also fires from defended-only evidence, not just scored', () => {
+    // The note's wording is generic ("live evidence"), not "Landed…" — it
+    // has to be true whichever of scored/attempts/defended is what actually
+    // moved, and "Stopped theirs" (defended) is a live counter too.
+    const item = technique(
+      'breakfall',
+      0,
+      { target_drilled_sessions: 6 },
+      { drilled_sessions: 0, defended: 3 },
+    );
+    expect(evidenceNoteOf(item, true)).toBe(
+      'You have live evidence for this, but it counts classes drilled — log it on "What did you drill?" to move it.',
+    );
+  });
+
+  it('also fires from attempts-only evidence, not just scored or defended', () => {
+    // The third of the three live counters — every one of `scored`,
+    // `attempts` and `defended` has to independently keep the guard from
+    // returning null, or a Missed-only session (attempted but never landed
+    // or got stopped) would silently go back to the pre-N206 bare "0/6".
+    const item = technique(
+      'breakfall',
+      0,
+      { target_drilled_sessions: 6 },
+      { drilled_sessions: 0, attempts: 2 },
+    );
+    expect(evidenceNoteOf(item, true)).toBe(
+      'You have live evidence for this, but it counts classes drilled — log it on "What did you drill?" to move it.',
+    );
+  });
+
+  it('does not invent the N206 explanation with no evidence of any kind', () => {
+    const item = technique(
+      'breakfall',
+      0,
+      { target_drilled_sessions: 6 },
+      { drilled_sessions: 0, scored: 0, attempts: 0, defended: 0 },
+    );
+    expect(evidenceNoteOf(item, true)).toBeNull();
+  });
+
+  it('does not contradict the measure once drilled evidence exists too, even alongside live evidence (N206)', () => {
+    // Not just "drilled_sessions > 0 alone" (the earlier test above covers
+    // that) — this is the case N206's fix could have broken: an item with
+    // BOTH some drilled evidence AND live evidence. `measuresOf` already
+    // draws "Classes drilled in 2 / 6" for this one; the live-evidence
+    // explanation firing anyway would contradict the number directly above
+    // it, which is exactly what the branch order exists to prevent.
+    const item = technique(
+      'breakfall',
+      0,
+      { target_drilled_sessions: 6 },
+      { drilled_sessions: 2, scored: 5 },
+    );
+    expect(evidenceNoteOf(item, true)).toBeNull();
+  });
+
   it('stays silent with no drilled evidence — there is no shortfall to invent', () => {
     const item = technique('armbar', 0, { target_scored: 12 }, { drilled_sessions: 0 });
     expect(evidenceNoteOf(item, true)).toBeNull();

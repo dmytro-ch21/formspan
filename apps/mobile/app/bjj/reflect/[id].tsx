@@ -1076,7 +1076,19 @@ function LiveStep({
 
       {LIVE_ROWS.map((r) => (
         <RNView key={r.category} style={styles.gridRow}>
-          <Text style={styles.gridLabel}>{r.label}</Text>
+          {/*
+            Same `gridLabelCol` (flex: 1.1) the "Working on & drilled today"
+            grid above uses, and the same column the `gridHeadSpacer` header
+            row reserves — a bare, unflexed label here sized to its own text
+            ("Submissions" vs "Passes"), leaving a different amount of room for
+            the two counters on every row, so the columns drifted row to row.
+            (N206)
+          */}
+          <RNView style={styles.gridLabelCol}>
+            <Text style={styles.gridLabel} numberOfLines={2}>
+              {r.label}
+            </Text>
+          </RNView>
           <Counter
             value={tagCount(detail.tags, r.category, 'scored', position)}
             label={r.scored}

@@ -264,17 +264,28 @@ function whatWouldCount(c: NonNullable<CurriculumItem['criteria']>): string {
  *  - not enrolled — nothing is being counted at all, which the screen says
  *    once at the top rather than 93 times;
  *  - no criteria — a concept, and a concept is not a measurable that failed;
- *  - a drilled criterion — drilling counts here and `measuresOf` already draws
- *    it as "Classes drilled in", so an explanation would contradict the number
- *    directly above it;
- *  - no drilled evidence — there is nothing the athlete did that we are
- *    failing to show, and inventing a shortfall is what `have: null` exists to
- *    avoid.
+ *  - a drilled criterion WITH some drilled evidence — drilling counts here
+ *    and `measuresOf` already draws it as "Classes drilled in", so an
+ *    explanation would contradict the number directly above it;
+ *  - no drilled evidence AND no live evidence either — there is nothing the
+ *    athlete did that we are failing to show, and inventing a shortfall is
+ *    what `have: null` exists to avoid.
  *
  * Note it is deliberately reported even when live evidence EXISTS. "Landed
  * live 2 / 12, drilled in 9 classes" is the athlete's real position, and
  * hiding the drilling once a single round has happened would make the note
  * flicker away at the moment it starts being encouraging.
+ *
+ * ## The drilled-criterion / live-only case (N206)
+ *
+ * A drilled criterion with ZERO drilled evidence but non-zero live evidence
+ * (`scored`/`attempts`/`defended`) is not "nothing to reconcile" — it is the
+ * one case this function most needs to cover. `bumpTechniqueOutcome` now
+ * backfills a `drilled` tag itself, so this should be rare going forward, but
+ * it still applies to sessions logged before that fix synced, and it is a
+ * cheap second line of defence if another path ever bypasses the backfill.
+ * Without it, the athlete sees a bare "0/6" beside a class they know they
+ * logged, with nothing explaining why.
  */
 export function evidenceNoteOf(item: CurriculumItem, enrolled: boolean): string | null {
   const c = item.criteria;
@@ -286,7 +297,11 @@ export function evidenceNoteOf(item: CurriculumItem, enrolled: boolean): string 
   // a concept is never explained; this is that promise being kept in code
   // rather than borrowed from a constraint in another file.
   if (!enrolled || item.kind === 'concept' || c === null || p == null) return null;
-  if (c.target_drilled_sessions !== null) return null;
+  if (c.target_drilled_sessions !== null) {
+    if (p.drilled_sessions > 0) return null;
+    if (p.scored <= 0 && p.attempts <= 0 && p.defended <= 0) return null;
+    return 'You have live evidence for this, but it counts classes drilled — log it on "What did you drill?" to move it.';
+  }
   if (p.drilled_sessions <= 0) return null;
   const classes = p.drilled_sessions === 1 ? '1 class' : `${p.drilled_sessions} classes`;
   return `Drilled in ${classes}. Drilling is not counted here — to move this one, ${whatWouldCount(c)}.`;

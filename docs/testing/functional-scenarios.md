@@ -13117,3 +13117,64 @@ on screen. That, and only that, is what moved.
 
 - No change to authorization on `GET /v1/feed` — this ticket only adds a
   field to an already-authenticated response.
+
+## N206 — Progress's duplicate "THIS WEEK" header, a BJJ drilled-milestone that never moved, and a jagged Log BJJ grid (`apps/mobile/app/(tabs)/progress.tsx`, `apps/mobile/components/WeekReview.tsx`, `apps/mobile/app/bjj/reflect/[id].tsx`, `apps/mobile/lib/bjjSession.ts`, `apps/mobile/lib/roadmapView.ts`)
+
+### Happy path
+
+- On the Progress tab, confirm the string "THIS WEEK" (or its rendered
+  "This week" section label) appears exactly once above the week summary
+  card — not once from the screen's own section header and again from
+  `WeekReview`'s internal label.
+- Confirm the `{met}/{planned} planned` pill still renders, right-aligned in
+  the card's head row, whenever `review.planned > 0`; confirm the row is
+  simply absent (no empty head row) when `planned` is 0.
+- Start a BJJ session, add a focus technique whose roadmap milestone's only
+  criterion is "classes drilled" (a fundamental like a breakfall), and work
+  it purely through the live Missed/Landed/Stopped-theirs counters on Step 2
+  — never touching the separate "What did you drill?" picker. Finish the
+  session and confirm the roadmap's "classes drilled in X/Y" count for that
+  technique increments by one class.
+- Repeat the live counters several more times for the same technique in the
+  same session (tap Landed five times, say); confirm the drilled count still
+  moved by exactly one class for the session, not five.
+- Work the same technique's live counters again in a **second** session;
+  confirm the drilled count increments by one more (two total), matching
+  "one class per session" rather than freezing after the first backfill ever
+  written.
+- On the roadmap/progress screen, view a drilled-only item that has live
+  evidence (any of Missed/Landed/Stopped-theirs) but the drilled count is
+  still 0 (e.g. a session logged before this fix synced) — confirm an
+  explanatory note appears ("You have live evidence for this, but it counts
+  classes drilled…") instead of a bare, unexplained "0/Y".
+- On Log BJJ's "Everything else" (Step 2) grid, confirm all five rows' two
+  counters line up into one consistent column under the header, regardless
+  of how long each row's label text is ("Submissions" vs "Passes" vs
+  "Sweeps", etc.).
+
+### Edge cases and errors
+
+- A drilled-only item with live evidence in one of the three counters only
+  (scored-only, attempts-only, or defended-only) each independently produce
+  the explanatory note — not just the "Landed" case.
+- A drilled-only item with **zero** evidence of any kind (never touched)
+  shows no note at all — nothing invented.
+- A drilled-only item that already has real drilled evidence (`drilled_sessions
+  > 0`) shows no live-evidence note even if live counters also have evidence
+  — the "Classes drilled in N / Y" measure above it is the single source of
+  truth and the note must not contradict it.
+- Taking a live counter back to zero (undo a mis-tap) does **not** remove the
+  backfilled drilled tag for that session — the drilled count stays at
+  whatever it reached, consistent with `removeDrilledTechnique`'s existing
+  asymmetry in the other direction.
+- A different technique in the same session already having a drilled tag
+  (from the picker, or from its own backfill) does not suppress the backfill
+  for this technique — the dedup is per technique, not "does the session have
+  any drilled tag at all."
+
+### Auth / security
+
+- No change to authorization on any endpoint — this ticket is pure client
+  presentation logic (WeekReview/grid layout) and pure client-side derived
+  data (the tag backfill happens in the same offline-first activity payload
+  the session already writes, no new endpoint or permission surface).
