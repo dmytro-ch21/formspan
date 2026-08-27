@@ -44982,6 +44982,120 @@ that judgment turns out wrong in practice (an athlete building a 40-item
 syllabus one-handed, say), that is its own ticket rather than a reason to
 reopen this one.
 
+## 2026-08-27 — N82: weekly training themes, authored on the phone (#677)
+
+Closed the phone-impossible audit's row 7 — setting a week's theme (the
+one-sentence "what is this week for", `PUT /v1/themes/{weekStart}`) was
+`/dashboard/calendar`'s `setTheme` and nothing else. `apps/mobile/lib/themes.ts`
+said so in its own doc comment: *"read-only on the phone… no write path here on
+purpose."* Same family as N83/N84/N85 this session — a phone-impossible-audit
+row closed on the exclusivity, not the design.
+
+**What was built.** `setTheme` and `deleteTheme` in `apps/mobile/lib/themes.ts`,
+calling the exact `PUT`/`DELETE /v1/themes/{weekStart}` web's `api.ts` already
+uses — no backend or contract change, since the endpoint already existed for
+the web client. The write affordance lives in `WeekThemeRow`, a new component
+in `apps/mobile/components/WeekPlanner.tsx` rendered from the Plan tab's
+week-authoring header: a row under the week switcher shows the shown week's
+theme, or a "+ Theme" placeholder, tappable either way into a one-field editor
+(`SelectAllTextInput`, so tapping an existing title selects it rather than
+appending — the same fix `bjj/session/[id].tsx`'s rename already needed) with
+Save and Cancel.
+
+**`WeekThemeRow` is mounted with `key={weekStartKey}`, and that key carries
+real weight, not just habit.** Its own `theme`/`editing`/`draft` state has to
+reset the moment the shown week changes — an edit left open across a
+week-arrow tap must not save the old week's half-typed title onto the new
+one — and the first draft of this did that with a `useEffect` that called
+`setThemeEditing(false)`/`setThemeDraft('')` on a `weekStartKey` dependency.
+That tripped `react-hooks/set-state-in-effect`, and the file was already
+sitting exactly at the repo's 50-warning lint ceiling (`eslint . 
+--max-warnings=50`) — the pre-existing `refresh()` call two effects down
+already spends one of the 50 on the identical pattern. Remounting via `key`
+instead throws the old instance's state away for free, so there is no effect
+calling `setState` in response to a prop for the rule to catch, and the
+network read that DOES stay in an effect (fetch-on-mount/focus/sync) keeps
+its `setState` inside a promise `.then` rather than as a bare statement,
+matching the shape `app/(tabs)/index.tsx`'s identical read already uses
+unflagged. Net new lint warnings: zero.
+
+**This is full parity, not a reduction, on the field itself.** Web's own
+`ThemeRow` edits only `title` too — its `setTheme` call always sends
+`notes: ""` — so there was nothing narrower to build; mobile's editor matches
+it exactly, including the same clear-to-delete behaviour (`title === ''` on
+save deletes an existing theme rather than writing a blank one, and costs no
+request at all when there was no theme to begin with). **The one real
+reduction is scope**: mobile shows and edits one week at a time, navigated
+with `WeekPlanner`'s existing arrows and month-jump, where web's calendar
+shows a theme row on every week of the visible month simultaneously. That
+follows directly from `WeekPlanner` already being a one-week-at-a-time
+surface for planning sessions — adding a second, wider-scoped theme editor
+elsewhere would have been a second navigation model for the same fact, which
+is the W2/W4 shape this session keeps naming and avoiding.
+
+**Why Plan and not Today.** Today already reads this week's theme (network-only,
+deliberately not cached — a stale theme is worse than none, since it would
+describe a block the athlete has already moved past) and stays read-only: it
+is a decision-support surface, not an authoring one, throughout the app. Plan
+(`WeekPlanner`) is where the athlete already decides what a week holds — it is
+the one screen that already navigates a week at a time with Save/Cancel-style
+affordances nearby — so the theme editor belongs beside the sessions it labels
+rather than on the read surface.
+
+**Guards mutation-tested.** `cleanThemeTitle`'s `.trim()`, the
+`title === '' ? delete : set` branch, the `if (theme)` guard that skips a
+delete request when there was nothing to delete, and the `key={weekStartKey}`
+that resets `WeekThemeRow` on navigation — all four mutated and reverted
+(the last by literally deleting the `key` prop); all four caught by
+`apps/mobile/app/__tests__/weekPlanner.test.tsx` and
+`apps/mobile/lib/__tests__/themes.test.ts`. The `key` is the one worth
+naming: without it, navigating away from an in-progress edit would silently
+carry the old week's half-typed title into a Save on the new one, which no
+visual check would catch — the input just looks empty again on the week you
+navigated to, because it is a different mounted instance with its own blank
+`draft` state, and the mutation test is what proved that isn't accidental.
+
+**`components/__tests__/keyboardCoverage.test.ts` went red the moment
+`WeekPlanner.tsx` gained its first `<SelectAllTextInput>`, on a file that had
+nothing to do with the theme editor.** The suite scans by FILE, not by input:
+any `.tsx` containing `<TextInput`/`<SelectAllTextInput` must both import the
+shared `KeyboardAwareScroll` module and contain no bare vertical
+`ScrollView`/`FlatList`/etc. `WeekPlanner.tsx` had carried a bare `<ScrollView>`
+for its month-jump sheet (day buttons only, no text field) since long before
+this ticket, invisible to the check because the file held no input at all —
+adding one anywhere in the file swept that unrelated scroller in too. Fixed
+with the `keyboard-container: provided by parent` opt-out
+(`SelectAllTextInput.tsx`'s own escape hatch), because it is true here in the
+way the hatch requires: `WeekPlanner` is rendered exactly once in production,
+as `app/(tabs)/workouts.tsx`'s `KeyboardAwareFlatList` header, which already
+carries the new field above the keyboard. Worth naming because it is the kind
+of failure `keyboardCoverage.test.ts`'s own doc comment predicts happening to
+someone — "add a `TextInput` to a screen that scrolls with a bare
+`ScrollView`/`FlatList` and this goes red, naming the file" — and it did,
+on the first PR to actually do that to this file.
+
+**Doc correction.** `functional-scenarios.md`'s "Mobile (read-only)" section
+said *"There is no way to author one on the phone, deliberately"* — replaced
+with the actual read-and-author scenarios, including the delete-on-clear and
+draft-drop-on-navigate cases above. `apps/mobile/lib/themes.ts`'s own
+"no write path here on purpose" comment is corrected in place. The web
+calendar's `ThemeRow` comment ("Authored here rather than on the phone, per
+the platform rule") and Today's theme-card comment ("Read-only here — themes
+are authored on web") are both corrected to point at `WeekPlanner` rather than
+claim an exclusivity that no longer holds. `system-design.md` was checked and
+carries no theme-specific exclusivity claim — only the general "nothing a
+user needs weekly may be desktop-only" rule the issue already cited, which
+this closes rather than contradicts.
+
+**NEEDS HUMAN EVIDENCE, per #416's own criterion**: exercised on a real
+device, with the web app closed.
+
+Open gap this leaves: mobile has no month-wide view of themes at all (only the
+shown week's), so an athlete auditing several weeks of themes at once still
+needs web — judged an acceptable reduction per the discussion above, not a
+corner-cut, since the mobile-first rule's test is "can the athlete decide and
+act on the phone", not "can they browse a month of history on it".
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

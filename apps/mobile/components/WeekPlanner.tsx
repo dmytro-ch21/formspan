@@ -12,6 +12,7 @@ import {
 
 import { request as requestSync, useSyncState } from '@/lib/sync';
 
+import { SelectAllTextInput } from '@/components/SelectAllTextInput';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
@@ -36,6 +37,15 @@ import {
   type PlannedSession,
 } from '@/lib/plan';
 import { cachedWorkouts } from '@/lib/sessionStore';
+import {
+  cleanThemeTitle,
+  deleteTheme,
+  fetchThemes,
+  MAX_THEME_TITLE,
+  setTheme,
+  type Theme,
+} from '@/lib/themes';
+import { useAuthToken, type TokenGetter } from '@/lib/useAuthToken';
 
 /**
  * The workout a planned row opens, or null when it opens nothing.
@@ -106,6 +116,7 @@ export function WeekPlanner({
 }) {
   const accent = useAccent();
   const router = useRouter();
+  const getToken = useAuthToken();
   const [now, setNow] = useState(() => new Date());
   const [plans, setPlans] = useState<PlannedSession[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -136,6 +147,7 @@ export function WeekPlanner({
   const days = useMemo(() => weekDays(anchor), [anchor]);
   const todayKey = dayString(now);
   const isCurrentWeek = days.some((d) => dayString(d) === todayKey);
+  const weekStartKey = dayString(days[0]);
 
   // Bumped on every anchor change, and captured by each read. A read that
   // resolves after the week moved is dropped rather than rendered.
@@ -353,6 +365,30 @@ export function WeekPlanner({
           month: 'long',
         })}. Open the month to jump to another week.`}
         testID="plan-week"
+      />
+
+      {/*
+        The week's theme — one sentence about what this week is FOR, editable
+        here rather than only read on Today (N82). Full parity with web's own
+        `ThemeRow`, not a reduction: web edits only `title` too, so there is
+        nothing narrower to build.
+
+        **Keyed on the week's Monday, deliberately.** `WeekThemeRow` owns its
+        own `theme`/`editing`/`draft` state, and re-mounting it — rather than
+        an effect that resets that state on a prop change — is what closes an
+        open edit and drops its draft the moment the shown week changes: React
+        throws the old instance's state away for free on a `key` change, so
+        there is no `useEffect` calling `setState` directly in this file for
+        `react-hooks/set-state-in-effect` to catch, and no way for a half-typed
+        theme to survive onto the next week by accident.
+      */}
+      <WeekThemeRow
+        key={weekStartKey}
+        weekStart={weekStartKey}
+        getToken={getToken}
+        reloadAt={reloadAt}
+        lastSyncAt={lastSyncAt}
+        accentInk={accent.ink}
       />
 
       {/*
@@ -719,10 +755,239 @@ export function WeekPlanner({
   );
 }
 
+/**
+ * One week's theme, as a row above the strip — N82.
+ *
+ * `WeekPlanner` renders this with `key={weekStartKey}`, and that key is the
+ * whole mechanism: this component's own `theme`/`editing`/`draft` state is
+ * thrown away and rebuilt from scratch whenever the shown week changes, so
+ * there is nothing here that resets state in a `useEffect` in response to a
+ * prop — which is what would otherwise trip
+ * `react-hooks/set-state-in-effect` for exactly the reason its docs give
+ * (derive or reset via `key`, not via an effect that mirrors a prop into
+ * state). The read effect below is the one exception, and it avoids the same
+ * rule the way `app/(tabs)/index.tsx`'s identical read does: the `setState`
+ * call sits inside a promise `.then`, not as a bare statement in the effect
+ * body, which is the shape the rule treats as "subscribe to an external
+ * system, `setState` in the callback" rather than as a synchronous effect
+ * side-effect.
+ *
+ * **Network-only, deliberately not cached**, matching Today's read of the
+ * same value: a theme is one short string that changes weekly, so a stale one
+ * read offline is worse than none — it would claim a block the athlete has
+ * already moved past.
+ *
+ * Full parity with web's own `ThemeRow`, not a reduction: web edits only
+ * `title` too (its own `setTheme` call always sends `notes: ""`), so there is
+ * nothing narrower to build. Three states, matching `ThemeRow`: editing (a
+ * text field plus Save/Cancel), set-but-not-editing (the title, tappable to
+ * edit), and unset-and-not-editing (a "+ Theme" affordance, always visible
+ * here — unlike web's hover-only reveal, which has no equivalent on a touch
+ * screen with nothing to hover).
+ *
+ * keyboard-container: provided by parent — `WeekPlanner` (this row's only
+ * caller) is itself rendered exactly once in production, as the
+ * `ListHeaderComponent` of `app/(tabs)/workouts.tsx`'s
+ * `KeyboardAwareFlatList`, which already carries this file's input above the
+ * keyboard. `WeekPlanner.tsx` also contains the month-jump sheet's bare
+ * `<ScrollView>`, unrelated to this input (it holds day buttons, no text
+ * field) and pre-dating this component — it only entered
+ * `keyboardCoverage.test.ts`'s scan the moment this file gained a
+ * `<SelectAllTextInput>` to trigger it, per that file's own `INPUT_TAGS`
+ * comment on `SelectAllTextInput` counting as an input in its own right.
+ */
+export function WeekThemeRow({
+  weekStart,
+  getToken,
+  reloadAt,
+  lastSyncAt,
+  accentInk,
+}: {
+  weekStart: string;
+  getToken: TokenGetter;
+  reloadAt: number;
+  lastSyncAt: number | null;
+  accentInk: string;
+}) {
+  const [theme, setWeekTheme] = useState<Theme | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Whether a read has ever SUCCEEDED for this mounted instance — a "no theme
+  // this week" answer counts, `false` (the never-loaded default) does not.
+  // Ref, not state: flipping it must never itself trigger a render.
+  const loadedOnce = useRef(false);
+
+  // Reads on mount, on focus (`reloadAt`) and whenever a sync finishes
+  // (`lastSyncAt`) — a theme set on web while the app was backgrounded should
+  // not wait for a manual pull. `weekStart` is IN the dependency array (it
+  // has to be, for the closure inside `.then`/`.catch` to read the right
+  // value) but is inert in practice: this component is remounted by its
+  // `key` whenever the shown week changes, so by the time this effect could
+  // see a new `weekStart` the whole instance — and this ref — is already gone.
+  useEffect(() => {
+    let live = true;
+    fetchThemes(getToken, { from: weekStart, to: weekStart })
+      .then((ts) => {
+        if (!live) return;
+        loadedOnce.current = true;
+        setWeekTheme(ts[0] ?? null);
+      })
+      .catch(() => {
+        // Offline, or the endpoint is unreachable. On the FIRST read for this
+        // week this degrades honestly to "no theme", matching Today's
+        // identical read. On a background refetch (`reloadAt`/`lastSyncAt`
+        // firing while a theme is already correctly on screen) it must NOT
+        // stomp what is already shown — a transient failure on refocus would
+        // otherwise flash "+ Theme" for a week that has one, and tapping that
+        // opens a blank draft that could overwrite the real title on save.
+        if (live && !loadedOnce.current) setWeekTheme(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [getToken, weekStart, reloadAt, lastSyncAt]);
+
+  async function save() {
+    // A fast double-tap, or a keyboard-submit landing on top of a tap: Save's
+    // own `disabled={busy}` does not gate `onSubmitEditing`, so this is the
+    // one guard against two overlapping requests for the same edit.
+    if (busy) return;
+    const title = cleanThemeTitle(draft);
+    setBusy(true);
+    try {
+      if (title === '') {
+        // Clearing the box removes the theme, matching web: a week with an
+        // empty title is not a state the model has. Skipped entirely when
+        // there was nothing to remove, so an empty save on a themeless week
+        // costs no request.
+        if (theme) {
+          await deleteTheme(getToken, weekStart);
+          setWeekTheme(null);
+        }
+      } else {
+        // `setTheme` returns the saved row, so the display updates from the
+        // server's own value (its `updated_at`, in particular) rather than
+        // needing a second round trip to read back what was just written.
+        setWeekTheme(await setTheme(getToken, weekStart, { title }));
+      }
+      setEditing(false);
+    } catch (err) {
+      Alert.alert("Couldn't save that theme", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // A human-readable date for VoiceOver, matching how every other date-bearing
+  // accessibility label in this file reads (`Plan ${weekday}, ${day} ${month}`
+  // above) — the raw `YYYY-MM-DD` in `weekStart` is fine as a wire value and
+  // wrong to speak aloud digit group by digit group.
+  const weekLabel = new Date(`${weekStart}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+
+  if (editing) {
+    return (
+      <RNView style={styles.themeEditRow} testID="plan-theme-edit">
+        <SelectAllTextInput
+          value={draft}
+          onChangeText={setDraft}
+          autoFocus
+          style={styles.themeInput}
+          placeholder="What is this week for?"
+          placeholderTextColor={vola.textMuted}
+          maxLength={MAX_THEME_TITLE}
+          returnKeyType="done"
+          onSubmitEditing={save}
+          accessibilityLabel={`Theme for the week of ${weekLabel}`}
+          testID="plan-theme-input"
+        />
+        <Pressable
+          onPress={save}
+          disabled={busy}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy, busy }}
+          // Fixed, rather than left to the text child: the child reads "…"
+          // while `busy`, and without this VoiceOver would announce "ellipsis,
+          // button" mid-save instead of "Save, button, busy".
+          accessibilityLabel="Save"
+          testID="plan-theme-save"
+        >
+          <Text style={[styles.themeAction, { color: accentInk }, busy && styles.themeActionDisabled]}>
+            {busy ? '…' : 'Save'}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setEditing(false)}
+          disabled={busy}
+          hitSlop={10}
+          accessibilityRole="button"
+          testID="plan-theme-cancel"
+        >
+          <Text style={styles.themeCancel}>Cancel</Text>
+        </Pressable>
+      </RNView>
+    );
+  }
+
+  return (
+    <Pressable
+      onPress={() => {
+        setDraft(theme?.title ?? '');
+        setEditing(true);
+      }}
+      style={styles.themeRow}
+      accessibilityRole="button"
+      accessibilityLabel={
+        theme ? `Theme for this week: ${theme.title}. Edit.` : 'Set a theme for this week'
+      }
+      testID="plan-theme-open"
+    >
+      {theme ? (
+        <Text style={styles.themeSet} numberOfLines={1}>
+          {theme.title}
+        </Text>
+      ) : (
+        <Text style={styles.themeUnset}>+ Theme</Text>
+      )}
+      <Icon name="pencil" size={12} color={vola.textDim} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   wrap: { gap: 8 },
 
   down: { transform: [{ rotate: '90deg' }] },
+
+  themeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingVertical: 2,
+  },
+  themeSet: { fontSize: 13, fontWeight: '700', color: vola.lime, flexShrink: 1 },
+  themeUnset: { fontSize: 13, color: vola.textDim },
+  themeEditRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  themeInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    fontSize: 13,
+    color: vola.text,
+    backgroundColor: vola.surface,
+  },
+  themeAction: { fontSize: 13, fontWeight: '700' },
+  themeActionDisabled: { opacity: 0.5 },
+  themeCancel: { fontSize: 13, fontWeight: '600', color: vola.textDim },
 
   card: {
     backgroundColor: vola.surface,

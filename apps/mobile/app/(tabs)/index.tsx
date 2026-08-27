@@ -1336,8 +1336,13 @@ export default function TodayScreen() {
                 ) : null)}
 
               {/*
-                What this week is for, if the athlete said. Read-only here —
-                themes are authored on web. Absent when there is no theme: a
+                What this week is for, if the athlete said. Read-only HERE —
+                Today is a read surface throughout, and the theme fits that.
+                As of N82 it is no longer web-only, though: `WeekPlanner`
+                (the Plan tab, `components/WeekPlanner.tsx`) carries the
+                actual editor, tap-to-edit on the shown week's row, so the
+                capability itself is on the phone even though this particular
+                card is not where it is set. Absent when there is no theme: a
                 permanent "no theme set" row would be the app asking for
                 homework.
               */}

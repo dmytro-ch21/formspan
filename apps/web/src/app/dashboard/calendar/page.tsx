@@ -251,8 +251,12 @@ export default function CalendarPage() {
                 {/*
                   The week's theme, on the week's own row.
 
-                  Authored here rather than on the phone, per the platform rule:
-                  deciding what a block is FOR is a desk activity. Mobile reads
+                  Also authored on the phone as of N82 (`WeekPlanner` in
+                  `apps/mobile/components/WeekPlanner.tsx`, on the Plan tab) —
+                  the mobile-first rule superseded the old "desk activity only"
+                  reasoning on the exclusivity, not on the design. This is still
+                  the richer surface: a whole month of week rows at once, versus
+                  mobile's one navigable week at a time. Mobile also still reads
                   it on Today.
 
                   Prose only — no technique or exercise picker, deliberately.
