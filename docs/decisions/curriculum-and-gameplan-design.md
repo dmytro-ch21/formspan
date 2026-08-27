@@ -436,8 +436,24 @@ are a read over that endpoint's output**, not a new aggregation. It only needs
 
 Per the platform rule — mobile owns live logging, web owns authoring and
 analysis — the split is the brief's own instinct: **in on Plan, out on Today**,
-with roadmap *building* and the full funnel on web, and admin authoring the
-belt-level sets under `/content`'s existing rules.
+with admin authoring the belt-level sets under `/content`'s existing rules.
+
+**"Roadmap building on web" is corrected on the exclusivity by N83
+(`docs/decisions/history.md`).** This section originally put building
+exclusively on web — reasonably, at the time: picking a dozen techniques out
+of 542 and setting four numeric criteria each reads like a desk job. The
+mobile-first rule in `CLAUDE.md` (set 2026-08-19, after this document) makes
+that the wrong kind of exclusivity: web being **richer** at authoring is fine
+and expected — the two-pane builder with the catalog always visible stays the
+better tool for building a dozen-item syllabus from scratch — but web being
+the **only** way was a gap. `apps/mobile/lib/curriculum.ts`'s
+`createCurriculum`/`updateCurriculum`/`deleteCurriculum` and
+`apps/mobile/app/curriculum/{new,edit/[id],index}.tsx` are the reduced form: a
+single reorderable list (up/down buttons rather than drag-and-drop) instead of
+two panes, everything else — phases, concepts, all five completion-criteria
+fields, visibility, belt — unreduced. The design in this section (the
+`bjj_focus` bridge, the criteria semantics, the read-derived-never-stored
+completion rule) is unchanged; only which surface may build a roadmap changed.
 
 The one genuinely new piece of state is *which roadmap am I on and when did each
 technique complete* — small, and completion should be **stored** rather than

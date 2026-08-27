@@ -62,9 +62,12 @@ export function CurriculaStrip() {
 
   // VOLA content only — the belt syllabuses plus the foundations track
   // (Novice Fundamentals has no belt, deliberately, and filtering on belt
-  // alone made it invisible on the one platform a novice actually holds). An
-  // athlete's own curriculum still belongs on the web list where it can be
-  // edited; showing it here without an edit path would be a dead end.
+  // alone made it invisible on the one platform a novice actually holds).
+  // An athlete's own curriculum is deliberately NOT here — it has an edit
+  // path now, `/curriculum` (N83), and this is a strip of what to WORK, not
+  // where to manage what you have built. Putting a "mine" section on a
+  // strip that otherwise reads as VOLA content would also put it beside a
+  // pill it cannot draw, since `roadmapCurricula` filters on `official`.
   //
   // Order: what you are working leads; then foundations before the belts,
   // because it is the entry point and finishes first; then belts in rank

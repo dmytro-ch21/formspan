@@ -10,15 +10,22 @@ import type { TokenGetter } from './useAuthToken';
  * completion criteria is a ROADMAP. The distinction is per ITEM, so the same
  * curriculum can be part reading list and part roadmap.
  *
- * **What this app does and does not get.** The design doc puts roadmap
- * *building* on web — picking a dozen techniques out of 542 and setting four
- * numeric criteria each is a desk job — and everything else here: pick one,
- * see progress, put its techniques into focus. That last one is why this file
- * exists at all. The loop is roadmap → `bjj_focus` → one-tap chips in the
- * reflection wizard → tagged events → criteria, and three of those four steps
- * were already on the phone. Only "choose the focus" was web-only, so an
- * athlete who trains and logs entirely on their phone had to open a laptop to
- * advance their own roadmap.
+ * **What this app gets, and how that changed (N83).** The design doc used to
+ * put roadmap *building* on web exclusively — picking a dozen techniques out
+ * of 542 and setting four numeric criteria each read as a desk job. That is
+ * superseded on the exclusivity, not on the design: web's two-pane builder
+ * with the catalog always visible is still the richer way to do this, but an
+ * athlete who trains and logs entirely on their phone can now create, edit
+ * and delete their own curricula and roadmaps here too — reduced (a single
+ * ordered list with up/down buttons rather than drag-and-drop, one item
+ * expanded at a time rather than two panes) but not absent. See
+ * `createCurriculum`, `updateCurriculum`, `deleteCurriculum` below and
+ * `app/curriculum/new.tsx` / `app/curriculum/edit/[id].tsx`.
+ *
+ * Reading was already here before N83: pick one, see progress, put its
+ * techniques into focus. The loop is roadmap → `bjj_focus` → one-tap chips in
+ * the reflection wizard → tagged events → criteria — which is why this file
+ * existed at all before authoring joined it.
  *
  * `apps/web` has its own copy of these types, for the same reason
  * `lib/proficiency.ts` says: the two apps cannot import from each other and
@@ -246,6 +253,100 @@ export function archiveCurriculumEnrollment(
   id: string,
 ): Promise<void> {
   return apiRequest<void>(getToken, `/curricula/${encodeURIComponent(id)}/enrollment`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Authoring (N83). One item as the client SENDS it — flattened to match the
+ * column names, the library fields (`name`, `position`, `category`, `order`,
+ * `progress`) absent because those are the catalog's / the server's to fill
+ * in on read. Mirrors `apps/web`'s `CurriculumItemWrite`, for the reason every
+ * type in this file duplicates one there: the two apps cannot import from
+ * each other and there is no `packages/` yet.
+ */
+export type CurriculumItemWrite = {
+  /** Omitted means technique — what every write predating kinds sent. A
+   *  concept needs `title` and refuses `technique_id` and every criterion. */
+  kind?: 'technique' | 'concept';
+  technique_id?: string;
+  title?: string;
+  /** Index into the accompanying `phases` array, or null for unphased. */
+  phase?: number | null;
+  notes?: string;
+  target_scored?: number | null;
+  target_defended?: number | null;
+  target_sessions?: number | null;
+  min_hit_rate?: number | null;
+  target_drilled_sessions?: number | null;
+};
+
+export type CurriculumWrite = {
+  name?: string;
+  description?: string;
+  belt?: string | null;
+  /** Present for parity with the server's `CurriculumWrite` and with
+   *  `apps/web`'s copy of this type, but neither this app's builder nor
+   *  web's ever sends it: `track` is a VOLA-content grouping hint
+   *  ("belt"/"foundations"/"syllabus") an athlete's own curriculum has no
+   *  business claiming — see `lib/syllabuses.ts`'s `official` filtering for
+   *  why a stranger's `track: "belt"` would otherwise pose as VOLA content.
+   *  Inert on this path deliberately, not an oversight. */
+  track?: string | null;
+  visibility?: Visibility;
+  /** Only read when `items` is present — the two replace together, because an
+   *  item names its phase by index into this array. Sending phases without
+   *  items is a 400 (`ValidateContent`, `handler.go`). */
+  phases?: { title: string; description?: string }[];
+  /** Omit to leave the content — items AND phases — alone; `[]` empties it; a
+   *  list replaces it. Three distinct states, mirroring the server's
+   *  `*[]itemRequest` — collapsing the first two would make every metadata
+   *  edit (renaming, changing the belt) silently delete every item. */
+  items?: CurriculumItemWrite[];
+};
+
+export type Visibility = 'private' | 'public';
+
+/** The shipped defaults, mirrored from the Go module (and from
+ *  `apps/web`'s `CRITERIA_DEFAULTS`) so the builder can offer them without a
+ *  round trip. Changing one here does NOT change the rule — the server
+ *  decides — but they must not drift from either copy. */
+export const CRITERIA_DEFAULTS = {
+  target_scored: 25,
+  target_defended: 8,
+  target_sessions: 12,
+  min_hit_rate: 0.35,
+} as const;
+
+export function createCurriculum(
+  getToken: TokenGetter,
+  input: CurriculumWrite,
+): Promise<Curriculum> {
+  return apiRequest<Curriculum>(
+    getToken,
+    `/curricula?tz=${encodeURIComponent(localZone())}`,
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+}
+
+export function updateCurriculum(
+  getToken: TokenGetter,
+  id: string,
+  input: CurriculumWrite,
+): Promise<Curriculum> {
+  return apiRequest<Curriculum>(
+    getToken,
+    `/curricula/${encodeURIComponent(id)}?tz=${encodeURIComponent(localZone())}`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+}
+
+/** Permanent. Distinct from {@link archiveCurriculumEnrollment}, which puts
+ *  down a syllabus someone else may still own — this removes a curriculum
+ *  that is yours outright, and the server refuses it on anything else
+ *  (`claims.UserID` ownership check in `Delete`, `postgres.go`). */
+export function deleteCurriculum(getToken: TokenGetter, id: string): Promise<void> {
+  return apiRequest<void>(getToken, `/curricula/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
 }

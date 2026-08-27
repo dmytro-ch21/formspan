@@ -44906,6 +44906,82 @@ Full `pnpm run verify` — green.
   device, with the web app closed.
 
 
+## 2026-08-27 — N83: curriculum and roadmap authoring on the phone (#417)
+
+Closed the phone-impossible audit's row 8 — creating, editing and deleting an
+athlete's own curriculum (and, by extension, a roadmap: a curriculum whose
+items carry completion criteria) was `curricula/new` and `[id]/edit` on web
+only. Mobile's `lib/curriculum.ts` exported `getCurriculum`, `enroll` and
+`archive`, and nothing that wrote.
+
+**What was built.** `createCurriculum`, `updateCurriculum` and
+`deleteCurriculum` in `apps/mobile/lib/curriculum.ts`, mirroring
+`apps/web`'s `api.ts` write functions field-for-field (`CurriculumItemWrite`,
+`CurriculumWrite`, `CRITERIA_DEFAULTS`) — no backend change was needed, since
+`POST/PATCH/DELETE /v1/curricula` already existed for the web client. Three
+new mobile screens: `curriculum/new.tsx` (create), `curriculum/edit/[id].tsx`
+(edit, plus a `HoldToConfirm` delete), and `curriculum/index.tsx` ("My
+curricula" — the list the audit didn't call out directly but the capability
+needed anyway: an athlete's own curricula were previously reachable on the
+phone only by already knowing an id, from Today's working-roadmaps card or
+from a link opened on web). The existing belt-roadmap viewer,
+`curriculum/[id].tsx`, gained Edit and Delete entries in its overflow menu,
+gated on the same `editable` field web's detail page gates its own Edit link
+and Delete button on.
+
+**The reduced form, and why each reduction holds.** `CurriculumEditor`
+(`apps/mobile/components/curriculum/CurriculumEditor.tsx`) is one reorderable
+list rather than web's two-pane builder with the catalog permanently visible —
+there is no room for both on a phone width, so a technique is added through a
+full-screen picker (`TechniquePicker`) summoned and dismissed, the same shape
+`workout/[id].tsx`'s exercise picker and `food/recipe/[id].tsx`'s
+`IngredientPicker` already use for an identical problem. Reordering is
+up/down buttons rather than drag-and-drop, matching `workout/[id].tsx`'s
+`move(index, ±1)` — the one reduction CLAUDE.md's mobile-first rule names
+explicitly as acceptable, and the pattern this session has used everywhere
+reordering needs to work with a thumb.
+
+What is **not** reduced, on purpose: every field the web builder writes is
+here — all five completion-criteria numbers (`target_scored`,
+`target_defended`, `target_sessions`, `target_drilled_sessions`,
+`min_hit_rate`), phases (add/reorder/remove, with the same item-remapping
+`CurriculumBuilder.tsx`'s doc comment calls out as the place its own blocking
+findings lived), concepts, visibility and belt. A reduced authoring screen
+that could not produce, say, a defence-only roadmap step would not be a
+smaller version of the capability — it would be a different, incomplete one,
+which is exactly what the mobile-first rule forbids ("can an athlete with
+only a phone do this at all" — not "can they do most of it").
+
+**Pure logic pulled out and mutation-tested.** `apps/mobile/lib/curriculumDraft.ts`
+holds the phase/item remapping (`removePhaseAt`, `movePhase`, `moveAt`),
+validation (`validateDraft`) and the wire-shape transform (`draftToWrite`) —
+out of the component for the identical reason `curriculumRow.ts` is: none of
+it is reachable from a test that only renders the screen. Thirteen mutations
+applied against the real file and reverted; twelve caught, and the thirteenth
+originally planned (an off-by-one on `removePhaseAt`'s shift condition) turned
+out to be equivalent code — the equality case is already consumed by the
+branch above it — so the table in `lib/__tests__/curriculumDraft.test.ts`
+records what actually happened rather than what was assumed going in.
+
+**Doc correction.** `curriculum-and-gameplan-design.md` put "roadmap
+*building* and the full funnel on web" — reasonable when written, superseded
+by the 2026-08-19 mobile-first rule this document predates. Corrected on the
+exclusivity, not on the design: the `bjj_focus` bridge, the criteria
+semantics and the read-derived-never-stored completion rule are all
+unchanged; only which surface may build a roadmap changed. `system-design.md`
+and `bjj-tracking-design.md` were checked and carry no curriculum-authoring
+exclusivity claims to correct.
+
+**NEEDS HUMAN EVIDENCE, per #417's own criterion**: exercised on a real
+device, with the web app closed.
+
+Open gap this leaves: the reduced form has no drag-and-drop and no visible
+catalog beside the list — both are richer on web and both were judged
+acceptable reductions rather than corner-cuts, per the discussion above. If
+that judgment turns out wrong in practice (an athlete building a 40-item
+syllabus one-handed, say), that is its own ticket rather than a reason to
+reopen this one.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

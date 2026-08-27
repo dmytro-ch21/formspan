@@ -1044,6 +1044,23 @@ export default function LibraryScreen() {
                 Every position on one map, stacked by what it is worth.
               </Text>
             </Pressable>
+            {/* N83: build or correct your OWN curriculum, on the phone —
+                previously a desk-only job (`curriculum-and-gameplan-design.md`
+                put building exclusively on web). Reference material above and
+                below is VOLA's; this is the one row in the block that is
+                about what an athlete makes rather than what they read. */}
+            <Pressable
+              onPress={() => router.push('/curriculum')}
+              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+              accessibilityRole="button"
+              testID="library-my-curricula"
+            >
+              <Text style={styles.mapLinkTitle}>My curricula</Text>
+              <Text style={styles.mapLinkNote}>
+                Build or edit your own list — techniques, phases, and what
+                mastering each one takes.
+              </Text>
+            </Pressable>
             {/* Between the map and the positions on purpose. The map is the
                 shape of a round, a syllabus is what a belt owes you, and a
                 position is one place on it — widest first, narrowest last.

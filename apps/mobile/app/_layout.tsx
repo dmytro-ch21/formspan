@@ -317,6 +317,12 @@ function RootStack() {
             here like every other pushed route, so its back button reads
             "Library" rather than the filename. */}
         <Stack.Screen name="library" options={{ title: 'Library' }} />
+        {/* N83: build/edit a curriculum on the phone. Titled here for the
+            same reason `profile/edit` is — the file segment ("new",
+            "[id]") would otherwise be what the back button reads. */}
+        <Stack.Screen name="curriculum/index" options={{ title: 'My curricula' }} />
+        <Stack.Screen name="curriculum/new" options={{ title: 'New curriculum' }} />
+        <Stack.Screen name="curriculum/edit/[id]" options={{ title: 'Edit curriculum' }} />
         <Stack.Screen name="exercise/[id]" options={{ title: 'Exercise' }} />
         <Stack.Screen name="technique/[id]" options={{ title: 'Technique' }} />
         <Stack.Screen name="position/[id]" options={{ title: 'Position' }} />
