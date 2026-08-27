@@ -7583,6 +7583,68 @@ be wrong in a way a screenshot review would pass.
   absent from the card: it is zero on the LIST response, so "0 of 14" there
   would be a placeholder rendered as fact.
 
+### Building and correcting a curriculum on the phone (N83, `app/curriculum/{new,edit/[id],index}.tsx`)
+
+Reduced from web's two-pane `CurriculumBuilder` (a full-screen technique
+picker instead of a permanent catalog pane, up/down buttons instead of
+drag-and-drop) but not smaller in what it can produce — see
+`docs/decisions/history.md`'s N83 entry for why each reduction is judged
+acceptable rather than a corner-cut.
+
+Happy path:
+
+- **Create**: name, description, belt, visibility, add two techniques and a
+  concept, save. `POST /v1/curricula` carries every field, and the screen
+  lands on the new curriculum's roadmap viewer (`/curriculum/{id}`) — the
+  same destination web's builder pushes to.
+- **Edit**: open an existing curriculum's Edit (from its roadmap viewer's
+  overflow menu), change the name, add an item, save. `PATCH` carries the id
+  from the route, not from anything typed — verify a slow save cannot land
+  against the wrong curriculum by racing two edits open in two tabs (web has
+  this scenario already; the mobile equivalent is a save in flight while the
+  athlete backgrounds and reopens the app).
+- **Delete**: from the edit screen, hold to confirm; from the roadmap
+  viewer's overflow menu (editable curricula only), a two-step `Alert`
+  confirm. Both land on `/curriculum`, the "My curricula" list.
+
+Edge cases and errors:
+
+- **Save is disabled until a name is entered**, and typing one enables it —
+  assert the disabled STATE separately from pressing it, the way
+  `recipeScreen.test.tsx` does: a disabled `Pressable` never fires `onPress`,
+  so pressing a disabled button proves nothing about the guard behind it.
+- **An untitled concept blocks save and names the problem** — "Every concept
+  needs a title", not the server's generic 400. Same for an untitled phase.
+- **A technique already in the list shows disabled in the picker**, not a
+  second row in the curriculum after a second tap.
+- **Clearing "Land it" clears the hit rate with it** — the rate divides the
+  offensive attempt count, and leaving it behind produces the exact 400 the
+  server's `curriculum_items_hit_rate_needs_volume` constraint exists to
+  catch, with no field named in the client-side error.
+- **Removing a phase unphases its items rather than dropping them**, and every
+  later phase's items shift down one index — reorder two phases with items in
+  both and confirm the items followed. This is the class of bug
+  `CurriculumBuilder.tsx`'s own doc comment names as where its blocking
+  findings lived; `lib/curriculumDraft.ts`'s tests cover the arithmetic, this
+  is the same property from the screen.
+- **A curriculum that is not `editable`** (a belt syllabus, another athlete's
+  shared list) shows neither Edit nor Delete in the roadmap viewer's overflow
+  menu, and `/curriculum/edit/{id}` for one refuses to render an editor at
+  all rather than rendering one that 403s on save.
+- **Offline**: starting a create or edit with no network shows the load/save
+  error rather than a blank or silently-discarded form. Unlike workout and
+  session editing, curriculum authoring is NOT local-first (`lib/curriculum.ts`
+  is network-only, matching every other write in this module) — worth
+  device-checking that the error is legible rather than a generic failure.
+
+Auth / security:
+
+- **`PATCH`/`DELETE` on a curriculum you do not own is a 403 from the server**
+  regardless of what the client renders — the `editable` gate above is a UX
+  courtesy, not the authorization boundary. Attempt one against another
+  athlete's id directly (bypassing the UI) and confirm the server, not the
+  client, is what refuses it.
+
 ### The roadmap → focus bridge
 
 The loop this feature rests on: roadmap → `bjj_focus` → one-tap chips in the

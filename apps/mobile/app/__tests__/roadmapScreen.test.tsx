@@ -1,4 +1,5 @@
 import {
+  act,
   configure,
   fireEvent,
   render,
@@ -6,7 +7,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 
 import CurriculumScreen from '../curriculum/[id]';
 import type { Curriculum, CurriculumItem } from '@/lib/curriculum';
@@ -71,11 +72,13 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 const mockGetCurriculum = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve(null));
+const mockDeleteCurriculum = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve());
 jest.mock('@/lib/curriculum', () => ({
   ...jest.requireActual('@/lib/curriculum'),
   getCurriculum: (...a: unknown[]) => mockGetCurriculum(...a),
   enrollInCurriculum: jest.fn(() => Promise.resolve()),
   archiveCurriculumEnrollment: jest.fn(() => Promise.resolve()),
+  deleteCurriculum: (...a: unknown[]) => mockDeleteCurriculum(...a),
 }));
 
 const mockSetFocus = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve());
@@ -616,5 +619,93 @@ describe('a session logged while the roadmap is open', () => {
     // explanation exists to keep — the screen says what would count precisely
     // because it may not offer a way to declare it done.
     expect(screen.queryByTestId('roadmap-complete-scissor-sweep')).toBeNull();
+  });
+});
+
+/**
+ * N83 — Edit and Delete, added to the same overflow menu enrolment already
+ * used. Gated on `editable`, exactly like `apps/web`'s detail page gates its
+ * Edit link and Delete button — `WHITE` (the fixture every other describe
+ * block in this file uses) is `editable: false`, a belt syllabus, and stays
+ * that way here: these tests are what pin that a syllabus's menu does NOT
+ * grow the two new options, alongside a second fixture that does.
+ *
+ * `Alert.alert` has no RNTL query of its own, so this reads its call args
+ * directly — the options array IS the menu, and pressing a row is calling
+ * that option's `onPress`. The one thing this file cannot see is the
+ * PLATFORM alert actually rendering; that is `Alert`'s own contract, not this
+ * screen's.
+ */
+describe('the overflow menu: Edit and Delete (N83)', () => {
+  const MINE: Curriculum = { ...WHITE, editable: true, official: false, track: null, belt: null };
+
+  function pressMenuAndGetOptions(): { text: string; style?: string; onPress?: () => void }[] {
+    fireEvent.press(screen.getByTestId('roadmap-menu'));
+    const call = jest.mocked(Alert.alert).mock.calls.at(-1);
+    if (!call) throw new Error('Alert.alert was not called');
+    return call[2] as { text: string; style?: string; onPress?: () => void }[];
+  }
+
+  beforeEach(() => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  });
+
+  it('offers neither option on a curriculum that is not editable', async () => {
+    mockGetCurriculum.mockResolvedValue(WHITE);
+    await open();
+    const options = pressMenuAndGetOptions();
+    expect(options.map((o) => o.text)).not.toContain('Edit');
+    expect(options.map((o) => o.text)).not.toContain('Delete curriculum');
+  });
+
+  it('offers Edit on one that is, and it pushes the N83 edit route', async () => {
+    mockGetCurriculum.mockResolvedValue(MINE);
+    await open();
+    const options = pressMenuAndGetOptions();
+    const edit = options.find((o) => o.text === 'Edit');
+    expect(edit).toBeTruthy();
+    edit!.onPress?.();
+    expect(mockPush).toHaveBeenCalledWith('/curriculum/edit/white-belt-basics');
+  });
+
+  it('Delete asks a second time before it deletes anything', async () => {
+    mockGetCurriculum.mockResolvedValue(MINE);
+    await open();
+    const options = pressMenuAndGetOptions();
+    const del = options.find((o) => o.text === 'Delete curriculum');
+    expect(del).toBeTruthy();
+    expect(del!.style).toBe('destructive');
+
+    del!.onPress?.();
+    expect(mockDeleteCurriculum).not.toHaveBeenCalled();
+
+    const confirmCall = jest.mocked(Alert.alert).mock.calls.at(-1)!;
+    expect(confirmCall[0]).toMatch(/delete this curriculum/i);
+    const confirmOptions = confirmCall[2] as { text: string; style?: string; onPress?: () => void }[];
+    const confirm = confirmOptions.find((o) => o.text === 'Delete');
+    await act(async () => {
+      await confirm!.onPress?.();
+    });
+
+    expect(mockDeleteCurriculum).toHaveBeenCalledWith(expect.any(Function), 'white-belt-basics');
+    expect(mockReplace).toHaveBeenCalledWith('/curriculum');
+  });
+
+  it('Cancel on the confirm leaves the curriculum alone', async () => {
+    mockGetCurriculum.mockResolvedValue(MINE);
+    await open();
+    const del = pressMenuAndGetOptions().find((o) => o.text === 'Delete curriculum');
+    del!.onPress?.();
+
+    const confirmOptions = jest.mocked(Alert.alert).mock.calls.at(-1)![2] as {
+      text: string;
+      onPress?: () => void;
+    }[];
+    // Cancel carries no `onPress` at all in this screen's own convention
+    // (every other Cancel button in this file is `{ text: 'Cancel', style:
+    // 'cancel' }`), so there is nothing to press — the assertion is that
+    // Delete was never reached.
+    expect(confirmOptions.find((o) => o.text === 'Cancel')?.onPress).toBeUndefined();
+    expect(mockDeleteCurriculum).not.toHaveBeenCalled();
   });
 });

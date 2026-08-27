@@ -19,6 +19,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { fetchFocus, setFocus, type Focus } from '@/lib/bjjFocus';
 import {
   archiveCurriculumEnrollment,
+  deleteCurriculum,
   enrollInCurriculum,
   getCurriculum,
   type Curriculum,
@@ -276,12 +277,39 @@ export default function CurriculumScreen() {
   );
 
   /**
+   * Permanent, and gated on `curriculum.editable` the same way the two menu
+   * entries below are — resolved server-side, never inferred. Confirmed
+   * through a second `Alert`, matching the eviction confirm above rather than
+   * a `HoldToConfirm`: the overflow already interrupts the athlete once, and
+   * a second alert costs nothing new there, where `HoldToConfirm` earns its
+   * keep on a screen where the delete control sits inline (the edit screen,
+   * N83's `curriculum/edit/[id].tsx`).
+   */
+  const deleteNow = useCallback(async () => {
+    if (!curriculum) return;
+    setBusy(true);
+    try {
+      await deleteCurriculum(getToken, curriculum.id);
+      router.replace('/curriculum');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  }, [curriculum, getToken, router]);
+
+  /**
    * The overflow, and everything that is not reading lives in it.
    *
    * Enrolment and the bulk focus write are both about the whole roadmap rather
    * than about any milestone, and the reference gives them no place on the
    * timeline. An `Alert` rather than a sheet because this app has no sheet
    * primitive and the destructive case already goes through one.
+   *
+   * **Edit and Delete (N83) are gated on `curriculum.editable`**, exactly the
+   * same field `apps/web`'s detail page gates its own Edit link and Delete
+   * button on — a belt syllabus and another athlete's shared curriculum both
+   * read `editable: false`, and offering either action there would promise a
+   * write the server refuses.
    */
   const openMenu = useCallback(() => {
     if (!curriculum) return;
@@ -306,6 +334,25 @@ export default function CurriculumScreen() {
       style: curriculum.enrolled ? 'destructive' : undefined,
       onPress: () => void toggleEnrollment(),
     });
+    if (curriculum.editable) {
+      options.push({
+        text: 'Edit',
+        onPress: () => router.push(`/curriculum/edit/${curriculum.id}`),
+      });
+      options.push({
+        text: 'Delete curriculum',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert(
+            'Delete this curriculum?',
+            `"${curriculum.name}" will be removed. This can't be undone.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: () => void deleteNow() },
+            ],
+          ),
+      });
+    }
     options.push({ text: 'Cancel', style: 'cancel' });
 
     Alert.alert(
@@ -315,7 +362,7 @@ export default function CurriculumScreen() {
         : 'Nothing here can be ticked off by hand — milestones complete from what you log.',
       options,
     );
-  }, [confirmFocus, curriculum, focus, toggleEnrollment]);
+  }, [confirmFocus, curriculum, deleteNow, focus, router, toggleEnrollment]);
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
