@@ -42,7 +42,7 @@ Counts at the time of the sweep: **26 web routes, 46 mobile routes.**
 | 9 | View, edit, copy or delete a sequence | `sequences/*` | mobile can only *capture* one inside `bjj/reflect/[id]` — **no list or detail screen exists** | **read-back by N80 ([#449](https://github.com/dmytro-ch21/formspan/pull/449)); edit/copy/delete still open** |
 | 10 | The technique funnel as a browsable surface | `/dashboard/proficiency` | mobile `fetchProficiency` feeds the Today card only | open |
 | 11 | Per-exercise load over time | `records` + `LoadHistoryChart` | mobile has no `fetchLoadHistory` | open |
-| 12 | Session search by name, period/sport filters, a paged list | `/dashboard/sessions` | mobile's month sheet has neither | **closed by N85 (PENDING_PR_N85)** — `apps/mobile/app/session/history.tsx` hits the same `GET /v1/sessions` filter web does (name search, sport chips, `SPANS`/`spanRange` period presets, a "Show older" page button); reduced UI, not a reduced query. |
+| 12 | Session search by name, period/sport filters, a paged list | `/dashboard/sessions` | mobile's month sheet has neither | **closed by N85 ([#671](https://github.com/dmytro-ch21/formspan/pull/671))** — `apps/mobile/app/session/history.tsx` hits the same `GET /v1/sessions` filter web does (name search, sport chips, `SPANS`/`spanRange` period presets, a "Show older" page button); reduced UI, not a reduced query. |
 
 **#9 was the sharpest**, and it was worse than a missing screen:
 `shared/index.tsx` told an athlete who accepts a shared sequence *"your copy is
@@ -90,7 +90,7 @@ phone-only athlete can build, reorder, rename and delete a plan.
 | Capability | Note |
 |---|---|
 | Correct a past day's food | Web has a six-week list **and a date jump**; mobile has a **±1-day stepper only**. "Fix a day three months ago" is ~90 taps. This is nominally reduced and practically impossible. |
-| ~~Browse session history~~ | **Closed by N85 (PENDING_PR_N85)**, and moved to row 12 above. Was: mobile read local SQLite only, and the server pull was `limit: 20` (`sessionStore.ts`), so on a fresh install older sessions were unreachable on the phone at all. Now: `/session/history` queries the server directly, and the sync's fresh-install case pages through the same server in bounded requests so the local cache itself stops being permanently stuck at 20 too. |
+| ~~Browse session history~~ | **Closed by N85 ([#671](https://github.com/dmytro-ch21/formspan/pull/671))**, and moved to row 12 above. Was: mobile read local SQLite only, and the server pull was `limit: 20` (`sessionStore.ts`), so on a fresh install older sessions were unreachable on the phone at all. Now: `/session/history` queries the server directly, and the sync's fresh-install case pages through the same server in bounded requests so the local cache itself stops being permanently stuck at 20 too. |
 | Set the BJJ focus list | Mobile accepts a proposal; it cannot hand-pick from the funnel. |
 | Round map, training totals, records for a given exercise | Genuine reduced forms, working as intended. |
 
@@ -126,7 +126,7 @@ Each is superseded on the exclusivity, not on the design.
 | `nutrition-design.md` §5 | "one web screen with three sections" — `CLAUDE.md` already rules this "one screen on each"; N69 delivered the feasibility section on both, the other two are still web-only |
 | `functional-scenarios.md` | "Building and refining [sequences] stay on web"; "No browse or detail screen on mobile" — **corrected on the exclusivity by N80 ([#449](https://github.com/dmytro-ch21/formspan/pull/449))**: reading is now on both, building is still web-only, and that is allowed |
 | `functional-scenarios.md` | Themes "Authored on web, read on the phone… **no way to author one on the phone**, deliberately" |
-| `functional-scenarios.md` | "Session list paging, search and filters (`GET /v1/sessions`, `apps/web` History)" — **corrected on the exclusivity by N85 (PENDING_PR_N85)**: mobile now has a reduced but real search/browse screen (`apps/mobile/app/session/history.tsx`) hitting the same backend filter; the backend scenarios were already platform-agnostic and are unchanged |
+| `functional-scenarios.md` | "Session list paging, search and filters (`GET /v1/sessions`, `apps/web` History)" — **corrected on the exclusivity by N85 ([#671](https://github.com/dmytro-ch21/formspan/pull/671))**: mobile now has a reduced but real search/browse screen (`apps/mobile/app/session/history.tsx`) hitting the same backend filter; the backend scenarios were already platform-agnostic and are unchanged |
 | `curriculum-and-gameplan-design.md` | "roadmap *building* and the full funnel on web" |
 | `system-design.md` | *"nothing a user needs weekly may be desktop-only"* — this one is not an assignment but a rule, and #1–#6 violate it. Nutrition is daily. |
 
