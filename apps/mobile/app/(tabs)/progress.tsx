@@ -391,6 +391,18 @@ export default function ProgressScreen() {
               testID="progress-bjj-positions"
             />
           )}
+          {/* N84, row 10 of the phone-impossible audit: the technique funnel
+              as a browsable surface, not just the Today card's abbreviated
+              slice. A list, not a chart — see `app/bjj/proficiency.tsx`'s own
+              note on why the carve-out does not apply to it. */}
+          {modulesReady && bjj && (
+            <Row
+              title="Technique funnel"
+              note="What you've drilled, what you've tried live, and what's working."
+              onPress={() => router.push('/bjj/proficiency')}
+              testID="progress-bjj-proficiency"
+            />
+          )}
           {modulesReady && !bjj && bjjOff && (
             <Text style={styles.off} testID="progress-bjj-off">
               {bjjOff.label} is turned off, so its position map is not shown. Turn it back on
@@ -437,6 +449,15 @@ export default function ProgressScreen() {
             note="What you are eating to, and why that number."
             onPress={() => router.push('/(tabs)/goals')}
             testID="progress-nutrition"
+          />
+          {/* N84, row 6 of the phone-impossible audit: the reduced phone form
+              of `/dashboard/nutrition` — one metric (mean kcal against
+              target), not web's three-way join. See `lib/nutritionTrend.ts`. */}
+          <Row
+            title="Eating vs. target"
+            note="Your logged intake against what you're eating to, over time."
+            onPress={() => router.push('/goals/nutritionTrend')}
+            testID="progress-nutrition-trend"
           />
         </View>
 

@@ -13561,3 +13561,134 @@ on screen. That, and only that, is what moved.
   only adds two additional read-only fields (`packet_serving_label`,
   `packet_serving_grams`) to an already-public response shape, with no new
   write surface and no change to who can call the endpoint.
+
+
+## N84 — the analytical surfaces get a phone form (`apps/mobile/app/records/[exerciseId]/trend.tsx`, `apps/mobile/app/bjj/proficiency.tsx`, `apps/mobile/app/goals/nutritionTrend.tsx`, `lib/loadTrend.ts`, `lib/nutritionTrend.ts`, `lib/proficiency.ts`, `GET /v1/records/{exerciseID}/history`, `GET /v1/nutrition/days`, `GET /v1/bjj/proficiency`)
+
+### Per-exercise load trend
+
+#### Happy path
+
+- Open an exercise you've logged more than once (Progress → Records → an
+  exercise → "Load over time", or Library → an exercise's detail screen).
+  Confirm the delta line, the chart and the sessions list all render, and
+  the sessions list shows the same top-set weights the session history
+  itself does.
+- Switch range chips (1W / 1M / 3M / 6M / 1Y / All). Confirm the chart and
+  the delta redraw for the new window and NO new network request fires —
+  the history is fetched once and sliced client-side.
+- Open the same screen for an exercise that mixes sessions with and
+  without a top set for that metric (e.g. an AMRAP set with no external
+  load). Confirm only the sessions carrying a top weight appear as
+  readings/entries.
+
+#### Edge cases and errors
+
+- Open the trend for an exercise logged only once. Confirm it renders a
+  single dot and no delta (a delta needs two readings), rather than an
+  error.
+- Open the trend for an exercise never logged at all. Confirm the "none"
+  empty state, distinct in wording from a load failure.
+- Force the history request to fail (airplane mode). Confirm the screen
+  says it couldn't load — never "no sessions yet", which is a claim about
+  the athlete's training rather than about the network.
+- Open the trend for an exercise measured in time/reps/distance rather than
+  weight (a plank, a run). Confirm it says this exercise needs a logged
+  weight rather than drawing an empty chart.
+- **NEEDS HUMAN EVIDENCE** — on a device, confirm the chart's dots (no
+  connecting line) read clearly rather than as a rendering bug, for an
+  exercise trained irregularly (gaps of weeks between sessions).
+
+#### Auth / security
+
+- Requesting another athlete's exercise history via a guessed/observed
+  exercise id still returns only the calling athlete's own sessions (no
+  change to `GET /v1/records/{exerciseID}/history`'s existing scoping —
+  this ticket adds a mobile caller, not a new endpoint).
+
+### The technique funnel, browsable (`apps/mobile/app/bjj/proficiency.tsx`)
+
+#### Happy path
+
+- Open the funnel from Progress → (BJJ section) → "Technique funnel".
+  Confirm the drilled/tried-live/landed summary bars match the numbers
+  `/dashboard/proficiency` shows for the same account.
+- Filter by each bucket chip in turn (Everything / Used on you / Never
+  tried live / Landing / Not landing yet). Confirm the chip counts sum to
+  "Everything", and each technique appears under exactly one non-"all"
+  bucket.
+- Search by technique name and by position. Confirm the list narrows to
+  matches and the empty-search state reads differently from "no matches
+  for this search".
+- Star a technique to add it to your focus list; confirm it appears in the
+  panel at the top with "this week" (not "0 weeks"), and that it also
+  shows up as a one-tap row in the BJJ reflection wizard afterward.
+- Un-star (Done) a focus technique; confirm it drops off the panel and off
+  the reflection wizard's one-tap rows.
+- Attempt to star a sixth technique with 5 already focused. Confirm the
+  cap message appears and the star does not apply.
+
+#### Edge cases and errors
+
+- Open the funnel with no BJJ evidence logged yet. Confirm the empty state
+  explains how evidence accumulates (drilling, live rounds) rather than
+  showing an empty table.
+- Force the proficiency request to fail. Confirm the screen says it
+  couldn't load the funnel, with no summary bars or list rendered
+  underneath a stale/zero-looking state.
+- Force only the focus-list request to fail while proficiency loads fine.
+  Confirm the funnel table still renders and stars simply read as unfilled
+  (best-effort read, matching web's `Promise.allSettled` split).
+- Star a technique, then force the write to fail (airplane mode mid-tap).
+  Confirm the star visually rolls back and a notice explains the save
+  failed.
+- A technique whose only evidence is `defended` (stopped it live, never
+  attempted or scored it, never drilled it standalone). Confirm it buckets
+  as "Landing", not "Used on you" — the inversion this bucketing rule
+  exists to avoid.
+
+#### Auth / security
+
+- No change to `GET /v1/bjj/proficiency` or `/v1/bjj/focus`'s existing
+  per-athlete scoping — this ticket adds a second mobile reader of data
+  already served to the account's own token.
+
+### Eating vs. target trend (`apps/mobile/app/goals/nutritionTrend.tsx`)
+
+#### Happy path
+
+- Open the screen from Progress → Nutrition → "Eating vs. target" on an
+  account with several weeks of logged food and a live target. Confirm the
+  delta, the adherence line ("N of M days logged"), the chart with its
+  dashed target reference line, and the day-by-day entries list all render.
+- Switch range chips (1W / 1M / 3M / 6M / 1Y / All). Confirm the chart,
+  delta and adherence all recompute for the new window with one combined
+  fetch per range change (days + targets), not per chip render.
+- Change your target (via Goals) partway through the window and reopen
+  this screen. Confirm the dashed reference line reflects the CURRENT
+  target, not whichever target was live on the most recently logged day.
+- Have a gap of several unlogged days inside the window. Confirm the
+  7-day-mean line does not dip toward zero across the gap — an unlogged
+  day is absent from the mean's inputs, not a zero.
+
+#### Edge cases and errors
+
+- Open the screen with no food ever logged. Confirm the "none" empty
+  state, not a fabricated flat line at zero.
+- Open the screen with food logged but none inside the selected window
+  (e.g. a 1W view on an account that logged only last month). Confirm the
+  "nothing in this range" wording, distinct from "no data at all".
+- Open the screen with no target ever set. Confirm no dashed reference
+  line renders, and nothing on screen implies a target of zero.
+- Force the day-totals request to fail. Confirm the screen reads as
+  unavailable rather than "nothing logged" — the network-failure and
+  no-data sentences must stay visibly different.
+- Force only the targets request to fail while day totals load fine.
+  Confirm the chart still renders with no dashed reference line, rather
+  than the whole screen failing.
+
+#### Auth / security
+
+- No change to `GET /v1/nutrition/days`'s or `GET /v1/nutrition/targets`'s
+  existing per-athlete scoping — this ticket adds a mobile caller for the
+  first, and a new caller of the already-mobile-available second.

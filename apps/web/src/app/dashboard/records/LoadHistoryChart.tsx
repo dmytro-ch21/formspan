@@ -13,20 +13,26 @@ import {
 } from "@/lib/units";
 
 /**
- * One lift's arc over time.
+ * One lift's arc over time, at desk depth.
  *
- * **This is the web screen on purpose.** N6 asked for per-exercise load over
- * time and paired itself with N5's mobile weight chart, but it does not pass
- * N5's carve-out — the at-the-rack decision is already answered on the phone by
- * the double-progression recommendation, so a chart there would be decoration.
- * What is left is "did my squat go up over the last three months", asked while
- * planning the next block, at a desk.
+ * **This screen is richer than the phone's on purpose — it is no longer the
+ * ONLY place the question is answered.** N6 asked for per-exercise load over
+ * time and paired itself with N5's mobile weight chart; at the time it did not
+ * pass N5's carve-out (the at-the-rack decision was already answered on the
+ * phone by the double-progression recommendation, so a chart there was
+ * decoration) and shipped web-only. N57's 2026-08-19 amendment to the
+ * mobile-chart carve-out reopened that door, and N84 (#418) built the phone's
+ * reduced form: `apps/mobile/app/records/[exerciseId]/trend.tsx`, ONE fixed
+ * metric ("Top set" / `top_weight_kg`), no picker, the same preset windows
+ * `app/goals/trend.tsx` uses.
  *
- * So this deliberately has the three things the carve-out forbids on mobile: a
- * metric picker, axes you can read values off, and per-point evidence. That is
- * not scope creep, it is the distinction being drawn — if this belonged on the
- * phone it would have to lose all three, and losing all three is what makes it
- * useless for the question it answers.
+ * This page keeps the three things the carve-out still forbids on mobile: a
+ * metric picker (Est. 1RM and Volume, alongside Top set), axes you can read
+ * arbitrary values off with per-point evidence in a table, and no fixed
+ * window — "did my squat go up over the last three months", asked while
+ * planning the next block, at a desk, stays here. That is richer, not
+ * exclusive: an athlete with only a phone can still answer "is my top set
+ * going up" without opening this page.
  *
  * SVG rather than a charting library, following `VolumeTrend`: a polyline and
  * some text is less code than the dependency, and it stays inspectable markup

@@ -44719,6 +44719,193 @@ inferred one if this turns out to matter in practice — not done here because
 it was not measured to happen, and the inferred version needed no schema
 migration.
 
+## 2026-08-27 — N84: the analytical surfaces get a phone form — nutrition trend, technique funnel, per-exercise load (#418)
+
+**Three rows from the phone-impossible audit, filed together (#418) because
+they share a shape.** Rows 6, 10 and 11 were each a read-only analytical
+surface that existed on web and nowhere else: nutrition's intake-vs-target-
+vs-training join (`/dashboard/nutrition`), the technique funnel as a browsable
+table (`/dashboard/proficiency`, mobile's `fetchProficiency` fed only the
+Today card's suggestion logic), and per-exercise load over time
+(`records`/`LoadHistoryChart`, mobile had no `fetchLoadHistory` at all). All
+three are now reachable on a phone with the web app closed.
+
+### What N57 had already done, and what this builds on
+
+N57 (2026-08-19) did not build any of these three — it widened CLAUDE.md's
+mobile-chart carve-out itself, after the user called the first mobile trend
+chart "pretty much useless" for carrying no readable values. The amendment
+struck "no axes to read values off, no tooltips and no zoom" from the first
+bullet, so a mobile trend chart may now carry value-readable axes, first/latest
+point labels, a dashed projection to a dashed goal line, a delta against a
+stated period, and an entries list — everything still disqualifying is a second
+metric or a date-range picker. N56 (#340, #462) built the reusable
+consequence of that: `lib/trendSeries.ts`'s metric-agnostic `buildTrend` /
+`TrendSeries` / `TrendChart` layer, used so far only by weight
+(`app/goals/trend.tsx`). Both entries flagged explicitly that per-exercise load
+had never actually consumed the shared layer — "Not yet demonstrated:
+reusable is still a claim" (N56) and "legitimately web-only until yesterday…
+now permitted and simply unbuilt" (phone-impossible-audit.md, on N57's
+amendment). This PR is that demonstration, and it is the second consumer for
+nutrition too.
+
+N6 itself (per-exercise load, shipped web-only) is superseded on the
+platform-rule reasoning it gave, not on its web design: its argument (the
+at-the-rack decision is already answered by the double-progression
+recommendation, so a chart there informs nothing new) was true under the OLD
+carve-out, which forbade readable axes entirely and so could only ever answer
+a decision, never a question read on its own. N57 widened what the carve-out
+can answer; N6's web screen (`LoadHistoryChart.tsx`) is untouched except for a
+doc-comment correction (below) — it stays the richer surface, with a metric
+picker (Est. 1RM, Volume, Top set), full axes and a per-point evidence table,
+none of which the phone gets.
+
+### Three designs, each checked against the carve-out's three conditions
+
+**Per-exercise load** (`apps/mobile/app/records/[exerciseId]/trend.tsx`,
+`lib/loadTrend.ts`) is the closest copy of `app/goals/trend.tsx`'s own shape:
+range chips (`1W 1M 3M 6M 1Y All`, all ending today — `Plan` is dropped, a lift
+has no plan to anchor a window to), a delta with its evidence line, the chart,
+and the sessions behind it. ONE metric, fixed — `top_weight_kg` ("Top set"),
+matching the ticket's own framing of the question ("is my top set going up")
+— with no picker; Est. 1RM and Volume, web's other two tabs, stay web-only.
+**One deliberate departure from `trend.tsx`'s drawing**: no connecting line
+between points, only dots. `buildTrend`'s smoothed line exists to answer "what
+is the underlying trend" for a metric logged roughly daily, where a gap in it
+is real information (a missed weigh-in). A lift is not logged daily — it is
+logged the days it is trained, anywhere from twice a week to once a month —
+and a gap between two real sessions means nothing on its own. Passing no
+`smooth` to `buildTrend` is exactly the fallback `trendSeries.ts`'s own doc
+comment describes ("Omit for a metric with no meaningful smoothing — the chart
+then draws readings only") rather than an oversight; every session already IS
+a real reading, and drawing a line through a training gap would invent
+continuity the data does not have. First/latest callouts, the delta and the
+entries list all still work off the raw readings, which `TrendChart` already
+reads independently of the smoothed line. No goal line either — a lift has no
+prescribed target the way a weight-loss phase does.
+
+**The technique funnel** (`apps/mobile/app/bjj/proficiency.tsx`) is
+deliberately NOT a chart, per the ticket's own suggestion that a "well-
+organized list/browse view can satisfy 'reachable and usable' without
+inventing chart real estate the carve-out would then have to police." It is a
+straight port of web's `bucketOf`/bucket-filter/search logic, moved to
+`lib/proficiency.ts` so the two screens cannot quietly disagree about which
+bucket a technique falls in, reshaped from a wide table into a scrollable
+list — the same reduction the Records screen already makes for personal
+records. The funnel summary (drilled/tried-live/landed) is three static bars,
+not a series over time, so it sits outside the carve-out's scope entirely.
+Starring a technique reuses the existing `lib/bjjFocus.ts` (`fetchFocus`/
+`setFocus`), which the reflection wizard already wrote to — this screen is its
+first READER on mobile.
+
+**Nutrition** (`apps/mobile/app/goals/nutritionTrend.tsx`, `lib/nutritionTrend.ts`)
+is the narrowest of the three, on purpose: web's page is a genuine three-way
+join (intake, bodyweight, training load, four stat tiles) and is exactly the
+shape the carve-out reserves for web — a second charted metric disqualifies a
+mobile chart outright, and this page has three. The one question that is
+decision support rather than analysis is "is my eating tracking the target I
+set" — a 7-day-mean kcal line (matching the backend's `TrendDays` / web's
+`MEAN_WINDOW_DAYS`) against a dashed reference for TODAY's live target
+(`targetOn(targets, today)`, not a stale `target_kcal` frozen on whichever day
+was last logged — the two disagree the moment the target changes and today
+has not been logged yet, and a test pins the distinction). The target line is
+a flat reference, the same shape as weight's goal line, not a second measured
+series. Adherence (days logged / days considered over the window on screen)
+rides alongside as TEXT, the same way `trend.tsx`'s own evidence line
+("N readings…") is text beside its one chart rather than a second series on
+it. Bodyweight and training load are not merely deferred — adding either would
+directly reproduce the "second metric" disqualifier, and `/dashboard/nutrition`
+stays the place that answers the comparison question.
+
+### Wire layer
+
+Three additions, each a direct port of its web counterpart: mobile's
+`lib/records.ts` gained `LoadPoint`/`LoadHistory`/`fetchLoadHistory` (mirroring
+`apps/web/src/lib/api.ts`); `lib/nutritionApi.ts` gained `DayTotals`/`listDays`
+(mirroring `apps/web/src/lib/nutritionApi.ts` — mobile already had
+`listTargets`/`targetOn` from the N72/N86 target-history work); and
+`lib/proficiency.ts`'s `Proficiency` type gained the `defended` field it was
+missing (present on web's `BjjProficiency` since the same fix that corrected
+web's own bucketing bug) plus a new `fetchProficiencyFull` returning
+`{ techniques, summary }` over ONE request — `fetchProficiency` (the Today
+card's and the reflection wizard's existing caller) now just projects
+`.techniques` off it rather than issuing a second, so nothing about its
+existing callers changed shape.
+
+Two existing test fixtures (`app/__tests__/suggestionPrefsRefocus.test.tsx`,
+`lib/__tests__/suggestion.test.ts`) needed `defended: 0` added to their
+`Proficiency` literals once the field became required — caught by
+`typecheck:mobile`, not a functional change.
+
+### Reachable from
+
+`app/exercise/[id].tsx` gained a "Load over time" row under "Your last
+session"; the Progress tab's BJJ section gained a "Technique funnel" row
+beside "Position map"; its Nutrition section gained an "Eating vs. target" row
+beside "Targets and adherence".
+
+### Corrected on the exclusivity, not the design
+
+`docs/decisions/nutrition-design.md` §4's "Intake vs weight vs training load"
+row moved from `✗ mobile / ✅ web` to `✅ (reduced) mobile / ✅ web`, with a
+paragraph matching the N72/N86 and N87 rows already there.
+`apps/web/src/app/dashboard/records/LoadHistoryChart.tsx` and
+`apps/web/src/app/dashboard/proficiency/page.tsx` each carried a doc comment
+asserting mobile exclusion as a present-tense fact ("this is the web screen on
+purpose… nothing here belongs on [the phone]"); both are corrected to say what
+is now built on mobile and why the web screen is still richer rather than
+merely present. `docs/decisions/phone-impossible-audit.md`'s rows 6, 10 and 11
+move from `open` to this PR.
+
+### Verification
+
+Pure-logic tests for `bucketOf` (including the pure-defensive-evidence case
+web's own comment documents, and the disjoint-attempted/scored case),
+`fetchProficiencyFull`/`fetchProficiency` (one request, not two; a missing
+`techniques` field normalises to `[]` rather than `undefined`), `buildLoadTrend`
+(unavailable vs. none vs. a real gap; only sessions with a top weight become
+readings; no connecting line; the delta's `basis: 'readings'`), `fetchLoadHistory`
+and `listDays` (request shape), and `buildNutritionTrend` (an unlogged day is a
+gap in the smoothed mean, never a zero; the goal reads today's live target, not
+a stale day-level one; adherence is scoped to the window on screen, not the
+mean's lookback slack). Component tests for all three new screens follow this
+codebase's established pattern (`friendsScreen.test.tsx`/`sequenceScreens.test.tsx`
+conventions) — a failed load reads as "couldn't load" rather than "nothing
+yet" on all three, the bucket chip counts sum to "Everything", starring a
+technique rolls back on a failed write, and switching the load-trend screen's
+range re-slices already-fetched data rather than re-fetching.
+
+**Mutation-verified**: `bucketOf`'s `defended > 0` branch (removing it turns
+the pure-defensive-evidence test red); `meanBuilder`'s gap-vs-zero branch in
+`nutritionTrend.ts` (zero-filling instead of returning `null` turns two tests
+red); the `goalKcal` guard (reading the last day's own `target_kcal` instead of
+`targetOn(targets, today)` turns the stale-target test red); and the adherence
+window filter (counting all fetched days instead of scoping to the window
+turns its test red). `buildLoadTrend`'s own `metricValue(p) != null` filter
+turned out to be REDUNDANT with `buildTrend`'s own `Number.isFinite` guard
+inside `trendSeries.ts` — the mutation did not reproduce a failure, because the
+shared layer already excludes a non-finite value before this file's filter
+would ever matter. Left in place as defence in depth (an explicit filter
+reads clearer than an implicit numeric coercion at the call site) and recorded
+here rather than left for a reviewer to wonder whether it was tested — the
+BEHAVIOUR it describes is covered, just one layer down, by `trendSeries.test.ts`'s
+own existing suite.
+
+Full `pnpm run verify` — green.
+
+### What is not done
+
+- **No mobile screen shows web's Est. 1RM or Volume metrics for a lift**, or
+  web's training-day overlay for nutrition, or web's bodyweight overlay —
+  deliberately: adding any of those to the phone is exactly the "second
+  metric" the carve-out disqualifies, not a scope gap.
+- **The funnel's `defended` field was already on the wire and already read by
+  web; mobile simply never declared it.** No backend change was needed or
+  made.
+- **NEEDS HUMAN EVIDENCE, per #418's own criterion**: exercised on a real
+  device, with the web app closed.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
