@@ -33377,15 +33377,44 @@ and `dictateScreen` instead.)
   machine's total, so at load 160 the cores are gone whatever one instance asks
   for. It does mean there is no flag that makes a 10-core machine host eleven
   concurrent suites, and pretending otherwise sends people hunting for one.
-- **A possible second, unrelated flake — filed as F18 (#431).** One session
-  measured `dictateScreen.test.tsx` failing **4 of 11 runs in isolation** at
-  local load 140–195 — no concurrent suite, so nothing for a worker cap to fix.
-  It did **not** reproduce on CI: `dictateScreen` was green in all 75 runs
-  across the three arms, and every one of the nine failures observed was
-  `bjjSessionScreen`. That leaves three live explanations — load-dependent
-  beyond anything CI reaches, real but rarer than 75 runs, or an artefact of the
-  local measurement — and #431 exists to settle which rather than let it be
-  absorbed by a fix that does not address it.
+- **A possible second, unrelated flake — filed as F18 (#431). RESOLVED
+  2026-08-27: ruled out, not reproducible on a genuinely quiet machine.** One
+  session had measured `dictateScreen.test.tsx` failing **4 of 11 runs in
+  isolation** at local load 140–195 — no concurrent suite, so nothing for a
+  worker cap to fix. It did **not** reproduce on CI: `dictateScreen` was green
+  in all 75 runs across the three arms, and every one of the nine failures
+  observed was `bjjSessionScreen`. That left three live explanations —
+  load-dependent beyond anything CI reaches, real but rarer than 75 runs, or an
+  artefact of the local measurement.
+
+  F18/#431 re-ran the file alone, `--maxWorkers=2`, on a machine confirmed
+  quiet first (`pgrep -f jest` empty throughout, no `expo`/`metro` process,
+  `uptime` load averages 7.96–11.57 on 10 cores, 71.5% CPU idle at the start) —
+  **35 of 35 runs green**, all 12 assertions in the file passing every time,
+  2–6.4s wall per run. The harness was shown able to fail first, in the same
+  session: a deliberate mutation (`toEqual([])` flipped to expect a bogus tag)
+  produced one genuine test failure and eleven unaffected passes, then was
+  reverted and reconfirmed clean before the real measurement began. That
+  answers explanation (1) — load-dependent, not reproducible once genuinely
+  isolated — the ambient load during this run (≈8–11) was nowhere near the
+  140–195 the original report described, so this does not rule out a failure
+  reappearing at that load. It rules out (2), a defect that fires regardless of
+  load: 35 straight green runs here plus the 75 already green on CI put the
+  odds of a load-independent defect surviving all of them near zero. It does
+  NOT cleanly rule out (3) on its own terms — watching for a concurrent jest
+  in *this* run says nothing about whether one went undetected in the
+  *original* measurement, and (1) and (3) predict the same outcome here. In
+  practice the distinction stops mattering: both route to the same
+  disposition — record, close, no code change — which is why this entry does
+  not try to adjudicate between them further.
+  Reproducing under synthetic load was judged not worth the added time: the
+  mechanism (`waitFor`'s default 1000ms `asyncUtilTimeout`, which this file —
+  alone among the suite's component tests with real deferred timers — does not
+  raise the way 24 sibling files do) is already the one this same document
+  attributes `dictateScreen`'s and `bjjSessionScreen`'s failures to two bullets
+  up, and a second confirmation of the same story was not judged to be worth
+  the wall-clock cost of hunting for a machine at 15–19× today's load. No code
+  change followed, because there was no reproducible defect to fix.
 
 ## 2026-08-20 — A provider outage stops costing the athlete their allowance (F16, #367)
 
