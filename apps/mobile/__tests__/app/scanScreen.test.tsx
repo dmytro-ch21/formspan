@@ -186,6 +186,32 @@ describe('a resolved barcode', () => {
   });
 
   /**
+   * N426, found in review: the sheet is a `Modal`, which UNMOUNTS its
+   * children while closed rather than merely hiding them — so without
+   * `initialGrams` seeding a remount from the current amount, closing the
+   * sheet after typing a number and reopening it silently reset back to
+   * the packet default. Concretely: type 80, tap Done (the card correctly
+   * showed "80 g" — screen and log stayed in sync so nothing looked wrong
+   * from the outside), tap Amount again — the field would show "40" (the
+   * packet default) rather than resuming at "80".
+   */
+  it('resumes the typed amount when the sheet is reopened, rather than resetting it', async () => {
+    await scan();
+    await openAmountSheet();
+    await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '80');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('amount-sheet-done'));
+    });
+    expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('80 g');
+
+    await openAmountSheet();
+    await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+    // 80, not OATS' 40 g default — the sheet RESUMED, it did not reset.
+    expect(screen.getByTestId('food-quantity-input').props.value).toBe('80');
+  });
+
+  /**
    * A fractional amount must survive to what gets logged, not round or
    * truncate to a whole number. Typed as two separate keystrokes ("6" then
    * "60", each a complete `fireEvent.changeText` value rather than a
@@ -437,6 +463,23 @@ describe('the local cache', () => {
       expect(entry.kcal).toBe(156);
       expect(entry.protein_g).toBe(12);
       expect(entry.servings).toBe(2);
+    });
+
+    /** N426: `ServingsFallback`'s half of the same resume-not-reset fix. */
+    it('resumes the typed servings count when the sheet is reopened', async () => {
+      await scan();
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
+      fireEvent.changeText(screen.getByTestId('scan-servings-fallback'), '2');
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('amount-sheet-done'));
+      });
+      expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('2 × 1 egg');
+
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
+      // 2, not the "1" default — resumed, not reset.
+      expect(screen.getByTestId('scan-servings-fallback').props.value).toBe('2');
     });
   });
 });

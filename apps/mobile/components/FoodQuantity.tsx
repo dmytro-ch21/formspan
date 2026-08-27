@@ -48,6 +48,7 @@ export function FoodQuantity({
   onQuantityChange,
   hideBuiltInFooter,
   hideName,
+  initialGrams,
 }: {
   food: QuantifiableFood;
   onLog: (grams: number) => void;
@@ -90,13 +91,28 @@ export function FoodQuantity({
    * rather than a raw `${brand} ${name}` that could repeat the brand.
    */
   hideName?: boolean;
+  /**
+   * N426, found in review: the amount an already-open draft is AT, so a
+   * remount (the scan screen's amount sheet unmounts this component on
+   * close — `Modal`'s children are gone while `visible={false}`, not merely
+   * hidden) resumes from what the athlete already chose rather than
+   * resetting to the packet's default every time the sheet reopens.
+   * Concretely: open, type 80 g, tap Done (the card correctly shows
+   * "80 g"), tap Amount again — without this prop the control remounts
+   * fresh and silently drops back to 25 g, which is then what gets logged
+   * if Done is tapped again without re-typing. Existing callers (the
+   * recipe ingredient picker, `add.tsx`'s `picking` screen, which never
+   * unmount and remount this control mid-edit) leave this unset and keep
+   * today's behaviour — the packet-or-100g default, unaffected.
+   */
+  initialGrams?: number;
 }) {
   const { foodUnit, setFoodUnit } = useUnits();
   const options = useMemo(() => quantityOptions(food, food.portions), [food]);
 
   // Grams are the state. The text field is a VIEW of it, which is what makes
   // the unit toggle a conversion rather than a reinterpretation.
-  const initial = options[0]?.grams ?? 100;
+  const initial = initialGrams ?? options[0]?.grams ?? 100;
   const [grams, setGrams] = useState<number>(initial);
   const [text, setText] = useState<string>(String(toDisplayGrams(initial, foodUnit)));
 

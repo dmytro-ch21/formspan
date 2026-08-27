@@ -692,11 +692,22 @@ export default function ScanBarcodeScreen() {
           // every macro recalculates live as it changes. `hideBuiltInFooter`
           // and `hideName`: the sheet has its own "Done" action and the
           // food's name is already on the card behind this sheet.
+          //
+          // `initialGrams`, found in review: without it, closing the sheet
+          // after typing a number and reopening it SILENTLY RESET to the
+          // packet default — the sheet is a `Modal`, which unmounts its
+          // children while closed rather than merely hiding them, so a
+          // fresh mount otherwise means a fresh (wrong) default. Computed
+          // from `effectiveQuantity` — whatever the athlete last set, or the
+          // packet default if they never touched it — so a remount RESUMES.
           <FoodQuantity
             // Never null here: `quantifiable` is null only when
             // `phase.kind !== 'draft'`, and this branch already established
             // it is. TypeScript cannot see across the `if` above, hence `!`.
             food={quantifiable!}
+            initialGrams={
+              effectiveQuantity ? effectiveQuantity.servings * servingBasisGrams(phase.food) : undefined
+            }
             onLog={() => setAmountSheetOpen(false)}
             onQuantityChange={(q) =>
               setQuantity({
@@ -712,8 +723,13 @@ export default function ScanBarcodeScreen() {
         ) : (
           // Found in review: a food with no honest gram weight
           // (`serving_grams: null`) must never be offered a grams field —
-          // see the `confirm` doc comment above for why.
-          <ServingsFallback food={phase.food} onChange={setQuantity} />
+          // see the `confirm` doc comment above for why. `initialServings`
+          // for the same resume-not-reset reason as `FoodQuantity` above.
+          <ServingsFallback
+            food={phase.food}
+            onChange={setQuantity}
+            initialServings={effectiveQuantity?.servings}
+          />
         )}
       </AmountSheet>
 
@@ -739,7 +755,12 @@ export default function ScanBarcodeScreen() {
           (saving || !effectiveQuantity?.valid) && styles.off,
         ]}
         accessibilityRole="button"
-        accessibilityLabel={`Log ${phase.food.name}`}
+        // N426: `displayName`, not the raw `phase.food.name` — the visible
+        // card title is `displayName(phase.food)` (e.g. "Kinder Chocolate"),
+        // and a screen reader hearing "Log Rolled oats" under a card titled
+        // "Flahavans Rolled oats" is a label-in-name mismatch. Found in
+        // review, alongside the reset-on-reopen fix above.
+        accessibilityLabel={`Log ${displayName(phase.food)}`}
         disabled={saving || !effectiveQuantity?.valid}
         accessibilityState={{ disabled: saving || !effectiveQuantity?.valid }}
         testID="scan-log"
@@ -808,11 +829,19 @@ function Shell({
 function ServingsFallback({
   food,
   onChange,
+  initialServings,
 }: {
   food: Macros & { serving_label: string };
   onChange: (state: { servings: number; valid: boolean; macros: Macros }) => void;
+  /**
+   * N426, found in review — the same reset-on-reopen bug `FoodQuantity`'s
+   * `initialGrams` fixes, for this control: the amount sheet unmounts this
+   * component on close, so without an initial value a remount silently
+   * drops back to "1" and discards whatever the athlete last typed.
+   */
+  initialServings?: number;
 }) {
-  const [text, setText] = useState('1');
+  const [text, setText] = useState(String(initialServings ?? 1));
 
   // Reports on every change to the typed text, mirroring `FoodQuantity`'s
   // own `onQuantityChange` effect. `food` is deliberately absent from the
