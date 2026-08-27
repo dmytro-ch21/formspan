@@ -84,6 +84,7 @@ describe('listSessionsPage', () => {
       q: 'leg day',
       from: '2026-06-01',
       to: '2026-08-01',
+      tz: 'Europe/Berlin',
     });
     const url = mockFetch.mock.calls[0][0] as string;
     expect(url).toContain('limit=20');
@@ -93,6 +94,14 @@ describe('listSessionsPage', () => {
     expect(url).toContain('q=leg+day');
     expect(url).toContain('from=2026-06-01');
     expect(url).toContain('to=2026-08-01');
+    expect(url).toContain('tz=Europe%2FBerlin');
+  });
+
+  it('omits tz when a caller sends no period — an unbounded query has no zone to resolve a boundary in', async () => {
+    respond({ sessions: [], total: 0, limit: 20, offset: 0 });
+    await listSessionsPage(token, { limit: 20 });
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).not.toContain('tz');
   });
 
   it('returns the page shape the search screen paginates on', async () => {

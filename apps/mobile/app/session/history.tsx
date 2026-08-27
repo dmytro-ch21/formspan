@@ -10,7 +10,7 @@ import { sportColor } from '@/components/ui/sport';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { isTransportFailure } from '@/lib/apiError';
-import { formatDuration, SPANS, spanRange, type SpanKey } from '@/lib/history';
+import { formatDuration, localZone, SPANS, spanRange, type SpanKey } from '@/lib/history';
 import { enabledSports, labelFor } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import {
@@ -96,6 +96,34 @@ function durationSeconds(s: Session): number | null {
   return (new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 1000;
 }
 
+/**
+ * A client-side approximation of the server's `Filter`, for the offline
+ * fallback ONLY.
+ *
+ * Without this, the sport/period chips and the search box kept showing as
+ * selected while the offline fallback quietly rendered every locally-cached
+ * session regardless — a search for "leg day" that returned unrelated
+ * sessions offline, with no indication the filter had stopped applying.
+ * `listLocalSessions` doesn't take a filter, so this narrows its result the
+ * same way the query would have server-side: case-insensitive substring on
+ * the name, exact sport match, and the day (not instant) falling inside the
+ * period's `[from, to]` — day-grained because `spanRange` deals in
+ * `YYYY-MM-DD`, and this is a fallback approximation, not the source of
+ * truth the server's own date-range handling is.
+ */
+function matchesFilters(
+  s: Session,
+  filters: { query: string; sport: string | null; range: { from: string; to: string } | null },
+): boolean {
+  if (filters.sport && s.sport !== filters.sport) return false;
+  if (filters.query && !s.name.toLowerCase().includes(filters.query.toLowerCase())) return false;
+  if (filters.range) {
+    const day = s.started_at.slice(0, 10);
+    if (day < filters.range.from || day > filters.range.to) return false;
+  }
+  return true;
+}
+
 export default function SessionHistoryScreen() {
   const { userId } = useAuth();
   const getToken = useAuthToken();
@@ -147,6 +175,7 @@ export default function SessionHistoryScreen() {
         sport: sport ?? undefined,
         from: range?.from,
         to: range?.to,
+        tz: range ? localZone() : undefined,
       },
       c.signal,
     )
@@ -162,7 +191,9 @@ export default function SessionHistoryScreen() {
           setTotal(0);
           listLocalSessions(userId, 100)
             .then((rows) => {
-              if (!c.signal.aborted) setItems(rows);
+              if (!c.signal.aborted) {
+                setItems(rows.filter((r) => matchesFilters(r, { query, sport, range })));
+              }
             })
             .catch(() => {
               if (!c.signal.aborted) setItems([]);
@@ -193,15 +224,37 @@ export default function SessionHistoryScreen() {
     if (loadingMore || offline || items === null || items.length >= total) return;
     setLoadingMore(true);
     const range = period === 'all' ? null : spanRange(period);
-    listSessionsPage(getToken, {
-      limit: PAGE_SIZE,
-      offset: items.length,
-      q: query || undefined,
-      sport: sport ?? undefined,
-      from: range?.from,
-      to: range?.to,
-    })
+
+    // Shares `inflight` with `load()` — not a second, independent controller.
+    // Without this, tapping "Show older" on a slow connection and then
+    // changing a filter/chip before it resolves let the OLD query's response
+    // land after `load()` had already replaced `items` for the NEW filter:
+    // `loadMore`'s `.then` appended stale rows and overwrote `total` with the
+    // old query's count, so the screen silently showed sessions that did not
+    // match the visibly-selected filters, with nothing to self-correct it.
+    // Aborting the previous controller here catches a *second* rapid
+    // "Show older" tap; `load()` aborting `inflight.current` on every filter
+    // change catches the filter-change race, because both functions now
+    // fight over the same ref.
+    inflight.current?.abort();
+    const c = new AbortController();
+    inflight.current = c;
+
+    listSessionsPage(
+      getToken,
+      {
+        limit: PAGE_SIZE,
+        offset: items.length,
+        q: query || undefined,
+        sport: sport ?? undefined,
+        from: range?.from,
+        to: range?.to,
+        tz: range ? localZone() : undefined,
+      },
+      c.signal,
+    )
       .then((page) => {
+        if (c.signal.aborted) return;
         setItems((prev) => {
           if (prev === null) return page.sessions;
           const seen = new Set(prev.map((s) => s.id));
@@ -210,9 +263,18 @@ export default function SessionHistoryScreen() {
         setTotal(page.total);
       })
       .catch((err: unknown) => {
+        if (c.signal.aborted || (err as Error)?.name === 'AbortError') return;
         setError(err instanceof Error ? err.message : String(err));
       })
-      .finally(() => setLoadingMore(false));
+      .finally(() => {
+        // Unconditional, unlike the `items`/`total`/`error` updates above:
+        // whatever happens to THIS request — it wins, it loses to `load()`
+        // aborting it, or it genuinely fails — "a load-more is in flight" is
+        // over, and leaving the button showing "Loading…" forever after an
+        // abort would be its own bug of the same shape as the race this fix
+        // exists to close.
+        setLoadingMore(false);
+      });
   }, [getToken, items, total, offline, loadingMore, query, sport, period]);
 
   const sportChips = [{ key: null as string | null, label: 'All' }, ...enabledSports(modules).map((m) => ({
@@ -239,7 +301,7 @@ export default function SessionHistoryScreen() {
           testID="session-history-search"
         />
 
-        <RNView style={styles.chips} accessibilityRole="tablist">
+        <RNView style={styles.chips}>
           {PERIODS.map((p) => {
             const active = period === p.key;
             return (
@@ -261,7 +323,7 @@ export default function SessionHistoryScreen() {
           })}
         </RNView>
 
-        <RNView style={styles.chips} accessibilityRole="tablist">
+        <RNView style={styles.chips}>
           {sportChips.map((s) => {
             const active = sport === s.key;
             return (
@@ -285,7 +347,8 @@ export default function SessionHistoryScreen() {
 
         {offline && (
           <Text style={styles.offlineNote} accessibilityLiveRegion="polite" testID="session-history-offline">
-            Couldn&apos;t reach the server — showing what&apos;s saved on this device. Reconnect to
+            Couldn&apos;t reach the server — showing what&apos;s saved on this device
+            {(query || sport || period !== 'all') ? ', matching your filters' : ''}. Reconnect to
             search your full history.
           </Text>
         )}
@@ -321,9 +384,13 @@ export default function SessionHistoryScreen() {
             !loading && !error ? (
               <RNView style={styles.empty} testID="session-history-empty">
                 <Text style={styles.emptyTitle}>
-                  {offline ? 'Nothing saved on this device yet' : 'No sessions match'}
+                  {offline
+                    ? query || sport || period !== 'all'
+                      ? 'No cached sessions match'
+                      : 'Nothing saved on this device yet'
+                    : 'No sessions match'}
                 </Text>
-                {(query || sport || period !== 'all') && !offline && (
+                {(query || sport || period !== 'all') && (
                   <Text style={styles.muted}>Try clearing the search or a filter.</Text>
                 )}
               </RNView>

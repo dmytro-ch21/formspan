@@ -1012,6 +1012,9 @@ export type SessionQuery = {
   to?: string;
   /** Free text matched against the session name, case-insensitively. */
   q?: string;
+  /** IANA zone `from`/`to` are resolved in — see `listSessionsPage`'s note on
+   *  why the search screen always sends this. */
+  tz?: string;
 };
 
 function sessionQS(opts: SessionQuery): string {
@@ -1022,6 +1025,7 @@ function sessionQS(opts: SessionQuery): string {
   if (opts.from) p.set('from', opts.from);
   if (opts.to) p.set('to', opts.to);
   if (opts.q) p.set('q', opts.q);
+  if (opts.tz) p.set('tz', opts.tz);
   const query = p.toString();
   return query ? `?${query}` : '';
 }
@@ -1040,6 +1044,12 @@ function sessionQS(opts: SessionQuery): string {
  * most recent rows). It therefore needs a connection; callers should fall
  * back to `listLocalSessions` (`sessionStore.ts`) and say so when this
  * throws offline, the way `apps/mobile/app/session/history.tsx` does.
+ *
+ * A period filter's `from`/`to` should be sent alongside a `tz` — the
+ * backend resolves both in that zone (`handler.go`'s `List`), and web's
+ * `apps/web/src/lib/api.ts` already does this. Without it, a session logged
+ * near midnight can fall on the wrong side of a period boundary compared to
+ * what web shows for the same athlete, the same filter, the same moment.
  */
 export async function listSessionsPage(
   getToken: TokenGetter,

@@ -44687,6 +44687,38 @@ install (or cleared app data) on an account with more than 20 historical
 sessions, confirming the 21st-and-older sessions are both backfilled locally
 and findable through `/session/history`'s search.
 
+**Fixed in review, before this PR opened.** `frontend-reviewer` found a real
+race: tapping "Show older" on a slow connection, then changing a filter
+before it resolved, let the OLD page's response land after `load()` had
+already replaced `items` for the NEW filter — `loadMore` appended stale rows
+and overwrote `total` with the wrong query's count, silently. Fixed by
+routing `loadMore` through the SAME `AbortController` ref `load()` already
+uses, so either function aborting the other's in-flight request is enough;
+`app/__tests__/sessionHistoryScreen.test.tsx` gained a reproduction that
+fails against the un-fixed code and passes against the fix (confirmed both
+ways). Independently, both reviewers flagged the offline fallback ignoring
+the active search/sport/period filters while the chips still showed them
+selected; `matchesFilters` now narrows `listLocalSessions`'s result the same
+way the server query would, and the offline banner and empty-state copy say
+so. `tz` also joined `listSessionsPage`'s query (mirroring web's
+`localZone()` call), so a period boundary near midnight resolves in the same
+zone on both clients. Two cosmetic items from the same pass: the chip rows'
+`accessibilityRole="tablist"` was a mismatch against `button`-role children
+(dropped), and a comment miscited `maxLimit`'s file as `session.go` (it's
+`session/postgres.go`).
+
+**A narrower gap than the routine 20-row cap, left open rather than
+papered over**: the fresh-install backfill is detected by an empty
+`local_sessions` table and never repeats once anything lands — so a device
+that logs exactly one session OFFLINE, before its first successful sync,
+permanently disables the backfill for that account once that first sync
+finally runs (the table is no longer empty). The athlete still gets that one
+session's own history correctly; what they lose is the paginated catch-up
+for everything else. Worth a persisted "backfill done" flag instead of an
+inferred one if this turns out to matter in practice — not done here because
+it was not measured to happen, and the inferred version needed no schema
+migration.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

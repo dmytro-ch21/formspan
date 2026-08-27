@@ -1237,7 +1237,7 @@ const ROUTINE_PULL_LIMIT = 20;
 
 /**
  * The page size used ONLY for the fresh-install backfill in `runSync`.
- * Matches the backend's own `maxLimit` (`session/session.go`) exactly, so a
+ * Matches the backend's own `maxLimit` (`session/postgres.go`) exactly, so a
  * page is never silently clamped to fewer rows than asked for — which would
  * look like "the server has nothing left" to the loop below when it is
  * really just the server's ceiling.
