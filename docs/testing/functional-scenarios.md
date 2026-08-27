@@ -5703,6 +5703,10 @@ The rule the old one broke: suggestions must be about what the exercise
   the other tier off the screen.
 - Swapping still keeps the logged numbers when the measurement carries, and
   clears them when it does not ("measured differently" on the row).
+- **The tonnage factor a swap lands on (N425)** is its own scenario, with a
+  mobile-offline and a web-mid-edit case that fail in opposite directions —
+  see "Per-side load" → "An offline exercise swap does not silently halve
+  (or, on web, double) the tonnage (N425)".
 
 ### Cross-app parity (web)
 
@@ -5755,6 +5759,12 @@ risk — this screen fails by congratulating someone for nothing.
   block at all. Not "RPE 0". This is the case that distinguishes "not collected"
   from "recorded as nothing".
 - A bodyweight session → **no Volume tile**, rather than "0 kg".
+- A session with an unresolved offline exercise swap in it (N425) → also **no
+  Volume tile**, even though `tonnageKg` is positive — that positive number
+  is a silent under-count, not a true zero, and the card must not celebrate
+  it. Full scenario, including the mobile-vs-web asymmetry: "Per-side load"
+  → "An offline exercise swap does not silently halve (or, on web, double)
+  the tonnage (N425)".
 
 ### BJJ
 
@@ -8686,6 +8696,52 @@ is the specific regression this guards.
 - An older client that ignores `load_factor` still shows the server's totals
   correctly, because the server does the multiplying for anything it computes.
 
+### An offline exercise swap does not silently halve (or, on web, double) the tonnage (N425)
+
+The two failure modes are mirror images of each other, and both were real
+before this: mobile guessed the new exercise's factor was 1 until the next
+sync, web kept the OLD exercise's factor until the row was saved. Neither
+surface may guess again.
+
+- **Mobile, offline, swap a barbell exercise for a pair of dumbbells** (turn
+  on Airplane Mode first). Type a weight on the swapped-in set. The row and
+  the session's Volume tile must show the CORRECT doubled tonnage
+  immediately — not the barbell's ×1, and not silence. This is the ordinary
+  case: `implements` is on every cached catalog row already, so the lookup
+  needs no signal.
+- **Mobile, offline, swap for an exercise whose catalog row predates this
+  fix** (hard to reach organically — the residual, pre-`payload_json` cache
+  case; simulate by clearing and only partially repopulating
+  `exercise_cache` in a debug build). The Volume tile shows **"—", not a
+  wrong number** — the session's own comment calls this "absent beats
+  wrong". Sync when signal returns; the tile then shows the real figure,
+  once, not a number that was already showing and silently changed.
+- **The finish celebration card obeys the same rule.** Finish a session
+  offline right after an unresolved swap: the card shows Sets and Reps but
+  **no Volume tile at all**, same shape as a bodyweight session's "no Volume
+  tile" scenario above — not a zero, not a wrong positive number.
+- **Reconnect and sync.** The tile updates to the correct figure exactly
+  once. The regression this guards against: the number reading one value,
+  then silently becoming a different value with nothing on screen
+  explaining why either was shown.
+- **The weekly/monthly rollups (Today's week review, the training calendar)
+  under-count by the unresolved set's own tonnage while it is unresolved**,
+  rather than showing "—" for the whole week — a deliberately different
+  choice from the session screen's own tile, made because withholding a
+  whole month's number over one set would hide far more than it protects.
+  Confirm the month/week figure corrects itself, quietly, once that one
+  session syncs — no separate scenario should be needed once it does.
+- **Web, swap a pair of dumbbells for a barbell mid-edit, without saving.**
+  The row must read the barbell's own factor (no "(total)" annotation)
+  immediately — not the dumbbells' stale ×2. Before this fix web never
+  cleared the factor on a swap at all, so this is the one direction most
+  worth checking by hand: a swapped-in barbell set reading its weight as
+  **double** would look like ordinary heavy training, not an obvious bug.
+- **Web has no unresolved case** — every `Exercise` on web comes from a live
+  fetch, so `implements` is always known. A scenario asserting web ever
+  shows "—" for this reason would be asserting something the architecture
+  does not allow; don't write one.
+
 ### Authoring it in the console (T2)
 
 The console can set `load_mode` now. Before, every exercise created there was
@@ -8741,6 +8797,19 @@ told the opposite of the truth.
   bug.
 - **A set with no factor says nothing** rather than guessing. Offline rows and
   anything logged before the server sent one: `10 × 30kg`, no annotation.
+- **Web now shows the doubled reading too (N425), not only the aria-only
+  hint the bullet above describes.** Open a Dumbbell Bench Press set on
+  `/dashboard/sessions/[id]` with weight 30 logged: a small `(60kg total)`
+  line appears under the weight cell. Open a One-Arm Dumbbell Row at 40kg:
+  no line at all — driven by the TOTAL, same rule as mobile, not by
+  `perSide`. Before this, a sighted user on web had no way to check `8 × 30`
+  against the session's Volume figure the way a phone user always could;
+  the same set genuinely read differently on the two surfaces.
+- **The web and mobile readings must be the SAME reading, on the same
+  set, at the same time.** Log a dumbbell set on the phone, open the same
+  session on web without refreshing the phone screen — both show
+  `(60kg total)`, not one showing it and the other silent or showing a
+  different number.
 - **Web shows two per-side lines on the 34 overlapping exercises**, and both
   are true: "Per side — 8 reps here means 8 each side." (reps, keyed on
   `is_unilateral`) and "Weight is per hand — enter the one dumbbell you lift."

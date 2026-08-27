@@ -30,6 +30,7 @@ import {
   SET_TYPES,
   swapSuggestions,
   swapExercise,
+  weightTotalSuffix,
   withSetChange,
   type Exercise,
   type LoggedSet,
@@ -1132,11 +1133,36 @@ function SetRow({
               : m === "distance"
                 ? toDisplayDistance(stored, units)
                 : stored;
+        // The doubled reading, named — mobile's `describeSet` has always
+        // rendered "30kg (60kg total)"; this table showed only "30" with the
+        // per-hand fact buried in an aria-label nobody sighted sees (#425).
+        //
+        // Routed through `weightTotalSuffix` rather than recomputed inline —
+        // `describeSetWeight`, which the parity test in `loadFactor.test.ts`
+        // actually pins, is built from that same function. An earlier version
+        // of this block restated the "differs from the total" condition by
+        // hand, which meant the tested string and the rendered page could
+        // drift from each other without either one failing — caught in
+        // review. Derived from the TOTAL, not from `perSide`: a one-arm
+        // dumbbell row is `perSide` but its factor is 1, and "(X total)"
+        // there would be a straight lie — see `weightTotalSuffix`'s own tests.
+        const weightSuffix =
+          m === "weight"
+            ? weightTotalSuffix({ weight_kg: set.weight_kg, load_factor: set.load_factor }, units)
+            : null;
+        // Stable per row without a set id to key on: `exercise_id` plus
+        // `position` is unique within the session, and this only needs to be
+        // unique enough for `aria-describedby` to find the right node.
+        const weightTotalId = `set-weight-total-${set.exercise_id}-${set.position}`;
         return (
           <td key={m} className="px-2 py-1.5">
             <NumberCell
               label={`${unitLabel}${m === "weight" && perSide ? " per hand" : ""} for set ${ordinal} of ${exerciseName}`}
               value={shown}
+              // Points a screen-reader user focused on the input at the total
+              // beside it — complementary information, not a restatement of
+              // the label, so this is additive rather than a conflict with it.
+              describedBy={weightSuffix ? weightTotalId : undefined}
               onChange={(raw) => {
                 const n =
                   raw.trim() === "" ? null : Number(raw.replace(",", "."));
@@ -1160,6 +1186,14 @@ function SetRow({
               step={m === "weight" ? 0.5 : 1}
               disabled={!editable}
             />
+            {weightSuffix && (
+              <span
+                id={weightTotalId}
+                className="mt-0.5 block whitespace-nowrap text-[0.625rem] text-text-dim"
+              >
+                {weightSuffix}
+              </span>
+            )}
           </td>
         );
       })}
@@ -1230,6 +1264,7 @@ function NumberCell({
   min,
   max,
   step,
+  describedBy,
 }: {
   label: string;
   value: number | null;
@@ -1239,12 +1274,20 @@ function NumberCell({
   min?: number;
   max?: number;
   step?: number;
+  /**
+   * Id of an element with complementary information about this value — the
+   * dumbbell-pair total beside the weight cell, so far the only caller (#425).
+   * Additive, not a restatement of `label`: VoiceOver/NVDA read the label
+   * first and then this, rather than one replacing the other.
+   */
+  describedBy?: string;
 }) {
   return (
     <input
       type="number"
       inputMode="decimal"
       aria-label={label}
+      aria-describedby={describedBy}
       value={value ?? ""}
       min={min}
       max={max}

@@ -187,6 +187,26 @@ describe('the objective tiles', () => {
     expect(stats.map((s) => s.label)).toEqual(['Time', 'Rounds', 'Rolling']);
   });
 
+  it('omits volume when it is a silent under-count, even though it is positive (#425)', () => {
+    // An offline exercise swap this session made left one set's tonnage out
+    // of the sum — `tonnageKg` is real but WRONG, by an unknown amount, and
+    // will change with no explanation the moment this syncs. A positive
+    // number here is not "some volume", it is exactly the case `omits volume
+    // rather than printing zero` above is about, just with tonnageKg > 0
+    // instead of === 0 — a celebration card is not the place to assert an
+    // achievement figure that is not yet the true one.
+    const stats = statsFor(summary({ tonnageKg: 4200, tonnageUnknown: true }), kg);
+    expect(stats.map((s) => s.label)).not.toContain('Volume');
+  });
+
+  it('shows volume normally once nothing is unresolved', () => {
+    // `tonnageUnknown` defaults to undefined/false in the `summary()` fixture
+    // above — this pins that the ordinary case is untouched by the new field.
+    expect(statsFor(summary({ tonnageKg: 4200, tonnageUnknown: false }), kg).find((s) => s.label === 'Volume')?.value).toBe(
+      '4200 kg',
+    );
+  });
+
   it('always leads with time, for both sports', () => {
     expect(statsFor(summary(), kg)[0].label).toBe('Time');
     expect(statsFor(summary({ sport: 'bjj' }), kg)[0].label).toBe('Time');
@@ -253,10 +273,10 @@ describe('building the summary from a finished session', () => {
     started_at: '2026-08-07T10:00:00Z',
     ended_at: '2026-08-07T11:04:00Z',
     sets: [
-      { exercise_id: 'bench', completed: true, reps: 8 },
-      { exercise_id: 'bench', completed: true, reps: 8 },
-      { exercise_id: 'row', completed: true, reps: 10 },
-      { exercise_id: 'row', completed: false, reps: null },
+      { exercise_id: 'bench', completed: true, reps: 8, set_type: 'working' as const, weight_kg: 100 },
+      { exercise_id: 'bench', completed: true, reps: 8, set_type: 'working' as const, weight_kg: 100 },
+      { exercise_id: 'row', completed: true, reps: 10, set_type: 'working' as const, weight_kg: 50 },
+      { exercise_id: 'row', completed: false, reps: null, set_type: 'working' as const, weight_kg: null },
     ],
   };
   const vol = { working_sets: 3, total_reps: 26, tonnage_kg: 1200, hardest_rpe: 8 };
@@ -292,6 +312,23 @@ describe('building the summary from a finished session', () => {
 
   it('starts with no records — they arrive later, or not at all', () => {
     expect(summariseSession(session, vol, true).records).toEqual([]);
+  });
+
+  it('is not flagged unknown when every set has a resolved factor', () => {
+    expect(summariseSession(session, vol, true).tonnageUnknown).toBe(false);
+  });
+
+  it('is flagged unknown when a completed, weighted set carries the EXPLICITLY UNRESOLVED sentinel (#425)', () => {
+    // The offline-swap case: this is what `hasUnresolvedLoad` is reading off
+    // `session.sets` directly, independent of `vol` — `volume.tonnage_kg`
+    // itself is already an under-count by then (see `localVolume`'s own
+    // comment) and cannot tell the caller that on its own, which is the whole
+    // reason this is a separate field rather than folded into that number.
+    const swapped = {
+      ...session,
+      sets: [...session.sets, { exercise_id: 'incline-bench', completed: true, reps: 5, set_type: 'working' as const, weight_kg: 40, load_factor: null }],
+    };
+    expect(summariseSession(swapped, vol, true).tonnageUnknown).toBe(true);
   });
 });
 
