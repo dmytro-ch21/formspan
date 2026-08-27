@@ -202,6 +202,28 @@ export function techniqueOutcomeCount(
  * — so deriving it twice could put the drilled row under "Half Guard" and the
  * attempted row under nothing, splitting one technique's evidence in half
  * with no error anywhere.
+ *
+ * ## Also backfills the drilled tag (N206)
+ *
+ * A live outcome IS evidence of drilling — you cannot go for, land, or get
+ * stopped on a technique you did not practise that session. But `event:
+ * 'drilled'` was, until now, written ONLY by the drilled-step technique
+ * picker (`add()` in `app/bjj/reflect/[id].tsx`'s `DrilledStep`), and the
+ * roadmap's "classes drilled in X/Y" criteria — the ONLY criterion some
+ * fundamentals carry, e.g. a breakfall — read exclusively that tag
+ * (`curriculum/postgres.go`'s `COUNT(DISTINCT session_id) FILTER (WHERE
+ * event = 'drilled')`). A focus technique worked purely through these live
+ * Missed/Landed/Stopped-theirs counters — which is the ONLY control most
+ * focus techniques ever show, since typing it again into the drilled
+ * picker is a slower, separate action — moved a live count that no
+ * drill-only milestone was reading, and stayed at 0 with no explanation.
+ *
+ * So: the first live outcome recorded for a technique in a session also
+ * writes one `drilled` tag, count 1, if that technique doesn't already have
+ * one. Taking a live count back to zero does NOT remove it — once a session
+ * has evidence the technique was drilled, undoing a tap shouldn't erase
+ * that, which is the same asymmetry `dropDrilled` below already documents
+ * for the reverse direction.
  */
 export function bumpTechniqueOutcome(
   tags: Tag[],
@@ -223,11 +245,22 @@ export function bumpTechniqueOutcome(
       technique_id: techniqueID,
       count: delta,
     });
-    return next;
+  } else {
+    const count = next[i].count + delta;
+    if (count <= 0) next.splice(i, 1);
+    else next[i] = { ...next[i], count };
   }
-  const count = next[i].count + delta;
-  if (count <= 0) next.splice(i, 1);
-  else next[i] = { ...next[i], count };
+
+  if (delta > 0 && !next.some((t) => t.technique_id === techniqueID && t.event === 'drilled')) {
+    next.push({
+      category: source.category,
+      event: 'drilled',
+      position: source.position,
+      technique_id: techniqueID,
+      count: 1,
+    });
+  }
+
   return next;
 }
 

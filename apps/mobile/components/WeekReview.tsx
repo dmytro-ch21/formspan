@@ -65,14 +65,13 @@ export function WeekReview({
 
   return (
     <View style={styles.card} testID={testID ?? 'week-review'}>
-      <RNView style={styles.head}>
-        <Text style={styles.label}>THIS WEEK</Text>
-        {review.planned > 0 && (
+      {review.planned > 0 && (
+        <RNView style={styles.head}>
           <Text style={[styles.plan, { color: review.met >= review.planned ? accent.ink : vola.textDim }]}>
             {review.met}/{review.planned} planned
           </Text>
-        )}
-      </RNView>
+        </RNView>
+      )}
 
       <Text style={styles.verdict}>{weekVerdict(review)}</Text>
 
@@ -229,8 +228,10 @@ const styles = StyleSheet.create({
   // nesting that inside a second one gives the double frame that reads as a
   // rendering mistake. This is a labelled group, like Today's other sections.
   card: { gap: 10 },
-  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  label: { fontSize: 11, color: vola.textDim, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: '600' },
+  // Single child now — this card no longer owns "THIS WEEK" (N206). The
+  // Progress screen's own SectionHeader carries that label; this row exists
+  // only to right-align the plan pill above the verdict sentence.
+  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
   plan: { fontSize: 12, fontWeight: '700' },
   verdict: { fontSize: 15, fontWeight: '600', lineHeight: 21 },
   /*

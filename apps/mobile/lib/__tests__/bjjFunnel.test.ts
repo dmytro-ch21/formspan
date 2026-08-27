@@ -117,6 +117,76 @@ describe('bumpTechniqueOutcome', () => {
     const [, created] = bumpTechniqueOutcome([armbar], armbar, 'attempted', 2);
     expect(created.count).toBe(2);
   });
+
+  describe('backfills a drilled tag (N206)', () => {
+    // A live outcome IS evidence of drilling — you cannot land, miss or get
+    // stopped on a technique you did not practise that session. A focus
+    // technique whose ONLY criterion is `target_drilled_sessions` (a
+    // breakfall, say) is worked exclusively through these live counters —
+    // typing it a second time into the drilled-step picker is a separate,
+    // slower action — so before this fix the "classes drilled in X/Y"
+    // milestone never moved no matter how many times "Landed" was tapped.
+    const focus = {
+      technique_id: 'breakfall-backward',
+      name: 'Backward Breakfall',
+      position: 'Standing',
+      category: 'control' as const,
+    };
+
+    it('adds one drilled tag the first time any live outcome is recorded', () => {
+      const tags = bumpTechniqueOutcome([], focus, 'scored', 1);
+      expect(tags).toContainEqual({
+        category: 'control',
+        event: 'drilled',
+        position: 'Standing',
+        technique_id: 'breakfall-backward',
+        count: 1,
+      });
+    });
+
+    it('does not add a second drilled tag on a later bump', () => {
+      let tags = bumpTechniqueOutcome([], focus, 'scored', 1);
+      tags = bumpTechniqueOutcome(tags, focus, 'scored', 4); // "Landed" tapped four more times
+      expect(tags.filter((t) => t.event === 'drilled')).toHaveLength(1);
+      expect(techniqueOutcomeCount(tags, 'breakfall-backward', 'scored')).toBe(5);
+    });
+
+    it('does not add a second drilled tag when the drilled-step picker already recorded one', () => {
+      // armbar is already `event: 'drilled'` in the seed array.
+      const tags = bumpTechniqueOutcome([armbar], armbar, 'scored', 1);
+      expect(tags.filter((t) => t.event === 'drilled')).toHaveLength(1);
+    });
+
+    it('never backfills on a decrement, even from nothing', () => {
+      expect(bumpTechniqueOutcome([], focus, 'scored', -1)).toEqual([]);
+    });
+
+    it('never backfills on a decrement of an existing row either', () => {
+      // The test above returns early on the `i === -1, delta < 0` branch,
+      // before the backfill guard is ever reached — it cannot tell a working
+      // `delta > 0` check from a deleted one. This one goes through the
+      // OTHER branch (an existing row found, then decremented), which is
+      // the path a session synced before N206 shipped would take: a live
+      // count already exists with no drilled tag alongside it yet.
+      const existingScored: Tag = { ...focus, event: 'scored', count: 3 };
+      const tags = bumpTechniqueOutcome([existingScored], focus, 'scored', -1);
+      expect(tags.some((t) => t.event === 'drilled')).toBe(false);
+    });
+
+    it('backfills per technique — a different technique already having a drilled tag does not suppress it', () => {
+      // The dedup check has to match on technique_id, not "does a drilled tag
+      // exist anywhere in this session's tags" — armbar's own drilled tag
+      // (already in the seed array) must not block breakfall's backfill.
+      const tags = bumpTechniqueOutcome([armbar], focus, 'scored', 1);
+      expect(tags).toContainEqual({
+        category: 'control',
+        event: 'drilled',
+        position: 'Standing',
+        technique_id: 'breakfall-backward',
+        count: 1,
+      });
+    });
+  });
 });
 
 describe('the live grid and the funnel partition the tag list', () => {
@@ -290,9 +360,14 @@ describe('the defensive half of the funnel', () => {
     expect(techniqueOutcomeCount(tags, 't1', 'defended')).toBe(1);
     tags = bumpTechniqueOutcome(tags, focus, 'defended', -1);
     expect(techniqueOutcomeCount(tags, 't1', 'defended')).toBe(0);
-    // And the row is removed rather than left at zero, so it cannot be PUT as
-    // a meaningless count.
-    expect(tags.filter((t) => t.technique_id === 't1')).toEqual([]);
+    // The defended row itself is removed rather than left at zero, so it
+    // cannot be PUT as a meaningless count — but the backfilled `drilled` row
+    // (N206) is NOT removed by decrementing a live count back to zero. Once a
+    // session has evidence the technique was drilled, undoing a tap should
+    // not erase that; see `bumpTechniqueOutcome`'s docstring.
+    expect(tags.filter((t) => t.technique_id === 't1')).toEqual([
+      { category: 'sweep', event: 'drilled', position: 'Standing', technique_id: 't1', count: 1 },
+    ]);
   });
 
   it('does not let a defended count leak into the offensive ones', () => {
