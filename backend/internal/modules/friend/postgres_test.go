@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {
@@ -343,5 +345,109 @@ func TestPendingCountIsIncomingOnly(t *testing.T) {
 	// An outsider has nothing.
 	if n, err := repo.PendingCount(ctx, asker); err != nil || n != 0 {
 		t.Fatalf("the asker has nothing waiting on them, got %d (%v)", n, err)
+	}
+}
+
+// ── N205: avatars on the social surfaces ──────────────────────────────────
+
+// TestAvatarKeyMatchesProfilesAvatarKey pins this package's own avatarKey
+// against profile.AvatarKey directly. It is the one place this package is
+// allowed to import a sibling module — see avatarKey's own doc comment — the
+// same exception feed_test.go already takes for its Detail wire shape against
+// sessioncard.Detail. Without this, the two hash functions could drift and
+// every friend's card would silently presign the wrong object.
+func TestAvatarKeyMatchesProfilesAvatarKey(t *testing.T) {
+	for _, id := range []string{"a_user", "fr_alice", "some-other-id-42", ""} {
+		if got, want := avatarKey(id), profile.AvatarKey(id); got != want {
+			t.Errorf("avatarKey(%q) = %q, want %q (profile.AvatarKey)", id, got, want)
+		}
+	}
+}
+
+// TestFriendsCardsCarryAvatarKeyOnlyWhenHasAvatar is N205's has-avatar /
+// no-avatar split for the friends list: a friend with an uploaded avatar gets
+// a hashed key on their card, one without gets none — never the raw id
+// either way.
+func TestFriendsCardsCarryAvatarKeyOnlyWhenHasAvatar(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	alice := person(t, pool, "fr_av_alice", "fr_av_alice_h")
+	bob := person(t, pool, "fr_av_bob", "fr_av_bob_h")
+
+	if err := repo.Send(ctx, alice, "fr_av_bob_h"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if err := repo.Accept(ctx, bob, "fr_av_alice_h"); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	// Bob has an avatar; Alice never uploaded one.
+	if _, err := pool.Exec(ctx, `UPDATE profiles SET has_avatar = true WHERE user_id = $1`, bob); err != nil {
+		t.Fatalf("set bob's avatar: %v", err)
+	}
+
+	aliceFriends, err := repo.Friends(ctx, alice)
+	if err != nil || len(aliceFriends) != 1 {
+		t.Fatalf("alice's friends: %+v %v", aliceFriends, err)
+	}
+	if aliceFriends[0].AvatarKey == nil {
+		t.Fatalf("bob has an avatar; alice's card for him should carry an AvatarKey")
+	}
+	if want := avatarKey(bob); *aliceFriends[0].AvatarKey != want {
+		t.Errorf("avatar key = %q, want %q", *aliceFriends[0].AvatarKey, want)
+	}
+	// The load-bearing property from N12's review, restated here: the key is
+	// a HASH, never bob's raw id, because a presigned URL's signature covers
+	// the whole path — a raw id in the key would leak through AvatarURL to
+	// every friend who can see this card.
+	if *aliceFriends[0].AvatarKey == bob {
+		t.Fatalf("AvatarKey leaked the raw user id")
+	}
+
+	bobFriends, err := repo.Friends(ctx, bob)
+	if err != nil || len(bobFriends) != 1 {
+		t.Fatalf("bob's friends: %+v %v", bobFriends, err)
+	}
+	if bobFriends[0].AvatarKey != nil {
+		t.Fatalf("alice has no avatar; bob's card for her should carry no AvatarKey, got %q", *bobFriends[0].AvatarKey)
+	}
+}
+
+// TestPendingCardsCarryAvatarKeyOnlyWhenHasAvatar is the same split for
+// BOTH halves of the pending inbox — incoming and outgoing share cardSelect,
+// so both are pinned rather than assuming one covers the other.
+func TestPendingCardsCarryAvatarKeyOnlyWhenHasAvatar(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	alice := person(t, pool, "fr_avp_alice", "fr_avp_alice_h")
+	bob := person(t, pool, "fr_avp_bob", "fr_avp_bob_h")
+
+	// Alice has an avatar; Bob does not.
+	if _, err := pool.Exec(ctx, `UPDATE profiles SET has_avatar = true WHERE user_id = $1`, alice); err != nil {
+		t.Fatalf("set alice's avatar: %v", err)
+	}
+	if err := repo.Send(ctx, alice, "fr_avp_bob_h"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	bobsInbox, err := repo.Pending(ctx, bob)
+	if err != nil || len(bobsInbox.Incoming) != 1 {
+		t.Fatalf("bob's inbox: %+v %v", bobsInbox, err)
+	}
+	if bobsInbox.Incoming[0].AvatarKey == nil {
+		t.Fatalf("alice has an avatar; her incoming row in bob's inbox should carry an AvatarKey")
+	}
+	if want := avatarKey(alice); *bobsInbox.Incoming[0].AvatarKey != want {
+		t.Errorf("avatar key = %q, want %q", *bobsInbox.Incoming[0].AvatarKey, want)
+	}
+
+	alicesOutbox, err := repo.Pending(ctx, alice)
+	if err != nil || len(alicesOutbox.Outgoing) != 1 {
+		t.Fatalf("alice's outbox: %+v %v", alicesOutbox, err)
+	}
+	if alicesOutbox.Outgoing[0].AvatarKey != nil {
+		t.Fatalf("bob has no avatar; alice's outgoing row for him should carry no AvatarKey, got %q",
+			*alicesOutbox.Outgoing[0].AvatarKey)
 	}
 }

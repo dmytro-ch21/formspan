@@ -9,13 +9,13 @@ import {
   View as RNView,
 } from 'react-native';
 
+import { Avatar } from '@/components/Avatar';
 import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
 import { SessionCard } from '@/components/SessionCard';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor, sportIcon } from '@/components/ui/sport';
 import { vola } from '@/constants/Colors';
-import { monogramFor } from '@/lib/monogram';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   agoLabel,
@@ -117,10 +117,6 @@ const FeedRow = memo(function FeedRow({
   const glyph = sportIcon(item.sport);
   const metrics = feedMetrics(item, units);
   const who = item.display_name || `@${item.from}`;
-  // Keyed on the handle, never the display name: the handle is unique and
-  // cannot be set to somebody else's, so letters and colour always agree about
-  // who this is.
-  const mono = monogramFor(item.from);
   const when = agoLabel(item.ended_at, now);
   const card = cardFromFeedItem(item, units, now);
 
@@ -159,22 +155,13 @@ const FeedRow = memo(function FeedRow({
             every post was therefore a restatement of its own caption, and the
             person, which is the question a feed is scanned for, was plain text.
 
-            The colour is derived from the handle and never changes, so a feed
-            of the same few friends becomes scannable by colour before any of it
-            is read. The sport keeps its tinted glyph, moved down beside its own
-            label where it is a detail rather than an identity. */}
-        <RNView style={[styles.avatar, { backgroundColor: mono.background }]}>
-          <Text
-            style={[styles.avatarText, { color: mono.ink }]}
-            // The disc is a fixed 38pt and RN scales text by default, so at
-            // accessibility sizes the initials outgrow it and spill — views do
-            // not clip. Capped because this is an identity GLYPH and the name
-            // it stands for is right beside it, scaling freely.
-            maxFontSizeMultiplier={1.4}
-          >
-            {mono.initials}
-          </Text>
-        </RNView>
+            The real uploaded avatar when there is one (N205); the monogram —
+            keyed on the handle, never the display name, so letters and colour
+            always agree about who this is — is `Avatar`'s own fallback,
+            exactly as it is everywhere else the component is used. The sport
+            keeps its tinted glyph, moved down beside its own label where it
+            is a detail rather than an identity. */}
+        <Avatar url={item.avatar_url} handle={item.from} size={38} />
         <RNView style={styles.byBody}>
           {/* The person leads. */}
           <Text style={styles.who} numberOfLines={1}>
@@ -560,16 +547,6 @@ const styles = StyleSheet.create({
   // contact sheet and the eye cannot tell where one session ends.
   post: { gap: 8, marginBottom: 12 },
   by: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // White on every palette entry, which is why the palette is constrained to
-  // colours that carry it.
-  avatarText: { fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
   byMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
   handle: { fontSize: 11, color: vola.textDim, marginTop: 1 },
   byBody: { flex: 1, minWidth: 0 },

@@ -13235,3 +13235,50 @@ on screen. That, and only that, is what moved.
   presentation logic (WeekReview/grid layout) and pure client-side derived
   data (the tag backfill happens in the same offline-first activity payload
   the session already writes, no new endpoint or permission surface).
+
+## N205 — uploaded avatars reach the friends list and the feed (`GET /v1/friends`, `GET /v1/friends/requests`, `GET /v1/feed`, `apps/mobile/app/friends/index.tsx`, `apps/mobile/app/social/index.tsx`)
+
+### Happy path
+
+- As athlete A, upload an avatar. As friend B, open the Friends screen and
+  confirm A's uploaded photo renders on their row — not the monogram.
+- As athlete A with no avatar, confirm friend B's Friends screen shows the
+  monogram for A's row, exactly as before this ticket.
+- Send a friend request from an account WITH an avatar; confirm the
+  recipient's incoming-request row shows the sender's real photo.
+- Send a friend request from an account with no avatar; confirm the row
+  shows the monogram.
+- Confirm the outgoing-requests list and the search-result card (after
+  looking a handle up) both show the same has-avatar/no-avatar split.
+- As athlete A with `share_training_with_friends` on and an avatar set,
+  finish a session; confirm friend B's Social feed row shows A's real photo
+  next to the post, not the monogram.
+- As athlete A with no avatar, confirm the feed row for their session shows
+  the monogram.
+- Remove A's avatar (via the profile screen); confirm A's rows on both a
+  friend's Friends screen and Social feed fall back to the monogram on next
+  load — no stale photo.
+
+### Edge cases and errors
+
+- **NEEDS HUMAN EVIDENCE — let a presigned avatar URL actually expire** (or
+  simulate a 404 on the image request) on a Friends row and a feed row;
+  confirm both fall back to the monogram rather than a broken-image icon —
+  the same property N12 already covers for the profile screen, now exercised
+  on these two new surfaces.
+- Confirm the avatar disc's size matches the row it is in (40pt on Friends
+  rows, 38pt on feed rows) and that swapping in the real `Avatar` component
+  did not shift surrounding layout.
+- Confirm a client built against the OLD response shape (no `avatar_url` on
+  `FriendCard`/`FeedItem`) does not crash — the field is optional on both
+  mobile types and `Avatar` already treats an absent url as "show the
+  monogram".
+
+### Auth / security
+
+- Confirm a friend's `avatar_url` is only ever a short-lived presigned URL,
+  never a raw storage key or the friend's user id — the same load-bearing
+  property `PublicProfile.avatar_url` already carries. No new authorization
+  surface: seeing a friend's avatar requires nothing beyond what already
+  gates seeing their card or feed row (an accepted friendship, or a pending
+  request naming them).

@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import { configure, render, screen, waitFor } from '@testing-library/react-native';
+import { configure, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import SocialScreen from '../social/index';
 import { ApiError } from '@/lib/apiError';
@@ -213,4 +213,38 @@ it('pluralizes a one-day window correctly', async () => {
   // (mutation-verified: an always-plural windowLabel fails this test).
   expect(note).toHaveTextContent(/1 day\b/);
   expect(note).not.toHaveTextContent(/1 days\b/);
+});
+
+/**
+ * N205: `FeedRow` must render the REAL Avatar component instead of calling
+ * `monogramFor` directly. `Avatar`'s own testIDs (`avatar-photo` /
+ * `avatar-monogram`, pinned in `components/__tests__/Avatar.test.tsx`) are
+ * the evidence — a hand-rolled disc computed inline would produce neither.
+ */
+describe('avatars (N205)', () => {
+  it('renders the uploaded avatar for a friend who has one', async () => {
+    mockFeed.mockResolvedValue({
+      items: [session({ avatar_url: 'https://example.test/rhonda.jpg' })],
+      total: 1,
+      limit: 30,
+      offset: 0,
+      window_days: 3,
+    });
+
+    render(<SocialScreen />);
+
+    const row = await screen.findByTestId('feed-s1');
+    expect(within(row).getByTestId('avatar-photo')).toBeTruthy();
+    expect(within(row).queryByTestId('avatar-monogram', { includeHiddenElements: true })).toBeNull();
+  });
+
+  it('falls back to the monogram for a friend with no avatar', async () => {
+    mockFeed.mockResolvedValue({ items: [session()], total: 1, limit: 30, offset: 0, window_days: 3 });
+
+    render(<SocialScreen />);
+
+    const row = await screen.findByTestId('feed-s1');
+    expect(within(row).getByTestId('avatar-monogram', { includeHiddenElements: true })).toBeTruthy();
+    expect(within(row).queryByTestId('avatar-photo')).toBeNull();
+  });
 });

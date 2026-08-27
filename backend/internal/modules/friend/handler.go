@@ -4,16 +4,65 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/objectstore"
 )
+
+// avatarReadTTL matches profile.avatarReadTTL exactly — short, because a
+// presigned GET is a bearer credential for the object, minted fresh on every
+// response and rendered immediately, so nothing here benefits from a longer
+// life either.
+const avatarReadTTL = 15 * time.Minute
 
 type Handler struct {
 	repo Repository
+	// store is nil when object storage is not configured — a supported state
+	// (local dev, CI), same as profile.Handler. present then mints no URLs at
+	// all, and every card just carries the monogram fallback every client
+	// already has.
+	store *objectstore.Store
 }
 
-func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
+func NewHandler(repo Repository, store *objectstore.Store) *Handler {
+	return &Handler{repo: repo, store: store}
+}
+
+// present mints presigned AvatarURLs for a batch of cards in place, mirroring
+// profile.Handler.presentPublic's failure mode: a presign failure is logged
+// and the card's AvatarURL is simply left empty — never turned into a
+// request failure, because a friends list or feed page should not 500 over
+// one signature.
+//
+// **Logs at most ONCE per CALL, unlike presentPublic** (which only ever
+// presigns a single row, so the question does not arise there — `Pending`
+// calls this twice, once per direction, so a request can still log twice).
+// `PresignGet` only fails on a config-class problem — a malformed endpoint, a
+// bad region — which cannot resolve between one card and the next inside the
+// same call, so a naive per-row `continue` would warn identically up to
+// `maxBadgeCount`/500 times for one broken deploy. Bailing out on the first
+// failure is the same information at a sane volume, and every card after the
+// first-failing one is left with its zero-value AvatarURL, same as if
+// `h.store` were nil.
+func (h *Handler) present(r *http.Request, cards []Card) {
+	if h.store == nil {
+		return
+	}
+	for i := range cards {
+		if cards[i].AvatarKey == nil {
+			continue
+		}
+		url, err := h.store.PresignGet(*cards[i].AvatarKey, avatarReadTTL, time.Now())
+		if err != nil {
+			httplog.FromContext(r.Context()).Warn("friend: could not presign avatar", "err", err)
+			return
+		}
+		cards[i].AvatarURL = url
+	}
+}
 
 func (h *Handler) Send(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
@@ -59,6 +108,7 @@ func (h *Handler) Friends(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	h.present(r, list)
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"friends": list})
 }
 
@@ -69,6 +119,8 @@ func (h *Handler) Pending(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	h.present(r, reqs.Incoming)
+	h.present(r, reqs.Outgoing)
 	apihttp.WriteJSON(w, http.StatusOK, reqs)
 }
 

@@ -2,6 +2,8 @@ package feed
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -16,6 +18,23 @@ type PostgresRepository struct {
 
 func NewPostgresRepository(pool *pgxpool.Pool, friends Friends) *PostgresRepository {
 	return &PostgresRepository{pool: pool, friends: friends}
+}
+
+// avatarKey mirrors profile.AvatarKey BYTE FOR BYTE, exactly as friend's own
+// copy does (see that copy's doc comment for the full argument: this module's
+// contract is that it imports neither `friend` nor `session`, so importing
+// `profile` for one function would be the first exception — duplicated
+// instead, and TestAvatarKeyMatchesProfilesAvatarKey pins this copy against
+// the original directly, in the test file, where an import for comparison IS
+// the established exception this package already uses for `Detail` against
+// `sessioncard.Detail`).
+//
+// Hashed, never the raw user id: a presigned URL's signature covers its full
+// path, so whatever this returns is what every reader of a feed row's
+// AvatarURL receives.
+func avatarKey(userID string) string {
+	sum := sha256.Sum256([]byte(userID))
+	return "avatars/" + hex.EncodeToString(sum[:]) + ".jpg"
 }
 
 // visibleFrom is the whole of the access rule, written once.
@@ -112,8 +131,12 @@ func FeedWindowDays() int {
 // tell you, so the test reads the plan, and it can only read the real one if
 // there is one string. Inline, the test would have had to restate the SQL, and
 // a restated query proves the copy is fast.
+// p.user_id is selected ONLY to build the hashed AvatarKey below — it is
+// never assigned to an Item field directly, and the scan loop discards it the
+// moment the key exists. Same discipline profile.GetByUsername and
+// friend.cardSelect both document at their own equivalent line.
 const pageQuery = `
-		SELECT s.id, p.username, p.display_name, s.sport, s.name, s.started_at, s.ended_at,
+		SELECT s.id, p.user_id, p.username, p.display_name, p.has_avatar, s.sport, s.name, s.started_at, s.ended_at,
 		       p.share_training_details,` +
 	workingVolume + visibleFrom + `
 		ORDER BY s.ended_at DESC, s.id
@@ -228,8 +251,10 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, limit, off
 		// the social graph is keyed on handles — but the column is nullable, so
 		// it is scanned through a pointer rather than assumed.
 		var handle *string
+		var ownerID string
+		var hasAvatar bool
 		var wantsDetail bool
-		if err := rows.Scan(&it.ID, &handle, &it.DisplayName, &it.Sport, &it.Name,
+		if err := rows.Scan(&it.ID, &ownerID, &handle, &it.DisplayName, &hasAvatar, &it.Sport, &it.Name,
 			&it.StartedAt, &it.EndedAt, &wantsDetail, &it.WorkingSets, &it.TonnageKg); err != nil {
 			return page, fmt.Errorf("feed: scan: %w", err)
 		}
@@ -240,6 +265,10 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, limit, off
 			continue
 		}
 		it.From = *handle
+		if hasAvatar {
+			key := avatarKey(ownerID)
+			it.AvatarKey = &key
+		}
 		if wantsDetail {
 			if it.Sport == "bjj" {
 				matIDs = append(matIDs, it.ID)

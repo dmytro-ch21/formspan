@@ -52,12 +52,28 @@ var (
 	ErrNoUsername = errors.New("friend: claim a username first")
 )
 
-// Card is one person as the social surfaces show them — the same two public
+// Card is one person as the social surfaces show them — the same public
 // fields as profile.PublicProfile, plus the relationship timestamps this
 // module owns. Never an id.
 type Card struct {
 	Username    string  `json:"username"`
 	DisplayName *string `json:"display_name"`
+	// AvatarKey mirrors profile.PublicProfile.AvatarKey EXACTLY — the same
+	// hashed, deterministic object key profile.AvatarKey computes for this
+	// person's uploaded avatar (N205, closing the gap N12 (#378) deliberately
+	// left open — a friend could upload an avatar with no surface that showed
+	// it to anyone else).
+	//
+	// json:"-" for the identical reason PublicProfile.AvatarKey carries it:
+	// the key embeds the owner's user id (see profile.AvatarKey's doc
+	// comment for why that is load-bearing — a presigned URL's signature
+	// covers its full path, so a raw id here would leak through AvatarURL to
+	// every friend who can see this card), and this struct's whole point is
+	// that an id never crosses the wire from it. Nil when the person has no
+	// avatar. Set by the repository; read by the handler to mint AvatarURL,
+	// then discarded.
+	AvatarKey *string `json:"-"`
+	AvatarURL string  `json:"avatar_url,omitempty"`
 	// Since is when the friendship was accepted (friends list) or when the
 	// request was sent (request lists).
 	Since time.Time `json:"since"`

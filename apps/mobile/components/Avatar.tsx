@@ -78,7 +78,20 @@ export function Avatar({
       importantForAccessibility="no-hide-descendants"
       testID="avatar-monogram"
     >
-      <Text style={[styles.initials, { color: ink, fontSize: size * 0.4 }]}>{initials}</Text>
+      <Text
+        style={[styles.initials, { color: ink, fontSize: size * 0.4 }]}
+        // The disc is a FIXED size and RN scales text by default, so at
+        // accessibility sizes the initials outgrow it and spill — views do
+        // not clip. Capped because this is an identity GLYPH, not prose: the
+        // name it stands for is right beside it wherever this renders,
+        // scaling freely. (Restated from the feed's own pre-N205 disc, which
+        // carried this cap inline before N205 replaced it with this shared
+        // component — capping it here once covers every call site instead of
+        // each one needing to remember it.)
+        maxFontSizeMultiplier={1.4}
+      >
+        {initials}
+      </Text>
     </View>
   );
 }

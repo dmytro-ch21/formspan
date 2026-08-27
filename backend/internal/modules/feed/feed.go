@@ -100,6 +100,15 @@ type Item struct {
 	// propagates rather than freezing whatever the name was that day.
 	From        string  `json:"from"`
 	DisplayName *string `json:"display_name"`
+	// AvatarKey mirrors profile.PublicProfile.AvatarKey and friend.Card's own
+	// copy of the same pattern (N205) — the hashed, deterministic key for the
+	// owner's uploaded avatar object, json:"-" for the identical reason: the
+	// user id it is built from must never reach a client, only the presigned
+	// URL minted from it. Nil when the owner has no avatar. Set by
+	// PostgresRepository.List; read by the handler to mint AvatarURL, then
+	// discarded.
+	AvatarKey *string `json:"-"`
+	AvatarURL string  `json:"avatar_url,omitempty"`
 
 	Sport string `json:"sport"`
 	Name  string `json:"name"`

@@ -427,6 +427,58 @@ func TestTheRowCarriesAHandleAndTheVolumeRule(t *testing.T) {
 	}
 }
 
+// N205: a feed row carries the owner's avatar the same way a friend.Card
+// does — a hashed key when they have one, nothing at all when they don't.
+func TestTheRowCarriesAnAvatarKeyOnlyWhenTheOwnerHasOne(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "fd_ava", "fd_ava_h", true)
+	bob := person(t, h.pool, "fd_avb", "fd_avb_h", true)
+	befriend(t, h, alice, "fd_ava_h", bob, "fd_avb_h")
+	train(t, h, bob, "fd_av_row", "Squat day", true, nil)
+
+	if _, err := h.pool.Exec(ctx, `UPDATE profiles SET has_avatar = true WHERE user_id = $1`, bob); err != nil {
+		t.Fatalf("set bob's avatar: %v", err)
+	}
+
+	page, err := h.repo.List(ctx, alice, 30, 0)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("list: %+v %v", ids(page), err)
+	}
+	it := page.Items[0]
+	if it.AvatarKey == nil {
+		t.Fatalf("bob has an avatar; his feed row should carry an AvatarKey")
+	}
+	if want := avatarKey(bob); *it.AvatarKey != want {
+		t.Errorf("avatar key = %q, want %q", *it.AvatarKey, want)
+	}
+	// The load-bearing property from N12's review, restated here: the key is
+	// a HASH, never bob's raw id — a presigned URL's signature covers the
+	// whole path, so a raw id in the key would leak through AvatarURL to
+	// every friend reading this feed.
+	if *it.AvatarKey == bob {
+		t.Fatalf("AvatarKey leaked the raw user id")
+	}
+}
+
+func TestTheRowCarriesNoAvatarKeyWhenTheOwnerHasNone(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "fd_nva", "fd_nva_h", true)
+	bob := person(t, h.pool, "fd_nvb", "fd_nvb_h", true)
+	befriend(t, h, alice, "fd_nva_h", bob, "fd_nvb_h")
+	train(t, h, bob, "fd_nv_row", "Push day", true, nil)
+
+	page, err := h.repo.List(ctx, alice, 30, 0)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("list: %+v %v", ids(page), err)
+	}
+	if page.Items[0].AvatarKey != nil {
+		t.Fatalf("bob never uploaded an avatar; his feed row should carry no AvatarKey, got %q",
+			*page.Items[0].AvatarKey)
+	}
+}
+
 // ── Ordering and paging ──────────────────────────────────────────────────────
 
 func TestNewestFinishedFirstAndPagingIsStable(t *testing.T) {
