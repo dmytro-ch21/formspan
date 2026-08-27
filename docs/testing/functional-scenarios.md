@@ -6136,6 +6136,41 @@ number would describe something still happening.
   every card shows the same peak, the hash is clustering.
 - Share is absent, not disabled, when there is no session id.
 
+### Sharing — temp-file cleanup (L5, #384)
+
+`shareCard` releases the captured PNG (`react-native-view-shot`'s
+`releaseCapture`) 1.5s after `shareAsync` settles rather than on the same
+tick, because the JS promise resolving does not mean every share target has
+finished reading the file — see the `shareCard.ts` module comment and the
+2026-08-27 history entry for the native-module reasoning. None of this is
+reachable from `shareCard.test.ts`'s mocks; it needs a device, per the
+ticket's own **NEEDS HUMAN EVIDENCE** criterion. Steps, in order:
+
+- **Share to each target the app offers in turn — Messages, Mail, Instagram,
+  Files, AirDrop — and confirm the image arrives intact** at the other end,
+  not truncated or zero-byte. This is the one that would catch a release
+  fired too early: a target still mid-read when the file disappears gets a
+  broken or empty image, not an error.
+- **After each of those, confirm the temp file is actually gone** — check the
+  app's cache directory (e.g. over a debug build, or by instrumenting
+  `releaseCapture`) a few seconds after the share sheet closes. A share
+  arriving intact does not by itself prove cleanup ran; check both halves.
+- **Cancel a share mid-sheet** (dismiss without picking a target) and confirm
+  the temp file is still cleaned up — `shareAsync` resolves the same way for
+  a cancel as for a completed share (see the module comment), so this should
+  follow automatically from the first two checks, but it is the ticket's own
+  named criterion and worth confirming as its own step rather than assuming.
+- **Share ten times in a row and confirm the cache directory does not grow.**
+  Each share's file should be gone (or on its way out, within `RELEASE_DELAY_MS`
+  of the sheet closing) before the next one starts — a directory that grows
+  linearly with share count means either a release is silently failing or the
+  delay is being outpaced by how fast the athlete re-shares.
+- **A failed release must never surface as a failed share.** Hardest to force
+  on a device deliberately — the "file already gone" and "module unlinked"
+  cases are the ones the unit tests mutation-cover instead — but worth
+  keeping in mind if a share ever reports failure that the OS share sheet
+  itself showed as successful: that combination is this guard's target.
+
 ## Rate limiting (platform — every authenticated endpoint)
 
 ### The limit exists

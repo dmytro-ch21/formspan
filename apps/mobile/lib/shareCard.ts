@@ -1,5 +1,5 @@
 import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
+import { captureRef, releaseCapture } from 'react-native-view-shot';
 import { PixelRatio, Platform, type View } from 'react-native';
 import type { RefObject } from 'react';
 
@@ -21,31 +21,66 @@ import type { RefObject } from 'react';
  * image arrives the same way. The Stories deep link would drop in beside this
  * without changing the capture — nobody has built it.
  *
- * ## The temp file is left behind, deliberately
+ * ## The temp file IS released now, on a delay (L5, #384)
  *
- * `result: 'tmpfile'` writes a PNG into the cache directory per share and
- * nothing here removes it. That is a directory the OS purges under pressure and
- * a reinstall clears, so it has been left alone.
+ * `result: 'tmpfile'` writes a PNG into the cache directory per share.
+ * `react-native-view-shot` exports `releaseCapture(uri)` — implemented
+ * natively on both platforms (`RNViewShot.mm`, `RNViewShotModule.java`) —
+ * which deletes exactly this file, and `shareCard` now calls it once
+ * `shareAsync` settles, success or failure.
  *
- * **Both halves of the reason this paragraph used to give were wrong**, and
- * review caught them together:
+ * **Why a delay, and not a call in the same tick `shareAsync` resolves:**
+ * `shareAsync`'s promise does not mean "the target app has read the file". It
+ * means "the OS says its part is done", and those are different moments on
+ * each platform, confirmed by reading the native module rather than assumed:
  *
- * 1. It said deleting the file "would need `expo-file-system` — a THIRD native
- *    dependency". It would not. `react-native-view-shot` already exports
- *    `releaseCapture(uri)`, implemented natively on both platforms
- *    (`RNViewShot.mm`, `RNViewShotModule.java`), which deletes exactly this
- *    file. No new dependency, no rebuild, no `dyld` risk.
- * 2. It priced the trade at "~1-2 MB per share" when the real figure was
- *    **10.5 MB** — the capture was exporting at 3× its intended size. It is
- *    1.6 MB now, back inside the bracket, but that is the bug being fixed
- *    rather than the estimate having been right.
+ * - **iOS** — `SharingModule.swift` resolves from
+ *   `UIActivityViewController.completionWithItemsHandler`, which UIKit calls
+ *   once the activity (and, for one that presents its own UI — Mail's
+ *   compose sheet, Messages — that UI too) has been dismissed. For a
+ *   well-behaved share extension this is after it has called
+ *   `completeRequest`, i.e. after it is done with the file. The safer of the
+ *   two platforms, but still not a documented guarantee for every extension.
+ * - **Android** — `SharingModule.kt` resolves from `OnActivityResult` on the
+ *   `startActivityForResult` call wrapping `Intent.createChooser`. That
+ *   fires once the **chooser** activity finishes, which is when it hands off
+ *   to the picked target and Android returns control to the caller — **not**
+ *   when the target has read the `content://` URI. A target that reads the
+ *   stream lazily (after its own UI finishes composing, say) can still be
+ *   reading after this promise resolves. This is the real risk the ticket
+ *   named, confirmed by the source rather than the doc, and it is Android-
+ *   specific: nothing here makes iOS immune, but Android's resolution point
+ *   is structurally earlier.
  *
- * So the conclusion stands on a much weaker argument than it appeared to. It is
- * kept rather than changed here because calling `releaseCapture` after
- * `shareAsync` resolves is a behaviour change that wants device verification —
- * iOS resolves that promise when the sheet dismisses, and whether every share
- * target has finished reading the file by then is a question, not an
- * assumption. Recorded as **L5** in `docs/TASKS.md`.
+ * So an immediate `releaseCapture` risks exactly the "share silently produces
+ * nothing" failure mode. `RELEASE_DELAY_MS` waits before releasing, rather
+ * than firing on the same tick — three times the 500ms
+ * `react-native-view-shot` gives its own internal capture-to-capture release
+ * (`ViewShotComponent` releases its *previous* capture 500ms after producing
+ * a new one; `src/index.tsx`), longer because this is releasing into an
+ * external app's hand-off rather than the library's own next capture. This
+ * narrows the window without the file living forever. **It is a mitigation,
+ * not a proof**: a slow enough reader on a loaded device could still lose
+ * the race. This is exactly what acceptance criterion 2 (device
+ * verification against every share target) exists to catch, and code
+ * review cannot substitute for it.
+ *
+ * One thing works in this delay's favour specifically on the Android path
+ * the risk above names: React Native suspends JS timers while the app is
+ * backgrounded (the JS thread pauses on iOS; Android's timer bridge pauses
+ * on host-pause and resumes on host-resume). So in the actual dangerous
+ * sequence — the chooser hands off, the target app foregrounds, VOLA goes to
+ * the background while the target is still reading — the countdown stops
+ * and only resumes once the athlete returns to VOLA, which in practice is
+ * after the target has finished. The residual risk this delay cannot cover
+ * is narrower than it first looks: a target that reads the file lazily
+ * *without* ever taking the foreground away from VOLA within the window.
+ *
+ * `releaseCapture` itself never throws back into the share flow — it runs
+ * inside its own `try`/`catch`, because a missing file, a permission error,
+ * or (real, if `RNViewShot`'s native module were ever unlinked) the JS
+ * wrapper itself throwing must never surface as a share failure the athlete
+ * did not cause.
  *
  * ## Why PNG and not JPEG
  *
@@ -117,6 +152,42 @@ export type ShareResult =
     };
 
 /**
+ * How long to wait, after `shareAsync` settles, before deleting the capture.
+ * See the module comment above for why this is not zero — three times the
+ * 500ms `react-native-view-shot` gives its own internal capture-to-capture
+ * release, not equal to it: that delay only has to outlast the library's own
+ * next `captureRef`, this one has to outlast a share target reading the file.
+ */
+export const RELEASE_DELAY_MS = 1500;
+
+/**
+ * Delete a capture's temp file without ever letting the deletion fail loudly.
+ *
+ * Fired after `shareAsync` settles (share OR cancel — the two are the same
+ * promise outcome; see the module comment) and after a real share failure
+ * too, since either way the file is no longer needed and would otherwise
+ * leak. Delayed by `RELEASE_DELAY_MS` for the timing reason above.
+ *
+ * `releaseCapture` itself is void, not a promise — the native side never
+ * rejects it — but the JS wrapper reads `RNViewShot.releaseCapture` off the
+ * native module object first, which throws synchronously if that module
+ * were ever missing. Wrapped regardless of how likely that is: a cleanup
+ * step must never be the reason a share the athlete already saw complete
+ * gets reported as failed.
+ */
+function scheduleRelease(uri: string): void {
+  setTimeout(() => {
+    try {
+      releaseCapture(uri);
+    } catch (err) {
+      if (__DEV__) {
+        console.warn('shareCard: releaseCapture failed', err);
+      }
+    }
+  }, RELEASE_DELAY_MS);
+}
+
+/**
  * Capture a mounted card and open the share sheet on it.
  *
  * The ref must point at a MOUNTED view — `captureRef` reads the native view
@@ -183,5 +254,10 @@ export async function shareCard(ref: RefObject<View | null>): Promise<ShareResul
       reason: 'failed',
       message: err instanceof Error ? err.message : String(err),
     };
+  } finally {
+    // Runs whether `shareAsync` resolved (share OR cancel — indistinguishable
+    // here, see the module comment) or rejected. Either way the temp file's
+    // job is done.
+    scheduleRelease(uri);
   }
 }
