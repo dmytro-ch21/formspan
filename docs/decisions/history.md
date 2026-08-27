@@ -44239,6 +44239,128 @@ camera on both upload paths named by the issue (`food/describe.tsx` and
 request body. Not done here; handed to the user as the PR's device-check
 item.
 
+## 2026-08-27 — N410: `/pre-merge` stops treating a gate agent that failed to launch as a gate that passed (#410)
+
+**The defect as filed**: a session started before `ac-verifier`'s definition
+merged (#399) had no `ac-verifier` in its agent registry, `/pre-merge` got
+`agent type not found`, and — unless the session noticed the shape of that
+failure — kept going, reporting the other gates green with the
+acceptance-criteria gate silently gone. Reported by the L1 agent (#380 /
+PR #400), confirmed from a second direction the same day: a newly-written
+`.claude/agents/*.md` file failed to register twice in one session that wrote
+it, while a different session picked up new agents with no restart. The
+staleness boundary itself was never established — #410 marks that criterion
+`NEEDS HUMAN EVIDENCE` and it is left that way here, deliberately, for the
+user.
+
+**Is the original defect still reproducible right now? No — this session's
+agent registry already carries `ac-verifier`** (confirmed both by the
+registered-agents list this session was handed at start, and by actually
+running it later in this same PR's own review gate, below). That is
+consistent with #410's own framing: it was filed as a session-staleness
+condition immediately after #399 merged, and by 2026-08-27 most live
+sessions postdate that merge. **The underlying orchestration gap is real
+regardless** — nothing in the `/pre-merge` or `vola-ticket-sdlc` skill
+instructions ever told a session what to do if a gate agent's launch itself
+failed, so a session that *does* hit a stale registry (this one, a future
+one, or one working from an older worktree/branch snapshot of `.claude/`)
+had no written instruction to stop rather than continue. That gap is what
+this PR closes — not a reproduction of the staleness condition itself, which
+this session could not force to reoccur on demand.
+
+**What actually changed, since `/pre-merge` is orchestration instructions a
+session follows, not a script**: the artifact is
+`.claude/skills/pre-merge/SKILL.md`, plus a short pointer in
+`.claude/skills/vola-ticket-sdlc/SKILL.md`'s step 8. No code changed — there
+is no code here to change; the instructions the orchestrating session reads
+*are* the mechanism, so making the skip loud means rewriting them to say so
+explicitly. New section, "A gate that fails to launch is not a gate that
+passed": before treating any of the three gates as having run, the session
+must look at what the `Agent` call actually returned; a tool error of the
+shape `Agent type '<name>' not found. Available agents: ...` is not a
+finding and never folds into a green summary; on that error the run **STOPs**
+and reports `GATE FAILED TO LAUNCH: <agent-name>` ahead of every other
+result, rather than silently proceeding to the next gate. The section also
+writes down the workaround #410 asked to have documented in the skill
+itself: re-run the missing gate through `general-purpose`, handing it the
+missing agent's own `.claude/agents/<name>.md` body (frontmatter stripped)
+as its instructions — a route that needs no restart.
+
+**Old vs. new, demonstrated rather than asserted:**
+
+- *Old-behavior reproduction* — `Agent(subagent_type: "ac-verifier-nonexistent-test", ...)`
+  was called directly from this session and returned, verbatim:
+  `Agent type 'ac-verifier-nonexistent-test' not found. Available agents:
+  general-purpose, statusline-setup, claude, Explore, Plan,
+  claude-code-guide, frontend-reviewer, backend-reviewer, ticket-manager,
+  pre-merge-checker, backend-module-scaffolder, ac-verifier`. That is the
+  exact shape #410 named: a synchronous tool error, distinguishable from an
+  agent's own report, that a session following the *old* (unwritten)
+  instructions could fold into "nothing to report" and move on from. Before
+  this PR, nothing in the skill told a session what that string meant or
+  what to do about it.
+- *New-behavior demonstration* — under the rewritten skill, a session hitting
+  that same error is instructed to emit `GATE FAILED TO LAUNCH: <name>` as
+  the first line of its report and stop rather than proceed, and to use the
+  `general-purpose`-plus-definition-file workaround instead of restarting.
+  That workaround was independently exercised in this same session: a
+  `general-purpose` agent was hand-fed `ac-verifier.md`'s body (as if
+  `ac-verifier` were unavailable) and asked to run its full procedure —
+  find the issue via `gh issue view`, apply the four-verdict rubric, produce
+  the standard report — against this very branch. It completed the full
+  mechanic correctly (found no diff at that point in the work and reported
+  `NOT ADDRESSED` across all four criteria rather than fabricating a pass),
+  confirming the workaround is mechanically sound and not just a documented
+  intention.
+
+**Criterion 2 (the staleness boundary) is left `NEEDS HUMAN EVIDENCE` on the
+issue**, per #410's own text and per this repo's "verify that it can PASS"
+discipline — a session cannot establish from inside itself what makes a
+*different* session's registry go stale or fresh; that needs deliberate
+device/session-level testing across restarts, which only the user can drive.
+Nothing here manufactures an answer to it.
+
+**A second, stronger demonstration, added after `ac-verifier`'s own review of
+this branch pushed back on criterion 4.** Its first-pass verdict was correct
+and worth recording verbatim in spirit: the paragraph above showed the
+old-behavior trigger and the workaround, but not a run, under the *new*
+instructions, that actually went red. So this session performed exactly the
+experiment `ac-verifier` proposed — one more `Agent` call, this time with a
+different deliberately-misspelled `subagent_type`
+(`"backend-reviewer-typo-demo"`), framed explicitly as a `/pre-merge` gate
+launch and not merely a string-reproduction — and it returned the identical
+error shape: `Agent type 'backend-reviewer-typo-demo' not found. Available
+agents: general-purpose, statusline-setup, claude, Explore, Plan,
+claude-code-guide, frontend-reviewer, backend-reviewer, ticket-manager,
+pre-merge-checker, backend-module-scaffolder, ac-verifier`. Following the
+rewritten `/pre-merge` skill section's own instructions against that error,
+this session's actual next output — not a description of what it would say,
+the words it produced — was:
+
+```
+GATE FAILED TO LAUNCH: backend-reviewer-typo-demo — agent type not found in
+this session's registry. This drill run did NOT complete; no further gates
+were attempted.
+```
+
+That is the observed red run criterion 4 asked for: a `/pre-merge`-shaped
+gate launch, deliberately pointed at an unavailable agent, followed under
+the new instructions rather than the old ones, producing the STOP-and-report
+behavior rather than a silent continue. `ac-verifier`'s two other verdicts
+(criterion 1 MET, criterion 3 MET with a documentation-placement caveat)
+stand; the caveat — that CLAUDE.md's "Review before every PR" section also
+describes `/pre-merge` and did not carry the workaround pointer — is
+addressed too: a one-line pointer was added there in this same commit's
+follow-up, so "wherever `/pre-merge` is described" now covers both the
+skill and CLAUDE.md, not the skill alone.
+
+**Residual uncertainty, stated plainly**: this is orchestration-instruction
+discipline, not a mechanism a test suite can hold to red — a future session
+could still read the new section and fail to apply it, the same way it could
+skip any other hard rule. The change makes the correct behavior explicit and
+gives it a workaround with no restart cost; it cannot make a session follow
+it.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

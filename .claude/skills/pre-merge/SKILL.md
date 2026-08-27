@@ -15,6 +15,68 @@ three**. Run them in the same turn, in parallel:
    - any `apps/**` change → **`frontend-reviewer`**
    - a change spanning both → **both, launched together**
 
+## A gate that fails to launch is not a gate that passed
+
+**Before treating any of the three as having run, confirm it actually
+launched.** `Agent(subagent_type: "ac-verifier")` (or `pre-merge-checker`,
+`backend-reviewer`, `frontend-reviewer`) can fail *at the launch step itself*,
+before the agent does any work, if this session's agent registry does not
+currently contain that type — for example, a session started before a new
+`.claude/agents/*.md` file merged into `main`. That failure is a **tool
+error**, not an agent report:
+
+```
+Agent type 'ac-verifier' not found. Available agents: general-purpose,
+statusline-setup, claude, Explore, Plan, claude-code-guide,
+frontend-reviewer, backend-reviewer, ticket-manager, pre-merge-checker,
+backend-module-scaffolder
+```
+
+(Reproduced verbatim on 2026-08-27 against a deliberately-misspelled
+`subagent_type`, in the session that wrote this section — see the N410
+history entry for the full old-vs-new demonstration.)
+
+This is the defect #410 named: every other gate still runs and reports green,
+the missing gate produces no report at all, and unless the orchestrating
+session explicitly notices the shape of that error, `/pre-merge` reads as
+complete with the one gate that checks the ticket silently gone.
+
+**So, explicitly, for every gate in the numbered list above:**
+
+1. Issue the `Agent` call and look at what came back. A tool error naming
+   the agent type as not found is not "nothing to report" and is never
+   folded into a green summary.
+2. **If any gate agent fails to launch this way: STOP.** Do not continue to
+   the next gate as though this one passed, and do not present a report that
+   omits it silently. State it as its own line, first, ahead of every other
+   result:
+
+   ```
+   GATE FAILED TO LAUNCH: <agent-name> — agent type not found in this
+   session's registry. /pre-merge did NOT complete; the following gates
+   did not run for this reason: <list>.
+   ```
+
+3. **The workaround — use it before considering a restart**: re-run that
+   gate through the `general-purpose` agent type instead of the missing
+   specific one. Read the missing agent's own definition file
+   (`.claude/agents/<name>.md`), strip the YAML frontmatter, and hand the
+   rest of the file to `general-purpose` as its prompt — it is written as a
+   self-contained set of instructions for exactly this purpose (finding the
+   issue, the verdict rubric, the report format). Say explicitly in the
+   final report that this gate ran via the `general-purpose` workaround, so
+   the reader knows the registry was stale for this session rather than
+   assuming the specific agent type was used.
+4. This is a **session-staleness condition**, not proof the agent
+   definition is broken or missing from the repo — check
+   `.claude/agents/<name>.md` exists on `origin/main` first; if it does,
+   this is exactly the registry-staleness gap #410 describes, and the
+   workaround in step 3 is the intended route, not a restart. (Exactly
+   *what* makes a session pick up a new definition — a fresh session, a
+   registry refresh event, something else — is still an open, unresolved
+   question: see #410's `NEEDS HUMAN EVIDENCE` criterion. Do not guess at
+   it here.)
+
 **Fetch the issue first and hand its acceptance criteria to every one of
 them**, not only to `ac-verifier`:
 

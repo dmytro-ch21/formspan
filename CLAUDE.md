@@ -784,6 +784,13 @@ All three are **read-only diagnostics** — they report, they don't fix. Resolve
 or explicitly justify every `[blocking]` finding *before* opening the PR;
 `[suggestion]` items are judgment calls.
 
+**If launching any of the three returns `Agent type '<name>' not found`, that
+is a stale session registry (#410), not a skipped gate.** Stop and report it
+loudly rather than continuing as if that gate had passed, and use the
+`general-purpose`-agent workaround instead of restarting — see the
+`/pre-merge` skill's "A gate that fails to launch is not a gate that passed"
+section for the exact procedure.
+
 **"Read-only" means they will not FIX anything. It does not mean they never
 write to your working tree — and the difference cost a pushed commit on 2026-08-20
 (N91, #432).** A criterion like *mutation-check the suite and confirm it goes

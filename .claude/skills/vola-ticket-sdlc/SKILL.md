@@ -57,6 +57,14 @@ authority; this skill is the ordered checklist those sections add up to.
    "closes #N" — the issue stays open, with the remainder filed as its own
    ticket rather than absorbed.
 
+   **If launching any of those agents returns `Agent type '<name>' not
+   found`, that is a hard stop, not a skip** — a session's agent registry
+   can be stale relative to `main` (#410). Do not let `/pre-merge` read as
+   complete with that gate silently missing. See the `/pre-merge` skill's
+   "A gate that fails to launch is not a gate that passed" section for the
+   loud-failure report format and the `general-purpose`-agent workaround
+   that avoids restarting the session.
+
 9. **`pnpm run verify` (one command, never split), push, open the PR** with
    `closes #<issue>` in the body — then verify what GitHub PARSED, never
    what the body looks like:
