@@ -43721,6 +43721,116 @@ counters, previously untested).
   `defended` tags.
 
 
+## 2026-08-26 — N184: the Strength session screen's header and Finish, without touching the engine (#589)
+
+Visual/interaction refinement of `apps/mobile/app/session/[id].tsx`, scoped
+deliberately narrow by the ticket: information hierarchy, scan speed, touch
+target size, exercise header hierarchy, Finish accessibility/discoverability,
+keyboard behaviour, reducing visual noise — **not** a rewrite, and explicitly
+not touching `sessionStore`, set transforms, rest-timer logic, or sync. Those
+are the hard non-regressions and none of them changed.
+
+**The fastest happy path was measured before anything was touched, because
+the ticket's own acceptance criterion is that this number must not grow:**
+logging a normal set — same weight and reps as the last one — is **two taps**
+on the current build: "+ Set" (which already carries the previous set's
+weight/reps forward via `emptySet`'s `from` parameter) and the row's ✓ tick
+(`toggleDone`, which also fills forward on the way to done). Auto rest, if the
+athlete has it on, then starts itself. Nothing in this change touches
+`addSet`, `toggleDone`, `fillForward`, `emptySet`, or the debounce/flush path
+that saves a set — the two-tap path is exactly two taps after this PR as
+before it, confirmed by reading the diff rather than asserted.
+
+**What changed, and why each one is additive rather than a redesign:**
+
+- **The exercise header is now two rows, not one.** It used to carry the
+  name plus up to eight controls — reorder up/down, Rest, the reps/time
+  chip, the duration-unit chip, "Run all", the kg/lb chip, Swap, Remove — all
+  wrapping together, so a long exercise name and a fully-decorated header
+  could run to three lines before the first set row even started. The name
+  and the chips someone actually touches *per set* (Rest, mode, duration
+  unit, weight unit, Run) stay on the header row. Reorder, Swap and Remove —
+  touched maybe once a session, not once a set — move to a second row below,
+  visually quieter. Every control kept its own testID, its own
+  accessibilityLabel, and its own tap target; nothing was hidden behind a
+  menu, so nothing here can add a tap to any existing flow, common or not.
+- **`Swap` stopped being `accent.ink`.** It was the one rare, structural
+  control rendered in the screen's accent colour — brighter than Rest, Time
+  and the unit chips sitting right beside it, for a control tapped far less
+  often than any of them. `setRowDrop`'s own comment already states the
+  screen's rule ("the accent is deliberately NOT used... this app reserves
+  the accent for what was earned") — Swap is not an achievement either, so it
+  now renders `vola.textMuted`, matching the other three structural chips.
+  Remove keeps its own `vola.danger`, because destructive is a real
+  distinction the other three don't share.
+- **Finish moved out of the scroll content and into a `KeyboardAwareFooter`
+  pinned below it**, using the keyboard infrastructure `KeyboardAwareScroll.tsx`
+  already built and the reflection wizard already proves out — this screen's
+  own comment on the scroll view's props had been saying "the day this screen
+  grows a finish bar" since before this ticket existed, naming the exact
+  mechanism to use. Finish used to sit after every exercise group and
+  "+ Add exercise", reachable only by scrolling past the whole workout — the
+  opposite of discoverable for the one control every session ends with, and
+  exactly the criterion the ticket names ("Finish accessibility/
+  discoverability"). It is still a `HoldToConfirm` hold, not a tap; still
+  gone entirely once the session is finished (nothing left to confirm on a
+  read-only record); and per `KeyboardAwareFooter`'s own contract it now
+  additionally sits clear of the keyboard rather than needing anything here
+  to compute that — which is also what the ticket's second acceptance
+  criterion ("the keyboard does not hide completion controls") asks for,
+  satisfied by the same move rather than a second one. `KeyboardAwareScreen`
+  wraps the return so the scroll view and the new footer agree on which one
+  is compensating for the keyboard, exactly as `needsPlatformKeyboardInset`'s
+  doc comment requires; skipping it is the double-inset bug the reflection
+  wizard already shipped and fixed once.
+- Delete session and the finished-session Share button were deliberately
+  **left where they were**, inline in the scroll content, not promoted to the
+  footer. Delete is rare and destructive — the ticket does not ask for it to
+  be more reachable, and making it as prominent as Finish would work against
+  "reducing visual noise" for a control an athlete should rarely need.
+
+**Left alone, on purpose, because the file already documents why touching it
+would be a regression rather than polish:** `components/Timer.tsx` (the rest
+timer's own top-of-screen placement, minimized/expanded states, and colour
+rules) and the `setRowDone`/contrast tuning on completed sets both carry their
+own detailed rationale — including specific measured contrast ratios this PR
+did not re-derive — and neither needed a change to satisfy this ticket's
+criteria on rest-timer prominence or completed-set distinction, which the
+existing implementation already meets. "Previous performance remains visible
+at the point of entry" was likewise already true (the suggestion hint renders
+directly above "+ Set", i.e. exactly where the next set is about to be added)
+and is unchanged.
+
+**No test previously rendered this screen** — `apps/mobile/lib/__tests__/`
+and `apps/mobile/app/__tests__/` reference `/session/[id]` only as a
+navigation target (`todayScreen.test.tsx`, `startSession.test.ts`) or scan its
+source as text (`reportedAggregation.test.ts`), never mount it — so there was
+no existing render coverage to regress, and none was added: the change is
+layout/structure with no new logic, and `docs/testing/device-checks.md`
+already carries this screen as one of the 44 with zero statements under the
+suite. `pnpm run lint:mobile` (50 warnings, at the ratchet ceiling —
+unmoved by this change), `pnpm run typecheck:mobile`, and the full
+`pnpm run test:mobile` (196 suites, 3048 tests, after rebasing onto the six
+commits `origin/main` gained in the meantime) all pass unchanged, re-run and
+independently confirmed rather than taken on the earlier draft's word — which
+had cited 186/2966, the pre-rebase counts.
+
+### What this leaves open
+
+- **NEEDS HUMAN EVIDENCE, added to #589:** the sticky Finish footer's actual
+  keyboard behaviour on a device — that it lifts clear of the numeric keypad
+  rather than merely being un-obscured when the keyboard is down; one-handed
+  reachability of the new two-row header on a real phone size, particularly
+  whether the second row reads as clearly secondary rather than merely
+  smaller; and that backgrounding the app mid-set with the keyboard open and
+  the footer visible loses nothing, which is a real-device combination the
+  simulator does not reliably reproduce.
+- The header restructuring is presentation only; it does not change which
+  controls exist or the order the screen computes `groups` in. A follow-up
+  could go further — e.g. collapsing Reorder into a drag affordance, or
+  giving Swap/Remove their own icon-only compact row — but that would be a
+  second pass with its own device evidence, not folded in here.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
