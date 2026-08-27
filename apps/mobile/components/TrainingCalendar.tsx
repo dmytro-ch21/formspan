@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
@@ -125,6 +126,7 @@ export function TrainingCalendar({
   onOpenSession: (s: Session) => void;
 }) {
   const accent = useAccent();
+  const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [monthOpen, setMonthOpen] = useState(false);
   // The month being browsed, which is not always the month `now` is in — the
@@ -561,6 +563,27 @@ export function TrainingCalendar({
               )}
             </StatRow>
 
+            {/* N85 — the way through to search/browse the FULL history, not
+                just this month's grid. The month sheet already loads a wider
+                window than the week strip (see the comment on `monthSessions`
+                above), but it is still a snapshot bounded by how far the
+                arrows have paged; this is the unbounded, searchable version. */}
+            <Pressable
+              onPress={() => {
+                setMonthOpen(false);
+                router.push('/session/history');
+              }}
+              style={styles.allSessions}
+              accessibilityRole="button"
+              accessibilityLabel="Search all sessions"
+              testID="calendar-all-sessions"
+            >
+              <Text style={[styles.allSessionsText, { color: accent.ink }]}>
+                Search all sessions
+              </Text>
+              <Icon name="chevron" size={12} color={accent.ink} />
+            </Pressable>
+
             {selected && (
               <>
                 <Text style={styles.sectionLabel}>
@@ -854,4 +877,14 @@ const styles = StyleSheet.create({
     marginTop: 14,
     marginBottom: 8,
   },
+
+  allSessions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 12,
+    marginTop: 6,
+  },
+  allSessionsText: { fontWeight: '700', fontSize: 13 },
 });

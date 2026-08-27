@@ -1297,10 +1297,18 @@ card must return to real today's figures.
 - Trained days carry a date + session-count label; empty days are not accessibility stops.
 - Bar heights: a trained week never rounds to invisible, and bars are capped in width so a 4-week span doesn't render as slabs.
 
-## Session list paging, search and filters (`GET /v1/sessions`, `apps/web` History)
+## Session list paging, search and filters (`GET /v1/sessions`, `apps/web` History, `apps/mobile` `/session/history`)
 
-**Happy path**
-- The list shows one page at a time with "1–20 of 43"; Newer/Older move between pages and disable at each end.
+**N85 (#419) gave mobile a second client of this same endpoint** — a
+reduced-but-real search/browse screen, not a port of web's. The heading used
+to name only `apps/web` History; per CLAUDE.md's "which platform gets a
+feature" rule, that assignment is corrected on the exclusivity, not on the
+design — the backend scenarios below are unchanged (they describe
+`GET /v1/sessions` itself, which both clients call identically), and the
+mobile-specific scenarios are new.
+
+**Happy path (backend, both clients)**
+- The list shows one page at a time with "1–20 of 43"; Newer/Older move between pages and disable at each end. (Web's own pager copy — mobile's is a "Show older (N more)" button, see below.)
 - Every session appears on exactly one page. Ordering is `started_at DESC, id` — without the id tiebreak, two sessions logged in the same second can swap places and one is shown twice while another is never shown.
 - Searching by name narrows the list and the count together; clearing it restores them.
 - Search and paging compose with the period, sport and picked-day filters, and any change of scope returns to the first page.
@@ -1321,6 +1329,21 @@ card must return to real today's figures.
 
 **Wording**
 - Cumulative load reads "Volume" everywhere it's visible, on both platforms. The wire field stays `tonnage_kg`.
+
+**Mobile's reduced form (`apps/mobile/app/session/history.tsx`)**
+- Reachable from the training calendar's month sheet ("Search all sessions", `calendar-all-sessions`) on the Progress tab — the only entry point, and it must actually open the screen rather than a dead link.
+- A name search debounces 250ms before it fires, same as `library.tsx`'s catalog search — typing "leg day" must not fire five requests.
+- The sport filter is a chip row built from `enabledSports(modules)`, not a hand-copied list — a discipline turned off for the account must not offer a chip nothing can return.
+- The period control is `SPANS`/`spanRange` (`lib/history.ts`) plus "All" — four presets that all end today, the same vocabulary `checkin/trend.tsx` already uses. There is no start/end picker; CLAUDE.md's mobile-chart carve-out is explicit that a picker is the web screen's job.
+- "Show older" reads its count off `total - items.length` and disappears once `items.length >= total` — it must never re-request a page that would return nothing.
+- **The fresh-install / restored-phone case, this ticket's sharpest half**: with the sync outbox empty and nothing ever pulled locally, opening this screen must still show the athlete's full history, because it queries the server directly rather than the capped local cache (`sessionStore.ts`'s routine pull tops out at 20 rows; see the fresh-install backfill scenario below for the OTHER half of that fix). **NEEDS HUMAN EVIDENCE**: a fresh install (or a device with the app data cleared), the web app closed, an account with more than 20 historical sessions — confirm the 21st-and-older sessions are searchable.
+- Offline (or the API unreachable), the screen falls back to `listLocalSessions` and says so (`session-history-offline`) rather than rendering a network list — a failed load must never be indistinguishable from "you have no older sessions". An empty fallback says "Nothing saved on this device yet", not "No sessions match", which would read as a real answer about the account rather than about this one device's cache.
+- A genuine server error (not a transport failure) shows the error text and does **not** fall back to the local cache — falling back there would silently hide a real 4xx/5xx behind a plausible-looking list.
+
+**Fresh-install backfill (`apps/mobile/lib/sessionStore.ts`'s `runSync`)**
+- A device with zero locally-held sessions for the signed-in athlete pages through the server in bounded 200-row requests (not one unbounded pull) until a short page arrives or 10 pages (2,000 sessions) are reached, whichever comes first.
+- A device that already holds at least one session for the athlete takes the ordinary 20-row routine pull — the backfill fires exactly once per account, self-limiting on an empty local table rather than a persisted flag.
+- **NEEDS HUMAN EVIDENCE**: sign in on a fresh install of an account with more than 20 sessions, watch the sync complete, then open `/session/history` (or the training calendar's month view) with the device offline and confirm sessions older than the routine 20-row window are present locally.
 
 ## Estimated 1RM (`GET /v1/sessions/suggestions`, both clients)
 

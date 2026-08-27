@@ -1226,6 +1226,33 @@ export async function retryBlockedRow(
  */
 let syncInFlight: Promise<SessionSyncResult> | null = null;
 
+/**
+ * How many sessions the routine pull below asks for on a device that already
+ * holds SOME local history. Deliberately small: this pull runs on every
+ * screen focus, every edit and every session start (see `runSync`'s own
+ * comment on why pull races push), so its job is catching up on what changed
+ * recently, not re-fetching a career each time the athlete looks at Today.
+ */
+const ROUTINE_PULL_LIMIT = 20;
+
+/**
+ * The page size used ONLY for the fresh-install backfill in `runSync`.
+ * Matches the backend's own `maxLimit` (`session/session.go`) exactly, so a
+ * page is never silently clamped to fewer rows than asked for — which would
+ * look like "the server has nothing left" to the loop below when it is
+ * really just the server's ceiling.
+ */
+const BACKFILL_PAGE = 200;
+
+/**
+ * A hard ceiling on how many pages one sync call will fetch during a
+ * fresh-install backfill, so a very long career can't turn a single
+ * `runSync` into an unbounded fetch loop. `BACKFILL_MAX_PAGES * BACKFILL_PAGE`
+ * = 2,000 sessions deliberately matches `TrainingCalendar.tsx`'s own
+ * documented ceiling for browsing back through months.
+ */
+const BACKFILL_MAX_PAGES = 10;
+
 export function syncSessions(
   userID: string,
   getToken: TokenGetter,
@@ -1326,26 +1353,59 @@ async function runSync(
   // That was wrong — both entry points already flushed — and the wrong
   // diagnosis is recorded here so it is not re-derived.
   try {
-    const remote = await pullSessions(getToken, { limit: 20 });
     // Ids this device has deleted but hasn't managed to tell the server about.
     // The server still lists them, so without this the pull writes each one
     // straight back — the exact resurrection tombstones exist to stop. Read
     // once per run rather than per row.
     const buried = await tombstonedIDs(userID);
-    for (const r of remote) {
-      if (buried.has(r.id)) continue;
-      const local = await db.getFirstAsync<{ dirty: number; updated_at: string }>(
-        `SELECT dirty, updated_at FROM local_sessions WHERE id = ? AND user_id = ?`,
-        r.id,
-        userID,
-      );
-      if (local?.dirty === 1) continue;
-      // Refuse to go backwards. If the local row is newer than the copy we
-      // fetched, this snapshot is stale and writing it would erase whatever
-      // landed in between.
-      if (local && local.updated_at > r.updated_at) continue;
-      await upsert({ ...r, dirty: false }, userID, false, true);
-      result.pulled++;
+
+    // N85 — on a FRESH INSTALL this device holds zero rows for this athlete,
+    // and the routine pull below (`ROUTINE_PULL_LIMIT`, unchanged at 20) only
+    // ever fetches the most recent ones — so every older session was
+    // permanently unreachable, with nothing on screen saying so
+    // (`docs/decisions/phone-impossible-audit.md` row 12). Detected by an
+    // empty local table rather than a persisted flag: the first backfilled
+    // page makes the table non-empty, so this branch stops firing on its own
+    // once history has landed, with no extra state to keep in sync with
+    // reality.
+    //
+    // Paged rather than one unbounded request, per CLAUDE.md's "which
+    // platform gets a feature" rule and this ticket's own guidance — a
+    // multi-year career becomes a handful of 200-row requests instead of one
+    // request the server (or a slow connection) has to hold open. Bounded at
+    // `BACKFILL_MAX_PAGES` so a pathological history can't turn one sync call
+    // into an unbounded fetch loop; `BACKFILL_MAX_PAGES * BACKFILL_PAGE` =
+    // 2,000 sessions deliberately matches `TrainingCalendar.tsx`'s own
+    // documented ceiling for the same reason.
+    const localCount = await db.getFirstAsync<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM local_sessions WHERE user_id = ?`,
+      userID,
+    );
+    const freshInstall = (localCount?.n ?? 0) === 0;
+
+    let offset = 0;
+    for (let page = 0; page < (freshInstall ? BACKFILL_MAX_PAGES : 1); page++) {
+      const limit = freshInstall ? BACKFILL_PAGE : ROUTINE_PULL_LIMIT;
+      const remote = await pullSessions(getToken, { limit, offset });
+      for (const r of remote) {
+        if (buried.has(r.id)) continue;
+        const local = await db.getFirstAsync<{ dirty: number; updated_at: string }>(
+          `SELECT dirty, updated_at FROM local_sessions WHERE id = ? AND user_id = ?`,
+          r.id,
+          userID,
+        );
+        if (local?.dirty === 1) continue;
+        // Refuse to go backwards. If the local row is newer than the copy we
+        // fetched, this snapshot is stale and writing it would erase whatever
+        // landed in between.
+        if (local && local.updated_at > r.updated_at) continue;
+        await upsert({ ...r, dirty: false }, userID, false, true);
+        result.pulled++;
+      }
+      // A short page means the server has nothing left to give — stop rather
+      // than spend another round trip confirming that.
+      if (remote.length < limit) break;
+      offset += limit;
     }
   } catch (err) {
     if (result.failed === 0) {
