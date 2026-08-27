@@ -563,6 +563,73 @@ export async function saveFoodLocally(
 }
 
 /**
+ * Remove a saved food or recipe (N79 — the management surface `deleteFood`
+ * was written for but never had a caller).
+ *
+ * The exact shape of `removeEntry` above, for the exact same reason: a TOMBSTONE
+ * for anything the server has seen, because a hard delete of a row the server
+ * still holds would have `cacheFoods`'s pull bring it straight back on the next
+ * sync — the athlete would be deleting the same recipe every time they open the
+ * app. A row this device has never pushed successfully (`remote = 0 AND
+ * dirty = 0` — the state a PERMANENTLY rejected, never-confirmed save leaves
+ * behind, see the `push` loop's `kind === 'permanent'` branch) is hard-deleted
+ * immediately, since there is nothing on the server to leave a tombstone for.
+ *
+ * **Deleting a food changes nothing about what it was logged as.** The server's
+ * `source_food_id` foreign key is `ON DELETE SET NULL` (migration 000059), and
+ * every `food_entries` row already carries its own copied macros regardless —
+ * the nutrition module's whole design is that a logged entry owns its numbers,
+ * so a day already eaten stays exactly as it read.
+ */
+export async function removeFood(userId: string, id: string): Promise<void> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ remote: number; dirty: number }>(
+    `SELECT remote, dirty FROM foods WHERE id = ? AND user_id = ?`, id, userId,
+  );
+  if (!row) return; // Already gone. Deleting twice is not an error.
+
+  // **Sever any UNSYNCED entry's reference to this food FIRST — found in
+  // review (N79, #413).** This mirrors the server's own `ON DELETE SET NULL`
+  // (migration 000059) locally, and it has to happen before either branch
+  // below, not after. `push()` sends the foods queue before the entries
+  // queue (see that function's own N114 comment on why the order is a
+  // correctness constraint) — so an entry that is still DIRTY and carries
+  // `source_food_id = id` would otherwise be pushed, in the SAME sync pass,
+  // naming a food the server either never had (this food was never synced)
+  // or has just been told to delete. Either way the composite FK on
+  // `nutrition_entries` refuses it with a 23503 the server maps to
+  // `invalid_input`; `classify` reads a 400 as PERMANENT and clears `dirty`
+  // on the ENTRY. The meal survives on THIS phone — its macros are a copy,
+  // not a join — but never reaches the server or any other device again,
+  // silently: no error, nothing on the sync screen, exactly the failure mode
+  // `push()`'s own N114 comment exists to prevent, now reachable from ONE
+  // phone rather than two devices racing, because before this ticket nothing
+  // on the phone could delete a saved food at all.
+  //
+  // An already-synced (`dirty = 0`) entry is left alone: the server's own
+  // cascade will null its copy of `source_food_id` once this delete lands,
+  // and nothing here ever re-reads that column to sync it back — same as a
+  // web-side delete already left a phone's local copy pointing at a since-
+  // deleted id, which is harmless because no query ever joins through it.
+  await db.runAsync(
+    `UPDATE food_entries SET source_food_id = NULL
+      WHERE user_id = ? AND source_food_id = ? AND dirty = 1`,
+    userId, id,
+  );
+
+  if (row.remote === 0 && row.dirty === 0) {
+    await db.runAsync(`DELETE FROM foods WHERE id = ? AND user_id = ?`, id, userId);
+    return;
+  }
+  const now = stamp();
+  await db.runAsync(
+    `UPDATE foods SET deleted_at = ?, dirty = 1, updated_at = ?, last_error = NULL
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    now, now, id, userId,
+  );
+}
+
+/**
  * Remember a food was just used, for the quick-add ranking.
  *
  * Local-only and never pushed: this is the device's reading of its own log. It
@@ -681,14 +748,34 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
   // and nothing anywhere says so. Pinned by
   // `savedFoods.test.ts`'s "sends the food BEFORE the entry that references it"
   // and by the consequence test beside it.
-  const foodRows = await db.getAllAsync<FoodRow & { updated_at: string }>(
-    `SELECT ${FOOD_COLS}, updated_at
-       FROM foods WHERE user_id = ? AND dirty = 1 AND deleted_at IS NULL`,
+  // **No `AND deleted_at IS NULL` here, unlike every other read of this
+  // table (N79).** Those all show the athlete a saved food and must not show
+  // a tombstone; this is what OWES a request, and a delete owes one exactly as
+  // much as a save does. Dropping the filter without adding the branch below
+  // would silently strand every mobile delete on the phone forever — the
+  // fixed version of the bug this ticket exists to close.
+  const foodRows = await db.getAllAsync<FoodRow & { updated_at: string; deleted_at: string | null }>(
+    `SELECT ${FOOD_COLS}, updated_at, deleted_at
+       FROM foods WHERE user_id = ? AND dirty = 1`,
     userId,
   );
-  const foods = foodRows.map((r) => ({ ...hydrate(r), updated_at: r.updated_at }));
+  const foods = foodRows.map((r) => {
+    const { updated_at, deleted_at, ...row } = r;
+    return { ...hydrate(row), updated_at, deleted_at };
+  });
   for (const f of foods) {
     try {
+      if (f.deleted_at) {
+        // Same shape as the entry queue's tombstone branch below: the server
+        // answers 204 whether or not it had heard of this row, so this
+        // resolves for a food already removed from another device. Hard-delete
+        // only once the server confirms — until then the tombstone IS the
+        // record that a delete is owed.
+        await api.deleteFood(getToken, f.id);
+        await db.runAsync(`DELETE FROM foods WHERE id = ? AND user_id = ?`, f.id, userId);
+        result.pushed += 1;
+        continue;
+      }
       await api.saveFood(getToken, f.id, {
         kind: f.kind, name: f.name, brand: f.brand,
         serving_label: f.serving_label, serving_grams: f.serving_grams,
@@ -747,6 +834,12 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
         message, f.id, userId, f.updated_at,
       );
       if (kind === 'permanent') {
+        // Same guard as the entry queue's own comment on this branch: a
+        // rejected DELETE is near-unreachable (the server answers 204 always,
+        // it does not refuse tombstones), but if it ever happens the tombstone
+        // survives with `dirty` cleared, invisible to every read here — all of
+        // which filter `deleted_at IS NULL` — which is the least-wrong outcome
+        // for a delete this device can no longer explain.
         await db.runAsync(
           `UPDATE foods SET dirty = 0 WHERE id = ? AND user_id = ? AND updated_at = ?`,
           f.id, userId, f.updated_at,

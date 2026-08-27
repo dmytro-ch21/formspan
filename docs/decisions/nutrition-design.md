@@ -66,12 +66,25 @@ logs, web authors and analyses.**
 | Log an item, edit an entry | ✅ | ✅ |
 | Save a food from what you just ate | ✅ | ✅ |
 | Build a recipe from scratch | ✅ | ✅ |
+| Browse, edit or delete a saved food/recipe | ✅ | ✅ |
 | Set / explain the target | ✅ | ✅ |
 | Correct or remove a PAST target | ✅ | partly — the list is inert; no delete anywhere |
 | Intake vs weight vs training load | ✅ (reduced) | ✅ |
 
 **Three of those rows read `✗` or `read-only` until 2026-08-21**, and two
 separate tickets corrected them on the **exclusivity**, not on the design.
+
+**The saved-food-management row (N79).** Until this ticket the row did not
+exist in this table at all, which is its own version of the mistake: the
+phone could *create* a saved food or recipe (`Save a food` / `Build a recipe`,
+both already ✅/✅ above) and neither list them, correct one without already
+knowing its id, nor remove one — `apps/web`'s `nutrition/recipes` page was the
+only place an athlete could see the whole list or clear an old entry off it.
+`app/food/saved/index.tsx` closes it: a searchable list, each row routed to
+whichever editor its kind needs, and a hold-to-confirm delete. What is still
+richer on web is unchanged — a keyboard for building a fourteen-ingredient
+recipe, a wide table for scanning a long list — and none of it is exclusive
+any more.
 
 **The target rows (N72, then N86).** N72 gave the phone manual entry and N86 gave
 it the record — history, editing a past row, removing one, and filing a target

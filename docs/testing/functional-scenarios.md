@@ -13835,3 +13835,58 @@ on screen. That, and only that, is what moved.
 - No change to `GET /v1/nutrition/days`'s or `GET /v1/nutrition/targets`'s
   existing per-athlete scoping — this ticket adds a mobile caller for the
   first, and a new caller of the already-mobile-available second.
+
+### Managing saved foods on the phone (N79 — `apps/mobile/app/food/saved/index.tsx`, `lib/foodLog.ts`'s `removeFood`)
+
+#### Happy path
+
+- Open "Manage your saved foods" from the Food tab's Add sheet. Confirm every
+  saved food and recipe appears (name, per-serving kcal/macros), sorted by
+  name, with a recipe visibly marked and showing its yield and ingredient
+  count instead of a serving line.
+- Type into the search field. Confirm the list narrows to matching names as
+  you type, and clearing the field restores the full list.
+- Tap a plain food's row. Confirm it opens `food/saved/[id]` (the per-serving
+  macro editor), change a number, save, and confirm the change is reflected
+  back on this list.
+- Tap a recipe's row. Confirm it opens `food/recipe/[id]` (the ingredient
+  editor) rather than the plain-food form — the same routing split
+  `food/add.tsx`'s own Edit button uses.
+- Hold a row's Delete control to completion. Confirm the row disappears from
+  the list, and that a food already logged from it (check the day it was
+  eaten on) still shows the exact numbers it was logged with.
+- Delete a food that has never been logged from at all. Confirm no error and
+  a clean removal from the list.
+- With the phone offline, delete a food, then reconnect and let sync run
+  (or force a resync). Confirm the delete reaches the server — the food does
+  not reappear on this device or on `apps/web`'s `nutrition/recipes` list
+  after the next pull on either surface.
+
+#### Edge cases and errors
+
+- Open the screen with nothing ever saved. Confirm the "nothing saved yet"
+  empty state, distinct from the "nothing saved by that name" state a
+  no-match search produces.
+- Delete a food, leave the screen (e.g. to edit another row) and return.
+  Confirm the deleted row stays gone — the list reloads on focus, not once
+  on mount.
+- Force the delete request to fail (airplane mode mid-hold, or a forced
+  500). Confirm the row is NOT removed from the list and an error message
+  appears — no silent "looks deleted, isn't."
+- A screen-reader user cannot perform the hold gesture. Confirm VoiceOver /
+  TalkBack gets a tap-and-confirm dialog instead (`HoldToConfirm`'s built-in
+  fallback), asks before deleting, and the delete only fires on confirm.
+- Delete the same food twice in quick succession (e.g. a double-tap on the
+  confirm). Confirm the second attempt is a harmless no-op, not an error.
+- Two devices: delete a food on the phone while `apps/web`'s recipes page is
+  open on the same account showing that food. Confirm web's next load (or a
+  manual refresh) no longer shows it, and does not error trying to open it.
+
+#### Auth / security
+
+- `DELETE /v1/nutrition/foods/{id}` is scoped to the authenticated athlete —
+  confirm one account cannot delete another's saved food by guessing or
+  reusing an id (an id from account A, sent under account B's token, must
+  404/no-op rather than delete A's row).
+- Confirm the list itself only ever shows the signed-in athlete's own saved
+  foods — no cross-account leakage through `GET /v1/nutrition/foods`.
