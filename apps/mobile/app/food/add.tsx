@@ -656,6 +656,23 @@ export default function AddFoodScreen() {
         </Text>
       )}
 
+      {/* N79 — the findability gap the phone-impossible audit named: this
+          screen already reads and edits the athlete's own saved list, but
+          nothing let them browse the whole thing or remove one. One link
+          rather than a delete control on every row here, deliberately: this
+          list's rows exist to be tapped for the two-tap repeat, and a Delete
+          button beside each one is exactly the affordance N114's own comment
+          warned against turning into a second, riskier way to hit this list. */}
+      <Pressable
+        onPress={() => router.push('/food/saved')}
+        style={styles.manageLink}
+        accessibilityRole="button"
+        accessibilityLabel="Manage your saved foods — edit or delete"
+        testID="add-manage-saved"
+      >
+        <Text style={styles.manageLinkText}>Manage your saved foods</Text>
+      </Pressable>
+
       {/* The catalog, as a SECOND section rather than merged into the first.
           The athlete's own foods are theirs and carry their own serving sizes;
           a catalog row is reference data. Merging them would also hide which
@@ -1088,6 +1105,18 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   newRecipeText: { fontSize: 15, fontWeight: '600' },
+  manageLink: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  manageLinkText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: vola.textMuted,
+    textDecorationLine: 'underline',
+  },
   rowEdit: {
     fontSize: 12,
     color: vola.textMuted,

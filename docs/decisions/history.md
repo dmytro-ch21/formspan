@@ -45196,6 +45196,149 @@ Judged acceptable for now: the audit's complaint was specifically about the
 fallback on mobile is a small, separable follow-up rather than something this
 ticket needed to also solve.
 
+## 2026-08-27 — N79: saved foods can now be listed, edited and deleted on a phone (#413)
+
+**Filed by the phone-impossible audit** (`docs/decisions/phone-impossible-audit.md`,
+row 5, PR #398/#372) and paired with N78 in the ticket's own words: "a phone can
+create the clutter and cannot clear it." `apps/web`'s `nutrition/recipes` page
+could list, open and delete an athlete's own saved foods and recipes; the phone
+could only create them (logging, describing a plate, scanning a barcode — N78)
+and, since N114, correct one it already had the id of. `lib/nutritionApi.ts`'s
+`deleteFood` had sat in the wire layer since the contract was written, with a
+comment saying, literally, "No production caller yet."
+
+**What shipped is a browse-and-manage screen, not a new editor.**
+`apps/mobile/app/food/saved/index.tsx` reads every saved food and recipe
+(`localFoods`, SQLite, offline), with a search field, and routes each row's Edit
+tap to whichever screen already handles its `kind` correctly —
+`food/saved/[id]` for a plain food, `food/recipe/[id]` for a recipe, the exact
+split N87 built into `food/add.tsx`'s own Edit button and for the identical
+reason: a recipe saved through the plain-food form writes an empty `items` and
+a null `yield_servings`, which the server refuses as a permanent 400, silently
+destroying the ingredient list with nothing anywhere saying so. This screen
+does not re-implement either editor — it only has to send a tap to the right
+one, and that guard is pinned in `savedFoodsScreen.test.tsx` the same way it
+already was in `food/add.tsx`'s own tests.
+
+**Delete needed a real caller, not a screen wired to a stub.** `removeFood`
+(`apps/mobile/lib/foodLog.ts`) is the exact shape of the existing `removeEntry`:
+a tombstone (`deleted_at` + `dirty`) for a row the server may already know
+about, so a hard delete cannot lose the race with an in-flight first push and
+have the row reappear on the next pull with no tombstone left to remove it
+again; a genuine hard delete only for a row that is neither pushed nor owed
+(`remote = 0 AND dirty = 0` — the state a permanently-rejected, never-confirmed
+save leaves behind).
+
+**The bug this surfaced, and the reason it is the real point of this
+ticket.** `push()`'s foods query read `WHERE user_id = ? AND dirty = 1 AND
+deleted_at IS NULL` — the same filter every ORDINARY read of this table
+correctly carries (an athlete must never be shown a tombstone), copied into
+the one query that must not carry it, because that query decides what gets
+SENT rather than what gets SHOWN. A tombstoned row is `dirty = 1` and
+`deleted_at IS NOT NULL` by construction, so the old query silently never
+selected it — `deleteFood` would have had a caller and still never been
+reached, and a phone delete would work locally forever and never leave the
+phone. Fixed by dropping the `deleted_at IS NULL` filter from that one query
+and branching per row: a tombstoned row calls `api.deleteFood` and is
+hard-deleted locally once the server confirms (204-always, same as
+`deleteEntry`); an ordinary dirty row is unchanged. `removeFood.test.ts`'s own
+doc comment names this as the one regression the suite must never let back in,
+and its "sends the delete request, not a save, for a tombstoned row" test is
+built specifically to catch the old query returning.
+
+**The fake server in that test file had to be stateful, and a blanket-`{}`
+mock would have hidden the bug it exists to catch.** Every `syncFood` call ends
+with a foods PULL that removes any local row that is `dirty = 0, remote = 1`
+and absent from the server's list — correct behaviour for a food genuinely
+dropped server-side, and exactly the state a row is in the instant after this
+same test pushes it. A mock that resolves `{}` for every call (as most of this
+file's siblings do, harmlessly, because they have no synced food row lying
+around when they call it) would have the pull sweep the very row `removeFood`
+is about to be asked to tombstone, and every assertion downstream would pass
+for a reason that has nothing to do with `removeFood` — the exact "a stub built
+from an assumption cannot falsify it" trap CLAUDE.md's testing section names.
+`fakeServer()` tracks what has actually been PUT and DELETEd, keyed by id, so
+the pull echoes back a server that could really exist.
+
+**Deleting a food changes nothing about what it was logged as.**
+`source_food_id` is `ON DELETE SET NULL` server-side (migration 000059) and a
+`food_entries` row already carries its own copied macros regardless — the
+nutrition module's whole design is that a logged entry owns its numbers. The
+delete confirmation states this, matching the sentence `apps/web`'s recipes
+page already prints under its own list.
+
+**That claim was nearly false, and review caught it before merge.**
+`push()` sends the foods queue before the entries queue — a documented N114
+correctness constraint, because an entry naming a food the server has not yet
+seen gets refused with a PERMANENT rejection (the composite FK's 23503 maps to
+`invalid_input`, and `classify` reads a 400 as unretryable). `removeFood`'s
+first draft cut against exactly that ordering: log a meal from a saved food,
+then delete that food, all on one phone before the next sync, and the entry —
+still dirty, still naming the food by id — would be pushed in the SAME sync
+pass, immediately after that food's own delete succeeded. The composite FK
+refuses it identically to the create-order case N114 already guards against,
+`dirty` is cleared on the ENTRY, and the meal never reaches the server or any
+other device again — silently, with the delete confirmation's own promise
+having just been broken by the delete itself. Found by `frontend-reviewer`
+before this branch opened a PR; fixed by having `removeFood` sever any DIRTY
+entry's `source_food_id` locally, first, mirroring the server's own cascade
+rather than waiting to be refused by it. Pinned by
+`removeFood.test.ts`'s "severing a dirty entry's reference when its food is
+deleted" block (4 cases), mutation-verified by disabling the fix and
+confirming three of the four go red with the FK-rejection signature
+(`res.failed === 1`, not a crash) before restoring it.
+
+**Reachable from where an athlete already deals with saved foods, not
+bolted onto the tab header.** `food/add.tsx` — the "log something" search sheet,
+which already lists and edits the athlete's own saved foods — gained one link,
+"Manage your saved foods," rather than a Delete control on every row of that
+list. `ScreenHeader`'s own doc comment documents a real history of layout
+regressions from widening its action cluster, and the search list's rows exist
+to be tapped for the two-tap repeat — a Delete button on every one of them
+would be the exact "second, riskier way to reach this list" N114's own
+comments warn against. One link, one dedicated screen.
+
+**Design docs corrected on the exclusivity, per the ticket's fourth
+criterion.** `docs/decisions/nutrition-design.md` §4's platform table had no
+row for browsing, editing or deleting a saved item at all — its own version of
+the mistake, since "Save a food" and "Build a recipe" were already `✅/✅` while
+managing what either of those created was `✅ web` only, unstated. A row and a
+paragraph were added, following the same pattern the N72/N86/N84/N87
+corrections above it already use. `docs/decisions/system-design.md` was
+checked and carries no saved-food-specific exclusivity claim, only the general
+"nothing a user needs weekly may be desktop-only" rule this closes rather than
+contradicts. `apps/web/src/app/dashboard/nutrition/recipes/page.tsx`'s own doc
+comment ("Plain foods are... logged and edited on the phone, where they are
+created") makes no exclusivity claim needing correction — it explains that
+page's own scope, not a claim that management is web-only, and was left alone.
+
+**Tests**: `apps/mobile/lib/__tests__/removeFood.test.ts` (15 cases, real
+SQLite via `migratedFixture()`) covers the tombstone/hard-delete split, the
+push-side branch, a permanent rejection leaving an invisible-but-owed
+tombstone, an offline failure leaving it fully owed, that a row saved and
+deleted before ever syncing sends exactly one DELETE rather than a PUT and a
+DELETE for the same id, and the entry-severing fix above (4 cases).
+`apps/mobile/app/__tests__/savedFoodsScreen.test.tsx`
+(8 cases) covers the list rendering per-serving macros, the recipe badge, the
+empty state, search re-querying SQLite, the kind-based edit routing, and
+delete going through `removeFood` with the sync request and list reload it
+requires — plus the failure path leaving the row in place with an error shown
+rather than a silent no-op. Both suites were run against the unmodified code
+first to confirm they can fail: the screen suite red on the pre-fix `ScrollView`
+(`keyboardCoverage.test.ts`'s repo-wide sweep caught the search field needing
+`KeyboardAwareScrollView`, not a bespoke assertion), and the lib suite red
+against the un-reverted `AND deleted_at IS NULL` filter before the fix landed.
+
+**NEEDS HUMAN EVIDENCE, per #413's own criterion**: exercised on a real
+device, with the web app closed.
+
+Open gap this leaves: the list has no bulk-delete and no undo — removing a
+food is one hold-to-confirm per row with no "oops" beyond re-creating it by
+logging again. Judged acceptable for now: the audit's complaint was that
+deletion did not exist on the phone at all, which this closes; bulk actions on
+a personal list that N78's own data suggests stays in the dozens rather than
+the hundreds are a separable, lower-priority follow-up.
+
 
 ## Open items / known gaps as of this entry
 
