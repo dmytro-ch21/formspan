@@ -199,6 +199,64 @@ export type Evidence = {
   reported: string;
 };
 
+/**
+ * One session's worth of one exercise. `null` is a real answer, not a
+ * failure — see each field. Mirrors `apps/web/src/lib/api.ts`'s `LoadPoint`.
+ */
+export type LoadPoint = {
+  session_id: string;
+  started_at: string;
+  /** Heaviest working set. Null for bodyweight, timed or distance work. */
+  top_weight_kg: number | null;
+  /** Null whenever no set that session could support an estimate. */
+  best_1rm_kg: number | null;
+  best_1rm_reps: number | null;
+  best_1rm_weight_kg: number | null;
+  best_1rm_assisted_reps: number | null;
+  best_1rm_rir: number | null;
+  best_1rm_rpe: number | null;
+  tonnage_kg: number;
+  sets: number;
+  reps: number;
+};
+
+export type LoadHistory = {
+  exercise_id: string;
+  /** From the catalog — decides which fields above are meaningful. */
+  load_type: string;
+  /** Oldest first. */
+  points: LoadPoint[];
+};
+
+/**
+ * One exercise's arc over time — the phone's half of N84 (row 11 of the
+ * phone-impossible audit). `apps/web`'s `fetchLoadHistory` has carried this
+ * since N6; the mobile client never had a caller.
+ *
+ * Under `/records`, not `/exercises`, matching web: everything below
+ * `/records` is the caller's own training data, and the path names the
+ * exercise, never the athlete.
+ */
+export function fetchLoadHistory(
+  getToken: TokenGetter,
+  exerciseID: string,
+  opts: { from?: string; to?: string; tz?: string } = {},
+  signal?: AbortSignal,
+): Promise<LoadHistory> {
+  const q = new URLSearchParams();
+  if (opts.from) q.set('from', opts.from);
+  if (opts.to) q.set('to', opts.to);
+  // The device's own zone, matching web: it decides which calendar day a
+  // bound falls on, so a session logged at 9pm doesn't read as tomorrow's.
+  q.set('tz', opts.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+  return call<LoadHistory>(
+    getToken,
+    `/records/${encodeURIComponent(exerciseID)}/history?${q}`,
+    {},
+    signal,
+  );
+}
+
 export function describeEvidence(r: PersonalRecord, u: UnitSystem): Evidence {
   const measured: string[] = [];
   if (r.reps != null && r.weight_kg != null) {

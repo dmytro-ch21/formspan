@@ -13,6 +13,24 @@ import { apiRequest } from './apiRequest';
 import type { Entry, Food, Macros, Meal, Target } from './nutrition';
 import type { TokenGetter } from './useAuthToken';
 
+/**
+ * One day's totals, as already aggregated by the server. Mirrors
+ * `apps/web/src/lib/nutritionApi.ts`'s `DayTotals`.
+ *
+ * **A row exists only for a day with at least one entry** — the server never
+ * sends a zero-filled day, so a day with nothing logged is simply absent from
+ * the array. Rendering that as `kcal: 0` is a claim that somebody ate
+ * nothing; treating an absence as a gap, never a zero, is
+ * `nutritionSeries.ts`'s rule 1 on web and the same rule applies here.
+ */
+export type DayTotals = Macros & {
+  eaten_on: string;
+  entries: number;
+  /** The target live on THIS day, or null if none had been set yet. */
+  target_kcal: number | null;
+  target_protein_g: number | null;
+};
+
 export type EntryInput = Macros & {
   eaten_on: string;
   meal: Meal;
@@ -127,6 +145,26 @@ export function saveFood(getToken: TokenGetter, id: string, input: FoodInput): P
  */
 export function deleteFood(getToken: TokenGetter, id: string): Promise<void> {
   return apiRequest<void>(getToken, `/nutrition/foods/${id}`, { method: 'DELETE' });
+}
+
+/**
+ * Day-by-day totals over a window — the phone's half of N84 (row 6 of the
+ * phone-impossible audit, "the nutrition analytical surface"). `apps/web`'s
+ * `NutritionTrendPage` has called this since N28; the mobile client never had
+ * a caller, because a day's own totals are computed locally for the day
+ * screen (`lib/nutrition.ts`'s `dayTotals`) rather than fetched for a range.
+ * A trend over many days needs the SERVER'S aggregate, the same way
+ * `listTargets` above already does — one request rather than reconstructing a
+ * range from however many individual days happen to be cached locally.
+ */
+export function listDays(
+  getToken: TokenGetter,
+  range: { from: string; to: string },
+): Promise<DayTotals[]> {
+  const q = new URLSearchParams({ from: range.from, to: range.to });
+  return apiRequest<{ days: DayTotals[] }>(getToken, `/nutrition/days?${q}`).then(
+    (b) => b.days ?? [],
+  );
 }
 
 /**

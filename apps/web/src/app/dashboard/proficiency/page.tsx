@@ -29,8 +29,15 @@ import {
  * reps" is a statistic. That ordering — funnel first, list second — is the
  * whole reason this screen exists rather than a list of counters.
  *
- * Web, per the platform rule: this is review and analysis, done sitting down.
- * The phone captures the evidence mid-reflection; nothing here belongs on it.
+ * **Web is richer here, not exclusive** — this table (a search box, focus
+ * management inline beside the numbers a decision is made from, every column
+ * the funnel can show) is the desk-depth version, and it stays that: the
+ * phone's browsable list (N84, #418, `apps/mobile/app/bjj/proficiency.tsx`)
+ * is a straight port of `bucketOf` below reshaped into a scrollable list, not
+ * a second implementation that could disagree with this one about which
+ * bucket a technique falls in. It is a LIST, not a chart, so CLAUDE.md's
+ * mobile-chart carve-out was never in play for it — nothing here plots a
+ * value against time.
  */
 
 /** Below this, a hit rate is noise rather than a measurement. */

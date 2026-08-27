@@ -68,7 +68,7 @@ logs, web authors and analyses.**
 | Build a recipe from scratch | ✅ | ✅ |
 | Set / explain the target | ✅ | ✅ |
 | Correct or remove a PAST target | ✅ | partly — the list is inert; no delete anywhere |
-| Intake vs weight vs training load | ✗ | ✅ |
+| Intake vs weight vs training load | ✅ (reduced) | ✅ |
 
 **Three of those rows read `✗` or `read-only` until 2026-08-21**, and two
 separate tickets corrected them on the **exclusivity**, not on the design.
@@ -79,6 +79,20 @@ for a day already gone. The split this table describes is still the right
 description of where each surface is strongest, and web's version may still be
 richer. It may not be the only one. Web's own half is now the weaker one — its
 history list is inert and neither surface offered deletion before the phone did.
+
+**The analytical row (N84, #418).** "Intake vs weight vs training load" was
+`✗ mobile / ✅ web`, the exact shape the mobile-first rule forbids. The phone's
+version is genuinely and deliberately smaller — the web page is a THREE-way
+join (intake, bodyweight, training load, four stat tiles) and CLAUDE.md's
+mobile-chart carve-out reserves exactly that shape for web: a second charted
+metric disqualifies a mobile chart. `app/goals/nutritionTrend.tsx` answers the
+one question that is decision support rather than analysis — "is my eating
+tracking the target I set" — as a single 7-day-mean line against a dashed
+target reference, with an adherence readout and the days behind it. Bodyweight
+and training load are not on the phone and are not a step toward putting them
+there; asking "did the week I ate least happen to be the week I trained
+hardest" stays a desk question. See `lib/nutritionTrend.ts`'s own note for the
+full carve-out argument.
 
 **The recipe row (N87, #529).** "Build a recipe from scratch" was `✗ mobile /
 ✅ web`, which the mobile-first rule in `CLAUDE.md` forbids. The phone can now

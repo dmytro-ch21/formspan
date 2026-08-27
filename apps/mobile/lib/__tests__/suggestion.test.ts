@@ -58,6 +58,7 @@ function row(over: Partial<Proficiency> = {}): Proficiency {
     attempted: 0,
     scored: 0,
     conceded: 0,
+    defended: 0,
     sessions: 3,
     last_seen: '2026-08-01T18:00:00Z',
     ...over,

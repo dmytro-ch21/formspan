@@ -1,9 +1,10 @@
 import { Image } from 'expo-image';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
@@ -29,6 +30,7 @@ import { useUnits } from '@/lib/useUnits';
 export default function ExerciseDetailScreen() {
   const accent = useAccent();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const getToken = useAuthToken();
   const { units } = useUnits();
 
@@ -210,6 +212,33 @@ export default function ExerciseDetailScreen() {
         </View>
       )}
 
+      {/* N84: "is my top set going up", the reduced phone form of what
+          `records`/`LoadHistoryChart` shows at desk depth — see
+          `lib/loadTrend.ts` for the carve-out argument. Shown whenever the
+          exercise is known, even before "Your last session" resolves: the
+          trend screen fetches its own history and degrades on its own. */}
+      {!!exercise && (
+        <Pressable
+          onPress={() =>
+            router.push({
+              pathname: '/records/[exerciseId]/trend',
+              params: { exerciseId: exercise.id, name: exercise.name },
+            })
+          }
+          style={({ pressed }) => [styles.trendRow, pressed && styles.trendRowPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Load over time"
+          accessibilityHint="Your top set on this exercise, charted over time"
+          testID="exercise-load-trend-link"
+        >
+          <View style={styles.trendRowText}>
+            <Text style={styles.trendRowTitle}>Load over time</Text>
+            <Text style={styles.trendRowNote}>Your top set, session by session.</Text>
+          </View>
+          <Icon name="chevron" size={16} />
+        </Pressable>
+      )}
+
       {!!exercise?.instructions && (
         <>
           <Text style={styles.sectionLabel}>How to do it</Text>
@@ -283,4 +312,20 @@ const styles = StyleSheet.create({
     borderLeftColor: vola.line,
   },
   noteText: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
+  trendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+  },
+  trendRowPressed: { opacity: 0.85 },
+  trendRowText: { flex: 1, gap: 2 },
+  trendRowTitle: { fontSize: 15, fontWeight: '700' },
+  trendRowNote: { color: vola.textMuted, fontSize: 13 },
 });
