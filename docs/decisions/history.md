@@ -44169,6 +44169,76 @@ orphan. No test existed for it to delete alongside it. No
 `functional-scenarios.md` update: removing dead code with no caller has no
 user-facing or API-surface behavior.
 
+## 2026-08-27 — N74: one shared "prepare an image for upload" helper (#392)
+
+`food/describe.tsx` and `session/[id]/identify.tsx` each independently
+learned the same three facts about turning a picked photo into an upload:
+resize to 1080px, `compress: 0.8` JPEG, and set the mime type explicitly to
+`image/jpeg` because `expo-image-manipulator` re-encodes regardless of the
+source format. The first screen shipped with it; the second shipped without
+it and was reported from a real phone as N73 (#361) — "Could not reach the
+server. Try again when you have signal." on four bars, because a raw 4-12MB
+camera frame blew the endpoint's 8MB cap and the request never returned a
+status. The ticket's own framing: "a third [screen] will inherit it from
+neither."
+
+Both screens now call one helper, `apps/mobile/lib/imageUpload.ts`'s
+`prepareImageForUpload(asset)`, which does the resize/compress/mime-type
+steps and returns `{ uri, mimeType }` ready for the request body. Neither
+screen keeps its own copy — both had `import * as ImageManipulator from
+'expo-image-manipulator'` and a `manipulateAsync(...)` call removed. The
+helper deliberately does not catch: each screen already has its own
+manipulator-failure copy (camera vs. library wording on `describe.tsx`,
+`retake` vs. `retry` on `identify.tsx`), and that copy is about what the
+athlete should do next, which only the screen knows.
+
+**The test discipline mirrors N73's own `identifyScreen.test.tsx`**, which
+already asserts on the URI reaching the wire rather than on the manipulator
+having been called — a call-count check passes against a helper that shrinks
+the frame and then returns the original uri anyway. `imageUpload.test.ts`
+carries the same assertion at the helper level, plus a test that reads each
+caller's own source and asserts it neither imports `expo-image-manipulator`
+nor calls `manipulateAsync` directly — so criteria 2 and 5's "visible in
+review" property is machine-checked rather than merely claimed.
+
+**Grew from two screens to four, on `ac-verifier` and `frontend-reviewer`'s
+own independent finding.** The issue's premise — "there are two image-upload
+paths… a third will inherit it from neither" — was already stale when filed:
+`profile/edit.tsx` (avatar) and `checkin/[date].tsx` (progress photo) both
+already carried the identical inline triple, predating the issue by three to
+five weeks. `ac-verifier` found this by grepping `manipulateAsync` across
+`apps/mobile/app` and got three hits where the ticket's own machine-checked
+test only looked for one; `frontend-reviewer` independently flagged the same
+two files by name. Both were ported onto the same helper in the same PR
+rather than filed as a follow-up, since the fix was small (both already
+built `{uri, mimeType}` or an equivalent) and leaving them meant criterion 5
+— "the only way to omit the downscale is forgetting the call" — stayed false
+as written. `imageUpload.test.ts`'s source-reading test now covers all four
+call sites via `it.each`, not the two the issue named, so a fifth inline
+copy fails the same way a first would have.
+
+**Mutation-verified per the ticket's own step 2, twice** — once for the
+two-screen version, again after the two-screen expansion:
+`prepareImageForUpload` was temporarily edited to return
+`{ uri: asset.uri, mimeType: 'image/jpeg' }` — the original, unshrunk uri —
+while still invoking the manipulator (so a weaker call-count check would
+have stayed green). With the mutation in place, four suites went red: the
+helper's own test, `describePhoto.test.tsx`, `identifyScreen.test.tsx`, and
+— unprompted, an existing test that already asserted the avatar upload's
+wire uri — `editProfileAvatar.test.tsx`. `checkinGirthUnits.test.tsx` stayed
+green under the mutation: it mocks `uploadCheckinPhoto` without asserting
+its arguments, so `checkin/[date].tsx`'s photo path has no uri-level test at
+all — a pre-existing gap this ticket did not introduce and did not close,
+recorded here rather than left to look like coverage it isn't. The mutation
+was reverted and the full suite re-confirmed green by re-running it, not by
+reading the diff.
+
+Open: criterion 6 needs a real device — photograph with the full-resolution
+camera on both upload paths named by the issue (`food/describe.tsx` and
+`session/[id]/identify.tsx`) and confirm the upload succeeds with a small
+request body. Not done here; handed to the user as the PR's device-check
+item.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

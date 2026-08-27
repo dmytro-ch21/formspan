@@ -1,4 +1,3 @@
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -10,6 +9,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
+import { prepareImageForUpload } from '@/lib/imageUpload';
 import { setModules } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import {
@@ -188,25 +188,24 @@ export default function EditProfileScreen() {
 
   /**
    * Shared by both sources (N12) — the downscale-then-upload sequence is
-   * identical whether the photo came from the camera or the library, and
-   * duplicating it per source is exactly the bug class `checkin/[date].tsx`
-   * and `identify.tsx` already avoid by keeping it in one place each.
+   * identical whether the photo came from the camera or the library.
+   *
+   * The resize/compress/mime-type steps themselves live in
+   * `prepareImageForUpload` (N74, #392) — this screen, `checkin/[date].tsx`
+   * and `identify.tsx` all call it rather than each keeping its own copy,
+   * which is what let two of the four screens ship without the downscale at
+   * all (N73, #361) and what let this comment go on claiming "one place
+   * each" while there were four.
    */
   async function commitAvatar(uri: string) {
     setAvatarBusy(true);
     setError(null);
     try {
-      // Downscaled before it leaves the phone, same 1080px/0.8 the checkin
-      // and identify screens use — bandwidth on a raw 4-5MB camera frame.
       // The server does its OWN authoritative resize (to 512px, discarding
       // whatever this produces) so this is purely a courtesy to the upload,
       // never the property "the original is never served" relies on.
-      const shrunk = await ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: 1080 } }],
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-      );
-      const updated = await uploadAvatar(getToken, { uri: shrunk.uri, mimeType: 'image/jpeg' });
+      const prepared = await prepareImageForUpload({ uri });
+      const updated = await uploadAvatar(getToken, prepared);
       setAvatarUrl(updated.avatar_url ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

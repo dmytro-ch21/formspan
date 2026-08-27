@@ -1,5 +1,4 @@
 import { Image } from 'expo-image';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -22,6 +21,7 @@ import {
   type CheckinInput,
   type GirthKey,
 } from '@/lib/body';
+import { prepareImageForUpload } from '@/lib/imageUpload';
 import { getProfile, type Profile } from '@/lib/profile';
 import {
   fromDisplayGirth,
@@ -221,13 +221,11 @@ export default function CheckinScreen() {
     try {
       // Downscaled before it leaves the phone: a raw frame is 4–5MB, and the
       // thing this photo is for — the shape of a body, month over month —
-      // survives 1080px with room to spare.
-      const shrunk = await ImageManipulator.manipulateAsync(
-        picked.assets[0].uri,
-        [{ resize: { width: 1080 } }],
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-      );
-      await uploadCheckinPhoto(getToken, date, shrunk.uri);
+      // survives 1080px with room to spare. The resize/compress/mime-type
+      // steps live in `prepareImageForUpload` (N74, #392), shared with
+      // `profile/edit.tsx` and `identify.tsx`.
+      const prepared = await prepareImageForUpload(picked.assets[0]);
+      await uploadCheckinPhoto(getToken, date, prepared.uri);
       // `false`: refresh the photo and nothing else. Rebuilding the draft here
       // wiped a weight the athlete had typed but not yet saved — and, because
       // notes are replace-semantics, the next Save then persisted the emptied

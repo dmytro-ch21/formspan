@@ -26,7 +26,6 @@
  */
 
 import { useAuth } from '@clerk/clerk-expo';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -50,6 +49,7 @@ import {
   type MealEstimate,
 } from '@/lib/estimateApi';
 import { logFood, saveFoodLocally } from '@/lib/foodLog';
+import { prepareImageForUpload, type UploadableImage } from '@/lib/imageUpload';
 import { MEALS, slotForClock, todayString, type Macros, type Meal } from '@/lib/nutrition';
 import { request as requestSync } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -222,7 +222,11 @@ export default function DescribeMealScreen() {
         // Downscaled BEFORE it leaves the phone, which is a cost decision as
         // much as a bandwidth one: image tokens scale with resolution, and a
         // plate of food is legible at 1080px. A raw 4-5MB frame would also
-        // exceed the endpoint's own 5MB cap.
+        // exceed the endpoint's own 5MB cap. The resize/compress/mime-type
+        // steps themselves live in `prepareImageForUpload` (N74, #392) —
+        // this screen and `identify.tsx` both call it rather than each
+        // keeping its own copy, which is what let `identify.tsx` ship
+        // without them in the first place (N73, #361).
         //
         // **Caught separately from the request below**, and that separation is
         // the whole of N92's mobile half. A manipulator failure is
@@ -250,13 +254,9 @@ export default function DescribeMealScreen() {
         // same N73 was reported for, just moved one line up". That is exactly
         // what was still true here. Same bug, second path — which is the
         // pattern #392 (N74) exists for.
-        let shrunk: ImageManipulator.ImageResult;
+        let prepared: UploadableImage;
         try {
-          shrunk = await ImageManipulator.manipulateAsync(
-            picked.assets[0].uri,
-            [{ resize: { width: 1080 } }],
-            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-          );
+          prepared = await prepareImageForUpload(picked.assets[0]);
         } catch {
           // Branched on `fromCamera` for the same reason the picker's own catch
           // fifteen lines up is: "try taking another" cannot be followed by
@@ -273,8 +273,8 @@ export default function DescribeMealScreen() {
         }
         receive(
           await photographMeal(getToken, {
-            uri: shrunk.uri,
-            mimeType: 'image/jpeg',
+            uri: prepared.uri,
+            mimeType: prepared.mimeType,
             description: description.trim() || undefined,
             meal,
           }),
