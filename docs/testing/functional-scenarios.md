@@ -1025,6 +1025,21 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - **The derived estimates must not move when a field is merely touched.** Waist-to-height and the Navy body-fat figure take centimetres. Open an imperial check-in that already has girths, retype the waist value that is already shown, and confirm neither number changes — the body did not. A reader that took the draft straight would swing waist-to-height from 0.47 to 0.18 on that keystroke, and both readings render as "under the 0.5 guide", so the words agree and only the number betrays it.
 - The **stale-allowlist guard** in `check-unit-literals.py` is what retires the exception: leave the `[date].tsx` entry in `ALLOW` after converting the screen and the check goes red, naming it. Verified by putting the entry back.
 
+**Progress photo (`addPhoto`, same screen).**
+- Pick a photo from the library; confirm it appears and the check-in's other
+  drafted-but-unsaved fields (weight, notes) survive the refresh — `addPhoto`
+  reloads only the photo, deliberately, since rebuilding the whole draft here
+  once wiped an unsaved weight.
+- **The DOWNSCALED frame is what is uploaded, not the picked one.** (N74,
+  #392: this screen's own inline `manipulateAsync` copy was removed in favour
+  of the shared `lib/imageUpload.ts` helper, same as `food/describe.tsx`,
+  `session/[id]/identify.tsx` and `profile/edit.tsx`'s avatar upload.)
+  **Not currently asserted by any test** — `checkinGirthUnits.test.tsx` mocks
+  `uploadCheckinPhoto` without checking its arguments, so nothing here pins
+  the uri the way the other three upload paths' tests do. A test asserting
+  the uri handed to `uploadCheckinPhoto` is the gap to close before trusting
+  this path the way the other three now can be.
+
 ## Library filter and search memory (`apps/mobile` Library tab)
 
 - The **sport filter persists** across visits and app launches; it's a standing fact about the athlete.
@@ -8240,7 +8255,11 @@ Edge cases and errors — the five states are the point:
   Assert the uri handed to `photographMeal`. A scenario asserting the
   manipulator was *called* passes against a screen that shrinks the frame and
   then sends the original anyway — which is exactly the 4–12MB upload N73 was,
-  and that mutation survives a call-count check.
+  and that mutation survives a call-count check. (N74, #392: this and the
+  identify screen below now share one helper, `lib/imageUpload.ts`'s
+  `prepareImageForUpload` — its own test carries the same uri-not-call-count
+  assertion, mutation-verified to go red when the helper is made to return the
+  original asset unchanged.)
 - **A failure before the request never mentions the network.** Make the
   re-encode reject: the radio has been idle throughout, so any message about
   signal is false by construction. Assert nothing was uploaded either, which is
@@ -9715,6 +9734,19 @@ Domain: N44, the phone half of N7. Reached from the add-exercise screen mid-sess
 - **No candidate is pre-selected.** No highlighted first row, no "best match" badge, no default. Adding one would mean an athlete can confirm a wrong exercise without ever choosing, and nothing downstream could tell.
 - **Confidence is never a filter.** A low-confidence candidate is still shown and still tappable; the list order is the server's, never re-sorted client-side.
 - Every candidate takes the same number of taps as every other.
+
+**Upload payload**
+- **The DOWNSCALED frame is what is uploaded, not the camera's raw one.** Assert
+  the uri handed to `identifyMachine`. (N73, #361: this screen originally
+  uploaded the raw 4–12MB camera frame, which blew the endpoint's cap and read
+  as "no signal" on a phone with four bars. N74, #392: the fix now lives in
+  one shared helper, `lib/imageUpload.ts`'s `prepareImageForUpload`, which
+  this screen and `food/describe.tsx` both call — a call-count check on the
+  manipulator alone would pass against a helper that shrinks the frame and
+  discards the result, so the assertion has to be on the uri itself.)
+- **A failure before the request never mentions the network.** Make the
+  re-encode reject: the radio has been idle throughout, so a message about
+  signal is false by construction.
 
 **Edge cases & errors**
 - **Permission denied** → an explanatory message naming Settings, and no retry prompt (a retry cannot grant permission).
@@ -13135,6 +13167,15 @@ on screen. That, and only that, is what moved.
 - Tap "Remove"; confirm the monogram returns immediately.
 - Deny camera or library permission when prompted; confirm a clear message
   appears and nothing crashes — no upload is attempted.
+- **The DOWNSCALED frame is what is uploaded, not the picked one.** Assert the
+  uri handed to `uploadAvatar`. (N74, #392: `commitAvatar` used to keep its
+  own inline `manipulateAsync` copy; it now calls the shared
+  `lib/imageUpload.ts` helper, same as `food/describe.tsx` and
+  `session/[id]/identify.tsx`.) `editProfileAvatar.test.tsx`'s "picking a
+  photo from the library uploads it and shows the result" already carries
+  this assertion — mutation-verified alongside N74's own: temporarily making
+  the helper return the original uri turned this test red too, without it
+  being written for N74.
 - **NEEDS HUMAN EVIDENCE — take a photo on a real device and look at the
   result.** The server resizes to fit within 512×512 and re-encodes to JPEG;
   confirm a real face photo still reads clearly at that size and the upload

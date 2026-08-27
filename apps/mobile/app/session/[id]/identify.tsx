@@ -1,7 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -17,6 +16,7 @@ import {
   isRetryable,
   type MachineIdentification,
 } from '@/lib/identifyApi';
+import { prepareImageForUpload, type UploadableImage } from '@/lib/imageUpload';
 import { emptySet, swapExercise } from '@/lib/sessions';
 import { readLocalSession, saveLocalSets } from '@/lib/sessionStore';
 import { fetchExercise, type Exercise } from '@/lib/exercises';
@@ -155,32 +155,27 @@ export default function IdentifyMachineScreen() {
       // `identifyErrorMessage` falls through to its no-status default and
       // tells an athlete with four bars to go find signal.
       //
-      // 1080px is the same width the meal photo uses and is ample for a
-      // machine and its label; it also cuts image tokens, which scale with
-      // resolution.
+      // The resize/compress/mime-type steps live in `prepareImageForUpload`
+      // (N74, #392) — this screen and `food/describe.tsx` both call it rather
+      // than each keeping its own copy, which is what let this screen ship
+      // without them in the first place.
       //
       // Caught separately from the request below, because a manipulator failure
       // is DETERMINISTIC — an unreadable file, no disk — and the outer handler
       // would give it `identifyErrorMessage`'s no-status default: "Try again
       // when you have signal", plus a retry hint. That is the same false
       // diagnosis N73 was reported for, just moved one line up.
-      let shrunk: ImageManipulator.ImageResult;
+      let prepared: UploadableImage;
       try {
-        shrunk = await ImageManipulator.manipulateAsync(
-          asset.uri,
-          [{ resize: { width: 1080 } }],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-        );
+        prepared = await prepareImageForUpload(asset);
       } catch {
         setError('That photo could not be read. Try taking another.');
         setHint('retake');
         return;
       }
       const res = await identifyMachine(getToken, {
-        uri: shrunk.uri,
-        // The manipulator re-encodes to JPEG, so the asset's own mime type is
-        // no longer what is on the wire.
-        mimeType: 'image/jpeg',
+        uri: prepared.uri,
+        mimeType: prepared.mimeType,
       });
       setResult(res.identification);
     } catch (err) {
