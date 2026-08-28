@@ -1657,6 +1657,111 @@ func TestRenameChangesOnlyTheNameAndOnlyForTheOwner(t *testing.T) {
 	}
 }
 
+// Rescheduling, and the boundary it has to respect — same shape as the
+// rename test above, for the sibling PATCH added by N436.
+func TestRescheduleChangesOnlyStartedAtAndOnlyForTheOwner(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, owner, attacker = "ses-reschedule", "user_reschedule_owner", "user_reschedule_attacker"
+	cleanup(t, pool, id)
+
+	before, err := repo.Create(ctx, strengthSession(id, owner, nil))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A day BEFORE the original, and a day the create's own default (now - 1h)
+	// would never land on by accident — if Reschedule silently no-oped, this
+	// assertion would still see "yesterday" only by coincidence on one day a
+	// month.
+	yesterday := before.StartedAt.AddDate(0, 0, -1)
+	after, err := repo.Reschedule(ctx, owner, id, yesterday)
+	if err != nil {
+		t.Fatalf("reschedule: %v", err)
+	}
+	if !after.StartedAt.Equal(yesterday) {
+		t.Fatalf("started_at is %v, want %v", after.StartedAt, yesterday)
+	}
+	// Only started_at. A general update would make sport and name editable
+	// through the same door as a date correction.
+	if after.Name != before.Name || after.Sport != before.Sport {
+		t.Errorf("reschedule changed more than started_at: name %q->%q, sport %q->%q",
+			before.Name, after.Name, before.Sport, after.Sport)
+	}
+
+	// Same IDOR shape Rename already had to close — see that test's comment.
+	// The re-Get below is what actually catches a missing ownership gate; the
+	// error alone does not, since the user-scoped Get would return
+	// ErrNotFound either way.
+	if _, err := repo.Reschedule(ctx, attacker, id, before.StartedAt); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-user reschedule gave %v, want ErrNotFound", err)
+	}
+	still, err := repo.Get(ctx, owner, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !still.StartedAt.Equal(yesterday) {
+		t.Errorf("owner's started_at was changed by another user: %v", still.StartedAt)
+	}
+}
+
+// The case `TestRescheduleChangesOnlyStartedAtAndOnlyForTheOwner`'s fixture
+// cannot reach: a FINISHED session (non-nil `ended_at`), moved BACKWARD.
+//
+// `sessions_ends_after_start CHECK (ended_at IS NULL OR ended_at >=
+// started_at)` makes the two timestamps order-dependent if `Reschedule` only
+// ever touched `started_at` — moving a session back a day would leave the OLD
+// `ended_at` sitting before the NEW `started_at` and trip the constraint,
+// exactly the "logged today, meant yesterday" scenario this endpoint exists
+// for. `Reschedule` shifts `ended_at` by the same delta in the same
+// statement, so this never happens; this test is what actually exercises
+// that path (found by review — the existing test's fixture has no
+// `ended_at`, so the constraint could never fire there).
+func TestRescheduleOfAFinishedSessionMovedBackwardPreservesDuration(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, owner = "ses-reschedule-finished", "user_reschedule_finished"
+	cleanup(t, pool, id)
+
+	started := time.Now().Add(-90 * time.Minute)
+	ended := started.Add(45 * time.Minute)
+	before, err := repo.Create(ctx, NewSession{
+		ID: id, UserID: owner, Sport: "strength", Name: "Reschedule fixture",
+		StartedAt: started, EndedAt: &ended,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if before.EndedAt == nil {
+		t.Fatalf("fixture: EndedAt is nil, this test proves nothing without it")
+	}
+
+	// A day BEFORE the original start — the direction
+	// TestRescheduleChangesOnlyStartedAtAndOnlyForTheOwner's NULL-ended_at
+	// fixture can never exercise, since the CHECK only fires when ended_at
+	// exists and would land before the new started_at.
+	yesterday := before.StartedAt.AddDate(0, 0, -1)
+	after, err := repo.Reschedule(ctx, owner, id, yesterday)
+	if err != nil {
+		t.Fatalf("reschedule a finished session backward: %v — this is exactly the "+
+			"sessions_ends_after_start CHECK violation a started_at-only UPDATE produces", err)
+	}
+	if !after.StartedAt.Equal(yesterday) {
+		t.Fatalf("started_at is %v, want %v", after.StartedAt, yesterday)
+	}
+	if after.EndedAt == nil {
+		t.Fatalf("ended_at became nil — a finished session must stay finished")
+	}
+	wantDuration := before.EndedAt.Sub(before.StartedAt)
+	gotDuration := after.EndedAt.Sub(after.StartedAt)
+	if gotDuration != wantDuration {
+		t.Errorf("duration changed by reschedule: was %v, now %v", wantDuration, gotDuration)
+	}
+	if !after.EndedAt.Equal(yesterday.Add(wantDuration)) {
+		t.Errorf("ended_at is %v, want %v (started_at + original duration)", after.EndedAt, yesterday.Add(wantDuration))
+	}
+}
+
 // seedDraftExercise inserts an unpublished catalog row and removes it again.
 // Same fixture discipline as the workout module's copy: the row lands in the
 // database every other package shares, so cleanup is registered first — and

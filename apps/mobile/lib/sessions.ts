@@ -1154,6 +1154,26 @@ export async function renameSession(
   });
 }
 
+/**
+ * Change a session's own date — `started_at` — and nothing else.
+ *
+ * Its own endpoint rather than folded into `renameSession`'s PATCH body,
+ * matching `/sets` and `/finish`'s sub-resource shape. Added for N436: an
+ * athlete correcting a BJJ class logged under the wrong day previously had no
+ * way to fix it, even though the reflection wizard already let them freely
+ * edit everything else about the session.
+ */
+export async function rescheduleSession(
+  getToken: TokenGetter,
+  id: string,
+  startedAt: string,
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}/schedule`, {
+    method: 'PATCH',
+    body: JSON.stringify({ started_at: startedAt }),
+  });
+}
+
 export async function deleteSession(
   getToken: TokenGetter,
   id: string,

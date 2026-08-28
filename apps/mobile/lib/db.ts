@@ -563,7 +563,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 27;
+const SCHEMA_VERSION = 28;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1122,6 +1122,19 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // keep a `daily_trackers` table with no `cutoff_minutes` and every read
     // that selects it would throw.
     await addColumnIfMissing(db, 'daily_trackers', 'cutoff_minutes', 'INTEGER');
+  }
+
+  if (current < 28) {
+    // N436: which rows have an unsent date correction.
+    //
+    // Same shape as `name_dirty` (v13) and for the identical reason: without
+    // it the push would have to PATCH the schedule endpoint on EVERY push of
+    // every already-synced session, because it cannot otherwise tell "the
+    // athlete moved this to yesterday" from "a set got ticked" — and pushRow
+    // is shared with the live strength flow, which pushes on every debounced
+    // set. That would turn the hottest write path in the app into two
+    // requests instead of one, for a field that changes rarely.
+    await addColumnIfMissing(db, 'local_sessions', 'started_at_dirty', 'INTEGER NOT NULL DEFAULT 0');
   }
 
   // The day query the card runs on every render of Today.

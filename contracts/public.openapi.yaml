@@ -9102,6 +9102,69 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /sessions/{sessionID}/schedule:
+    patch:
+      summary: Correct a session's date
+      operationId: rescheduleSession
+      description: >
+        Changes `started_at` and nothing else. Its own sub-resource, matching
+        `/sets` and `/finish`, rather than a field on the bare
+        `/sessions/{sessionID}` PATCH — see that endpoint's description for
+        why it was long treated as name-only.
+
+
+        Added for N436: an athlete correcting a BJJ class logged under the
+        wrong day had no way to fix it once saved, even though every other
+        field of the session (techniques, rounds, gi, notes, RPE) was already
+        freely editable. No past/future validation — the server does not
+        police what date makes sense for a training log, matching the
+        create path's own `started_at`.
+
+
+        `ended_at` has no equivalent endpoint here: it is resent on every
+        `POST /finish` regardless of whether it changed, so a client shifting
+        a session's day already has a path to carry the matching shift for
+        `ended_at`, and duration derives from the two together.
+
+
+        Not-yours and does-not-exist both answer 404, deliberately
+        indistinguishable, same as the rename endpoint.
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [started_at]
+              properties:
+                started_at:
+                  type: string
+                  format: date-time
+                  example: "2026-08-27T19:00:00Z"
+      responses:
+        "200":
+          description: The rescheduled session, with its volume summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionWithVolume" }
+        "400":
+          description: started_at missing, a malformed body, or a body over 8 KB.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No such session for this caller
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /sessions/{sessionID}/sets:
     put:
       summary: Replace a session's ordered sets

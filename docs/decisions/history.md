@@ -48115,6 +48115,182 @@ reasoned accessibility code (dimmed-opacity and `disabled`-role traps both
 already fixed once), and the New Log FAB already reaches every past day,
 planned or not, without touching it.
 
+## 2026-08-28 — N436 (#723): a BJJ session's date can now be corrected after logging it
+
+**What was missing.** `app/bjj/session/[id].tsx`'s "Edit detail" CTA →
+`/bjj/reflect/[id]` already let an athlete freely correct techniques, tags,
+rounds, gi, notes and RPE on any past session via `saveLocalBjjDetail` — the
+one field that flow never touched was the session's own date. Logged a
+Tuesday class under Wednesday by mistake, and there was no way to fix it.
+Direct product-owner feedback, same day, same ruling as N434/N435.
+
+**Where it lives, and why the answer isn't "add a field to the wizard".**
+`started_at` is a column on `local_sessions` itself, not part of the
+`bjj_json` blob the reflection wizard edits — so this had to be a genuinely
+separate write path, both to avoid the two edits ever racing each other and
+because the acceptance criteria explicitly asked for `saveLocalBjjDetail` to
+stay untouched. Landed on the session screen instead, next to the date it
+already displays, mirroring the existing tap-to-rename affordance immediately
+above it (same interaction, same hint copy shape) rather than adding a step to
+the wizard.
+
+**The sharpest risk, per the ticket's own design guidance, was re-bucketing —
+verified rather than assumed.** `grep -rl local_sessions apps/mobile/lib`
+finds exactly three files (`db.ts`, `foodLog.ts`, `sessionStore.ts`); every
+downstream reader — `listLocalSessions`, `trainingSince`'s SQL
+`date(started_at,'localtime')` grouping, `weekReview.ts`, `adherence.ts`,
+Today's board, the training calendar — re-derives a session's day fresh from
+this ONE column on every call. There is no second cache of "what day this
+session is on" anywhere in the app for a write to fall out of step with, which
+is what makes a single `UPDATE` sufficient. `lib/__tests__/rescheduleRebucket.test.ts`
+proves this against the real migrated SQLite fixture rather than a mock: it
+seeds a session on the wrong day, confirms `matchPlans` (a real, independent
+downstream consumer — plan/session matching, nothing to do with the detail
+screen) does NOT match a plan on the intended day, calls
+`rescheduleLocalSession`, and confirms it DOES match afterward, that the raw
+`date(started_at,'localtime')` bucket itself moved, that an untouched sibling
+session is unaffected, and that a tombstoned/nonexistent row is refused rather
+than silently accepted or resurrected. Mutation-tested (dropped the day-shift,
+confirmed 3 of 6 assertions went red for the right reason, restored, re-ran
+green).
+
+**Duration survives the move.** `started_at` and `ended_at` (when the session
+has one) are shifted by the IDENTICAL number of days — computed once from
+`started_at` via `calendar.ts`'s new `localDayDelta`, then applied to both
+through `addDays` — rather than each recomputed independently from its own
+day. A session that ran past midnight already has `ended_at` on a different
+calendar day than `started_at`; deriving each field's shift from its own day
+would silently change how long a midnight-spanning session recorded as having
+lasted. `addDays`'s existing calendar-day arithmetic (not raw
+`+ n * 86_400_000`) is what keeps the wall-clock time of day exact across a
+DST boundary — `calendar.test.ts`'s new `onLocalDay` block genuinely exercises
+2026's 8 March spring-forward under the suite's `TZ=America/Los_Angeles`, not
+merely asserts it does; mutation-tested by swapping in flat millisecond
+arithmetic and confirming the DST test (only that one) goes red.
+
+**Day-only, deliberately** — per the design guidance, and because nothing in
+the existing data model treats a BJJ session's time-of-day as meaningful
+beyond duration. No native date-picker dependency added: this app has none
+today (`grep` confirms it), and a plain month grid over `calendar.ts`'s
+existing `monthGrid`/`weekDays` — the same geometry `TrainingCalendar.tsx`
+already renders — does everything "pick a different day" needs. The sheet
+also offers Today/Yesterday quick chips for the common case the ticket names,
+and places no restriction on past vs. future: the backend does not police it
+either (see below), and "logged the morning after" and "entered a class a day
+ahead of a scheduled seminar" are both real.
+
+**Backend: a new `Reschedule` alongside `Rename`, not a fold-in.** No PATCH
+existed for `started_at` at all — `Rename`'s own doc comment explicitly
+listed the timestamps among the fields a client may never change after the
+fact, on the reasoning that "history counts them". That reasoning doesn't
+hold once the product decision is that history counting a field is an
+argument for it being *correct*, not for it being permanent — so the comment
+is amended in place (not deleted, since sport and sets are still genuinely
+off-limits) and a sibling method, matching this module's own established
+"one field, one method" shape (`Rename` for the name, `Finish` for
+`ended_at`), does the actual work: `PATCH /v1/sessions/{sessionID}/schedule`,
+`{ "started_at": "..." }`, ownership-gated exactly like `Rename` and `Finish`
+(`requireOwner`), same 404-for-both-not-yours-and-does-not-exist shape. No
+past/future validation, deliberately — surveyed the module and found none to
+add. New integration test
+`TestRescheduleChangesOnlyStartedAtAndOnlyForTheOwner` mirrors the Rename
+test's shape (including the cross-user IDOR re-Get, which is the assertion
+that actually catches a missing ownership gate) and is mutation-tested against
+the real `vola_test` database (dropped the `UPDATE`'s effect, confirmed the
+test failed with the real mismatch rather than a compile error, restored,
+re-ran green).
+
+**Correction, same day, caught by `backend-reviewer` before merge — the
+paragraph above originally shipped a real bug.** The first draft's design
+was: `ended_at` gets **no** equivalent endpoint, because `POST /finish`
+already resends it on every push regardless of whether it changed, so a
+client that had already shifted `ended_at` locally would deliver the
+correction "through the existing path for free." That reasoning is wrong
+for exactly the case this ticket is about — moving a FINISHED session
+BACKWARD. `sessions_ends_after_start CHECK (ended_at IS NULL OR ended_at
+>= started_at)` makes the two client pushes order-dependent
+(`pushFinish` runs before `pushReschedule` in `sessionStore.ts`'s push
+order), and a session moved back far enough leaves the OLD `ended_at`
+sitting before the NEW `started_at` — a CHECK violation, `invalid_input`,
+the correction silently rejected and permanently un-syncable for any
+session shorter than the distance moved back. The existing test never
+caught this because its fixture (`strengthSession`, no `EndedAt`) can
+never trip a constraint keyed on `ended_at`.
+
+Fixed at the source instead of patching the client ordering: `Reschedule`
+now shifts `ended_at` by the SAME delta as `started_at`, atomically, in
+the one `UPDATE` — `ended_at = CASE WHEN ended_at IS NOT NULL THEN
+ended_at + ($2 - started_at) ELSE ended_at END` — computed from the
+PRE-update row, so the session's real duration survives the move and the
+CHECK is satisfied by construction regardless of push order. This also
+quietly resolves the push-ordering coupling `frontend-reviewer` flagged
+as a `[suggestion]` in the same review (a dead session mid-push could
+transiently leave new `ended_at` paired with old `started_at`): the
+server no longer depends on `/finish` to deliver the `ended_at` half at
+all. New test, `TestRescheduleOfAFinishedSessionMovedBackwardPreservesDuration`
+— the case the original fixture couldn't reach — mutation-verified
+(reverted to the `started_at`-only `UPDATE`, confirmed a real duration
+mismatch — `45m0s` became `24h45m0s` — rather than a compile error;
+restored, confirmed green by re-running against the real database, not
+by grepping the file).
+
+**Mobile outbox: `started_at_dirty`, a new flag with the identical shape as
+`name_dirty` — including its own T7 protection, proven, not just copied.**
+`saveLocalBjjDetail`'s underlying UPDATE never needed a separate flag (it
+always sends the whole blob), but a rare, discrete correction like this one
+does: without a flag, `pushRow` would have to PATCH `/schedule` on every push
+of every already-synced session — the same reasoning that produced
+`name_dirty` in the first place. Both flags are cleared in the SAME
+compare-and-swapped terminal `UPDATE ... WHERE updated_at = ?` that already
+protects `name_dirty` against a rename landing mid-push (T7,
+`renameRace.test.ts`) — adding a second flag to that one guarded statement is
+exactly the kind of edit that has silently dropped half a compound guard in
+this file before, so `rescheduleRace.test.ts` reproduces T7's own scenario for
+`started_at_dirty` specifically (a reschedule landing between the push's
+snapshot and its terminal swap) and is mutation-tested: reintroduced an
+unguarded clear immediately after the PATCH call, confirmed 2 of 4 tests went
+red with the exact T7 signature (flag cleared, row still `dirty`, correction
+never resent), restored, re-ran green. `db.ts` schema v27→v28 adds the column
+with `addColumnIfMissing`, same guarded-idempotent shape as every branch
+before it; `schema.test.ts` gained a stamped-27-upgrades and a
+re-running-is-not-an-error pair matching N431's `cutoff_minutes` precedent,
+and its fourteen hardcoded `user_version: 27` pins across the rest of the
+file were bumped to 28 (deliberately hardcoded, not read from
+`SCHEMA_VERSION`, so a schema bump is a visible diff rather than a number
+nobody has to look at).
+
+**`keyboardCoverage.test.ts` caught something real, not a false positive.**
+The reschedule sheet's grid needed a scroll container, and the file already
+imports `KeyboardAwareScroll` for its rename input — so a bare `ScrollView`
+anywhere else in the same file trips the suite's per-FILE (not per-container)
+rule. Swapped to `KeyboardAwareScrollView`, which degrades to a plain scroll
+view when there's no `KeyboardAwareScreen` ancestor (there isn't one inside
+this `Modal`) — correct rather than a workaround, since none of the three
+keyboard problems that component solves apply to a sheet with no text field
+and no footer.
+
+**Verification run:** full mobile jest suite green (229 suites, 3,572 tests,
+0 failures) after the schema-version and keyboard-coverage fixes above;
+`typecheck:mobile` clean (`routes:mobile` regenerated first, per the standing
+rule); `lint:mobile` 0 errors, at the existing 50-warning ratchet, no new
+file in this change appearing among them. Backend: `go build ./...`,
+`go vet ./...` clean; `go test ./internal/modules/session/...` green,
+including both new integration tests against the real `vola_test` database.
+
+**What's deliberately not here.** Web gets nothing from this ticket — the
+BJJ reflection wizard and its "Edit detail" CTA are mobile-only surfaces, and
+the ticket scoped the UI to mobile explicitly. The backend `Reschedule`
+endpoint is sport-agnostic (any session, not only BJJ), since the underlying
+column is shared and there was no reason to gate the API by sport — but only
+the BJJ session screen wires a UI to it; a strength session's date is not yet
+editable from any screen, which is a natural, small follow-up rather than a
+gap in this ticket's own scope.
+
+`docs/testing/functional-scenarios.md` — updated in the same commit: a new
+BJJ scenario for the date-correction sheet, covering the happy path, moving
+onto a day that already has another session, and moving to today/a future
+date.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

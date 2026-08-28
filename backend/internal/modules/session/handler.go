@@ -672,6 +672,39 @@ func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"session": s, "volume": Summarise(s.Sets)})
 }
 
+type rescheduleRequest struct {
+	StartedAt *time.Time `json:"started_at"`
+}
+
+// Reschedule is PATCH, same reasoning as Rename: the body carries the one
+// field being corrected, not the whole session.
+//
+// N436: an athlete logging a BJJ class that evening has no way to say "that
+// was actually yesterday" once it's saved, and by the time it's noticed the
+// wizard's other fields (techniques, rounds, notes) are already freely
+// editable — this was the one exception. No past/future check: see
+// PostgresRepository.Reschedule for why the server does not police it.
+func (h *Handler) Reschedule(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	var req rescheduleRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Body must be valid JSON.")
+		return
+	}
+	if req.StartedAt == nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "started_at is required.")
+		return
+	}
+
+	s, err := h.repo.Reschedule(r.Context(), claims.UserID, r.PathValue("sessionID"), *req.StartedAt)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"session": s, "volume": Summarise(s.Sets)})
+}
+
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	if err := h.repo.Delete(r.Context(), claims.UserID, r.PathValue("sessionID")); err != nil {

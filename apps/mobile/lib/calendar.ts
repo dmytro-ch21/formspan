@@ -86,6 +86,47 @@ export function weekDays(now: Date): Date[] {
 }
 
 /**
+ * The whole-day offset from `at`'s LOCAL calendar day to `newDay`'s — the
+ * same "count calendar days, not milliseconds" rule {@link dayOffsetFor}
+ * uses, applied to an ISO instant instead of a `now`.
+ *
+ * Computed from the two LOCAL midnights and rounded, rather than dividing an
+ * unrounded ms gap by a flat 86,400,000: on a DST boundary a day is 23 or 25
+ * hours, so a fractional-day division would floor to the wrong side on
+ * exactly those two days a year. Exported (not just inlined into
+ * {@link onLocalDay} below) because `sessionStore.ts`'s reschedule needs the
+ * SAME delta applied to two different timestamps — `started_at` and
+ * `ended_at` — and computing it twice from each timestamp's own day would
+ * shift a midnight-spanning session's two ends by different amounts.
+ */
+export function localDayDelta(at: string, newDay: Date): number {
+  const fromMidnight = new Date(at);
+  fromMidnight.setHours(0, 0, 0, 0);
+  const toMidnight = new Date(newDay);
+  toMidnight.setHours(0, 0, 0, 0);
+  return Math.round((toMidnight.getTime() - fromMidnight.getTime()) / 86_400_000);
+}
+
+/**
+ * `at` moved onto `newDay`'s LOCAL calendar day, preserving its own time of
+ * day exactly — a session logged 8:14pm stays 8:14pm, just on a different
+ * date.
+ *
+ * Built for N436 — correcting a BJJ session's date after logging it — and
+ * kept day-only on purpose: the athlete is fixing "that was yesterday, not
+ * today", not re-timing the class, so nothing here lets the clock time move.
+ *
+ * Applies {@link localDayDelta} through {@link addDays} — which shifts by
+ * calendar days via `setDate`, not by milliseconds — which is what keeps the
+ * ORIGINAL time of day intact across a DST boundary; adding raw milliseconds
+ * would shift the clock time by an hour on exactly the two days a year this
+ * matters.
+ */
+export function onLocalDay(at: string, newDay: Date): string {
+  return addDays(new Date(at), localDayDelta(at, newDay)).toISOString();
+}
+
+/**
  * The whole-day OFFSET from `now` to the calendar day named by `on` — the
  * inverse of {@link addDays} + {@link dayString}:
  * `dayString(addDays(now, dayOffsetFor(on, now))) === on`.

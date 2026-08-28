@@ -3163,6 +3163,49 @@ most of the value is in the floor working alone.
 - A reflection written on one account is never visible or writable from
   another; both "no such session" and "not yours" answer identically.
 
+### Correcting a session's date (N436)
+
+The one field the reflection wizard above never touches — `started_at` lives
+on the session record itself, not the `bjj_json` blob `saveLocalBjjDetail`
+writes, so this is a separate control (tap the date on the session screen,
+next to the existing tap-to-rename) and a separate outbox flag
+(`started_at_dirty`).
+
+- **Happy path.** Log a session today, open it, tap the date, pick yesterday
+  from the sheet (or the **Yesterday** quick chip). The session screen now
+  shows yesterday's date; Today's day-strip, the training calendar and the
+  history list all show it on yesterday too, not just the detail screen —
+  this is the property worth testing directly, not "the field updated".
+- **Duration survives the move.** A session with both a start and end time
+  (a finished class) keeps the identical mat-time and rolling-time numbers
+  after the date is corrected — the move must not silently shrink or grow the
+  session by shifting only one end of it.
+- **The rest of the reflection is untouched.** Drill two techniques, record a
+  live round, write a note; correct the date; confirm every one of those
+  survives exactly — this is the acceptance criterion the ticket named
+  explicitly, and the sharpest way to break it is a shared code path with
+  `saveLocalBjjDetail`.
+- **Moving onto a day that already has another session.** Two BJJ classes on
+  different days, move one onto the other's day: both remain distinct
+  sessions, both visible, and no session silently merges with or overwrites
+  the other. History for that day now shows two entries.
+- **Moving to today, or to a future date.** Neither is refused — the ticket
+  found no server-side reason to police this. A session dated in the future
+  should still read sensibly wherever dates are formatted (no "in 3 days"
+  countdown language anywhere a past-only session screen assumed one).
+- **Offline.** The correction applies immediately on-device with no network,
+  and reaches the server once signal returns — same posture as every other
+  edit on this screen.
+- **A session not yet pushed to the server at all** (still `remote = false`)
+  simply carries the corrected date on its first create call; no separate
+  PATCH is ever sent for it.
+- **A session already on the server**, corrected, must actually update
+  server-side `started_at` — verify against the live API response after sync,
+  not only against the local device.
+- **Cross-account.** A date correction sent for a session id belonging to
+  another account is refused as `not_found`, same as every other per-session
+  write in this module.
+
 ### Auth & security
 
 These are the cases the composite owner foreign key does **not** cover on its

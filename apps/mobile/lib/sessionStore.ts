@@ -26,12 +26,14 @@ import {
   listSessions as pullSessions,
   replaceSets as pushSets,
   renameSession as pushRename,
+  rescheduleSession as pushReschedule,
   repairSet,
   startSession as pushCreate,
   type LoggedSet,
   type Session,
 } from './sessions';
 import { putDetail as pushBjjDetail, type SessionDetail as BjjDetail } from './bjjSession';
+import { addDays, localDayDelta } from './calendar';
 
 /**
  * Offline-first session storage.
@@ -82,6 +84,8 @@ type Row = {
   dirty: number;
   /** 1 while this row's name has not reached the server. */
   name_dirty: number;
+  /** 1 while this row's started_at has not reached the server — see N436. */
+  started_at_dirty: number;
   remote: number;
   /** Set once the athlete deleted it; the row survives until the server agrees. */
   deleted_at: string | null;
@@ -459,6 +463,68 @@ export async function renameLocalSession(
     `UPDATE local_sessions SET name = ?, dirty = 1, name_dirty = 1, updated_at = ?
      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     trimmed,
+    new Date().toISOString(),
+    id,
+    userID,
+  );
+  return true;
+}
+
+/**
+ * Correct a session's own date — `started_at`, and `ended_at` too if it has
+ * one, shifted by the IDENTICAL number of days so the two stay exactly as far
+ * apart as they were and the session's recorded duration survives the move.
+ *
+ * N436: the reflection wizard (`saveLocalBjjDetail`) already lets an athlete
+ * freely correct techniques, tags, rounds, gi, notes and RPE on any past
+ * session — this is the one field that flow never touched, because it lives
+ * on the session record itself rather than inside the `bjj_json` blob that
+ * flow edits. Kept as a wholly SEPARATE function and a separate outbox flag
+ * for exactly that reason: this must never share a code path with
+ * `saveLocalBjjDetail`, so correcting a session's date can never blank or
+ * race an in-progress reflection edit, and vice versa.
+ *
+ * `localDayDelta` is taken from `started_at` alone and applied to BOTH
+ * timestamps via the same `addDays` — not `onLocalDay` called twice, once
+ * per field. A session that ran past midnight already has `ended_at` on a
+ * different calendar day than `started_at`; computing each field's shift
+ * independently from its OWN day would move a midnight-spanning session's two
+ * ends by different amounts and silently change how long it recorded as
+ * having lasted.
+ *
+ * This is a single UPDATE against the exact column every local read
+ * (`listLocalSessions`, `trainingSince`, Today's board, the training
+ * calendar, `weekReview`, `adherence`) queries FRESH off `local_sessions`
+ * on every call — there is no separate cache of "what day this session
+ * belongs to" anywhere in this app for a second write to fall out of step
+ * with. That is what makes this one write sufficient for every consumer to
+ * re-bucket the session under its new day the next time it reads this row,
+ * rather than something that has to also be taught to a cache. See
+ * `apps/mobile/lib/__tests__/rescheduleRebucket.test.ts` for the property
+ * itself, exercised end to end through the real SQLite fixture.
+ */
+export async function rescheduleLocalSession(
+  userID: string,
+  id: string,
+  newDay: Date,
+): Promise<boolean> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ started_at: string; ended_at: string | null }>(
+    `SELECT started_at, ended_at FROM local_sessions
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    id,
+    userID,
+  );
+  if (!row) return false;
+  const delta = localDayDelta(row.started_at, newDay);
+  const started_at = addDays(new Date(row.started_at), delta).toISOString();
+  const ended_at = row.ended_at ? addDays(new Date(row.ended_at), delta).toISOString() : null;
+  await db.runAsync(
+    `UPDATE local_sessions
+        SET started_at = ?, ended_at = ?, dirty = 1, started_at_dirty = 1, updated_at = ?
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    started_at,
+    ended_at,
     new Date().toISOString(),
     id,
     userID,
@@ -923,11 +989,26 @@ async function pushRow(
     await pushRename(getToken, s.id, s.name);
   }
 
+  // The date correction, same shape as the rename immediately above and for
+  // the identical reason — including the exact T7 race this guards against,
+  // which applies here unchanged: an athlete rescheduling mid-push must leave
+  // `started_at_dirty = 1` if the terminal swap below declines, or the
+  // corrected date is sent once, the flag clears anyway, and the phone and
+  // server diverge forever with nothing left to notice.
+  //
+  // Only for a row the server already knows about — a session rescheduled
+  // before its first push is CREATED with the corrected `started_at`
+  // (`toSession(row)` above reads the row as it stands NOW, after the local
+  // reschedule already wrote it), so there is nothing left to PATCH.
+  if (wasRemote && row.started_at_dirty === 1) {
+    await pushReschedule(getToken, s.id, s.started_at);
+  }
+
   await db.runAsync(
-    // BOTH flags, in the one guarded statement. Declining has to leave the row
-    // owing everything it owed, and clearing `name_dirty` anywhere else is what
-    // made that untrue.
-    `UPDATE local_sessions SET dirty = 0, name_dirty = 0 WHERE id = ? AND user_id = ?
+    // ALL THREE flags, in the one guarded statement. Declining has to leave
+    // the row owing everything it owed, and clearing any of them anywhere
+    // else is what made that untrue for `name_dirty` — see above.
+    `UPDATE local_sessions SET dirty = 0, name_dirty = 0, started_at_dirty = 0 WHERE id = ? AND user_id = ?
      -- Only if nothing changed underneath us mid-push, or we'd mark a newer
      -- edit as already sent and silently drop it.
      AND updated_at = ?

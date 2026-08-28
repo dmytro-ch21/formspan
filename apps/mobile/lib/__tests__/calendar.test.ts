@@ -5,6 +5,7 @@ import {
   dayString,
   finishTimestampFor,
   monthGrid,
+  onLocalDay,
   refreshedAnchor,
   startOfWeek,
   weekDays,
@@ -286,5 +287,63 @@ describe('refreshedAnchor', () => {
     const mondayThisWeek = new Date(2026, 7, 3);
     expect(refreshedAnchor(mondayThisWeek, now)).toBe(mondayThisWeek);
     expect(dayString(refreshedAnchor(new Date(2026, 7, 2), now))).toBe(dayString(now));
+  });
+});
+
+describe('onLocalDay', () => {
+  // N436: correcting a BJJ session's date after logging it.
+
+  test('moves the calendar day and keeps the exact time of day', () => {
+    // Logged 8:14pm Wednesday, meant Tuesday.
+    const loggedWednesday = new Date(2026, 7, 26, 20, 14, 30, 500).toISOString();
+    const tuesday = new Date(2026, 7, 25);
+    const moved = onLocalDay(loggedWednesday, tuesday);
+
+    expect(dayString(new Date(moved))).toBe('2026-08-25');
+    const back = new Date(moved);
+    expect([back.getHours(), back.getMinutes(), back.getSeconds(), back.getMilliseconds()]).toEqual(
+      [20, 14, 30, 500],
+    );
+  });
+
+  test('moving to the same day is a no-op', () => {
+    const at = new Date(2026, 7, 26, 9, 0, 0).toISOString();
+    expect(onLocalDay(at, new Date(2026, 7, 26, 23, 59))).toBe(at);
+  });
+
+  test('moves forward in time just as readily as backward — no past/future bias', () => {
+    const at = new Date(2026, 7, 20, 7, 30, 0).toISOString();
+    const nextWeek = new Date(2026, 7, 27);
+    expect(dayString(new Date(onLocalDay(at, nextWeek)))).toBe('2026-08-27');
+  });
+
+  test('rolls across a month boundary, matching addDays rather than 24h*n arithmetic', () => {
+    const lastDayOfAugust = new Date(2026, 7, 31, 18, 0, 0).toISOString();
+    const earlySeptember = new Date(2026, 8, 2);
+    const moved = onLocalDay(lastDayOfAugust, earlySeptember);
+    expect(dayString(new Date(moved))).toBe('2026-09-02');
+    expect(new Date(moved).getHours()).toBe(18);
+  });
+
+  // The suite runs under TZ=America/Los_Angeles — set on the `test` script
+  // itself (`package.json`, not `jest.config.js`) — so this actually
+  // crosses the 2026 spring-forward boundary (8 March) rather than merely
+  // asserting it does. Running `npx jest` directly (bypassing `pnpm test`)
+  // uses the host's own TZ instead, where this can pass vacuously without
+  // exercising the boundary at all — always go through `pnpm --filter
+  // mobile test` (or `pnpm run test:mobile`) to get the pin.
+  test('preserves the LOCAL clock time across a DST boundary', () => {
+    const beforeSpringForward = new Date(2026, 2, 7, 20, 0, 0); // Sat 7 March, still PST
+    const afterSpringForward = new Date(2026, 2, 9); // Mon 9 March, now PDT
+
+    const moved = onLocalDay(beforeSpringForward.toISOString(), afterSpringForward);
+    const result = new Date(moved);
+
+    // A flat `+ 2 * 86_400_000` would land this an hour off — 19:00, not
+    // 20:00 — because the 8 March day it steps over is only 23 hours long in
+    // local time. `addDays`'s calendar-day arithmetic must not have that bug.
+    expect(dayString(result)).toBe('2026-03-09');
+    expect(result.getHours()).toBe(20);
+    expect(result.getMinutes()).toBe(0);
   });
 });

@@ -327,6 +327,9 @@ func (f *suggestionsFakeRepo) Finish(context.Context, string, string, time.Time)
 func (f *suggestionsFakeRepo) Rename(context.Context, string, string, string) (*Session, error) {
 	panic("not used by Suggestions")
 }
+func (f *suggestionsFakeRepo) Reschedule(context.Context, string, string, time.Time) (*Session, error) {
+	panic("not used by Suggestions")
+}
 func (f *suggestionsFakeRepo) Delete(context.Context, string, string) error {
 	panic("not used by Suggestions")
 }

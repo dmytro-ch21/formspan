@@ -536,5 +536,8 @@ type Repository interface {
 	// Rename changes only the name — see the implementation for why it is not
 	// a general Update.
 	Rename(ctx context.Context, userID, sessionID, name string) (*Session, error)
+	// Reschedule changes only started_at — see the implementation for why
+	// this is a second single-field method rather than folded into Rename.
+	Reschedule(ctx context.Context, userID, sessionID string, startedAt time.Time) (*Session, error)
 	Delete(ctx context.Context, userID, id string) error
 }
