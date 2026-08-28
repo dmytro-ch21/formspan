@@ -1023,6 +1023,37 @@ export default function LibraryScreen() {
           </View>
         )}
 
+        {/* N441 (#728): the guided runner's only entry point on the phone.
+            Read-only here too, and honestly so — `classplans/index.tsx`'s own
+            empty state already says a plan is built on web, so this row is
+            "run one", not "build one". Same gate as the sequences block above
+            it and for the same reason: a class plan's technique_drill blocks
+            point at the technique catalog, so an account with that module off
+            has nothing here to run. Placed directly below sequences rather
+            than its own new section — both are "an athlete's own ordered
+            technique lists", and a coach who captured a chain here is exactly
+            who also plans a class. */}
+        {techniqueSport !== undefined && (
+          <View style={styles.glossary} testID="library-classplans">
+            <Text style={styles.glossaryLabel} accessibilityRole="header">
+              Your class plans
+            </Text>
+            <Pressable
+              onPress={() => router.push('/classplans')}
+              accessibilityRole="button"
+              accessibilityLabel="Your class plans"
+              accessibilityHint="Pick one to run, built on the web app"
+              testID="library-classplans-link"
+              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+            >
+              <Text style={styles.mapLinkTitle}>Your class plans</Text>
+              <Text style={styles.mapLinkNote}>
+                Pick one to run — warmup, drilling, rounds, timed block by block.
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         {usesPosition(sport, modules) && positions.length > 0 && (
           <View style={styles.glossary}>
             <Text style={styles.glossaryLabel} accessibilityRole="header">

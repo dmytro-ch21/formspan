@@ -48429,6 +48429,137 @@ guided runner, N442 is Plan/calendar scheduling. Per the mobile-first rule,
 neither gap makes the product phone-impossible today: a plan authored on web
 is fully usable data, just not yet runnable from the mat.
 
+### 2026-08-28 — N441: the class-plan mobile guided runner (#728)
+
+Part 3 of 4 of the class-plan workstream (N439 backend → N440 web authoring →
+**N441 mobile guided runner** → N442 Plan/calendar scheduling), and the piece
+that closes the mobile-first gap the two entries above it both name: a plan
+authored on web is now actually runnable from the mat, one-handed, standing
+up.
+
+**Read-only, same split as `sequence/index.tsx`.** `apps/mobile/lib/
+classplans.ts` mirrors `curriculum.ts`'s thin, direct client rather than
+`sequences.ts`'s offline-outboxed one — `classplan.go`'s package doc already
+established that this domain has no mobile capture path at all (every
+mutation is web's, via N440), so there is nothing here to queue for retry,
+unlike a sequence captured in a changing room. `listClassPlans`/`getClassPlan`
+just wrap `apiRequest`.
+
+**Pure run logic lives in `lib/classPlanRun.ts`, built and tested exactly the
+way `intervalRun.ts`/`countdown.ts` are — a `RunState` (blocks + position)
+walked by index, and a deadline computed from `now` as a parameter rather
+than a `Date.now()` call buried in the function.** Fresh types throughout
+(`RunState`, `BlockDeadline`), not `RunStep`/`Run`/`CountdownKind` — those
+carry gym-specific meaning (`exerciseID` mandatory, `setIndex` writes to a
+logged set, three kinds with the "cannot rest and plank at once" invariant)
+that a class-plan block, which never writes back to anything, has no version
+of. 23 tests in `lib/__tests__/classPlanRun.test.ts` cover walking a plan,
+a single-block plan, an empty plan, and the deadline arithmetic including the
+"survives a 4-minute gap" case that is the whole point of the deadline model.
+
+**The React timer (`components/ClassPlanTimer.tsx`) started life split from
+the run-walking, exactly like the ticket's own file-by-file spec, and had to
+be merged back into one hook (`useClassPlanRun`) during implementation.**
+`Countdown.tsx`'s three-part backgrounding-survival mechanism (a `setTimeout`
+at the deadline, a 250ms `setInterval` backstop, an `AppState` listener) was
+straightforward to mirror. What was not: this repo's React Compiler ESLint
+config (`react-hooks/set-state-in-effect`, `react-hooks/refs`,
+`react-hooks/purity`) is strict enough to flag arming a fresh deadline
+whenever an incoming `block` prop changes, in EVERY shape tried — a
+prop-watching `useEffect` priming state directly in its body (flagged, and
+the mobile lint ratchet had zero headroom to spend on it), the React-docs
+"adjust state during render" idiom compared against a ref (flagged twice
+over: ref access during render, and the `Date.now()` call it needs is an
+"impure function during render"), and a ref bridging a hook's returned
+`arm()` callback back into an earlier-declared callback (flagged as
+"modifying a value previously passed as an argument to a hook"). The
+resolution was architectural, not a workaround: `Countdown.tsx`'s own
+`start()` is called imperatively by the SESSION SCREEN's own event handlers,
+never derived from a watched prop, and its `finish()` advances the run AND
+arms the next countdown together, in one place — because splitting those
+across a callback boundary is exactly where the double-fire bug its comments
+document was found. `useClassPlanRun` now does the same: it owns BOTH the
+`RunState` and the deadline internally, exposes `start`/`goNext`/`goBack` as
+plain `useCallback`s the screen calls from its own effect/event-handler
+contexts, and the one `useEffect` left (keyed on the armed deadline) never
+calls `setState` at its own top level — only from inside the
+`setTimeout`/`setInterval`/`AppState` callbacks nested within it, which this
+codebase's existing `Countdown.tsx` pattern already establishes as the
+accepted shape. Verified empirically rather than assumed: `pnpm run
+lint:mobile` was re-run after each restructuring attempt until it reported
+exactly the pre-existing 50 warnings — zero new ones — matching CLAUDE.md's
+own instruction that the ratchet has no headroom to spend.
+
+**Two screens, mirroring `sequence/index.tsx`'s list conventions and N440's
+web detail page's per-type rendering reasoning (not its JSX).**
+`app/classplans/index.tsx` is a plain read-only list whose empty state says
+"Build one on VOLA on the web" rather than implying a create button exists
+here. `app/classplans/[id]/run.tsx` fetches the plan once on mount — not on
+every focus, unlike this app's other read screens — because refetching mid-
+block would rebuild the run from block zero the moment the coach so much as
+switched apps and came back, discarding exactly the position `RunState`
+exists to hold. It shows the current block's type, timer, and content
+(a `technique_drill`'s catalog pick or free text, a `notes` block's note as
+primary content, every other block's note as supplementary detail — same XOR
+and same distinction as web's detail page), "Next up" always visible, and
+large one-handed Back/Next controls. Reaching the end shows a "Plan complete"
+state rather than a crash. Manual advance/back and auto-advance-on-elapse all
+funnel through the same `goNext`, so a timer running out and a tap on Next
+behave identically.
+
+**On completion, a haptic plus `playSound('success')`** — deliberately not
+`completionSoundFor`/`countdownCopy`, which encode workout-specific
+distinctions (rest-ending versus a-set-ending) this domain has no equivalent
+of. `success` was chosen because it is already in the bundled `SOUND_NAMES`
+(`BUNDLE` in `sounds.ts`) and reads as generic positive completion rather
+than borrowing a workout-specific chime's meaning.
+
+**`expo-keep-awake` is NOT used, and this is a deliberate gap rather than a
+silent omission.** It is not a dependency anywhere in `apps/mobile` today —
+confirmed by grep, not assumed — and the ticket was explicit that adding a
+new native dependency needs the user's sign-off rather than happening
+silently mid-task. `session/[id].tsx`, the closest precedent for an
+in-workout screen, does not use it either, so there is no existing pattern in
+this codebase to extend. The consequence: the phone's idle timeout can lock
+the screen mid-run exactly as it would on any other screen, and only a real
+device tells you whether that matters enough in practice to justify adding
+the dependency — flagged in the new functional-scenarios device-evidence
+subsection rather than fixed here.
+
+**Typed routes regenerated** (`pnpm run routes:mobile`) and
+`pnpm --filter mobile exec tsc --noEmit` clean. `pnpm run test:mobile`: 231
+suites, 3614 tests, all green (23 of them new, for `classPlanRun.ts`).
+`pnpm run lint:mobile`: 50 warnings, 0 errors — unchanged from the branch
+point, i.e. the zero-headroom ratchet held. **No Simulator or device run was
+possible in this environment** — the `NEEDS HUMAN EVIDENCE` criterion already
+on issue #728 covers exactly that gap (timer readable at arm's length,
+advance/back one-handed, a real background/foreground cycle mid-block) and
+was left untouched, as instructed, for the user to close by hand.
+
+**Docs:** `docs/testing/functional-scenarios.md` gets a new `## N441` section
+(happy path across every block type, edge cases including a single-block
+plan and going back from the first block, and a device-evidence subsection
+kept separate from happy path per N439/N440's own convention).
+
+**`/pre-merge` caught a real gap: nothing linked to `/classplans` at all.**
+Both `ac-verifier` and `frontend-reviewer` independently found the same
+thing — every read screen in this app has an entry point except this one;
+`/sequence` is linked from `library.tsx`, `/classplans` was reachable only by
+typed-route push or a deep link, which would have left the ticket's own
+device-evidence tester with no way to reach the picker through the UI. Fixed
+by adding a "Your class plans" row to `library.tsx`, directly below the
+existing sequences row and gated on the identical `techniqueSport !==
+undefined` predicate (a class plan's `technique_drill` blocks point at the
+same catalog) — same reasoning N181 (#586) gives for `/sequence`'s own single
+entry point: an athlete's own ordered technique lists belong in the library,
+next to each other, not scattered. Re-verified after: `tsc --noEmit` clean,
+`lint:mobile` still 50/50 (zero new), `test:mobile` still 231/3614 green.
+
+**Open for N442:** scheduling a class plan onto the calendar, and a SECOND
+entry point into this runner from wherever that scheduling surfaces, are both
+still unbuilt — this ticket covers picking an already-known plan id from the
+library and running it end to end.
+
 
 ## Open items / known gaps as of this entry
 
