@@ -101,6 +101,14 @@ describe('set numbering', () => {
     expect(t('drop', 'working')).toEqual([1, 2]);
   });
 
+  it('never lets a second orphan attach to the first one either', () => {
+    // frontend-reviewer, L9 review: the orphan branch deliberately never sets
+    // `hasParent`, so a RUN of leading drops must each get their own ordinal
+    // rather than the second falsely treating the first orphan as its parent
+    // — the exact bug class this ticket exists to prevent, one level deeper.
+    expect(t('drop', 'drop', 'working')).toEqual([1, 2, 3]);
+  });
+
   it('is empty for no sets', () => {
     expect(t()).toEqual([]);
   });

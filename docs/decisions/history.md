@@ -47080,6 +47080,25 @@ green.
   logic-and-test coverage on an existing screen with no new user-facing
   surface, not a new flow to add a scenario for.
 
+### `frontend-reviewer` finding, applied before merge
+
+No blocking findings. One suggestion applied: the orphan branch of
+`setOrdinals` deliberately never sets `hasParent`, so a RUN of leading drops
+must each get their own ordinal — a second orphan must not falsely treat the
+first orphan as its parent, the exact bug class this ticket exists to
+prevent, one level deeper. Neither of the two acceptance-criteria tests
+exercised this (each hits the orphan branch only once per group), so it
+survived as a real, unmutation-tested gap. Added `t('drop', 'drop',
+'working') → [1, 2, 3]`, mutation-verified the same way as the rest of this
+ticket: set `hasParent = true` in the orphan branch, confirmed the new test
+failed on a real assertion (`[1, 1, 2]` received vs. `[1, 2, 3]` expected),
+restored, confirmed green by re-running.
+
+Left as a judgment call, per the reviewer's own framing: an orphan's
+accessibility label still reads `"drop off set N"` even though it IS row N —
+self-referential rather than misattributed, which is strictly better than
+the pre-fix behaviour and not required by this ticket's acceptance criteria.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
