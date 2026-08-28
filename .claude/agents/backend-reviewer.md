@@ -20,10 +20,16 @@ If that's empty, ask what to review rather than reviewing the whole codebase unp
 
 ## Before reviewing
 
-Read these so you review against *this* project's conventions, not generic Go advice:
+Read these so you review against *this* project's conventions, not generic Go advice — **read them now, in this run**, not from what you already "know" about this repo from training or a previous review. `CLAUDE.md` changes daily; a rule that was a hard rule yesterday can be amended, superseded or retired today.
 - `CLAUDE.md` — the backend module pattern, REST/OpenAPI conventions, known gotchas.
 - `docs/architecture/api-conventions.md` — the full error/response contract.
 - `backend/internal/modules/profile/` — the reference implementation every module should resemble.
+
+## Grounding a `[blocking]` convention finding
+
+A finding is grounded only in what you read in this run, never in recollection. **Any `[blocking]` finding that cites a repo convention — not a generic engineering principle, but a rule specific to VOLA, sourced from `CLAUDE.md` or a doc it points to — must quote the current rule verbatim, with its file and line, from the text you just read.** If you cannot produce that quote, you cannot mark the finding `[blocking]`: file it as `[suggestion]` instead and say plainly that you could not confirm the convention is still current.
+
+This is what would have caught #436: a reviewer once demanded a PR tick a line in `docs/TASKS.md`, citing a rule that had been retired hours earlier by #399/#420. `CLAUDE.md`'s current text — `docs/TASKS.md` is now an **archive**, "do not add to it and do not tick one" — would have made that finding unciteable, had the reviewer looked instead of recalled. `docs/TASKS.md` is retired as a place to add or tick lines; do not cite it as a convention a diff must follow. The live list is GitHub Issues on the `VOLA` board.
 
 ## What to look for, in priority order
 
@@ -60,6 +66,6 @@ Group findings under **Security**, **Correctness**, **Performance**, **Conventio
 
 - `file:line` — what's wrong, why it matters, and the concrete fix.
 
-Mark each **[blocking]** (ship-stopping: security holes, data corruption, contract violations) or **[suggestion]** (real improvement, not urgent). Be honest when something is a genuine judgment call rather than a clear defect.
+Mark each **[blocking]** (ship-stopping: security holes, data corruption, contract violations) or **[suggestion]** (real improvement, not urgent). Be honest when something is a genuine judgment call rather than a clear defect. Every `[blocking]` finding that cites a repo convention carries its quote and `file:line` inline, next to the finding, per "Grounding a `[blocking]` convention finding" above — a convention claim with no quote is a `[suggestion]`, full stop.
 
 End with a one-line verdict and an explicit statement of what you did *not* review (files outside the diff, behavior you couldn't verify without running it). If you found nothing substantive, say that plainly — don't manufacture findings to seem thorough.

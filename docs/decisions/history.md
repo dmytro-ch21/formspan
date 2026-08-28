@@ -45917,6 +45917,78 @@ full `internal/modules/food` suite re-run against a live, seeded
 `vola_test` — including `TestSearchRejectsATermThatCrossesAnAliasBoundary`
 — all green. `pnpm run verify`: green (220 suites, 3402 tests).
 
+**2026-08-27 — N436: a `[blocking]` reviewer finding now has to quote what it
+just read, not what it remembers.** `frontend-reviewer` had returned a
+`[blocking]` finding demanding a PR tick a line in `docs/TASKS.md` — a
+convention #399/#420 had retired hours earlier. `CLAUDE.md`'s current text
+(`docs/TASKS.md` is an **archive**; "do not add to it and do not tick one")
+already said the finding was wrong. Neither reviewer definition even
+mentioned `docs/TASKS.md`, so the finding came from the model's own
+training-time memory of how the repo worked that morning, not from any
+instruction it was given — and it was persuasive precisely because it cited a
+rule that genuinely *had* been a hard rule, in the right voice, against a file
+that still exists with the right shape.
+
+The fix is mechanical rather than a plea for more care, per the "a stub built
+from an assumption cannot falsify it" lesson already in `CLAUDE.md`'s *Verify
+that a check can fail* section: **any `[blocking]` finding that cites a
+VOLA-specific convention must quote the current rule verbatim, with its file
+and line, from the copy of `CLAUDE.md` the reviewer reads in that same run.**
+No quote, no block — the finding downgrades to `[suggestion]` automatically.
+Both `backend-reviewer.md` and `frontend-reviewer.md` got the identical
+instruction (new "Grounding a `[blocking]` convention finding" section, plus
+a line in "Before reviewing" telling the reviewer to read `CLAUDE.md` *now, in
+this run*, not from what it already "knows"), and `.claude/skills/pre-merge/
+SKILL.md` got a matching paragraph so a session reading the gate description
+sees the same contract the two reviewer definitions carry — the three pieces
+now agree because all three re-read their source of truth every run instead
+of one of them carrying a belief between runs.
+
+Demonstrated rather than merely argued, against **both** reviewers, because
+the original offender was `frontend-reviewer` and a clean run of only its
+sibling would not have shown much: five separate `backend-reviewer` runs
+against one small, real backend diff (a doc-comment addition to
+`Profile.Sex` in `backend/internal/modules/profile/profile.go`, committed
+temporarily and reset afterward), plus three separate `frontend-reviewer`
+runs against a second small, real diff (a two-line comment inside
+`newTraceId()` in `apps/web/src/lib/trace.ts`, same commit-then-reset
+treatment). Eight runs total. Zero of eight cited `docs/TASKS.md`, or any
+other convention, as a `[blocking]` finding.
+
+Worth recording what *did* happen instead, because it is the same grounding
+discipline working the way it should, in both directions. On the backend
+side, four of the five runs caught a **real** defect in the synthetic
+comment — it claimed sex "has no 'prefer not to say' third state" and feeds
+"the calorie/1RM formulas", and the reviewers checked both claims against
+`backend/internal/platform/energy/energy.go` and
+`backend/internal/modules/session/onerm.go` rather than taking them on faith,
+finding a `default:` branch that *does* route an unset sex to a midpoint, and
+that 1RM estimation never reads sex at all. On the frontend side, all three
+runs verified the synthetic comment's security claim ("not a security
+boundary… never anything the API trusts as auth") against
+`backend/internal/platform/httplog/httplog.go`'s actual `traceparent`
+handling before accepting it, rather than trusting a comment about security
+on the strength of it being a comment. That is the fix working as intended
+both times — a finding grounded in code and text actually read in this run,
+each one citing a `file:line`, none of them a recollection.
+
+This is the mirror of #410, named in the ticket that drove this (#436) as the
+same class of problem from the other direction: #410 is a gate that vanishes
+without saying so; this is a gate that speaks confidently and is wrong. #410's
+"fails loudly on a missing agent" fix already landed in `SKILL.md` (the "A
+gate that fails to launch is not a gate that passed" section) before this
+entry; this closes the other half.
+
+Left open: this only grounds *repo-convention* findings — security,
+correctness, performance and accessibility findings are unaffected and
+correctly so, since those are checked against the diff and the code, not
+against a document that can go stale under the model. No mechanism yet
+detects a *[suggestion]* that smuggles in a stale convention citation the same
+way — the rule only bites `[blocking]`, on the theory that a suggestion is
+already read as "judge for yourself" rather than "resolve before merge". If
+that turns out to be too soft, the same file:line requirement generalizes
+to `[suggestion]` findings that name a repo convention.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

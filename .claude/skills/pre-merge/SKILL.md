@@ -90,6 +90,22 @@ what the code is trying to do — and the acceptance criteria **are** that
 intent, already written down, which is the cheapest way to hand it over. Say
 which invariant is load-bearing, and what would be a disaster if it broke.
 
+**A reviewer's `[blocking]` finding is only as current as what it read this
+run.** `backend-reviewer` and `frontend-reviewer` are each instructed (see
+their own "Grounding a `[blocking]` convention finding" section) to read
+`CLAUDE.md` fresh in every run rather than from training-time memory of the
+repo, and to quote the current rule — verbatim, with `file:line` — for any
+`[blocking]` finding that cites a VOLA-specific convention. A convention
+finding with no such quote is not a blocker: treat it as a `[suggestion]`
+regardless of how confidently it reads. (#436: a reviewer once demanded a PR
+tick a line in `docs/TASKS.md`, a convention #399/#420 had retired hours
+earlier — `CLAUDE.md` already said plainly that a tick there "means nothing".)
+This is also why the three pieces of this gate cannot disagree about which
+conventions are live: `ac-verifier` grades against the issue's own criteria,
+read fresh every run; the reviewers ground convention findings the same way,
+against `CLAUDE.md` read fresh every run. Neither carries a convention as a
+standing belief between runs.
+
 ## The three answer different questions
 
 - The checker asks **"will CI pass?"**
