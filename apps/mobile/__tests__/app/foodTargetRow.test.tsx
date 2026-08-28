@@ -34,6 +34,10 @@ const mockPush = jest.fn();
 const mockFocusCbs: (() => void | (() => void))[] = [];
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush, back: jest.fn(), replace: jest.fn() }),
+  // N430/#692 — `app/(tabs)/food.tsx` now reads `?date=` to seed its
+  // day stepper. `() => ({})` matches the global mock in `jest.setup.js`:
+  // no incoming param, so the screen behaves exactly as before.
+  useLocalSearchParams: () => ({}),
   // Keyed on the callback, matching React Navigation — the same shape
   // `foodScreenModuleOff.test.tsx` uses, and for the same reason: a focus
   // effect re-runs when its callback identity changes while focused.

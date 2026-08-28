@@ -14287,3 +14287,67 @@ on screen. That, and only that, is what moved.
   Today reads as uncrowded — this is the report that opened the ticket, and
   only a device pass by the person who reported it settles whether the fix
   actually addresses what they saw.
+
+## N430 — Today's actions follow the browsed day, not real today (`apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/app/(tabs)/food.tsx`, `apps/mobile/components/today/MomentumCard.tsx`, `apps/mobile/lib/todayBoard.ts`, `apps/mobile/lib/calendar.ts`)
+
+### Happy path
+
+- On Today, step the day switcher back to yesterday. Tap `Log food`: confirm
+  it opens `/food/add` already dated yesterday (the form's own date field, or
+  the day it lands under once saved) rather than today.
+- With yesterday still browsed, tap a quick-add chip on the Momentum card:
+  confirm the entry appears in Food's day view under YESTERDAY, not under
+  today — the core regression this ticket exists for. Note the meal slot it
+  lands in still follows the CURRENT time of day (a known, documented gap,
+  not part of this fix's scope) — only the DAY is asserted here.
+- With yesterday still browsed, tap the day link at the foot of the Momentum
+  card (reads `See logged food`): confirm it opens the Food tab already on
+  yesterday, not on today.
+- With yesterday still browsed, tap `+` on the water (or coffee) tracker
+  card: confirm the count shown on Today's card is yesterday's count (not
+  today's), and that the tap is logged under yesterday in Food's own tracker
+  view.
+- Return the switcher to TODAY (press the day label) and repeat all four
+  actions above: confirm each still targets real today exactly as before —
+  this ticket must not have moved logging away from today when today is
+  what's on screen, only made a browsed day reachable too.
+- With a session actively running (the day switcher hidden, per the
+  existing resume-outranks-everything rule): confirm Momentum's card, the
+  trackers, and `Log food` all still target REAL today regardless of any
+  `dayOffset` left over from browsing before the session started.
+- From Food, browse to a day, back out to Today, browse Today to a
+  DIFFERENT day, and tap `See logged food` again: confirm Food opens on the
+  SECOND day, not the first — Food is a tab and stays mounted, so this
+  exercises the re-seed path a first-open alone would not.
+- On Food (reached directly, not via Today's link), manually step the day
+  after arriving via a deep link, then switch to another tab and back:
+  confirm the manual step is NOT undone by the return to Food — a mere
+  refocus with no new navigation must never re-seed the day.
+
+### Edge cases and errors
+
+- Browse Today more than one day back (e.g. three days), tap `Log food`:
+  confirm the date threaded through is still correct at that distance, not
+  only for a one-day step.
+- Browse Today to a FUTURE day and repeat the four actions above: confirm
+  each targets that future day (Food's own day stepper already allows this;
+  Today should not diverge from it).
+- Rapidly quick-add two different chips while browsing a past day: confirm
+  both entries land under the SAME browsed day and the card's own totals do
+  not flash a stale or wrong day's figures mid-sequence (the existing
+  stale-read guard — stepping days cannot paint one day's entries under
+  another day's header — must still hold with the write path now
+  day-following too).
+- **NEEDS HUMAN EVIDENCE** — on a real device after midnight (or with the
+  system clock moved past a day boundary): browse Today back to yesterday,
+  log a food entry via `Log food`, tap a quick-add chip, and log a cup of
+  water; confirm all three appear under yesterday in Food's day view and
+  NONE under today. This is the literal scenario from the user's report and
+  cannot be fully exercised by a test-runner clock alone.
+
+### Auth / security
+
+- None of these are auth-gated differently from the screens' existing
+  requests — no new endpoint, no new permission surface, and no cross-user
+  data path. Confirm a signed-out state still routes to sign-in before any
+  of the above is reachable, unchanged from before this ticket.

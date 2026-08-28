@@ -1,5 +1,6 @@
 import {
   addDays,
+  dayOffsetFor,
   dayString,
   monthGrid,
   refreshedAnchor,
@@ -60,6 +61,40 @@ describe('startOfWeek', () => {
       '2026-08-08',
       '2026-08-09',
     ]);
+  });
+});
+
+describe('dayOffsetFor', () => {
+  // N430/#692: `app/(tabs)/food.tsx`'s `?date=` deep link decodes into this
+  // offset. Wrong here means "See logged food" from a browsed yesterday opens
+  // Food on the wrong day — silently, exactly the bug this ticket is about.
+  const noon = (y: number, m: number, d: number) => new Date(y, m, d, 12, 0, 0);
+
+  test('today is 0', () => {
+    expect(dayOffsetFor('2026-08-26', noon(2026, 7, 26))).toBe(0);
+  });
+
+  test('yesterday is -1, regardless of the time of day `now` carries', () => {
+    // Past midnight, still "now" is the 27th — this is the exact shape of the
+    // bug report: browsing back one day from just after midnight.
+    const justAfterMidnight = new Date(2026, 7, 27, 0, 5, 0);
+    expect(dayOffsetFor('2026-08-26', justAfterMidnight)).toBe(-1);
+  });
+
+  test('a future day is positive', () => {
+    expect(dayOffsetFor('2026-08-29', noon(2026, 7, 26))).toBe(3);
+  });
+
+  test('round-trips with addDays + dayString for an arbitrary span', () => {
+    const now = noon(2026, 7, 26);
+    for (const on of ['2026-08-01', '2026-07-15', '2026-09-03', '2026-08-26']) {
+      const offset = dayOffsetFor(on, now);
+      expect(dayString(addDays(now, offset))).toBe(on);
+    }
+  });
+
+  test('crosses a month boundary correctly', () => {
+    expect(dayOffsetFor('2026-09-02', noon(2026, 7, 31))).toBe(2);
   });
 });
 

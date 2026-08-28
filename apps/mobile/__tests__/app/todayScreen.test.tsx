@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import TodayScreen from '../../app/(tabs)/index';
-import type { Entry } from '@/lib/nutrition';
+import type { Entry, Food } from '@/lib/nutrition';
 import type { Module } from '@/lib/modules';
 import type { PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
@@ -116,13 +116,19 @@ jest.mock('@/lib/prefs', () => ({
 // is specifically that it reads the BROWSED day, not always real today, so
 // the tests for that need to see which `on` argument this was called with.
 const mockLocalEntries = jest.fn((..._a: unknown[]): Promise<Entry[]> => Promise.resolve([]));
+// Real jest.fn()s, not constant resolvers, like `mockLocalEntries` above and
+// for the same reason: N430/#692's quick-add coverage needs to control what
+// the chips rank AND see what `quickLog` actually wrote — which day, not just
+// that a write happened.
+const mockFoodQuick = jest.fn((..._a: unknown[]): Promise<unknown[]> => Promise.resolve([]));
+const mockLogFood = jest.fn((..._a: unknown[]): Promise<void> => Promise.resolve());
 jest.mock('@/lib/foodLog', () => ({
   localEntries: (...a: unknown[]) => mockLocalEntries(...a),
   localLoggedDays: () => Promise.resolve([]),
   localTargetView: () => Promise.resolve({ state: 'unknown' }),
-  recentsFor: () => Promise.resolve([]),
+  recentsFor: (...a: unknown[]) => mockFoodQuick(...a),
   cacheTargets: () => Promise.resolve(),
-  logFood: () => Promise.resolve(),
+  logFood: (...a: unknown[]) => mockLogFood(...a),
 }));
 jest.mock('@/lib/nutritionApi', () => ({
   ...jest.requireActual('@/lib/nutritionApi'),
@@ -244,6 +250,34 @@ function entry(over: Partial<Entry> & { id: string }): Entry {
   };
 }
 
+/** A catalog food, for the quick-add chips. Defaulted so a test sets only what it means. */
+function food(over: Partial<Food> & { id: string; name: string }): Food {
+  return {
+    kind: 'food',
+    brand: '',
+    serving_label: '1 serving',
+    serving_grams: null,
+    yield_servings: null,
+    items: [],
+    kcal: 100,
+    protein_g: 10,
+    carb_g: 10,
+    fat_g: 5,
+    fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
+    ...over,
+  };
+}
+
+/** A quick-add ranking row — `recentsFor`'s own return shape, not a bare `Food`. */
+function recent(f: Food, uses = 1): { food: Food; uses: number; lastUsedOn: string | null } {
+  return { food: f, uses, lastUsedOn: todayKey() };
+}
+
 beforeEach(() => {
   mockModules = [strength, bjj, nutrition];
   mockPush.mockReset();
@@ -257,6 +291,10 @@ beforeEach(() => {
   mockFunnel.mockResolvedValue([]);
   mockLocalEntries.mockReset();
   mockLocalEntries.mockResolvedValue([]);
+  mockFoodQuick.mockReset();
+  mockFoodQuick.mockResolvedValue([]);
+  mockLogFood.mockReset();
+  mockLogFood.mockResolvedValue(undefined);
 });
 
 describe('the active session outranks everything', () => {
@@ -727,10 +765,11 @@ describe('the day switcher, restored on direct user instruction', () => {
 describe('the six blocks', () => {
   it('keeps Log Food one tap from Today', async () => {
     // The ticket's third test step: any additional confirmation step is a
-    // failure. `onLog` goes straight at the food flow.
+    // failure. `onLog` goes straight at the food flow — carrying today's own
+    // date (N430/#692: `on` is always threaded through now, even on today).
     render(<TodayScreen />);
     fireEvent.press(await screen.findByTestId('today-log-food'));
-    expect(mockPush).toHaveBeenCalledWith('/food/add');
+    expect(mockPush).toHaveBeenCalledWith(`/food/add?date=${todayKey()}`);
   });
 
   it('renders the daily-progress and this-week blocks', async () => {
@@ -872,17 +911,44 @@ describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
     expect(mockLocalEntries).toHaveBeenCalledWith('u1', yesterday);
   });
 
-  it('keeps Log Food pinned to real today even while browsing a different day', async () => {
-    // The decision recorded in the history entry: logging stays on real
-    // today regardless of which day's stats are on screen, rather than
-    // silently logging retroactively into a browsed day. `/food/add` with no
-    // date param is what makes it default to today.
+  it('N430/#692 — Log Food now follows the browsed day, reversing the decision above', async () => {
+    // REVERSED on direct user report, 2026-08-28: "we have today already past
+    // 12am but I need to catch up with logs and I can't????" — pinning to
+    // real today made a browsed day impossible to log to at all, which is
+    // strictly worse than the "silent retroactive log" this used to guard
+    // against. `Log food` must carry the VIEWED day, not default to today.
     render(<TodayScreen />);
     await screen.findByTestId('today-day');
     fireEvent.press(screen.getByTestId('today-day-prev'));
 
     fireEvent.press(await screen.findByTestId('today-log-food'));
-    expect(mockPush).toHaveBeenCalledWith('/food/add');
+    expect(mockPush).toHaveBeenCalledWith(`/food/add?date=${dayFromNow(-1)}`);
+  });
+
+  it('N430/#692 — the day link opens Food on the browsed day too', async () => {
+    render(<TodayScreen />);
+    await screen.findByTestId('today-day');
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    fireEvent.press(await screen.findByTestId('today-open-food'));
+    expect(mockPush).toHaveBeenCalledWith(`/food?date=${dayFromNow(-1)}`);
+  });
+
+  it('N430/#692 — a quick-add chip while browsing writes to the browsed day, not real today', async () => {
+    mockFoodQuick.mockResolvedValue([recent(food({ id: 'f1', name: 'Greek yogurt' }))]);
+    render(<TodayScreen />);
+    await screen.findByTestId('today-day');
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    fireEvent.press(await screen.findByTestId('today-quick-f1'));
+
+    await waitFor(() => expect(mockLogFood).toHaveBeenCalled());
+    const [, written] = mockLogFood.mock.calls[mockLogFood.mock.calls.length - 1] as [
+      string,
+      { eaten_on: string },
+    ];
+    expect(written.eaten_on).toBe(dayFromNow(-1));
+    expect(written.eaten_on).not.toBe(todayKey());
   });
 
   // W13 (#693): the card's DATA has followed the browsed day since N179/#584

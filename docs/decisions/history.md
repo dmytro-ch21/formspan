@@ -46420,6 +46420,157 @@ Full suite: 222 files, 3423 tests, all green under `TZ=America/Los_Angeles`
 `TZ` set — a pre-existing property of the runner, not a regression, confirmed
 by rerunning them with `TZ` explicit).
 
+### Today's actions now follow the browsed day, not real today (N430, #692)
+
+**The report, verbatim, past midnight:** *"we have today already past 12am but
+I need to catch up with logs and I can't????"* A functional blocker, not
+cosmetic, and it was rated accordingly: no lower-priority work was staffed
+ahead of it.
+
+**What the athlete saw.** Step Today back to yesterday to catch up, and every
+action that LOOKED like it would log to yesterday silently filed under real
+today instead, with no way to tell: `Log food` opened `/food/add` (which
+defaults an absent `?date=` to today), the quick-add chips wrote
+`eaten_on: dayString(new Date())` unconditionally, `See today's food` always
+opened Food on today regardless of what the card was showing, and the
+water/coffee trackers both read and wrote real today no matter which day
+Today displayed. There was no way to log a past day from Today at all.
+
+**One root cause, four surfaces.** Every downstream read was already
+day-parameterized — `app/food/add.tsx` already took `?date=`, `app/(tabs)/
+food.tsx`'s meal-row "Add" already passed `?meal=…&date=${on}`, tracker
+storage was already keyed per day. Today itself was the one screen that never
+threaded its own browsed day (`on`, from `momentumDayKey` — `lib/
+todayBoard.ts`) into its own action handlers. Surface 2 (quick-add) was not an
+oversight but a **recorded decision**, in the doc comment above `quickLog`
+and in the N179/#584 history entry: *"the safer default is that a tap here
+always logs to today... avoiding a 'viewing Tuesday, tap Log Food, it
+silently logs to today' surprise."* This ticket reverses that decision on
+direct instruction — the surprise it traded away for is strictly worse than
+the surprise it accepted: a corrigible mislog versus a day nobody can log to
+at all. Both comments (`refreshFoodWeek`'s and `quickLog`'s own) were rewritten
+in place to record the reversal explicitly, rather than silently deleted, so
+a future reader does not mistake this for an accidental regression of a
+decision nobody revisited.
+
+**What changed, per surface:**
+
+1. **`Log food`** (`MomentumCard`'s `onLog`) now pushes
+   `momentumLogFoodHref(on)` — `/food/add?date=${on}` — instead of a bare
+   `/food/add`. `on` already carries the resume fallback to real today
+   (`momentumDayKey`), so a running session is unaffected.
+2. **Quick-add** (`quickLog`) now writes `eaten_on: on` instead of
+   `dayString(new Date())`. **Design choice, stated per the ticket's request:
+   log to the viewed day, not hide the chips on a browsed day.** Hiding was
+   considered and rejected — the chips are already ranked by the *current*
+   meal-time slot (`slotForClock`) regardless of which day is on screen, so
+   they are a "what do you usually eat around now" shortcut rather than a
+   statement about the viewed day specifically; making them vanish entirely
+   the moment an athlete steps back one day removes a genuinely useful
+   shortcut (breakfast catch-up logging, the exact case in the report) for a
+   theoretical mismatch that logging TO the viewed day already resolves. The
+   `isToday || resume` gate on the post-write refetch was also removed —
+   the day written and the day shown are now always the same day by
+   construction, so the refetch is never wasted and never a surprise repaint.
+3. **The day link** (`onOpenDay`, labelled `See today's food`) now pushes
+   `momentumOpenFoodHref(on)` — `/food?date=${on}` — and the label itself
+   changed to the day-neutral **`See logged food`** (a11y label: `Open your
+   food log`), since the old wording was a false claim about which day was
+   about to open on any day but today. `app/(tabs)/food.tsx` gained the
+   other half: it did not previously accept an initial day at all — its
+   `dayOffset` always started at 0. It now reads `?date=` via
+   `useLocalSearchParams`, decoded through a new `dayOffsetFor(on, now)` in
+   `lib/calendar.ts` (the inverse of `addDays` + `dayString`, returning the
+   whole-day offset from `now`), seeded through a **lazy `useState`
+   initializer** for the first mount (no flash of today first) and re-applied
+   through a **`useFocusEffect`** for any subsequent deep link, since Food is
+   a tab screen that stays mounted for the process's life and the lazy
+   initializer only ever runs once. That focus effect is guarded on an
+   `appliedDateParam` ref so a bare refocus — switching tabs away and back
+   with the SAME lingering `params.date`, which Expo Router keeps handing
+   back — cannot clobber a manual day-step the athlete took after arriving;
+   mutation-tested by dropping the guard and confirming the corresponding
+   test goes red on exactly that scenario. `useFocusEffect`, not a plain
+   `useEffect`, for the reason `app/goals/history.tsx` already establishes
+   elsewhere in this codebase: a focus event is a bounded, real trigger,
+   where a bare `useEffect` calling `setState` synchronously is the
+   cascading-render shape this app's lint ratchet holds a line against
+   (`react-hooks/set-state-in-effect`, currently at its `--max-warnings=50`
+   ceiling with zero headroom — verified by running `eslint .` before and
+   after this change, both times 50, 0 errors).
+4. **The trackers** (`TrackerList` on Today) now read and write the browsed
+   day too. `refreshTrackers(on)` moved out of the combined real-today focus
+   effect into the same `on`-keyed effect `refreshFoodDay` already had (for
+   the same reason that effect exists separately: a day-step must not also
+   re-run checkins, the training summary, the funnel and the roadmap read).
+   `dayAtTap` and `collapseKey` both changed from `todayKey` to a new pure
+   `trackerTapDay(isToday, on, now)` (`lib/todayBoard.ts`) and to `on`,
+   respectively — preserving the pre-existing **tap-at-midnight rule**
+   exactly for TODAY (`dayAtTap` still resolves the clock fresh at the
+   moment of the tap, so a phone left open across midnight still files a
+   00:05 tap under the new day) while resolving to `on` for any browsed day,
+   where there is no clock-staleness risk because `dayOffset` is an explicit
+   choice rather than a reading. `trackerTapDay` never calls its `now` thunk
+   at all while browsing — asserted directly, since it is the concrete
+   guarantee "a tap on a past day cannot be affected by what time it is"
+   rests on.
+
+**Two new pure functions in `lib/todayBoard.ts`** — `momentumLogFoodHref` and
+`momentumOpenFoodHref`, both typed `Href` rather than `string` for the same
+reason `lib/startSession.ts`'s own href builders are (a bare `string` return
+launders a route literal past Expo Router's generated types, which is the
+exact hole N32 shipped from) — plus `trackerTapDay`. All three sit beside
+`momentumDayKey`, which they are built on and which already had its own
+tests from N179/#584; extracting them out of the JSX inline callbacks is what
+makes "tapping Log food navigates with the browsed day's date" and "a tracker
+tap on today still resolves at the moment of the tap" testable as pure logic
+at all, matching this app's stated testing discipline of pure-logic tests over
+component tests where the two can be separated — though this ticket also
+strengthens `__tests__/app/todayScreen.test.tsx`'s existing component
+coverage directly (reversing its own now-wrong `'keeps Log Food pinned to
+real today even while browsing a different day'` test to assert the new
+behaviour, and adding coverage for the quick-add write and the day-link href)
+and adds a new `__tests__/app/foodInitialDay.test.tsx` for Food's own
+`?date=` seeding, since that half is genuinely screen-level state (a lazy
+initializer plus a focus-effect guard) that a pure function cannot represent.
+Four PRE-EXISTING screen tests needed their local `expo-router` mocks
+updated to add `useLocalSearchParams` (the global `jest.setup.js` mock
+already had it; `foodTargetRow.test.tsx`, `foodDayJump.test.tsx` and
+`foodScreenModuleOff.test.tsx` each override it locally without that key,
+which broke the moment `food.tsx` started calling the hook) — a straight
+`TypeError`, not a behavioural difference, and every one of them now passes
+`() => ({})` explicitly rather than leaving the gap for a fifth file to hit.
+
+**Mutation-verified, five separate guards**, each: baseline green, mutated
+back to the pre-fix hardcoded-today (or otherwise-wrong) behaviour, confirmed
+the covering test failed on a genuine assertion mismatch (never a compile
+error), restored, confirmed green again by re-running rather than by
+inspection — `quickLog`'s `eaten_on`, the `onLog`/`onOpenDay` href builders,
+`trackerTapDay`'s branch, `dayOffsetFor`'s arithmetic, and Food's
+`appliedDateParam` refocus guard.
+
+**`pnpm run verify`'s lint step deserves its own note.** This app's mobile
+lint sits at exactly `--max-warnings=50` with zero headroom on `origin/main`
+today (measured, not assumed) — so any new `react-hooks/set-state-in-effect`
+would have failed CI regardless of correctness. That is what ruled out the
+otherwise-obvious "just `useEffect` it" implementation for Food's `?date=`
+re-seeding and settled on `useFocusEffect` instead, which this codebase
+already uses the same way (`app/goals/history.tsx`) without being flagged.
+
+**NEEDS HUMAN EVIDENCE, left to the user, per the issue:** on a real device
+after midnight (or with the clock past a day boundary) — browse to
+yesterday, log a food entry via `Log food`, tap a quick-add chip, log a cup
+of water; confirm all three appear under yesterday in Food's day view and
+none under real today.
+
+**Left open:** quick-add's `meal` slot (`slotForClock(new Date())`) still
+reads the CURRENT time of day even when writing to a browsed day, so a
+midnight quick-add to yesterday files as a "snack" rather than whatever slot
+made sense for yesterday's actual eating time. Not fixed here — the ticket's
+acceptance criteria are scoped to the DAY, not the meal, and `Log food`'s
+full form already lets the athlete correct the meal explicitly. Worth its own
+ticket if it turns out to matter in practice.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

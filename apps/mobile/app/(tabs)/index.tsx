@@ -63,7 +63,13 @@ import { restLine } from '@/lib/trend';
 import { enabledSports, labelFor, logsAfterwards, type Module } from '@/lib/modules';
 import { sessionHref, startSessionHref } from '@/lib/startSession';
 import type { PlannedOffer, Source } from '@/lib/trainBoard';
-import { momentumDayKey, type TodayLead } from '@/lib/todayBoard';
+import {
+  momentumDayKey,
+  momentumLogFoodHref,
+  momentumOpenFoodHref,
+  trackerTapDay,
+  type TodayLead,
+} from '@/lib/todayBoard';
 import { useTodayBoard } from '@/lib/useTodayBoard';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
@@ -543,16 +549,29 @@ export default function TodayScreen() {
   const foodView: TargetView = datedFoodView.on === on ? datedFoodView.view : { state: 'checking' };
 
   /**
-   * The week's logged-day count and the quick-add ranking — always real
-   * TODAY's, never the browsed day's.
+   * The week's logged-day count and the quick-add RANKING — still always
+   * real TODAY's, and that half of this comment is unchanged: which foods
+   * rank as "recent" depends on the CURRENT time-of-day slot
+   * (`slotForClock(new Date())` below), and the week strip counts a real
+   * calendar week — neither describes the day Momentum happens to be
+   * showing, so neither should follow it.
    *
-   * **Deliberately NOT re-dated.** Logging and quick-add stay pinned to real
-   * today regardless of which day Momentum is displaying — see `quickLog`
-   * below and the decision recorded in the history entry: the safer default
-   * is that a tap here always logs to today, matching `food.tsx`'s own rule
-   * ("Today pins its row to today, because a tap there logs a cup now") and
-   * avoiding a "viewing Tuesday, tap Log Food, it silently logs to today"
-   * surprise that a day-following action would create.
+   * **What is no longer true here: "logging stays pinned to real today."**
+   * That was this comment's own claim until N430/#692 (2026-08-28) reversed
+   * it, on direct user report, past midnight, mid-catch-up: *"we have today
+   * already past 12am but I need to catch up with logs and I can't????"* —
+   * an athlete who stepped Today back to yesterday found `Log food`, the
+   * quick-add chips and the day link all silently filing under real today
+   * regardless of what the screen showed, with no way to log the day they
+   * were actually looking at.
+   *
+   * The old reasoning — "the safer default is a tap here always logs to
+   * today... avoiding a 'viewing Tuesday, tap Log Food, it silently logs to
+   * today' surprise" — traded a surprise an athlete could immediately see
+   * and correct for an inability to log a past day AT ALL, which is strictly
+   * worse. See `quickLog` below, which now writes to the VIEWED day (`on`),
+   * matching `TrackerList`'s own rule on Food ("a tap while reading Tuesday
+   * belongs to Tuesday", `food.tsx:390-393`).
    */
   const refreshFoodWeek = useCallback(() => {
     let live = true;
@@ -641,22 +660,28 @@ export default function TodayScreen() {
   const foodDayCancelRef = useRef<() => void>(() => {});
 
   /**
-   * One tap from the card: log a serving of a ranked food, right now.
+   * One tap from the card: log a serving of a ranked food, to the day
+   * Momentum is showing.
    *
-   * Always writes to real TODAY, regardless of which day Momentum is showing
-   * — see the decision recorded on `refreshFoodWeek` above. `refreshFoodDay`
-   * only runs after it when the card is currently showing today's figures
-   * (`isToday`, or `resume` — see the fallback on `on` above): browsing
-   * Tuesday and quick-adding does write to today, but re-fetching Tuesday's
-   * own totals would show nothing different, and fetching today's instead
-   * would silently repaint the screen onto a day the athlete did not ask to
-   * see.
+   * **Writes to `on`, not real today unconditionally.** `on` already folds
+   * in the resume fallback (`momentumDayKey`, above) — a running session
+   * still logs to real today regardless of a leftover `dayOffset` — so this
+   * needed no separate branch of its own to preserve that. What changed is
+   * everything else: this used to hardcode `dayString(new Date())` here,
+   * which is the N430/#692 bug itself, not a safeguard against it — see the
+   * reversal recorded on `refreshFoodWeek` above.
+   *
+   * `refreshFoodDay` now always re-runs after the write, unconditionally.
+   * The old `isToday || resume` gate existed because the day written and the
+   * day shown could differ; they cannot any more — the write targets `on`
+   * and the card reads `on` — so re-fetching it is never wasted and never a
+   * surprise repaint onto a day the athlete did not ask to see.
    */
   const quickLog = useCallback(
     async (food: Food) => {
       if (!userId) return;
       await logFood(userId, {
-        eaten_on: dayString(new Date()),
+        eaten_on: on,
         meal: slotForClock(new Date()),
         name: food.name,
         servings: 1,
@@ -666,15 +691,12 @@ export default function TodayScreen() {
       });
       requestSync('food logged');
       refreshFoodWeek();
-      if (isToday || resume) {
-        // Cancel any still-in-flight read this same source started, so a
-        // slow first tap cannot resolve after a fast second one and paint
-        // over it.
-        foodDayCancelRef.current();
-        foodDayCancelRef.current = refreshFoodDay();
-      }
+      // Cancel any still-in-flight read this same source started, so a slow
+      // first tap cannot resolve after a fast second one and paint over it.
+      foodDayCancelRef.current();
+      foodDayCancelRef.current = refreshFoodDay();
     },
-    [userId, refreshFoodWeek, refreshFoodDay, isToday, resume],
+    [userId, on, refreshFoodWeek, refreshFoodDay],
   );
 
   /**
@@ -734,10 +756,6 @@ export default function TodayScreen() {
       // again immediately after logging — so a slow read started at focus could
       // otherwise resolve last and paint over the row just added.
       const stopFood = refreshFoodWeek();
-      // Same treatment as food, and for the same reason: this screen writes to
-      // it (every tap re-reads the day), so a slow read started at focus could
-      // otherwise resolve last and paint over a cup just added.
-      const stopTrackers = refreshTrackers(todayKey);
       const stopSummary = refreshSummary();
       refreshFunnel();
       // On focus, not on mount: enrolling happens on a screen pushed over these
@@ -747,7 +765,6 @@ export default function TodayScreen() {
       const stop = readSuggestionPrefs();
       return () => {
         stopFood?.();
-        stopTrackers?.();
         stopSummary?.();
         stop?.();
       };
@@ -757,29 +774,40 @@ export default function TodayScreen() {
       readSuggestionPrefs,
       refreshCheckins,
       refreshFoodWeek,
-      refreshTrackers,
       refreshSummary,
-      todayKey,
     ]),
   );
 
   /**
-   * Momentum's own read, kept OUT of the bundle above on purpose.
+   * Momentum's own read, and the trackers beside it — kept OUT of the bundle
+   * above on purpose.
    *
    * `refreshFoodDay` depends on `on` (the browsed day), so stepping the
    * switcher changes its identity and — since the screen is already
    * focused — re-runs this effect immediately, the same way `food.tsx`'s day
    * stepper re-triggers its own `refresh`. Folding it into the combined focus
-   * effect above would mean every day-step also re-runs checkins, trackers,
-   * the training summary, the funnel and the roadmap read: none of those
-   * describe the browsed day, so none of them need to answer again just
-   * because the switcher moved.
+   * effect above would mean every day-step also re-runs checkins, the
+   * training summary, the funnel and the roadmap read: none of those describe
+   * the browsed day, so none of them need to answer again just because the
+   * switcher moved.
+   *
+   * **Trackers joined this effect for N430/#692.** They used to read
+   * `todayKey` unconditionally in the bundle above — real today, regardless
+   * of what Momentum was showing — which is the same shape of bug `quickLog`
+   * had: a browsed day's water/coffee counts never showed, and a `+` always
+   * filed under today. `on` already carries the resume fallback
+   * (`momentumDayKey`, above), so this one read is right for both the plain
+   * browse and the session-resumed case with no extra branching needed here.
    */
   useFocusEffect(
     useCallback(() => {
-      const stop = refreshFoodDay();
-      return stop;
-    }, [refreshFoodDay]),
+      const stopFood = refreshFoodDay();
+      const stopTrackers = refreshTrackers(on);
+      return () => {
+        stopFood?.();
+        stopTrackers?.();
+      };
+    }, [refreshFoodDay, refreshTrackers, on]),
   );
 
   // The same staleness arrives without a focus change when the app is
@@ -1069,7 +1097,10 @@ export default function TodayScreen() {
           {/* ── 3. DAILY PROGRESS ─────────────────────────────────────────
               The things today ASKS for: fuel, trackers, the weigh-in. Log Food
               stays exactly one tap — `onLog` pushes `/food/add` with no
-              confirmation between. */}
+              confirmation between, ON THE DAY MOMENTUM IS SHOWING (`on`) —
+              N430/#692: this used to always push a bare `/food/add`, which
+              `app/food/add.tsx` defaults to real today, so `Log food` on a
+              browsed day silently filed the entry under the wrong one. */}
           <View style={styles.section}>
             <SectionHeader label="Daily progress" />
             {foodEnabled ? (
@@ -1085,9 +1116,14 @@ export default function TodayScreen() {
                 // above for why the two can disagree.
                 isToday={on === todayKey}
                 quickAdd={foodQuick}
-                onLog={() => router.push('/food/add')}
+                onLog={() => router.push(momentumLogFoodHref(on))}
                 onQuickAdd={(f) => void quickLog(f)}
-                onOpenDay={() => router.push('/food')}
+                // `?date=` seeds Food's own day-stepper (`dayOffsetFor`,
+                // `lib/calendar.ts`) so the card's day link actually opens ON
+                // the viewed day rather than always on real today — the other
+                // half of N430/#692. Same `on` `quickLog` and `onLog` write
+                // to, so what this opens always matches what got logged.
+                onOpenDay={() => router.push(momentumOpenFoodHref(on))}
                 onConfigureRings={() => router.push('/food/rings')}
                 testID="today-momentum"
               />
@@ -1123,18 +1159,30 @@ export default function TodayScreen() {
               names later. Being on Today is the whole feature: a tracker you
               have to go and find is a tracker you forget.
 
-              Pinned to `todayKey` rather than any browsed day: a tap logs a cup
-              NOW. Reading a past day's trackers is a Food-screen job, where the
-              day is the subject rather than a lens.
+              **Follows the browsed day now (N430/#692).** Used to be pinned
+              to `todayKey` unconditionally — a tap always logged NOW and the
+              cards always showed real today's counts, even while the rest of
+              the screen said "FRI 28 AUG". That silently mislabeled every
+              browsed-day count as today's and, worse, filed every tap under
+              the wrong day with no way to tell. Read for the day, and file a
+              tap under the day: see `dayAtTap` below for how TODAY
+              specifically still resolves at the moment of the tap rather
+              than at render.
             */}
             <TrackerList
               day={trackerDay}
-              // Read at the MOMENT of the tap, not at render. `todayKey` is
-              // computed during render and this screen never unmounts, so a
-              // phone left open across midnight still holds yesterday's key
-              // until something re-renders — and the first tap at 00:05 would
-              // file a cup under the day that just ended.
-              dayAtTap={() => dayString(new Date())}
+              // TODAY resolves fresh at the MOMENT of the tap, exactly as
+              // before: `dayString(new Date())` rather than the `on`/`now`
+              // this render captured, because this screen never unmounts and
+              // a phone left open across midnight would otherwise still hold
+              // yesterday's `on` until something re-renders — the first tap
+              // at 00:05 must not file a cup under the day that just ended.
+              //
+              // A BROWSED day has no such staleness risk — `dayOffset` is
+              // already an explicit choice away from today, not a clock
+              // reading — so it resolves to `on`, the same day the cards
+              // above and `quickLog` write to.
+              dayAtTap={() => trackerTapDay(isToday, on, () => new Date())}
               units={units}
               unitsReady={unitsReady}
               // Three, then a disclosure row — N78's answer to "several
@@ -1142,10 +1190,13 @@ export default function TodayScreen() {
               // server caps an athlete at eight; three is what fits here
               // without pushing the rest of the screen below the fold.
               collapseAfter={3}
-              // Expanding is a decision about TODAY. Today never unmounts, so
-              // without a key the first tap on "2 more" would leave the list
-              // expanded for every day after it.
-              collapseKey={todayKey}
+              // Expanding is a decision about the day ON SCREEN, not just
+              // about "today" any more. `on` changes when the switcher steps
+              // — without keying on it, "2 more trackers" expanded on
+              // Tuesday would still read as expanded after stepping to
+              // Wednesday, the same one-shot trap `todayKey` alone existed
+              // to prevent for a screen that never unmounts.
+              collapseKey={on}
               testID="today-trackers"
             />
 
