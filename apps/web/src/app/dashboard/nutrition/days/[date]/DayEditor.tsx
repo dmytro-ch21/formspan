@@ -632,8 +632,14 @@ function EntryForm({
           <p className="mt-2 text-xs text-text-muted">
             {/* The multiplication, spelled out. An athlete fixing a doubled
                 count sees the total move as they type, which is the fastest
-                possible confirmation that the fix landed. */}
-            {draft.servings} × {draft.kcal} kcal ={" "}
+                possible confirmation that the fix landed. Rounded for
+                DISPLAY only via the same `trim` the load turns `servings`
+                through on the way in — the grams control writes an unrounded
+                `g / basis` string, and a non-round-numbered basis (e.g. a
+                172 g label) would otherwise print float dust here
+                ("0.5302325581395349 × …") while the stored value and the
+                total beside it stay exact. */}
+            {Number.isFinite(servings) ? trim(servings) : draft.servings} × {draft.kcal} kcal ={" "}
             <strong className="tabular-nums text-text">{total} kcal</strong> for this entry
           </p>
         )}

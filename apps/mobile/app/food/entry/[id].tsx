@@ -199,21 +199,33 @@ export default function EditEntryScreen() {
   // athlete's own typing.
   const lastUnit = useRef(foodUnit);
   useEffect(() => {
+    // `entry` checked BEFORE the ref write, not after: in the narrow window
+    // between mount and `localEntry` resolving, a unit change arriving while
+    // `entry` is still null must not be consumed here — advancing
+    // `lastUnit.current` past it would mean the seed effect above (whose
+    // `foodUnit` closure is frozen at mount) applies the STALE unit once the
+    // entry loads, leaving the field showing the old unit's number beside a
+    // toggle already lit for the new one. `entry` is now in the deps below so
+    // this effect gets another chance to run once loading finishes and pick
+    // the missed change back up — the ref guard still stops it firing on
+    // every keystroke, since `foodUnit` itself hasn't changed between those.
+    if (!entry) return;
     if (lastUnit.current === foodUnit) return;
     lastUnit.current = foodUnit;
-    if (!entry) return;
     const basis = gramsBasisFromLabel(entry.serving_label);
     if (basis == null) return;
     const n = parse(servings);
     // This is the sanctioned "re-render because an external value changed"
     // effect the ref guard above exists for — `FoodQuantity`'s identically
-    // shaped `lastUnit` effect is the same pattern. `servings`/`entry` are
-    // read fresh via closure rather than added to the deps, which would fire
-    // this on every keystroke instead of only on an outside unit change.
+    // shaped `lastUnit` effect is the same pattern. `servings` is read fresh
+    // via closure rather than added to the deps, which would fire this on
+    // every keystroke instead of only on an outside unit change.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setGramsText(String(toDisplayGrams(n * basis, foodUnit)));
+    // `servings` deliberately still absent — see above; `entry` is now
+    // included so the effect gets a second chance once loading finishes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [foodUnit]);
+  }, [foodUnit, entry]);
 
   if (missing) {
     return (

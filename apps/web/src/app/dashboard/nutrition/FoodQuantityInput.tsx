@@ -36,6 +36,7 @@ export function FoodQuantityInput({
 }) {
   const { foodUnit, setFoodUnit } = useUnits();
   const [text, setText] = useState(String(toDisplayGrams(grams, foodUnit)));
+  const [unitError, setUnitError] = useState<string | null>(null);
 
   // The field tracks `grams` from ABOVE only when it changes for a reason
   // other than this component's own `commit` below — a portion chip picked
@@ -92,7 +93,20 @@ export function FoodQuantityInput({
       // the new one, THEN persist the choice — reading the number out of the
       // text box and relabelling it is the bug this ordering avoids.
       setText(String(toDisplayGrams(grams, u)));
-      await setFoodUnit(u);
+      setUnitError(null);
+      try {
+        await setFoodUnit(u);
+      } catch (err) {
+        // `setFoodUnit` rolls back and RETHROWS on a failed PATCH — same
+        // contract `UnitsProvider.setUnits` has, and dropping this the way a
+        // bare `void switchUnit(u)` onClick would is the exact silent-failure
+        // shape `dashboard/settings/page.tsx` already had to fix for that
+        // sibling call. The rollback itself still re-fires the unit-change
+        // effect above and converts the field back, so nothing on screen
+        // lies — but the athlete typed a real request that failed, and
+        // deserves to be told.
+        setUnitError(err instanceof Error ? err.message : "Could not change the unit.");
+      }
     },
     [foodUnit, grams, setFoodUnit],
   );
@@ -133,6 +147,11 @@ export function FoodQuantityInput({
           ))}
         </div>
       </div>
+      {unitError && (
+        <p role="alert" className="text-xs text-danger-ink">
+          {unitError}
+        </p>
+      )}
     </div>
   );
 }

@@ -89,6 +89,15 @@ function num(v: string): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
+/** DISPLAY-only rounding — never applied to a stored/saved value. Same
+ *  two-decimal trim `days/[date]/DayEditor.tsx`'s own `trim` uses, for the
+ *  same reason: the grams control writes an unrounded `g / basis` string,
+ *  and a basis that doesn't divide evenly (e.g. a 172 g label) would
+ *  otherwise print float dust in this preview line. */
+function trimQty(v: number): string {
+  return String(Math.round(v * 100) / 100);
+}
+
 /**
  * Mirrors `Food.PerServing()`.
  *
@@ -306,7 +315,7 @@ export function RecipeEditor({ existing }: { existing?: Food }) {
                   {/* Per-unit above, total here. Same reasoning as the day
                       editor: a wrong quantity is invisible in a per-unit figure
                       and obvious in a total. */}
-                  {it.quantity || 0} × {it.serving_label || "serving"} ={" "}
+                  {it.quantity ? trimQty(num(it.quantity)) : 0} × {it.serving_label || "serving"} ={" "}
                   {Math.round(num(it.kcal) * num(it.quantity))} kcal in the pot
                 </p>
               </li>
