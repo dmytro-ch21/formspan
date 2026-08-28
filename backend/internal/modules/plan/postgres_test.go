@@ -293,10 +293,11 @@ func decodeUpdate(t *testing.T, body string) PlanUpdate {
 		t.Fatalf("decode %s: %v", body, err)
 	}
 	return PlanUpdate{
-		Day:       req.Day,
-		Sport:     req.Sport,
-		WorkoutID: req.WorkoutID,
-		Notes:     req.Notes,
+		Day:         req.Day,
+		Sport:       req.Sport,
+		WorkoutID:   req.WorkoutID,
+		ClassPlanID: req.ClassPlanID,
+		Notes:       req.Notes,
 	}
 }
 
@@ -465,6 +466,16 @@ func TestInvalidInput(t *testing.T) {
 		}
 	})
 
+	t.Run("unknown class plan is a 400, not a 500", func(t *testing.T) {
+		missing := "no_such_class_plan"
+		_, err := repo.Create(ctx, user, NewPlan{
+			ID: "plan_bad_4", Day: "2026-08-04", Sport: "bjj", ClassPlanID: &missing,
+		})
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("err = %v, want ErrInvalidInput", err)
+		}
+	})
+
 	t.Run("backwards range", func(t *testing.T) {
 		_, err := repo.List(ctx, user, Range{From: "2026-08-09", To: "2026-08-03"})
 		if !errors.Is(err, ErrInvalidInput) {
@@ -478,4 +489,308 @@ func TestInvalidInput(t *testing.T) {
 			t.Errorf("err = %v, want ErrInvalidInput", err)
 		}
 	})
+}
+
+// seedClassPlan inserts a minimal class_plans row directly, keeping this
+// test's dependencies to the table it is about rather than going through the
+// classplan module. Cleaned up unconditionally, the same reasoning
+// TestDeletingAWorkoutKeepsThePlan gives: a failed test that dies before its
+// own cleanup would otherwise leave the row for the next run to collide with.
+func seedClassPlan(t *testing.T, pool *pgxpool.Pool, id, ownerUserID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO class_plans (id, owner_user_id, name) VALUES ($1, $2, 'Half Guard fundamentals')`,
+		id, ownerUserID); err != nil {
+		t.Fatalf("seed class plan: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM class_plans WHERE id = $1`, id); err != nil {
+			t.Logf("cleanup class plan: %v", err)
+		}
+	})
+}
+
+// The three-state ClassPlanID: absent leaves it, a value sets it, an explicit
+// null clears it. Mirrors TestUpdateCanClearTheWorkoutButLeavesItWhenAbsent.
+func TestUpdateCanClearTheClassPlanButLeavesItWhenAbsent(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "plan_test_classplan"
+	cleanupPlans(t, pool, user)
+
+	const classPlanID = "plan_test_classplan_row"
+	seedClassPlan(t, pool, classPlanID, user)
+
+	cpid := classPlanID
+	made, err := repo.Create(ctx, user, NewPlan{
+		ID: "plan_cp_1", Day: "2026-08-04", Sport: "bjj", ClassPlanID: &cpid,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if made.ClassPlanID == nil || *made.ClassPlanID != classPlanID {
+		t.Fatalf("class_plan_id = %v, want %q", made.ClassPlanID, classPlanID)
+	}
+	if made.WorkoutID != nil {
+		t.Errorf("workout_id = %v, want nil", *made.WorkoutID)
+	}
+
+	// Absent: unchanged.
+	notes := "gi class"
+	after, err := repo.Update(ctx, user, made.ID, PlanUpdate{Notes: &notes})
+	if err != nil {
+		t.Fatalf("update notes: %v", err)
+	}
+	if after.ClassPlanID == nil || *after.ClassPlanID != classPlanID {
+		t.Errorf("class_plan_id = %v after an unrelated update, want it unchanged", after.ClassPlanID)
+	}
+
+	// Explicit null: cleared. Decoded from a real request body, matching
+	// TestUpdateCanClearTheWorkoutButLeavesItWhenAbsent's own reasoning: the
+	// point of the three-state is the wire contract, so the test starts there.
+	cleared, err := repo.Update(ctx, user, made.ID, decodeUpdate(t, `{"class_plan_id":null}`))
+	if err != nil {
+		t.Fatalf("clear class plan: %v", err)
+	}
+	if cleared.ClassPlanID != nil {
+		t.Errorf("class_plan_id = %v, want nil after an explicit null", *cleared.ClassPlanID)
+	}
+}
+
+// The three states, at the wire level. Mirrors TestWorkoutIDThreeStateSurvivesJSON.
+func TestClassPlanIDThreeStateSurvivesJSON(t *testing.T) {
+	for _, tc := range []struct {
+		body      string
+		present   bool
+		wantValue *string
+	}{
+		{`{}`, false, nil},
+		{`{"notes":"x"}`, false, nil},
+		{`{"class_plan_id":null}`, true, nil},
+		{`{"class_plan_id":"cp_1"}`, true, ptr("cp_1")},
+	} {
+		var req updateRequest
+		if err := json.Unmarshal([]byte(tc.body), &req); err != nil {
+			t.Fatalf("%s: %v", tc.body, err)
+		}
+		if req.ClassPlanID.Present != tc.present {
+			t.Errorf("%s: Present = %v, want %v", tc.body, req.ClassPlanID.Present, tc.present)
+		}
+		switch {
+		case tc.wantValue == nil && req.ClassPlanID.Value != nil:
+			t.Errorf("%s: Value = %q, want nil", tc.body, *req.ClassPlanID.Value)
+		case tc.wantValue != nil && (req.ClassPlanID.Value == nil || *req.ClassPlanID.Value != *tc.wantValue):
+			t.Errorf("%s: Value = %v, want %q", tc.body, req.ClassPlanID.Value, *tc.wantValue)
+		}
+	}
+}
+
+// Deleting a class plan must not delete the day scheduled around it — the
+// plan degrades to its discipline, which is still true and still startable.
+// Mirrors TestDeletingAWorkoutKeepsThePlan, and is the ticket's own explicit
+// "decide and state it in the PR" question, answered and proven against a
+// real Postgres rather than merely asserted in the migration's comment.
+func TestDeletingAClassPlanKeepsThePlan(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "plan_test_cp_fk"
+	cleanupPlans(t, pool, user)
+
+	const classPlanID = "plan_test_cp_fk_row"
+	seedClassPlan(t, pool, classPlanID, user)
+
+	cpid := classPlanID
+	if _, err := repo.Create(ctx, user, NewPlan{
+		ID: "plan_cp_fk_1", Day: "2026-08-04", Sport: "bjj", ClassPlanID: &cpid,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM class_plans WHERE id = $1`, classPlanID); err != nil {
+		t.Fatalf("delete class plan: %v", err)
+	}
+
+	got, err := repo.Get(ctx, user, "plan_cp_fk_1")
+	if err != nil {
+		t.Fatalf("get after class plan delete: %v", err)
+	}
+	if got.ClassPlanID != nil {
+		t.Errorf("class_plan_id = %v, want nil (ON DELETE SET NULL)", *got.ClassPlanID)
+	}
+}
+
+// The enumeration oracle, closed for class plans too. Mirrors
+// TestCannotReferenceAnotherUsersPrivateWorkout — this domain has no
+// public/VOLA-authored row at all (classplan.go's package comment), so EVERY
+// class plan id belonging to somebody else must read identically to one that
+// does not exist.
+func TestCannotReferenceAnotherUsersPrivateClassPlan(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const mine, theirs = "plan_cp_oracle_mine", "plan_cp_oracle_theirs"
+	cleanupPlans(t, pool, mine)
+
+	const victimClassPlan = "plan_cp_oracle_private_row"
+	seedClassPlan(t, pool, victimClassPlan, theirs)
+
+	cpid := victimClassPlan
+	_, visible := repo.Create(ctx, mine, NewPlan{
+		ID: "plan_cp_oracle_1", Day: "2026-08-04", Sport: "bjj", ClassPlanID: &cpid,
+	})
+
+	missing := "plan_cp_oracle_no_such_row"
+	_, absent := repo.Create(ctx, mine, NewPlan{
+		ID: "plan_cp_oracle_2", Day: "2026-08-04", Sport: "bjj", ClassPlanID: &missing,
+	})
+
+	if !errors.Is(visible, ErrInvalidInput) {
+		t.Fatalf("referencing another user's private class plan = %v, want ErrInvalidInput", visible)
+	}
+	// THE POINT: the two must be indistinguishable, or the endpoint is an
+	// oracle for guessable class plan ids.
+	if visible.Error() != absent.Error() {
+		t.Errorf("distinguishable errors:\n  not-yours: %v\n  no-such:   %v", visible, absent)
+	}
+}
+
+// The mutual-exclusivity decision this ticket asked to be made and stated:
+// a plan may reference a workout template or a class plan, never both.
+func TestWorkoutAndClassPlanAreMutuallyExclusive(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "plan_test_exclusive"
+	cleanupPlans(t, pool, user)
+
+	const workoutID = "plan_test_exclusive_workout"
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO workouts (id, owner_user_id, sport, name) VALUES ($1, $2, 'strength', 'Push Day')`,
+		workoutID, user); err != nil {
+		t.Fatalf("seed workout: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM workouts WHERE id = $1`, workoutID); err != nil {
+			t.Logf("cleanup workout: %v", err)
+		}
+	})
+
+	const classPlanID = "plan_test_exclusive_classplan"
+	seedClassPlan(t, pool, classPlanID, user)
+
+	t.Run("create refuses both at once", func(t *testing.T) {
+		wid, cpid := workoutID, classPlanID
+		_, err := repo.Create(ctx, user, NewPlan{
+			ID: "plan_exclusive_1", Day: "2026-08-04", Sport: "strength",
+			WorkoutID: &wid, ClassPlanID: &cpid,
+		})
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("err = %v, want ErrInvalidInput", err)
+		}
+	})
+
+	t.Run("update refuses setting the other side when one is already set", func(t *testing.T) {
+		wid := workoutID
+		made, err := repo.Create(ctx, user, NewPlan{
+			ID: "plan_exclusive_2", Day: "2026-08-04", Sport: "strength", WorkoutID: &wid,
+		})
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		// The PATCH itself never mentions workout_id — the conflict has to be
+		// caught against the ROW'S CURRENT workout_id, exactly the fetch this
+		// case exists to exercise.
+		_, err = repo.Update(ctx, user, made.ID, decodeUpdate(t, `{"class_plan_id":"`+classPlanID+`"}`))
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("err = %v, want ErrInvalidInput", err)
+		}
+
+		// Sanity: clearing workout_id first and THEN setting class_plan_id in
+		// a later PATCH is allowed — the constraint is about the resulting
+		// row, not about ever having touched both fields in one request.
+		_, err = repo.Update(ctx, user, made.ID, decodeUpdate(t, `{"workout_id":null}`))
+		if err != nil {
+			t.Fatalf("clear workout: %v", err)
+		}
+		after, err := repo.Update(ctx, user, made.ID, decodeUpdate(t, `{"class_plan_id":"`+classPlanID+`"}`))
+		if err != nil {
+			t.Fatalf("set class plan after clearing workout: %v", err)
+		}
+		if after.ClassPlanID == nil || *after.ClassPlanID != classPlanID {
+			t.Errorf("class_plan_id = %v, want %q", after.ClassPlanID, classPlanID)
+		}
+		if after.WorkoutID != nil {
+			t.Errorf("workout_id = %v, want nil", *after.WorkoutID)
+		}
+	})
+
+	t.Run("update allows swapping both sides in ONE request", func(t *testing.T) {
+		wid := workoutID
+		made, err := repo.Create(ctx, user, NewPlan{
+			ID: "plan_exclusive_3", Day: "2026-08-04", Sport: "strength", WorkoutID: &wid,
+		})
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		// A SINGLE PATCH body naming both sides — clearing workout_id and
+		// setting class_plan_id together, not across two calls like the
+		// subtest above. This is the case where both Present flags are true,
+		// so Update must not fetch the row at all: it has everything it
+		// needs from the request itself, and the resulting state (workout
+		// nil, class plan set) is legal.
+		after, err := repo.Update(ctx, user, made.ID,
+			decodeUpdate(t, `{"workout_id":null,"class_plan_id":"`+classPlanID+`"}`))
+		if err != nil {
+			t.Fatalf("swap in one request: %v", err)
+		}
+		if after.WorkoutID != nil {
+			t.Errorf("workout_id = %v, want nil", *after.WorkoutID)
+		}
+		if after.ClassPlanID == nil || *after.ClassPlanID != classPlanID {
+			t.Errorf("class_plan_id = %v, want %q", after.ClassPlanID, classPlanID)
+		}
+	})
+}
+
+// The Update-path twin of TestCannotReferenceAnotherUsersPrivateClassPlan.
+// assertClassPlanUsable is called from both Create and Update, but an update
+// is just as good an oracle as an insert — re-pointing an EXISTING plan at
+// someone else's private class plan is the same leak by a different verb,
+// and nothing before this test proved the Update call site actually reached
+// the guard rather than skipping it.
+func TestCannotReferenceAnotherUsersPrivateClassPlanOnUpdate(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const mine, theirs = "plan_cp_update_oracle_mine", "plan_cp_update_oracle_theirs"
+	cleanupPlans(t, pool, mine)
+
+	const victimClassPlan = "plan_cp_update_oracle_private_row"
+	seedClassPlan(t, pool, victimClassPlan, theirs)
+
+	made, err := repo.Create(ctx, mine, NewPlan{
+		ID: "plan_cp_update_oracle_1", Day: "2026-08-04", Sport: "bjj",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	visibleErr := repo.updateForTest(ctx, t, mine, made.ID, victimClassPlan)
+	absentErr := repo.updateForTest(ctx, t, mine, made.ID, "plan_cp_update_oracle_no_such_row")
+
+	if !errors.Is(visibleErr, ErrInvalidInput) {
+		t.Fatalf("re-pointing at another user's private class plan = %v, want ErrInvalidInput", visibleErr)
+	}
+	// THE POINT, same as the Create-path test: indistinguishable, or a PATCH
+	// is an existence oracle for guessable class plan ids.
+	if visibleErr.Error() != absentErr.Error() {
+		t.Errorf("distinguishable errors:\n  not-yours: %v\n  no-such:   %v", visibleErr, absentErr)
+	}
+}
+
+// updateForTest is a one-line helper so the test above reads as two
+// comparable calls rather than two inlined decodeUpdate/Update pairs.
+func (r *PostgresRepository) updateForTest(ctx context.Context, t *testing.T, userID, planID, classPlanID string) error {
+	t.Helper()
+	_, err := r.Update(ctx, userID, planID, decodeUpdate(t, `{"class_plan_id":"`+classPlanID+`"}`))
+	return err
 }

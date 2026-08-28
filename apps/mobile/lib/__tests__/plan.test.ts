@@ -69,8 +69,26 @@ describe('planned_sessions', () => {
       day: '2026-08-05',
       sport: 'strength',
       workoutId: 'workout-9',
+      classPlanId: null,
       notes: '',
     });
+  });
+
+  // N442: this device never SCHEDULES a class (see PlannedSession.classPlanId's
+  // own comment), but it has to READ one back correctly once the sync pull has
+  // written it — inserted directly here rather than through `planSession`,
+  // which has no parameter for it, to prove the column and the read path
+  // rather than a function that deliberately cannot produce this state.
+  test('a class-plan-linked row round-trips class_plan_id', async () => {
+    await db.runAsync(
+      `INSERT INTO planned_sessions
+         (id, user_id, day, sport, workout_id, class_plan_id, notes, created_at, updated_at, dirty, remote)
+       VALUES ('plan-cp-1', 'user-1', '2026-08-05', 'bjj', NULL, 'classplan-1', '', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 0, 1)`,
+    );
+
+    const [plan] = await plannedFor('user-1', '2026-08-05');
+    expect(plan.classPlanId).toBe('classplan-1');
+    expect(plan.workoutId).toBeNull();
   });
 
   test('a day can be planned as a bare discipline', async () => {

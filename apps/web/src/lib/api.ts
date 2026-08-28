@@ -2632,6 +2632,17 @@ export type Plan = {
   day: string;
   sport: Sport;
   workout_id: string | null;
+  /**
+   * The coach's class plan this day is scheduled from, instead of a workout
+   * template — a scheduled BJJ class rather than a scheduled strength/running
+   * session. Mutually exclusive with `workout_id`: the server rejects a plan
+   * naming both.
+   *
+   * Becomes null if the class plan is later deleted, matching `workout_id`'s
+   * own `ON DELETE SET NULL` — the plan degrades to its discipline rather
+   * than disappearing.
+   */
+  class_plan_id: string | null;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -2658,6 +2669,12 @@ export async function createPlan(
     day: string;
     sport: Sport;
     workoutID: string | null;
+    /**
+     * Schedule this day from a coach's class plan instead of a workout
+     * template. Mutually exclusive with `workoutID` — the server rejects a
+     * request that sets both.
+     */
+    classPlanID?: string | null;
     notes?: string;
   },
 ): Promise<Plan> {
@@ -2670,6 +2687,7 @@ export async function createPlan(
       day: input.day,
       sport: input.sport,
       workout_id: input.workoutID,
+      class_plan_id: input.classPlanID ?? null,
       notes: input.notes ?? "",
     }),
   });
@@ -2678,20 +2696,31 @@ export async function createPlan(
 /**
  * Move or re-point a plan.
  *
- * `workoutID` is deliberately three-state, matching the endpoint: leave the
- * key out to keep the current template, pass a string to set it, pass `null`
- * to clear it. `undefined` here means "omit", which is why the body is built
- * key by key rather than spread.
+ * `workoutID` and `classPlanID` are each deliberately three-state, matching
+ * the endpoint: leave the key out to keep the current value, pass a string to
+ * set it, pass `null` to clear it. `undefined` here means "omit", which is
+ * why the body is built key by key rather than spread.
+ *
+ * The two are mutually exclusive on the resulting row: setting one while the
+ * other is already present on the plan is rejected by the server the same
+ * way sending both in one request is.
  */
 export async function updatePlan(
   getToken: Token,
   id: string,
-  changes: { day?: string; sport?: Sport; workoutID?: string | null; notes?: string },
+  changes: {
+    day?: string;
+    sport?: Sport;
+    workoutID?: string | null;
+    classPlanID?: string | null;
+    notes?: string;
+  },
 ): Promise<Plan> {
   const body: Record<string, unknown> = {};
   if (changes.day !== undefined) body.day = changes.day;
   if (changes.sport !== undefined) body.sport = changes.sport;
   if (changes.workoutID !== undefined) body.workout_id = changes.workoutID;
+  if (changes.classPlanID !== undefined) body.class_plan_id = changes.classPlanID;
   if (changes.notes !== undefined) body.notes = changes.notes;
 
   return request<Plan>(getToken, `/plans/${encodeURIComponent(id)}`, {

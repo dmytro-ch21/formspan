@@ -192,6 +192,13 @@ const CREATE_PLANNED = `
     day TEXT NOT NULL,
     sport TEXT NOT NULL,
     workout_id TEXT,
+    -- N442: a plan scheduled from a coach's class plan instead of a workout
+    -- template. Mutually exclusive with workout_id server-side, but NEVER
+    -- written by this app — scheduling is web-only (see WeekPlanner.tsx's
+    -- own comment on plannedClassPlanTarget), so this column only ever
+    -- arrives via a sync pull. Nullable and untouched by every local write
+    -- function for exactly that reason.
+    class_plan_id TEXT,
     notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT '',
@@ -563,7 +570,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 28;
+const SCHEMA_VERSION = 29;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1135,6 +1142,21 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // set. That would turn the hottest write path in the app into two
     // requests instead of one, for a field that changes rarely.
     await addColumnIfMissing(db, 'local_sessions', 'started_at_dirty', 'INTEGER NOT NULL DEFAULT 0');
+  }
+
+  if (current < 29) {
+    // N442: a scheduled class is a plan referencing a coach's class plan
+    // instead of a workout template. Real ALTER, same reason as every branch
+    // above: `CREATE TABLE IF NOT EXISTS` is a no-op on a device already past
+    // this version, so it would keep a `planned_sessions` table with no
+    // `class_plan_id` and every pull that writes one would throw.
+    //
+    // Nullable, no default beyond SQLite's implicit NULL: unlike `dirty` (v15)
+    // or `name_dirty` (v16) there is nothing to backfill and no outbox state
+    // to get backwards, because this app never WRITES the column — see
+    // CREATE_PLANNED's own comment. Every existing row simply has no class
+    // plan until the next pull says otherwise.
+    await addColumnIfMissing(db, 'planned_sessions', 'class_plan_id', 'TEXT');
   }
 
   // The day query the card runs on every render of Today.

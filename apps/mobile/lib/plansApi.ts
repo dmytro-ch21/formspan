@@ -21,6 +21,13 @@ export type RemotePlan = {
   day: string;
   sport: string;
   workout_id: string | null;
+  /**
+   * N442: a coach's class plan this day is scheduled from, instead of a
+   * workout template — mutually exclusive with `workout_id` server-side.
+   * Read-only from this client's point of view: mobile never sets it, only
+   * reads it back on a pull. See `lib/plan.ts`'s `CREATE_PLANNED` comment.
+   */
+  class_plan_id: string | null;
   notes: string;
   created_at: string;
   updated_at: string;

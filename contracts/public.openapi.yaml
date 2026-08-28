@@ -3044,7 +3044,7 @@ components:
         Adherence is a query over both resources, computed by a client when
         asked; how a client chooses to match the two is its own decision and
         is not part of this contract.
-      required: [id, user_id, day, sport, workout_id, notes, created_at, updated_at]
+      required: [id, user_id, day, sport, workout_id, class_plan_id, notes, created_at, updated_at]
       properties:
         id: { type: string }
         user_id: { type: string }
@@ -3070,6 +3070,21 @@ components:
 
             Becomes null if the template is later deleted: the plan degrades to
             its discipline rather than disappearing.
+
+            Mutually exclusive with `class_plan_id` — a plan may reference a
+            workout template or a class plan, never both.
+        class_plan_id:
+          type: string
+          nullable: true
+          description: >
+            The coach's class plan this day is scheduled from — a scheduled
+            BJJ class rather than a scheduled strength/running session. Null
+            when the day names no class plan.
+
+            Becomes null if the class plan is later deleted: the plan degrades
+            to its discipline rather than disappearing, matching `workout_id`.
+
+            Mutually exclusive with `workout_id`.
         notes: { type: string, maxLength: 500 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -8463,7 +8478,16 @@ paths:
                 workout_id:
                   type: string
                   nullable: true
-                  description: Omit or null to plan the day as a bare discipline.
+                  description: >
+                    Omit or null to plan the day as a bare discipline. Mutually
+                    exclusive with `class_plan_id` — sending both is a 400.
+                class_plan_id:
+                  type: string
+                  nullable: true
+                  description: >
+                    Schedule this day from a coach's class plan instead of a
+                    workout template. Mutually exclusive with `workout_id` —
+                    sending both is a 400.
                 notes: { type: string, maxLength: 500 }
       responses:
         "201":
@@ -8474,7 +8498,9 @@ paths:
         "400":
           description: >
             A missing id, a `day` that is not a calendar date, an unknown
-            sport, an unknown workout, or notes over 500 characters.
+            sport, an unknown workout, an unknown class plan, both a
+            `workout_id` and a `class_plan_id` at once, or notes over 500
+            characters.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -8490,11 +8516,15 @@ paths:
       summary: Change a planned session
       operationId: updatePlan
       description: >
-        Partial — omitted fields are left alone. `workout_id` is three-state:
-        omit it to leave the template, send an id to set it, and send an
-        explicit `null` to clear it so the day becomes a bare discipline.
-        Without that distinction, clearing a template would be
+        Partial — omitted fields are left alone. `workout_id` and
+        `class_plan_id` are each three-state: omit to leave it, send an id to
+        set it, and send an explicit `null` to clear it so the day becomes a
+        bare discipline. Without that distinction, clearing one would be
         indistinguishable from not mentioning it.
+
+        The two are mutually exclusive on the resulting row, not merely
+        within one request body: setting one while the other is already
+        present on the plan is a 400, exactly as sending both at once is.
       parameters:
         - name: planID
           in: path
@@ -8510,6 +8540,7 @@ paths:
                 day: { type: string, format: date }
                 sport: { type: string, enum: [strength, running, bjj] }
                 workout_id: { type: string, nullable: true }
+                class_plan_id: { type: string, nullable: true }
                 notes: { type: string, maxLength: 500 }
       responses:
         "200":

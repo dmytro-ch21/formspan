@@ -42,6 +42,7 @@ const plan = (day: string, sport: string): PlannedSession => ({
   day,
   sport,
   workoutId: null,
+  classPlanId: null,
   notes: '',
 });
 

@@ -301,7 +301,7 @@ describe('the active session outranks everything', () => {
   it('leads with Resume and renders no competing plan card', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, notes: '' },
+      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, classPlanId: null, notes: '' },
     ]);
 
     render(<TodayScreen />);
@@ -366,7 +366,7 @@ describe('the active session outranks everything', () => {
 describe("today's plan", () => {
   it('offers Start for a planned strength day, template and all', async () => {
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: 'w7', notes: '' },
+      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: 'w7', classPlanId: null, notes: '' },
     ]);
     mockCachedWorkouts.mockResolvedValue([{ id: 'w7', name: 'Push A' } as Workout]);
 
@@ -383,7 +383,7 @@ describe("today's plan", () => {
   // Criterion 5 of the epic, and the one that is silent when broken.
   it('sends a planned BJJ day to the BJJ log, never to the set logger', async () => {
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, notes: '' },
+      { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, classPlanId: null, notes: '' },
     ]);
     render(<TodayScreen />);
 
@@ -394,7 +394,7 @@ describe("today's plan", () => {
 
   it('announces Log rather than Start for a discipline logged afterwards', async () => {
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, notes: '' },
+      { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, classPlanId: null, notes: '' },
     ]);
     render(<TodayScreen />);
 
@@ -406,7 +406,7 @@ describe("today's plan", () => {
     // The one sentence that was flatly untrue at the exact moment an athlete
     // finished their last session.
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, notes: '' },
+      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, classPlanId: null, notes: '' },
     ]);
     mockListLocalSessions.mockResolvedValue([session({ id: 's1', sport: 'strength' })]);
 
@@ -590,7 +590,7 @@ describe('insight', () => {
 describe('later', () => {
   it('shows the next planned day, with no button on it', async () => {
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p9', day: dayFromNow(2), sport: 'bjj', workoutId: null, notes: '' },
+      { id: 'p9', day: dayFromNow(2), sport: 'bjj', workoutId: null, classPlanId: null, notes: '' },
     ]);
     render(<TodayScreen />);
 
@@ -603,7 +603,7 @@ describe('later', () => {
   it('is shown alongside a running session', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p9', day: dayFromNow(2), sport: 'bjj', workoutId: null, notes: '' },
+      { id: 'p9', day: dayFromNow(2), sport: 'bjj', workoutId: null, classPlanId: null, notes: '' },
     ]);
     render(<TodayScreen />);
 
@@ -650,7 +650,7 @@ describe('the day switcher, restored on direct user instruction', () => {
 
   it('steps forward to reveal a plan on tomorrow', async () => {
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p9', day: dayFromNow(1), sport: 'strength', workoutId: null, notes: '' },
+      { id: 'p9', day: dayFromNow(1), sport: 'strength', workoutId: null, classPlanId: null, notes: '' },
     ]);
     render(<TodayScreen />);
 
@@ -664,7 +664,7 @@ describe('the day switcher, restored on direct user instruction', () => {
 
   it('a plan owed on a browsed FUTURE day still routes through startSessionHref', async () => {
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p9', day: dayFromNow(1), sport: 'bjj', workoutId: null, notes: '' },
+      { id: 'p9', day: dayFromNow(1), sport: 'bjj', workoutId: null, classPlanId: null, notes: '' },
     ]);
     render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
@@ -676,7 +676,7 @@ describe('the day switcher, restored on direct user instruction', () => {
 
   it('steps to a past day with an unmet plan: no press, says Not logged', async () => {
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, notes: '' },
+      { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, classPlanId: null, notes: '' },
     ]);
     render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
@@ -720,7 +720,7 @@ describe('the day switcher, restored on direct user instruction', () => {
 
   it('"planned and done" reads in the past tense for a browsed past day', async () => {
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, notes: '' },
+      { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, classPlanId: null, notes: '' },
     ]);
     mockListLocalSessions.mockResolvedValue([
       session({ id: 's1', sport: 'strength', started_at: `${dayFromNow(-1)}T09:00:00.000Z` }),
@@ -753,7 +753,7 @@ describe('the day switcher, restored on direct user instruction', () => {
 
   it('does NOT move LATER — it names the same next planned day regardless of viewDay', async () => {
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'later1', day: dayFromNow(3), sport: 'bjj', workoutId: null, notes: '' },
+      { id: 'later1', day: dayFromNow(3), sport: 'bjj', workoutId: null, classPlanId: null, notes: '' },
     ]);
     render(<TodayScreen />);
     expect(await screen.findByTestId('today-later')).toBeTruthy();
@@ -1014,7 +1014,7 @@ describe('offline', () => {
     // dependency for its primary block would fail here rather than on a phone
     // in a basement.
     mockListPlannedBetween.mockResolvedValue([
-      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, notes: '' },
+      { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, classPlanId: null, notes: '' },
     ]);
     render(<TodayScreen />);
 

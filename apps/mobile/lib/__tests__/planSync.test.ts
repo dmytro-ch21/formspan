@@ -121,6 +121,43 @@ describe('the outbox flags', () => {
     expect(mockUpdate).toHaveBeenCalledTimes(1);
     expect(mockUpdate.mock.calls[0][2]).toMatchObject({ day: '2026-08-06' });
   });
+
+  /**
+   * N442: a local edit must never push `class_plan_id` at all — not even as
+   * an explicit `null` — because the server's PATCH is three-state and
+   * treats an ABSENT key as "leave it alone". This device never authors a
+   * class-plan link (see `plan.ts`'s `PlannedSession.classPlanId` comment),
+   * so the only way one ever lands on a row is a prior sync pull from web.
+   * If a future edit to `pushRow`'s payload ever added the key — even
+   * `class_plan_id: row.class_plan_id`, which LOOKS like the safe,
+   * pass-through choice — it would silently clear that link on the very
+   * next unrelated edit (renaming the day, say) pushed from this device.
+   *
+   * `toMatchObject` elsewhere in this file cannot catch that regression: it
+   * is a subset match, so an extra key passes silently. This asserts the
+   * key's ABSENCE directly.
+   */
+  test('editing a class-plan-linked row never pushes class_plan_id', async () => {
+    const p = await planSession(USER, '2026-08-05', 'bjj', null);
+    await syncPlans(USER, getToken);
+
+    // Simulate what only a sync PULL can do: a class-plan link arriving
+    // from the server. Then a local edit that has nothing to do with it.
+    await db.runAsync(
+      `UPDATE planned_sessions
+          SET class_plan_id = ?, day = ?, dirty = 1, updated_at = ?
+        WHERE id = ?`,
+      'a-class-plan-id-from-web',
+      '2026-08-06',
+      new Date().toISOString(),
+      p.id,
+    );
+    await syncPlans(USER, getToken);
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    const pushed = mockUpdate.mock.calls[0][2] as Record<string, unknown>;
+    expect(Object.keys(pushed)).not.toContain('class_plan_id');
+  });
 });
 
 describe('deleting', () => {
