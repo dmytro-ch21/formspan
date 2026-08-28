@@ -7,7 +7,7 @@ import {
   rememberActivityChoice,
   settleActivityChoice,
 } from '@/lib/activityLevel';
-import { ApiError } from '@/lib/apiError';
+import { ApiError, OfflineError, RequestDroppedError, TimeoutError } from '@/lib/apiError';
 import type { Module } from '@/lib/modules';
 import { fetchAdjustment, listTargets, saveTarget, suggestedTarget } from '@/lib/nutritionApi';
 import { setActivityLevel } from '@/lib/profile';
@@ -170,6 +170,16 @@ function selectedState(testID: string): boolean | undefined {
   return screen.getByTestId(testID).props.accessibilityState?.selected;
 }
 
+/**
+ * A diagnosis, as a regex — `toHaveTextContent` matches a plain string only
+ * EXACTLY, and every composed failure sentence here is the diagnosis plus a
+ * screen-local action, never the diagnosis alone. Same helper as
+ * `scanScreen.test.tsx`'s.
+ */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** A stored target, as the server sends it back. */
 function target(over: Partial<Awaited<ReturnType<typeof listTargets>>[number]> = {}) {
   return {
@@ -304,6 +314,55 @@ describe('the saved receipt', () => {
 });
 
 /**
+ * N94 — "Use this target" used to answer EVERY failure the same way: a bare
+ * `setSaveFailed(true)` rendered one fixed sentence ("Could not save it —
+ * this one needs a connection … try again when you have signal"), whatever
+ * actually went wrong. A server refusal and a request that timed out on a
+ * live connection both read as a dead radio.
+ */
+describe('accepting the derived target, when the write fails', () => {
+  it('shows a server refusal in the server’s own words', async () => {
+    mockSave.mockRejectedValueOnce(
+      new ApiError('kcal must be between 800 and 8000', 'invalid_input', 400),
+    );
+    render(<GoalsScreen />);
+    fireEvent.press(await screen.findByTestId('target-accept'));
+
+    const failed = await screen.findByTestId('target-accept-failed');
+    expect(failed).toHaveTextContent(/must be between 800 and 8000/);
+    expect(failed).not.toHaveTextContent(/signal/);
+  });
+
+  it.each([
+    ['no route to the API', new OfflineError()],
+    ['a timeout', new TimeoutError()],
+    ['a dropped connection', new RequestDroppedError()],
+  ] as const)('composes the transport’s own diagnosis for %s', async (_label, err) => {
+    mockSave.mockRejectedValueOnce(err);
+    render(<GoalsScreen />);
+    fireEvent.press(await screen.findByTestId('target-accept'));
+
+    const failed = await screen.findByTestId('target-accept-failed');
+    expect(failed).toHaveTextContent(new RegExp(escapeRe(err.diagnosis)));
+  });
+
+  it('never blames a bad connection for a timeout or a dropped connection', async () => {
+    // The regression: folding this back to one sentence would pass the test
+    // above (the diagnosis IS a substring of the old fixed sentence's
+    // neighbourhood by coincidence for none of these) but would still read as
+    // network-caused. Pinned separately so a fold-back is caught even if a
+    // future diagnosis string happens to overlap.
+    mockSave.mockRejectedValueOnce(new TimeoutError());
+    render(<GoalsScreen />);
+    fireEvent.press(await screen.findByTestId('target-accept'));
+
+    const failed = await screen.findByTestId('target-accept-failed');
+    expect(failed).not.toHaveTextContent(/needs a connection/);
+    expect(failed).not.toHaveTextContent(/signal/);
+  });
+});
+
+/**
  * N72 — the two ways of DISAGREEING with the derivation, which lived on web
  * only until now.
  *
@@ -395,10 +454,10 @@ describe('typing your own target', () => {
     expect(mockSave).not.toHaveBeenCalled();
   });
 
-  it('says so when the save could not reach the server', async () => {
+  it('says so when there was no route to the API at all', async () => {
     // Offline is this app's ordinary weather, and a button that simply
     // un-dims reads as a successful save.
-    mockSave.mockRejectedValueOnce(new Error('offline'));
+    mockSave.mockRejectedValueOnce(new OfflineError());
     render(<GoalsScreen />);
     await openManualForm();
 
@@ -406,7 +465,7 @@ describe('typing your own target', () => {
     fireEvent.press(screen.getByTestId('manual-save'));
 
     const failed = await screen.findByTestId('manual-failed');
-    expect(failed).toHaveTextContent(/try again when you have signal/);
+    expect(failed).toHaveTextContent(new RegExp(escapeRe(new OfflineError().diagnosis)));
   });
 
   it('reports a server REFUSAL in the server’s words, not as bad signal', async () => {
@@ -425,6 +484,32 @@ describe('typing your own target', () => {
 
     const failed = await screen.findByTestId('manual-failed');
     expect(failed).toHaveTextContent(/must be between 800 and 8000/);
+    expect(failed).not.toHaveTextContent(/signal/);
+  });
+
+  /**
+   * N94: a timeout and a dropped connection are not "no route to the API",
+   * and this screen used to report all three the same way — "this one needs
+   * a connection … try again when you have signal" — which sent an athlete
+   * whose request timed out on a live connection to go and look for signal
+   * they already had. `manualTarget.test.ts` covers `refusalOrWeather`
+   * itself; this pins that the screen actually renders its answer rather
+   * than a fixed sentence of its own.
+   */
+  it.each([
+    ['a timeout', new TimeoutError()],
+    ['a dropped connection', new RequestDroppedError()],
+  ] as const)('never blames a bad connection for %s', async (_label, err) => {
+    mockSave.mockRejectedValueOnce(err);
+    render(<GoalsScreen />);
+    await openManualForm();
+
+    typeATarget('2000');
+    fireEvent.press(screen.getByTestId('manual-save'));
+
+    const failed = await screen.findByTestId('manual-failed');
+    expect(failed).toHaveTextContent(new RegExp(escapeRe(err.diagnosis)));
+    expect(failed).not.toHaveTextContent(/needs a connection/);
     expect(failed).not.toHaveTextContent(/signal/);
   });
 
@@ -509,6 +594,40 @@ describe('what you are eating to', () => {
     render(<GoalsScreen />);
 
     expect(await screen.findByTestId('target-provenance-none')).toBeTruthy();
+  });
+});
+
+/**
+ * N94 — the derivation's own `.catch` used to be unconditional: any failure
+ * at all, including a 500 the server genuinely answered, rendered a fixed
+ * "Could not reach the server." A `suggestedTarget` refusal is not the same
+ * failure as a dead radio, and must not read as one.
+ */
+describe('why today’s number could not be worked out', () => {
+  it('never says "could not reach the server" for a failure the server answered', async () => {
+    mockSuggested.mockRejectedValue(
+      new ApiError('could not derive a target', 'internal', 500),
+    );
+    render(<GoalsScreen />);
+
+    const failed = await screen.findByTestId('target-derivation-failed');
+    expect(failed).not.toHaveTextContent(/reach the server/i);
+    // The screen's own knowledge — why this ONE number needs the network —
+    // survives regardless of cause.
+    expect(failed).toHaveTextContent(/everything else in Food works offline/);
+  });
+
+  it.each([
+    ['no route to the API', new OfflineError()],
+    ['a timeout', new TimeoutError()],
+    ['a dropped connection', new RequestDroppedError()],
+  ] as const)('composes the transport’s own diagnosis for %s', async (_label, err) => {
+    mockSuggested.mockRejectedValue(err);
+    render(<GoalsScreen />);
+
+    const failed = await screen.findByTestId('target-derivation-failed');
+    expect(failed).toHaveTextContent(new RegExp(escapeRe(err.diagnosis)));
+    expect(failed).toHaveTextContent(/everything else in Food works offline/);
   });
 });
 

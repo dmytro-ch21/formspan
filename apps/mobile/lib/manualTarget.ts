@@ -14,7 +14,7 @@
  * failure the mobile-first rule in `CLAUDE.md` was written to forbid.
  */
 
-import { ApiError } from './apiError';
+import { ApiError, transportDiagnosis } from './apiError';
 import { kcalLooksOff, type Macros } from './nutrition';
 
 /** The form as the athlete has it: five strings, any of them half-typed. */
@@ -43,8 +43,20 @@ export type ManualParse =
    *  retype a field that was fine. */
   | { ok: false; field: keyof ManualDraft | null; problem: string };
 
+/** "save it" / "remove it" / "put it back" — the object half of the
+ *  sentence, shared between {@link refusalOrWeather}'s composed message and
+ *  the fallback below. */
+function whatFor(verb: 'save' | 'remove' | 'put it back'): string {
+  return verb === 'save' ? 'save it' : verb === 'remove' ? 'remove it' : 'put it back';
+}
+
 /**
- * The one offline sentence, said the same way wherever a target write fails.
+ * The one sentence for a write that got no answer AT ALL and could not even
+ * say which of the three ways that happens (`apiError.ts`) — kept only as the
+ * last resort in {@link refusalOrWeather}, for something that is neither an
+ * `ApiError` nor a `TransportError`. That should not happen: every write path
+ * this app has throws one of the two. But this is still an honest sentence
+ * rather than silence if it ever does.
  *
  * Lifted out of `app/(tabs)/goals.tsx` when a second screen — the history —
  * grew the same write paths. Two copies of this sentence is two chances for one
@@ -54,10 +66,16 @@ export type ManualParse =
  * saves.** It read "Could not save it" unconditionally, which was returned for
  * a failed DELETE and a failed UNDO too — telling somebody a save failed when
  * they had pressed Remove. Found in review.
+ *
+ * **N94:** this used to be `refusalOrWeather`'s answer for EVERY non-`ApiError`
+ * failure, which is the same defect N55 named one layer down — a timeout, a
+ * dropped connection and no route at all were all reported as "this one needs
+ * a connection … try again when you have signal", so an athlete whose request
+ * timed out on four bars of signal was sent to go and find some. It is now
+ * only reachable when the transport itself gave no diagnosis to compose.
  */
 export function offlineMessage(verb: 'save' | 'remove' | 'put it back' = 'save'): string {
-  const what = verb === 'save' ? 'save it' : verb === 'remove' ? 'remove it' : 'put it back';
-  return `Could not ${what} — this one needs a connection. Nothing has changed; try again when you have signal.`;
+  return `Could not ${whatFor(verb)} — this one needs a connection. Nothing has changed; try again when you have signal.`;
 }
 
 /** The default phrasing, for the callers that only ever save. */
@@ -72,12 +90,22 @@ export const OFFLINE_MESSAGE = offlineMessage();
  * told to try again when they had signal. It would fail identically forever.
  *
  * An `ApiError` means the server ANSWERED and refused: its message is written
- * for a human and is the most useful thing available, so it is shown. Anything
- * else — `OfflineError`, a dropped socket — means nothing was answered at all,
- * and only then is "try again when you have signal" true.
+ * for a human and is the most useful thing available, so it is shown.
+ *
+ * Anything else means nothing was answered at all — but N94 is what a "means
+ * nothing was answered" branch that stopped there had missed: `OfflineError`,
+ * `TimeoutError` and `RequestDroppedError` (`apiError.ts`) are three different
+ * diagnoses, not one, and only `OfflineError` licenses "try again when you
+ * have signal". A request that ran for thirty seconds before this gave up had
+ * a network under it the whole time. So this composes `transportDiagnosis()`
+ * — the wording of WHAT happened, central and shared — with the one thing this
+ * family of screens can say for itself: the write never landed, so nothing
+ * changed.
  */
 export function refusalOrWeather(e: unknown, verb: 'save' | 'remove' | 'put it back' = 'save'): string {
   if (e instanceof ApiError) return e.message;
+  const diagnosis = transportDiagnosis(e);
+  if (diagnosis) return `${diagnosis} Nothing has changed — try to ${whatFor(verb)} again.`;
   return offlineMessage(verb);
 }
 

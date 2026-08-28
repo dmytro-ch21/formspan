@@ -45660,6 +45660,113 @@ tests) and `typecheck:mobile` stayed green.
 seen on a device on a day with a BJJ class scheduled, with a roadmap active
 and, separately, deactivated.
 
+## 2026-08-27 — N94: two screens stop blaming the network for failures the server answered (#437)
+
+N55 (#365) gave every dead request its own sentinel — `OfflineError`,
+`TimeoutError`, `RequestDroppedError` — each carrying a `diagnosis` a screen
+composes with its own local action via `transportDiagnosis()`. Filed
+deliberately out of that PR were the two screens still hand-writing
+network-flavoured copy from before the taxonomy existed, each misdiagnosing at
+least one real failure under it.
+
+**`apps/mobile/app/phase/index.tsx`'s `refresh` had an unconditional
+`.catch`.** `listPhases` failing for ANY reason — a genuine 500 as readily as
+a dead radio — rendered a fixed `'Could not reach the server.'` Now the catch
+reads `transportDiagnosis(err)` and falls back to a cause-neutral
+`'Could not load this phase.'` only when the server actually answered (an
+`ApiError`), so a failure the server answered never gets network wording.
+
+**`apps/mobile/app/(tabs)/goals.tsx` had three sites sharing the same
+defect, not one.** The two the ticket named by line number —
+`suggestedTarget`'s read failure (`failed`, "Could not reach the server. This
+one number is worked out there…") and the shared `refusalOrWeather` helper
+(`OFFLINE_MESSAGE`, "Could not save it — this one needs a connection…
+try again when you have signal") — had, since the ticket was filed, already
+been joined by a third: `accept()`'s own write path (the "Use this target"
+button) had drifted onto a bare `setSaveFailed(true)` boolean that rendered
+`OFFLINE_MESSAGE` unconditionally, never even routing through
+`refusalOrWeather`. All three now compose:
+
+- `failed`/`saveFailed` became `string | null` instead of `boolean` — a flat
+  flag is exactly what forces every cause to share one sentence, the same
+  fix `writeFailed` already had for `saveManual`/`acceptAdjustment`.
+- A new `derivationFailureMessage(err)` in `goals.tsx` composes
+  `transportDiagnosis(err)` (falling back to a neutral "This number could not
+  be worked out right now." for an `ApiError`) with the screen's own
+  knowledge — "everything else in Food works offline" — mirroring
+  `food/scan.tsx`'s `messageForLookupFailure`.
+- `accept()`'s catch now calls `refusalOrWeather(e)`, the same helper the
+  other two write paths already used.
+
+**The real fix is in `lib/manualTarget.ts`'s `refusalOrWeather`, shared by
+three call sites (`goals.tsx`'s `accept`/`saveManual`/`acceptAdjustment`) plus
+`goals/history.tsx`.** It used to answer every non-`ApiError` failure with
+`offlineMessage(verb)` — "this one needs a connection … try again when you
+have signal" — regardless of which of the three ways a request can die. That
+is the identical defect N55 fixed one layer down, just reintroduced above it:
+a request that timed out on a live connection was told to go and find signal
+it already had. It now composes `transportDiagnosis(e)` with the one thing
+every write path here can say for itself — "Nothing has changed" — and falls
+back to the old `offlineMessage` only for something that is neither an
+`ApiError` nor a recognised `TransportError`, which should not happen since
+every API caller throws one of the two.
+
+**Mutation-verified at all three composition points**, by hand: folding
+`refusalOrWeather` back to its old unconditional `offlineMessage(verb)` turned
+13 tests red across `manualTarget.test.ts` and `goalsScreen.test.tsx`; folding
+`derivationFailureMessage` back to the fixed sentence turned 4 red; folding
+`phase/index.tsx`'s catch back turned 5 of 6 red in the new
+`phaseScreen.test.tsx`. All restored and re-confirmed green afterward, per the
+"verify a check can fail" discipline.
+
+New tests: `lib/__tests__/manualTarget.test.ts` gained a `refusalOrWeather`
+describe block; `app/__tests__/goalsScreen.test.tsx` gained coverage for the
+`accept()` write path (new testID `target-accept-failed`) and the derivation
+read (`target-derivation-failed`), plus updated its one pre-existing test that
+had stubbed a plain `Error('offline')` rather than a real sentinel; a new
+`app/__tests__/phaseScreen.test.tsx` covers the read failure, since
+`phaseWeightUnits.test.tsx` only ever covered the write path's unit
+conversion. Full mobile suite (220 suites, 3395 tests), `lint:mobile` and
+`typecheck:mobile` all green.
+
+**Follow-up, same day, caught in `frontend-reviewer` and fixed before
+merge**: the paragraph above originally read "not touched" for
+`phase/index.tsx`'s `start`/`stop` catches and `goals/history.tsx`'s read
+path — both carried the identical unconditional-network-blame defect, one
+function and one file away from the sites the ticket named, and shipping the
+file half-fixed invites "wasn't this already fixed?" later. Both are now
+fixed alongside the named sites rather than left as a follow-up:
+
+- `phase/index.tsx`'s `start`/`stop` catches now read `transportDiagnosis(err)`
+  the same way `refresh` does, falling back to a neutral `'Could not start
+  it.'`/`'Could not end it.'` only for a server-answered `ApiError`.
+- `goals/history.tsx`'s failed-read catch used to discard its error entirely
+  (`.catch(() => setRead({ status: 'unavailable' }))`) and the render
+  asserted one fixed "this one needs a connection" sentence regardless of
+  cause. `TargetRead`'s `unavailable` variant and `TargetHistory`'s matching
+  `kind` both gained an optional `diagnosis` field, threaded from the catch
+  through `buildHistory` to the render, which now composes it with the
+  screen's own "It is not gone; we just could not ask." — falling back to a
+  neutral sentence for a server-answered failure, same pattern as
+  everywhere else in this ticket.
+- `accept()`'s catch (`goals.tsx`, the "Use this target" button) also gained
+  the `AccessibilityInfo.announceForAccessibility(why)` call its two sibling
+  write catches (`saveManual`, `acceptAdjustment`) already had — a VoiceOver
+  user hitting a real failure there previously heard nothing at all, the
+  button just un-dimmed. Caught in the same review pass.
+
+Mutation-verified the same way as the rest of the ticket: folding
+`phase/index.tsx`'s two write catches back to the unconditional wording
+turned 4 assertions red across the new `describe('why start/stop failed', …)`
+block; folding `buildHistory`'s `unavailable` passthrough back to dropping
+`diagnosis` turned the new `targetHistory.test.ts` case red. Both restored
+and re-confirmed green. `goals/history.tsx`'s catch-site wiring itself has no
+component-test harness (this repo deliberately does not write mobile
+component tests) — its correctness rests on `buildHistory`'s passthrough,
+which is what the mutation above exercises.
+
+Full mobile suite after these fixups: 220 suites, 3402 tests, `verify` green.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

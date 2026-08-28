@@ -76,6 +76,7 @@ import { Text } from '@/components/Themed';
 import { ManualTarget } from '@/components/nutrition/ManualTarget';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { transportDiagnosis } from '@/lib/apiError';
 import { formatDayLong } from '@/lib/history';
 import {
   draftFrom,
@@ -189,12 +190,18 @@ export default function TargetHistoryScreen() {
         .then((targets) => {
           if (newest()) setRead({ status: 'read', targets, from: win.from });
         })
-        .catch(() => {
+        .catch((err) => {
           // `unavailable`, never an empty array. An empty array here would make
           // a request that never returned render as "you have never set a
           // target" — a positive claim about somebody's data, next to a delete
           // button. `apps/web`'s targets page still does exactly that.
-          if (newest()) setRead({ status: 'unavailable' });
+          //
+          // N94: `err` used to be discarded here, and the render below asserted
+          // one fixed "this one needs a connection" sentence for any rejection
+          // — including a server 500. `transportDiagnosis` composes the real
+          // cause; `null` (a server-answered `ApiError`) falls back to the
+          // screen's neutral wording below rather than a network claim.
+          if (newest()) setRead({ status: 'unavailable', diagnosis: transportDiagnosis(err) });
         });
       return () => {
         live = false;
@@ -433,11 +440,16 @@ function Body({
   if (history.kind === 'unread') return <ActivityIndicator testID="history-loading" />;
 
   if (history.kind === 'unavailable') {
+    // N94: this used to assert "this one needs a connection" for ANY failed
+    // read, including a server 500. `history.diagnosis` is the transport's
+    // own composed sentence (`transportDiagnosis(err)` from the catch in
+    // `load`), null for a server-answered `ApiError` — which falls back to
+    // this screen's own neutral wording, never a network claim.
     return (
       <View style={styles.state}>
         <Text style={styles.stateText} testID="history-unavailable">
-          Could not read your target history — this one needs a connection. It is not gone; we just
-          could not ask.
+          {history.diagnosis ?? 'Could not read your target history.'} It is not gone; we just could
+          not ask.
         </Text>
         <Pressable onPress={onRetry} hitSlop={8} accessibilityRole="button" testID="history-retry">
           <Text style={styles.stateAction}>Try again</Text>

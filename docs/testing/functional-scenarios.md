@@ -14044,3 +14044,86 @@ on screen. That, and only that, is what moved.
   active: confirm the focus and suggestion text is legible and does not
   visually crowd the Log button within the card's fixed two-line hint area,
   in both light and dark appearance.
+
+## N94 — two screens compose the transport's own diagnosis instead of asserting one (`apps/mobile/app/phase/index.tsx`, `apps/mobile/app/(tabs)/goals.tsx`, `apps/mobile/lib/manualTarget.ts`)
+
+### Happy path
+
+- Load the Phase screen with a live phase already recorded: confirm it shows
+  the phase card, with no problem text of any kind.
+- On Goals, with a target derivable and a live target on record: confirm no
+  derivation-failure or save-failure text appears anywhere on the screen.
+- Type a valid manual target and save it successfully: confirm no failure
+  text appears and the receipt/confirmation shows as normal.
+- Accept the derived target ("Use this target") successfully: confirm the
+  "Saved" receipt appears and no failure text does.
+- Accept a weekly adjustment successfully: confirm the same.
+
+### Edge cases and errors — no route to the API (offline)
+
+- With the device radio off (airplane mode), open the Phase screen: confirm
+  the problem text reads "Can't reach VOLA." (not "Could not reach the
+  server.") and offers no false claim about what is wrong beyond that.
+- With the radio off, open Goals: confirm the derivation-failure text
+  ("target-derivation-failed") leads with "Can't reach VOLA." and still
+  states the screen's own reason this one number needs the network —
+  "everything else in Food works offline."
+- With the radio off, type a manual target and try to save: confirm the
+  failure text ("manual-failed") leads with "Can't reach VOLA." and still
+  reads "Nothing has changed."
+- With the radio off, press "Use this target": confirm the failure text
+  ("target-accept-failed") leads with "Can't reach VOLA." and "Nothing has
+  changed" — not the old fixed "Could not save it — this one needs a
+  connection … try again when you have signal" sentence.
+- With the radio off, accept a weekly adjustment: confirm the same shape on
+  "adjustment-failed".
+
+### Edge cases and errors — a failure the server genuinely answered
+
+- Force a request to the derivation/phase/target-save endpoints to return a
+  5xx (a backend outage, or a temporarily disabled route): confirm NONE of
+  the four failure texts above ever contains "reach the server", "signal",
+  or "needs a connection" — the server answered, however badly, and that is
+  not the same failure as a dead radio.
+- Force one of those endpoints to return a 4xx the server genuinely refuses
+  (e.g. an out-of-range manual target already caught client-side is hard to
+  force past validation, so use a request the server itself rejects):
+  confirm the failure text shows the server's own message verbatim, with no
+  network wording appended.
+
+### Edge cases and errors — a request that dies mid-flight, not from no signal
+
+- On a connection that is demonstrably up (a request that times out after
+  VOLA's own deadline, or one whose connection resets mid-request rather
+  than never starting): confirm the four failure texts above read "VOLA
+  took too long to answer." or "That didn't get through." respectively — and
+  do NOT say "try again when you have signal" or "needs a connection", which
+  would misdirect an athlete who already has signal to go looking for it.
+  (Reproducing this against a live network needs an artificial slow/dropped
+  endpoint; the mobile suite covers it directly by rejecting the relevant API
+  call with `TimeoutError`/`RequestDroppedError`.)
+
+### Follow-up fixups — the same defect in two more sites, and one missed announcement
+
+- With a live phase already recorded, press "End this phase" while offline or
+  with a forced 5xx: confirm the problem text ("phase-problem") composes the
+  transport's own diagnosis (or the server's own words for a 5xx) rather than
+  the old fixed "Could not end it. Check your connection and try again." —
+  same for pressing "Start" to begin a new phase.
+- Open the target history screen (`goals/history.tsx`) with the network off
+  or the endpoint forced to a 5xx: confirm "history-unavailable" leads with
+  the transport's diagnosis (or a neutral sentence for a server-answered
+  failure), not the old fixed "this one needs a connection" text, and the
+  "Try again" retry control still works.
+- With VoiceOver/TalkBack on, press "Use this target" while offline or
+  against a forced 5xx: confirm the failure is SPOKEN (an accessibility
+  announcement), not just rendered — matching the "Saved" receipt on the
+  success path and the equivalent failure announcement on the manual-save
+  and weekly-adjustment buttons.
+
+### Auth / security
+
+- None of these are auth-gated differently from the screens' existing
+  requests — no new endpoint, no new permission surface. Confirm a
+  signed-out state still routes to sign-in before any of the above is
+  reachable, unchanged from before this ticket.

@@ -58,6 +58,33 @@ describe('buildHistory — the five states', () => {
     expect(historyRows(h)).toEqual([]);
   });
 
+  it('N94: carries the caller\'s composed diagnosis through unavailable, rather than discarding it', () => {
+    // The screen composes `transportDiagnosis(err)` in its catch and hands it
+    // here — `buildHistory` must pass it through unchanged, not fold it away.
+    // Losing this field is exactly the regression that made every failed read
+    // assert "this one needs a connection" for a server 500 as readily as for
+    // a dead radio.
+    const withDiagnosis = buildHistory(
+      { status: 'unavailable', diagnosis: "Can't reach VOLA." },
+      ON,
+    );
+    expect(withDiagnosis.kind).toBe('unavailable');
+    expect('diagnosis' in withDiagnosis && withDiagnosis.diagnosis).toBe("Can't reach VOLA.");
+
+    // A server-answered ApiError composes to `null` (see `transportDiagnosis`),
+    // and that null must survive the passthrough too — it is the screen's own
+    // signal to fall back to neutral wording rather than inventing a network
+    // sentence for a failure that was never about the network.
+    const serverAnswered = buildHistory({ status: 'unavailable', diagnosis: null }, ON);
+    expect('diagnosis' in serverAnswered && serverAnswered.diagnosis).toBeNull();
+
+    // And the field is genuinely optional — a read that never supplies one
+    // (the pre-N94 shape) still builds cleanly, so this stays backward
+    // compatible with any other caller of the union.
+    const noDiagnosis = buildHistory({ status: 'unavailable' }, ON);
+    expect('diagnosis' in noDiagnosis && noDiagnosis.diagnosis).toBeUndefined();
+  });
+
   it('calls a history complete only when it can prove nothing precedes it', () => {
     // The oldest row starts INSIDE the window. The endpoint carries in the row
     // live at `from` when there is one, so its absence is proof there is none.

@@ -85,6 +85,7 @@ import { InfoMark } from '@/components/ui/InfoSheet';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { transportDiagnosis } from '@/lib/apiError';
 import {
   ACTIVITY_DEFAULT,
   activityParam,
@@ -107,12 +108,7 @@ import { PREF_GOALS_COLLAPSED, readPref, writePref } from '@/lib/prefs';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { formatWeight, formatWeightRate, type UnitSystem } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
-import {
-  draftFrom,
-  OFFLINE_MESSAGE,
-  refusalOrWeather,
-  type ManualTargetInput,
-} from '@/lib/manualTarget';
+import { draftFrom, refusalOrWeather, type ManualTargetInput } from '@/lib/manualTarget';
 import { profileGap, todayString, type Target } from '@/lib/nutrition';
 import {
   fetchAdjustment,
@@ -212,6 +208,26 @@ function historyLinkLabel(targets: Target[] | null): string {
     : 'Set a target for a day already past';
 }
 
+/**
+ * Why today's derivation could not be read, composed rather than asserted.
+ *
+ * N94: this `.catch` used to be unconditional — `setFailed(true)` for
+ * anything at all — and the render read a fixed "Could not reach the server."
+ * A 500 from a genuinely reachable API said exactly the same thing as a dead
+ * radio. `transportDiagnosis()` returns `null` for anything the server
+ * actually answered (an `ApiError`), so that case gets an honest sentence
+ * instead of a network claim built on nothing.
+ *
+ * The explanation of WHY this one number needs the network at all — the rest
+ * of the sentence — is this screen's own knowledge, not the transport's, and
+ * it survives regardless of which of the three ways (or neither) the read
+ * failed. Same shape as `food/scan.tsx`'s `messageForLookupFailure`.
+ */
+function derivationFailureMessage(err: unknown): string {
+  const cause = transportDiagnosis(err) ?? 'This number could not be worked out right now.';
+  return `${cause} This one number is worked out there, because it needs your training history — everything else in Food works offline.`;
+}
+
 // `refusalOrWeather` and `draftFrom` moved to `lib/manualTarget.ts` when the
 // history screen grew the same three write paths. Two copies of the
 // refusal-versus-weather split is two chances for one of them to drift back
@@ -266,9 +282,15 @@ export default function TargetScreen() {
     unsynced: boolean;
   } | null>(null);
   const [data, setData] = useState<Suggested | null>(null);
-  const [failed, setFailed] = useState(false);
+  // The MESSAGE, not a boolean — N94. A flat `failed` flag is what forced
+  // every read failure to share one sentence ("Could not reach the server"),
+  // which misdiagnosed a 500 as a dead radio just as surely as `writeFailed`
+  // below once did for a write.
+  const [failed, setFailed] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveFailed, setSaveFailed] = useState(false);
+  // Also a message rather than a boolean, for the identical reason — see
+  // `accept`'s catch below.
+  const [saveFailed, setSaveFailed] = useState<string | null>(null);
 
   // What is actually in force, and the weekly proposal — both read from the
   // server, and both deliberately independent of the movement cards. Web
@@ -512,7 +534,7 @@ export default function TargetScreen() {
       .then((d) => {
         if (!live) return;
         setData(d);
-        setFailed(false);
+        setFailed(null);
         // The receipt belongs to the numbers that were saved, and these are
         // different numbers. Moving a movement card, or coming back to the tab
         // on a new day, produces a fresh and UNSAVED suggestion — leaving
@@ -530,8 +552,8 @@ export default function TargetScreen() {
           return next.level === prev.level ? prev : { ...prev, level: next.level };
         });
       })
-      .catch(() => {
-        if (live) setFailed(true);
+      .catch((err) => {
+        if (live) setFailed(derivationFailureMessage(err));
       });
     return () => {
       live = false;
@@ -683,7 +705,7 @@ export default function TargetScreen() {
     const s = data?.suggestion;
     if (!s || saving) return;
     setSaving(true);
-    setSaveFailed(false);
+    setSaveFailed(null);
     setSaved(false);
     try {
       await saveTarget(getToken, on, {
@@ -708,11 +730,27 @@ export default function TargetScreen() {
       // target" and heard nothing at all. iOS has no live regions, which is why
       // this is an imperative announcement.
       AccessibilityInfo.announceForAccessibility(SAVED_MESSAGE);
-    } catch {
-      // Accepting a target is the one derived WRITE on this screen, and offline
-      // is this app's ordinary weather. Without this the button simply un-dimmed
-      // and nothing happened — the athlete would reasonably conclude it saved.
-      setSaveFailed(true);
+    } catch (e) {
+      // Accepting a target is the one derived WRITE on this screen, and a dead
+      // request is this app's ordinary weather. Without this the button simply
+      // un-dimmed and nothing happened — the athlete would reasonably conclude
+      // it saved.
+      //
+      // N94: this used to set a bare boolean and render one fixed sentence
+      // ("Could not save it — this one needs a connection … try again when you
+      // have signal") for every cause, including a server refusal and a
+      // timeout on a live connection. `refusalOrWeather` composes the actual
+      // diagnosis instead — the server's own words for a refusal, the
+      // transport's own diagnosis for a dead request — so this stops sending
+      // an athlete with four bars to go and look for signal.
+      const why = refusalOrWeather(e);
+      setSaveFailed(why);
+      // SPOKEN, not just rendered — same reasoning as the success path three
+      // lines up, and the same shape `saveManual`/`acceptAdjustment` already
+      // use for their own failure catches. Missing here meant a VoiceOver
+      // user who tapped "Use this target" and hit a real failure heard
+      // nothing at all; the button just un-dimmed.
+      AccessibilityInfo.announceForAccessibility(why);
     } finally {
       setSaving(false);
     }
@@ -1054,9 +1092,8 @@ export default function TargetScreen() {
         )}
 
         {failed && (
-          <Text style={styles.note}>
-            Could not reach the server. This one number is worked out there, because it needs your
-            training history — everything else in Food works offline.
+          <Text style={styles.note} testID="target-derivation-failed">
+            {failed}
           </Text>
         )}
 
@@ -1171,7 +1208,11 @@ export default function TargetScreen() {
                 {saving ? 'Saving…' : 'Use this target'}
               </Text>
             </Pressable>
-            {saveFailed ? <Text style={styles.problem}>{OFFLINE_MESSAGE}</Text> : null}
+            {saveFailed ? (
+              <Text style={styles.problem} testID="target-accept-failed">
+                {saveFailed}
+              </Text>
+            ) : null}
             {saved ? (
               <Text
                 style={styles.saved}

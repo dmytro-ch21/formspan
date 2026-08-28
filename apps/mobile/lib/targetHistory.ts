@@ -58,7 +58,12 @@ import type { StoredTarget } from './nutritionApi';
  */
 export type TargetRead =
   | { status: 'unread' }
-  | { status: 'unavailable' }
+  /** N94: `diagnosis` is the transport's own composed sentence — the caller's
+   *  `transportDiagnosis(err)` — carried through rather than discarded, so a
+   *  server 500 does not read as "this one needs a connection" here either.
+   *  Optional and `null` both mean "no diagnosis available", matching every
+   *  other `transportDiagnosis(err) ?? fallback` call site. */
+  | { status: 'unavailable'; diagnosis?: string | null }
   /** `from` is the window's start, and it is what makes `partial` decidable. */
   | { status: 'read'; targets: StoredTarget[]; from: string };
 
@@ -81,7 +86,7 @@ export type HistoryRow = {
 
 export type TargetHistory =
   | { kind: 'unread' }
-  | { kind: 'unavailable' }
+  | { kind: 'unavailable'; diagnosis?: string | null }
   | { kind: 'none' }
   | { kind: 'complete'; rows: HistoryRow[] }
   | { kind: 'partial'; rows: HistoryRow[]; from: string };
@@ -103,7 +108,7 @@ export type TargetHistory =
  */
 export function buildHistory(read: TargetRead, on: string): TargetHistory {
   if (read.status === 'unread') return { kind: 'unread' };
-  if (read.status === 'unavailable') return { kind: 'unavailable' };
+  if (read.status === 'unavailable') return { kind: 'unavailable', diagnosis: read.diagnosis };
   if (read.targets.length === 0) return { kind: 'none' };
 
   // Sorted here rather than trusted from the wire. The endpoint does order by
