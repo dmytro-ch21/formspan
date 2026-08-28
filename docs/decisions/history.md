@@ -46345,6 +46345,21 @@ who cannot reach Goals at all, and it is a materially different answer than
 "Goals now offers it," worth being explicit about rather than assumed true by
 symmetry with Today's old behaviour.
 
+**Said plainly, because softening it would be dishonest: for the
+nutrition-off, BJJ-on cohort, this ticket reverts N96.** N96's own diagnosis
+called `CurriculaStrip` alone insufficient — "a horizontal strip below a
+seven-day week grid, on the tab you open to pick a template" — and built the
+Today offer specifically because that strip wasn't being found. This ticket
+removes the offer from every screen that cohort can actually reach, leaving
+exactly the surface N96 judged inadequate as their only path in. That is a
+real regression for a real population, not a wash. It survives here because
+nutrition is `default_on` (so the affected population is the minority) and
+the user's own instruction was specific to *where* the offer sits, not
+*whether* a nutrition-off athlete can find one — but it is a product call the
+user has not explicitly signed off on for this cohort, flagged by
+`ac-verifier`/`frontend-reviewer` review, and it should be treated as open
+until they do, not as settled by this entry.
+
 **`RoadmapOffer` itself needed no prop changes** — it was already
 self-contained (its own `useAuthToken`, its own `listCurricula` fetch,
 `roadmapToOffer`'s own enrolled/countable-items filtering) and took no props at
@@ -46355,7 +46370,11 @@ identical computation built fresh, since it had no roadmap-related state
 before. New in `app/(tabs)/goals.tsx`: a `roadmaps` state, a focus effect
 mirroring Today's `refreshRoadmaps` (silent-catch, deliberately never
 `setRoadmaps([])` on failure — an unreadable answer is not "on none"), gated on
-`hasRoadmapCatalog` so an athlete with BJJ off costs one fewer request, and
+`hasRoadmapCatalog` (and, caught in `frontend-reviewer` and fixed before
+merge, `foodDisabled` — every other fetch on this screen already guarded on
+it first, and this one had been left out, paying a request on every focus for
+a nutrition-off athlete who can never see the render it feeds) so an athlete
+with BJJ off or nutrition off costs one fewer request, and
 `showRoadmapOffer = hasRoadmapCatalog && roadmaps !== null &&
 roadmaps.length === 0`. The component's own doc comment was rewritten to drop
 every "on Today" reference and its `today-roadmap-offer` testID renamed to

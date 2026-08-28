@@ -548,10 +548,15 @@ export default function TargetScreen() {
    *
    * Skipped entirely with no catalog to offer from — one fewer request for an
    * athlete who has BJJ off, matching the gate `hasRoadmapCatalog` states.
+   * Also skipped with `foodDisabled` — this screen's own module-off return
+   * (below) already guarantees the offer can never render for that athlete,
+   * so fetching for it would be a request with no possible use. Caught in
+   * review: every other fetch on this screen already guards on
+   * `foodDisabled` first; this one had been left out.
    */
   useFocusEffect(
     useCallback(() => {
-      if (!userId || !hasRoadmapCatalog) return;
+      if (foodDisabled || !userId || !hasRoadmapCatalog) return;
       let live = true;
       listWorkingCurricula(getToken)
         .then((c) => {
@@ -564,7 +569,7 @@ export default function TargetScreen() {
       return () => {
         live = false;
       };
-    }, [userId, hasRoadmapCatalog, getToken]),
+    }, [foodDisabled, userId, hasRoadmapCatalog, getToken]),
   );
 
   /**
