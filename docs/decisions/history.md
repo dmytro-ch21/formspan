@@ -47248,6 +47248,91 @@ real fix depends on (a day-tied `key` genuinely resets `Ring`'s animation
 mid-transition), not the wiring at the call site. The ticket's own `NEEDS
 HUMAN EVIDENCE` device check is still the closure for that gap, unchanged.
 
+### 2026-08-28 — W16/#704: a tracker tap logged on a browsed day leaked onto every other day
+
+The user's report: *"the water intake and coffee if we change in one place
+any day we modify it for all days, i change yesterday that i drank 10 cups
+today i will have 10 cups too."* Logging a tap while browsing a past day (on
+Food's stepper, or a non-today `on` on Today) made the same entries appear
+under Today (and any other day) until something unrelated forced a re-fetch.
+
+**Not a write bug.** `logTap`/the SQLite INSERT filed the tap under the
+correct `logged_on` all along, confirmed by prior investigation and left
+untouched. The bug was a read: `apps/mobile/lib/useTrackerDay.ts`'s
+`entriesFor` returned whatever `loaded.entries` currently held with no check
+that `loaded` had ever been asked to load the day now on screen —
+
+```ts
+const entriesFor = useCallback(
+  (trackerID: string) => byTracker(loaded.entries).get(trackerID) ?? [],
+  [loaded.entries],
+);
+```
+
+— while `refresh(on)` is async (SQLite, then network, sequenced), so there is
+a real window on every day switch during which `loaded` still reflects the
+PREVIOUS day. Every other read/write in the same hook (`addTap`,
+`removeEntry`) already guards its own `setLoaded` on `prev.on === on`;
+`entriesFor` was the one place that skipped the pattern already established
+right next to it.
+
+**Fix: guard `entriesFor` on the day being asked for, once, inside the
+hook.** `TrackerDay.entriesFor` now takes `(trackerID, on)` and returns `[]`
+unless `loaded.on === on` — indistinguishable from "still loading", which is
+correct: a screen mid-`refresh` genuinely has nothing to show yet for the day
+it just asked for. The guard itself is pulled out as an exported pure
+function, `entriesForLoadedDay(loaded, trackerID, on)`, so it is unit-testable
+without `renderHook`-ing the whole hook (Clerk auth, SQLite, network) for what
+is really a string comparison.
+
+This was a genuine three-way decision (per-call-site guard vs. a `ready`
+signal vs. fixing it once in the hook), and the hook's own doc comment settled
+it: "there is ONE implementation of loading it" — a duplicated `loaded.on ===
+on` check at both `TrackerList` and its two Today/Food callers is exactly the
+"diverge in exactly the places that are hard to see" failure the hook exists
+to prevent (#392's lesson, quoted in that same comment).
+
+**Threading `on` through meant correcting a design assumption that turned out
+to be the root cause.** `TrackerList`'s own doc comment used to say "there is
+deliberately no separate 'day being rendered' prop — the cards show whatever
+`day.refresh(on)` last loaded, and the screen owns that call." That premise —
+that `loaded` always matches the day on screen — is precisely what was false.
+`TrackerList` now takes an explicit `on: string` prop (distinct from
+`dayAtTap`, which resolves what a TAP writes to, not what is being READ) and
+threads it into every `day.entriesFor(id, on)` call. Both callers
+(`app/(tabs)/index.tsx`, `app/(tabs)/food.tsx`) already compute `on` for their
+own `refreshTrackers(on)` call, so wiring it into `TrackerList` cost one line
+at each call site.
+
+**Defense in depth, same failure class as W15's `MacroRings` (sibling
+ticket): `TrackerCard`'s glyphs carry their own `Animated.Value`s
+(`useState(() => new Animated.Value(...))` in `Glyph`), keyed only by index
+within a `TrackerCard` keyed only by tracker id — not by day.** Even with the
+data guard above landed, switching days for the same tracker would leave the
+card mounted and its glyph fills would SPRING from the old day's count to the
+new day's, reading as an animated tap nobody made. `TrackerList` now keys each
+`TrackerCard` as `` `${t.id}-${on}` `` (was `t.id`), so a day switch remounts
+the card fresh instead of animating across it — mirroring the `collapseKey`
+idiom already in the same file for resetting `TrackerList`'s own
+expand/collapse state on a day switch.
+
+**Test**: `apps/mobile/lib/__tests__/useTrackerDay.test.ts`, pure-logic
+against the exported `entriesForLoadedDay`, pinning the exact reported
+sequence — browse to yesterday, log a tap there (`loaded = {on: yesterday,
+entries: [tap]}`), browse back to today before `refresh(today)` resolves
+(`loaded` still says yesterday) — and asserting today's read sees `[]`, not
+yesterday's cup, while yesterday's own read still sees it. Also covers
+per-tracker scoping and the hook's initial `on: ''` state never matching a
+real day. Mutation-verified: baseline green, reverted
+`entriesForLoadedDay` to the unguarded `byTracker(loaded.entries).get(...)`,
+confirmed the new test failed on a real assertion (received the leaked
+yesterday tap where `[]` was expected), restored, confirmed green by
+re-running (not by grepping the file).
+
+`docs/testing/functional-scenarios.md` left alone — this is a read-path
+regression fix on two existing screens with an existing scenario list, not a
+new flow.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

@@ -55,6 +55,7 @@ function day(trackers: Tracker[], entries: Record<string, number> = {}): Tracker
 
 const props = {
   dayAtTap: () => '2026-08-20',
+  on: '2026-08-20',
   units: 'metric' as const,
   unitsReady: true,
   testID: 'today-trackers',

@@ -20,6 +20,7 @@ import type { UnitSystem } from '@/lib/units';
 export function TrackerList({
   day,
   dayAtTap,
+  on,
   units,
   unitsReady,
   now = null,
@@ -41,12 +42,23 @@ export function TrackerList({
    * The screen decides what it means: Today reads the clock, Food passes its
    * stepper's day, because there the day is the subject of the screen and a tap
    * while reading Tuesday belongs to Tuesday.
-   *
-   * There is deliberately no separate "day being rendered" prop — the cards
-   * show whatever `day.refresh(on)` last loaded, and the screen owns that call.
-   * Two day inputs would be two things to keep in step.
    */
   dayAtTap: () => string;
+  /**
+   * The day being READ — what these cards are showing, as opposed to
+   * `dayAtTap`'s "what a tap right now would write to". The two used to be
+   * treated as one concept ("there is deliberately no separate 'day being
+   * rendered' prop" used to be written here); that assumption was the root
+   * cause of W16/#704, where a tap logged on a browsed past day kept
+   * rendering on Today until something else forced a re-fetch, because
+   * nothing checked that `day`'s loaded entries actually matched the day on
+   * screen. `on` is threaded straight into `day.entriesFor(id, on)` for
+   * that check, and used to key each `TrackerCard` so a day switch remounts
+   * the card's glyphs instead of springing their fill from the previous
+   * day's count to this one's — the same stale-transition failure class as
+   * `MacroRings` (W15).
+   */
+  on: string;
   units: UnitSystem;
   unitsReady: boolean;
   /**
@@ -124,16 +136,20 @@ export function TrackerList({
   // always urgent and therefore never informative. Only a target can be unmet.
   const outstanding = hidden.filter((t) => {
     const target = targetCount(t);
-    return target != null && day.entriesFor(t.id).length < target;
+    return target != null && day.entriesFor(t.id, on).length < target;
   }).length;
 
   return (
     <>
       {shown.map((t) => (
         <TrackerCard
-          key={t.id}
+          // Keyed on the day too, not just the tracker — see `on`'s own doc
+          // comment above. A day switch remounts the card, so its glyphs'
+          // `Animated.Value`s start fresh from the NEW day's count instead of
+          // springing to it from the old one.
+          key={`${t.id}-${on}`}
           tracker={t}
-          entries={day.entriesFor(t.id)}
+          entries={day.entriesFor(t.id, on)}
           units={units}
           unitsReady={unitsReady}
           now={now}

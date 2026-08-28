@@ -36,7 +36,25 @@ import { useAuthToken } from './useAuthToken';
  */
 export type TrackerDay = {
   view: TrackerView;
-  entriesFor: (trackerID: string) => TrackerEntry[];
+  /**
+   * Entries for one tracker, on the day the CALLER is currently showing.
+   *
+   * **`on` is required, not decorative — see W16/#704.** `refresh(on)` is
+   * async (SQLite, then network), so there is a real window after a caller
+   * has moved on to a new day — stepped Food's day switcher, or Today's
+   * `on` moved — during which `loaded.entries` still holds the PREVIOUS
+   * day's rows. Returning them unguarded during that window is exactly what
+   * happened: a tap logged on a browsed past day rendered under Today too,
+   * because `entriesFor` handed back whatever `loaded.entries` currently
+   * held with no check that it was ever asked to load `on`. Every other read
+   * or write in this hook (`addTap`, `removeEntry`) already guards its own
+   * `setLoaded` on `prev.on === on` — this was the one read that skipped it.
+   *
+   * Returns `[]` (never stale rows) when `on` is not what was last loaded —
+   * indistinguishable from "loading", which is correct: a screen mid-`refresh`
+   * has no entries to show yet for the day it just asked for.
+   */
+  entriesFor: (trackerID: string, on: string) => TrackerEntry[];
   /** Load, for the given local day. Returns a cancel function. */
   refresh: (on: string) => () => void;
   addTap: (tracker: Tracker, on: string) => Promise<void>;
@@ -44,6 +62,22 @@ export type TrackerDay = {
   removeEntry: (entryID: string, on: string) => Promise<void>;
   openSettings: (tracker: Tracker) => void;
 };
+
+/**
+ * The guard behind `entriesFor`, pulled out as its own pure function so
+ * W16/#704's regression — a tap logged on a browsed day rendering under
+ * every other day until something forced a re-fetch — can be pinned by a
+ * plain unit test over `{on, entries}` state, without `renderHook`-ing the
+ * whole hook (Clerk auth, SQLite, network) for what is really just "does the
+ * day that was loaded match the day being asked for".
+ */
+export function entriesForLoadedDay(
+  loaded: { on: string; entries: TrackerEntry[] },
+  trackerID: string,
+  on: string,
+): TrackerEntry[] {
+  return loaded.on === on ? (byTracker(loaded.entries).get(trackerID) ?? []) : [];
+}
 
 export function useTrackerDay(): TrackerDay {
   const { userId } = useAuth();
@@ -123,8 +157,8 @@ export function useTrackerDay(): TrackerDay {
   );
 
   const entriesFor = useCallback(
-    (trackerID: string) => byTracker(loaded.entries).get(trackerID) ?? [],
-    [loaded.entries],
+    (trackerID: string, on: string) => entriesForLoadedDay(loaded, trackerID, on),
+    [loaded],
   );
 
   const openSettings = useCallback(
