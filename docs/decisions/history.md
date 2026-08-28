@@ -45767,6 +45767,138 @@ which is what the mutation above exercises.
 
 Full mobile suite after these fixups: 220 suites, 3402 tests, `verify` green.
 
+## 2026-08-27 — N109: the trigram index is used now, and the alias OR is no longer what defeats it
+
+Migration 000062 created `food_catalog_name_trgm_idx` and kept it "as headroom"
+despite being unused at 173 rows. N88's history entry (above) measured *why* it
+stayed unused at 12,651: `SearchClause` emits, per token, `f.name ILIKE $n OR
+EXISTS (SELECT 1 FROM unnest(f.aliases) alias WHERE alias ILIKE $n)`, and an OR
+against a correlated subquery forces a Seq Scan — a GIN bitmap scan cannot be
+built for one branch of an OR whose other branch is a subplan. N88 filed this
+as its own ticket rather than folding it in, "because it changes matching
+semantics and deserves its own tests." It didn't end up changing them.
+
+### The fix: an indexable over-approximation, ANDed alongside the untouched exact check
+
+`aliases` gained a generated, stored column — `aliases_text`, `aliases` joined
+with a space — carrying its own trigram GIN index (migration 000078). Each
+token's clause is now:
+
+```sql
+(f.name ILIKE $n OR f.aliases_text ILIKE $n)                         -- prefilter, indexable
+AND
+(f.name ILIKE $n OR EXISTS (SELECT 1 FROM unnest(f.aliases) alias ...)) -- exact, byte-for-byte unchanged
+```
+
+The two candidate shapes the ticket named were a UNION of a name-matched set
+and an alias-matched set, or an expression/GIN index spanning both fields.
+Neither survived contact with the actual requirement. A UNION of "all tokens
+matched by name" and "all tokens matched by alias" is *stricter* than the
+original — it drops the case where one token matches by name and a different
+token on the same row matches only by alias, which is completely ordinary
+(N88's own `courgette`/`zucchini` fixture is exactly that: name doesn't match
+"courgette", alias does). And a single index spanning name and aliases
+together is the concatenation defect by construction — it's what made `arm
+bar` return nothing in the technique library in the first place.
+
+The shape that actually works is a third one: don't replace the exact clause,
+make it faster to REACH. `prefilter AND exact` is provably a no-op on the
+RESULT and not merely "probably fine" — if some alias element contains the
+typed substring, the joined string still contains that same run of characters
+(joining only adds text *around* a match, never breaks one apart), so `exact`
+implies `prefilter`, and `prefilter AND exact` is logically identical to
+`exact` alone for every row, for every query `SearchClause` can build. What
+changes is that Postgres can now build a `BitmapOr`/`BitmapAnd` against two
+indexes (`name`, `aliases_text`) to find CANDIDATES, and apply the untouched
+`EXISTS` clause only as a Recheck/Filter on that narrowed set — not against
+all 12,651 rows. The full reasoning, plus the one subtlety that makes the
+`EXISTS` clause genuinely load-bearing rather than decorative, is written out
+in `internal/modules/food/search.go`'s `SearchClause` doc comment.
+
+**The subtlety, because it is the whole reason this isn't a five-minute
+change.** A single-WORD alias boundary can never cross in `aliases_text` —
+the join separator is a space, `searchTokens` never emits a token containing
+one, so a contiguous ILIKE match cannot straddle the seam either. `synonyms`
+is the exception: its VALUES are used as-is rather than re-tokenized, and a
+few contain a literal space (`synonyms["pb"] = {"peanut butter"}`). Two
+aliases like `{"... peanut", "butter ..."}`, neither containing "peanut
+butter" alone, DO produce it at the seam once joined — a query for "pb" is a
+real false-positive *candidate* there, and the `EXISTS` recheck is what still
+correctly rejects it. `TestSearchRejectsATermThatCrossesAnAliasBoundary`
+(`postgres_test.go`) is built on exactly this shape rather than a nonsense
+single-word pair, because a single-word pair (tried first) turned out unable
+to distinguish "the exact clause is doing its job" from "this join happens
+not to collide" — it passed even with the exact clause deleted entirely.
+Mutation-tested, both at the SQL-generation level (`search_test.go`) and
+against a real Postgres: dropping the `EXISTS` recheck and keeping only
+`aliases_text` makes `TestSearchRejectsATermThatCrossesAnAliasBoundary` fail
+on `"pb"`, and makes `TestSearchClauseMatchesAliasesSeparatelyFromName` /
+`TestSearchClauseNeverLetsThePrefilterDecideAloneAcrossMultipleTokens` fail at
+the SQL-text level; restored and re-confirmed green by re-running, not by
+reading the file.
+
+### Measured, before and after, at 12,651 rows (real `EXPLAIN ANALYZE`, not estimates)
+
+| query | plan | time (before) | time (after) |
+|---|---|---|---|
+| `chicken breast` | Seq Scan → Bitmap Heap Scan (`BitmapAnd` of two `BitmapOr`s, one per index) | 14.6–20.5 ms | **0.47–0.83 ms** |
+| `e` (single letter, 12,041 of 12,651 rows match) | Seq Scan → **still Seq Scan** | 7.3–8.7 ms | 15–18.6 ms |
+| `ahi` (alias-only match, no general synonym) | Seq Scan → Bitmap Heap Scan | — | 0.32 ms, 11 rows |
+
+The `chicken breast` numbers move by roughly 20–30x, in the same range as N88's
+original 31.6ms/0.97ms measurement (this session's hardware runs the *old*
+query faster than N88's — 14.6ms vs 31.6ms for the identical Seq Scan plan —
+which is why the ratio, not the absolute number, is the thing to trust).
+
+**The single-letter worst case does NOT improve, and it is worth saying
+plainly rather than implying otherwise: it measurably regresses, by roughly
+2x.** A one-character trigram carries no useful selectivity — GIN trigram
+indexing works on 3-character shingles, so `ILIKE '%e%'` was never going to
+choose an index scan over either `name` or `aliases_text`, and Postgres
+correctly keeps the Seq Scan for both the old and new query. The new query is
+slower on this path because it now filters TWO ILIKE predicates
+(`name`, `aliases_text`) per row instead of one, for zero index benefit. This
+is the honest, worse-case tradeoff of a prefilter that helps the selective
+path: it costs a little on the path where nothing was ever selective. `e` is
+also not a query anyone actually types — it exists in this table only as the
+documented adversarial case — and it was already the slow path before this
+change (7–9ms, `12,041` of `12,651` rows matching, on a table this size).
+
+### What was NOT done, and why
+
+The old `food_catalog_name_trgm_idx` is untouched — it was already correct,
+merely unreachable, and it is now reachable without being touched. No
+existing search test needed to change its *assertions*, only what they check
+about `array_to_string` appearing in the clause text (see
+`TestSearchClauseMatchesAliasesSeparatelyFromName`) — the aliases stay
+separate PREDICATES exactly as before; what's new is a redundant, provably-safe
+indexable superset ANDed alongside them, never instead of them.
+
+`array_to_string` itself is STABLE, not IMMUTABLE, so Postgres refuses both a
+generated column and a GIN expression index built on it directly — measured
+directly (`ERROR: functions in index expression must be marked IMMUTABLE`,
+then `ERROR: generation expression is not immutable` on the generated-column
+attempt too). `food_catalog_aliases_text(text[]) RETURNS text` is a one-line
+`IMMUTABLE` SQL wrapper asserting to the planner what's already true for
+`TEXT[]` — no such wrapper exists anywhere else in this repo's migrations
+(checked; this is the first stored SQL function here), which is worth knowing
+if a future migration needs the same trick.
+
+New Postgres integration fixtures: `fd-fx-tuna-yellowfin` (alias `"ahi"`, no
+general-synonym backing, for the alias-only-match criterion by name) and
+`fd-fx-alias-boundary` (the `synonyms["pb"]` boundary case above). Measured
+against a freshly-migrated, unseeded database — the same shape CI's `Backend
+(Go)` job runs — not the fully-seeded 12,651-row database used for the
+`EXPLAIN ANALYZE` numbers above; running the existing fixture tests against
+the seeded database first (by mistake, before separating the two) showed two
+PRE-EXISTING tests (`TestSearchFindsAFoodByWordsOutOfContiguousOrder`,
+`TestSearchFindsAFoodThroughAGeneralSynonym`) fail there too, for reasons
+unrelated to this change — real catalog rows with similar names compete with
+the fixtures for the top rank. Not a regression from this ticket; recorded
+here because it cost real time to diagnose and would cost the next person
+the same time if they ran the suite against a seeded database without
+knowing why.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

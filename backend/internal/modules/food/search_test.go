@@ -1,6 +1,7 @@
 package food
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -87,20 +88,68 @@ func TestSearchClauseAndsItsTerms(t *testing.T) {
 	}
 }
 
-// Name and aliases are kept APART. Concatenating them would let one typed word
-// match across the boundary between two unrelated aliases — the defect that
+// Name and aliases are kept APART for the clause that actually DECIDES a
+// match. Concatenating them and matching against the join would let one typed
+// word straddle the boundary between two unrelated aliases — the defect that
 // made `arm bar` return nothing.
+//
+// N109 added `f.aliases_text` (aliases joined with a space) as an indexable
+// PREFILTER — see the block comment on SearchClause for why that is provably
+// a no-op on the result. This test guards the two things that make it safe:
+// the exact `unnest`-based clause must still be present, UNCHANGED, and it
+// must be ANDed alongside the prefilter rather than replacing it — an OR
+// there (or the prefilter appearing alone) would let the join decide a match
+// on its own, which is exactly the defect this test exists to catch.
 func TestSearchClauseMatchesAliasesSeparatelyFromName(t *testing.T) {
 	clause, _ := SearchClause("aubergine", 1)
 	if !strings.Contains(clause, "f.name ILIKE") {
 		t.Fatalf("clause does not match the name: %q", clause)
 	}
+	// The exact, decisive predicate: unnest keeps each alias its own string.
 	if !strings.Contains(clause, "unnest(f.aliases)") {
-		t.Fatalf("clause does not match aliases: %q", clause)
+		t.Fatalf("clause does not match aliases via unnest: %q", clause)
 	}
-	// unnest is what keeps each alias its own string. A join would defeat it.
-	if strings.Contains(clause, "array_to_string") {
-		t.Fatalf("aliases were joined into one string, which lets a term straddle two of them: %q", clause)
+	// The new prefilter must be present (that is the whole point of N109)...
+	if !strings.Contains(clause, "f.aliases_text ILIKE") {
+		t.Fatalf("clause has no aliases_text prefilter: %q", clause)
+	}
+	// ...but ANDed alongside the exact clause, never OR'd with it and never
+	// standing in its place. Structurally: the exact unnest-based OR-group
+	// must appear as its own fully-parenthesised group joined by " AND ", not
+	// merged into the same OR-group as the prefilter.
+	if !regexp.MustCompile(`\)\s+AND\s+\(f\.name ILIKE .* OR EXISTS \(SELECT 1 FROM unnest\(f\.aliases\)`).MatchString(clause) {
+		t.Fatalf("prefilter is not ANDed with an independent exact (unnest-based) group: %q", clause)
+	}
+}
+
+// The SQL-generation-level guarantee behind the boundary claim above: the
+// prefilter (aliases_text) can only ever be a conjunct alongside the exact
+// clause, for every token, not just the first. If a future change ever let
+// the prefilter alone decide a token (dropping the trailing "AND (...unnest
+// ...)"), a term could match purely because two unrelated aliases happened to
+// concatenate into it — the `arm`/`bar` class of defect, moved from the
+// technique library into the food catalog. See postgres_test.go for the same
+// claim checked against a real row and a real query.
+func TestSearchClauseNeverLetsThePrefilterDecideAloneAcrossMultipleTokens(t *testing.T) {
+	clause, _ := SearchClause("chicken breast", 1)
+	// Two tokens, so the exact (unnest-based) EXISTS clause must appear
+	// exactly twice — once per token — never fewer, which is what would
+	// happen if a token's clause were built from the prefilter alone.
+	if got := strings.Count(clause, "EXISTS (SELECT 1 FROM unnest(f.aliases)"); got != 2 {
+		t.Fatalf("expected the exact unnest clause once per token (2 tokens), got %d occurrences: %q", got, clause)
+	}
+	if got := strings.Count(clause, "f.aliases_text ILIKE"); got != 2 {
+		t.Fatalf("expected the aliases_text prefilter once per token (2 tokens), got %d occurrences: %q", got, clause)
+	}
+	// The structural property itself, per token, not just a count that an OR
+	// mutation would leave untouched: each token's prefilter group must be
+	// followed by " AND (" and an independent exact group, never " OR (".
+	// Mutated AND -> OR to confirm this line, specifically, is what catches
+	// it (rather than merely being redundant with the count checks above) —
+	// see the N109 PR description for the mutation record.
+	andGroups := regexp.MustCompile(`\)\s+AND\s+\(f\.name ILIKE [^)]*OR EXISTS \(SELECT 1 FROM unnest\(f\.aliases\)`)
+	if got := len(andGroups.FindAllString(clause, -1)); got != 2 {
+		t.Fatalf("expected 2 token groups each closed with \") AND (...unnest...)\", found %d: %q", got, clause)
 	}
 }
 
