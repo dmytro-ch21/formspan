@@ -23,6 +23,7 @@ const water: Tracker = {
   sort_order: 10,
   count_noun: 'cup',
   provisioned: true,
+  cutoff_minutes: null,
 };
 
 const draftOf = (r: ReturnType<typeof readDraft>) => {

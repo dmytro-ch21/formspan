@@ -46818,6 +46818,148 @@ the test's own comment.
 - The device comparison against the reference screenshots remains N426's own
   outstanding `NEEDS HUMAN EVIDENCE` criterion.
 
+## 2026-08-28 — N431: a caffeine tracker, and a generic cutoff column that comes with it (#695)
+
+A caffeine tracker alongside water and coffee: today's mg against a
+recommended daily limit, and a warning line for when to stop drinking coffee
+relative to sleep — "no more caffeine after N hours before bed."
+
+### What this is, and specifically what it is not
+
+The ticket asked for one new preset and one new capability. Both landed as
+**generic** additions to the existing tracker model, not as caffeine-specific
+code, matching the pattern the model's own header states: "nothing here
+mentions water … and if either of those needs a change to `trackerModel.ts`,
+the model did not generalise and that is the finding."
+
+- **The daily limit is `target`, unchanged.** `footLine`'s own comment already
+  says every phrasing it produces is true whether a target reads as a goal
+  (water) or a ceiling (coffee): "4 to go" and "2 past your target of 3" both
+  state arithmetic, never a verdict. Caffeine's 400 mg default is the first
+  tracker where the ceiling reading is the ONLY one that makes sense, and
+  nothing had to change to accommodate that — the `target_kind` column
+  `footLine`'s comment speculates about turned out not to be needed after all.
+  It stays unbuilt; nothing forced the question this time either.
+- **The cutoff is a new column, `cutoff_minutes`** — minutes since local
+  midnight, nullable, on `daily_trackers` (backend migration `000079`, mobile
+  schema v27). Generic like every other column on that table: a plain "no more
+  after this clock time" that any tracker can carry, not
+  `caffeine_cutoff_minutes` and not a branch on `preset`. The ticket itself
+  suggested this could be the thing that finally justifies a caffeine-specific
+  special case; it wasn't needed. An athlete could put the same cutoff on a
+  late pre-workout supplement tracker and it would work identically.
+
+### The cutoff line's three cases
+
+`cutoffLine(tracker, entries, now)` in `trackerModel.ts`, mirroring `footLine`'s
+own shape and register — a stated fact, never a verdict, "the same register as
+`Over target` on MomentumCard":
+
+1. The day's last entry was already at or past the cutoff — `last at 15:40 —
+   past your 16:00 cutoff`. A fact about what already happened, so it is shown
+   for a browsed PAST day too, not only real today.
+2. Nothing has crossed it yet and the live clock is still before the cutoff —
+   `cutoff in 1h 20m`.
+3. Nothing has crossed it yet and the live clock is at or past the cutoff —
+   `past your 16:00 cutoff`, stated with no entry to point at.
+
+`now: Date | null` is the parameter that keeps cases 2 and 3 off a browsed past
+day: both are claims about the CURRENT moment, and neither is true of a day
+that already ended. `null` also silently answers "nothing to say" for a past
+day nothing crossed the cutoff on — the athlete respected it, and this project
+does not praise that either, so the line is simply absent rather than reading
+"you were fine."
+
+`now` threads through `TrackerList` (a new optional prop, same shape as
+`dayAtTap`) down to `TrackerCard`. Both Today and Food pass `isToday ? new
+Date() : null` — the same `isToday` each screen already computes for its own
+day switcher, so no new state was needed to wire this up. **N430's browsed-day
+threading needed no changes at all**: entries were already day-scoped through
+`day.entriesFor`, and the only new question — "is this real today" — already
+had an answer sitting in both screens.
+
+### The preset
+
+`caffeine` in `presets.go`: unit `mg`, increment 80 (one cup-equivalent),
+target 400 (the commonly-cited daily ceiling for a healthy adult — a default,
+editable like any tracker's target, not a medical claim), cutoff 960 minutes
+(16:00 — six hours before a 22:00 bedtime). `Default: false`, same reasoning as
+coffee: an unremovable caffeine counter handed to someone who quit or never
+drank it is not neutral. Reachable exactly the way coffee already is — the
+"Ready to go" list on `app/trackers/new.tsx` renders from `NonDefaultPresets`
+and needed no changes; the preset just started appearing in it.
+
+### The plumbing this touched, in the pattern the ticket asked for
+
+Backend: `tracker.go` (`Tracker.CutoffMinutes`, `Patch.CutoffMinutes`, a
+0..1439 range check in `Validate`, wired through `patchColumns`), `postgres.go`
+(the new column in `trackerCols`/`scanTracker`, and in all three INSERT
+statements — `EnsureDefaults`, `Create`, `AddPreset`), `presets.go` (the
+literal above), `handler.go` (the `ListPresets` wire DTO), migration `000079`,
+and `contracts/public.openapi.yaml` (`DailyTracker`, `DailyTrackerInput`,
+`DailyTrackerPatch`, `TrackerPreset`). Mobile: `trackerModel.ts` (the type
+field and four new pure functions — `formatCutoff`, `parseCutoff`,
+`formatMinuteSpan`, `cutoffLine`), `trackersApi.ts`, `trackers.ts` (SQLite
+schema v27, `toTracker`, `upsertTrackers`, `updateTrackerLocally`,
+`createTrackerLocally`, both push payloads), `TrackerForm.tsx` (a "Cutoff"
+field, entered as a plain HH:MM clock time — see below), `TrackerCard.tsx`,
+`TrackerList.tsx`, and the `now` prop at both call sites.
+
+### One simplification, stated rather than hidden
+
+The ticket allowed either "hours-before-sleep with a stated bedtime, or a
+plain cutoff time." This ships the plain cutoff time only — one text field,
+"16:00" — rather than also building a bedtime-plus-offset entry mode that
+computes the same stored value. The form's hint line does the arithmetic for
+an athlete who thinks in hours-before-bed ("six hours before a ten o'clock
+bedtime is 16:00") without a second UI mode or a second way to reach one
+number. There is still no sleep model anywhere in this app, on either side of
+the API boundary, and this ticket does not add one — the ticket's own words
+were "not a new sleep-tracking feature."
+
+### Out of scope, and why
+
+No new mobile screen, no chart, no metric picker, no date-range picker — the
+existing tracker card shape carries the whole feature, per the mobile-first
+carve-out's boundaries. `DailyTrackerPatch`'s OpenAPI schema was already
+missing `count_noun` before this entry (a pre-existing drift, `Patch` has
+carried the field since N78/#075) — noticed while adding `cutoff_minutes`
+beside it, left alone as out of scope for this ticket, and flagged separately
+rather than folded into this diff.
+
+### Verification
+
+Backend: `go build ./...`, `go vet ./...`, `gofmt -l .` clean; the tracker
+package's own suite green (`patch_test.go`'s reflection tests — which fail
+loudly on an unwired `Patch` field — cover `CutoffMinutes` automatically; new
+boundary cases added to `TestPatchValidate` for 0, 1439, 1440 and -1).
+`pnpm run lint:openapi` green. Postgres integration tests
+(`postgres_test.go`) are gated on `TEST_DATABASE_URL`, per this repo's own
+`test:api` exclusion from `verify` — not run here; `oneOf`'s reflection guard
+now has a `CutoffMinutes` case, so the restore-path test will cover the new
+column's SET-clause wiring the next time someone runs it against a real
+database.
+
+Mobile: `formatCutoff`/`parseCutoff` mutation-verified (each boundary —
+1439/1440, 23:59/24:00 — flipped independently, confirmed to fail a real
+assertion rather than a compile error, restored, confirmed green by
+re-running `jest`). `cutoffLine`'s three-case branch mutation-verified the
+same way: the `last >= cutoff` guard, the `now == null` early return, and the
+`now < cutoff` countdown-vs-past split were each inverted in turn and each
+caught by a distinct test in the new `N431: the cutoff line` describe block —
+none surviving as a false pass. `pnpm --filter mobile exec tsc --noEmit`
+clean. Full mobile suite green: 224 suites, 3501 tests (up from 223/3499 at
+the start of this branch — the two new `schema.test.ts` migration cases for
+v26→v27, plus the new `trackerModel.test.ts`/existing-fixture updates).
+`pnpm run lint:mobile` at 0 errors / 50 warnings — the pre-existing ratchet
+ceiling, unmoved by this change. `pnpm run verify` green.
+
+### What is not done
+
+- No device run yet — the cutoff line has not been read on a phone. `NEEDS
+  HUMAN EVIDENCE` on the issue.
+- `DailyTrackerPatch`'s missing `count_noun` (noted above) is unfixed here.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

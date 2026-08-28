@@ -1193,6 +1193,11 @@ export default function TodayScreen() {
               dayAtTap={() => trackerTapDay(isToday || resume !== null, on, () => new Date())}
               units={units}
               unitsReady={unitsReady}
+              // The cutoff line (N431) is a claim about the CURRENT moment —
+              // "cutoff in 1h 20m" — so it only makes sense while the day on
+              // screen is real today. `isToday` here is the switcher's own
+              // (`dayOffset === 0`), matching `dayAtTap`'s TODAY branch above.
+              now={isToday ? new Date() : null}
               // Three, then a disclosure row — N78's answer to "several
               // trackers on Today do not crowd out what Today is for". The
               // server caps an athlete at eight; three is what fits here

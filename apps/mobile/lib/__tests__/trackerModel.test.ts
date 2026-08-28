@@ -2,8 +2,11 @@ import {
   MAX_GLYPHS,
   addLabel,
   amountLine,
+  cutoffLine,
   footLine,
   formatClock,
+  formatCutoff,
+  formatMinuteSpan,
   glyphHint,
   glyphLabel,
   glyphSlots,
@@ -11,6 +14,7 @@ import {
   lastLoggedAt,
   loggedAmount,
   loggedCount,
+  parseCutoff,
   progress,
   resolveRenderStyle,
   targetCount,
@@ -43,14 +47,14 @@ import {
 const water: Tracker = {
   id: 't_water', preset: 'water', name: 'Water', icon: '💧', color_key: 'water',
   unit: 'ml', increment: 250, target: 2000, render_style: 'glyphs', sort_order: 10,
-  count_noun: 'cup', provisioned: true,
+  count_noun: 'cup', provisioned: true, cutoff_minutes: null,
 };
 
 /** N77's shape, today, with no coffee tracker anywhere in the app. */
 const coffee: Tracker = {
   id: 't_coffee', preset: 'coffee', name: 'Coffee', icon: '☕', color_key: 'coffee',
   unit: 'cup', increment: 1, target: null, render_style: 'auto', sort_order: 20,
-  count_noun: 'cup', provisioned: false,
+  count_noun: 'cup', provisioned: false, cutoff_minutes: null,
 };
 
 /**
@@ -67,14 +71,21 @@ const ceiling: Tracker = { ...coffee, name: 'Coffee', target: 3 };
 const creatine: Tracker = {
   id: 't_creatine', preset: '', name: 'Creatine', icon: '🥄', color_key: 'water',
   unit: 'g', increment: 5, target: 5, render_style: 'auto', sort_order: 30,
-  count_noun: 'dose', provisioned: false,
+  count_noun: 'dose', provisioned: false, cutoff_minutes: null,
 };
 
 /** N78's other example: the one that must never be a row of glyphs. */
 const capsules: Tracker = {
   id: 't_caps', preset: '', name: 'Capsules', icon: '💊', color_key: 'coffee',
   unit: 'dose', increment: 1, target: 30, render_style: 'auto', sort_order: 40,
-  count_noun: 'capsule', provisioned: false,
+  count_noun: 'capsule', provisioned: false, cutoff_minutes: null,
+};
+
+/** N431's shape, field for field with `presets.go`'s caffeine literal. */
+const caffeine: Tracker = {
+  id: 't_caffeine', preset: 'caffeine', name: 'Caffeine', icon: '⚡', color_key: 'amber',
+  unit: 'mg', increment: 80, target: 400, render_style: 'glyphs', sort_order: 30,
+  count_noun: 'cup', provisioned: false, cutoff_minutes: 960, // 16:00
 };
 
 let seq = 0;
@@ -509,5 +520,125 @@ describe('N77: a count with a ceiling, and the cups past it', () => {
     // today's cups, and would pass in a UTC-run suite.
     const late = taps(ceiling, 1, '2026-08-21T06:58:00.000Z');
     expect(footLine(ceiling, late)).toContain('last at 23:58');
+  });
+});
+
+describe('formatCutoff / parseCutoff — the clock-time round trip', () => {
+  it('formats minutes-since-midnight as a zero-padded clock', () => {
+    expect(formatCutoff(960)).toBe('16:00');
+    expect(formatCutoff(0)).toBe('00:00');
+    expect(formatCutoff(1439)).toBe('23:59');
+    expect(formatCutoff(65)).toBe('01:05');
+  });
+
+  it('parses a typed clock back into minutes', () => {
+    expect(parseCutoff('16:00')).toBe(960);
+    expect(parseCutoff('4:00')).toBe(240);
+    expect(parseCutoff(' 09:05 ')).toBe(545); // trimmed, like every other field
+    expect(parseCutoff('00:00')).toBe(0);
+    expect(parseCutoff('23:59')).toBe(1439);
+  });
+
+  it('refuses anything that is not a legal clock time', () => {
+    for (const bad of ['25:00', '16:60', 'not a time', '16', '', '16:0']) {
+      expect(parseCutoff(bad)).toBeNull();
+    }
+  });
+
+  it('round-trips every minute of the day', () => {
+    // The apparatus: a sweep too coarse to catch an off-by-one at either edge.
+    for (const m of [0, 1, 59, 60, 61, 719, 720, 1438, 1439]) {
+      expect(parseCutoff(formatCutoff(m))).toBe(m);
+    }
+  });
+});
+
+describe('formatMinuteSpan', () => {
+  it('never says "0m" beside an hour, and never says "0h" at all', () => {
+    expect(formatMinuteSpan(80)).toBe('1h 20m');
+    expect(formatMinuteSpan(45)).toBe('45m');
+    expect(formatMinuteSpan(360)).toBe('6h');
+    expect(formatMinuteSpan(0)).toBe('0m');
+  });
+});
+
+describe('N431: caffeine\'s 400 mg target reads as a ceiling, like coffee\'s', () => {
+  // `footLine` and `glyphState` are pre-existing (N77) and already
+  // mutation-tested against `ceiling`. What is new here is that caffeine is
+  // the tracker the ticket says makes this reading LOAD-BEARING rather than
+  // incidental — so this pins the same neutral phrasing down against the
+  // caffeine fixture specifically, rather than trusting it generalises.
+  it('crosses the target without being refused, and states the fact plainly', () => {
+    const over = taps(caffeine, 6); // 6 * 80 mg = 480 mg, over the 400 mg / 5-cup target
+    expect(loggedCount(over)).toBe(6);
+    expect(valueLine(caffeine, over)).toBe('6 of 5 cups');
+    expect(footLine(caffeine, over)).toContain('1 past your target of 5');
+  });
+
+  it('marks the over-target cup distinctly, never as a warning colour or word', () => {
+    const states = Array.from({ length: 6 }, (_, i) => glyphState(caffeine, i, 6));
+    expect(states).toEqual(['filled', 'filled', 'filled', 'filled', 'filled', 'over']);
+  });
+
+  it('reads the same at the target as under it — no "reached!" fanfare', () => {
+    expect(footLine(caffeine, taps(caffeine, 5))).toContain('Target 5 reached');
+    expect(footLine(caffeine, taps(caffeine, 5))).not.toMatch(/great|nice|watch|careful|limit/i);
+    expect(footLine(caffeine, taps(caffeine, 6))).not.toMatch(/great|nice|watch|careful|limit/i);
+  });
+});
+
+describe('N431: the cutoff line — a stated fact, never a verdict', () => {
+  // Local noon and local 15:40 / 16:10, expressed in UTC for the suite's fixed
+  // TZ=America/Los_Angeles (UTC-7 in August), exactly as `taps()`'s own default
+  // and the "reads the clock in the DEVICE zone" test above already do.
+  const localNoonUTC = '2026-08-20T19:00:00.000Z'; // 12:00 local
+  const before = '2026-08-20T22:40:00.000Z'; // 15:40 local — before the 16:00 cutoff
+  const after = '2026-08-20T23:10:00.000Z'; // 16:10 local — past the 16:00 cutoff
+
+  it('says nothing at all when no cutoff is configured', () => {
+    expect(cutoffLine(coffee, [], new Date(localNoonUTC))).toBeNull();
+    expect(cutoffLine(coffee, taps(coffee, 3), new Date(localNoonUTC))).toBeNull();
+  });
+
+  it('counts down to the cutoff when nothing has crossed it yet', () => {
+    // now = 12:00 local, cutoff = 16:00 local -> 4h to go.
+    expect(cutoffLine(caffeine, [], new Date(localNoonUTC))).toBe('cutoff in 4h');
+    // A cup logged well before the cutoff does not change the answer — the
+    // countdown is about the CLOCK, not about whether anything was logged.
+    expect(cutoffLine(caffeine, taps(caffeine, 1, before), new Date(localNoonUTC))).toBe(
+      'cutoff in 4h',
+    );
+  });
+
+  it('states the cutoff has passed once the clock does, with nothing logged past it', () => {
+    // now = 16:10 local, nothing logged at all today.
+    expect(cutoffLine(caffeine, [], new Date(after))).toBe('past your 16:00 cutoff');
+    // Nor does a cup logged safely BEFORE the cutoff change this — the
+    // athlete respected it, but the clock has still moved past it.
+    expect(cutoffLine(caffeine, taps(caffeine, 1, before), new Date(after))).toBe(
+      'past your 16:00 cutoff',
+    );
+  });
+
+  it('names the actual late entry once one crossed the line', () => {
+    const entries = taps(caffeine, 1, after);
+    expect(cutoffLine(caffeine, entries, new Date(after))).toBe(
+      'last at 16:10 — past your 16:00 cutoff',
+    );
+  });
+
+  it('states a crossed cutoff for a BROWSED PAST DAY too — a fact about what happened', () => {
+    // `now: null` is what a screen passes for a day that is not real today.
+    // Case 1 (the entry itself crossed the line) does not depend on the
+    // live clock at all, so it must still fire here.
+    const entries = taps(caffeine, 1, after);
+    expect(cutoffLine(caffeine, entries, null)).toBe('last at 16:10 — past your 16:00 cutoff');
+  });
+
+  it('says nothing about a past day nothing crossed the cutoff on', () => {
+    // No live clock to compare against, and nothing logged past the line —
+    // there is no fact left to state. Not "you were fine", which is praise.
+    expect(cutoffLine(caffeine, [], null)).toBeNull();
+    expect(cutoffLine(caffeine, taps(caffeine, 1, before), null)).toBeNull();
   });
 });

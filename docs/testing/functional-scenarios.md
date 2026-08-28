@@ -14442,3 +14442,128 @@ on screen. That, and only that, is what moved.
 - No change to authorization or the wire contract — this is a pure
   client-side display/input change, deriving the unit from a field
   (`packet_serving_label`) the app already receives and stores.
+
+## The caffeine tracker: a limit and a cutoff (N431)
+
+Backend `internal/modules/tracker` (unchanged endpoints — `/v1/trackers`,
+`/v1/tracker-presets` — plus the new `cutoff_minutes` field on all four of
+`DailyTracker`, `DailyTrackerInput`, `DailyTrackerPatch` and `TrackerPreset`),
+migration `000079`. Mobile `lib/trackerModel.ts` (`cutoffLine`, `formatCutoff`,
+`parseCutoff`), `components/TrackerForm.tsx` (the "Cutoff" field),
+`components/TrackerCard.tsx`, `components/TrackerList.tsx` (the new `now` prop).
+
+This is a preset and a cutoff on the existing tracker model, not a new
+surface — see the N76/N77/N78 sections above for the scoping, ownership and
+offline scenarios that already cover any tracker, caffeine included, and are
+not repeated here.
+
+### Adding it
+
+- Open **Track something new**. **Caffeine** appears in "Ready to go" — server
+  ships it `Default: false`, same as coffee, so it must be reachable from the
+  same list rather than pre-provisioned.
+- Tap it. It provisions with unit `mg`, increment 80, target 400, cutoff 960
+  (16:00) — check the card reads `0 of 400 mg` with no glyphs drawn yet.
+- It is reachable from the SAME create screen a hand-authored tracker is —
+  confirms N431 did not need a new screen, matching the mobile-first
+  no-new-surface constraint.
+
+### The limit reads as a ceiling, not a goal
+
+- Log five taps (400 mg). The card reads `5 of 5 cups · Target 5 reached` (or
+  the numeric equivalent for whatever the athlete's own increment produces).
+- Log a sixth. It logs — **never refused**. The foot line states the
+  arithmetic (`X past your target of Y`), not a warning. Read every string the
+  card can produce for this tracker and find no verdict — no "too much", no
+  warning colour, no exclamation mark. Same criterion N77's coffee section
+  already states; caffeine is the tracker where it is load-bearing rather than
+  incidental, since crossing 400 mg is closer to something worth flagging than
+  crossing an arbitrary water goal ever was — and the card must still not flag
+  it.
+- The sixth cup's glyph is visually distinct from the first five (smaller
+  fill), same mechanism as coffee's past-target cup.
+
+### The cutoff line
+
+- With the tracker's default cutoff (16:00): before 16:00 local with nothing
+  logged, the card reads `cutoff in Xh Ym` and the countdown shrinks as you
+  wait and reload.
+- Log a cup, then reach 16:00 local with the last cup still before it. The
+  cutoff line reads `past your 16:00 cutoff` — no mention of the earlier cup,
+  because it was not the one that crossed the line.
+- Log a cup AT OR AFTER 16:00 local. The line reads `last at HH:MM — past your
+  16:00 cutoff`, naming the actual late entry.
+- **Read every string this line can produce and find no verdict** — same
+  criterion as the limit above, and it is the sharper case: this is
+  specifically a "you should not do this" line by design, and it must still
+  read as a stated fact rather than a scold. No red, no warning icon.
+- Clear the cutoff field in the tracker's settings (blank it out, save). The
+  cutoff line disappears from the card entirely — no line, not an empty one.
+- Set a cutoff on WATER. It works identically — this is a generic tracker
+  field, not a caffeine special case. Confirms nothing branches on `preset`.
+
+### Day-scoping (N430's browsed-day threading)
+
+- Log a caffeine entry AFTER the cutoff today. Browse back to yesterday (or
+  any day with no entries). The cutoff line must be **absent** on that day's
+  card — nothing crossed yesterday's cutoff, and there is no live countdown
+  for a day that already ended.
+- On a PAST day where an entry genuinely was logged after that day's cutoff
+  time: the `last at HH:MM — past your HH:MM cutoff` line still appears. This
+  is a fact about what happened, not about the live clock, so it must not
+  disappear just because the day being viewed is not today.
+- Browse to a past day with entries all logged BEFORE that day's cutoff, or
+  with none at all. No cutoff line, and specifically no "cutoff in Xh" (there
+  is no live clock to count down to) and no bare "past your cutoff" either
+  (nothing to warn about, and this project does not praise the absence of a
+  problem any more than it scolds the presence of one).
+- Tap `+` on the caffeine card while browsing a past day. Confirms it logs
+  under the BROWSED day, not real today — same criterion the water/coffee
+  section already states for N430, exercised here on the newest tracker rather
+  than assumed to generalise.
+
+### Editing the cutoff
+
+- Open the caffeine tracker's settings. The Cutoff field shows `16:00`.
+- Type `25:00` or `16:60`. Save is refused with a message naming the format
+  (`HH:MM`), not a silent clamp to a nearby legal value.
+- Type a genuinely different cutoff (e.g. `14:30`), save, reopen the card. The
+  new cutoff is reflected in the countdown/warning line.
+- Clear the field and save. `cutoff_minutes` goes to `null` server-side —
+  confirm with a second device or a re-fetch, not just the local screen, since
+  this is the three-state (absent/null/value) PATCH the rest of this module
+  already relies on for `target`.
+
+### Offline
+
+- Airplane mode: add the caffeine preset (this needs the network — same as
+  turning on coffee — confirm the error names the connection requirement
+  rather than failing silently), OR create a hand-authored tracker with a
+  cutoff (this works offline, same as any other field). Log taps, edit the
+  cutoff, reconnect. The definition syncs once and the cutoff value on the
+  server matches what was set on the device.
+
+### Auth/security
+
+- Nothing new. `cutoff_minutes` follows the same owner-scoped read/write path
+  as every other tracker field — no new endpoint, no new authorization
+  surface.
+- `POST /v1/tracker-presets/caffeine` provisions field-for-field from the
+  compiled preset, exactly as `coffee` does — a request body cannot influence
+  the cutoff it receives.
+
+### For the user to check on a device
+
+Reading the diff cannot settle any of these.
+
+1. **The countdown reads naturally.** `cutoff in 1h 20m` (not `1h20m`, not
+   `01:20`) at a glance, one-handed, the way the ticket's own example phrases
+   it.
+2. **The warning line is genuinely not alarming.** Sit at "last at 16:10 —
+   past your 16:00 cutoff" for a few seconds and check it does not read as an
+   error to a normal person, the way a red banner would.
+3. **VoiceOver reads the cutoff line as plain text**, in the same tone as the
+   foot line above it — no different pacing or emphasis that would make it
+   sound like a system alert.
+4. **The Cutoff field's keyboard is sane** on-device (numbers-and-punctuation)
+   for typing `16:00` one-handed.

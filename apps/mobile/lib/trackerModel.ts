@@ -52,6 +52,19 @@ export type Tracker = {
    * beats two copies of a rule that can disagree.
    */
   provisioned: boolean;
+  /**
+   * Minutes since local midnight — a plain clock time, e.g. `960` for 16:00.
+   * `null` means no cutoff is configured, a real state distinct from
+   * midnight (`0`) the same way `target: null` is distinct from `0`.
+   *
+   * **Generic, like everything else here — nothing about this field says
+   * caffeine.** N431 is the first tracker where it is load-bearing, but any
+   * tracker can carry a "no more after this time" line; see `cutoffLine`.
+   * There is no "hours before sleep" or "bedtime" stored anywhere: an athlete
+   * who thinks that way computes the clock time once, at authoring time, and
+   * this is where the result lives.
+   */
+  cutoff_minutes: number | null;
 };
 
 export type TrackerEntry = {
@@ -301,6 +314,93 @@ export function formatClock(at: Date): string {
   const h = String(at.getHours()).padStart(2, '0');
   const m = String(at.getMinutes()).padStart(2, '0');
   return `${h}:${m}`;
+}
+
+/** Minutes-since-midnight of a `Date`'s LOCAL clock reading. */
+function minutesOfDay(at: Date): number {
+  return at.getHours() * 60 + at.getMinutes();
+}
+
+/**
+ * "16:00" from minutes-since-midnight — `formatClock`'s twin for a stored
+ * cutoff rather than a logged instant. Assumes a valid 0..1439 input, which is
+ * what the server's own CHECK constraint and `Patch.Validate` both enforce;
+ * nothing on this side re-validates a value that already came from a tracker.
+ */
+export function formatCutoff(minutes: number): string {
+  const h = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const m = String(minutes % 60).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+/**
+ * Parse a typed "16:00" (or "4:00") into minutes-since-midnight, or `null` for
+ * anything that is not a legal clock time.
+ *
+ * Used by the tracker form's cutoff field, the same way `readDraft` parses
+ * every other number the athlete types — rejected rather than silently
+ * clamped, so a typo ("25:00") is a form error and not a quietly wrong cutoff.
+ */
+export function parseCutoff(text: string): number | null {
+  const m = /^([0-9]{1,2}):([0-9]{2})$/.exec(text.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const mins = Number(m[2]);
+  if (h > 23 || mins > 59) return null;
+  return h * 60 + mins;
+}
+
+/**
+ * "1h 20m", "45m", "6h" — never "6h 0m". The unit the countdown in
+ * `cutoffLine` is written in.
+ */
+export function formatMinuteSpan(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+/**
+ * The cutoff warning — N431's "no more caffeine after N hours before bed",
+ * generalised to any tracker that carries a `cutoff_minutes`.
+ *
+ * **A stated fact, never a verdict — the same register `footLine` already
+ * uses for a target.** No colour, no "you blew it", nothing different about a
+ * cutoff crossed by five minutes than by five hours. Three answers, in order:
+ *
+ * 1. **The day's last entry was already at or past the cutoff** — "last at
+ *    15:40 — past your 16:00 cutoff". This is a fact about what already
+ *    happened and is shown regardless of what day is on screen, including a
+ *    browsed PAST day: an athlete looking back at Tuesday is still told
+ *    Tuesday's last cup was late.
+ * 2. **Nothing crossed it yet, and `now` is before the cutoff** — "cutoff in
+ *    1h 20m", a forward-looking countdown.
+ * 3. **Nothing crossed it yet, and `now` is at or past the cutoff** — "past
+ *    your 16:00 cutoff", stated with no entry to point at.
+ *
+ * `now` is `null` for a browsed day that is not real today (see
+ * `TrackerList`'s own prop). Cases 2 and 3 are both claims about the CURRENT
+ * moment — "you still have time" or "you are out of it right now" — and
+ * neither is a fact about a day that already ended, so both are skipped when
+ * `now` is null and case 1 did not already answer. A day nothing crossed the
+ * cutoff on, viewed after the fact, has nothing to warn about — the athlete
+ * respected it, and this project does not praise that either.
+ */
+export function cutoffLine(t: Tracker, entries: TrackerEntry[], now: Date | null): string | null {
+  if (t.cutoff_minutes == null) return null;
+  const cutoffClock = formatCutoff(t.cutoff_minutes);
+  const last = lastLoggedAt(entries);
+  if (last && minutesOfDay(last) >= t.cutoff_minutes) {
+    return `last at ${formatClock(last)} — past your ${cutoffClock} cutoff`;
+  }
+  if (now == null) return null;
+  const nowMinutes = minutesOfDay(now);
+  if (nowMinutes < t.cutoff_minutes) {
+    return `cutoff in ${formatMinuteSpan(t.cutoff_minutes - nowMinutes)}`;
+  }
+  return `past your ${cutoffClock} cutoff`;
 }
 
 /**

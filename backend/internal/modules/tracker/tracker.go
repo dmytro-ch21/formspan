@@ -159,6 +159,16 @@ type Tracker struct {
 	// SUGGESTION it always really was.
 	CountNoun string `json:"count_noun"`
 
+	// Minutes since local midnight — a plain clock time, e.g. 960 for 16:00.
+	// `nil` means no cutoff is configured, a real state distinct from
+	// midnight (0). See the migration for why this is minutes rather than a
+	// SQL TIME, and why it carries no "hours before sleep" or "kind" of its
+	// own: the athlete who thinks in "six hours before my 22:00 bedtime"
+	// computes 16:00 once, at authoring time, and this column only ever
+	// holds the result. Generic, like every other column here — nothing
+	// about it says caffeine, and a supplement tracker can carry one too.
+	CutoffMinutes *int `json:"cutoff_minutes"`
+
 	// Whether provisioning would re-create this row if it were deleted.
 	//
 	// **Derived, never stored** — it is `preset` looked up in the compiled
@@ -242,6 +252,10 @@ type Patch struct {
 	RenderStyle Field[string]  `json:"render_style"`
 	SortOrder   Field[int]     `json:"sort_order"`
 	CountNoun   Field[string]  `json:"count_noun"`
+	// Nullable, exactly like Target: absent leaves the cutoff alone, an
+	// explicit null clears it, and a number sets one. Three states, one
+	// column, same reason Target needs the pointer form rather than deref.
+	CutoffMinutes Field[int] `json:"cutoff_minutes"`
 }
 
 // patchColumn is one column the patch actually names.
@@ -277,6 +291,9 @@ func patchColumns(p Patch) []patchColumn {
 	add("render_style", p.RenderStyle.Set, deref(p.RenderStyle.Value))
 	add("sort_order", p.SortOrder.Set, deref(p.SortOrder.Value))
 	add("count_noun", p.CountNoun.Set, deref(p.CountNoun.Value))
+	// Keeps its pointer, exactly like target: nil here is SQL NULL — "no
+	// cutoff configured" — not "null into a NOT NULL column".
+	add("cutoff_minutes", p.CutoffMinutes.Set, p.CutoffMinutes.Value)
 	return cols
 }
 
@@ -342,6 +359,15 @@ func (p Patch) Validate() error {
 	}
 	if p.SortOrder.Set && p.SortOrder.Value == nil {
 		return fmt.Errorf("%w: sort_order cannot be null", ErrInvalidInput)
+	}
+	// Null is legal here too — it is how an athlete clears a cutoff, same as
+	// target. What is refused is a value outside a day: the column is
+	// minutes since local midnight, and anything past 1439 is not a clock
+	// time this athlete's device can ever reach.
+	if p.CutoffMinutes.Set && p.CutoffMinutes.Value != nil &&
+		(*p.CutoffMinutes.Value < 0 || *p.CutoffMinutes.Value > 1439) {
+		return fmt.Errorf("%w: cutoff_minutes must be between 0 and 1439, or null for no cutoff",
+			ErrInvalidInput)
 	}
 	if p.CountNoun.Set {
 		if p.CountNoun.Value == nil {
@@ -410,6 +436,8 @@ type New struct {
 	RenderStyle string   `json:"render_style"`
 	SortOrder   int      `json:"sort_order"`
 	CountNoun   string   `json:"count_noun"`
+	// Nullable, same reading as Target: omit it or send null for no cutoff.
+	CutoffMinutes *int `json:"cutoff_minutes"`
 }
 
 // Validate reuses the patch validator by expressing New as a complete patch, so
@@ -474,6 +502,11 @@ func (n New) validateFields() error {
 		p.Target = Of(*n.Target)
 	} else {
 		p.Target = Null[float64]()
+	}
+	if n.CutoffMinutes != nil {
+		p.CutoffMinutes = Of(*n.CutoffMinutes)
+	} else {
+		p.CutoffMinutes = Null[int]()
 	}
 	return p.Validate()
 }

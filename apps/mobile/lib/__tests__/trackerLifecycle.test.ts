@@ -62,6 +62,7 @@ const draft = (over: Partial<Parameters<typeof createTrackerLocally>[1]> = {}) =
   target: 5,
   render_style: 'auto' as const,
   count_noun: 'dose',
+  cutoff_minutes: null,
   ...over,
 });
 

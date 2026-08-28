@@ -43,6 +43,7 @@ const coffee: Tracker = {
   // omitting the one field that decides what the card reads.
   count_noun: 'cup',
   provisioned: false,
+  cutoff_minutes: null,
 };
 
 const water: Tracker = {
@@ -58,6 +59,7 @@ const water: Tracker = {
   sort_order: 10,
   count_noun: 'cup',
   provisioned: true,
+  cutoff_minutes: null,
 };
 
 /** Cups, one an hour, ending at the time the assertions read back. */
@@ -120,6 +122,56 @@ describe('the card shows when the last one was', () => {
     // An athlete who declined a ceiling is not handed an empty goal line.
     renderCard(coffee, []);
     expect(screen.queryByTestId('tracker-foot-cof')).toBeNull();
+  });
+});
+
+describe('N431: the cutoff line is wired to the card, not just the model', () => {
+  // Same reasoning as the file header: `cutoffLine` is already pinned down as
+  // pure logic in `trackerModel.test.ts`, and a correct function nothing
+  // renders is exactly the #406 shape. This proves the card actually calls it
+  // and draws what it returns.
+  const withCutoff: Tracker = { ...coffee, cutoff_minutes: 960 }; // 16:00
+
+  it('is absent when the tracker has no cutoff configured', () => {
+    renderCard(coffee, [], { now: new Date('2026-08-20T19:00:00.000Z') });
+    expect(screen.queryByTestId('tracker-cutoff-cof')).toBeNull();
+  });
+
+  it('counts down before the cutoff, on the live card', () => {
+    // 2026-08-20T19:00:00.000Z is 12:00 local — four hours before 16:00.
+    renderCard(withCutoff, [], { now: new Date('2026-08-20T19:00:00.000Z') });
+    expect(screen.getByTestId('tracker-cutoff-cof')).toHaveTextContent('cutoff in 4h');
+  });
+
+  it('names the late cup once one crosses the line', () => {
+    // 2026-08-20T23:10:00.000Z is 16:10 local — past the 16:00 cutoff.
+    const late = taps(withCutoff, 1, '2026-08-20T23:10:00.000Z');
+    renderCard(withCutoff, late, { now: new Date('2026-08-20T23:10:00.000Z') });
+    expect(screen.getByTestId('tracker-cutoff-cof')).toHaveTextContent(
+      'last at 16:10 — past your 16:00 cutoff',
+    );
+  });
+
+  it('is absent on a browsed PAST day nothing crossed the cutoff on', () => {
+    // `now: null` (the default, and what a browsed-day screen passes) — a cup
+    // logged well before the cutoff leaves nothing to warn about.
+    const early = taps(withCutoff, 1, '2026-08-20T21:00:00.000Z'); // 14:00 local
+    renderCard(withCutoff, early);
+    expect(screen.queryByTestId('tracker-cutoff-cof')).toBeNull();
+  });
+
+  it('still states a crossed cutoff on a browsed PAST day — a fact, not a live reading', () => {
+    const late = taps(withCutoff, 1, '2026-08-20T23:10:00.000Z');
+    renderCard(withCutoff, late); // now: null — not real today
+    expect(screen.getByTestId('tracker-cutoff-cof')).toHaveTextContent(
+      'last at 16:10 — past your 16:00 cutoff',
+    );
+  });
+
+  it('reads no differently from the foot line above it — same register, no verdict', () => {
+    renderCard(withCutoff, [], { now: new Date('2026-08-20T23:10:00.000Z') });
+    const text = screen.getByTestId('tracker-cutoff-cof').props.children;
+    expect(String(text)).not.toMatch(/warn|careful|stop|too (much|late)|!/i);
   });
 });
 

@@ -29,6 +29,7 @@ const tracker = (id: string, over: Partial<Tracker> = {}): Tracker => ({
   sort_order: 10,
   count_noun: 'dose',
   provisioned: false,
+  cutoff_minutes: null,
   ...over,
 });
 

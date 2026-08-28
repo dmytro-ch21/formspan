@@ -212,15 +212,16 @@ func (h *Handler) ListPresets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type wire struct {
-		Preset      string   `json:"preset"`
-		Name        string   `json:"name"`
-		Icon        string   `json:"icon"`
-		ColorKey    string   `json:"color_key"`
-		Unit        string   `json:"unit"`
-		Increment   float64  `json:"increment"`
-		Target      *float64 `json:"target"`
-		RenderStyle string   `json:"render_style"`
-		CountNoun   string   `json:"count_noun"`
+		Preset        string   `json:"preset"`
+		Name          string   `json:"name"`
+		Icon          string   `json:"icon"`
+		ColorKey      string   `json:"color_key"`
+		Unit          string   `json:"unit"`
+		Increment     float64  `json:"increment"`
+		Target        *float64 `json:"target"`
+		RenderStyle   string   `json:"render_style"`
+		CountNoun     string   `json:"count_noun"`
+		CutoffMinutes *int     `json:"cutoff_minutes"`
 	}
 	// Shaped explicitly rather than returning `Preset` — that struct carries
 	// `Default`, which is a provisioning decision and none of a client's
@@ -232,6 +233,7 @@ func (h *Handler) ListPresets(w http.ResponseWriter, r *http.Request) {
 			Preset: p.Key, Name: f.Name, Icon: f.Icon, ColorKey: f.ColorKey,
 			Unit: f.Unit, Increment: f.Increment, Target: f.Target,
 			RenderStyle: f.RenderStyle, CountNoun: f.CountNoun,
+			CutoffMinutes: f.CutoffMinutes,
 		})
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"presets": out})

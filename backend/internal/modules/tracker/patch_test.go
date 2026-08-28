@@ -232,6 +232,16 @@ func TestPatchValidate(t *testing.T) {
 		// `>=`, which is the off-by-one this pair exists to catch.
 		{"24 characters is the limit", `{"count_noun":"123456789012345678901234"}`, true},
 		{"25 characters is over it", `{"count_noun":"1234567890123456789012345"}`, false},
+
+		// The cutoff (N431): minutes since local midnight, 0..1439. Null clears
+		// it — the same reading `target` already gives null — so the interesting
+		// vectors are the boundary and the value just past it.
+		{"a cutoff at 16:00", `{"cutoff_minutes":960}`, true},
+		{"null clears the cutoff", `{"cutoff_minutes":null}`, true},
+		{"midnight is a legal cutoff, not the same as unset", `{"cutoff_minutes":0}`, true},
+		{"1439 is the last minute of the day", `{"cutoff_minutes":1439}`, true},
+		{"1440 is tomorrow, not a clock time today", `{"cutoff_minutes":1440}`, false},
+		{"negative is not a clock time", `{"cutoff_minutes":-1}`, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

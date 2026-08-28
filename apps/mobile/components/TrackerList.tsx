@@ -22,6 +22,7 @@ export function TrackerList({
   dayAtTap,
   units,
   unitsReady,
+  now = null,
   collapseAfter,
   collapseKey,
   testID,
@@ -48,6 +49,14 @@ export function TrackerList({
   dayAtTap: () => string;
   units: UnitSystem;
   unitsReady: boolean;
+  /**
+   * The live clock, passed straight through to `TrackerCard` for the cutoff
+   * line (N431) — `null` unless the day on screen IS real today. Today passes
+   * `new Date()` when `isToday`, Food likewise; a browsed past day passes
+   * `null` from both, because "cutoff in 1h 20m" is a claim about right now
+   * and neither screen's stepper changes what time it actually is.
+   */
+  now?: Date | null;
   /**
    * Draw at most this many cards, and put the rest behind one disclosure row.
    *
@@ -127,6 +136,7 @@ export function TrackerList({
           entries={day.entriesFor(t.id)}
           units={units}
           unitsReady={unitsReady}
+          now={now}
           onAdd={() => void day.addTap(t, dayAtTap())}
           onRemove={(entryID) => void day.removeEntry(entryID, dayAtTap())}
           onEdit={() => day.openSettings(t)}
