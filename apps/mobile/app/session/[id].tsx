@@ -97,6 +97,7 @@ import {
   describeSet,
   emptyDropSet,
   emptySet,
+  groupSets,
   setOrdinals,
   localVolume,
   hasUnresolvedLoad,
@@ -1111,13 +1112,10 @@ export default function SessionScreen() {
   }
 
   // Grouped by exercise so "+ Set" sits under the movement it belongs to,
-  // rather than making someone re-pick the exercise for every set.
-  const groups: { exerciseID: string; indices: number[] }[] = [];
-  sets.forEach((s, i) => {
-    const last = groups[groups.length - 1];
-    if (last && last.exerciseID === s.exercise_id) last.indices.push(i);
-    else groups.push({ exerciseID: s.exercise_id, indices: [i] });
-  });
+  // rather than making someone re-pick the exercise for every set. See
+  // `groupSets`'s own doc comment for why it is deliberately blind to
+  // `set_type` — the orphaned-drop handling lives in `setOrdinals` below.
+  const groups = groupSets(sets);
 
   /**
    * Switch a whole exercise between reps and time.

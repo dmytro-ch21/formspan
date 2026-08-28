@@ -46999,6 +46999,106 @@ EVIDENCE on the issue's own criteria (the issue carries no device-check
 criterion; the standing NEEDS HUMAN EVIDENCE noted above is this session's
 own addition, not the issue's).
 
+## 2026-08-28 — L9: the session screen's drop-attachment walk gets tests, and an orphan-drop bug of its own along the way (#664)
+
+The mobile half of L7 (#386). L7 pinned `DropsOf` — "a drop belongs only to
+the immediately preceding same-exercise, non-drop row; skipped rather than
+attached when there isn't one" — server-side, in
+`backend/internal/modules/session/session.go`. Review of #663 found
+`DropsOf` has **zero production callers**: the behaviour an athlete actually
+sees comes entirely from an inline positional walk in
+`apps/mobile/app/session/[id].tsx` that built `groups` by `exercise_id`
+adjacency, with no test coverage at all.
+
+**What was actually wrong wasn't the grouping walk itself.** `exercise_id`
+adjacency already isolates cross-exercise runs correctly — a drop can never
+pull rows from the wrong exercise into its group, because its `exercise_id`
+always matches its own exercise, same as any other row. The real gap was one
+level down, in `setOrdinals` (already extracted and already tested, in
+`apps/mobile/lib/__tests__/setDetail.test.ts`'s "set numbering" describe
+block) — specifically in its handling of a drop that opens a group with no
+preceding same-exercise working set to borrow a number from. That is exactly
+`DropsOf`'s "orphaned" case, and the existing behaviour clamped it to `1`,
+which is ALSO the ordinal the next legitimate working set in the group was
+about to get. `t('drop', 'working')` returned `[1, 1]` — a deliberate,
+documented choice at the time ("a drop with nothing above it is a client bug
+… '`set 0`' is the one thing it must not say"), but its side effect is
+exactly what this ticket describes: the orphan's row (and its accessibility
+label — "drop off set 1", spoken by VoiceOver even though the row itself only
+ever shows "↳") reads as though it hangs off that following set's effort.
+`localVolume`/`Summarise` don't actually double-count anything (both sum
+flatly, drop-awareness only lives in `countsAsSet`) — the "inflation" is
+purely a false claim of attachment on screen, not a wrong number in a total.
+
+**The fix, and the judgment call this ticket left open:** `groupSets` is now
+extracted verbatim from the screen into `apps/mobile/lib/sessions.ts`,
+unchanged in behaviour and deliberately still blind to `set_type` — its doc
+comment explains why that is correct rather than an oversight. `setOrdinals`
+changed: an orphaned drop (no non-drop row above it in the group so far) is
+now counted like a working set — its own ordinal, incrementing the running
+counter — rather than clamped to whatever the next real set is about to
+claim. `t('drop', 'working')` is now `[1, 2]`. This still never shows a bare
+zero (the original constraint), and it stops the orphan from silently sharing
+an identity with a set it has no relation to. The trade-off: numbering after
+an orphan shifts up by one, which only ever happens in the already-anomalous
+case both `DropsOf`'s doc comment and the original `setOrdinals` comment call
+a client bug — there is no legitimate way for a group to start with a drop.
+The normal case (a drop genuinely following a same-exercise working set) is
+untouched: `t('working', 'drop', 'working')` is still `[1, 1, 2]`.
+
+New tests in `setDetail.test.ts`: a `groupSets` describe block (adjacency
+grouping, and the squat/bench/squat non-merge case `reorderGroups`'s own
+comment already relied on), and a `drop attachment (L9, #664)` describe block
+that runs the two functions together the way the screen does — via a
+`ordinalsBySet` helper that groups then numbers per group — pinning both
+acceptance-criteria cases: a drop as the first row of the whole session, and
+a drop as the first row of a new exercise group (preceded by a different
+exercise). Both assert the orphan's ordinal is distinct from the following
+legitimate working set's, not merely non-zero.
+
+Mutation-verified: reverted `setOrdinals` to the old clamp-to-1
+(attach-to-previous-in-effect) behaviour, confirmed 3 tests failed on real
+`toEqual`/`not.toBe` mismatches (not a compile error) — the two new drop-
+attachment tests plus the updated "leading drop" set-numbering test — restored
+verbatim (diffed byte-identical against the pre-mutation copy), confirmed
+green again by re-running `jest`, not by reading the file. `pnpm run verify`
+green.
+
+### What is not done
+
+- No device run — this is a numbering/labelling change with no new screen,
+  so it wasn't treated as needing one. If it turns out an athlete has ever
+  actually hit an orphaned-drop state in practice (versus this being a purely
+  theoretical client-bug guard), that would be worth a `NEEDS HUMAN EVIDENCE`
+  follow-up.
+- `DropsOf` itself still has zero production callers, unchanged by this
+  ticket — it was never in scope here (backend-only, and this is "mobile
+  only" per the issue). Worth revisiting together with **L2** and **L7**
+  (#386) if the positional attachment model changes, per the issue's own
+  acceptance criteria.
+- `docs/testing/functional-scenarios.md` not touched — this is unit-level
+  logic-and-test coverage on an existing screen with no new user-facing
+  surface, not a new flow to add a scenario for.
+
+### `frontend-reviewer` finding, applied before merge
+
+No blocking findings. One suggestion applied: the orphan branch of
+`setOrdinals` deliberately never sets `hasParent`, so a RUN of leading drops
+must each get their own ordinal — a second orphan must not falsely treat the
+first orphan as its parent, the exact bug class this ticket exists to
+prevent, one level deeper. Neither of the two acceptance-criteria tests
+exercised this (each hits the orphan branch only once per group), so it
+survived as a real, unmutation-tested gap. Added `t('drop', 'drop',
+'working') → [1, 2, 3]`, mutation-verified the same way as the rest of this
+ticket: set `hasParent = true` in the orphan branch, confirmed the new test
+failed on a real assertion (`[1, 1, 2]` received vs. `[1, 2, 3]` expected),
+restored, confirmed green by re-running.
+
+Left as a judgment call, per the reviewer's own framing: an orphan's
+accessibility label still reads `"drop off set N"` even though it IS row N —
+self-referential rather than misattributed, which is strictly better than
+the pre-fix behaviour and not required by this ticket's acceptance criteria.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
