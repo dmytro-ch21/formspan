@@ -47099,6 +47099,30 @@ accessibility label still reads `"drop off set N"` even though it IS row N —
 self-referential rather than misattributed, which is strictly better than
 the pre-fix behaviour and not required by this ticket's acceptance criteria.
 
+## 2026-08-28 — H11: CLAUDE.md and the ticket-sdlc skill catch up to the board's real Status options (#701)
+
+Docs-only. The evidence-latch section of `CLAUDE.md` said flatly "there is no
+`Awaiting evidence` column on the board, deliberately" — true when it was
+written, stale now: the board's `Status` field on the VOLA project carries an
+`Awaiting evidence` option (and a `Blocked` one, also undocumented until now),
+both set by hand this session via `updateProjectV2ItemFieldValue` mutations,
+the same mechanism the `vola-ticket-sdlc` skill already documents for
+`Status → Done`.
+
+**What didn't change:** the reasoning that kept this out of automation. CI
+still writes only the `evidence-outstanding` label — moving a Projects v2
+field from a workflow still needs a long-lived PAT, and that credential is
+still the board owner's call, not something this PR grants. So `Status →
+Awaiting evidence` is a manual convenience layered on top of the label, not a
+second source of truth for it: the label is what the evidence latch actually
+reads and writes; the Status option just makes "merged, awaiting evidence"
+visible from the board's own Status column instead of a saved filtered view.
+
+Updated `CLAUDE.md`'s wording to describe the option as it now exists, and
+added a one-line pointer next to the `vola-ticket-sdlc` skill's existing
+`Status → Done` recipe (step 12) noting the `Status → Awaiting evidence`
+counterpart for a ticket the latch reopens.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
