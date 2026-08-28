@@ -254,6 +254,14 @@ function ClipNote({ series }: { series: TrendSeries }) {
  * Exported for its own test, same reasoning as {@link refusalCopy}: Expo
  * Router reads only the default export from a route file, so a named export
  * alongside it is inert in the app and free to use in a test.
+ *
+ * **Plan-sourced projections only.** `goal` is absent on every `none` result
+ * `projectToGoal` produces (see that function's own doc), so a caller handing
+ * this component an observed-trend projection loses its refusal sentence
+ * silently. The only caller today ({@link useWeightTrend}) builds exclusively
+ * via {@link fromPlanProjection}; a second caller sourcing from
+ * `projectToGoal` would need its own path to a goal figure before reusing
+ * this component.
  */
 export function ProjectionLine({
   projection,
