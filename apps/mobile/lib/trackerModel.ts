@@ -13,6 +13,7 @@
  * rules are what a test can pin down.
  */
 
+import { dayString } from './calendar';
 import { formatFluid, fluidUnit, type UnitSystem } from './units';
 
 export type RenderStyle = 'auto' | 'glyphs' | 'bar' | 'dose';
@@ -310,6 +311,32 @@ export function lastLoggedAt(entries: TrackerEntry[]): Date | null {
   return newest;
 }
 
+/**
+ * `lastLoggedAt`'s twin for `cutoffLine`'s "crossed" fact — excludes a
+ * BACKFILLED entry, whose `logged_at` is the real wall-clock moment it was
+ * tapped, not a fact about the day it was filed under (`logged_on`).
+ *
+ * N431 review, frontend-reviewer: browsing back to a past day and tapping
+ * there stamps `logged_at = now()` while filing under the browsed
+ * `logged_on` (see `logTap`, `lib/trackers.ts`) — so a tap on Tuesday made
+ * from Thursday at 16:10 has `logged_at` reading Thursday 16:10 but
+ * `logged_on = Tuesday`. Reading that straight into `cutoffLine`'s "last at
+ * 16:10 — past your cutoff" fabricates a claim about Tuesday's evening from
+ * Thursday's clock. Only an entry whose logged INSTANT falls on the same
+ * local calendar day as the day it is filed under can honestly state what
+ * time it was logged AT on that day.
+ */
+function lastLoggedAtOnItsOwnDay(entries: TrackerEntry[]): Date | null {
+  let newest: Date | null = null;
+  for (const e of entries) {
+    const at = new Date(e.logged_at);
+    if (Number.isNaN(at.getTime())) continue;
+    if (dayString(at) !== e.logged_on) continue;
+    if (!newest || at > newest) newest = at;
+  }
+  return newest;
+}
+
 export function formatClock(at: Date): string {
   const h = String(at.getHours()).padStart(2, '0');
   const m = String(at.getMinutes()).padStart(2, '0');
@@ -374,7 +401,8 @@ export function formatMinuteSpan(totalMinutes: number): string {
  *    15:40 — past your 16:00 cutoff". This is a fact about what already
  *    happened and is shown regardless of what day is on screen, including a
  *    browsed PAST day: an athlete looking back at Tuesday is still told
- *    Tuesday's last cup was late.
+ *    Tuesday's last cup was late. Only an entry actually LOGGED on that day
+ *    counts, not a backfilled one — see `lastLoggedAtOnItsOwnDay`.
  * 2. **Nothing crossed it yet, and `now` is before the cutoff** — "cutoff in
  *    1h 20m", a forward-looking countdown.
  * 3. **Nothing crossed it yet, and `now` is at or past the cutoff** — "past
@@ -391,7 +419,10 @@ export function formatMinuteSpan(totalMinutes: number): string {
 export function cutoffLine(t: Tracker, entries: TrackerEntry[], now: Date | null): string | null {
   if (t.cutoff_minutes == null) return null;
   const cutoffClock = formatCutoff(t.cutoff_minutes);
-  const last = lastLoggedAt(entries);
+  // `lastLoggedAtOnItsOwnDay`, not `lastLoggedAt`: a backfilled tap's
+  // `logged_at` is the real moment it was tapped, not a fact about the
+  // browsed day it was filed under — see that function's own doc.
+  const last = lastLoggedAtOnItsOwnDay(entries);
   if (last && minutesOfDay(last) >= t.cutoff_minutes) {
     return `last at ${formatClock(last)} — past your ${cutoffClock} cutoff`;
   }

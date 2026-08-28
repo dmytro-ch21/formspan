@@ -641,4 +641,27 @@ describe('N431: the cutoff line — a stated fact, never a verdict', () => {
     expect(cutoffLine(caffeine, [], null)).toBeNull();
     expect(cutoffLine(caffeine, taps(caffeine, 1, before), null)).toBeNull();
   });
+
+  it('never reads a BACKFILLED tap\'s real-world time as a fact about the browsed day', () => {
+    // frontend-reviewer, N431 review: browsing to a past day and tapping
+    // there stamps `logged_at` = the real moment of the tap while filing
+    // under the browsed day's `logged_on` (`logTap`, `lib/trackers.ts`). An
+    // entry backfilled onto Aug 20 from a tap made two days later, at 16:10
+    // local, must NOT read as "Aug 20's last cup was at 16:10" — that
+    // instant never happened on Aug 20.
+    const backfilled: TrackerEntry = {
+      id: 'e_backfill',
+      tracker_id: caffeine.id,
+      logged_on: '2026-08-20',
+      logged_at: '2026-08-22T23:10:00.000Z', // 16:10 local, but on the 22nd
+      amount: caffeine.increment,
+    };
+    expect(cutoffLine(caffeine, [backfilled], null)).toBeNull();
+    // A genuine same-day late entry alongside it must still fire — the fix
+    // excludes the mismatched entry, not the whole day.
+    const genuine = taps(caffeine, 1, after);
+    expect(cutoffLine(caffeine, [backfilled, ...genuine], null)).toBe(
+      'last at 16:10 — past your 16:00 cutoff',
+    );
+  });
 });

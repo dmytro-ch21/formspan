@@ -427,9 +427,9 @@ export function TrackerForm({
         />
         <Text style={styles.hint}>
           {value.cutoffText
-            ? `Your card will warn once it is ${value.cutoffText} and past — e.g. six hours ` +
+            ? `Your card will note once it is ${value.cutoffText} and past — e.g. six hours ` +
               `before a ten o'clock bedtime is 16:00.`
-            : 'Leave it blank for no cutoff warning.'}
+            : 'Leave it blank for no cutoff line.'}
         </Text>
       </Field>
 

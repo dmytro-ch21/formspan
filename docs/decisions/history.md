@@ -46960,6 +46960,45 @@ ceiling, unmoved by this change. `pnpm run verify` green.
   HUMAN EVIDENCE` on the issue.
 - `DailyTrackerPatch`'s missing `count_noun` (noted above) is unfixed here.
 
+### `frontend-reviewer` findings, applied before merge
+
+**One blocking correctness bug, mutation-verified**: `cutoffLine`'s "already
+crossed" case read `lastLoggedAt`, which is the newest entry's real-world
+`logged_at` regardless of which day it was filed under. N430's browsed-day
+logging (merged earlier this session) made backfilling routine — an athlete
+browsing to a past day and tapping there stamps `logged_at` = the real
+tap-time moment while filing under the browsed `logged_on`. So a tap made
+Thursday at 16:10, backfilled onto Tuesday, told Tuesday's card "last at
+16:10 — past your 16:00 cutoff": a claim about Tuesday derived from
+Thursday's clock, and the exact collision of the two features these adjacent
+tickets shipped. Fixed with a new `lastLoggedAtOnItsOwnDay` — only an entry
+whose `logged_at`'s local calendar day matches its own `logged_on` counts as
+a same-day fact. Mutation-verified: reverted to the bare `lastLoggedAt`,
+confirmed the new regression test failed on the real assertion (`"last at
+16:10 — past your 16:00 cutoff"` where `null` was expected), restored,
+confirmed green by re-running.
+
+Two suggestions applied: `TrackerForm`'s cutoff-field hint dropped the word
+"warn" ("Your card will warn once…" → "…will note once…", "no cutoff
+warning" → "no cutoff line") — the one place this ticket's own copy used the
+word its no-shame register elsewhere avoids.
+
+Two suggestions left as judgment calls, stated rather than silently skipped:
+the live countdown (`cutoff in 1h 20m`) is captured at render and can go
+stale on a screen left open with no clock tick, same as `footLine`'s
+pre-existing `last at HH:MM` already behaves — consistent with, not worse
+than, the existing pattern. And caffeine's `CountNoun: "cup"` mislabels a
+Red Bull, but it is editable by the athlete and matches the ticket's own
+"cup-equivalent" framing for the 80 mg increment — a naming nit, not a
+defect.
+
+`backend-reviewer`: no blocking findings — IDOR-safe, server-validated at
+three layers (client, `Patch.Validate`, the migration's CHECK), migration
+safe against live data. `ac-verifier`: 5 MET / 0 NOT MET / 0 NEEDS HUMAN
+EVIDENCE on the issue's own criteria (the issue carries no device-check
+criterion; the standing NEEDS HUMAN EVIDENCE noted above is this session's
+own addition, not the issue's).
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
