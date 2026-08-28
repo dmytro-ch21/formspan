@@ -35,7 +35,7 @@ function session(day: string, sport: string, hour = 18): Session {
 
 function plan(day: string, sport: string, workoutId: string | null = null): PlannedSession {
   seq += 1;
-  return { id: `p${seq}`, day, sport, workoutId, notes: '' };
+  return { id: `p${seq}`, day, sport, workoutId, classPlanId: null, notes: '' };
 }
 
 beforeEach(() => {

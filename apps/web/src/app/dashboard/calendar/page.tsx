@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 
 import {
@@ -8,8 +9,10 @@ import {
   deletePlan,
   fetchHistory,
   labelForModule,
+  listClassPlans,
   listPlans,
   listWorkouts,
+  type ClassPlan,
   type History,
   type Plan,
   type Workout,
@@ -63,6 +66,19 @@ export default function CalendarPage() {
   const { getToken } = useAuth();
   const { modules } = useModules();
 
+  /**
+   * A class plan to preselect, arriving from "Schedule this class" on its own
+   * detail page (`/dashboard/classplans/[id]/page.tsx`).
+   *
+   * Read once as an initial value, the same way `library/page.tsx` reads
+   * `position` — not stored back into the URL and not re-applied on a later
+   * navigation, so this page has no persisted filter state to keep in sync.
+   * Unvalidated on purpose: an id that does not resolve to one of this
+   * caller's class plans simply never matches in the picker below.
+   */
+  const params = useSearchParams();
+  const initialClassPlanID = params.get("scheduleClassPlan");
+
   // The month being browsed, as its own first day. A key rather than a Date
   // for the same reason `history.ts` uses keys throughout: `new Date("2026-08-04")`
   // parses as UTC, so west of Greenwich it renders as the 3rd.
@@ -72,6 +88,7 @@ export default function CalendarPage() {
   const [history, setHistory] = useState<History | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [classPlans, setClassPlans] = useState<ClassPlan[]>([]);
   const [everLoaded, setEverLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [themes, setThemes] = useState<Theme[]>([]);
@@ -95,16 +112,18 @@ export default function CalendarPage() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const [hist, planned, mine, weekThemes] = await Promise.all([
+      const [hist, planned, mine, myClassPlans, weekThemes] = await Promise.all([
         fetchHistory(getToken, { ...range, tz: localZone() }, controller.signal),
         listPlans(getToken, range, controller.signal),
         listWorkouts(getToken, "mine", controller.signal),
+        listClassPlans(getToken, controller.signal),
         listThemes(getToken, range, controller.signal),
       ]);
       if (controller.signal.aborted) return;
       setHistory(hist);
       setPlans(planned);
       setWorkouts(mine);
+      setClassPlans(myClassPlans);
       setThemes(weekThemes);
       setError(null);
     } catch (err) {
@@ -140,6 +159,18 @@ export default function CalendarPage() {
     [workouts],
   );
 
+  const classPlanName = useCallback(
+    (id: string | null) => (id ? (classPlans.find((c) => c.id === id)?.name ?? null) : null),
+    [classPlans],
+  );
+
+  /** Either template kind's name, whichever the plan carries — the two are
+   *  mutually exclusive, so at most one of these ever resolves. */
+  const planName = useCallback(
+    (p: Plan) => workoutName(p.workout_id) ?? classPlanName(p.class_plan_id),
+    [workoutName, classPlanName],
+  );
+
   /**
    * Themes by their Monday.
    *
@@ -155,10 +186,14 @@ export default function CalendarPage() {
   const thisMonth = month.slice(0, 7);
   const todayKey = today();
 
-  async function addPlan(sport: string, workoutID: string | null) {
+  async function addPlan(
+    sport: string,
+    workoutID: string | null,
+    classPlanID: string | null,
+  ) {
     setBusy(true);
     try {
-      await createPlan(getToken, { day: selected, sport, workoutID });
+      await createPlan(getToken, { day: selected, sport, workoutID, classPlanID });
       await load();
       setError(null);
     } catch (err) {
@@ -333,8 +368,7 @@ export default function CalendarPage() {
                           ? `planned: ${dayPlans
                               .map(
                                 (p) =>
-                                  workoutName(p.workout_id) ??
-                                  labelForModule(modules, p.sport),
+                                  planName(p) ?? labelForModule(modules, p.sport),
                               )
                               .join(", ")}`
                           : null,
@@ -372,10 +406,7 @@ export default function CalendarPage() {
                           <Chip
                             key={p.id}
                             kind="planned"
-                            label={
-                              workoutName(p.workout_id) ??
-                              labelForModule(modules, p.sport)
-                            }
+                            label={planName(p) ?? labelForModule(modules, p.sport)}
                           />
                         ))}
                       </span>
@@ -404,6 +435,9 @@ export default function CalendarPage() {
           plans={plansByDay.get(selected) ?? []}
           workouts={workouts}
           workoutName={workoutName}
+          classPlans={classPlans}
+          classPlanName={classPlanName}
+          initialClassPlanID={initialClassPlanID}
           busy={busy}
           onAdd={addPlan}
           onRemove={removePlan}
@@ -487,6 +521,16 @@ function Chip({ kind, label }: { kind: "trained" | "planned"; label: string }) {
  * are the only two facts a plan carries. A discipline with no template is a
  * complete plan — "Tuesday is BJJ" — so the template select defaults to none
  * rather than to the first workout.
+ *
+ * **A class plan is a second, mutually exclusive template kind**, offered
+ * only when the chosen discipline's catalog is techniques (N442) — a class
+ * plan's `technique_drill` blocks point into that catalog, so gating on
+ * `capabilities.catalog === "techniques"` is the same over-inclusive-on-
+ * purpose check `DashboardNav`'s Class plans entry uses, rather than
+ * `key === "bjj"` specifically. Picking one clears the other: nothing renders
+ * a day scheduled around both a strength template and a class plan at once,
+ * and the server rejects a plan naming both — see `plan.go`'s
+ * `plans_one_template_kind` comment.
  */
 function DayPanel({
   day,
@@ -494,6 +538,9 @@ function DayPanel({
   plans,
   workouts,
   workoutName,
+  classPlans,
+  classPlanName,
+  initialClassPlanID,
   busy,
   onAdd,
   onRemove,
@@ -503,8 +550,13 @@ function DayPanel({
   plans: Plan[];
   workouts: Workout[];
   workoutName: (id: string | null) => string | null;
+  classPlans: ClassPlan[];
+  classPlanName: (id: string | null) => string | null;
+  /** A class plan id to preselect, from `?scheduleClassPlan=` — see the
+   *  page's own comment on where that arrives from. */
+  initialClassPlanID: string | null;
   busy: boolean;
-  onAdd: (sport: string, workoutID: string | null) => void;
+  onAdd: (sport: string, workoutID: string | null, classPlanID: string | null) => void;
   onRemove: (id: string) => void;
 }) {
   const { modules } = useModules();
@@ -519,8 +571,19 @@ function DayPanel({
   // the next pass — visible as the template select flashing a stale option
   // when the discipline changed, and flagged by `react-hooks/set-state-in-effect`
   // for exactly that reason. Deriving means there is no wrong frame to fix.
+  //
+  // A preselected class plan (`initialClassPlanID`) implies its discipline:
+  // it only ever makes sense on a techniques-catalog sport, so the initial
+  // choice is the first such enabled module rather than `sports[0]`.
   const [chosenSport, setChosenSport] = useState<string | null>(null);
-  const sport = chosenSport ?? sports[0]?.key ?? "";
+  const techniquesSport = sports.find((m) => m.capabilities.catalog === "techniques");
+  const sport =
+    chosenSport ??
+    (initialClassPlanID ? (techniquesSport?.key ?? sports[0]?.key) : sports[0]?.key) ??
+    "";
+
+  const isTechniquesCatalog =
+    sports.find((m) => m.key === sport)?.capabilities.catalog === "techniques";
 
   const [chosenWorkout, setChosenWorkout] = useState("");
   const forSport = workouts.filter((w) => w.sport === sport);
@@ -531,6 +594,14 @@ function DayPanel({
   const workoutID = forSport.some((w) => w.id === chosenWorkout)
     ? chosenWorkout
     : "";
+
+  const [chosenClassPlan, setChosenClassPlan] = useState(() => initialClassPlanID ?? "");
+  // Only meaningful on a techniques-catalog discipline — a strength/running
+  // day clears any leftover choice the same way the workout select does.
+  const classPlanID =
+    isTechniquesCatalog && classPlans.some((c) => c.id === chosenClassPlan)
+      ? chosenClassPlan
+      : "";
 
   return (
     <aside className="flex h-fit flex-col gap-4 rounded-card border border-line bg-surface p-4">
@@ -565,7 +636,9 @@ function DayPanel({
               >
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium">
-                    {workoutName(p.workout_id) ?? labelForModule(modules, p.sport)}
+                    {workoutName(p.workout_id) ??
+                      classPlanName(p.class_plan_id) ??
+                      labelForModule(modules, p.sport)}
                   </span>
                   <span className="block text-xs text-text-dim">
                     {labelForModule(modules, p.sport)}
@@ -577,7 +650,9 @@ function DayPanel({
                   disabled={busy}
                   className="shrink-0 text-xs text-text-muted transition hover:text-danger disabled:opacity-50"
                   aria-label={`Remove ${
-                    workoutName(p.workout_id) ?? labelForModule(modules, p.sport)
+                    workoutName(p.workout_id) ??
+                    classPlanName(p.class_plan_id) ??
+                    labelForModule(modules, p.sport)
                   } from ${formatDayLong(day)}`}
                 >
                   Remove
@@ -592,7 +667,7 @@ function DayPanel({
         className="flex flex-col gap-2 border-t border-line-soft pt-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (sport) onAdd(sport, workoutID || null);
+          if (sport) onAdd(sport, workoutID || null, classPlanID || null);
         }}
       >
         <h3 className="eyebrow">Add to this day</h3>
@@ -622,7 +697,13 @@ function DayPanel({
               <span className="text-text-muted">Template</span>
               <select
                 value={workoutID}
-                onChange={(e) => setChosenWorkout(e.target.value)}
+                onChange={(e) => {
+                  setChosenWorkout(e.target.value);
+                  // Mutually exclusive with a class plan — picking a workout
+                  // template clears any class plan choice the same way
+                  // changing discipline already clears a stale workout.
+                  if (e.target.value) setChosenClassPlan("");
+                }}
                 className="rounded-control border border-line bg-surface px-2.5 py-2"
               >
                 {/* Not "pick one" — none is a legitimate, complete plan. */}
@@ -634,6 +715,28 @@ function DayPanel({
                 ))}
               </select>
             </label>
+
+            {isTechniquesCatalog && (
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-text-muted">Or schedule a class plan</span>
+                <select
+                  value={classPlanID}
+                  onChange={(e) => {
+                    setChosenClassPlan(e.target.value);
+                    // Mutually exclusive with a workout template — see above.
+                    if (e.target.value) setChosenWorkout("");
+                  }}
+                  className="rounded-control border border-line bg-surface px-2.5 py-2"
+                >
+                  <option value="">None</option>
+                  {classPlans.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <button
               type="submit"

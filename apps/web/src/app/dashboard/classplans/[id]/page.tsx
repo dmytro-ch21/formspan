@@ -29,6 +29,13 @@ const BLOCK_LABEL: Record<ClassPlanBlock["type"], string> = {
  * anything else before this page ever has a plan to render an edit button
  * next to. No `ShareToFriend` and no copy affordance either, for the same
  * reason.
+ *
+ * "Schedule this class" (N442) is the other entry point the ticket asks for,
+ * alongside scheduling from Plan itself. It is a plain link, not a second
+ * builder: `/dashboard/calendar?scheduleClassPlan={id}` and the calendar page
+ * reads that query param once, to preselect this plan in its own scheduling
+ * form — this page does nothing with the date or time, which the calendar
+ * already owns.
  */
 export default function ClassPlanDetailPage() {
   const { getToken } = useAuth();
@@ -108,6 +115,12 @@ export default function ClassPlanDetailPage() {
           </p>
         </div>
         <div className="flex shrink-0 items-start gap-2">
+          <Link
+            href={`/dashboard/calendar?scheduleClassPlan=${encodeURIComponent(p.id)}`}
+            className="rounded-pill border border-line px-5 py-2 text-sm font-bold transition hover:bg-surface-raised"
+          >
+            Schedule this class
+          </Link>
           <Link
             href={`/dashboard/classplans/${p.id}/edit`}
             className="rounded-pill border border-line px-5 py-2 text-sm font-bold transition hover:bg-surface-raised"

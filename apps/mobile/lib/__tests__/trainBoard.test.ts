@@ -88,7 +88,7 @@ function session(over: Partial<Session> & { id: string }): Session {
 }
 
 function plan(over: Partial<PlannedSession> & { id: string }): PlannedSession {
-  return { day: TODAY, sport: 'strength', workoutId: null, notes: '', ...over };
+  return { day: TODAY, sport: 'strength', workoutId: null, classPlanId: null, notes: '', ...over };
 }
 
 function workout(over: Partial<Workout> & { id: string }): Workout {

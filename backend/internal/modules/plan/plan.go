@@ -43,25 +43,33 @@ const MaxNotesLen = 500
 // contract is "YYYY-MM-DD" and the type that survives that unchanged is a
 // string.
 type Plan struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Day       string    `json:"day"`
-	Sport     string    `json:"sport"`
-	WorkoutID *string   `json:"workout_id"`
-	Notes     string    `json:"notes"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string  `json:"id"`
+	UserID    string  `json:"user_id"`
+	Day       string  `json:"day"`
+	Sport     string  `json:"sport"`
+	WorkoutID *string `json:"workout_id"`
+	// ClassPlanID points at a coach's class plan (`internal/modules/classplan`)
+	// instead of a workout template — a scheduled BJJ class rather than a
+	// scheduled strength/running session. Mutually exclusive with WorkoutID:
+	// see the migration's `plans_one_template_kind` CHECK and this package's
+	// Create/Update in postgres.go, which enforce the same rule ahead of the
+	// database so the caller gets a message naming the conflict.
+	ClassPlanID *string   `json:"class_plan_id"`
+	Notes       string    `json:"notes"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // NewPlan is the input for creating one. The ID is client-supplied — the same
 // contract sessions and activities use, and what makes an offline plan
 // syncable without duplicating on retry.
 type NewPlan struct {
-	ID        string
-	Day       string
-	Sport     string
-	WorkoutID *string
-	Notes     string
+	ID          string
+	Day         string
+	Sport       string
+	WorkoutID   *string
+	ClassPlanID *string
+	Notes       string
 }
 
 // OptionalWorkoutID is a `workout_id` that can be absent, explicitly null, or
@@ -99,17 +107,42 @@ func (o *OptionalWorkoutID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// OptionalClassPlanID is `class_plan_id`'s three-state field, an exact mirror
+// of OptionalWorkoutID for the identical reason — see that type's comment for
+// why a `**string` cannot carry "absent" separately from "explicit null".
+type OptionalClassPlanID struct {
+	Present bool
+	Value   *string
+}
+
+func (o *OptionalClassPlanID) UnmarshalJSON(b []byte) error {
+	o.Present = true
+	if string(b) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	o.Value = &s
+	return nil
+}
+
 // PlanUpdate is a partial update — nil fields are left unchanged.
 //
-// WorkoutID has three states rather than two: absent (leave it alone), set
-// (point at this template), and explicitly null (clear it, so the day is
-// planned as a bare discipline). See OptionalWorkoutID for why it is a named
-// type and not a pointer-to-pointer.
+// WorkoutID and ClassPlanID each have three states rather than two: absent
+// (leave it alone), set (point at this template/class plan), and explicitly
+// null (clear it, so the day is planned as a bare discipline). See
+// OptionalWorkoutID for why each is a named type and not a pointer-to-pointer.
+//
+// The two are mutually exclusive on the resulting row — see Plan.ClassPlanID.
 type PlanUpdate struct {
-	Day       *string
-	Sport     *string
-	WorkoutID OptionalWorkoutID
-	Notes     *string
+	Day         *string
+	Sport       *string
+	WorkoutID   OptionalWorkoutID
+	ClassPlanID OptionalClassPlanID
+	Notes       *string
 }
 
 // Range is an inclusive window of calendar days.

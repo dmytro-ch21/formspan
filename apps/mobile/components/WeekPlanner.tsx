@@ -76,6 +76,27 @@ export function plannedEntryTarget(
 }
 
 /**
+ * The class plan a planned row opens into the N441 guided runner, or null.
+ *
+ * **Simpler than `plannedEntryTarget` on purpose, and for a reason specific
+ * to this field.** A workout id needs the `names` lookup because the local
+ * cache is the only place a template's current name lives, and a stale or
+ * missing cache entry must not offer a dead link. `classPlanId` has no local
+ * name cache to go stale — mobile never authors or caches class plans (see
+ * `lib/plan.ts`'s `PlannedSession.classPlanId`), and `/classplans/[id]/run`
+ * fetches the plan directly from the server on open rather than reading a
+ * name back from anything this device stored. So there is nothing to resolve
+ * here: a set id is always somewhere to go, and the run screen's own loading
+ * and error states are what a class plan deleted since the last sync shows up
+ * as — the identical "degrades to the discipline" answer the server gives
+ * once the next sync pull clears the id (see the plan migration's
+ * `ON DELETE SET NULL`).
+ */
+export function plannedClassPlanTarget(p: { classPlanId: string | null }): string | null {
+  return p.classPlanId;
+}
+
+/**
  * The training week, as something you fill in.
  *
  * This is the authoring half of the Today screen's lead card: plan a day here,
@@ -517,16 +538,32 @@ export function WeekPlanner({
                   // navigating while still announcing the sport fallback. That
                   // is the same drift this fix exists to remove.
                   const name = target ? names[target] : null;
+                  // N442: the class-plan-linked case, mutually exclusive with
+                  // `target` on the server (see plan.go's
+                  // `plans_one_template_kind`), so at most one of the two
+                  // navigates. No local name to show — see
+                  // `plannedClassPlanTarget`'s own comment — so this row
+                  // falls back to the same "<Sport> session" text the
+                  // template-less case already uses.
+                  const classPlanTarget = plannedClassPlanTarget(p);
+                  const opensWorkout = target !== null;
+                  const opensClass = classPlanTarget !== null;
                   return (
                   <Pressable
                     key={p.id}
                     style={({ pressed }) => [styles.entry, pressed && styles.entryPressed]}
-                    onPress={target ? () => router.push(`/workout/${target}`) : undefined}
+                    onPress={
+                      opensWorkout
+                        ? () => router.push(`/workout/${target}`)
+                        : opensClass
+                          ? () => router.push(`/classplans/${classPlanTarget}/run`)
+                          : undefined
+                    }
                     onLongPress={() => confirmRemove(p)}
                     accessibilityRole="button"
-                    accessibilityLabel={`${
-                      name || labelFor(modules, p.sport)
-                    }, planned.${target ? ' Opens the workout.' : ''} Long press to remove.`}
+                    accessibilityLabel={`${name || labelFor(modules, p.sport)}, planned.${
+                      opensWorkout ? ' Opens the workout.' : opensClass ? ' Starts the class.' : ''
+                    } Long press to remove.`}
                     testID={`plan-entry-${p.id}`}
                   >
                     <RNView
@@ -573,7 +610,9 @@ export function WeekPlanner({
                     </RNView>
                     {/* Only when there is somewhere to go. A chevron on an
                         inert row is the whole bug this fixes. */}
-                    {target && <Icon name="chevron" size={13} color={vola.textDim} />}
+                    {(opensWorkout || opensClass) && (
+                      <Icon name="chevron" size={13} color={vola.textDim} />
+                    )}
                   </Pressable>
                   );
                 })

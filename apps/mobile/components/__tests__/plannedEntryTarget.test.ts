@@ -1,4 +1,4 @@
-import { plannedEntryTarget } from '../WeekPlanner';
+import { plannedClassPlanTarget, plannedEntryTarget } from '../WeekPlanner';
 
 /**
  * A planned row opens something, or says nothing about opening.
@@ -61,5 +61,15 @@ describe('plannedEntryTarget', () => {
    */
   it('treats a cached-but-empty name as nowhere to go', () => {
     expect(plannedEntryTarget({ workoutId: 'w1' }, { w1: '' })).toBeNull();
+  });
+});
+
+describe('plannedClassPlanTarget', () => {
+  it('opens the class plan a plan names', () => {
+    expect(plannedClassPlanTarget({ classPlanId: 'cp1' })).toBe('cp1');
+  });
+
+  it('opens nothing when the plan names no class plan', () => {
+    expect(plannedClassPlanTarget({ classPlanId: null })).toBeNull();
   });
 });

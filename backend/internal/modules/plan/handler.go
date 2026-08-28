@@ -67,11 +67,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type createRequest struct {
-	ID        string  `json:"id"`
-	Day       string  `json:"day"`
-	Sport     string  `json:"sport"`
-	WorkoutID *string `json:"workout_id"`
-	Notes     string  `json:"notes"`
+	ID          string  `json:"id"`
+	Day         string  `json:"day"`
+	Sport       string  `json:"sport"`
+	WorkoutID   *string `json:"workout_id"`
+	ClassPlanID *string `json:"class_plan_id"`
+	Notes       string  `json:"notes"`
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -115,11 +116,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := h.repo.Create(r.Context(), claims.UserID, NewPlan{
-		ID:        req.ID,
-		Day:       req.Day,
-		Sport:     req.Sport,
-		WorkoutID: req.WorkoutID,
-		Notes:     req.Notes,
+		ID:          req.ID,
+		Day:         req.Day,
+		Sport:       req.Sport,
+		WorkoutID:   req.WorkoutID,
+		ClassPlanID: req.ClassPlanID,
+		Notes:       req.Notes,
 	})
 	if err != nil {
 		writeErr(w, r, err)
@@ -128,14 +130,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusCreated, p)
 }
 
-// updateRequest carries `workout_id` as an OptionalWorkoutID so "absent" and
-// "explicitly null" stay distinguishable — see the type's own comment for why
-// a `**string` cannot do this, and for the silent no-op it caused.
+// updateRequest carries `workout_id` and `class_plan_id` as their Optional*
+// types so "absent" and "explicitly null" stay distinguishable — see
+// OptionalWorkoutID's own comment for why a `**string` cannot do this, and for
+// the silent no-op it caused.
 type updateRequest struct {
-	Day       *string           `json:"day"`
-	Sport     *string           `json:"sport"`
-	WorkoutID OptionalWorkoutID `json:"workout_id"`
-	Notes     *string           `json:"notes"`
+	Day         *string             `json:"day"`
+	Sport       *string             `json:"sport"`
+	WorkoutID   OptionalWorkoutID   `json:"workout_id"`
+	ClassPlanID OptionalClassPlanID `json:"class_plan_id"`
+	Notes       *string             `json:"notes"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -163,10 +167,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := h.repo.Update(r.Context(), claims.UserID, id, PlanUpdate{
-		Day:       req.Day,
-		Sport:     req.Sport,
-		WorkoutID: req.WorkoutID,
-		Notes:     req.Notes,
+		Day:         req.Day,
+		Sport:       req.Sport,
+		WorkoutID:   req.WorkoutID,
+		ClassPlanID: req.ClassPlanID,
+		Notes:       req.Notes,
 	})
 	if err != nil {
 		writeErr(w, r, err)

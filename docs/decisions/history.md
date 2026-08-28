@@ -48560,6 +48560,208 @@ entry point into this runner from wherever that scheduling surfaces, are both
 still unbuilt — this ticket covers picking an already-known plan id from the
 library and running it end to end.
 
+## 2026-08-28 — N442 (#729), part 4 of 4: a scheduled class is a Plan/calendar entry
+
+**Final ticket of the class-plan workstream** (N439 backend → N440 web
+authoring → N441 mobile guided runner → **N442 this scheduling piece**).
+Reuses the existing `plan` module rather than inventing new scheduling
+infrastructure, exactly as the ticket asked: a scheduled class is a Plan row
+carrying `class_plan_id` alongside the `workout_id` it already had. No new
+table, no new endpoint shape — `POST`/`PATCH /v1/plans` grew one field.
+
+**`workout_id` was the template to mirror, and `class_plan_id` follows it
+column for column**: nullable FK (`ON DELETE SET NULL`), a three-state
+`Optional*` type for the wire (`OptionalClassPlanID`, an exact copy of
+`OptionalWorkoutID` down to the `UnmarshalJSON` trick that distinguishes
+"omit" from "explicit null" — a bare `*string` collapses the two, which is
+the bug `OptionalWorkoutID`'s own comment documents having shipped once
+already), and a cross-user-visibility guard before every insert/update
+(`assertClassPlanUsable`). **Simpler than `assertWorkoutUsable` in exactly
+the way the ticket predicted**: `classplan.go`'s package doc already
+establishes there is no sport concept and no visibility split for class
+plans — every plan a caller can see, they own, full stop — so the guard
+collapses to a plain ownership check with no sport cross-check to perform,
+closing the identical ID-enumeration hole (a guessable class-plan id read as
+an oracle for "exists but not mine" vs. "does not exist") the third time
+this bug class has been closed in this codebase (workout write paths, then
+sessions, then plans' own `workout_id`, now `class_plan_id`).
+
+**Deleting a class plan with scheduled entries: `ON DELETE SET NULL`,
+identical reasoning to `workout_id`'s own choice in migration 000033.** The
+plan degrades to its bare discipline rather than the calendar row
+disappearing or the delete being blocked — a coach reworking their own class
+plan must not find someone's calendar frozen around it, and a cascading
+delete would silently erase athletes' calendar rows for a reason they never
+took (editing a lesson plan). Proven against a real Postgres, not merely
+asserted in the migration comment: `TestDeletingAClassPlanKeepsThePlan`
+creates a plan pointing at a class plan, deletes the class plan directly,
+and asserts the plan row survives with `class_plan_id` read back as `nil`.
+
+**Scheduling is day-granular, not date/time, and that is a scope narrowing
+this entry states explicitly rather than leaving implicit.** The ticket's
+own framing ("Tuesday 19:00 — Half Guard fundamentals") names a time; `plan`
+has only ever stored a calendar `day` (`plan.go`'s own comment: "no time, no
+zone" — a deliberate choice from migration 000033, to keep a plan a claim
+about the athlete's calendar rather than an instant that slides across a day
+boundary the moment they fly somewhere). This ticket reuses that module
+exactly as asked ("reusing the existing Plan module/calendar rather than
+inventing a separate scheduling concept") and does not add a time field to
+it — doing so would be a change to every plan in the system, not a class-
+plan-specific one, and is out of scope here. A scheduled class today reads
+"BJJ — Half Guard fundamentals" on its day, with no time of day attached,
+identically to how a scheduled workout already does. Time-of-day scheduling,
+if wanted, is a follow-up against the `plan` module generally, not this
+workstream.
+
+**Review hardening, applied after `/pre-merge`'s four gates (checker,
+`ac-verifier`, `backend-reviewer`, `frontend-reviewer`) came back with no
+blocking findings but several worthwhile suggestions:**
+
+- `SET lock_timeout = '3s'` added to the migration, matching 000080/000034/
+  000035's precaution for a migration touching a hot, frequently-read table.
+- Two new Postgres tests, both mutation-tested (temporarily disabled the
+  guard under test, confirmed the new test fails as a genuine assertion
+  failure — not a compile error — restored, confirmed green by re-running):
+  `TestCannotReferenceAnotherUsersPrivateClassPlanOnUpdate` (the Update-path
+  twin of the existing Create-path IDOR test — `assertClassPlanUsable` is
+  called from both sites, and nothing previously proved the Update call site
+  actually reached it) and a same-request atomic-swap case inside
+  `TestWorkoutAndClassPlanAreMutuallyExclusive` (clearing `workout_id` and
+  setting `class_plan_id` in ONE PATCH body, not two sequential ones).
+- One new mobile test, also mutation-tested the same way:
+  `planSync.test.ts`'s "editing a class-plan-linked row never pushes
+  class_plan_id" — asserts the key's ABSENCE from the outgoing sync payload
+  directly (`Object.keys(...).not.toContain(...)`), because the file's
+  existing `toMatchObject` assertions are subset matches that would let a
+  future `class_plan_id: row.class_plan_id` addition to `pushRow`'s payload
+  — which reads as the SAFE, pass-through choice and is exactly backwards —
+  pass silently while clearing every web-set class-plan link on the next
+  unrelated mobile edit.
+- `assertClassPlanUsable`'s doc comment now states explicitly, rather than
+  leaving implicit, that it does NOT cross-check `sport` the way
+  `assertWorkoutUsable` does (a `{"sport":"strength","class_plan_id":"..."}`
+  plan is not rejected server-side) — and why: `classplan.go` deliberately
+  carries no sport column, and hardcoding one discipline into this guard
+  would reintroduce the exact migration-per-discipline cost 000021 removed
+  from `sport`'s own CHECK constraint. Both UIs already prevent this in
+  practice (web's class-plan picker only renders for a techniques-catalog
+  discipline; mobile never writes the field at all) — accepted as a stated
+  decision rather than a silent gap, revisitable if it's ever reached through
+  something other than those two surfaces.
+
+**Mutual exclusivity — the decision the ticket explicitly asked to be made
+and stated — is enforced in TWO places, deliberately, and for different
+reasons.** A plan pointing at both a strength template and a BJJ class plan
+is a bug wearing the shape of a feature: nothing anywhere renders two
+templates for one calendar row. So:
+
+- A Postgres CHECK, `plans_one_template_kind CHECK (workout_id IS NULL OR
+  class_plan_id IS NULL)`, added as defence in depth — mirroring
+  `class_plan_blocks_technique_fields_valid`'s own reasoning in migration
+  000080, not the `sport` column's "NO CHECK, deliberately" argument two
+  columns up in the same table. Those are different categories: `sport`'s
+  vocabulary is open and growing (a fifth discipline would need a migration
+  before a CHECK enumerating values could accept it), while "at most one of
+  these two specific columns" is a fixed shape that does not grow with the
+  discipline registry and carries none of that migration-per-discipline
+  cost. Conflating the two would have meant reaching for `sport`'s decision
+  without `sport`'s reason for it.
+- Go validation in `plan.go`'s `Create`/`Update` (`postgres.go`), ahead of
+  the database, so the caller gets a message naming the conflict rather than
+  a constraint name. **Checked against the row's state AFTER the update, not
+  merely against the fields one PATCH request touches** — a caller may set
+  only `class_plan_id` and say nothing about `workout_id`, and whether that
+  conflicts depends on what the row's `workout_id` already holds. `Update`
+  fetches the current `workout_id`/`class_plan_id` only when exactly one
+  side is being set and the other is untouched (never needed when clearing
+  either side, or when the request already names both), mirroring the
+  existing sport re-check `assertWorkoutUsable` already needed for the
+  identical reason. Both directions are covered by
+  `TestWorkoutAndClassPlanAreMutuallyExclusive`: sending both at once on
+  create is a 400, and a PATCH that mentions only `class_plan_id` on a plan
+  that already has a `workout_id` is a 400 too, with a subtest proving the
+  legitimate sequence — clear `workout_id` first, THEN set `class_plan_id`
+  in a later PATCH — is allowed, because the constraint is about the
+  resulting row, not about a single request ever having named both fields.
+
+**Web: the calendar's day-panel form grows a second, mutually exclusive
+picker.** `dashboard/calendar/page.tsx` fetches `listClassPlans()` alongside
+workouts and themes, and offers "Or schedule a class plan" beside the
+existing Template select — gated on the chosen discipline's
+`capabilities.catalog === "techniques"`, the same over-inclusive-on-purpose
+predicate `DashboardNav`'s Class plans entry already uses rather than
+`key === "bjj"` specifically. Picking either select clears the other
+client-side, so the form can never submit both; a day's chip and the day
+panel's list resolve a plan's name through `workoutName(...) ??
+classPlanName(...)`, falling back to the discipline label exactly as
+`workoutName` alone already did. **The second entry point the ticket asked
+for** — "from the builder or from Plan" — is `classplans/[id]/page.tsx`'s
+new "Schedule this class" link to
+`/dashboard/calendar?scheduleClassPlan={id}`; the calendar reads that query
+param once (the same one-time-initial-value pattern `library/page.tsx`
+already uses for `?position=`, not a persisted filter) to preselect the
+class plan and its discipline, matching N440's own restraint about not
+building a second builder — this is a plain link, the calendar still owns
+the day and the submit.
+
+**Mobile: read-only, per the platform split N440/N441 already drew.**
+`lib/plan.ts`'s `PlannedSession` gains `classPlanId: string | null`, but
+**no local write function ever sets it** — `planSession` has no parameter
+for it, matching the ticket's instruction not to build a symmetric write
+path this ticket does not ask for. It only ever arrives through a sync pull
+(`class_plan_id` threaded through `listPlannedBetween`'s `SELECT`, the pull
+loop's `INSERT ... ON CONFLICT`, and `plansApi.ts`'s `RemotePlan`), which is
+the opposite of how `workoutId` behaves on this platform (mobile CAN create
+workout-linked plans locally) — confirmed by reading `workout_id`'s own
+local write path before assuming the two fields should be symmetric.
+`db.ts` schema v28 → v29 adds the column via `addColumnIfMissing`, nullable,
+no backfill needed (nothing to derive: an existing row simply has no class
+plan until the next pull says otherwise). `WeekPlanner.tsx` gets
+`plannedClassPlanTarget`, deliberately SIMPLER than `plannedEntryTarget`:
+a workout id needs the local `names` cache lookup because a stale cache
+entry must not offer a dead link, but a class plan has no local name cache
+to go stale at all — `/classplans/[id]/run` fetches the plan directly from
+the server on open, so a set id is always somewhere to go, and the run
+screen's own loading/error states are what a deleted class plan shows up as
+before the next sync clears the id. Tapping a class-plan-linked row
+navigates straight to `/classplans/{id}/run` and announces "Starts the
+class." in its accessibility label, mirroring the existing "Opens the
+workout." convention. **Stated simplification**: the row shows the generic
+"`<Sport> session`" fallback title rather than the class plan's real name,
+since resolving that would mean either a network call from an
+offline-first screen or a new local cache this ticket's read-only scope did
+not ask for.
+
+**Verified for real, not assumed.** Backend: `gofmt -l .` clean, `go vet
+./...` clean, `go build ./...` clean, `go test ./internal/modules/plan/...
+-p 1 -count=1` green twice in a row against a real Postgres (migration
+`000081` applied to both `vola` and `vola_test`), including the new
+mutual-exclusivity, ownership-oracle and `ON DELETE SET NULL` tests.
+`pnpm run lint:openapi` clean. Web: `tsc --noEmit` clean, `eslint .` clean,
+`vitest run` 232/232 green, `pnpm run build:web` succeeds and lists
+`/dashboard/calendar` among the compiled routes. Mobile: `pnpm run
+routes:mobile && tsc --noEmit` clean, `pnpm run test:mobile` 3619/3619 green
+across 231 suites (the new `schema.test.ts` v28→v29 migration tests and the
+`plannedClassPlanTarget` tests included), and `pnpm run lint:mobile`
+diffed line-for-line against the branch point: **50 warnings before, 50
+after, and the only difference is one pre-existing warning's line number
+shifting from added code above it** — the zero-headroom ratchet held.
+
+**Docs:** `docs/testing/functional-scenarios.md` gets a new `## N442`
+section (scheduling from both web entry points, the mutual-exclusivity edge
+cases, mobile read/navigate scenarios, and the cross-user auth scenario).
+
+**What the whole four-part workstream now does, end to end:** a coach
+builds a class plan on web (N439/N440) — an ordered list of warmup /
+technique-drill / live-rounds / notes blocks — schedules it onto a date from
+either the calendar or the plan's own detail page (N442, this entry), sees
+it on the Plan view on both surfaces, and on mobile opens it straight into
+a guided runner (N441) that walks the blocks with a countdown timer, one
+handed, from a phone propped on the mat. Every piece of that sentence is
+now real and device-buildable; only the guided runner's own device-evidence
+gaps (already flagged on #728) and this entry's own click-through — a
+signed-in browser session was not available in this environment, matching
+N440's own note on why — remain **NEEDS HUMAN EVIDENCE**.
 
 ## Open items / known gaps as of this entry
 

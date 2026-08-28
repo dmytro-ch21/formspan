@@ -49,6 +49,17 @@ export type PlannedSession = {
   sport: string;
   /** The template to start from, when the day is planned as a specific one. */
   workoutId: string | null;
+  /**
+   * N442: the coach's class plan this day is scheduled from, instead of a
+   * workout template — mutually exclusive with `workoutId` server-side.
+   *
+   * READ-ONLY on this platform. Scheduling a class is a web-only action (the
+   * same split N440/N441 already draw between authoring/scheduling and
+   * running), so nothing in this module ever sets it on a local write —
+   * `planSession` below has no parameter for it. It only ever arrives
+   * through a sync pull, exactly like a class plan name it might resolve to.
+   */
+  classPlanId: string | null;
   notes: string;
 };
 
@@ -58,6 +69,7 @@ type Row = {
   day: string;
   sport: string;
   workout_id: string | null;
+  class_plan_id: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -71,6 +83,7 @@ function rowToPlan(r: {
   day: string;
   sport: string;
   workout_id: string | null;
+  class_plan_id: string | null;
   notes: string | null;
 }): PlannedSession {
   return {
@@ -78,6 +91,7 @@ function rowToPlan(r: {
     day: r.day,
     sport: r.sport,
     workoutId: r.workout_id,
+    classPlanId: r.class_plan_id,
     notes: r.notes ?? '',
   };
 }
@@ -102,9 +116,10 @@ export async function listPlannedBetween(
     day: string;
     sport: string;
     workout_id: string | null;
+    class_plan_id: string | null;
     notes: string | null;
   }>(
-    `SELECT id, day, sport, workout_id, notes
+    `SELECT id, day, sport, workout_id, class_plan_id, notes
        FROM planned_sessions
       WHERE user_id = ? AND deleted_at IS NULL AND day >= ? AND day <= ?
       ORDER BY day ASC, created_at ASC`,
@@ -151,7 +166,9 @@ export async function planSession(
     now,
     now,
   );
-  return { id, day, sport, workoutId, notes };
+  // classPlanId: null — this device never schedules a class; see
+  // PlannedSession.classPlanId's own comment.
+  return { id, day, sport, workoutId, classPlanId: null, notes };
 }
 
 /**
@@ -443,12 +460,13 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
       // makes the read and the write one operation.
       await db.runAsync(
         `INSERT INTO planned_sessions
-           (id, user_id, day, sport, workout_id, notes, created_at, updated_at, dirty, remote)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
+           (id, user_id, day, sport, workout_id, class_plan_id, notes, created_at, updated_at, dirty, remote)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
          ON CONFLICT(id) DO UPDATE SET
            day = excluded.day,
            sport = excluded.sport,
            workout_id = excluded.workout_id,
+           class_plan_id = excluded.class_plan_id,
            notes = excluded.notes,
            updated_at = excluded.updated_at,
            dirty = 0,
@@ -461,6 +479,7 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
         r.day,
         r.sport,
         r.workout_id,
+        r.class_plan_id,
         r.notes ?? '',
         r.created_at,
         r.updated_at,

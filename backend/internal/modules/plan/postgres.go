@@ -56,8 +56,14 @@ func translatePgError(err error) error {
 		if strings.Contains(pgErr.ConstraintName, "notes") {
 			return fmt.Errorf("%w: notes are too long", ErrInvalidInput)
 		}
+		if strings.Contains(pgErr.ConstraintName, "one_template_kind") {
+			return fmt.Errorf("%w: a plan may reference a workout or a class plan, not both", ErrInvalidInput)
+		}
 		return ErrInvalidInput
-	case "23503": // foreign_key_violation — workout_id is the only FK.
+	case "23503": // foreign_key_violation — workout_id and class_plan_id are the two FKs.
+		if strings.Contains(pgErr.ConstraintName, "class_plan") {
+			return fmt.Errorf("%w: unknown class plan", ErrInvalidInput)
+		}
 		return fmt.Errorf("%w: unknown workout", ErrInvalidInput)
 	case "22007", "22008": // invalid/out-of-range datetime
 		return fmt.Errorf("%w: day must be a calendar date (YYYY-MM-DD)", ErrInvalidInput)
@@ -71,12 +77,12 @@ func translatePgError(err error) error {
 // some zone, and every one of those conversions is a chance to move the plan
 // onto the previous day. The database already knows the calendar date; asking
 // for it as text is asking it not to help.
-const selectColumns = `id, user_id, to_char(day, 'YYYY-MM-DD'), sport, workout_id, notes, created_at, updated_at`
+const selectColumns = `id, user_id, to_char(day, 'YYYY-MM-DD'), sport, workout_id, class_plan_id, notes, created_at, updated_at`
 
 func scanPlan(row pgx.Row) (*Plan, error) {
 	var p Plan
 	if err := row.Scan(
-		&p.ID, &p.UserID, &p.Day, &p.Sport, &p.WorkoutID, &p.Notes, &p.CreatedAt, &p.UpdatedAt,
+		&p.ID, &p.UserID, &p.Day, &p.Sport, &p.WorkoutID, &p.ClassPlanID, &p.Notes, &p.CreatedAt, &p.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -203,10 +209,79 @@ func assertWorkoutUsable(ctx context.Context, tx pgx.Tx, workoutID *string, user
 	return nil
 }
 
+// assertClassPlanUsable resolves a plan's class_plan_id under class plan's
+// own visibility rule: every class plan a caller can see, they own — see
+// classplan.go's package comment on the deliberately absent ErrForbidden,
+// which explains why "not yours" and "does not exist" are the identical case
+// for that domain on every path it has.
+//
+// Simpler than assertWorkoutUsable in exactly that respect: there is no
+// public/VOLA-authored class plan to admit, and a class plan carries no sport
+// column at all (see classplan.go), so there is nothing to cross-check a
+// plan's sport against — this collapses to a plain ownership check.
+//
+// **A deliberate gap, not an oversight: nothing here stops `{"sport":
+// "strength", "class_plan_id": "..."}`**, which would render as a strength
+// day naming a BJJ class. Two things keep this from being reachable through
+// the product rather than through raw API access: the web calendar's class-
+// plan picker only appears when the chosen discipline's catalog is
+// techniques (see calendar/page.tsx's `isTechniquesCatalog`), and mobile
+// never writes class_plan_id at all (see apps/mobile/lib/plan.ts). Adding a
+// hard `sport == "bjj"` check here was considered and rejected: classplan.go
+// deliberately carries no sport field because a class plan is not itself
+// sport-typed data, and hardcoding one discipline into this guard would be
+// the same migration-per-discipline cost 000021 removed from `sport`'s own
+// CHECK constraint, reintroduced one module up. If a caller ever reaches
+// this through something other than the two UIs above, that is the moment
+// to revisit — not preemptively here.
+//
+// **Not optional, for the identical reason assertWorkoutUsable is not.**
+// Without it a caller could POST a plan naming any class_plan id and read the
+// outcome as an oracle: a visible id inserts and returns 201, a nonexistent
+// one trips the foreign key and returns 400 — a practical way to enumerate
+// other coaches' guessable plan ids and confirm a private plan's existence.
+// Hence ONE indistinguishable error for "no such class plan" and "not yours".
+func assertClassPlanUsable(ctx context.Context, tx pgx.Tx, classPlanID *string, userID string) error {
+	if classPlanID == nil {
+		return nil
+	}
+	var exists bool
+	err := tx.QueryRow(ctx, `
+		SELECT true FROM class_plans WHERE id = $1 AND owner_user_id = $2`,
+		*classPlanID, userID).Scan(&exists)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: unknown class plan", ErrInvalidInput)
+	}
+	if err != nil {
+		return fmt.Errorf("plan: check class plan: %w", err)
+	}
+	return nil
+}
+
+// bothTemplateKindsSet reports whether a workout and a class plan would both
+// be set on a plan, which nothing anywhere knows how to render — a calendar
+// row is one schedule, not two. Shared by Create (where both sides are known
+// outright) and Update (where the caller may touch only one side, and the
+// other's current value on the row decides the conflict — see the call in
+// Update for that fetch).
+func bothTemplateKindsSet(workoutID, classPlanID *string) bool {
+	return workoutID != nil && classPlanID != nil
+}
+
 func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewPlan) (*Plan, error) {
 	day, err := time.Parse(DayLayout, in.Day)
 	if err != nil {
 		return nil, fmt.Errorf("%w: day must be a calendar date (YYYY-MM-DD)", ErrInvalidInput)
+	}
+
+	// Checked before opening a transaction: a plan naming both a workout and
+	// a class plan is invalid regardless of whether either one turns out to
+	// exist, so there is nothing to gain from a round trip first. The
+	// database's own `plans_one_template_kind` CHECK is defence in depth for
+	// this — see the migration — but a caller should get a message naming
+	// the conflict rather than a constraint name.
+	if bothTemplateKindsSet(in.WorkoutID, in.ClassPlanID) {
+		return nil, fmt.Errorf("%w: a plan may reference a workout or a class plan, not both", ErrInvalidInput)
 	}
 
 	// In a transaction so the visibility check and the insert cannot be split
@@ -220,12 +295,15 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewPl
 	if err := assertWorkoutUsable(ctx, tx, in.WorkoutID, userID, in.Sport); err != nil {
 		return nil, err
 	}
+	if err := assertClassPlanUsable(ctx, tx, in.ClassPlanID, userID); err != nil {
+		return nil, err
+	}
 
 	p, err := scanPlan(tx.QueryRow(ctx, `
-		INSERT INTO plans (id, user_id, day, sport, workout_id, notes)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO plans (id, user_id, day, sport, workout_id, class_plan_id, notes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING `+selectColumns,
-		in.ID, userID, day, in.Sport, in.WorkoutID, in.Notes,
+		in.ID, userID, day, in.Sport, in.WorkoutID, in.ClassPlanID, in.Notes,
 	))
 	if err != nil {
 		return nil, translatePgError(err)
@@ -257,12 +335,48 @@ func (r *PostgresRepository) Update(ctx context.Context, userID, id string, in P
 
 	setWorkout := in.WorkoutID.Present
 	workoutID := in.WorkoutID.Value
+	setClassPlan := in.ClassPlanID.Present
+	classPlanID := in.ClassPlanID.Value
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
+
+	// Mutual exclusivity, checked against the row's state AFTER this update —
+	// not merely against what this one PATCH sets. A caller may touch only
+	// one side (set a class_plan_id and say nothing about workout_id), and
+	// whether that conflicts depends on what the OTHER column already holds
+	// on the row, exactly as the sport re-check just below has to fetch the
+	// row's current sport when the caller didn't send one. Only fetched when
+	// there is something to conflict with: setting neither, or clearing
+	// either side, can never produce the forbidden pair.
+	if (setWorkout && workoutID != nil) || (setClassPlan && classPlanID != nil) {
+		finalWorkout, finalClassPlan := workoutID, classPlanID
+		if !setWorkout || !setClassPlan {
+			var curWorkout, curClassPlan *string
+			err := tx.QueryRow(ctx,
+				`SELECT workout_id, class_plan_id FROM plans WHERE id = $1 AND user_id = $2`,
+				id, userID,
+			).Scan(&curWorkout, &curClassPlan)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			if err != nil {
+				return nil, translatePgError(err)
+			}
+			if !setWorkout {
+				finalWorkout = curWorkout
+			}
+			if !setClassPlan {
+				finalClassPlan = curClassPlan
+			}
+		}
+		if bothTemplateKindsSet(finalWorkout, finalClassPlan) {
+			return nil, fmt.Errorf("%w: a plan may reference a workout or a class plan, not both", ErrInvalidInput)
+		}
+	}
 
 	// The same visibility check `Create` does — an update is just as good an
 	// oracle as an insert, and re-pointing a plan at someone else's private
@@ -289,17 +403,24 @@ func (r *PostgresRepository) Update(ctx context.Context, userID, id string, in P
 			return nil, err
 		}
 	}
+	// class_plan_id has no sport to cross-check — see assertClassPlanUsable.
+	if setClassPlan && classPlanID != nil {
+		if err := assertClassPlanUsable(ctx, tx, classPlanID, userID); err != nil {
+			return nil, err
+		}
+	}
 
 	p, err := scanPlan(tx.QueryRow(ctx, `
 		UPDATE plans
-		   SET day        = COALESCE($3, day),
-		       sport      = COALESCE($4, sport),
-		       workout_id = CASE WHEN $5 THEN $6 ELSE workout_id END,
-		       notes      = COALESCE($7, notes),
-		       updated_at = now()
+		   SET day           = COALESCE($3, day),
+		       sport         = COALESCE($4, sport),
+		       workout_id    = CASE WHEN $5 THEN $6 ELSE workout_id END,
+		       class_plan_id = CASE WHEN $7 THEN $8 ELSE class_plan_id END,
+		       notes         = COALESCE($9, notes),
+		       updated_at    = now()
 		 WHERE id = $1 AND user_id = $2
 		 RETURNING `+selectColumns,
-		id, userID, day, in.Sport, setWorkout, workoutID, in.Notes,
+		id, userID, day, in.Sport, setWorkout, workoutID, setClassPlan, classPlanID, in.Notes,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

@@ -15187,3 +15187,86 @@ read and web authoring, except this domain has no mobile capture at all (see
   nonexistent id (N439's own auth scenarios) — no plan content, no partial
   block list, and no client-side check to bypass, since the server never
   returns another user's plan.
+
+## N442 — BJJ class-plan scheduling: a planned class is a Plan/calendar entry (`backend/internal/modules/plan`, `POST /v1/plans`, `PATCH /v1/plans/{planID}`, `apps/web/src/app/dashboard/calendar/page.tsx`, `apps/web/src/app/dashboard/classplans/[id]/page.tsx`, `apps/mobile/components/WeekPlanner.tsx`, `apps/mobile/lib/plan.ts`)
+
+Final part of the class-plan workstream (N439 backend → N440 web authoring →
+N441 mobile guided runner → N442 this scheduling piece). Reuses the existing
+`plan` module rather than a new scheduling concept: a scheduled class is a
+Plan/calendar row carrying `class_plan_id` instead of (or alongside no)
+`workout_id`. Web is the only surface that schedules; mobile reads and
+navigates into the N441 runner, matching the platform split N440/N441 already
+drew for authoring/scheduling versus running.
+
+### Happy path
+
+- Web calendar: pick a day, choose a discipline whose catalog is techniques
+  (BJJ today), pick "Or schedule a class plan" instead of a workout template,
+  submit — the day's chip and the day panel's list both show the class plan's
+  name, and the entry is otherwise an ordinary plan (editable, removable).
+- Web class-plan detail page (`/dashboard/classplans/[id]`): "Schedule this
+  class" navigates to `/dashboard/calendar?scheduleClassPlan={id}` with the
+  calendar's scheduling form pre-filled to that class plan (discipline
+  defaulted to the first techniques-catalog module, the class-plan select
+  already showing it) — submitting still requires picking a day and pressing
+  Add, since the link carries no date.
+- Editing a scheduled plan's day/notes leaves `class_plan_id` untouched
+  (three-state `PATCH` semantics: omitting the key means "leave it alone").
+- Clearing a class-plan link (`PATCH` with `class_plan_id: null`) turns the
+  entry into a bare-discipline plan; setting a different class plan
+  re-points it.
+- Mobile Plan tab: a class-plan-linked entry appears on its day like any
+  other planned row (sport icon/color, discipline label); tapping it
+  navigates straight into `/classplans/{id}/run` (N441's guided runner) —
+  the row's accessibility label announces "Starts the class." and it draws
+  the same chevron a workout-linked row does. Long-press still removes the
+  local plan.
+- Deleting the class plan itself (from its own detail page, or the classplans
+  list) leaves the scheduled Plan/calendar row in place with `class_plan_id`
+  cleared to null (`ON DELETE SET NULL`, matching `workout_id`'s own choice)
+  — the entry degrades to its bare discipline on both web and mobile rather
+  than disappearing or blocking the class plan's deletion.
+
+### Edge cases & errors
+
+- **Mutual exclusivity is the whole design decision this ticket had to
+  make, and it is enforced in two places**: a Postgres CHECK
+  (`plans_one_template_kind`, `workout_id IS NULL OR class_plan_id IS NULL`)
+  as defence in depth, and Go validation in `plan.go`'s `Create`/`Update`
+  (checked against the resulting row, not merely the fields one request
+  touches) for a message naming the conflict rather than a constraint name.
+  Scenario: `POST /v1/plans` with both `workout_id` and `class_plan_id` set
+  is a 400; `PATCH`ing `class_plan_id` onto a plan that already has a
+  `workout_id` (or vice versa) is a 400 even though the request never
+  mentions the other field.
+- Picking a workout template in the web calendar's form after having picked
+  a class plan (or vice versa) clears the other selection client-side, so the
+  submit can never send both.
+- Switching the day panel's discipline away from a techniques-catalog sport
+  hides the class-plan picker and clears any leftover selection — a
+  strength/running day cannot carry a class-plan link, matching the existing
+  workout-template-per-discipline rule.
+- An unknown `class_plan_id` (never existed) is a 400 `invalid_input`, not a
+  500 — the same "checked before insert" shape `workout_id` already has.
+- A `day`/`sport`/notes validation failure on a request that also carries a
+  `class_plan_id` still reports the specific problem (day format, notes
+  length, unknown sport) rather than a generic error.
+
+### Auth/security
+
+- A `class_plan_id` naming a class plan owned by a different user is
+  rejected as `invalid_input` on both create and update, and the error is
+  **textually identical** to the error for a `class_plan_id` that does not
+  exist at all — this domain has no public/VOLA-authored class plan (see
+  `classplan.go`'s package comment), so every id a caller does not own must
+  be indistinguishable from a nonexistent one. Closing the identical
+  ID-enumeration hole `workout_id` already closes for workouts.
+- Listing/reading plans never leaks another user's class-plan names: the web
+  calendar resolves `class_plan_id` → name only against the caller's own
+  `listClassPlans()` result, so a plan somehow carrying a foreign id (there
+  is no way to create one, but defensively) would render as the bare
+  discipline rather than an unresolved id or a crash.
+- Mobile never writes `class_plan_id` — there is no local write path that
+  sets it, so an offline device cannot accidentally schedule (or re-point) a
+  class regardless of what UI bugs might exist elsewhere; confirm no mobile
+  screen offers a class-plan picker.
