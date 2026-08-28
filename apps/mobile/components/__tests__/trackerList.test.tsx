@@ -59,6 +59,8 @@ function day(
     refresh: () => () => {},
     addTap: async () => {},
     removeEntry: async () => {},
+    addCoffeeTap: async () => {},
+    removeCoffeeTap: async () => {},
     openSettings: () => {},
   };
 }
@@ -167,4 +169,90 @@ it('stays expanded within a day and collapses when the day changes', () => {
 
   rerender(<TrackerList day={day(ts)} collapseAfter={3} collapseKey="2026-08-21" {...props} />);
   expect(screen.queryByTestId('tracker-card-e')).toBeNull();
+});
+
+/**
+ * N432 — the ONE preset-aware branch in this screen: a coffee card gets a
+ * drink-type picker and, if the athlete has a caffeine tracker, its tap
+ * fans out to it. `TrackerCard` itself stays generic (see its own header);
+ * these assertions are about `TrackerList` actually wiring the two up.
+ */
+describe('N432: coffee taps also post to caffeine, when the athlete has one', () => {
+  const coffee = tracker('coffee-1', { preset: 'coffee', name: 'Coffee', target: null });
+  const caffeine = tracker('caf-1', { preset: 'caffeine', name: 'Caffeine', target: 400 });
+  const water = tracker('water-1', { preset: 'water', name: 'Water' });
+
+  it('offers a drink-type picker on the coffee card when there is a caffeine tracker to feed, and not on water', () => {
+    render(<TrackerList day={day([coffee, caffeine, water])} {...props} />);
+
+    fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
+    expect(screen.getByTestId('tracker-choice-coffee-1-espresso')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('tracker-add-water-1'));
+    expect(screen.queryByTestId('tracker-choices-water-1')).toBeNull();
+  });
+
+  it('passes the caffeine tracker and the picked mg figure through to addCoffeeTap', () => {
+    const addCoffeeTap = jest.fn(async () => {});
+    const d = { ...day([coffee, caffeine]), addCoffeeTap };
+    render(<TrackerList day={d} {...props} />);
+
+    fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
+    fireEvent.press(screen.getByTestId('tracker-choice-coffee-1-espresso'));
+
+    expect(addCoffeeTap).toHaveBeenCalledWith(coffee, caffeine, 63, '2026-08-20');
+  });
+
+  it('taps a plain cup with no picker at all when the athlete has no caffeine tracker', () => {
+    // No caffeine tracker at all in this athlete's list — the criterion that
+    // a coffee tap must behave as if this ticket never shipped. Offering a
+    // picker whose every choice discards its mg is a behaviour change in
+    // itself (frontend-reviewer, N432 review) — the fix is no picker at all,
+    // same single instant tap every other tracker gets.
+    const addTap = jest.fn(async () => {});
+    const addCoffeeTap = jest.fn(async () => {});
+    const d = { ...day([coffee]), addTap, addCoffeeTap };
+    render(<TrackerList day={d} {...props} />);
+
+    expect(screen.queryByTestId('tracker-choice-coffee-1-drip')).toBeNull();
+    fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
+
+    expect(addTap).toHaveBeenCalledWith(coffee, '2026-08-20');
+    expect(addCoffeeTap).not.toHaveBeenCalled();
+  });
+
+  it('passes null mg for "Other" — never an invented figure', () => {
+    const addCoffeeTap = jest.fn(async () => {});
+    const d = { ...day([coffee, caffeine]), addCoffeeTap };
+    render(<TrackerList day={d} {...props} />);
+
+    fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
+    fireEvent.press(screen.getByTestId('tracker-choice-coffee-1-other'));
+
+    expect(addCoffeeTap).toHaveBeenCalledWith(coffee, caffeine, null, '2026-08-20');
+  });
+
+  it('removing a coffee tap goes through removeCoffeeTap, which also undoes the paired entry', () => {
+    const removeCoffeeTap = jest.fn(async () => {});
+    const removeEntry = jest.fn(async () => {});
+    const d = { ...day([coffee], { 'coffee-1': 1 }), removeCoffeeTap, removeEntry };
+    render(<TrackerList day={d} {...props} />);
+
+    fireEvent.press(screen.getByTestId('tracker-glyph-coffee-1-0'));
+
+    expect(removeCoffeeTap).toHaveBeenCalledWith('coffee-1-0', '2026-08-20');
+    expect(removeEntry).not.toHaveBeenCalled();
+  });
+
+  it('removing a WATER tap still goes through the ordinary removeEntry — water carries no caffeine', () => {
+    const removeCoffeeTap = jest.fn(async () => {});
+    const removeEntry = jest.fn(async () => {});
+    const d = { ...day([water], { 'water-1': 1 }), removeCoffeeTap, removeEntry };
+    render(<TrackerList day={d} {...props} />);
+
+    fireEvent.press(screen.getByTestId('tracker-glyph-water-1-0'));
+
+    expect(removeEntry).toHaveBeenCalledWith('water-1-0', '2026-08-20');
+    expect(removeCoffeeTap).not.toHaveBeenCalled();
+  });
 });

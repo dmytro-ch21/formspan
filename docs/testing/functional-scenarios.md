@@ -14609,3 +14609,135 @@ Reading the diff cannot settle any of these.
    sound like a system alert.
 4. **The Cutoff field's keyboard is sane** on-device (numbers-and-punctuation)
    for typing `16:00` one-handed.
+
+## A coffee tap can post to the caffeine tracker too, by drink type (N432)
+
+Mobile only — no new endpoint, no new migration. New file
+`lib/coffeeCaffeine.ts` (the mg figures, the chip choices, the id pairing);
+changed `lib/trackers.ts` (`logCoffeeTap`, `removeCoffeeTap`),
+`lib/useTrackerDay.ts` (`addCoffeeTap`, `removeCoffeeTap`),
+`components/TrackerCard.tsx` (generic `addChoices`/`onAddChoice`),
+`components/TrackerList.tsx` (the one `preset === 'coffee'` branch, and the
+caffeine-tracker lookup). Water is untouched throughout — every scenario
+below that says "water" is checking that it stays untouched, not testing new
+water behaviour.
+
+### The drink-type picker
+
+- Add a caffeine tracker AND a coffee tracker to the same athlete. Tap `+` on
+  the coffee card. Instead of logging immediately, a compact chip row appears
+  inline: **Espresso / Drip / Tea / Other**. Confirm nothing was logged yet —
+  the coffee count has not moved.
+- Tap **Espresso**. The coffee card's count increases by one cup (unchanged
+  behaviour), the chip row closes, AND the caffeine card's total increases by
+  63 mg (a new entry, not a change to an existing one).
+- Repeat for **Drip** (95 mg) and **Tea** (47 mg) — check the caffeine total
+  reflects each figure exactly, summed correctly across different drink
+  types in one day (e.g. one espresso + one drip = 158 mg, not "2 cups" worth
+  of a single assumed figure).
+- Tap **+** on the coffee card, then tap **+** again without picking a chip.
+  The row closes with nothing logged — neither coffee nor caffeine moved.
+- **Tap an EMPTY glyph on the coffee row directly** (not the `+` button).
+  Same picker opens — confirms the picker is not a `+`-button-only shortcut;
+  every add gesture on the coffee card goes through it.
+
+### "Other" logs no invented number
+
+- Tap `+` on coffee, tap **Other**. The coffee card's count increases by one
+  cup, exactly like every other choice. The caffeine card's total does **not**
+  change — no entry was posted, not even a fallback estimate.
+
+### No caffeine tracker — behaves exactly as before this ticket
+
+- On an athlete with a coffee tracker and **no** caffeine tracker: tap `+`,
+  pick any drink type. The coffee tap logs normally. No error, no toast, no
+  caffeine tracker gets silently created. (This is the ticket's own explicit
+  acceptance criterion — verify there is no code path that provisions one.)
+
+### Water is unaffected
+
+- Tap `+` on the WATER card. It logs immediately, exactly as before this
+  ticket — no picker, no chip row, regardless of whether the athlete has a
+  coffee or caffeine tracker. Confirms the picker is coffee-specific, not a
+  property every tracker with `addChoices` support silently gained.
+
+### The caffeine tracker treats a coffee-derived entry like any other (N431, unchanged)
+
+- With one coffee-derived caffeine entry on the board, check `cutoffLine` and
+  `footLine` read exactly as N431's own scenarios describe — `cutoff in Xh
+  Ym`, `last at HH:MM — past your HH:MM cutoff`, `X past your target of Y`.
+  No different wording, no branch, because the entry is ordinary.
+- Cross the caffeine cutoff using ONLY coffee-derived entries (no manual
+  caffeine tap at all). The cutoff line still fires — confirms it reads
+  `tracker_entries` generically rather than something that only manual taps
+  populate.
+
+### Editable, and removable together
+
+- Tap **Espresso** on coffee. On the CAFFEINE card, find the new 63 mg entry
+  (it is an ordinary glyph, indistinguishable from a manually-tapped one) and
+  tap it to remove it. Confirm only that one entry is gone — the coffee cup
+  and any other caffeine entries are untouched. This is the "correct a wrong
+  assumption" path: the athlete drank something other than an espresso, so
+  they remove the auto-posted mg and, optionally, tap `+` on caffeine
+  directly for the right amount.
+- Tap **Drip** on coffee to log a cup + 95 mg. Now go to the COFFEE card and
+  tap that SAME cup's filled glyph to remove it. Confirm the caffeine card's
+  95 mg entry is ALSO gone — undoing the coffee tap undoes what it caused,
+  not just the cup.
+- Log a coffee tap (posts to caffeine), and SEPARATELY tap `+` on caffeine
+  directly to log a manual 80 mg entry on the same day. Remove the COFFEE
+  tap. Confirm only the coffee-derived caffeine entry disappears — the
+  manual 80 mg entry survives untouched.
+- Remove a coffee tap that was logged when the athlete had **no** caffeine
+  tracker (or was an "Other" tap that posted nothing). Confirm this is a
+  silent no-op on the caffeine side — no error, nothing to undo.
+
+### Day-scoping (N430's browsed-day threading, W16's day-leak fix)
+
+- Browse to a past day. Tap `+` on coffee, pick **Drip**. Confirm both the
+  coffee cup and the 95 mg caffeine entry are filed under the BROWSED day,
+  not real today — same criterion N431 already states for a plain caffeine
+  tap, exercised here for the fan-out.
+- Browse away and back. The picked drink's mg entry appears on the day it was
+  logged and nowhere else — no leak onto today or any other day (W16/#704's
+  regression class).
+
+### Offline
+
+- Airplane mode: log two coffee taps with different drink types (with a
+  caffeine tracker present). Both the coffee count and the caffeine total
+  update immediately, locally, with no network wait. Reconnect and confirm
+  all four rows (two coffee entries, two caffeine entries) sync — check the
+  network log shows two independent `PUT /v1/trackers/{id}/entries/{id}`
+  calls per tap, one per tracker, not a single combined request.
+- Airplane mode: log a coffee tap, then remove it, then reconnect. Confirm
+  no orphaned caffeine entry appears on the server after sync — the local
+  tombstone for the paired entry was created even though the original
+  caffeine POST never left the device.
+
+### Auth/security
+
+- Nothing new. Both the coffee and caffeine entries this feature posts go
+  through the SAME owner-scoped `/v1/trackers/{trackerID}/entries/{entryID}`
+  endpoint every other tap already uses — no new route, no new authorization
+  surface. Confirm one athlete's coffee tap cannot be made to post into
+  another athlete's caffeine tracker (it can't: the caffeine tracker is
+  looked up from the SAME athlete's own tracker list, never from an id
+  supplied by the tap itself).
+
+### For the user to check on a device
+
+Reading the diff cannot settle any of these.
+
+1. **The chip row is genuinely one-handed.** Standing up, holding the phone
+   in one hand: tap `+`, tap a chip, done — no fumbling, no need for a second
+   hand to steady the screen.
+2. **VoiceOver reads the chip row sensibly.** Each chip announces its own
+   name and mg figure (e.g. "Espresso — about 63 mg caffeine"), and the `+`
+   button's label changes to say it opens a chooser rather than just "Add a
+   cup of Coffee" while the athlete has no way to know a picker exists.
+3. **The two cards visibly update together.** After picking a drink type,
+   both the coffee card's count AND the caffeine card's total change in the
+   same glance — nothing that requires a manual refresh or a screen switch
+   to notice the caffeine side moved at all.

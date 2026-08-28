@@ -47352,6 +47352,225 @@ Left as the reviewer's own stated judgment call: nothing pins the
 awkward to assert meaningfully in React Native Testing Library, and the
 existing code comment carries the intent.
 
+## 2026-08-28 — N432: a coffee tap can post to the caffeine tracker too, by drink type (#705)
+
+"water and coffee should be tracked as food via api and counted the overall
+caffeine as i mentioned before" (the user, verbatim, 2026-08-28). Confirmed
+with the user: water and coffee stay ordinary `daily_trackers` rows — not a
+move to the food-log API, which would lose the dedicated tracker glyph/count
+UI for a bigger reshape the ticket did not ask for. What changed instead is
+additive: a coffee tap now ALSO posts an entry to the athlete's caffeine
+tracker (N431), if they have one, carrying a real mg figure for whichever
+drink was actually tapped.
+
+### Mobile-only — no migration, no OpenAPI change
+
+`tracker_entries.amount` was already a free `REAL` per entry, independent of
+the tracker's own `increment` (a manual caffeine tap has always been able to
+carry a different amount than 80 mg, nothing enforced uniformity). So a
+coffee-caused caffeine entry is an ORDINARY row through the SAME backend
+endpoints, the SAME SQLite outbox, and the SAME model functions
+(`footLine`/`cutoffLine`/`valueLine`) that already treat every entry as just
+"an amount logged on a day" — none of which needed to change, and none of
+which was changed. Everything below is `apps/mobile` only.
+
+### The picker, and why it lives in `TrackerList`, not `TrackerCard`
+
+`TrackerCard.tsx`'s own header states its whole discipline: "there is no
+WaterCard and there will not be a CoffeeCard" — the component knows nothing
+about which preset it is drawing. A drink-type CHOICE at tap time is
+genuinely new behaviour a plain increment tap cannot express, so it needed
+somewhere to live without breaking that promise:
+
+- **`TrackerCard` grew one generic capability: `addChoices` / `onAddChoice`.**
+  A small, fixed list of `{key, label, accessibilityLabel}` a caller may
+  offer instead of a plain increment. Absent or empty (every existing
+  caller) is the ordinary behaviour, unchanged — `onAdd` fires immediately
+  from the `+` button AND from an empty glyph, exactly as before. Present and
+  non-empty replaces BOTH of those with a compact inline chip row: tap `+` (or
+  an empty glyph) to open it, tap a chip to log and close it, tap `+` again to
+  cancel with nothing logged. Still one-handed, still no full-screen form for
+  a single tap — a SELECTION control at tap time, which the ticket
+  distinguishes from the trend-chart carve-out's "no metric picker" (that
+  rule is about a chart's axis, not a logging control).
+- **`TrackerList` is where the one `tracker.preset === 'coffee'` branch
+  actually lives.** It already has every tracker on the day in hand — exactly
+  what "does this athlete have a caffeine tracker" needs — so it is the
+  natural (and only new) place to ask that question, look up the caffeine
+  tracker once per render (`all.find(t => t.preset === 'caffeine') ?? null`,
+  no extra fetch), and wire the coffee card's `addChoices` to
+  `coffeeCaffeine.ts`'s `COFFEE_ADD_CHOICES`. `TrackerCard` still does not
+  know the word "coffee" or "caffeine" anywhere in it.
+
+### The mg figures, cited rather than invented
+
+New file, `apps/mobile/lib/coffeeCaffeine.ts` — the one place in the mobile
+app that says "coffee" and "mg" in the same breath, kept out of both
+`trackerModel.ts` and `trackers.ts` on purpose. Source: Mayo Clinic,
+*"Caffeine content for coffee, tea, soda and more"*
+(mayoclinic.org/healthy-lifestyle/nutrition-and-healthy-eating/in-depth/
+caffeine/art-20049372) — the same "a DEFAULT, editable, not a medical claim"
+framing `presets.go` already gives caffeine's own 400 mg limit:
+
+- Espresso, one shot — **63 mg**
+- Drip (brewed), 8 fl oz — **95 mg**
+- Tea, black, 8 fl oz — **47 mg**
+- Other — **no figure.** An athlete who does not know what they drank, or
+  drank something none of the three chips describe, is not handed a number
+  this app invented for them. The coffee cup still logs normally; nothing is
+  posted to caffeine. If they want that cup counted, the caffeine card's own
+  `+` is right there for a manual entry at its usual 80 mg default, which
+  they can edit like any other.
+
+### Dual-write, client-side — and why, against the ticket's own open question
+
+The ticket left "client-side dual-write vs. backend fan-out" open, to decide
+against the actual shape of `logTap`. Read `trackers.ts` and `sync.ts` before
+deciding: `logTap` is already a local-first SQLite write with no network in
+the loop, and the outbox already retries each `tracker_entries` row
+independently, keyed on a client-generated id. A backend endpoint that fanned
+a coffee tap out to a second tracker would need its own retry/idempotency
+story running parallel to one this file already has, for a write that is
+already safe to duplicate and already offline-tolerant. So: two ordinary
+`tracker_entries` inserts, in one new function
+(`logCoffeeTap(userId, coffeeTracker, caffeineTracker, caffeineMg, on)` in
+`trackers.ts`), both flowing through the SAME outbox pass independently. The
+coffee leg is untouched — still one cup at `coffeeTracker.increment` — and
+the caffeine leg is skipped entirely (no second insert at all) when
+`caffeineTracker` is `null` or `caffeineMg` is `null`, which is what makes
+"no caffeine tracker → behaves exactly as before" true by construction rather
+than by a special case anyone has to remember.
+
+Because this reuses the existing outbox, the day-scoping, and every model
+function unchanged, N430's browsed-day threading and N431's `cutoffLine`/
+`footLine` needed literally no changes to cover coffee-derived entries — they
+already treat every `tracker_entries` row identically.
+
+### Pairing a removal, without a schema change
+
+"Editable... an athlete can correct or remove an auto-posted caffeine entry"
+already holds for free — it is an ordinary row, editable by removing it and
+re-tapping caffeine's own `+`, same as any tracker entry (there is no
+per-entry amount-edit UI anywhere in this app; remove-and-re-add is how every
+tracker entry is corrected today). What needed actual design was: removing
+the COFFEE tap should also remove the caffeine entry it caused, so undoing a
+mis-tap does not leave an orphaned mg reading behind.
+
+`pairedCaffeineEntryId(coffeeEntryId)` in `coffeeCaffeine.ts` derives the
+caffeine entry's id from the coffee entry's own id (`${coffeeId}-caf`) rather
+than storing a link on a new column. That is the whole reason no migration
+was needed here either: any device that knows a coffee entry's id can
+recompute its pairing, including one that only pulled the coffee entry down
+later. `removeCoffeeTap(userId, coffeeEntryId)` calls the ordinary `removeTap`
+twice — once on the coffee id, once on the derived caffeine id — and the
+second call is a harmless no-op (via `removeTap`'s existing "already gone"
+branch) in exactly the two cases that never made a paired entry: no caffeine
+tracker at tap time, and an "Other" tap. `TrackerList` routes a coffee card's
+`onRemove` through `removeCoffeeTap` instead of the ordinary `removeEntry`;
+every other tracker, water included, is unaffected.
+
+### What was mutation-verified
+
+- `logCoffeeTap`'s guard (`if (caffeineTracker && caffeineMg != null)`):
+  mutated to always insert regardless, 4 of the new `trackers.test.ts` cases
+  failed (the no-caffeine-tracker case, the "Other" case, the two-row
+  assertion, and the constraint failure from writing a `null` amount),
+  reverted, confirmed green by re-running.
+- `removeCoffeeTap`'s pairing: mutated to drop the second `removeTap` call,
+  the "tombstones both rows" and "does not remove a manually-tapped caffeine
+  entry" tests both failed with the paired row surviving, reverted, confirmed
+  green by re-running.
+
+### Left out of scope, and why
+
+- **The empty-glyph and `+` accessibility HINT text (`glyphHint`,
+  `"Double tap to add it"`) is not customised for the picker path.** Both
+  still open the chip row rather than logging, and the label already says
+  "choose a type" — only the HINT wording is generic. Threading `addChoices`
+  into `glyphHint`/`glyphLabel` (currently preset-agnostic pure functions in
+  `trackerModel.ts`) for one extra sentence felt disproportionate to this
+  ticket; flagged here rather than silently skipped.
+- **`footLine`'s "N to go" / "N past your target" arithmetic counts TAPS
+  against `targetCount` (mg target ÷ mg increment), not summed mg** — a
+  pre-existing property of `trackerModel.ts`, not something this ticket
+  introduced. It already could have skewed the moment anyone hand-edited a
+  caffeine entry's amount (which N431 already allowed); coffee-derived entries
+  with varying mg just make it more likely to be visible. The actual mg total
+  is still stated correctly on the amount line (`amountLine` sums real
+  `entry.amount`s), so nothing is misreported — the count-vs-target phrasing
+  is just coarser than the number beside it. Not fixed here: it is a
+  `trackerModel.ts` design question independent of this ticket's scope.
+
+### Test
+
+`apps/mobile/lib/__tests__/coffeeCaffeine.test.ts` (new) — the cited figures,
+the chip row, and `pairedCaffeineEntryId`'s determinism. `trackers.test.ts` —
+two new `describe` blocks against the real SQLite fixture: the dual-write
+(both rows, correct amounts, coffee leg unaffected, both entries independently
+pushed through the outbox) and the pairing removal (tombstones both rows,
+no-op when nothing was paired, does not touch a manual caffeine entry sharing
+the same day, scoped per-athlete). `trackerCard.test.tsx` — the generic
+`addChoices` picker: no addChoices leaves `+` and empty-glyph behaviour
+unchanged, addChoices opens/closes/fires on both the `+` button and an empty
+glyph, accessibility labels. `trackerList.test.tsx` — the one preset-aware
+wire: coffee gets the picker and water does not, the caffeine tracker (or
+`null`) and the picked mg are threaded to `addCoffeeTap` correctly including
+the no-caffeine-tracker and "Other" cases, and coffee removal routes through
+`removeCoffeeTap` while every other tracker still uses `removeEntry`.
+
+`docs/testing/functional-scenarios.md` updated with the drink-type-picker and
+cross-tracker-posting scenarios under Daily trackers.
+
+### `ac-verifier`/`frontend-reviewer` findings, applied before merge
+
+`ac-verifier`: 7 MET / 0 NOT MET, every criterion traced against the diff
+(including independently confirming the id-derivation collision math and the
+no-caffeine-tracker no-op path). `backend-reviewer` not run — this ticket is
+mobile-only, confirmed by an empty `git diff --name-only backend/`.
+
+`frontend-reviewer`: no blocking findings, several suggestions — the one
+applied as a real fix rather than left as a judgment call:
+
+- **The picker showed even with no caffeine tracker to feed.** Gating the
+  chip row on `isCoffee` alone (rather than `isCoffee && caffeineTracker`)
+  meant every chip did the identical thing for that athlete — log one cup,
+  mg discarded — turning what used to be an instant tap into two taps that
+  bought nothing, directly against this ticket's own "no caffeine tracker →
+  behaves exactly as before" criterion. `TrackerList.tsx` now has a separate
+  `showPicker` gate; `isCoffee` alone still routes removal through
+  `removeCoffeeTap` (safe as a no-op if no paired entry exists — e.g. one
+  logged before the athlete's caffeine tracker was removed). Two existing
+  tests updated/renamed to match: a coffee tap with no caffeine tracker now
+  asserts the plain `addTap` path fires and `addCoffeeTap` does not, and the
+  picker-is-offered test now includes a caffeine tracker in its fixture.
+
+Also applied, all cheap: `logCoffeeTap`'s two inserts now run inside
+`withTransaction` (this file already states the rule for exactly this
+shape — the two writes here had drifted from it, and a caffeine-insert
+failure after the coffee insert commits would otherwise leave a real cup
+logged while the promise still rejected); the chip row's
+`accessibilityRole="radiogroup"` corrected to `"none"` (its children are
+plain buttons with nothing that reads as a persisted selection); `hitSlop={4}`
+on each chip, clearing the 44pt touch-target bar this file states elsewhere
+for the `+`/glyphs/settings controls; and an
+`AccessibilityInfo.announceForAccessibility('Choose a drink type')` when the
+picker opens (not on close) — a VoiceOver user previously double-tapped,
+heard silence, and had to discover the chip row by swiping.
+
+Mutation-verified all four: the `showPicker` gate (reverted to `isCoffee`
+alone, confirmed the renamed test failed on a real `toHaveBeenCalledWith`
+mismatch), and the announcement (removed the call, confirmed the new
+`trackerCard.test.tsx` test failed with zero calls recorded, not a compile
+error) — both restored, confirmed green by re-running.
+
+Left as the reviewer's own stated judgment call, not fixed here: the
+one-handed cost of the picker for athletes who DO have a caffeine tracker
+(the reviewer's own read was that mg fidelity is the feature and the
+two-tap cost is a fair trade there); the empty-glyph accessibility hint
+text still says "Double tap to add it" rather than mentioning the picker
+(the `+` button's label already changes, and the hint lives in
+`trackerModel.ts`'s pure functions, which stay preset-unaware by design).
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

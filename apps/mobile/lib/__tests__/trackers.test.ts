@@ -1,12 +1,15 @@
 import { ApiError, OfflineError } from '../apiError';
+import { pairedCaffeineEntryId } from '../coffeeCaffeine';
 import type { Tracker } from '../trackerModel';
 import {
   byTracker,
   cacheTrackers,
   localEntries,
   localTrackers,
+  logCoffeeTap,
   logTap,
   pendingTrackerCount,
+  removeCoffeeTap,
   removeLastTap,
   removeTap,
   syncTrackers,
@@ -57,6 +60,38 @@ const water: Tracker = {
 
 const wire = (over: Partial<Record<string, unknown>> = {}) => ({
   ...water,
+  user_id: USER,
+  archived_at: null,
+  created_at: '2026-08-01T00:00:00.000Z',
+  updated_at: '2026-08-01T00:00:00.000Z',
+  ...over,
+});
+
+/** The shipped coffee preset. See `tracker/presets.go`. */
+const coffee: Tracker = {
+  id: 't_coffee', preset: 'coffee', name: 'Coffee', icon: '☕', color_key: 'coffee',
+  unit: 'cup', increment: 1, target: null, render_style: 'auto', sort_order: 20,
+  count_noun: 'cup', provisioned: false, cutoff_minutes: null,
+};
+
+/** The shipped caffeine preset (N431). */
+const caffeine: Tracker = {
+  id: 't_caffeine', preset: 'caffeine', name: 'Caffeine', icon: '⚡', color_key: 'amber',
+  unit: 'mg', increment: 80, target: 400, render_style: 'glyphs', sort_order: 30,
+  count_noun: 'cup', provisioned: false, cutoff_minutes: 960,
+};
+
+const coffeeWire = (over: Partial<Record<string, unknown>> = {}) => ({
+  ...coffee,
+  user_id: USER,
+  archived_at: null,
+  created_at: '2026-08-01T00:00:00.000Z',
+  updated_at: '2026-08-01T00:00:00.000Z',
+  ...over,
+});
+
+const caffeineWire = (over: Partial<Record<string, unknown>> = {}) => ({
+  ...caffeine,
   user_id: USER,
   archived_at: null,
   created_at: '2026-08-01T00:00:00.000Z',
@@ -456,6 +491,111 @@ describe('the push', () => {
     const after = await definition(water.id);
     expect(after?.target).toBe(3000);
     expect(after?.dirty).toBe(1);
+  });
+});
+
+describe('N432: a coffee tap can also post to the caffeine tracker', () => {
+  it("writes both entries, the caffeine leg carrying the drink type's own mg", async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, 63, TODAY);
+
+    const entries = await localEntries(USER, TODAY);
+    expect(entries).toHaveLength(2);
+    const byId = (id: string) => entries.find((e) => e.id === id);
+    expect(byId(coffeeId)).toMatchObject({ tracker_id: coffee.id, amount: coffee.increment });
+    const caffeineId = pairedCaffeineEntryId(coffeeId);
+    expect(byId(caffeineId)).toMatchObject({ tracker_id: caffeine.id, amount: 63 });
+  });
+
+  it('logs the coffee cup and nothing else when the athlete has no caffeine tracker', async () => {
+    // The acceptance criterion this ticket names explicitly: "no error, no
+    // forced caffeine-tracker creation" — behaves exactly as before.
+    await cacheTrackers(USER, [coffeeWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, null, 63, TODAY);
+
+    const entries = await localEntries(USER, TODAY);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].id).toBe(coffeeId);
+  });
+
+  it('logs the coffee cup and nothing else for "Other" — never an invented mg figure', async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, null, TODAY);
+
+    const entries = await localEntries(USER, TODAY);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].id).toBe(coffeeId);
+  });
+
+  it("the coffee leg is unaffected — still one cup at the tracker's own increment", async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, 95, TODAY);
+    const entries = await localEntries(USER, TODAY);
+    expect(entries.find((e) => e.id === coffeeId)?.amount).toBe(1);
+  });
+
+  it('pushes both entries through the ordinary outbox, independently', async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    await logCoffeeTap(USER, coffee, caffeine, 63, TODAY);
+
+    const result = await syncTrackers(USER, token);
+    expect(result.failed).toBe(0);
+    expect(await pendingTrackerCount(USER)).toBe(0);
+    const paths = mockApi.mock.calls.map((c) => String(c[1]));
+    expect(paths.some((p) => p.includes(`/trackers/${coffee.id}/entries/`))).toBe(true);
+    expect(paths.some((p) => p.includes(`/trackers/${caffeine.id}/entries/`))).toBe(true);
+  });
+});
+
+describe('N432: removing a coffee tap undoes the caffeine entry it caused', () => {
+  it('tombstones both rows', async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, 63, TODAY);
+    const caffeineId = pairedCaffeineEntryId(coffeeId);
+
+    await removeCoffeeTap(USER, coffeeId);
+
+    expect(await localEntries(USER, TODAY)).toHaveLength(0);
+    expect((await row(coffeeId))?.deleted_at).not.toBeNull();
+    expect((await row(caffeineId))?.deleted_at).not.toBeNull();
+  });
+
+  it('is a harmless no-op on the paired id when the tap never made one (no caffeine tracker)', async () => {
+    await cacheTrackers(USER, [coffeeWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, null, 63, TODAY);
+
+    await expect(removeCoffeeTap(USER, coffeeId)).resolves.toBeUndefined();
+    expect(await localEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it('is a harmless no-op when the tap posted no caffeine ("Other")', async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, null, TODAY);
+
+    await expect(removeCoffeeTap(USER, coffeeId)).resolves.toBeUndefined();
+    expect(await localEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it('does not remove a manually-tapped caffeine entry that merely shares a day', async () => {
+    // The pairing is by DERIVED id, not "any caffeine entry logged today" —
+    // an athlete's own manual caffeine tap must survive undoing a coffee cup.
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const manualCaffeineId = await logTap(USER, caffeine, TODAY);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, 63, TODAY);
+
+    await removeCoffeeTap(USER, coffeeId);
+
+    const entries = await localEntries(USER, TODAY);
+    expect(entries.map((e) => e.id)).toEqual([manualCaffeineId]);
+  });
+
+  it("does not let one athlete remove another athlete's paired caffeine entry", async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, 63, TODAY);
+
+    await removeCoffeeTap(OTHER, coffeeId);
+
+    expect(await localEntries(USER, TODAY)).toHaveLength(2);
   });
 });
 
