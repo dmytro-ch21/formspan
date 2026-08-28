@@ -147,8 +147,10 @@ func HasSearchableTerm(q string) bool { return len(searchTokens(q)) > 0 }
 // the boundary between two unrelated names -- the exact defect that made
 // `arm bar` behave the way it did. `unnest` keeps each alias its own string
 // for the clause that actually DECIDES a match, so a term must live inside
-// one of them. See TestSearchClauseRejectsATermThatCrossesAnAliasBoundary
-// below, and the Postgres-integration counterpart in postgres_test.go, for
+// one of them. See TestSearchClauseMatchesAliasesSeparatelyFromName and
+// TestSearchClauseNeverLetsThePrefilterDecideAloneAcrossMultipleTokens below,
+// and the Postgres-integration counterpart
+// (TestSearchRejectsATermThatCrossesAnAliasBoundary) in postgres_test.go, for
 // that guarantee checked directly against real rows.
 //
 // # N109 -- the alias OR used to defeat food_catalog_name_trgm_idx
@@ -262,6 +264,71 @@ func SearchClause(query string, startAt int) (string, []any) {
 	return strings.Join(clauses, " AND "), args
 }
 
+// SearchRank decides what comes FIRST, and it is three signals, not one.
+//
+// # rank_tier, and why the other two could not do this job (N88)
+//
+// The catalog was 177 hand-curated foods when the two signals below were
+// written, and against 177 rows they were enough. It is 12,651 now — SR Legacy
+// and FNDDS in full — and **803 of those rows contain the word "chicken"**: 394
+// from SR Legacy, 409 from FNDDS. Measured on the source data, not estimated.
+//
+// Neither signal below separates the food an athlete meant from the 802 others:
+//
+//	curated   "Chicken breast"
+//	FNDDS     "Chicken breast, fried, coated, skin / coating eaten, from pre-cooked"
+//
+// Both LEAD with the typed word, so lead position ties. Similarity then breaks
+// the tie by string length — which is not a question about food at all, and is
+// the very reason the lead-position rule had to be invented in the first place.
+// A third signal is needed, and it has to outrank both.
+//
+// `rank_tier` is that signal: 0 for a food a human named, gave aliases to and
+// resolved to one specific USDA row; 1 for everything imported in bulk. It sorts
+// first, so a curated row wins whenever one matches, and the two signals below
+// decide the order among the thousands of rows where none does — "lobster gumbo"
+// and "pad thai" have no curated row, and there the original reasoning is
+// untouched and still doing all the work.
+//
+// # The two signals below are unchanged
+//
+// The WHERE decides what matches; this decides the order, and they answer
+// different questions. Trigram similarity alone is NOT enough here, and the
+// case that proves it is the one USDA's own search gets wrong:
+//
+//	query            "chicken breast"
+//	ranked first     "Lunchmeat, chicken breast, sliced, prepackaged"
+//	wanted           "Chicken, broiler or fryers, breast, skinless, meat only, raw"
+//
+// Similarity puts the lunchmeat on top for two compounding reasons: it
+// contains the typed phrase contiguously, and it is the shorter string, which
+// a trigram ratio rewards. Measured against the real catalog, not reasoned
+// about — the integration test carries both rows for exactly this.
+//
+// # Lead position, and why it is the primary key
+//
+// A USDA description is written head-noun first: the leading comma-segment
+// says what the food IS and everything after it qualifies. "Chicken, broilers
+// or fryers, breast..." is a chicken. "Lunchmeat, chicken breast, sliced..."
+// is a lunchmeat that mentions chicken breast.
+//
+// So the EARLIEST position at which any typed word appears is a better signal
+// of what a row is about than how much of the string the query covers. A food
+// whose name LEADS with what you typed is what you meant; one that mentions it
+// partway through is something else that happens to contain it.
+//
+// Similarity stays as the tiebreak, because among rows that all lead with the
+// right word it is the right question again — it is what separates the plain
+// row from a longer variant.
+//
+// **The `f.id` tie-break is not cosmetic.** This ordering pages, and both
+// signals above produce ties constantly across a catalog of similar names. A
+// non-deterministic sort under LIMIT/OFFSET silently repeats rows on one page
+// and skips them on the next — a paging bug no correctness test on page one
+// can see.
+//
+// `startAt` is the first placeholder this may use; it returns every argument
+// it binds, in order.
 func SearchRank(query string, startAt int) (string, []any) {
 	tokens := searchTokens(query)
 	if len(tokens) == 0 {

@@ -45899,6 +45899,24 @@ here because it cost real time to diagnose and would cost the next person
 the same time if they ran the suite against a seeded database without
 knowing why.
 
+**Follow-up, caught in `backend-reviewer` and fixed before merge**: the
+rewrite of `SearchClause`'s doc comment accidentally deleted `SearchRank`'s
+entire ~55-line block comment a few lines below it — the `rank_tier`
+rationale, the lunchmeat-vs-broiler measured example, the lead-position
+reasoning, and the note that **"the `f.id` tie-break is not cosmetic"** (the
+paging-bug guard N88 wrote it for). Nothing in this ticket touches
+`SearchRank`'s logic; the deletion was collateral from an editing pass, and
+it left a dangling cross-reference (`SearchClause`'s catch-a-boundary-crossing
+comment pointed at a test name, `TestSearchClauseRejectsATermThatCrossesAn-
+AliasBoundary`, that was never the real one). Both restored: the comment
+verbatim, and the reference corrected to the two real test names
+(`TestSearchClauseMatchesAliasesSeparatelyFromName`,
+`TestSearchClauseNeverLetsThePrefilterDecideAloneAcrossMultipleTokens`) plus
+the Postgres-integration counterpart. `gofmt`/`go build`/`go vet` clean; the
+full `internal/modules/food` suite re-run against a live, seeded
+`vola_test` — including `TestSearchRejectsATermThatCrossesAnAliasBoundary`
+— all green. `pnpm run verify`: green (220 suites, 3402 tests).
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
