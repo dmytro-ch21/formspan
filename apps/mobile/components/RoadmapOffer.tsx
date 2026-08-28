@@ -11,22 +11,33 @@ import { roadmapToOffer } from '@/lib/roadmapEntry';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
- * The offer, on Today, for an athlete who is on no roadmap.
+ * The offer, for an athlete who is on no roadmap.
  *
- * **This is the whole of N96.** The user could not find roadmaps, and the
- * reason was not that there were too few links: it was that the only surface
- * offering an un-enrolled roadmap was a horizontal strip below a seven-day
- * week grid, on the tab you open to pick a template. See `lib/roadmapEntry.ts`
- * for the full diagnosis. Today is the screen the app opens to, and the slot
- * this occupies is the one `RoadmapLine` already owns for everybody else — so
- * the roadmap row is now PERMANENT with two states rather than a prompt that
- * appears out of nowhere. That distinction is what keeps it from being the nag
- * `RoadmapSummary` declines to be on the profile screen.
+ * **This is the whole of N96, moved by N107.** The user could not find
+ * roadmaps, and the reason was not that there were too few links: it was that
+ * the only surface offering an un-enrolled roadmap was a horizontal strip
+ * below a seven-day week grid, on the tab you open to pick a template. See
+ * `lib/roadmapEntry.ts` for the full diagnosis.
  *
- * **It self-limits, structurally.** Today renders this only when the working
- * list came back empty, so enrolling replaces it with the progress line and it
- * never returns. There is no dismiss control, because there is nothing left to
- * dismiss the moment it has done its job.
+ * **N96 put this at the top of Today; N107 moved it to Goals.** The reasoning
+ * that put it on Today no longer holds — the offer crowded the one screen
+ * whose job is "what do I do right now", and the user's own report was that
+ * this made Today feel crowded on a device. Deciding to start a syllabus is
+ * the same *kind* of decision as accepting a calorie target — made once in a
+ * while, with reading attached — which is what Goals is for. Today keeps only
+ * the #447 hint inside a scheduled BJJ session's card, which is evidence about
+ * a session already on the calendar rather than an offer to start something.
+ *
+ * **It is deliberately screen-agnostic.** Nothing in this component names
+ * Today or Goals — it fetches its own data and renders a self-contained card,
+ * so the caller's only job is deciding WHETHER to mount it (below) and where
+ * to put it in their own layout. That is what made the N107 move a render-site
+ * change rather than a rewrite.
+ *
+ * **It self-limits, structurally.** The caller renders this only when the
+ * working list came back empty, so enrolling makes the caller stop mounting
+ * it and it never returns. There is no dismiss control, because there is
+ * nothing left to dismiss the moment it has done its job.
  *
  * **It says what a roadmap IS.** The strip's tiles say "WHITE BELT" and "25 to
  * master", which names a thing the athlete has no model for — one of the four
@@ -34,10 +45,10 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * fixed. So the body sentence spends its words on the mechanism (your logged
  * sessions move it) rather than on the noun.
  *
- * **One extra request, and only for the people it is for.** Today already
- * reads `/curricula/working`; the full list is fetched only when that came back
- * empty — i.e. only for an athlete on no roadmap — and stops being fetched the
- * moment they take one on.
+ * **One extra request, and only for the people it is for.** The caller already
+ * reads `/curricula/working` for its own purposes; the full list here is
+ * fetched only when that came back empty — i.e. only for an athlete on no
+ * roadmap — and stops being fetched the moment they take one on.
  */
 export function RoadmapOffer() {
   const getToken = useAuthToken();
@@ -96,7 +107,7 @@ export function RoadmapOffer() {
         accessibilityRole="button"
         accessibilityLabel={`Start a roadmap. ${offer.name}, ${offer.countable_items} techniques. Your logged sessions decide the progress.`}
         accessibilityHint="Opens the roadmap so you can look at it before starting"
-        testID="today-roadmap-offer"
+        testID="roadmap-offer"
       >
         <RNView style={styles.head}>
           {/* `route`, NOT `goal` — and this is a real collision rather than a

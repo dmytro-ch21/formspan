@@ -6,8 +6,11 @@ import { RoadmapOffer } from '@/components/RoadmapOffer';
 import type { Criteria, Curriculum, CurriculumItem, Progress } from '@/lib/curriculum';
 
 /**
- * The two roadmap entry points on Today, as a SIGHTED athlete actually meets
- * them — N96.
+ * The two roadmap entry points, as a SIGHTED athlete actually meets them —
+ * N96. `RoadmapLine` still renders on the roadmap reflection wizard
+ * (`app/bjj/reflect/[id].tsx`); `RoadmapOffer` renders on Goals as of N107,
+ * which moved it off Today. Both are tested here in isolation, screen-agnostic
+ * — neither component itself changed shape in that move, only who mounts it.
  *
  * `lib/__tests__/roadmapEntry.test.ts` covers the two decisions. It cannot
  * cover the thing the ticket is actually about, which is whether anything
@@ -250,7 +253,7 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
     mockListCurricula.mockResolvedValue([offerable]);
     render(<RoadmapOffer />);
 
-    await waitFor(() => expect(screen.getByTestId('today-roadmap-offer')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('roadmap-offer')).toBeTruthy());
     expect(screen.getByText('Start a roadmap')).toBeTruthy();
     // The name, because "a roadmap" is the abstraction the athlete had no
     // model for — the diagnosis behind this whole change.
@@ -279,7 +282,7 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
     render(<RoadmapOffer />);
 
     await act(async () => {});
-    expect(screen.queryByTestId('today-roadmap-offer')).toBeNull();
+    expect(screen.queryByTestId('roadmap-offer')).toBeNull();
   });
 
   it('stops offering a roadmap the athlete has since started', async () => {
@@ -289,14 +292,14 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
     // athlete is already working. `CurriculaStrip` shipped that bug once.
     mockListCurricula.mockResolvedValue([offerable]);
     render(<RoadmapOffer />);
-    await waitFor(() => expect(screen.getByTestId('today-roadmap-offer')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('roadmap-offer')).toBeTruthy());
 
     mockListCurricula.mockResolvedValue([{ ...offerable, enrolled: true }]);
     await act(async () => {
       refocus();
     });
 
-    await waitFor(() => expect(screen.queryByTestId('today-roadmap-offer')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('roadmap-offer')).toBeNull());
   });
 
   it('drops a read that was still in flight when the tab lost focus', async () => {
@@ -359,6 +362,6 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
       landStale([offerable]);
     });
 
-    expect(screen.queryByTestId('today-roadmap-offer')).toBeNull();
+    expect(screen.queryByTestId('roadmap-offer')).toBeNull();
   });
 });

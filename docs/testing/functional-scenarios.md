@@ -14216,3 +14216,74 @@ on screen. That, and only that, is what moved.
   (sign out, sign in as someone else): confirm the second account's backfill
   only ever requests and writes THAT account's own entries — never the
   previous signed-in account's history.
+
+## N107 — the roadmap offer moves to Goals, and Today drops roadmap progress entirely (`apps/mobile/components/RoadmapOffer.tsx`, `apps/mobile/app/(tabs)/goals.tsx`, `apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/components/RoadmapSummary.tsx`, `apps/mobile/components/CurriculaStrip.tsx`)
+
+### Happy path
+
+- Fresh account, BJJ module on, nutrition module on, never enrolled in a
+  roadmap: confirm Today's "Current focus" section shows only the week's
+  theme (or nothing, if no theme is set) — no roadmap offer, no empty state,
+  no progress line, anywhere on Today.
+- From that same state, open Goals (via Food tab's target row, or Progress
+  tab's "Targets and adherence" row): confirm a roadmap offer card appears
+  directly under the target authority card, naming a specific roadmap (not
+  a generic "start one" prompt) and its technique count.
+- Tap the offer: confirm it opens that roadmap's own screen.
+- Start (enrol in) the offered roadmap. Return to Today with no BJJ class
+  scheduled for today: confirm Today still shows nothing about roadmaps —
+  no progress line for the roadmap just started, no offer for a different
+  one.
+- Reopen Goals after enrolling: confirm the offer card is gone (an athlete
+  is offered at most one roadmap at a time, and never one already joined).
+- Schedule a BJJ class for today, on the roadmap just started: confirm the
+  scheduled class's "Up next" card on Today now carries the roadmap's
+  current focus/suggestion line (N99/#447's hint) — this is the ONLY
+  roadmap-related content Today ever shows, and only while a session is on
+  the calendar.
+- With BJJ on and nutrition OFF: confirm Progress's "Targets and adherence"
+  row still reaches Goals, Goals shows "Nutrition is turned off" (no roadmap
+  offer — this screen's off-state is unchanged), and confirm the roadmap is
+  still discoverable via the Plan tab's roadmap strip (`CurriculaStrip`),
+  which does not depend on nutrition being on.
+- Check the You tab: confirm `RoadmapSummary` still shows progress (mastered
+  count, current milestone, "working on now" chips) for a roadmap the
+  athlete is enrolled in — this is now the only place roadmap PROGRESS (as
+  opposed to the offer, or the session hint) is shown anywhere in the app.
+
+### Edge cases and errors
+
+- With BJJ module off entirely (no techniques catalog): confirm Goals shows
+  no roadmap offer and makes no roadmap-related network request (nothing to
+  offer from).
+- Enrolled in one roadmap already, with others still available to start:
+  confirm Goals shows no offer at all — the offer is only for an athlete
+  confirmed on NONE, never a second roadmap alongside one already underway.
+- Force the working-roadmap read to fail (airplane mode, a dead connection)
+  on Goals: confirm no offer renders and no "you are on none" is falsely
+  implied — an unreadable answer must never look like a fact about the
+  athlete. Confirm the rest of Goals (the calorie target and its ladder)
+  still works normally; this failure must not blank the screen.
+- Enrol in a roadmap on one device, then bring another device (or the same
+  session, refocusing the tab) back to Goals: confirm the offer disappears
+  on the next read rather than continuing to offer something already
+  started.
+- With a BJJ class scheduled today but no roadmap enrolled: confirm the
+  class card shows no roadmap hint (N99's own existing behaviour, unaffected
+  here) and Today otherwise still shows nothing about roadmaps.
+
+### Auth / security
+
+- N/A beyond the existing per-account scoping on `/curricula/working` and
+  `/curricula` — no new endpoint, no new authorization surface. Confirm (as
+  a smoke check, not a new property) that the roadmap offered on Goals is
+  drawn from the signed-in athlete's own account after a sign-out/sign-in
+  swap on the same device, the same way the pre-existing roadmap screens
+  already are.
+
+### NEEDS HUMAN EVIDENCE
+
+- On a real device, with nothing scheduled and no roadmap started: confirm
+  Today reads as uncrowded — this is the report that opened the ticket, and
+  only a device pass by the person who reported it settles whether the fix
+  actually addresses what they saw.
