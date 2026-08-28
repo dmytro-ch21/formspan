@@ -185,14 +185,21 @@ export function MomentumCard({
         onPress={onOpenDay}
         accessibilityRole="button"
         // Agrees with the title above (W13, #693): "today's" only when this
-        // card is actually reading today. The link's NAVIGATION is unchanged
-        // (still N430's scope) — only this label's wording follows `isToday`.
+        // card is actually reading today, on BOTH the spoken label and the
+        // visible text below — ac-verifier caught the visible string still
+        // reading "today's" on a browsed day when only the a11y label had
+        // been fixed. The link's NAVIGATION is unchanged (still N430's
+        // scope) — only wording follows `isToday`.
         accessibilityLabel={isToday ? "Open today's food log" : 'Open food log'}
         style={styles.openDay}
         testID="today-open-food"
       >
         <Text style={styles.openDayLabel}>
-          {kcal && kcal.percent !== null ? "See today's food" : 'Open food'}
+          {kcal && kcal.percent !== null
+            ? isToday
+              ? "See today's food"
+              : 'See logged food'
+            : 'Open food'}
         </Text>
         <Icon name="chevron" size={14} color={vola.textMuted} />
       </Pressable>

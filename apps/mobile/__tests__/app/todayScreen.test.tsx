@@ -934,6 +934,12 @@ describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
     const link = await screen.findByTestId('today-open-food');
     expect(link.props.accessibilityLabel).toBe("Open today's food log");
   });
+
+  // The VISIBLE link text ("See today's food" / "See logged food") needs a
+  // real target set to reach its own branch, and this suite's `listTargets`
+  // mock always resolves `[]` — every render here holds `view.state ===
+  // 'none'`, so the branch is unreachable from this file. Covered directly
+  // against MomentumCard instead: components/today/__tests__/momentumCard.test.tsx.
 });
 
 describe('offline', () => {
