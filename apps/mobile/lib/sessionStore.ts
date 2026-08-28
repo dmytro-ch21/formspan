@@ -387,12 +387,23 @@ export async function saveLocalSets(
   );
 }
 
-export async function finishLocalSession(userID: string, id: string): Promise<void> {
+/**
+ * `endedAt` defaults to now — the ordinary "finished it live" case. A
+ * BACKFILLED session's caller passes an explicit override (N434): without
+ * one, every backfilled strength session would get `started_at` on the
+ * chosen past day and `ended_at` stamped with the real moment Finish was
+ * tapped, days later — a multi-day "duration" that the elapsed Stat,
+ * `weekReview.ts`'s totals, `celebration.ts`'s finish card and the history
+ * list all read back literally. See `app/session/[id].tsx`'s finish handler
+ * for how the override is computed.
+ */
+export async function finishLocalSession(userID: string, id: string, endedAt?: string): Promise<void> {
   const db = await getDb();
+  const ended = endedAt ?? new Date().toISOString();
   await db.runAsync(
     `UPDATE local_sessions SET ended_at = ?, dirty = 1, updated_at = ?
      WHERE id = ? AND user_id = ?`,
-    new Date().toISOString(),
+    ended,
     new Date().toISOString(),
     id,
     userID,

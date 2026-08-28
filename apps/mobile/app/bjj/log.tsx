@@ -1,5 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Pressable,
@@ -21,6 +21,7 @@ import {
   type SessionDetail,
 } from '@/lib/bjjSession';
 import { fetchFocus, type Focus } from '@/lib/bjjFocus';
+import { backdatedTimestamp } from '@/lib/calendar';
 import { useModules } from '@/lib/ModulesProvider';
 import { PREF_BJJ_LAST_LOG, readPref, writePref } from '@/lib/prefs';
 import { saveLocalBjjDetail, startLocalSession } from '@/lib/sessionStore';
@@ -88,6 +89,15 @@ export default function LogBjjScreen() {
   const router = useRouter();
   const { userId } = useAuth();
   const { modules, ready: modulesReady } = useModules();
+  /**
+   * A day key (`YYYY-MM-DD`), when this is backfilling a missed session
+   * rather than logging today's (N434/#721) — reached from Today's `New
+   * log` while browsing a past day, via `startSessionHref`'s `?date=`.
+   *
+   * Absent on the ordinary path, and every use below is gated on that: the
+   * within-~2hr TODAY flow this screen exists for is unaffected.
+   */
+  const { date } = useLocalSearchParams<{ date?: string }>();
   // Same gate as every other BJJ surface, applied at the screen and not only
   // at the door it was opened from — a stale back-stack entry must not reach
   // a logging form for a discipline that is switched off.
@@ -204,12 +214,18 @@ export default function LogBjjScreen() {
       // history, both copies dirty and both pushed.
       let sessionId = createdRef.current;
       if (!sessionId) {
-        const startedAt = new Date(Date.now() - draft.durationMinutes * 60_000);
+        // N434/#721: `endBase` is real "now" on the ordinary path (`date`
+        // absent), so `startedAt`/`ended_at` below are byte-identical to
+        // before this ticket touched the file. Backfilling moves the
+        // CALENDAR DAY only — `backdatedTimestamp` keeps the time of day the
+        // athlete is filling this in at, same as logging it live would.
+        const endBase = date ? backdatedTimestamp(date, new Date()) : new Date();
+        const startedAt = new Date(endBase.getTime() - draft.durationMinutes * 60_000);
         const session = await startLocalSession(userId, {
           sport: 'bjj',
           name: KINDS.find((k) => k.key === draft.kind)?.label ?? 'BJJ',
           started_at: startedAt.toISOString(),
-          ended_at: new Date().toISOString(),
+          ended_at: endBase.toISOString(),
         });
         sessionId = session.id;
         createdRef.current = sessionId;
@@ -270,6 +286,23 @@ export default function LogBjjScreen() {
           </Text>
         )}
 
+        {/* N434/#721: says out loud which day this backfills, so the athlete
+            has the same confirmation the FAB's own sheet title already gave
+            them one tap ago — never a Pressable, so it costs nothing on the
+            three-tap floor the header comment above describes. */}
+        {date && (
+          <RNView style={styles.focusHint} testID="bjj-log-backfill-banner">
+            <Text style={styles.focusHintLabel}>Logging for</Text>
+            <Text style={styles.focusHintNames}>
+              {new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+              })}
+            </Text>
+          </RNView>
+        )}
+
         {/* The dictation route in (N60), above the form rather than buried in
             it. Talking through a session is faster than tapping it out and is
             the reason the backend feature exists; a surface nobody can find is
@@ -278,7 +311,7 @@ export default function LogBjjScreen() {
             It is an ALTERNATIVE, not a replacement — the form below stays the
             three-tap floor, works with no signal and spends nothing. */}
         <Pressable
-          onPress={() => router.push('/bjj/dictate')}
+          onPress={() => router.push(date ? `/bjj/dictate?date=${date}` : '/bjj/dictate')}
           style={[styles.dictate, { borderColor: accent.accent }]}
           accessibilityRole="button"
           accessibilityLabel="Say what happened instead of filling this in"

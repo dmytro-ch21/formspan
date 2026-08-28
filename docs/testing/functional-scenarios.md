@@ -14812,3 +14812,88 @@ Reading the diff cannot settle any of these.
    both the coffee card's count AND the caffeine card's total change in the
    same glance — nothing that requires a manual refresh or a screen switch
    to notice the caffeine side moved at all.
+
+## N434 — backfilling a missed BJJ or strength session for a past date (`apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/app/bjj/log.tsx`, `apps/mobile/app/bjj/dictate.tsx`, `apps/mobile/app/session/start.tsx`, `apps/mobile/lib/startSession.ts`, `apps/mobile/lib/calendar.ts`)
+
+### Happy path
+
+- Browse Today back to yesterday. Tap **New log**, pick BJJ, log it through
+  the ordinary three-tap floor. Confirm the sheet's own title read `New log
+  for` yesterday's date before picking, the BJJ form showed a "Logging for"
+  banner naming that same date, and the session that lands in history is
+  dated yesterday — not today, not the moment it was actually typed in.
+- Same, for **strength**: browse back two days, tap **New log**, pick
+  Strength, either a template or an empty session. Confirm the session-start
+  screen's header read `Log Strength — <that date>`, and once a few sets are
+  entered and the session finished, it appears on that day in history.
+- Browse back several weeks (not just one day) and backfill a BJJ session via
+  **Say what happened** (the dictation route from inside `/bjj/log`). Confirm
+  the dictated session lands on the browsed day, not today, and its header
+  also names the date.
+- Backfill a BJJ session for a past day, then open it from history. Confirm
+  `ended_at` is on the SAME calendar day as `started_at` (not "today"), so
+  the duration reads as plausible mat time rather than however many days ago
+  the backfill happened.
+
+### Edge cases and errors
+
+- Browse to a PAST day where nothing was planned (a rest day) and backfill an
+  unplanned session via **New log**. Confirm it is reachable exactly the same
+  way as a planned day — the FAB does not require a plan to exist first.
+- Browse to a past day that already has a planned-and-missed BJJ/strength
+  session shown as "Not logged" on the Up Next card. Confirm **New log** (not
+  the card itself, which stays a statement) is still the route to backfill
+  it, and that logging it does NOT retroactively mark the Up Next card's
+  planned entry as fulfilled unless the sport/day genuinely match the plan's
+  own matching rule.
+- Backfill the SAME day twice (two BJJ sessions, or a BJJ and a strength
+  session, both dated the same past day). Confirm both persist as separate
+  sessions — no dedup, no overwrite — the way two real sessions on one day
+  already work.
+- Browse to TODAY (`dayOffset === 0`) and use **New log**. Confirm the sheet
+  title reads plain `New log` (no date suffix) and the created session is
+  dated `now`, byte-identical to before this ticket — the "existing ~2hr
+  flow for TODAY is unaffected" criterion.
+- Browse to a FUTURE day (`dayOffset > 0`) and use **New log**. Confirm this
+  is UNCHANGED and out of this ticket's scope: the session is still dated
+  `now`, not the future day — logging something that has not happened yet is
+  not a backfill, and no route was added for it.
+- Start a strength backfill, enter some sets, then leave the app for a real
+  day or more before pressing **Finish**. Confirm `started_at` is still the
+  backfilled day (correct) and be aware `ended_at` lands on whichever day
+  `Finish` was actually pressed — a known, documented limitation shared with
+  any legitimately resumed stale session (see the N434/#721 history entry),
+  not a bug specific to this feature.
+- Malformed or hand-edited `?date=` (a stale deep link, an unparseable
+  string). Confirm the affected screen falls back to logging AS TODAY rather
+  than crashing or minting a session with an invalid date — pinned at the
+  unit level by `backdatedTimestamp`'s malformed-input test in
+  `lib/calendar.ts`.
+
+### Auth / security
+
+- Nothing new. Every write here goes through the same
+  `startLocalSession`/`saveLocalBjjDetail` local-first path (and the same
+  outbox sync) every ordinary log already uses — no new endpoint, no new
+  authorization surface. The `date` is a client-chosen display/backdating
+  value only; the backend accepts any well-formed `started_at` regardless of
+  past/future (confirmed by this ticket's own survey — no server-side date
+  validation beyond format checks), so there is nothing here for the backend
+  to authorize differently.
+
+### For the user to check on a device
+
+Reading the diff cannot settle any of these.
+
+1. **The date threading feels obvious in the UI, not just correct in code.**
+   Standing at the gym, browsing back to a missed day and tapping New Log —
+   is it clear at a glance which day is about to be logged, on the sheet,
+   and again on the form?
+2. **VoiceOver reads the backfilled date**, not just the sighted banner text
+   — a screen-reader user browsing a past day and opening New Log should hear
+   which day they are about to log, the same way a sighted athlete reads it.
+3. **The strength `Finish`-later duration gap (documented above) is
+   acceptable in practice**, not just in theory — start a backfilled strength
+   session, actually walk away for a real day, come back and finish it, and
+   judge whether the resulting duration reads as confusing enough to warrant
+   a follow-up ticket.
