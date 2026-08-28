@@ -1672,3 +1672,32 @@ export function hasUnresolvedLoad(
     (s) => contributesVolume(s) && s.weight_kg != null && s.load_factor === null,
   );
 }
+
+/**
+ * Whether a timestamp belongs to a calendar day already closed, in the
+ * device's own local time.
+ *
+ * Backs "Correct this session" (N435): the product owner's ruling reversed
+ * the finished-session-is-locked design, but only for *past* sessions — a
+ * session that finished five minutes ago still gets the "is this locked in"
+ * moment the read-only state exists for, so the edit affordance is withheld
+ * until the day it happened is actually over. `session.started_at` is what
+ * this is compared against (not `ended_at`), matching the day-bucketing
+ * `trainingSince`'s SQL already uses (`date(started_at, 'localtime')`) —
+ * two conventions for "which day does this session belong to" would let them
+ * disagree at exactly the boundary either one is for.
+ *
+ * Compared as calendar days rather than elapsed hours: a session that ended
+ * at 11:58pm is still "today" for two more minutes, and an elapsed-time
+ * cutoff would make the answer flip depending on when you happen to look,
+ * which a calendar-day boundary does not. `now` is a parameter (defaulting to
+ * the real clock) so this is testable without faking system time.
+ */
+export function isPastLocalDay(iso: string, now: Date = new Date()): boolean {
+  // Strictly LESS THAN, not merely "a different day" — `!==` would also call
+  // a FUTURE local day "past" (a rolled-back device clock, or a session
+  // synced from a device several timezones east), which would unlock
+  // "Correct this session" on something that hasn't happened locally yet.
+  const startOfLocalDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return startOfLocalDay(new Date(iso)) < startOfLocalDay(now);
+}
