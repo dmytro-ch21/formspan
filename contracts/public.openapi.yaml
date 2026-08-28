@@ -5502,6 +5502,7 @@ components:
         render_style: { type: string, enum: [auto, glyphs, bar, dose] }
         sort_order: { type: integer }
         cutoff_minutes: { type: integer, nullable: true, minimum: 0, maximum: 1439 }
+        count_noun: { type: string, maxLength: 24 }
 
     TrackerEntry:
       type: object
