@@ -2498,6 +2498,63 @@ at the longer durations.
 - Ticking a set tints the whole row, and the set number stays legible on it.
 - Un-ticking returns it.
 
+### Correcting a finished session (N435)
+
+A finished session is read-only by default; "Correct this session" is the one
+deliberate way in. Only offered on a **past-day** session — see the scoping
+bullets below.
+
+**Happy path**
+
+- Open a session that finished on an earlier calendar day. It reads "Finished
+  — this session is read-only," with a `Correct this session` button.
+- Tap it: the message changes to the editing copy, and every set row is now
+  expandable — weight, reps and every other measure become editable exactly
+  as they are on a live session.
+- Fix a weight on a completed set. It saves the same way a live edit does (no
+  explicit Save step) — leave the screen and come back, or check the web
+  dashboard / another device, and the corrected number is there.
+- The **Volume** stat (and any screen reading this session's tonnage —
+  history, records) reflects the corrected number, not the original one.
+- `+ Set` and `+ Drop` are available again; a set added this way saves and
+  syncs like any other.
+- Swipe a set to delete it: available again, removes the set, and the
+  session's set count updates everywhere that reads it.
+- Tap `Done editing`: the message reverts to the plain read-only line, set
+  rows stop expanding, swipe-to-delete and `+ Set`/`+ Drop` disappear again.
+- Corrections made, then `Done editing` tapped, then the screen is left and
+  reopened fresh: it opens read-only again (edit mode does not persist across
+  a fresh open) — but the corrected numbers do.
+
+**Scoping — past-day vs. still-today**
+
+- A session finished a few minutes ago, still today: shows the plain
+  "Finished — this session is read-only" line with **no** `Correct this
+  session` button at all. This is deliberate — see the history entry's N435
+  reasoning (the "is this locked in" moment stays meaningful for a session
+  you just walked off the mat from).
+- The exact boundary: a session that ends at 11:58pm and is reopened at
+  12:01am the same night shows the Correct button (the calendar day changed);
+  reopened at 11:59pm the same night, it still does not.
+- Device clock/timezone changes between finishing and reopening a session are
+  not specially handled — the comparison is against the device's current
+  local day at open time, same as everywhere else in the app that buckets by
+  local day.
+
+**Unaffected by this change**
+
+- The rest chip, the reps/time and weight/duration-unit chips, exercise
+  reorder/swap/remove, "Run all", "Guided workout" and the suggestion "Use"
+  button all stay absent on a finished session, edit mode or not — only the
+  set-level controls unlock.
+- No timer-start icon appears on any set row of a finished session, edit mode
+  or not — ticking a set in edit mode does not start an auto-rest countdown
+  even with "Auto rest timer" on.
+- Delete session and Share this session behave exactly as before, in and out
+  of edit mode.
+- A session still open (not finished) is completely unaffected — no
+  "Correct this session" button, no `editingFinished` state to interact with.
+
 ## Account preferences (units, effort tracking)
 
 Both are account-level, cached locally, and now held once each rather than per

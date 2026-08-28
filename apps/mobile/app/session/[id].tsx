@@ -101,6 +101,7 @@ import {
   setOrdinals,
   localVolume,
   hasUnresolvedLoad,
+  isPastLocalDay,
   soloReps,
   withSetChange,
   fetchSuggestions,
@@ -147,6 +148,16 @@ export default function SessionScreen() {
   const router = useRouter();
 
   const [session, setSession] = useState<Session | null>(null);
+  /**
+   * N435 — a finished session is a record by DEFAULT, correctable on purpose.
+   *
+   * "Correct this session" flips this on; "Done editing" flips it back off.
+   * Local and un-persisted on purpose: it is a mode of looking at the screen,
+   * not a fact about the session, so it starts false on every fresh open —
+   * the just-reopened record is read-only until asked otherwise, same as it
+   * always was. See `sessionEditable` below for what it actually unlocks.
+   */
+  const [editingFinished, setEditingFinished] = useState(false);
   // The sets are held locally rather than read off `session`, because the
   // server's copy arrives asynchronously and would otherwise overwrite
   // whatever's being typed at the moment a save lands.
@@ -863,7 +874,12 @@ export default function SessionScreen() {
     // one event — the same collision the sound was kept out of, for the same
     // reason.
     Haptics.selectionAsync().catch(() => {});
-    if (now && autoRest) startRest(exerciseID);
+    // N435 — never on a finished session, edit mode or not. A rest countdown
+    // is a live-workout affordance; the `stopTimer` effect that keeps one
+    // from outliving a finished session is keyed on `session?.ended_at`
+    // CHANGING, which correcting a tick does not do, so a bar started here
+    // would have nothing left to catch it.
+    if (now && autoRest && !finished) startRest(exerciseID);
   }
 
   /**
@@ -1180,6 +1196,35 @@ export default function SessionScreen() {
   }
 
   const finished = session.ended_at !== null;
+
+  /**
+   * N435 — whether "Correct this session" may be offered at all.
+   *
+   * Scoped to PAST-DAY sessions only, not every finished one: a session that
+   * finished five minutes ago still gets the "is this locked in" moment the
+   * read-only state exists for, and the ticket's own framing ("editing past
+   * sessions") is about days already closed, not the one still running. See
+   * `isPastLocalDay`'s doc comment for why this is a calendar-day comparison
+   * rather than an elapsed-time one, and why it reads `started_at` rather
+   * than `ended_at`.
+   */
+  const pastDay = finished && isPastLocalDay(session.started_at);
+
+  /**
+   * Whether the set controls (weight/reps/count) are live right now.
+   *
+   * True while the session is still open, exactly as before — and true again
+   * once "Correct this session" has been tapped on a past-day one. A finished
+   * session is a record by DEFAULT; this is what makes it correctable on
+   * purpose rather than reopening it as a workspace outright. Deliberately
+   * NOT threaded onto the exercise-level controls below (rest, reps/time and
+   * unit chips, reorder/swap/remove-exercise, guided run, "Use" suggestion) —
+   * those stay `!finished` exactly as they did, so editing a past session
+   * corrects the numbers logged against it without reopening the broader
+   * in-workout affordances a correction has no use for. Narrower on purpose;
+   * see the history entry for the reasoning.
+   */
+  const sessionEditable = !finished || editingFinished;
 
   /**
    * Whether the session as a whole can be run hands-free.
@@ -1556,9 +1601,11 @@ export default function SessionScreen() {
                   return (
                 <SwipeToDelete
                   key={i}
-                  // A finished session is a record, not a workspace — the
-                  // same reason every other control here gates on `finished`.
-                  enabled={!finished}
+                  // A finished session is a record, not a workspace, by
+                  // DEFAULT — the same reason every other control here gates
+                  // on `finished`. `sessionEditable` is that default with one
+                  // deliberate escape hatch: "Correct this session" (N435).
+                  enabled={sessionEditable}
                   onDelete={() => removeSet(i)}
                   // Rows are keyed by index and a set has no stable id, so
                   // any change to WHAT LIVES AT THIS INDEX must close an open
@@ -1583,15 +1630,21 @@ export default function SessionScreen() {
                     isDrop={isDrop}
                     set={sets[i]}
                     exercise={exercise}
-                    editable={!finished}
+                    editable={sessionEditable}
                     onChange={(next) => update(i, next)}
                     onRemove={() => removeSet(i)}
                     onToggleDone={() => toggleDone(i, g.exerciseID)}
                     // Null on anything that isn't measured in seconds, which
                     // is what keeps a play button off a set of squats. The
                     // running row hides its own button rather than offering a
-                    // restart mid-hold.
+                    // restart mid-hold. Also null whenever `finished` — N435's
+                    // edit mode unlocks correcting the numbers already on a
+                    // set, not starting a live countdown against one; without
+                    // this a `stopTimer` effect keyed on `ended_at` (which
+                    // does not change when edit mode toggles) would have
+                    // nothing left to catch a countdown newly armed here.
                     onStartTimer={
+                      !finished &&
                       workSecondsFor(sets[i], exercise?.load_type) != null &&
                       timerState.timer?.setIndex !== i &&
                       // Never inside a run: the plan is already driving this
@@ -1617,6 +1670,7 @@ export default function SessionScreen() {
                       field mid-countdown grew a dim clock on the running row.
                     */
                     canArmTimer={
+                      !finished &&
                       offersTimerTarget(exercise?.load_type) &&
                       sets[i].seconds == null &&
                       timerState.timer?.setIndex !== i &&
@@ -1794,7 +1848,7 @@ export default function SessionScreen() {
                 );
               })()}
 
-              {!finished && (
+              {sessionEditable && (
                 <View style={styles.addRow}>
                   <Pressable
                     style={styles.addSet}
@@ -1850,7 +1904,46 @@ export default function SessionScreen() {
 
         {finished && (
           <>
-            <Text style={styles.muted}>Finished — this session is read-only.</Text>
+            {/*
+              N435 — "a record, not a workspace" is now the DEFAULT, not the
+              only state. `editingFinished` decides which of the two messages
+              and controls below show; `pastDay` (see its own comment) decides
+              whether "Correct this session" is offered at all — a session
+              that finished minutes ago still gets the plain read-only line
+              with no way to unlock it, on purpose.
+            */}
+            {editingFinished ? (
+              <>
+                <Text style={styles.muted} accessibilityLiveRegion="polite">
+                  Editing a finished session — corrections save the same way a
+                  live set does.
+                </Text>
+                <Pressable
+                  style={[styles.primary, styles.correctToggle, { borderColor: accent.accent }]}
+                  onPress={() => setEditingFinished(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done editing — lock this session back to read-only"
+                  testID="session-done-editing"
+                >
+                  <Text style={[styles.primaryText, { color: accent.ink }]}>Done editing</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.muted}>Finished — this session is read-only.</Text>
+                {pastDay && (
+                  <Pressable
+                    style={styles.primary}
+                    onPress={() => setEditingFinished(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Correct this session — unlock weight, reps and set count for editing"
+                    testID="session-correct"
+                  >
+                    <Text style={styles.primaryText}>Correct this session</Text>
+                  </Pressable>
+                )}
+              </>
+            )}
             {/*
               Read-only is not the same as finished with. The card that opened
               the moment this session ended is still the card it deserves, and
@@ -3132,6 +3225,11 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 16, fontWeight: '600' },
   muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   share: { marginTop: 12 },
+  // N435 — "Done editing" reuses `primary`'s shape but marks itself as the
+  // active state with an accent border, the same way `guided`'s border does.
+  // A filled accent background would compete with Finish for the one loud
+  // control on this screen; a border says "you are here" without it.
+  correctToggle: { backgroundColor: 'transparent', borderWidth: 1 },
   error: { color: vola.danger, fontSize: 14 },
   deleteButton: { alignItems: 'center', paddingVertical: 16, marginTop: 8 },
   deleteText: { color: vola.danger, fontWeight: '600' },

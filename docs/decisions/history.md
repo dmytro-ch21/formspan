@@ -47865,6 +47865,135 @@ an independent pass check the conclusion" — this shipped only because a
 review gate re-ran the same search rather than trusting the sweep's own
 result.
 
+## 2026-08-28 — N435: a finished strength session's sets can be corrected, on mobile (#722)
+
+**A deliberate prior decision reversed, on the product owner's explicit
+ruling.** `apps/mobile/app/session/[id].tsx` gated every set control on
+`editable={!finished}`, with the comment "a finished session is a record,
+not a workspace" — once a session ended, weight/reps/sets were fully
+read-only; only rename (which, on inspection, this screen never actually
+offered — see below) and delete survived. That was a considered design
+choice, not an oversight. The user overrode it directly on 2026-08-28,
+asked to clarify what "editing past sessions that weren't logged" meant:
+**"all of them"** — confirmed to cover correcting an already-logged past
+session, across BJJ, strength and nutrition. This ticket is the strength
+edit-existing half; BJJ's half is separate (N435 is strength-only, per the
+issue body — "web mirrors the same lock" is tracked separately as N438).
+
+**What shipped: "record by default, correctable on purpose," not "always a
+workspace."** Rather than deleting the `!finished` gate outright, the screen
+now carries a local `editingFinished` flag, off on every fresh open. A
+finished session still opens fully read-only — the resting state is
+unchanged — and a new **"Correct this session"** button flips the flag,
+re-enabling exactly the controls the ticket's acceptance criteria named:
+- the set-row editor (weight, reps, and every other measure `SetRow` shows)
+- the tick (`completed`) toggle
+- swipe-to-delete on a set, and the exercise group's "+ Set"/"+ Drop" buttons
+
+A **"Done editing"** button (accent-bordered, mirroring the existing
+"Guided workout" button's own accent-border-not-fill treatment — see
+`styles.guided`) flips it back. This mirrors the BJJ session screen's "Edit
+detail" CTA in spirit (an explicit, undoable step into a correction mode)
+without literally reusing it — BJJ's opens a separate screen; this toggles
+a flag in place, because the fields needing correction are already right
+there in the same row the athlete is looking at.
+
+**Deliberately NOT unlocked, even in edit mode**, to keep the change
+surgical rather than reopening the screen as a full workspace: the rest
+chip, the reps/time and weight/duration-unit chips, exercise
+reorder/swap/remove, "Run all"/"Guided workout", and the suggestion "Use"
+button all stay gated on the original `!finished` — a correction fixes the
+numbers already logged against a session, it does not restage the workout.
+Two controls needed an explicit extra guard rather than simply following
+`editable`, because both have a *live-session* side effect that would be
+wrong to fire against a session already over: the per-set timer
+(`onStartTimer`/`canArmTimer`, now additionally gated on `!finished`) and
+`toggleDone`'s auto-rest countdown (now `!finished &&` on top of the
+existing `autoRest` check). Both matter for the same underlying reason: the
+screen's `stopTimer` effect that keeps a countdown from outliving a
+finished session is keyed on `session?.ended_at` **changing**, and
+correcting a tick or a number does not change that value — so a timer
+newly armed *during* a correction would have nothing left to catch it. Found
+by re-reading that effect's own comment while doing the design pass, not by
+a failure.
+
+**Scoping decision: PAST-DAY sessions only, not every finished one — the
+ticket's own recommended default, taken as final rather than as a
+placeholder.** A new `pastDay` flag (`finished && isPastLocalDay(session.
+started_at)`) gates whether "Correct this session" even renders. A session
+that finished five minutes ago still shows the plain "Finished — this
+session is read-only" line with no way to unlock it — the "is this locked
+in" moment the read-only state exists for stays meaningful for the session
+you just walked off the mat from, and only degrades once the day is
+actually over. This reads `started_at`, not `ended_at`, to match the
+day-bucketing convention `trainingSince`'s own SQL already uses
+(`date(started_at, 'localtime')`) — two different answers to "which day does
+this session belong to" would disagree at exactly the boundary either one
+matters for.
+
+The comparison itself is a new pure function, `isPastLocalDay(iso, now =
+new Date())` in `lib/sessions.ts`: a calendar-day (`toDateString()`)
+comparison, not an elapsed-hours one — a session that ended at 11:58pm is
+still "today" for two more minutes and "yesterday" the moment the clock
+crosses over, regardless of how little time has actually passed, and an
+elapsed-time cutoff would make the answer depend on when you happen to look
+rather than what actually happened. `now` is an explicit parameter
+precisely so this is testable without faking the system clock. New test
+file `lib/__tests__/isPastLocalDay.test.ts` covers same-day, a day ago, a
+week ago, and the midnight-boundary case specifically (same two-minute gap,
+opposite side of midnight, opposite answer) — mutation-tested by flipping
+the `!==` to `===`, confirming 4 of 5 cases go red for the right reason,
+reverting, confirming green again.
+
+This was weighed against "any finished session, no day check" — the ticket
+explicitly offered that as the fallback if day-boundary logic turned out to
+add meaningful complexity. It didn't: `isPastLocalDay` is four lines and one
+call site, so the safer default cost nothing extra to take as final.
+
+**No backend or write-path change was needed.** `ReplaceSets`'s own doc
+comment already reads "the natural shape for … 'fix a typo in set 2'", and
+neither the handler nor `PostgresRepository.ReplaceSets` reads `ended_at` at
+all — the backend has permitted this all along; only the mobile UI ever
+refused it. So a correction writes through the exact same path a live
+session's sets already use (`saveLocalSets` → debounced `pushSession` →
+`PUT /sessions/{id}/sets`), and nothing needed inventing. Checked for
+anything that might cache a now-stale derived value: volume
+(`localVolume`), the app's records (`Records` — computed live by Postgres
+query, not stored), and `trainingSince`'s day/session counts are all
+computed fresh from `sets_json`/`started_at` on every read, never cached in
+a column that a correction could leave stale. The one thing that
+deliberately does NOT re-trigger on a correction is the finish-time
+celebration card — editing a set after the fact does not re-run
+`worthCelebrating`, which is correct: a correction is not a new
+achievement.
+
+**Rename: confirmed there is nothing to protect.** The ticket's third
+criterion — "the existing rename/delete affordances are unaffected" —
+turned out to rest on a false premise for this specific screen:
+`renameLocalSession` exists in `lib/sessionStore.ts` and is real (BJJ's
+`app/bjj/session/[id].tsx` calls it), but nothing in
+`apps/mobile/app/session/[id].tsx` ever calls it — this screen has never
+had a rename UI, only the `HoldToConfirm` delete at the bottom, which this
+change does not touch. Recorded here rather than silently treated as
+"already fine," since the acceptance criterion asked for it to be checked,
+not assumed.
+
+Tests: `lib/__tests__/isPastLocalDay.test.ts` (new, 5 cases, mutation-tested
+per above). Full mobile suite green — 141 suites / 2,496 tests, run under
+`TZ=America/Los_Angeles` matching `test:mobile`'s own invocation.
+`pnpm run routes:mobile && pnpm --filter mobile exec tsc --noEmit` clean.
+`pnpm run lint:mobile` exits 0 (pre-existing warnings elsewhere in the repo,
+none introduced by this change, none in the touched files' new lines).
+
+**Left for later, on purpose:** the equivalent BJJ correction flow (out of
+scope — BJJ already has its own "Edit detail" CTA and its own reflection
+data shape, a different enough surface to deserve its own ticket rather
+than folding in here) and the web mirror (tracked as N438 per the issue
+body). Unit/duration-toggle access while correcting a set typed in the
+"wrong" chip state was considered and deliberately deferred — real but
+minor friction, not blocking, and easy to add later without touching the
+scoping or persistence decisions above.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
