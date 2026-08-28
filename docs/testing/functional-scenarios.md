@@ -15003,3 +15003,87 @@ them.
 - No auth header — `401` on every route, matching every other `/v1` module.
 - A `classPlanID` that is syntactically a valid id but belongs to no one —
   `404`, same as a foreign one (no existence oracle).
+
+## N440 — class-plan web authoring: a two-pane builder over `/v1/classplans` (`apps/web/src/app/dashboard/classplans/page.tsx`, `apps/web/src/app/dashboard/classplans/ClassPlanBuilder.tsx`, `apps/web/src/app/dashboard/classplans/[id]/page.tsx`, `apps/web/src/app/dashboard/classplans/[id]/edit/page.tsx`, `apps/web/src/lib/api.ts`)
+
+Web-only, part 2 of 4 of the class-plan workstream (N439 backend → N440 web
+authoring → N441 mobile guided runner → N442 Plan/calendar scheduling). Builds
+on N439's API-level scenarios above — these are UI-level, exercising the same
+`/v1/classplans` contract through the new screens.
+
+### Happy path
+
+- `/dashboard/classplans` with no plans shows the empty state and a "Build
+  one" link into `/dashboard/classplans/new`; with plans, each card shows
+  name, block count and total duration ("6 blocks · 45 min") and a
+  description snippet when present.
+- Build a plan with one block of **every** type: `warmup` (duration + notes),
+  `technique_drill` picked from the catalog panel (search, click a
+  technique — it appends a new block with that technique set), `live_rounds`
+  (duration + notes), and `notes` (its own notes field as the main content).
+  Save creates the plan and navigates to its detail page.
+- The detail page renders each block per its type: `warmup`/`live_rounds`
+  show duration and notes; the `technique_drill` block shows the technique
+  name and position; the `notes` block shows its notes as the primary
+  content, not supplementary detail. Total duration is shown prominently
+  and equals the server's `total_duration_minutes`.
+- Edit an existing plan (`/dashboard/classplans/{id}/edit`): the builder is
+  seeded with the plan's name, description and blocks; reorder two blocks
+  with the ↑/↓ controls, remove one, add another, and save — the detail page
+  reflects the new order, count and total duration on reload.
+- Reload the edit page mid-session (or navigate `edit → edit` on a different
+  plan) — the builder remounts with the newly-loaded plan's data rather than
+  carrying over the previous plan's fields (the `key={p.id}` on the builder).
+- Delete: click Delete once to arm ("Really delete?"), click again to
+  confirm — the plan is removed and the user lands back on the list. Clicking
+  Delete and then clicking/tabbing elsewhere (blur) disarms it without
+  deleting.
+- A `technique_drill` row started as free text ("type the drill"), then
+  switched to a catalog pick via "Pick from the library" followed by
+  clicking a technique in the catalog panel — the free text clears and the
+  picked technique's name/position render in its place; the picked technique
+  can then be cleared (✕) to fall back to an empty free-text input.
+
+### Edge cases & errors
+
+- A plan with zero blocks: the builder shows its own empty state ("Add a
+  block above…") and still saves successfully (an empty schedule is legal);
+  the detail page then shows "This class plan has no blocks yet."
+- Hitting the 40-block cap (`MAX_CLASS_PLAN_BLOCKS`): the four "Add block"
+  buttons and the catalog's per-technique buttons all disable, and the
+  catalog panel shows the same-shape warning `SequenceBuilder`'s does at its
+  own cap — confirm the cap is enforced in the UI (button disabled) *and*
+  that removing a block re-enables adding past the boundary.
+- Save is blocked client-side (with a message naming the block) when a
+  `technique_drill` block has **neither** a picked technique **nor**
+  non-empty free text, and equally when — through a bug, not the normal UI
+  path — it somehow has both; this is the XOR the backend's `ValidateBlocks`
+  enforces, checked here before the request is even sent.
+- Switching a `technique_drill` block's type away to `warmup`/`live_rounds`/
+  `notes` via the row's type selector clears any picked technique or free
+  text; switching a block's type *to* `technique_drill` starts it empty
+  (neither set) rather than inheriting anything from its previous type.
+- Removing the block currently targeted by "Pick from the library" (mid-pick)
+  clears the pending pick rather than leaving a catalog click silently
+  fill a block that no longer exists.
+- An unnamed plan cannot be saved — the Save button stays disabled with an
+  inline explanation, matching `SequenceBuilder`'s convention.
+- A duration typed as `0`, blank, or above 180 is rejected/clamped
+  client-side per block rather than reaching the server as an unnamed 400.
+
+### Auth/security
+
+- `/dashboard/classplans`, `/dashboard/classplans/new`,
+  `/dashboard/classplans/{id}`, and `/dashboard/classplans/{id}/edit` all
+  require a signed-in session, same as every other `/dashboard` route.
+- Navigating directly to `/dashboard/classplans/{id}` or
+  `/dashboard/classplans/{id}/edit` for a plan owned by a **different**
+  user shows the page's generic load error (the API 404s it — see N439's
+  auth scenarios above) — no plan content, no Edit/Delete controls, and no
+  client-side check that could be bypassed, since the server never returns
+  another user's plan in the first place.
+- No client-only authorization anywhere on these screens: unlike
+  `sequences/[id]/page.tsx`'s `editable`-gated Edit/Delete, this domain has
+  no ownerless row to gate against, so Edit/Delete are unconditionally
+  rendered and rely entirely on the server's ownership check on the
+  subsequent request.

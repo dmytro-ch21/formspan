@@ -48347,6 +48347,88 @@ actually idempotent rather than merely looking right.
 list/create/get/update/delete only, nothing a coach can reach from web or
 mobile yet. N440 (web authoring) is next.
 
+## 2026-08-28 — N440 (#727), part 2 of 4: class-plan web authoring — a two-pane builder over N439's endpoints
+
+**First client surface for the class-plan workstream.** N439 shipped the
+`classplan` module with nothing behind it; this adds `apps/web`'s
+`/dashboard/classplans` list, detail, create and edit routes, plus the
+`ClassPlan`/`ClassPlanBlock`/`ClassPlanWrite`/`ClassPlanBlockWrite` types and
+CRUD functions in `lib/api.ts`, mirrored from the `Sequence` section
+immediately above them in that file.
+
+**Structurally the same two-pane shape as `SequenceBuilder`/
+`CurriculumBuilder` — technique catalog on one side, the ordered list on the
+other — and deliberately different in the three places the domain itself
+differs:**
+
+- **No position rail.** A sequence draws the positions BETWEEN its steps
+  because its order is causal; a class plan's order is a SCHEDULE (ten
+  minutes of this, then fifteen of that), so there is nothing to draw
+  between blocks and no `start_position` concept anywhere in the builder —
+  the ticket called this out explicitly and it was worth restating in code
+  comments, since copy-pasting `SequenceBuilder` is the obvious way to start
+  this file and the position rail is the first thing that would be wrong.
+- **No `editable`/`official` fields, and no gate built on them.** This
+  domain has no VOLA-authored rows and no sharing (N439's package comment:
+  `owner_user_id` is `NOT NULL`), so Edit/Delete render unconditionally on
+  the detail page and the edit route has no "cannot edit, copy it instead"
+  branch at all — there is nothing for the server to say no to that isn't
+  already a 404 the load effect surfaces as a generic error. No
+  `ShareToFriend`, no copy affordance.
+- **The catalog can target an existing row, not just append one.** Every
+  prior two-pane builder here only ever appends from its catalog. A
+  `technique_drill` block's technique-or-free-text is a real XOR the backend
+  enforces (`ValidateBlocks`), and the ticket asked for switching between the
+  two sources to be a genuine UI constraint rather than a submit-time
+  surprise. The builder tracks which row (if any) is "armed" for the
+  catalog's next click (`pickingForUid`); clicking a technique with a row
+  armed fills THAT row and clears its free text, clicking with nothing armed
+  appends a new block — so the ordinary sequence/curriculum behaviour still
+  works, and switching a block's source in place also works, in one small
+  bit of state rather than a second picker UI.
+
+**Tokenized from the start, not ported later.** `SequenceBuilder.tsx` and
+`CurriculumBuilder.tsx` still use raw `neutral-*` Tailwind classes;
+`sequences/[id]/page.tsx` and everything under `dashboard/workouts/` use this
+app's design-system tokens (`rounded-card`, `rounded-pill`, `bg-accent-fill`,
+`border-line`, `text-danger`, `eyebrow`, `font-display`, …). Per the
+`vola-design-system` skill's guidance to build new work from the current
+convention rather than the app's stale average, every file this ticket adds
+(list, detail, builder) uses tokens exclusively — this is the first
+list+builder+detail set in `apps/web` that is tokenized end to end rather
+than tokenized on just the most recently touched file.
+
+**Nav wired.** `/dashboard/classplans` added to `DashboardNav.tsx` beside
+Sequences and Curricula, gated on the same "some enabled discipline has a
+technique catalog" predicate — a class plan's `technique_drill` blocks point
+at techniques the same way a sequence's steps do, so the same
+over-inclusion is accepted for the same stated reason (`key === "bjj"` is a
+check this codebase has deliberately avoided everywhere else). Without this
+the routes existed but nothing linked to them.
+
+**Verified:** `pnpm --filter web exec tsc --noEmit` clean, `eslint .` clean
+(no new warnings), `pnpm --filter web run build` succeeds and lists all five
+new routes as compiled. Started a real backend (`go run ./cmd/migrate up`
+confirmed N439's migration `000080` already applied; `go run ./cmd/api`) and
+a real `next dev` against it — an unauthenticated `GET /v1/classplans`
+against the live server returns the expected `401 {"error":{"code":
+"unauthorized",...}}` envelope, confirming the routes are actually wired
+end to end. **A signed-in click-through was not completed**: the only path
+to a session in this environment was creating a Clerk test-mode account
+(`+clerk_test@` / fixed OTP), and entering a password to do that is a
+prohibited action regardless of purpose, so the flow was abandoned before
+submitting. The `NEEDS HUMAN EVIDENCE` gap this leaves: creating a plan with
+one block of each type, reordering, deleting, and the technique-drill
+source-switch, all confirmed by hand in a real signed-in session.
+
+**Docs:** `docs/testing/functional-scenarios.md` gets a new `## N440`
+section (UI-level scenarios building on N439's API-level ones above it).
+
+**Open for N441–N442:** still nothing reachable from mobile — N441 is the
+guided runner, N442 is Plan/calendar scheduling. Per the mobile-first rule,
+neither gap makes the product phone-impossible today: a plan authored on web
+is fully usable data, just not yet runnable from the mat.
+
 
 ## Open items / known gaps as of this entry
 
