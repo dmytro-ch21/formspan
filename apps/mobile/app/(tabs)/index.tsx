@@ -1188,6 +1188,10 @@ export default function TodayScreen() {
             */}
             <TrackerList
               day={trackerDay}
+              // The day these cards are showing — matches what `refreshTrackers(on)`
+              // above was asked to load. See `TrackerList`'s own `on` doc comment
+              // (W16/#704) for why this is a separate prop from `dayAtTap`.
+              on={on}
               // TODAY resolves fresh at the MOMENT of the tap, exactly as
               // before: `dayString(new Date())` rather than the `on`/`now`
               // this render captured, because this screen never unmounts and

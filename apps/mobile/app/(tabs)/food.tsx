@@ -451,6 +451,10 @@ export default function FoodScreen() {
               who lives in Food never has to go to Today for it. */}
           <TrackerList
             day={trackerDay}
+            // The day these cards are showing — matches what `refreshTrackers(on)`
+            // above was asked to load. See `TrackerList`'s own `on` doc comment
+            // (W16/#704) for why this is a separate prop from `dayAtTap`.
+            on={on}
             // The day being LOOKED AT, unlike Today's clock read: the stepper is
             // the point of this screen, so a tap while reading Tuesday belongs
             // to Tuesday.
