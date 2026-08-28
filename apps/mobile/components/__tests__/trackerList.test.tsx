@@ -42,10 +42,20 @@ const entry = (trackerID: string, n: number): TrackerEntry[] =>
     amount: 1,
   }));
 
-function day(trackers: Tracker[], entries: Record<string, number> = {}): TrackerDay {
+function day(
+  trackers: Tracker[],
+  entries: Record<string, number> = {},
+  loadedOn = '2026-08-20',
+): TrackerDay {
   return {
     view: { state: 'ready', trackers },
-    entriesFor: (id: string) => entry(id, entries[id] ?? 0),
+    // frontend-reviewer, W16 review: a fixture that ignores `on` entirely
+    // cannot detect `TrackerList` failing to thread it through to
+    // `entriesFor` — the exact class of bug this ticket fixes. Mirrors the
+    // real guard (`entriesForLoadedDay`): entries for a day other than the
+    // one this fixture was "loaded" for come back empty, same as a genuine
+    // day switch still mid-refresh.
+    entriesFor: (id: string, on: string) => (on === loadedOn ? entry(id, entries[id] ?? 0) : []),
     refresh: () => () => {},
     addTap: async () => {},
     removeEntry: async () => {},

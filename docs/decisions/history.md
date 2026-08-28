@@ -47333,6 +47333,25 @@ re-running (not by grepping the file).
 regression fix on two existing screens with an existing scenario list, not a
 new flow.
 
+### `frontend-reviewer` finding, applied before merge
+
+No blocking findings. One suggestion applied: `trackerList.test.tsx`'s `day()`
+fixture's `entriesFor: (id) => entry(id, entries[id] ?? 0)` ignored its `on`
+argument entirely — a fewer-args function legally satisfies the two-arg type,
+so the fixture could not detect `TrackerList` failing to thread `on` through
+to `entriesFor`, the exact class of wiring bug this ticket fixes. Changed the
+fixture to genuinely gate on a `loadedOn` day (defaulting to the existing
+`'2026-08-20'`), mirroring the real `entriesForLoadedDay` guard — every
+existing assertion in that file now also proves the day-threading wiring,
+not just the collapse/visibility logic it was written for. All 8 tests in
+that file still pass unchanged.
+
+Left as the reviewer's own stated judgment call: nothing pins the
+`` `${t.id}-${on}` `` key change on `TrackerCard` directly (a regression to
+`key={t.id}` alone would still pass every test and typecheck) — keys are
+awkward to assert meaningfully in React Native Testing Library, and the
+existing code comment carries the intent.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
