@@ -46089,6 +46089,55 @@ had never had to distinguish the two before.
 device reinstall + sign-in showing the food log repopulate — has not been
 run yet as of this entry; that is the remaining step before this closes.
 
+### The weight trend refusal's goal figure now rides the same payload as its reason (N103, #475)
+
+On `apps/mobile/app/goals/trend.tsx`, the refusal sentence — *"Not enough yet to
+say when you'll reach X kg"*, or N101's server-authored *"This plan never
+reaches X kg — «reason»"* — paired its number and its reason from two
+independent requests. `serverReason` (and the reason enum itself) rides on
+`suggestedTarget(...).basis.projection`, fetched by the screen's own
+`useFocusEffect`. The `goal` interpolated beside it was `goalKg`,
+`phase?.target_weight_kg` from `useWeightTrend`'s separate `listPhases` fetch,
+on its own lifecycle. After a phase edit, one stale response could pair the
+server's reason with a goal figure the server never judged — transient and
+self-correcting on refocus, but a real drift while it lasted, of the same
+`offered_grips` shape (N16) this file's own doc comment already warns against
+for the *date*. The `projected` branch never had this problem: it always read
+`projection.basis.goal`, the projection's own number.
+
+The fix mirrors N101's own pattern for `serverReason` exactly, for a second
+field: `fromPlanProjection` (`lib/trendSeries.ts`) now also carries
+`target_weight_kg` through as `goal` on the `none` variant, from the same
+`PlanProjection` payload `reason`/`serverReason` already come from.
+`ProjectionLine` no longer takes a `goalKg` prop at all — the refusal branch
+reads `projection.goal`, so both branches of the sentence now take their
+number from the projection they are already rendering rather than from a
+second, independently-timed fetch. `no-goal` (the one case with no
+`PlanProjection` at all, `p == null`) carries no `goal` and stays silent,
+exactly as before — there is no projection to take a number from.
+
+Three tests: `trendSeries.test.ts` gained direct coverage that every refusal
+reachable from a non-null `PlanProjection` carries that projection's own
+`goal`, and that `no-goal` carries none (`'goal' in p` is `false`, not merely
+falsy — the render site's guard depends on absence). The three existing
+`fromPlanProjection` `toEqual` fixtures needed the new field added to stay
+exact. The ticket's own regression test lives in the new
+`app/__tests__/trendGoalFigure.test.tsx`: it mocks `useWeightTrend` to return
+a stale `goalKg` (80) alongside a projection built from a fresh
+`target_weight_kg` (75) and asserts the rendered sentence contains "75", not
+"80" — a component test rather than a pure one, deliberately, because the
+property is which of two sources the RENDER SITE reaches for, which a pure
+test of `refusalCopy` alone (already covered by `trendRefusalCopy.test.ts`)
+cannot see.
+
+Mutation-verified by literally performing the regression: temporarily
+reverted `ProjectionLine` to take back a `goalKg` prop and read `fmt(goalKg)`
+instead of `fmt(projection.goal)`, confirmed both new tests failed on genuine
+assertion mismatches (rendered "80", expected "75"; and a stale `goalKg`
+rendering a sentence where the AC requires silence) rather than a compile
+error, restored the fix, and reran to confirm green again rather than trusting
+the restore by inspection.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

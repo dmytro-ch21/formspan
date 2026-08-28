@@ -322,6 +322,7 @@ test("the server's refusals are translated, not re-judged", () => {
   expect(fromPlanProjection({ ...base, already: true, unreachable: false }, null)).toEqual({
     kind: 'none',
     reason: 'reached',
+    goal: 80,
   });
   expect(
     fromPlanProjection(
@@ -331,6 +332,7 @@ test("the server's refusals are translated, not re-judged", () => {
   ).toEqual({
     kind: 'none',
     reason: 'moving-away',
+    goal: 80,
     serverReason: 'a bulk toward a lower goal',
   });
 });
@@ -365,7 +367,7 @@ test("both of the server's unreachable reasons reach the caller verbatim", () =>
     'this phase moves your weight away from that goal',
   ]) {
     const p = fromPlanProjection({ ...UNREACHABLE, unreachable_reason: reason }, null);
-    expect(p).toEqual({ kind: 'none', reason: 'moving-away', serverReason: reason });
+    expect(p).toEqual({ kind: 'none', reason: 'moving-away', goal: 80, serverReason: reason });
   }
 });
 
@@ -378,7 +380,7 @@ test('a reason the server did not send leaves serverReason absent, not empty', (
     fromPlanProjection({ ...UNREACHABLE, unreachable_reason: '' }, null),
     fromPlanProjection({ ...UNREACHABLE, unreachable_reason: '   ' }, null),
   ]) {
-    expect(p).toEqual({ kind: 'none', reason: 'moving-away' });
+    expect(p).toEqual({ kind: 'none', reason: 'moving-away', goal: 80 });
     expect(p.kind === 'none' && p.serverReason).toBeFalsy();
   }
 });
@@ -394,4 +396,59 @@ test('a locally decided refusal never carries a server reason', () => {
 
 test('no plan projection at all is the no-goal absence, not a blank', () => {
   expect(fromPlanProjection(null, null)).toEqual({ kind: 'none', reason: 'no-goal' });
+});
+
+// ---------------------------------------------------------------------------
+// N103 — the refusal's goal figure rides the same payload as its reason.
+//
+// `app/goals/trend.tsx` used to pair this projection's `reason` with a goal
+// number from a SEPARATE fetch (`useWeightTrend`'s `listPhases`). These assert
+// the adapter now carries the goal itself, from the same `PlanProjection` the
+// reason came from — so a render site has no reason left to reach outside the
+// projection for one.
+// ---------------------------------------------------------------------------
+
+test('every refusal that has a plan projection carries that projection\'s own goal', () => {
+  const base = { reached_on: '', target_weight_kg: 82.5, kg_to_go: 5, weeks_to_go: 0 };
+  // reached
+  expect(fromPlanProjection({ ...base, already: true, unreachable: false }, null)).toMatchObject({
+    goal: 82.5,
+  });
+  // moving-away (unreachable)
+  expect(fromPlanProjection({ ...base, already: false, unreachable: true }, null)).toMatchObject({
+    goal: 82.5,
+  });
+  // no-trend
+  expect(fromPlanProjection({ ...base, already: false, unreachable: false }, null)).toMatchObject({
+    goal: 82.5,
+  });
+});
+
+test('no-goal carries no goal — there is no projection to take a number from', () => {
+  // The one refusal `p == null` produces. Asserted on its own, separate from
+  // the `toEqual` above, because this is the exact case the AC names: the
+  // render site's `if (projection.goal == null) return null;` depends on this
+  // key being ABSENT here, not merely falsy.
+  const p = fromPlanProjection(null, null);
+  expect(p.kind === 'none' && 'goal' in p).toBe(false);
+});
+
+test("a stale phase's goal and a fresh projection's goal can disagree, and the adapter reports its own", () => {
+  // The exact shape of the bug: an athlete edits their phase target from 80kg
+  // to 75kg. `useWeightTrend`'s `listPhases` fetch has not caught up yet and
+  // still reports 80; `suggestedTarget`'s own fetch has, and its projection
+  // is built against 75. The adapter must report 75 — its own payload's
+  // number — regardless of what a different, staler fetch believes.
+  const stalePhaseGoalKg = 80;
+  const freshPlanProjection = {
+    reached_on: '',
+    target_weight_kg: 75,
+    kg_to_go: 3,
+    weeks_to_go: 0,
+    already: false,
+    unreachable: false,
+  };
+  const p = fromPlanProjection(freshPlanProjection, null);
+  expect(p.kind === 'none' && p.goal).toBe(75);
+  expect(p.kind === 'none' && p.goal).not.toBe(stalePhaseGoalKg);
 });

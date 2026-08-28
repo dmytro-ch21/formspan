@@ -193,7 +193,7 @@ export default function WeightTrendScreen() {
               <Text style={[styles.primaryText, { color: accent.on }]}>Record Weight</Text>
             </Pressable>
 
-            <ProjectionLine projection={projection} goalKg={goalKg} fmt={fmt} unit={unit} />
+            <ProjectionLine projection={projection} fmt={fmt} unit={unit} />
 
             <Text style={styles.note}>
               The line is a seven-day average; the dots and the labels are what the scale said.
@@ -238,15 +238,29 @@ function ClipNote({ series }: { series: TrendSeries }) {
  * A `reached_on` the server did not compute is NOT an all-clear. "We did not
  * check" and "it checks out" are different answers, and this is exactly the
  * surface that would flatten the first into a missing line reading as fine.
+ *
+ * **Takes no `goalKg` prop (N103).** It used to, and rendered the refusal
+ * sentence off it — a number from `useWeightTrend`'s own `listPhases` fetch,
+ * independent of the `projection` this component was also handed. After a
+ * phase edit, one stale response could pair THIS request's reason with a goal
+ * figure a different request computed, which is exactly the drift the
+ * `projected` branch below already avoided by reading `basis.goal`, the
+ * projection's own number. The refusal branch now reads `projection.goal` —
+ * carried through by {@link fromPlanProjection} from the same payload the
+ * reason came from — so both branches take their number from the projection
+ * they are already rendering rather than from a second, independently-timed
+ * fetch.
+ *
+ * Exported for its own test, same reasoning as {@link refusalCopy}: Expo
+ * Router reads only the default export from a route file, so a named export
+ * alongside it is inert in the app and free to use in a test.
  */
-function ProjectionLine({
+export function ProjectionLine({
   projection,
-  goalKg,
   fmt,
   unit,
 }: {
   projection: Projection;
-  goalKg: number | null;
   fmt: (kg: number) => string;
   unit: string;
 }) {
@@ -269,10 +283,13 @@ function ProjectionLine({
   // sentence's claim, so it says nothing rather than borrowing the copy — the
   // whole point of the discriminator.
   if (projection.kind === 'projected') return null;
-  if (goalKg == null) return null; // nothing to say about a goal nobody set
+  // `goal` is absent exactly when `p` was null in `fromPlanProjection` — the
+  // `no-goal` case, where there genuinely is no projection to take a number
+  // from. Nothing to say about a goal nobody set.
+  if (projection.goal == null) return null;
   return (
     <Text style={styles.projection} testID="trend-projection-text">
-      {refusalCopy(projection, fmt(goalKg), unit)}
+      {refusalCopy(projection, fmt(projection.goal), unit)}
     </Text>
   );
 }

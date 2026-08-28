@@ -415,6 +415,27 @@ export type Projection =
        * screen can render a dangling em dash.
        */
       serverReason?: string;
+      /**
+       * The goal this refusal is ABOUT, carried from the same payload as the
+       * reason (N103). Set only by {@link fromPlanProjection}, from
+       * `target_weight_kg` — the same response `reason`/`serverReason` came
+       * from, on the same request.
+       *
+       * **This exists because a caller had a second, INDEPENDENT source for the
+       * goal number and used that one instead.** `app/goals/trend.tsx` paired
+       * this projection's reason with `useWeightTrend`'s `phase.target_weight_kg`
+       * — a separate `listPhases` fetch, on its own lifecycle. After a phase
+       * edit, one stale response could pair the server's reason with a goal
+       * figure the server never judged: correct most of the time, wrong exactly
+       * when it would be most confusing. `projected` already avoided this by
+       * reading `basis.goal`, the projection's own number; this field lets
+       * `none` do the same rather than reaching outside the projection for one.
+       *
+       * {@link projectToGoal} never sets it — its caller already supplies `goal`
+       * synchronously, as a plain argument rather than a second fetch, so there
+       * is no staleness for this field to guard against there.
+       */
+      goal?: number;
     };
 
 /**
@@ -528,8 +549,11 @@ export function fromPlanProjection(
   p: PlanProjection | null | undefined,
   latest: { on: string; value: number } | null,
 ): Projection {
+  // `no-goal` genuinely has no goal to carry: `p` is absent, so there is no
+  // projection to take a number from — this is the case AC requires stay
+  // silent, and it does, because nothing downstream sets `goal` for it.
   if (p == null) return { kind: 'none', reason: 'no-goal' };
-  if (p.already) return { kind: 'none', reason: 'reached' };
+  if (p.already) return { kind: 'none', reason: 'reached', goal: p.target_weight_kg };
   if (p.unreachable) {
     // The server distinguishes a contradictory plan (a bulk toward a lower
     // goal) from one that simply never arrives. Both are the same refusal on
@@ -543,9 +567,14 @@ export function fromPlanProjection(
     // render site would emit a dangling "— ." if one ever arrived, and a copy
     // defect is not worth trusting a wire field's manners for.
     const reason = p.unreachable_reason?.trim();
-    return { kind: 'none', reason: 'moving-away', ...(reason ? { serverReason: reason } : {}) };
+    return {
+      kind: 'none',
+      reason: 'moving-away',
+      goal: p.target_weight_kg,
+      ...(reason ? { serverReason: reason } : {}),
+    };
   }
-  if (!p.reached_on) return { kind: 'none', reason: 'no-trend' };
+  if (!p.reached_on) return { kind: 'none', reason: 'no-trend', goal: p.target_weight_kg };
   return {
     kind: 'projected',
     onDate: p.reached_on,

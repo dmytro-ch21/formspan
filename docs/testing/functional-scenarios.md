@@ -12416,6 +12416,19 @@ picture** check; none of them can be answered from a number.
     real phone with the real account. This is the only check that closes the
     ticket; a Simulator with synthetic data can show the geometry is right and
     cannot show that it reads right.
+34. **The refusal's goal figure survives a phase edit without going stale
+    (N103).** Edit the live phase's target weight, then immediately reopen
+    `/goals/trend` before the screen's own re-fetches have necessarily
+    settled — the interesting window is right after the edit, on a slow
+    connection if one can be simulated. The refusal sentence's goal must match
+    the NEW target, never the one that was live a moment ago. This cannot be
+    forced deterministically from the UI alone (it depends on which of two
+    independent requests answers first), so it is a targeted device/manual
+    check rather than one automatable end to end; `trendGoalFigure.test.tsx`
+    is the deterministic regression for the underlying property (the render
+    site reads the projection's own carried `goal`, never the separate
+    `useWeightTrend`/`listPhases` value) and should be treated as covering the
+    mechanism, with this scenario covering the observable symptom on a device.
 
 ## W10 — the scrolling region has a visible top edge (`components/ScreenHeader.tsx`)
 
