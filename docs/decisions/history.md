@@ -47571,6 +47571,60 @@ text still says "Double tap to add it" rather than mentioning the picker
 (the `+` button's label already changes, and the hint lives in
 `trackerModel.ts`'s pure functions, which stay preset-unaware by design).
 
+## 2026-08-28 — N429: the weight trend chart's goal line stops riding a stale fetch (#690)
+
+Same race N103 already closed for the refusal sentence beside it, one
+component over. `app/goals/trend.tsx` draws two things off a goal figure: a
+sentence ("based on your current plan, you'll reach X") and the chart's own
+dashed goal line. N103 fixed the sentence to read `projection.goal` — carried
+through `fromPlanProjection` from the same `suggestedTarget` payload the
+reason came from — rather than `useWeightTrend`'s separately-fetched
+`goalKg` (`phase?.target_weight_kg`, from its own `listPhases` call, on its
+own lifecycle). It left the chart's `<TrendChart goal={goalKg} .../>` call
+site untouched, so after a phase edit the two could disagree again: the
+sentence right, the dashed line and its printed number stale, side by side
+on the same screen.
+
+Pulled the shared derivation out of `lib/trendSeries.ts` as
+`projectionGoal(projection)` — `basis.goal` for a `projected` result,
+`goal ?? null` for a refusal — so both callers take the number from the same
+place rather than from two call sites agreeing to compute it the same way by
+convention, which is exactly how they drifted apart the first time. Wired it
+into `trend.tsx`'s `TrendChart` call in place of `goalKg`, and dropped
+`goalKg` from that screen's destructure entirely — nothing else there read
+it. Left `ProjectionLine`'s own inline logic alone: it already reads
+`projection.goal`/`basis.goal` directly (N103's fix), and it additionally
+gates on `projection.source === 'plan'` before rendering, a distinction
+`projectionGoal` doesn't carry — the two are not a drop-in match, and
+touching a component with that much load-bearing doc comment for a change
+the ticket didn't ask for would be scope creep for no behavior change.
+
+New test, `trendGoalLine.test.tsx`, mirrors N103's own
+`trendGoalFigure.test.tsx` fixture exactly (a stale `goalKg` disagreeing
+with a fresh `projection`) but reads the CHART's rendered number instead of
+the sentence's. Discovered along the way: `react-native-svg`'s `<Text>`
+renders its string child through an inner `<TSpan>` host node, so the
+label's text sits one level deeper (`el.props.children.props.children`) than
+the testID'd node itself — worth knowing for the next chart-label test, since
+`props.children` on the outer node is a live Fiber object, not a string, and
+serializes as `"[object Object]"` rather than throwing. The single-reading
+fixture lands the goal off-scale (`▼ goal 75`) rather than in-bounds, which
+is fine — same rendered text either way, and it's the path a one-point
+series actually reaches. A second test confirms the genuinely-goalless
+`no-goal` case still draws no line and no off-scale marker at all, even
+against a non-null stale `goalKg` sitting right there.
+
+Mutation-verified: reverted both the call site and the destructure back to
+`goalKg`, confirmed both new tests failed as real assertion failures (one
+wrong number, one an unexpected non-null element) rather than a compile
+error, restored, confirmed green by re-running.
+
+`components/__tests__/trackerCard.test.tsx` has six pre-existing,
+timezone-dependent failures in its N431 cutoff tests (`19:10` where a
+fixture asserts `16:10`) — reproduced identically against an unmodified
+`origin/main` checkout via `git stash`, so unrelated to this change and not
+fixed here.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

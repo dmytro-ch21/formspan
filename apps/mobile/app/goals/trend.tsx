@@ -12,7 +12,13 @@ import { type Checkin } from '@/lib/body';
 import { dayString, shortDate } from '@/lib/calendar';
 import { suggestedTarget, type Projection as PlanProjectionWire } from '@/lib/nutritionApi';
 import { plotWindow } from '@/lib/trendChartLayout';
-import { RANGES, type Projection, type TrendRangeKey, type TrendSeries } from '@/lib/trendSeries';
+import {
+  RANGES,
+  projectionGoal,
+  type Projection,
+  type TrendRangeKey,
+  type TrendSeries,
+} from '@/lib/trendSeries';
 import { useWeightTrend } from '@/lib/useWeightTrend';
 import { toDisplayWeight, weightUnit, type UnitSystem } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -102,7 +108,7 @@ export default function WeightTrendScreen() {
     }, [getToken]),
   );
 
-  const { loading, series, goalKg, projection, today, checkins } = useWeightTrend(
+  const { loading, series, projection, today, checkins } = useWeightTrend(
     getToken,
     range,
     FETCH_DAYS,
@@ -163,7 +169,7 @@ export default function WeightTrendScreen() {
             ) : (
               <TrendChart
                 series={series}
-                goal={goalKg}
+                goal={projectionGoal(projection)}
                 projection={projection}
                 format={fmt}
                 minSpan={MIN_SPAN_KG}
