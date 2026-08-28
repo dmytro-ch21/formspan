@@ -25,6 +25,16 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * mastery is recomputed on every read, so a long enough bad run takes one back.
  * A stats surface that implied permanence would be the one place in this app
  * that promised something the data model does not.
+ *
+ * **Reviewed for N107, kept as-is.** With the offer moved to Goals and Today
+ * reduced to the #447 session hint, this became the ONLY place a roadmap's
+ * progress reads as a standing fact rather than a decision or a momentary
+ * hint — Today's own `RoadmapLine` (the other progress readout) was removed in
+ * the same change specifically because it duplicated what this block already
+ * says. So the "three surfaces" the ticket worried about collapsed to one
+ * progress surface, one offer surface and one contextual hint by removing the
+ * duplication rather than by cutting this block's content — trimming it
+ * further would leave progress with nowhere to live at all.
  */
 export function RoadmapSummary() {
   const getToken = useAuthToken();

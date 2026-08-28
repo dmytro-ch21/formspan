@@ -61,6 +61,19 @@
  * fall back to the estimated resting baseline: `energy`'s own doc puts that
  * 20–30% high, which on a target is roughly 400 kcal a day and a cut that never
  * happens, invisibly, forever.
+ *
+ * ## One other decision lives here now (N107)
+ *
+ * `RoadmapOffer` moved here from the top of Today, for an athlete on no
+ * roadmap and with the technique catalog on (`hasRoadmapCatalog` below).
+ * Starting a syllabus and accepting a calorie target are the same *kind* of
+ * decision — made once in a while, with an explanation attached — so it sits
+ * directly under the target authority card. This screen is reached through the
+ * food-log module gate, same as the rest of it (`foodDisabled` below), and an
+ * athlete with nutrition off does not see this offer: `CurriculaStrip` on the
+ * Plan tab is the unconditional fallback that predates N96 and was never
+ * removed, so discoverability does not depend on nutrition being on. See
+ * `docs/decisions/history.md`'s N107 entry for the full reasoning.
  */
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -70,6 +83,7 @@ import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ModuleOffNotice } from '@/components/ModuleOffNotice';
+import { RoadmapOffer } from '@/components/RoadmapOffer';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { WeightTrendCard } from '@/components/WeightTrendCard';
 import { Text } from '@/components/Themed';
@@ -98,10 +112,11 @@ import {
   type ActivityLevel,
 } from '@/lib/activityLevel';
 import { CONFIDENCE_DAYS, readConfidence, type Confidence } from '@/lib/confidence';
+import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
 import { localLoggedDayKcal } from '@/lib/foodLog';
 import { macroColor, macroRows, macroRowsFromTarget } from '@/lib/macroModel';
 import { useModules } from '@/lib/ModulesProvider';
-import { foodLogGate } from '@/lib/modules';
+import { foodLogGate, moduleWithCatalog } from '@/lib/modules';
 import { setActivityLevel } from '@/lib/profile';
 import { addDays } from '@/lib/history';
 import { PREF_GOALS_COLLAPSED, readPref, writePref } from '@/lib/prefs';
@@ -338,6 +353,16 @@ export default function TargetScreen() {
    */
   const [logged, setLogged] = useState<{ day: string; kcal: number }[] | null>(null);
 
+  /**
+   * Working roadmaps — N107, the offer this screen took over from Today.
+   *
+   * `null` until read, the same distinction every other roadmap read in this
+   * app makes (see `RoadmapOffer`'s own doc): rendering "you are on none" off
+   * an unanswered question would retract something the athlete already
+   * committed to, for however briefly the cache takes to answer.
+   */
+  const [roadmaps, setRoadmaps] = useState<Curriculum[] | null>(null);
+
   /** Which sections are folded. `null` until the preference has been read, so
    *  nothing flashes open and then shut on arrival. */
   const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean> | null>(null);
@@ -503,6 +528,57 @@ export default function TargetScreen() {
     },
     [collapsed, userId],
   );
+
+  /** Whether this build has a roadmap catalog to offer at all — never on
+   *  `key === 'bjj'`, the same rule Today applied before N107. With it off
+   *  there is nothing to offer, and `CurriculaStrip` on Plan already owns the
+   *  "turn it back on" case (N61). */
+  const hasRoadmapCatalog = moduleWithCatalog(modules, 'techniques') !== undefined;
+
+  /**
+   * Read the working list on focus — N107, moved from Today.
+   *
+   * Mirrors Today's own `refreshRoadmaps`: silent on failure and deliberately
+   * NOT `setRoadmaps([])` there, for the identical reason — an unreadable
+   * answer is not "you are on no roadmap", and an offer built on that would
+   * quietly retract something the athlete already committed to. Read on
+   * FOCUS rather than mount because enrolling happens on a screen pushed over
+   * this tab, which stays mounted for the life of the process — the same
+   * stale-offer shape `RoadmapOffer`'s own tests cover.
+   *
+   * Skipped entirely with no catalog to offer from — one fewer request for an
+   * athlete who has BJJ off, matching the gate `hasRoadmapCatalog` states.
+   * Also skipped with `foodDisabled` — this screen's own module-off return
+   * (below) already guarantees the offer can never render for that athlete,
+   * so fetching for it would be a request with no possible use. Caught in
+   * review: every other fetch on this screen already guards on
+   * `foodDisabled` first; this one had been left out.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      if (foodDisabled || !userId || !hasRoadmapCatalog) return;
+      let live = true;
+      listWorkingCurricula(getToken)
+        .then((c) => {
+          if (live) setRoadmaps(c);
+        })
+        .catch(() => {
+          // Silent, and deliberately not `setRoadmaps([])` — see the doc
+          // comment above.
+        });
+      return () => {
+        live = false;
+      };
+    }, [foodDisabled, userId, hasRoadmapCatalog, getToken]),
+  );
+
+  /**
+   * Show the offer only for an athlete confirmed on NONE — never the roadmap
+   * they are already on. `roadmaps === null` (not yet read, or unreadable)
+   * renders neither this nor a false "on none" claim, matching `RoadmapOffer`
+   * mounting only for "the people it is for" on Today before this moved.
+   */
+  const showRoadmapOffer = hasRoadmapCatalog && roadmaps !== null && roadmaps.length === 0;
 
   /**
    * What to send as `?activity=`, and whether we may ask at all.
@@ -979,6 +1055,22 @@ export default function TargetScreen() {
             setManualOpen(!manualOpen);
           }}
         />
+
+        {/*
+          N107 — the roadmap offer, moved off Today. "Start a roadmap" and
+          "accept this calorie target" are the same kind of decision, made at
+          the same moment, with the same amount of reading — the user's own
+          framing for why this belongs beside the target rather than at the
+          top of the screen whose whole job is the day in front of you.
+
+          Directly under the authority card and above the mechanics of HOW the
+          number above was worked out, so it reads as a second decision
+          alongside the first rather than a footnote buried in the ladder.
+          `RoadmapOffer` is self-contained and screen-agnostic — see its own
+          doc — so nothing here needs to know its internals, only whether to
+          mount it at all.
+        */}
+        {showRoadmapOffer && <RoadmapOffer />}
 
         {/*
           Directly under the card it argues with.

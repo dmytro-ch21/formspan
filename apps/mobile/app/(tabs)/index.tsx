@@ -19,8 +19,6 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
-import { RoadmapLine } from '@/components/RoadmapLine';
-import { RoadmapOffer } from '@/components/RoadmapOffer';
 import { SectionHeader } from '@/components/ui/Section';
 import { WeekStrip } from '@/components/today/WeekStrip';
 import { MomentumCard } from '@/components/today/MomentumCard';
@@ -62,13 +60,7 @@ import {
   writePref,
 } from '@/lib/prefs';
 import { restLine } from '@/lib/trend';
-import {
-  enabledSports,
-  labelFor,
-  logsAfterwards,
-  moduleWithCatalog,
-  type Module,
-} from '@/lib/modules';
+import { enabledSports, labelFor, logsAfterwards, type Module } from '@/lib/modules';
 import { sessionHref, startSessionHref } from '@/lib/startSession';
 import type { PlannedOffer, Source } from '@/lib/trainBoard';
 import { momentumDayKey, type TodayLead } from '@/lib/todayBoard';
@@ -148,7 +140,15 @@ function todayLabel(now: Date): string {
  * 4. **THIS WEEK** — the week strip and two compact counts. Context, not
  *    analysis.
  * 5. **INSIGHT** — at most one interpretation, and only when evidence exists.
- * 6. **CURRENT FOCUS** — the roadmap being worked, and the week's theme.
+ * 6. **CURRENT FOCUS** — the week's theme, if one is set.
+ *
+ * **N107 took the roadmap out of block 6.** It used to hold either the offer
+ * to start one or a progress line for one already underway; both are gone —
+ * the offer moved to Goals, and the progress line is not replaced here at
+ * all, because You's `RoadmapSummary` already says it and this block saying
+ * it too was the "three surfaces" review flagged. Today keeps only the #447
+ * hint inside a scheduled BJJ session's card in block 1 — evidence about a
+ * session on the calendar, not a standing readout.
  *
  * The order is the hierarchy: it descends from *act now* through *is asked of
  * you* to *is true about you*. It does not reorder itself — the CONTENT of a
@@ -958,10 +958,6 @@ export default function TodayScreen() {
     }
   }, [refreshBoard, syncing, userId]);
 
-  /** The roadmap block has something to draw. Kept out of the JSX ladder. */
-  const focusHasRoadmap =
-    roadmaps !== null && (roadmaps.length > 0 || moduleWithCatalog(modules, 'techniques') !== undefined);
-
   return (
     <RNView style={styles.screen}>
       <ScrollView
@@ -1341,33 +1337,9 @@ export default function TodayScreen() {
               inference over evidence, this is a commitment, and the design doc
               is explicit that conflating them turns a curriculum into a
               prescription. */}
-          {(focusHasRoadmap || theme) && (
+          {theme && (
             <View style={styles.section}>
               <SectionHeader label="Current focus" />
-
-              {/*
-                TWO STATES, ONE SLOT — N96. On a roadmap, the progress line; on
-                none, the offer. The only surface that ever offered an
-                un-enrolled roadmap was a horizontal strip below the week grid
-                on the Plan tab, so an athlete who had never taken one on saw
-                nothing about roadmaps anywhere they actually looked.
-
-                `roadmaps === null` renders NEITHER, and that is why
-                `refreshRoadmaps` refuses to `setRoadmaps([])` on a failed read:
-                an unknown list is not "you are on no roadmap", and offering one
-                on the strength of an offline read would quietly retract
-                something the athlete committed to.
-
-                Gated on a discipline whose catalog is TECHNIQUES, never on
-                `key === 'bjj'`. With it off there is nothing to offer, and
-                `CurriculaStrip` already owns the "turn it back on" case (N61).
-              */}
-              {roadmaps !== null &&
-                (roadmaps.length > 0 ? (
-                  roadmaps.map((c) => <RoadmapLine key={c.id} curriculum={c} />)
-                ) : moduleWithCatalog(modules, 'techniques') ? (
-                  <RoadmapOffer />
-                ) : null)}
 
               {/*
                 What this week is for, if the athlete said. Read-only HERE —
@@ -1376,17 +1348,15 @@ export default function TodayScreen() {
                 (the Plan tab, `components/WeekPlanner.tsx`) carries the
                 actual editor, tap-to-edit on the shown week's row, so the
                 capability itself is on the phone even though this particular
-                card is not where it is set. Absent when there is no theme: a
-                permanent "no theme set" row would be the app asking for
-                homework.
+                card is not where it is set. The outer `theme &&` above is what
+                keeps a permanent "no theme set" row from ever existing — the
+                app asking for homework.
               */}
-              {theme && (
-                <View style={styles.themeCard} testID="week-theme">
-                  <Text style={styles.themeLabel}>This week</Text>
-                  <Text style={styles.themeTitle}>{theme.title}</Text>
-                  {theme.notes !== '' && <Text style={styles.themeNotes}>{theme.notes}</Text>}
-                </View>
-              )}
+              <View style={styles.themeCard} testID="week-theme">
+                <Text style={styles.themeLabel}>This week</Text>
+                <Text style={styles.themeTitle}>{theme.title}</Text>
+                {theme.notes !== '' && <Text style={styles.themeNotes}>{theme.notes}</Text>}
+              </View>
             </View>
           )}
 

@@ -89,13 +89,47 @@ jest.mock('@/lib/activityLevel', () => ({
 jest.mock('@/lib/profile', () => ({ setActivityLevel: jest.fn() }));
 
 /**
+ * The roadmap offer's own data (N107) — mocked at the same boundary the
+ * screen itself calls through, not the component. `RoadmapOffer` is mocked
+ * separately below, so this only matters to the tests that put a techniques
+ * catalog in `mockUseModules` and need to control what "on none" resolves to.
+ */
+const mockListWorkingCurricula = jest.fn(
+  (..._a: unknown[]): Promise<unknown[]> => Promise.resolve([]),
+);
+jest.mock('@/lib/curriculum', () => ({
+  ...jest.requireActual('@/lib/curriculum'),
+  listWorkingCurricula: (...a: unknown[]) => mockListWorkingCurricula(...a),
+}));
+
+/**
+ * A stub standing in for the real card — `components/__tests__/
+ * roadmapEntryPoints.test.tsx` already covers its own contents in full, so
+ * re-testing them here would be the second copy this app's doc culture warns
+ * against. `testID="mock-roadmap-offer"` is a real (stub) element rather than
+ * `() => null`, the same reasoning `youScreen.test.tsx` gives for its own
+ * `BjjRankHeader` stub: a component that renders nothing can never fail a
+ * presence assertion, and presence is exactly what this screen's gate is
+ * about.
+ */
+jest.mock('@/components/RoadmapOffer', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Text } = require('react-native');
+  return {
+    RoadmapOffer: () => React.createElement(Text, { testID: 'mock-roadmap-offer' }, 'Roadmap offer'),
+  };
+});
+
+/**
  * The module set, defaulting to what the real context defaults to.
  *
  * `{ modules: [], ready: false }` is `ModulesContext`'s own default, so every
  * test above this one behaves exactly as it did before the screen consulted
  * modules at all — an unread list is an unanswered question, and the screen
- * renders normally rather than claiming anything is off. The N61 test below is
- * the only one that overrides it.
+ * renders normally rather than claiming anything is off. The N61 and N107
+ * describe blocks below are the only ones that override it.
  */
 const mockUseModules = jest.fn(() => ({
   modules: [] as Module[],
@@ -254,6 +288,7 @@ beforeEach(() => {
   mockSave.mockResolvedValue(undefined as never);
   mockList.mockResolvedValue([]);
   mockAdjust.mockResolvedValue({ adjustment: null, blocked_by: [] });
+  mockListWorkingCurricula.mockResolvedValue([]);
 });
 
 describe('the Goals tab refetches when it is focused again', () => {
@@ -1142,6 +1177,111 @@ describe('with nutrition turned off', () => {
 
     expect(screen.queryByTestId('goals-disabled')).toBeNull();
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
+  });
+});
+
+/**
+ * The roadmap offer this screen took over from Today — N107.
+ *
+ * `RoadmapOffer` itself is stubbed (see the module mock above); what these
+ * cover is the GATE this screen decides with, which is the part that moved.
+ * Its own contents — the name, the sentence, the destination — are already
+ * covered where the component lives.
+ */
+describe('the roadmap offer (N107)', () => {
+  afterEach(() => {
+    mockUseModules.mockReturnValue({ modules: [], ready: false, stale: false, apply: jest.fn() });
+  });
+
+  // Nutrition ON is what lets the screen past its own `foodDisabled` early
+  // return at all — without it every case below hits `ModuleOffNotice`
+  // instead, which is a real and separate gate this describe block is not
+  // about. The roadmap offer's own reach into a nutrition-off Goals is
+  // deliberately NOT this screen's job — see the doc comment at the top of
+  // `app/(tabs)/goals.tsx` and CurriculaStrip's role as the fallback.
+  const nutritionOn: Module = {
+    key: 'nutrition',
+    label: 'Nutrition',
+    is_sport: false,
+    default_on: true,
+    enabled: true,
+    capabilities: {
+      catalog: '',
+      facets: [],
+      has_goals: false,
+      has_progression: false,
+      has_food_log: true,
+      record_kinds: [],
+    },
+  };
+
+  const bjjWithCatalog: Module = {
+    key: 'bjj',
+    label: 'BJJ',
+    is_sport: true,
+    default_on: true,
+    enabled: true,
+    capabilities: {
+      catalog: 'techniques',
+      facets: [],
+      has_goals: false,
+      has_progression: false,
+      has_food_log: false,
+      record_kinds: [],
+    },
+  };
+
+  function withModules(modules: Module[]) {
+    mockUseModules.mockReturnValue({
+      modules: [nutritionOn, ...modules],
+      ready: true,
+      stale: false,
+      apply: jest.fn(),
+    });
+  }
+
+  it('offers a roadmap once the read confirms the athlete is on none', async () => {
+    withModules([bjjWithCatalog]);
+    mockListWorkingCurricula.mockResolvedValue([]);
+    render(<GoalsScreen />);
+
+    expect(await screen.findByTestId('mock-roadmap-offer')).toBeTruthy();
+  });
+
+  it('does not offer once enrolled in even one roadmap', async () => {
+    withModules([bjjWithCatalog]);
+    mockListWorkingCurricula.mockResolvedValue([{ id: 'r1' }]);
+    render(<GoalsScreen />);
+
+    // Waited on something ELSE that only settles after the same tick the
+    // roadmap read would have landed on, so this is not a vacuous pass that
+    // never gave the read a chance to resolve.
+    await waitFor(() => expect(mockListWorkingCurricula).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByTestId('mock-roadmap-offer')).toBeNull();
+  });
+
+  it('neither offers nor asks the server, with no roadmap catalog to offer from', async () => {
+    // The screen's own default — no BJJ, no techniques catalog at all.
+    withModules([]);
+    render(<GoalsScreen />);
+
+    await waitFor(() => expect(screen.queryByText('Working it out…')).toBeNull());
+    expect(screen.queryByTestId('mock-roadmap-offer')).toBeNull();
+    expect(mockListWorkingCurricula).not.toHaveBeenCalled();
+  });
+
+  it('renders nothing while the read is still unanswered, never a false "on none"', async () => {
+    // A promise that never resolves during this test — `roadmaps` stays
+    // `null`, the same "not yet read is not on none" rule the doc comment
+    // states. Rendering the offer here would be the exact bug `RoadmapOffer`
+    // itself guards against, moved one level up to the screen that gates it.
+    withModules([bjjWithCatalog]);
+    mockListWorkingCurricula.mockReturnValue(new Promise(() => {}));
+    render(<GoalsScreen />);
+
+    await act(async () => {});
+    expect(screen.queryByTestId('mock-roadmap-offer')).toBeNull();
   });
 });
 

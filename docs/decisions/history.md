@@ -46279,12 +46279,153 @@ test(s) went red as genuine assertion failures — not compile errors — the
 (`"FRI, AUG 28, Friday, August 28. Back to today"`) that W14 exists to
 prevent. Both were then restored and reconfirmed green.
 
+## 2026-08-28 — N107: the roadmap offer moves to Goals, and Today drops roadmap progress entirely (#486)
+
+The user, having seen it on a device: *"Today screen gets a bit crowded with
+that suggestion."* `RoadmapOffer` — N96's fix for roadmaps being invisible —
+rendered as the first thing under Today's `UPCOMING` section, above the
+schedule itself: five lines explaining what a roadmap is, on the one screen
+whose job is deciding what to do right now. Not a criticism of N96 — the offer
+is why the user found roadmaps at all — but the placement, not the existence,
+was wrong. The user's own framing for where it belongs: *"when we start a
+roadmap and maybe that should appear on Goals"* — starting a syllabus and
+accepting a calorie target are the same *kind* of decision, made once in a
+while, with an explanation attached, and Goals is where the second one already
+lives.
+
+**The acceptance criteria asked for more than a render-site move, and the
+steps-to-test made it explicit**: *"Start a roadmap. Today still says nothing
+until a BJJ session is scheduled."* That is not just the offer — Today's
+`RoadmapLine` (the progress readout for a roadmap already underway) rendered
+unconditionally too, in the same "Current focus" block, and it is neither an
+offer nor an empty state nor a prompt, so a narrower reading could have left it
+in place and still technically removed only the offer. Taken literally, the
+criterion means Today carries no standing roadmap UI at all — only N99/#447's
+hint inside a scheduled BJJ session's card, which is evidence about a session
+on the calendar rather than a standing readout. So this ticket removed both:
+`RoadmapOffer` moved to Goals, and `RoadmapLine` was deleted from Today's
+render (not from the app — it still draws the same progress line on the BJJ
+reflection wizard, `app/bjj/reflect/[id].tsx`, unrelated to this ticket).
+Today's own docstring (block 6, "Current focus") now says only the week's
+theme; `focusHasRoadmap` and the `moduleWithCatalog` import that fed it are
+gone from `index.tsx`, and the `roadmaps` state stays — `classFocus` (the #447
+hint's own selection rule) still reads it.
+
+**Goals turned out to be a harder landing spot than the ticket's own reasoning
+assumed, and that tension is worth recording rather than papering over.** The
+ticket was written believing Goals is a general goal-setting screen. It isn't,
+any more — N106 rebuilt it same-day into a single-purpose calorie-target
+derivation screen (`ScreenHeader title="Your target"`), and N180 (two days
+earlier) had already taken Goals off the bottom tab bar entirely: it is reached
+only through `TargetRow` on the Food tab, or an unconditional link from
+Progress ("Targets and adherence"). Worse for this ticket specifically: **Goals
+is itself gated on the nutrition module** — `if (foodDisabled) return
+<ModuleOffNotice .../>` — so an athlete with nutrition off and BJJ on, who is
+exactly the population a roadmap offer is for, cannot reach anything on Goals
+at all, including a roadmap offer placed there. Restructuring `ModuleOffNotice`
+to carry other content would have contradicted its own doc ("there is no
+screen around the notice; the notice IS the screen") for the sake of an
+audience that has no route into Goals to begin with regardless (Food itself is
+nutrition-gated too, so the one plausible entry a nutrition-off athlete has is
+Progress's unconditional link, landing on the bare off-notice either way). So
+the offer is rendered only in Goals' normal (nutrition-on) branch, directly
+under `TargetCard` and above the manual-target form — a second decision beside
+the first rather than a footnote inside the derivation ladder — and
+`ModuleOffNotice`'s screen-is-the-notice design is untouched.
+
+**Discoverability for the nutrition-off population rests on a surface that
+already existed and was never touched: `CurriculaStrip` on Plan.**
+`lib/roadmapEntry.ts`'s own N96 diagnosis already names it as "the only surface
+that shows an un-enrolled [roadmap]" pre-N96, gated only on the techniques
+catalog, unconditional on nutrition, and living on Plan — one of the five
+permanent tab-bar slots. It was never removed by N96 adding the Today offer,
+and it is not touched by this ticket either. That is the actual answer to AC3
+("an athlete who never opens Goals can still discover roadmaps") for anyone
+who cannot reach Goals at all, and it is a materially different answer than
+"Goals now offers it," worth being explicit about rather than assumed true by
+symmetry with Today's old behaviour.
+
+**Said plainly, because softening it would be dishonest: for the
+nutrition-off, BJJ-on cohort, this ticket reverts N96.** N96's own diagnosis
+called `CurriculaStrip` alone insufficient — "a horizontal strip below a
+seven-day week grid, on the tab you open to pick a template" — and built the
+Today offer specifically because that strip wasn't being found. This ticket
+removes the offer from every screen that cohort can actually reach, leaving
+exactly the surface N96 judged inadequate as their only path in. That is a
+real regression for a real population, not a wash. It survives here because
+nutrition is `default_on` (so the affected population is the minority) and
+the user's own instruction was specific to *where* the offer sits, not
+*whether* a nutrition-off athlete can find one — but it is a product call the
+user has not explicitly signed off on for this cohort, flagged by
+`ac-verifier`/`frontend-reviewer` review, and it should be treated as open
+until they do, not as settled by this entry.
+
+**`RoadmapOffer` itself needed no prop changes** — it was already
+self-contained (its own `useAuthToken`, its own `listCurricula` fetch,
+`roadmapToOffer`'s own enrolled/countable-items filtering) and took no props at
+all. What moved was the GATING logic that decides whether to mount it: Today
+used to compute this from its own `roadmaps` state (populated by
+`refreshRoadmaps`, which still runs for `classFocus`); Goals needed the
+identical computation built fresh, since it had no roadmap-related state
+before. New in `app/(tabs)/goals.tsx`: a `roadmaps` state, a focus effect
+mirroring Today's `refreshRoadmaps` (silent-catch, deliberately never
+`setRoadmaps([])` on failure — an unreadable answer is not "on none"), gated on
+`hasRoadmapCatalog` (and, caught in `frontend-reviewer` and fixed before
+merge, `foodDisabled` — every other fetch on this screen already guarded on
+it first, and this one had been left out, paying a request on every focus for
+a nutrition-off athlete who can never see the render it feeds) so an athlete
+with BJJ off or nutrition off costs one fewer request, and
+`showRoadmapOffer = hasRoadmapCatalog && roadmaps !== null &&
+roadmaps.length === 0`. The component's own doc comment was rewritten to drop
+every "on Today" reference and its `today-roadmap-offer` testID renamed to
+`roadmap-offer`, since a screen-specific identifier on a now screen-agnostic
+component is exactly the kind of stale claim this codebase's review keeps
+finding.
+
+**`RoadmapSummary` (You tab) was reviewed per AC4 and left unchanged, and the
+reasoning is symmetric with the `RoadmapLine` deletion above rather than
+separate from it.** Before this ticket: three surfaces named roadmap progress
+or an offer — Today's offer, Today's `RoadmapLine`, and You's
+`RoadmapSummary` (milestone, mastered count, "working on now" chips). Removing
+`RoadmapLine` from Today — required by AC2's literal reading, above — already
+collapses that to one progress surface (`RoadmapSummary`), one offer surface
+(Goals), and one contextual hint (Today's #447 card). Trimming
+`RoadmapSummary`'s own content on top of that would leave roadmap progress with
+nowhere to live at all, which is a regression the ticket does not ask for and
+AC4 explicitly warns against ("reviewed", not "delete it"). So the "three
+surfaces may be one too many" concern is resolved by construction — by
+removing the surface that duplicated `RoadmapSummary`, not by cutting
+`RoadmapSummary` itself. Its doc comment now records this explicitly, so a
+future reviewer does not re-open the same review with `RoadmapLine` already
+gone and read the silence as an oversight.
+
+**Tests.** `app/(tabs)/goals.tsx`'s new gate is exercised in
+`__tests__/app/goalsScreen.test.tsx` (`describe('the roadmap offer (N107)')`,
+four cases: offers when confirmed on none, withholds once enrolled in even one,
+withholds and fetches nothing with no techniques catalog, and withholds while
+the read is still unanswered — the same "`null` is not `[]`" guard
+`RoadmapOffer` itself already carries, moved one level up to the screen that
+now gates it). `RoadmapOffer` is stubbed there to a marker element, the same
+pattern `youScreen.test.tsx` already used for `BjjRankHeader`, so these tests
+cover the GATE rather than re-testing the card's own contents, which
+`components/__tests__/roadmapEntryPoints.test.tsx` already covers in full and
+continues to, unchanged apart from the testID rename and a docstring
+correction. `__tests__/app/todayScreen.test.tsx` needed no new assertions — it
+already mocked `listWorkingCurricula` to `[]` and never asserted on the
+removed render, so the removal is covered only by "still 115/115 green," not by
+a dedicated regression test; a future session touching Today's "Current focus"
+block should add one rather than assume this entry's coverage extends that far.
+Full suite: 222 files, 3423 tests, all green under `TZ=America/Los_Angeles`
+(the timezone-dependent tracker tests fail under a bare `npx jest` with no
+`TZ` set — a pre-existing property of the runner, not a regression, confirmed
+by rerunning them with `TZ` explicit).
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
 - **What a filled ring on the week strip MEANS is currently food, and that is a guess.** `WeekStrip` deliberately takes a `Set` of day keys rather than deriving it, so the choice sits at the call site in `app/(tabs)/index.tsx` — food days, chosen so the strip agrees with the `LOGGING` card at the foot rather than contradicting it. A training reading is equally defensible and would make the strip agree with `TRAINING` instead. Nothing in the reference disambiguates it.
-- **Today now carries the reference's five blocks AND everything that was already there.** `MomentumCard` replaced `NutritionCard` and `ProgressCard` replaced `CheckinCard` in place — both replacements rather than additions, because two cards answering one question with different arithmetic is the W2/W4 shape. But the resume card, the roadmap slot, the suggestion card, `TrackerList`, `TrainingCalendar`, `WeekReview`, Recent and the 8-week `TrendStrip` are all still below, and the reference shows none of them. **Nobody has decided whether the reference is the whole screen or the top of it.** #486 removes one of those blocks and #447 folds another into `UP NEXT`, so the question is partly answered by tickets already filed — but not entirely.
-- **`UP NEXT` has a `hint` slot that nothing fills yet.** Built for #447's roadmap theme so that ticket is a prop value rather than a redesign. It renders nothing when absent, so an unfilled slot costs no space — but it is untested against real theme copy, and two lines is the cap.
+- **Today now carries the reference's five blocks AND everything that was already there.** `MomentumCard` replaced `NutritionCard` and `ProgressCard` replaced `CheckinCard` in place — both replacements rather than additions, because two cards answering one question with different arithmetic is the W2/W4 shape. But the resume card, the suggestion card, `TrackerList`, `TrainingCalendar`, `WeekReview`, Recent and the 8-week `TrendStrip` are all still below, and the reference shows none of them. **Nobody has decided whether the reference is the whole screen or the top of it.** **CLOSED for the roadmap slot by #486 (N107, entry above)**, which removed it from Today entirely rather than folding it into a reference block — the offer moved to Goals and the progress line was deleted outright. #447 (N99) folded the roadmap theme into `UP NEXT`. Both were the two blocks this bullet named as pending; the broader "is the reference the whole screen" question is still open for everything else in the list.
+- **CLOSED by #447 (N99, entry above, 2026-08-27) and confirmed still filled after #486 (N107).** `UP NEXT`'s `hint` slot carries `classHintText` for a scheduled BJJ session — this bullet used to say nothing filled it, which was already stale by the time N107 read it. Still true and worth restating: it is untested against real theme copy, and two lines is the cap.
 - **The belt hero came off the plan card** when it became `UP NEXT`. `usesBelt` still governs it wherever it returns; it is simply not drawn in the tighter row. Not a decision anybody asked for — a consequence of the reshape, recorded so it is not rediscovered as a bug.
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.

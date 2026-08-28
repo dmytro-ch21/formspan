@@ -29,6 +29,16 @@ import { roadmapCurricula } from './syllabuses';
  * SQLite and half the router through it, so a derivation left inline there is
  * one nothing can cover. What can go wrong in both of these is a filter, and a
  * filter is testable.
+ *
+ * **N107 moved the offer again, off Today entirely, onto Goals.** The
+ * diagnosis above is about N96 and is left as history — three surfaces, one
+ * of them genuinely an offer — but as of N107 the offer is Goals' own, gated
+ * on the same "on none, with a catalog to offer from" rule this file states,
+ * and Today carries no roadmap UI at all except the #447 session hint.
+ * `CurriculaStrip` on Plan is unchanged and remains the discovery path for an
+ * athlete who never opens Goals — nutrition-gated as Goals now is (N106), that
+ * strip is what keeps this file's "on none" fix from regressing for anyone
+ * with nutrition off.
  */
 
 /** Where the athlete is in a roadmap's own structure. */
