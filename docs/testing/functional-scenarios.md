@@ -13989,3 +13989,54 @@ on screen. That, and only that, is what moved.
   entry-edit screen is usable one-handed with the numeric keyboard up, and
   that the keyboard does not cover the field, the toggle, or the Save
   button.
+
+## N99 — Today's BJJ class card carries the roadmap's focus and what would move it (`apps/mobile/lib/classFocus.ts`, `apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/components/today/UpNextCard.tsx`)
+
+### Happy path
+
+- With a BJJ roadmap active (enrolled, unmastered items remaining) and a BJJ
+  class scheduled for today: confirm the "Up next" card shows the current
+  milestone or next-step line beneath the Log button.
+- With that roadmap also carrying an item drilled at least 6 sessions and
+  never taken live (per the funnel), seen within the last 60 days: confirm
+  the same card additionally names that technique with its reason (e.g.
+  "drilled 9 times, never live").
+- Confirm the reason line always states WHY — never a bare instruction with
+  no evidence behind it.
+- Complete (master) that suggested item's criteria via logged sessions.
+  Confirm the card's suggestion moves on to the next eligible roadmap step
+  (or disappears if none currently qualifies) on the next Today read.
+- Confirm a VoiceOver/TalkBack pass over the card announces the same focus
+  and suggestion text sighted athletes see (the card's explicit
+  `accessibilityLabel`, not just the visible `hint`).
+
+### Edge cases and errors
+
+- With no roadmap active (never enrolled, or the only enrollment archived):
+  confirm the scheduled BJJ class card renders exactly as a plain class card
+  — no empty focus/suggestion scaffolding of any kind.
+- With a roadmap active but every countable item already mastered: confirm
+  the card also degrades to plain — there is no "current focus" left to
+  state.
+- Deactivate (archive) an active roadmap while its class card is showing a
+  focus/suggestion line. Confirm the card degrades cleanly on the next read,
+  and confirm this does not disturb the athlete's own `bjj_focus` entries
+  (the N95 deactivation fix) — nothing here writes to focus at all.
+- With suggestions switched off in Settings (master toggle) or the BJJ
+  module specifically: confirm the focus/milestone line still shows (it is a
+  committed fact, not a suggestion) but no suggestion/reason text appears.
+- With a technique the athlete has already dismissed from the general
+  suggestion card: confirm it is never offered again here either, even if it
+  is a roadmap step that otherwise qualifies.
+- Schedule a strength (non-BJJ) session instead of a BJJ class: confirm none
+  of this — focus line or suggestions — appears on that card.
+- With two roadmaps active, one fully mastered and one still in progress:
+  confirm the card reports the still-in-progress roadmap's focus, not the
+  finished one's.
+
+### NEEDS HUMAN EVIDENCE
+
+- On a real device, on a day with a BJJ class scheduled and a roadmap
+  active: confirm the focus and suggestion text is legible and does not
+  visually crowd the Log button within the card's fixed two-line hint area,
+  in both light and dark appearance.
