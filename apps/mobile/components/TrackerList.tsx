@@ -4,6 +4,7 @@ import { Pressable, StyleSheet } from 'react-native';
 import { Text } from '@/components/Themed';
 import { TrackerCard } from '@/components/TrackerCard';
 import { vola } from '@/constants/Colors';
+import { COFFEE_ADD_CHOICES, caffeineMgFor } from '@/lib/coffeeCaffeine';
 import { targetCount } from '@/lib/trackerModel';
 import type { TrackerDay } from '@/lib/useTrackerDay';
 import type { UnitSystem } from '@/lib/units';
@@ -127,6 +128,11 @@ export function TrackerList({
   }
 
   const all = day.view.trackers;
+  // N432: looked up once per render, from the trackers this list already has
+  // in hand — no extra fetch. `null` (no such tracker, or the device has not
+  // learned about one yet) is a real, expected state: a coffee tap must
+  // behave exactly as before when the athlete has no caffeine tracker.
+  const caffeineTracker = all.find((t) => t.preset === 'caffeine') ?? null;
   const limit = collapseAfter ?? all.length;
   const collapsed = !expanded && all.length > limit;
   const shown = collapsed ? all.slice(0, limit) : all;
@@ -141,23 +147,45 @@ export function TrackerList({
 
   return (
     <>
-      {shown.map((t) => (
-        <TrackerCard
-          // Keyed on the day too, not just the tracker — see `on`'s own doc
-          // comment above. A day switch remounts the card, so its glyphs'
-          // `Animated.Value`s start fresh from the NEW day's count instead of
-          // springing to it from the old one.
-          key={`${t.id}-${on}`}
-          tracker={t}
-          entries={day.entriesFor(t.id, on)}
-          units={units}
-          unitsReady={unitsReady}
-          now={now}
-          onAdd={() => void day.addTap(t, dayAtTap())}
-          onRemove={(entryID) => void day.removeEntry(entryID, dayAtTap())}
-          onEdit={() => day.openSettings(t)}
-        />
-      ))}
+      {shown.map((t) => {
+        // The one preset-aware branch in this screen — deliberately here and
+        // not in `TrackerCard`, which stays generic (see its own header).
+        // This is the orchestration layer: it already knows every tracker on
+        // the day, which is exactly what "does the athlete have a caffeine
+        // tracker" needs and `TrackerCard` must not have to ask for.
+        const isCoffee = t.preset === 'coffee';
+        return (
+          <TrackerCard
+            // Keyed on the day too, not just the tracker — see `on`'s own doc
+            // comment above. A day switch remounts the card, so its glyphs'
+            // `Animated.Value`s start fresh from the NEW day's count instead
+            // of springing to it from the old one. It also resets the coffee
+            // card's own `picking` state on a day switch, which is the right
+            // default — a picker left open from yesterday should not survive
+            // into today.
+            key={`${t.id}-${on}`}
+            tracker={t}
+            entries={day.entriesFor(t.id, on)}
+            units={units}
+            unitsReady={unitsReady}
+            now={now}
+            onAdd={() => void day.addTap(t, dayAtTap())}
+            onRemove={(entryID) =>
+              isCoffee
+                ? void day.removeCoffeeTap(entryID, dayAtTap())
+                : void day.removeEntry(entryID, dayAtTap())
+            }
+            onEdit={() => day.openSettings(t)}
+            addChoices={isCoffee ? COFFEE_ADD_CHOICES : undefined}
+            onAddChoice={
+              isCoffee
+                ? (key) =>
+                    void day.addCoffeeTap(t, caffeineTracker, caffeineMgFor(key), dayAtTap())
+                : undefined
+            }
+          />
+        );
+      })}
       {collapsed ? (
         <Pressable
           onPress={() => setOpenFor(collapseKey ?? '')}

@@ -274,6 +274,89 @@ describe('no praise, no scolding, anywhere on the card', () => {
   });
 });
 
+/**
+ * N432 — the generic add-time choice. `addChoices` is deliberately not about
+ * coffee here: the fixture below could be any tracker, which is the point —
+ * this component must not need to know what coffee is to offer a picker.
+ */
+describe('addChoices: a picker instead of a plain increment tap', () => {
+  const choices = [
+    { key: 'espresso', label: 'Espresso', accessibilityLabel: 'Espresso — about 63 mg caffeine' },
+    { key: 'drip', label: 'Drip', accessibilityLabel: 'Drip — about 95 mg caffeine' },
+  ];
+
+  it('with no addChoices, `+` still calls onAdd directly — the ordinary tap is unchanged', () => {
+    const { onAdd } = renderCard(coffee, []);
+    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('tracker-choices-cof')).toBeNull();
+  });
+
+  it('with addChoices, `+` opens the picker instead of calling onAdd', () => {
+    const onAddChoice = jest.fn();
+    const { onAdd } = renderCard(coffee, [], { addChoices: choices, onAddChoice });
+    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.getByTestId('tracker-choice-cof-espresso')).toBeTruthy();
+    expect(screen.getByTestId('tracker-choice-cof-drip')).toBeTruthy();
+  });
+
+  it('picking a choice fires onAddChoice with its key, and closes the picker', () => {
+    const onAddChoice = jest.fn();
+    renderCard(coffee, [], { addChoices: choices, onAddChoice });
+    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    fireEvent.press(screen.getByTestId('tracker-choice-cof-espresso'));
+
+    expect(onAddChoice).toHaveBeenCalledWith('espresso');
+    expect(screen.queryByTestId('tracker-choices-cof')).toBeNull();
+  });
+
+  it('pressing `+` again while open closes it without picking anything', () => {
+    const onAddChoice = jest.fn();
+    renderCard(coffee, [], { addChoices: choices, onAddChoice });
+    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    expect(screen.getByTestId('tracker-choices-cof')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    expect(screen.queryByTestId('tracker-choices-cof')).toBeNull();
+    expect(onAddChoice).not.toHaveBeenCalled();
+  });
+
+  it('an empty glyph opens the picker too, not just the `+` button', () => {
+    // `+` is not the only add gesture — an empty glyph adds directly on every
+    // other tracker (N77/N78), so a coffee card with choices must route that
+    // through the SAME picker rather than silently logging a default.
+    const onAdd = jest.fn();
+    const onAddChoice = jest.fn();
+    render(
+      <TrackerCard
+        tracker={coffee}
+        entries={[]}
+        units="metric"
+        unitsReady
+        onAdd={onAdd}
+        onRemove={jest.fn()}
+        onEdit={() => {}}
+        addChoices={choices}
+        onAddChoice={onAddChoice}
+      />,
+    );
+    fireEvent.press(screen.getByTestId('tracker-glyph-cof-0'));
+
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.getByTestId('tracker-choice-cof-espresso')).toBeTruthy();
+  });
+
+  it('labels the add control as a chooser, using the choice\'s own label when picking', () => {
+    renderCard(coffee, [], { addChoices: choices, onAddChoice: jest.fn() });
+    expect(screen.getByLabelText('Add a cup of Coffee — choose a type')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    expect(screen.getByLabelText('Espresso — about 63 mg caffeine')).toBeTruthy();
+  });
+});
+
 /** Every string the tree renders, including accessibility labels and hints. */
 function collectText(node: { children?: unknown[]; props?: Record<string, unknown> }): string[] {
   const out: string[] = [];

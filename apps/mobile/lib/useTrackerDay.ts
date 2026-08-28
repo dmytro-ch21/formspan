@@ -7,7 +7,9 @@ import {
   fetchTrackerDay,
   localEntries,
   localTrackers,
+  logCoffeeTap,
   logTap,
+  removeCoffeeTap,
   removeTap,
   type TrackerView,
 } from './trackers';
@@ -60,6 +62,19 @@ export type TrackerDay = {
   addTap: (tracker: Tracker, on: string) => Promise<void>;
   /** Remove one logged tap, named by its entry id rather than its position. */
   removeEntry: (entryID: string, on: string) => Promise<void>;
+  /**
+   * Log a coffee tap that also posts to `caffeineTracker`, if the athlete has
+   * one — N432. `caffeineMg` is the drink type's own figure (`null` for
+   * "Other", which posts nothing); see `logCoffeeTap` in `trackers.ts`.
+   */
+  addCoffeeTap: (
+    coffeeTracker: Tracker,
+    caffeineTracker: Tracker | null,
+    caffeineMg: number | null,
+    on: string,
+  ) => Promise<void>;
+  /** Undo a coffee tap and the caffeine entry it caused, if it caused one. */
+  removeCoffeeTap: (entryID: string, on: string) => Promise<void>;
   openSettings: (tracker: Tracker) => void;
 };
 
@@ -156,6 +171,33 @@ export function useTrackerDay(): TrackerDay {
     [userId],
   );
 
+  const addCoffeeTap = useCallback(
+    async (
+      coffeeTracker: Tracker,
+      caffeineTracker: Tracker | null,
+      caffeineMg: number | null,
+      on: string,
+    ) => {
+      if (!userId) return;
+      await logCoffeeTap(userId, coffeeTracker, caffeineTracker, caffeineMg, on);
+      requestSync('coffee tap');
+      const entries = await localEntries(userId, on);
+      setLoaded((prev) => (prev.on === on ? { ...prev, entries } : prev));
+    },
+    [userId],
+  );
+
+  const removeCoffeeTapEntry = useCallback(
+    async (entryID: string, on: string) => {
+      if (!userId) return;
+      await removeCoffeeTap(userId, entryID);
+      requestSync('coffee tap removed');
+      const entries = await localEntries(userId, on);
+      setLoaded((prev) => (prev.on === on ? { ...prev, entries } : prev));
+    },
+    [userId],
+  );
+
   const entriesFor = useCallback(
     (trackerID: string, on: string) => entriesForLoadedDay(loaded, trackerID, on),
     [loaded],
@@ -166,5 +208,14 @@ export function useTrackerDay(): TrackerDay {
     [router],
   );
 
-  return { view: loaded.view, entriesFor, refresh, addTap, removeEntry, openSettings };
+  return {
+    view: loaded.view,
+    entriesFor,
+    refresh,
+    addTap,
+    removeEntry,
+    addCoffeeTap,
+    removeCoffeeTap: removeCoffeeTapEntry,
+    openSettings,
+  };
 }

@@ -65,6 +65,13 @@ import type { UnitSystem } from '@/lib/units';
  * are unconditional, driven by the record rather than by which preset it is; a
  * branch on `tracker.preset` anywhere in this file would be the CoffeeCard the
  * first paragraph promises not to grow.
+ *
+ * **N432 added a generic add-time CHOICE, and it holds the same promise.**
+ * `addChoices` is a small, fixed list of named options a caller may offer
+ * instead of a plain increment — the coffee tracker's drink-type picker is
+ * the first use, but this component takes only labels and keys, never the
+ * word "coffee" or "caffeine". `TrackerList` (which DOES know what a coffee
+ * tracker is) decides who gets one; see `coffeeCaffeine.ts`.
  */
 export function TrackerCard({
   tracker,
@@ -75,6 +82,8 @@ export function TrackerCard({
   onAdd,
   onRemove,
   onEdit,
+  addChoices,
+  onAddChoice,
   testID,
 }: {
   tracker: Tracker;
@@ -93,6 +102,17 @@ export function TrackerCard({
   /** Remove one logged tap, named by its entry id rather than its position. */
   onRemove: (entryID: string) => void;
   onEdit: () => void;
+  /**
+   * A small set of named options offered at the moment of adding, instead of
+   * a plain increment tap — N432. Absent or empty is the ordinary behaviour:
+   * `onAdd` fires immediately, from the `+` button and from an empty glyph
+   * alike. Present and non-empty replaces BOTH of those with a compact chip
+   * row — a SELECTION at tap time, still one-handed, never a full-screen
+   * form for a single tap.
+   */
+  addChoices?: { key: string; label: string; accessibilityLabel?: string }[];
+  /** Fires with the picked choice's key. Required whenever `addChoices` is non-empty. */
+  onAddChoice?: (key: string) => void;
   testID?: string;
 }) {
   const count = loggedCount(entries);
@@ -101,6 +121,21 @@ export function TrackerCard({
   const foot = footLine(tracker, entries);
   const cutoff = cutoffLine(tracker, entries, now);
   const amount = unitsReady ? amountLine(tracker, entries, units) : null;
+  const hasChoices = (addChoices?.length ?? 0) > 0;
+  // Closed again by a second press of `+`, or by picking a chip — there is no
+  // separate "cancel" affordance, and there does not need to be one: `+` is
+  // already the control that opened it.
+  const [picking, setPicking] = useState(false);
+  const handleAdd = hasChoices ? () => setPicking((p) => !p) : onAdd;
+  const handleChoice = (key: string) => {
+    setPicking(false);
+    onAddChoice?.(key);
+  };
+  const addAccessibilityLabel = !hasChoices
+    ? addLabel(tracker)
+    : picking
+      ? `Hide ${tracker.name} choices`
+      : `${addLabel(tracker)} — choose a type`;
 
   return (
     <View style={styles.card} testID={testID ?? `tracker-card-${tracker.id}`}>
@@ -162,14 +197,14 @@ export function TrackerCard({
           name and the value are already their own elements above. */}
       <RNView style={styles.row} testID={`tracker-row-${tracker.id}`}>
         <Pressable
-          onPress={onAdd}
+          onPress={handleAdd}
           // 30pt drawn + 7 all round = 44pt. This is the PRIMARY affordance on
           // the card — the one an athlete hits several times a day — so it is
           // the one that must not be a near miss.
           hitSlop={7}
           style={[styles.add, { borderColor: fill }]}
           accessibilityRole="button"
-          accessibilityLabel={addLabel(tracker)}
+          accessibilityLabel={addAccessibilityLabel}
           testID={`tracker-add-${tracker.id}`}
         >
           <Icon name="plus" size={16} color={fill} />
@@ -183,11 +218,36 @@ export function TrackerCard({
             entries={entries}
             fill={fill}
             single={style === 'dose'}
-            onAdd={onAdd}
+            onAdd={handleAdd}
             onRemove={onRemove}
           />
         )}
       </RNView>
+
+      {/* N432: the drink-type (or other add-time) choice, shown only while
+          picking. A compact chip row rather than a sheet or a full-screen
+          form — the one-handed, standing-up discipline this app states
+          elsewhere for logging. */}
+      {hasChoices && picking ? (
+        <RNView
+          style={styles.choices}
+          accessibilityRole="radiogroup"
+          testID={`tracker-choices-${tracker.id}`}
+        >
+          {addChoices?.map((c) => (
+            <Pressable
+              key={c.key}
+              onPress={() => handleChoice(c.key)}
+              style={styles.choice}
+              accessibilityRole="button"
+              accessibilityLabel={c.accessibilityLabel ?? c.label}
+              testID={`tracker-choice-${tracker.id}-${c.key}`}
+            >
+              <Text style={styles.choiceText}>{c.label}</Text>
+            </Pressable>
+          ))}
+        </RNView>
+      ) : null}
 
       {foot == null ? null : (
         <Text style={styles.foot} testID={`tracker-foot-${tracker.id}`}>
@@ -530,4 +590,18 @@ const styles = StyleSheet.create({
   },
   barFill: { height: '100%', borderRadius: 5 },
   foot: { fontSize: 12, color: vola.textMuted, fontWeight: '600' },
+  // Same chip look `TrackerForm.tsx`'s unit/colour pickers already use —
+  // reused as tokens, not as shared code, since that Chips component is
+  // private to its own form and this row's selection semantics differ
+  // (fires once and collapses, rather than staying toggled on).
+  choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  choice: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: vola.surfaceRaised,
+  },
+  choiceText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
 });

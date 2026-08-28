@@ -27,6 +27,7 @@ import type { SQLiteBindValue } from 'expo-sqlite';
 
 import { dayString } from './calendar';
 import { ApiError, isOffline, isPermanentRejection, retryAfterOf } from './apiError';
+import { pairedCaffeineEntryId } from './coffeeCaffeine';
 import { getDb, withTransaction } from './db';
 import type { RenderStyle, Tracker, TrackerEntry, TrackerUnit } from './trackerModel';
 import * as api from './trackersApi';
@@ -517,6 +518,91 @@ export async function logTap(
     id, tracker.id, userId, on, now, tracker.increment, now,
   );
   return id;
+}
+
+/**
+ * Log one coffee tap, and — if the athlete has a caffeine tracker — a paired
+ * caffeine entry carrying that DRINK's own mg figure (N432).
+ *
+ * ## Why this is not just two `logTap` calls
+ *
+ * `logTap` always writes `amount: tracker.increment`, and the caffeine
+ * tracker's own increment is a flat 80 mg — a reasonable "about a cup"
+ * default for a MANUAL tap, but wrong for a coffee-derived one: an espresso
+ * and a drip coffee are not the same drink. So the caffeine leg here takes an
+ * explicit amount from the caller (see `coffeeCaffeine.ts`) instead of
+ * reading the tracker's own increment. The coffee leg is untouched — it still
+ * logs one cup at `coffeeTracker.increment`, exactly as before this ticket.
+ *
+ * ## Dual-write, chosen over a backend fan-out
+ *
+ * Both rows are ordinary `tracker_entries` inserts, and each flows through
+ * the SAME outbox as every other tap, independently — see this file's own
+ * header on the outbox's shape. `logTap` is already a local-first SQLite
+ * write with no network in the loop; a server endpoint that fanned a coffee
+ * tap out to a second tracker would need its own retry/idempotency story
+ * running parallel to the one this file already has, for a write that is
+ * already safe to duplicate (client-generated ids) and already
+ * offline-tolerant. Two ordinary inserts, both owed to the same outbox pass,
+ * is the smaller design and reuses everything `syncTrackers` already does —
+ * including "day-scoped exactly like every other tracker", which falls out
+ * for free rather than needing its own case.
+ *
+ * ## The pairing
+ *
+ * The caffeine entry's id is DERIVED from the coffee entry's id
+ * (`pairedCaffeineEntryId`), never stored on a new column — see that
+ * function's own doc for why. That is what lets `removeCoffeeTap` undo both
+ * sides of one tap with no schema change and no server-side link to keep in
+ * sync.
+ *
+ * `caffeineTracker == null` (no such tracker) or `caffeineMg == null` (the
+ * athlete tapped "Other", which posts no invented number) both skip the
+ * second insert entirely — the coffee tap behaves exactly as it did before
+ * this ticket.
+ */
+export async function logCoffeeTap(
+  userId: string,
+  coffeeTracker: Tracker,
+  caffeineTracker: Tracker | null,
+  caffeineMg: number | null,
+  on: string = dayString(new Date()),
+): Promise<string> {
+  const db = await getDb();
+  const coffeeId = randomUUID();
+  const coffeeAt = stamp();
+  await db.runAsync(
+    `INSERT INTO tracker_entries
+       (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
+     VALUES (?,?,?,?,?,?,?,1,0)`,
+    coffeeId, coffeeTracker.id, userId, on, coffeeAt, coffeeTracker.increment, coffeeAt,
+  );
+  if (caffeineTracker && caffeineMg != null) {
+    const caffeineId = pairedCaffeineEntryId(coffeeId);
+    const caffeineAt = stamp();
+    await db.runAsync(
+      `INSERT INTO tracker_entries
+         (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
+       VALUES (?,?,?,?,?,?,?,1,0)`,
+      caffeineId, caffeineTracker.id, userId, on, caffeineAt, caffeineMg, caffeineAt,
+    );
+  }
+  return coffeeId;
+}
+
+/**
+ * Undo a coffee tap, and the caffeine entry it caused, if it caused one.
+ *
+ * The second `removeTap` targets the DERIVED pairing id (see
+ * `pairedCaffeineEntryId`) and is a harmless no-op when nothing is there to
+ * remove — exactly the same "already gone" branch `removeTap` already takes
+ * for a double-tap on the same cup. That covers both of `logCoffeeTap`'s
+ * skip cases for free: no caffeine tracker at tap time, and an "Other" tap
+ * that posted nothing.
+ */
+export async function removeCoffeeTap(userId: string, coffeeEntryId: string): Promise<void> {
+  await removeTap(userId, coffeeEntryId);
+  await removeTap(userId, pairedCaffeineEntryId(coffeeEntryId));
 }
 
 /**
