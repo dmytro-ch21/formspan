@@ -115,6 +115,9 @@ func oneOf(t *testing.T, field string) Patch {
 		// Differs from fixture()'s "cup", and is the word the whole column
 		// exists for: no table over units could have produced it.
 		p.CountNoun = Of("serving")
+	case "CutoffMinutes":
+		// fixture() leaves this unset (nil), so any value differs from it.
+		p.CutoffMinutes = Of(960)
 	default:
 		// Reached the moment somebody adds a Patch field, which is exactly when
 		// this test must be extended rather than silently skipping it.

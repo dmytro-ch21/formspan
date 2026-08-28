@@ -10,7 +10,9 @@ import {
   type TrackerColor,
 } from '@/constants/Colors';
 import {
+  formatCutoff,
   inputUnitLabel,
+  parseCutoff,
   pluralise,
   suggestedNoun,
   type RenderStyle,
@@ -73,6 +75,8 @@ export type TrackerDraft = {
   target: number | null;
   render_style: RenderStyle;
   count_noun: string;
+  /** Minutes since local midnight. `null` is no cutoff — see `cutoffLine`. */
+  cutoff_minutes: number | null;
 };
 
 const UNITS: { key: TrackerUnit; label: string }[] = [
@@ -110,6 +114,8 @@ export type TrackerFormState = {
   incrementText: string;
   countText: string;
   shape: RenderStyle;
+  /** "16:00", or empty for no cutoff. Parsed once, on submit, by `readDraft`. */
+  cutoffText: string;
 };
 
 /** A blank form: one dose, once a day — N78's own motivating example. */
@@ -124,6 +130,7 @@ export function emptyForm(): TrackerFormState {
     incrementText: '',
     countText: '1',
     shape: 'auto',
+    cutoffText: '',
   };
 }
 
@@ -163,6 +170,7 @@ export function formFor(t: Tracker, units: UnitSystem): TrackerFormState {
     incrementText: displayIncrement(t, units),
     countText: count == null ? '' : String(count),
     shape: t.render_style,
+    cutoffText: t.cutoff_minutes == null ? '' : formatCutoff(t.cutoff_minutes),
   };
 }
 
@@ -231,6 +239,15 @@ export function readDraft(
   const noun = f.noun.trim();
   if (noun.length > 24) return { error: 'That word is too long.' };
 
+  let cutoffMinutes: number | null = null;
+  const typedCutoff = f.cutoffText.trim();
+  if (typedCutoff !== '') {
+    cutoffMinutes = parseCutoff(typedCutoff);
+    if (cutoffMinutes == null) {
+      return { error: 'Enter a cutoff time as HH:MM (e.g. 16:00), or leave it blank for none.' };
+    }
+  }
+
   return {
     draft: {
       name,
@@ -241,6 +258,7 @@ export function readDraft(
       target,
       render_style: f.shape,
       count_noun: noun,
+      cutoff_minutes: cutoffMinutes,
     },
   };
 }
@@ -387,6 +405,32 @@ export function TrackerForm({
           testID="tracker-form-target"
         />
         <Text style={styles.hint}>Leave it blank to just count, with nothing to reach.</Text>
+      </Field>
+
+      <Field label="Cutoff">
+        {/* N431: "no more after this time" — a plain clock time rather than a
+            second sleep-tracking feature. An athlete who thinks in "six hours
+            before my 22:00 bedtime" works that out once and types the result;
+            there is no separate bedtime field to keep in sync with a sleep
+            model this app does not have. */}
+        <SelectAllTextInput
+          style={styles.input}
+          value={value.cutoffText}
+          onChangeText={(t) => set('cutoffText', t)}
+          keyboardType="numbers-and-punctuation"
+          placeholder="No cutoff"
+          placeholderTextColor={vola.textDim}
+          maxLength={5}
+          accessibilityLabel="Cutoff time, as hours and minutes"
+          accessibilityHint="For example, sixteen colon zero zero for four in the afternoon"
+          testID="tracker-form-cutoff"
+        />
+        <Text style={styles.hint}>
+          {value.cutoffText
+            ? `Your card will note once it is ${value.cutoffText} and past — e.g. six hours ` +
+              `before a ten o'clock bedtime is 16:00.`
+            : 'Leave it blank for no cutoff line.'}
+        </Text>
       </Field>
 
       <Field label="Shape">

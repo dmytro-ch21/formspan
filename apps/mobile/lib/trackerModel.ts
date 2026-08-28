@@ -13,6 +13,7 @@
  * rules are what a test can pin down.
  */
 
+import { dayString } from './calendar';
 import { formatFluid, fluidUnit, type UnitSystem } from './units';
 
 export type RenderStyle = 'auto' | 'glyphs' | 'bar' | 'dose';
@@ -52,6 +53,19 @@ export type Tracker = {
    * beats two copies of a rule that can disagree.
    */
   provisioned: boolean;
+  /**
+   * Minutes since local midnight — a plain clock time, e.g. `960` for 16:00.
+   * `null` means no cutoff is configured, a real state distinct from
+   * midnight (`0`) the same way `target: null` is distinct from `0`.
+   *
+   * **Generic, like everything else here — nothing about this field says
+   * caffeine.** N431 is the first tracker where it is load-bearing, but any
+   * tracker can carry a "no more after this time" line; see `cutoffLine`.
+   * There is no "hours before sleep" or "bedtime" stored anywhere: an athlete
+   * who thinks that way computes the clock time once, at authoring time, and
+   * this is where the result lives.
+   */
+  cutoff_minutes: number | null;
 };
 
 export type TrackerEntry = {
@@ -297,10 +311,127 @@ export function lastLoggedAt(entries: TrackerEntry[]): Date | null {
   return newest;
 }
 
+/**
+ * `lastLoggedAt`'s twin for `cutoffLine`'s "crossed" fact — excludes a
+ * BACKFILLED entry, whose `logged_at` is the real wall-clock moment it was
+ * tapped, not a fact about the day it was filed under (`logged_on`).
+ *
+ * N431 review, frontend-reviewer: browsing back to a past day and tapping
+ * there stamps `logged_at = now()` while filing under the browsed
+ * `logged_on` (see `logTap`, `lib/trackers.ts`) — so a tap on Tuesday made
+ * from Thursday at 16:10 has `logged_at` reading Thursday 16:10 but
+ * `logged_on = Tuesday`. Reading that straight into `cutoffLine`'s "last at
+ * 16:10 — past your cutoff" fabricates a claim about Tuesday's evening from
+ * Thursday's clock. Only an entry whose logged INSTANT falls on the same
+ * local calendar day as the day it is filed under can honestly state what
+ * time it was logged AT on that day.
+ */
+function lastLoggedAtOnItsOwnDay(entries: TrackerEntry[]): Date | null {
+  let newest: Date | null = null;
+  for (const e of entries) {
+    const at = new Date(e.logged_at);
+    if (Number.isNaN(at.getTime())) continue;
+    if (dayString(at) !== e.logged_on) continue;
+    if (!newest || at > newest) newest = at;
+  }
+  return newest;
+}
+
 export function formatClock(at: Date): string {
   const h = String(at.getHours()).padStart(2, '0');
   const m = String(at.getMinutes()).padStart(2, '0');
   return `${h}:${m}`;
+}
+
+/** Minutes-since-midnight of a `Date`'s LOCAL clock reading. */
+function minutesOfDay(at: Date): number {
+  return at.getHours() * 60 + at.getMinutes();
+}
+
+/**
+ * "16:00" from minutes-since-midnight — `formatClock`'s twin for a stored
+ * cutoff rather than a logged instant. Assumes a valid 0..1439 input, which is
+ * what the server's own CHECK constraint and `Patch.Validate` both enforce;
+ * nothing on this side re-validates a value that already came from a tracker.
+ */
+export function formatCutoff(minutes: number): string {
+  const h = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const m = String(minutes % 60).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+/**
+ * Parse a typed "16:00" (or "4:00") into minutes-since-midnight, or `null` for
+ * anything that is not a legal clock time.
+ *
+ * Used by the tracker form's cutoff field, the same way `readDraft` parses
+ * every other number the athlete types — rejected rather than silently
+ * clamped, so a typo ("25:00") is a form error and not a quietly wrong cutoff.
+ */
+export function parseCutoff(text: string): number | null {
+  const m = /^([0-9]{1,2}):([0-9]{2})$/.exec(text.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const mins = Number(m[2]);
+  if (h > 23 || mins > 59) return null;
+  return h * 60 + mins;
+}
+
+/**
+ * "1h 20m", "45m", "6h" — never "6h 0m". The unit the countdown in
+ * `cutoffLine` is written in.
+ */
+export function formatMinuteSpan(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+/**
+ * The cutoff warning — N431's "no more caffeine after N hours before bed",
+ * generalised to any tracker that carries a `cutoff_minutes`.
+ *
+ * **A stated fact, never a verdict — the same register `footLine` already
+ * uses for a target.** No colour, no "you blew it", nothing different about a
+ * cutoff crossed by five minutes than by five hours. Three answers, in order:
+ *
+ * 1. **The day's last entry was already at or past the cutoff** — "last at
+ *    15:40 — past your 16:00 cutoff". This is a fact about what already
+ *    happened and is shown regardless of what day is on screen, including a
+ *    browsed PAST day: an athlete looking back at Tuesday is still told
+ *    Tuesday's last cup was late. Only an entry actually LOGGED on that day
+ *    counts, not a backfilled one — see `lastLoggedAtOnItsOwnDay`.
+ * 2. **Nothing crossed it yet, and `now` is before the cutoff** — "cutoff in
+ *    1h 20m", a forward-looking countdown.
+ * 3. **Nothing crossed it yet, and `now` is at or past the cutoff** — "past
+ *    your 16:00 cutoff", stated with no entry to point at.
+ *
+ * `now` is `null` for a browsed day that is not real today (see
+ * `TrackerList`'s own prop). Cases 2 and 3 are both claims about the CURRENT
+ * moment — "you still have time" or "you are out of it right now" — and
+ * neither is a fact about a day that already ended, so both are skipped when
+ * `now` is null and case 1 did not already answer. A day nothing crossed the
+ * cutoff on, viewed after the fact, has nothing to warn about — the athlete
+ * respected it, and this project does not praise that either.
+ */
+export function cutoffLine(t: Tracker, entries: TrackerEntry[], now: Date | null): string | null {
+  if (t.cutoff_minutes == null) return null;
+  const cutoffClock = formatCutoff(t.cutoff_minutes);
+  // `lastLoggedAtOnItsOwnDay`, not `lastLoggedAt`: a backfilled tap's
+  // `logged_at` is the real moment it was tapped, not a fact about the
+  // browsed day it was filed under — see that function's own doc.
+  const last = lastLoggedAtOnItsOwnDay(entries);
+  if (last && minutesOfDay(last) >= t.cutoff_minutes) {
+    return `last at ${formatClock(last)} — past your ${cutoffClock} cutoff`;
+  }
+  if (now == null) return null;
+  const nowMinutes = minutesOfDay(now);
+  if (nowMinutes < t.cutoff_minutes) {
+    return `cutoff in ${formatMinuteSpan(t.cutoff_minutes - nowMinutes)}`;
+  }
+  return `past your ${cutoffClock} cutoff`;
 }
 
 /**

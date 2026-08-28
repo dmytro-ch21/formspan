@@ -24,7 +24,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 // drift apart.
 const trackerCols = `
 	id, user_id, preset, name, icon, color_key, unit, increment, target,
-	render_style, sort_order, count_noun, archived_at, created_at, updated_at`
+	render_style, sort_order, count_noun, cutoff_minutes, archived_at, created_at, updated_at`
 
 const entryCols = `
 	id, tracker_id, user_id, logged_on::text, logged_at, amount, created_at`
@@ -34,7 +34,7 @@ func scanTracker(row pgx.Row) (*Tracker, error) {
 	err := row.Scan(
 		&t.ID, &t.UserID, &t.Preset, &t.Name, &t.Icon, &t.ColorKey, &t.Unit,
 		&t.Increment, &t.Target, &t.RenderStyle, &t.SortOrder, &t.CountNoun,
-		&t.ArchivedAt, &t.CreatedAt, &t.UpdatedAt,
+		&t.CutoffMinutes, &t.ArchivedAt, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -78,6 +78,9 @@ func translatePgError(err error) error {
 				return fmt.Errorf("%w: target must be greater than zero, or null", ErrInvalidInput)
 			case strings.Contains(pgErr.ConstraintName, "render_style"):
 				return fmt.Errorf("%w: unrecognised render_style", ErrInvalidInput)
+			case strings.Contains(pgErr.ConstraintName, "cutoff_minutes"):
+				return fmt.Errorf("%w: cutoff_minutes must be between 0 and 1439, or null",
+					ErrInvalidInput)
 			case strings.Contains(pgErr.ConstraintName, "amount"):
 				return fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
 			}
@@ -107,8 +110,8 @@ func (r *PostgresRepository) EnsureDefaults(ctx context.Context, userID string, 
 		batch.Queue(`
 			INSERT INTO daily_trackers (
 				id, user_id, preset, name, icon, color_key, unit,
-				increment, target, render_style, sort_order, count_noun)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+				increment, target, render_style, sort_order, count_noun, cutoff_minutes)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 			-- NO ARBITER, and that is the point. An arbiter names ONE constraint,
 			-- so the (user_id, preset) form absorbed a re-provision and let a
 			-- PRIMARY KEY collision raise 23505 -- which List turned into a 409 on
@@ -121,7 +124,7 @@ func (r *PostgresRepository) EnsureDefaults(ctx context.Context, userID string, 
 			-- silently ends it. Same trap db.ts records for its CREATE statements.)
 			ON CONFLICT DO NOTHING`,
 			p.ID, userID, p.Preset, p.Name, p.Icon, p.ColorKey, p.Unit,
-			p.Increment, p.Target, p.RenderStyle, p.SortOrder, p.CountNoun)
+			p.Increment, p.Target, p.RenderStyle, p.SortOrder, p.CountNoun, p.CutoffMinutes)
 	}
 	results := r.pool.SendBatch(ctx, batch)
 	for i := range presets {
@@ -192,14 +195,14 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in New) 
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO daily_trackers (
 			id, user_id, preset, name, icon, color_key, unit,
-			increment, target, render_style, sort_order, count_noun)
-		SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+			increment, target, render_style, sort_order, count_noun, cutoff_minutes)
+		SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
 		 WHERE (SELECT count(*) FROM daily_trackers
-		         WHERE user_id = $2 AND archived_at IS NULL) < $13
+		         WHERE user_id = $2 AND archived_at IS NULL) < $14
 		ON CONFLICT (id) DO NOTHING
 		RETURNING `+trackerCols,
 		in.ID, userID, in.Preset, in.Name, in.Icon, in.ColorKey, in.Unit,
-		in.Increment, in.Target, in.RenderStyle, in.SortOrder, in.CountNoun,
+		in.Increment, in.Target, in.RenderStyle, in.SortOrder, in.CountNoun, in.CutoffMinutes,
 		MaxLiveTrackers)
 
 	t, err := scanTracker(row)
@@ -274,14 +277,14 @@ func (r *PostgresRepository) AddPreset(ctx context.Context, userID string, in Ne
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO daily_trackers (
 			id, user_id, preset, name, icon, color_key, unit,
-			increment, target, render_style, sort_order, count_noun)
-		SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+			increment, target, render_style, sort_order, count_noun, cutoff_minutes)
+		SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
 		 WHERE (SELECT count(*) FROM daily_trackers
-		         WHERE user_id = $2 AND archived_at IS NULL) < $13
+		         WHERE user_id = $2 AND archived_at IS NULL) < $14
 		ON CONFLICT DO NOTHING
 		RETURNING `+trackerCols,
 		in.ID, userID, in.Preset, in.Name, in.Icon, in.ColorKey, in.Unit,
-		in.Increment, in.Target, in.RenderStyle, in.SortOrder, in.CountNoun,
+		in.Increment, in.Target, in.RenderStyle, in.SortOrder, in.CountNoun, in.CutoffMinutes,
 		MaxLiveTrackers)
 
 	t, err := scanTracker(row)

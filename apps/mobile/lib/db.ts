@@ -495,6 +495,11 @@ const CREATE_DAILY_TRACKERS = `
     -- would then have nothing left carrying the intent, and the next pull would
     -- hand the tracker back. It is hard-deleted once the server confirms.
     destroyed_at TEXT,
+    -- Minutes since local midnight — a plain clock time, e.g. 960 for 16:00.
+    -- NULL means no cutoff is configured, a real state distinct from midnight
+    -- (0). Generic like target: nothing here says caffeine. See
+    -- lib/trackerModel.ts's cutoffLine.
+    cutoff_minutes INTEGER,
     updated_at TEXT NOT NULL DEFAULT '',
     dirty INTEGER NOT NULL DEFAULT 0,
     remote INTEGER NOT NULL DEFAULT 1,
@@ -558,7 +563,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 26;
+const SCHEMA_VERSION = 27;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1108,6 +1113,15 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // also said" to remember.
     await addColumnIfMissing(db, 'barcode_cache', 'packet_serving_label', 'TEXT');
     await addColumnIfMissing(db, 'barcode_cache', 'packet_serving_grams', 'REAL');
+  }
+
+  if (current < 27) {
+    // N431: the caffeine tracker's cutoff — "no more after this clock time".
+    // Real ALTER, same reason as every branch above: `CREATE TABLE IF NOT
+    // EXISTS` is a no-op on a device already past this version, so it would
+    // keep a `daily_trackers` table with no `cutoff_minutes` and every read
+    // that selects it would throw.
+    await addColumnIfMissing(db, 'daily_trackers', 'cutoff_minutes', 'INTEGER');
   }
 
   // The day query the card runs on every render of Today.

@@ -131,6 +131,50 @@ var presets = []Preset{
 			CountNoun: "cup",
 		},
 	},
+	// Caffeine (N431): a recommended daily LIMIT rather than a goal, and a
+	// cutoff line for when to stop relative to sleep.
+	//
+	// **`Target: 400` here reads as a ceiling, not a goal, and that reading was
+	// already load-bearing before this ticket.** `footLine`'s own comment (see
+	// `trackerModel.ts`) says every phrasing it produces is true whether a
+	// target is a goal (water) or a limit (coffee, this) — "4 to go" and
+	// "2 past your target of 3" both state arithmetic, never a verdict. 400 mg
+	// is the FDA/EFSA-cited figure most healthy adults are told is a reasonable
+	// daily ceiling; it is a DEFAULT, editable like any tracker's target, not a
+	// medical claim this app is making.
+	//
+	// `Increment: 80` is one cup-equivalent (roughly a cup of brewed coffee, or
+	// an espresso shot at the low end) — close enough that "3 of 5" reads as
+	// "about three cups" without pretending to know what the athlete actually
+	// drank. The athlete can retype it once they know their own cup.
+	//
+	// `CutoffMinutes: ptr(960)` is 16:00 — six hours before a 22:00 bedtime,
+	// which is within the range sleep research usually cites for caffeine's
+	// half-life mattering to sleep onset. Also a DEFAULT: the tracker's own
+	// cutoff field is editable, and an athlete with a different bedtime sets
+	// their own number the same way they would retype the 400 mg limit.
+	//
+	// `Default: false`, same reasoning as coffee's: an unremovable caffeine
+	// counter handed to somebody who has quit, or never drank it, is not a
+	// neutral thing to do. Reachable exactly the way coffee is — the "Ready to
+	// go" list `app/trackers/new.tsx` already renders from `NonDefaultPresets`.
+	{
+		Key:     "caffeine",
+		Default: false,
+		Fields: New{
+			Preset:        "caffeine",
+			Name:          "Caffeine",
+			Icon:          "⚡",
+			ColorKey:      "amber",
+			Unit:          "mg",
+			Increment:     80,
+			Target:        ptr(400.0),
+			CutoffMinutes: ptr(960),
+			RenderStyle:   RenderGlyphs,
+			SortOrder:     30,
+			CountNoun:     "cup",
+		},
+	},
 }
 
 func ptr[T any](v T) *T { return &v }

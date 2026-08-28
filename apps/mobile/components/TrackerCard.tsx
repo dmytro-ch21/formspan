@@ -13,6 +13,7 @@ import { trackerFill, vola } from '@/constants/Colors';
 import {
   addLabel,
   amountLine,
+  cutoffLine,
   footLine,
   glyphHint,
   glyphLabel,
@@ -70,6 +71,7 @@ export function TrackerCard({
   entries,
   units,
   unitsReady,
+  now = null,
   onAdd,
   onRemove,
   onEdit,
@@ -80,6 +82,13 @@ export function TrackerCard({
   units: UnitSystem;
   /** Never print a unit-bearing number before the preference has been read. */
   unitsReady: boolean;
+  /**
+   * The live clock, for a card showing REAL today — `null` for a browsed past
+   * day. See `cutoffLine`'s own doc for why the split matters: a countdown or
+   * a bare "past your cutoff" is a claim about the CURRENT moment, and neither
+   * is true of a day that already ended.
+   */
+  now?: Date | null;
   onAdd: () => void;
   /** Remove one logged tap, named by its entry id rather than its position. */
   onRemove: (entryID: string) => void;
@@ -90,6 +99,7 @@ export function TrackerCard({
   const style = resolveRenderStyle(tracker, count);
   const fill = trackerFill(tracker.color_key);
   const foot = footLine(tracker, entries);
+  const cutoff = cutoffLine(tracker, entries, now);
   const amount = unitsReady ? amountLine(tracker, entries, units) : null;
 
   return (
@@ -187,6 +197,16 @@ export function TrackerCard({
               string this feature can produce and checks none of them carries a
               verdict can actually see it. */}
           {foot}
+        </Text>
+      )}
+
+      {cutoff == null ? null : (
+        <Text style={styles.foot} testID={`tracker-cutoff-${tracker.id}`}>
+          {/* N431. Same style as the foot line above and the same rule: a
+              stated fact, never a verdict — "cutoff in 1h 20m" and
+              "last at 15:40 — past your 16:00 cutoff" read the same register
+              as `Over target` on MomentumCard, not a warning colour. */}
+          {cutoff}
         </Text>
       )}
     </View>

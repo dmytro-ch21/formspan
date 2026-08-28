@@ -457,6 +457,10 @@ export default function FoodScreen() {
             dayAtTap={() => on}
             units={units}
             unitsReady={unitsReady}
+            // Same reasoning as Today's own `now` prop (N431): the cutoff
+            // line is a claim about the current moment, so it only applies
+            // while the day on screen is real today.
+            now={isToday ? new Date() : null}
             // No `collapseAfter`. Today hides all but three because it is a
             // decision surface with a session, a readiness reading and a week on
             // it; Food is where trackers LIVE, and somebody who came here came

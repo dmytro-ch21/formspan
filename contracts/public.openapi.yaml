@@ -5387,6 +5387,18 @@ components:
             is what the athlete said. Must not contain control characters or
             start or end with a space — it is pluralised and concatenated into
             the card copy and into the VoiceOver label.
+        cutoff_minutes:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 1439
+          description: >
+            Minutes since local midnight — a plain clock time, e.g. `960` for
+            16:00. **Null is a real state**, meaning no cutoff is configured —
+            distinct from `0`, which is midnight. Generic like `target`:
+            nothing about the column says caffeine, and it is what the client
+            derives its "last at 15:40 — past your 16:00 cutoff" line from,
+            compared against the day's last entry (N431).
         provisioned:
           type: boolean
           description: >
@@ -5438,6 +5450,7 @@ components:
         render_style: { type: string, enum: [auto, glyphs, bar, dose] }
         sort_order: { type: integer }
         count_noun: { type: string, maxLength: 24 }
+        cutoff_minutes: { type: integer, nullable: true, minimum: 0, maximum: 1439 }
 
     TrackerPreset:
       type: object
@@ -5464,6 +5477,7 @@ components:
         target: { type: number, nullable: true }
         render_style: { type: string, enum: [auto, glyphs, bar, dose] }
         count_noun: { type: string }
+        cutoff_minutes: { type: integer, nullable: true, minimum: 0, maximum: 1439 }
 
     DailyTrackerPatch:
       type: object
@@ -5487,6 +5501,7 @@ components:
         target: { type: number, nullable: true }
         render_style: { type: string, enum: [auto, glyphs, bar, dose] }
         sort_order: { type: integer }
+        cutoff_minutes: { type: integer, nullable: true, minimum: 0, maximum: 1439 }
 
     TrackerEntry:
       type: object

@@ -64,6 +64,7 @@ type TrackerRow = {
   render_style: string;
   sort_order: number;
   count_noun: string;
+  cutoff_minutes: number | null;
   provisioned: number;
   archived_at: string | null;
   restore_pending: number;
@@ -86,6 +87,7 @@ function toTracker(r: TrackerRow): Tracker {
     render_style: r.render_style as RenderStyle,
     sort_order: r.sort_order,
     count_noun: r.count_noun,
+    cutoff_minutes: r.cutoff_minutes,
     provisioned: r.provisioned === 1,
   };
 }
@@ -227,19 +229,20 @@ async function upsertTrackers(
     await db.runAsync(
       `INSERT INTO daily_trackers (
          id, user_id, preset, name, icon, color_key, unit, increment, target,
-         render_style, sort_order, count_noun, provisioned, archived_at, updated_at,
-         dirty, remote)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+         render_style, sort_order, count_noun, cutoff_minutes, provisioned, archived_at,
+         updated_at, dirty, remote)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
        ON CONFLICT(id) DO UPDATE SET
          preset = excluded.preset, name = excluded.name, icon = excluded.icon,
          color_key = excluded.color_key, unit = excluded.unit,
          increment = excluded.increment, target = excluded.target,
          render_style = excluded.render_style, sort_order = excluded.sort_order,
-         count_noun = excluded.count_noun, provisioned = excluded.provisioned,
+         count_noun = excluded.count_noun, cutoff_minutes = excluded.cutoff_minutes,
+         provisioned = excluded.provisioned,
          archived_at = excluded.archived_at, remote = 1
        WHERE daily_trackers.dirty = 0`,
       t.id, userId, t.preset, t.name, t.icon, t.color_key, t.unit, t.increment,
-      t.target, t.render_style, t.sort_order, t.count_noun ?? '',
+      t.target, t.render_style, t.sort_order, t.count_noun ?? '', t.cutoff_minutes ?? null,
       t.provisioned ? 1 : 0, t.archived_at, t.updated_at,
     );
   }
@@ -287,6 +290,7 @@ export async function updateTrackerLocally(
   add('render_style', patch.render_style);
   add('sort_order', patch.sort_order);
   add('count_noun', patch.count_noun);
+  add('cutoff_minutes', patch.cutoff_minutes);
   if (sets.length === 0) return;
 
   const db = await getDb();
@@ -324,6 +328,8 @@ export type NewTrackerInput = {
   target: number | null;
   render_style: RenderStyle;
   count_noun: string;
+  /** `null` for no cutoff, same reading as `target`. */
+  cutoff_minutes: number | null;
 };
 
 /**
@@ -364,11 +370,11 @@ export async function createTrackerLocally(
   await db.runAsync(
     `INSERT INTO daily_trackers (
        id, user_id, preset, name, icon, color_key, unit, increment, target,
-       render_style, sort_order, count_noun, updated_at, dirty, remote)
-     VALUES (?,?,'',?,?,?,?,?,?,?,?,?,?,1,0)`,
+       render_style, sort_order, count_noun, cutoff_minutes, updated_at, dirty, remote)
+     VALUES (?,?,'',?,?,?,?,?,?,?,?,?,?,?,1,0)`,
     id, userId, input.name, input.icon, input.color_key, input.unit,
     input.increment, input.target, input.render_style, (next?.n ?? 0) + 10,
-    input.count_noun, now,
+    input.count_noun, input.cutoff_minutes, now,
   );
   return id;
 }
@@ -741,7 +747,7 @@ async function push(userId: string, getToken: TokenGetter): Promise<TrackerSyncR
           id: d.id, name: d.name, icon: d.icon, color_key: d.color_key,
           unit: d.unit as TrackerUnit, increment: d.increment, target: d.target,
           render_style: d.render_style as RenderStyle, sort_order: d.sort_order,
-          count_noun: d.count_noun,
+          count_noun: d.count_noun, cutoff_minutes: d.cutoff_minutes,
         });
         // Created offline and then stopped before it ever reached the server.
         // Uncommon, and silently wrong without this: the create alone would put
@@ -756,7 +762,7 @@ async function push(userId: string, getToken: TokenGetter): Promise<TrackerSyncR
           name: d.name, icon: d.icon, color_key: d.color_key,
           unit: d.unit as TrackerUnit, increment: d.increment, target: d.target,
           render_style: d.render_style as RenderStyle, sort_order: d.sort_order,
-          count_noun: d.count_noun,
+          count_noun: d.count_noun, cutoff_minutes: d.cutoff_minutes,
         });
         // AFTER the patch, so an edit made in the same offline stretch as the
         // archive is not lost — the server accepts a patch on an archived row,

@@ -33,6 +33,8 @@ export type TrackerInput = {
   render_style?: RenderStyle;
   sort_order?: number;
   count_noun?: string;
+  /** Nullable, like `target`: omitted or `null` both mean no cutoff. */
+  cutoff_minutes?: number | null;
 };
 
 /**
@@ -53,6 +55,7 @@ export type TrackerPreset = {
   target: number | null;
   render_style: RenderStyle;
   count_noun: string;
+  cutoff_minutes: number | null;
 };
 
 /**
@@ -75,6 +78,8 @@ export type TrackerPatch = {
   render_style?: RenderStyle;
   sort_order?: number;
   count_noun?: string;
+  /** Same `omitted` / `null` / value split as `target`. */
+  cutoff_minutes?: number | null;
 };
 
 export type EntryInput = {
