@@ -439,6 +439,25 @@ export type Projection =
     };
 
 /**
+ * The one goal figure a projection actually knows, regardless of which
+ * branch it took — `basis.goal` for a success, `goal` for a refusal, `null`
+ * for the genuinely-goalless `no-goal` case.
+ *
+ * **N429.** `app/goals/trend.tsx`'s refusal sentence already read its number
+ * this way inline (N103's own fix for the same staleness this ticket closes
+ * one component down) — the chart's dashed goal line two components below
+ * still read `useWeightTrend`'s separately-fetched `goalKg` instead. Pulled
+ * out here so both callers take the number from the SAME derivation rather
+ * than two call sites agreeing to compute it the same way by convention,
+ * which is exactly how they drifted apart the first time (see `goal`'s own
+ * doc comment above, and N103's history entry).
+ */
+export function projectionGoal(projection: Projection): number | null {
+  if (projection.kind === 'projected') return projection.basis.goal;
+  return projection.goal ?? null;
+}
+
+/**
  * The smallest weekly rate worth projecting from, as a fraction of the distance
  * still to go per week. Below this the date is decades out and the honest
  * answer is that the current plan does not get there.
