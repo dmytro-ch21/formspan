@@ -46138,6 +46138,68 @@ rendering a sentence where the AC requires silence) rather than a compile
 error, restored the fix, and reran to confirm green again rather than trusting
 the restore by inspection.
 
+### Every mobile route-test file moved out from under the route root (N104, #477)
+
+Expo Router's `require.context` (`expo-router/_ctx.ios.js`) pulls in **everything**
+under the app root except `+api`/`+html`/`+middleware`, and `apps/mobile/app/__tests__/`
+matched it. Every `*.test.tsx`/`*.test.ts` file living there resolved to a real
+`/__tests__/<name>` route, reachable from `/_sitemap` in dev. Navigating to one
+evaluates `test(...)`/`expect(...)` at module scope, which is undefined outside a
+jest runner — and per this file's own Release-build gotcha, an unhandled error
+during route-module evaluation is fatal with no red box, no dialog and no JS
+stack in a Release build. Nobody had hit it, because nobody navigates to a test
+route, but the count kept growing: filed at 22 instances (frontend review on
+N101, #472, whose own new test file was the 22nd), it had grown to **53** by the
+time this ticket was worked, three tickets earlier the same day (N94, N101, N103)
+each having added one more screen test to the same trap.
+
+**The fix**: `git mv` every file from `apps/mobile/app/__tests__/` to
+`apps/mobile/__tests__/app/` — outside the route root entirely, mirroring the
+route tree one level up, alongside the pre-existing (and unaffected)
+`apps/mobile/lib/__tests__/` and `apps/mobile/components/__tests__/`. All 53
+files moved with history preserved via `git mv`; git recorded 51 as rename+edit
+and 2 (`todayPlanMatching.test.ts`, `weekPlanner.test.tsx`) as pure renames,
+matching exactly which files needed their relative imports touched.
+
+**The import fix, worked out by counting segments rather than assumed**: every
+file in the old location had exactly one class of relative import — a single
+`../X` reaching into `app/` (50 files via `from`, one of those also via a bare
+`require('../food/scan')` in `scanNoCamera.test.tsx`; two files had no relative
+imports at all). `apps/mobile/app/__tests__/` and `apps/mobile/__tests__/app/`
+are both exactly two path segments below `apps/mobile/`, so a *deeper* relative
+import (there were none here, but the reasoning generalizes) would have been
+unchanged by the move — only the one-hop case changes meaning, because the first
+`../` used to land in `app/` and now lands in `__tests__/`. Every `../X` became
+`../../app/X` (`s/from '\.\.\//from '..\/..\/app\//` plus the equivalent for the
+one `require(...)`), verified by grep afterward for any un-rewritten single-`../`
+import (zero) and any accidental double-application (zero). `@/` alias imports
+needed no change and none were touched — `tsconfig.json`'s `paths` maps `@/*` to
+the repo-relative `apps/mobile/*` and `babel-preset-expo` (no `moduleNameMapper`
+in `jest.config.js`, no `babel.config.js` in the app at all) resolves it the same
+way regardless of the importing file's location, so this held by construction,
+confirmed empirically by every moved suite passing.
+
+`jest.config.js`'s `testMatch` needed no path change — `**/__tests__/**/*.test.ts?(x)`
+already matches the new location by pattern, same as it matched the old one — but
+picked up a `testPathIgnorePatterns` entry excluding `<rootDir>/app/__tests__/`
+explicitly, as a guard against the same trap recurring if a stray file is ever
+added back under `app/` directly rather than under the new `__tests__/app/`.
+
+**Verified, both criteria the ticket asked for exactly**:
+- `pnpm run routes:mobile` then `grep -c "__tests__" apps/mobile/.expo/types/router.d.ts`
+  → **0** (was 22 at filing time, 53 immediately before this fix).
+- `pnpm run test:mobile` before the move: **222 suites / 3419 tests, all passing**.
+  After the move: **222 suites / 3419 tests, all passing** — identical counts,
+  confirming nothing was silently dropped from jest's discovery. One run mid-way
+  through verification showed a single failure in `bjjSessionScreen.test.tsx`
+  that did not reproduce in isolation or on a second full run and carried a
+  stack trace pointing at an unrelated `act()` warning in `goals.tsx` — a
+  pre-existing cross-test flake, not caused by this move, and the two full green
+  runs bracketing it are what the before/after comparison rests on.
+
+Left for the user, correctly marked `NEEDS HUMAN EVIDENCE` in the issue and not
+attempted here: confirming `/_sitemap` on a real dev build lists no test routes.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
