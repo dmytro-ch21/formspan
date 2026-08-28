@@ -45486,6 +45486,90 @@ from the sanctioned ref-guard idiom.
   itself has one. Small, and worth filing if the user wants exact parity with
   mobile's Settings screen.
 
+## 2026-08-27 — H9: a native dependency can no longer reach a device unnoticed (#441)
+
+Split out of #432/N91, where `expo-camera` landed in the JS bundle (#320)
+without ever reaching `apps/mobile/ios/Podfile.lock`, the generated
+autolinking manifest, or the built binary — an instant, no-dialog
+termination on a Release build, because `expo-camera` calls
+`requireNativeModule` at module scope and an unhandled JS error there is
+fatal in Release. `apps/mobile/ios/` is CNG-generated and gitignored, so
+nothing in the repo had ever verified it agreed with `package.json`; a human
+running `pod install` was the only thing keeping them in sync, and nothing
+failed when they didn't.
+
+**`scripts/check-native-deps.py`** is the fifteen-line comparison that was
+run by hand to find that, made permanent. For every `expo-*` package in
+`apps/mobile/package.json`'s `dependencies`, it derives the pod name(s) that
+package actually ships for iOS and confirms at least one is present in
+`ios/Podfile.lock`'s top-level `PODS:` section.
+
+**It reads real pod names rather than guessing them, because guessing is
+wrong on two dependencies already in this repo.** The obvious heuristic —
+PascalCase the package name (`expo-camera` → `ExpoCamera`) — is right for
+most of them and wrong for `expo-constants` (ships `EXConstants`,
+pre-unification naming) and `expo-dev-client` (ships `expo-dev-client`,
+verbatim). Deriving the name from each package's own
+`expo-module.config.json` (`apple.podspecPath`, when declared — `expo-camera`
+is an example) or, failing that, from whatever `*.podspec` lives under the
+package's own `ios/` (the fallback `expo-constants`, `expo-dev-client` and
+`expo-linking` all need) gets both right without a hardcoded exceptions
+table that the next irregular package would silently defeat. The same
+mechanism also keeps `expo-auth-session` (pure JS, no
+`expo-module.config.json` at all) and `expo-status-bar` (`"platforms":
+["android"]`, no iOS component) from being false-flagged — a check that
+cries wolf on a clean install is one CLAUDE.md already has a section about
+("verify that it can PASS") and gets disabled inside a week.
+
+**Scope is deliberately `expo-*` only**, not every autolinkable dependency.
+`@clerk/expo` and `react-native-*` packages are also autolinked and are out
+of scope: the incident was an `expo-*` package and is the class most native
+regressions here come from, and every `expo-*` package agrees on where to
+look (`expo-module.config.json`) while third-party podspecs share no such
+convention. A regression in a non-`expo-*` native dependency is a real gap
+this doesn't cover — recorded rather than assumed away.
+
+**Two pnpm scripts, split the way `check-ci-checks.py`/`ci:checks` already
+split real-vs-self-test (N65):**
+
+- `native-deps:check` — the real check, against the actual
+  `apps/mobile/ios/Podfile.lock`. No-ops (exit 0) when that file doesn't
+  exist, which is every fresh worktree and every CI run — `ios/` is
+  gitignored and CI installs from the lockfile without ever running `pod
+  install`, so a CI job here would be a permanent, silent no-op. Deliberately
+  **outside `verify` and outside CI**, and named with a `native-deps:` prefix
+  rather than `check:` specifically so `check-verify-chain.py`'s
+  `GATE_PREFIXES` never sees it as a gate that went silently unwired — that
+  script's own docstring warns "if it joins `verify`, it also joins
+  `check:verify-chain`," which is exactly the trap a `check:` name on an
+  `ios/`-dependent script would reopen.
+- `check:native-deps-guard` — `check-native-deps.py --self-test`, exercising
+  the comparison logic against synthetic fixtures built in a temp directory.
+  Needs no real `ios/`, so unlike the real check it CAN run anywhere — wired
+  into `verify` and into the `Scripts (Python)` CI job, same relationship
+  `check:ci-detector` has to `ci:checks`.
+
+**Mutation-verified two ways**, per CLAUDE.md's "verify that a check can
+fail": the self-test's own 5 synthetic cases (no-op, clean pass, a missing
+pod going red, a genuine restore going green again — confirmed by
+re-running, not by re-reading the file — and a node_modules-missing package
+being skipped rather than failed), and separately, against the **real**
+`apps/mobile/ios/Podfile.lock` (read from the primary checkout, copied into
+this worktree only — gitignored, never touched the primary): baseline green
+on all 20 real native dependencies, red with the exact message naming
+`expo-camera` after deleting its top-level `PODS:` entry (reproducing #432's
+actual incident), green again after restoring the original bytes and
+re-running. The copied `ios/`/`node_modules` scratch files were removed
+before finishing; `git status --short` confirmed empty.
+
+**What's left, and it's genuinely not agent-doable:** #441's other two
+criteria are device work — rebuilding the four-phone fleet and confirming
+each build post-dates #320, and confirming the rebuilt binary itself
+contains an `ExpoCamera` symbol. Left unchecked; the PR still says `closes
+#441` and the evidence-latch workflow will reopen it labelled
+`evidence-outstanding` until a human runs the device checklist, same pattern
+as every other device-gated ticket recently.
+
 
 ## Open items / known gaps as of this entry
 
