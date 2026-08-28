@@ -172,6 +172,43 @@ export function parseQuantity(text: string): number | null {
   return n;
 }
 
+/**
+ * A gram basis, read back out of a `serving_label` that states one honestly
+ * (N90's edit-an-existing-entry half).
+ *
+ * `nutrition_entries` has no gram column — `servings` is a multiplier against
+ * whatever `serving_label` says one serving is, and that label is free text:
+ * "100 g" for almost everything the catalog logs, but also "1 scoop (30 g)" or
+ * plain "1 egg" for a saved or described food. Only the first shape is honestly
+ * a weight — a scoop's "30 g" is a parenthetical about the scoop, not the unit
+ * the athlete is choosing between servings of, and "1 egg" has no gram claim in
+ * it at all.
+ *
+ * So this matches ONLY a label that is a bare number and "g" — `/^\d+(\.\d+)?
+ * \s*g$/i` after trimming — and returns null for everything else, including
+ * the two examples above. A caller that got a basis for "1 scoop (30 g)" would
+ * offer a grams control for a scoop and silently start counting scoops as
+ * grams, which is the exact relabel-not-convert bug this ticket's other half
+ * (`FoodQuantity`) already refuses.
+ */
+export function gramsBasisFromLabel(servingLabel: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)\s*g$/i.exec(servingLabel.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Grams -> servings, for a label that honestly states a gram basis — null when
+ * it does not, so a caller can fall back to editing servings directly rather
+ * than inventing a basis `gramsBasisFromLabel` just refused to guess.
+ */
+export function servingsForLabelGrams(servingLabel: string, grams: number): number | null {
+  const basis = gramsBasisFromLabel(servingLabel);
+  if (basis == null) return null;
+  return grams / basis;
+}
+
 function round1(v: number): number {
   return Math.round(v * 10) / 10;
 }

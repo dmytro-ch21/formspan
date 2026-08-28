@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 
+import { gramsBasisFromLabel } from "@/lib/foodQuantity";
 import { saveFood, type Food, type Macros, type RecipeItemInput } from "@/lib/nutritionApi";
+import { FoodQuantityInput } from "../FoodQuantityInput";
 
 /**
  * Authoring a recipe: a thing you cook once and eat six times.
@@ -30,6 +32,18 @@ import { saveFood, type Food, type Macros, type RecipeItemInput } from "@/lib/nu
  * (N42, with barcode scanning as N41), and building a thin version here would
  * mean N42 has to replace it rather than land in it. The one place this
  * section reads `/nutrition/foods` is to list the athlete's own saved recipes.
+ *
+ * # The quantity field, and when it is grams (N90)
+ *
+ * "How many" is a multiplier against "Of what" — 1.5 of "100 g", or 2 of "1
+ * egg" — because an ingredient's own unit is free text and not every
+ * ingredient is honestly a weight. When "Of what" is a bare gram figure
+ * (`gramsBasisFromLabel`; every new row starts there, since `emptyItem` seeds
+ * "100 g") the field becomes `FoodQuantityInput`, the same grams/oz control
+ * `apps/mobile/components/FoodQuantity.tsx` renders on the phone, reading the
+ * SAME `profiles.food_unit`. Switching "Of what" to something that is not a
+ * bare gram figure drops back to the plain multiplier on the next render — a
+ * live re-derivation, not a mode switch that can go stale.
  *
  * # Where the numbers come from
  *
@@ -239,54 +253,65 @@ export function RecipeEditor({ existing }: { existing?: Food }) {
         </div>
 
         <ul className="flex flex-col gap-3">
-          {items.map((it, i) => (
-            <li key={it.key} className="rounded-card border border-line bg-surface p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="grid flex-1 gap-3 sm:grid-cols-3">
-                  <Field
-                    label="Ingredient"
-                    type="text"
-                    value={it.name}
-                    onChange={(v) => update(i, { name: v })}
-                  />
-                  <Field
-                    label="How many"
-                    value={it.quantity}
-                    onChange={(v) => update(i, { quantity: v })}
-                  />
-                  <Field
-                    label="Of what"
-                    type="text"
-                    value={it.serving_label}
-                    onChange={(v) => update(i, { serving_label: v })}
-                  />
+          {items.map((it, i) => {
+            const basis = gramsBasisFromLabel(it.serving_label);
+            return (
+              <li key={it.key} className="rounded-card border border-line bg-surface p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="grid flex-1 gap-3 sm:grid-cols-3">
+                    <Field
+                      label="Ingredient"
+                      type="text"
+                      value={it.name}
+                      onChange={(v) => update(i, { name: v })}
+                    />
+                    {basis != null ? (
+                      <FoodQuantityInput
+                        label="How much"
+                        grams={num(it.quantity) * basis}
+                        onGramsChange={(g) => update(i, { quantity: String(g / basis) })}
+                      />
+                    ) : (
+                      <Field
+                        label="How many"
+                        value={it.quantity}
+                        onChange={(v) => update(i, { quantity: v })}
+                      />
+                    )}
+                    <Field
+                      label="Of what"
+                      type="text"
+                      value={it.serving_label}
+                      onChange={(v) => update(i, { serving_label: v })}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setItems((prev) => prev.filter((_, j) => j !== i))}
+                    disabled={items.length === 1}
+                    aria-label={`Remove ${it.name || `ingredient ${i + 1}`}`}
+                    className="mt-5 text-xs font-semibold text-danger-ink underline underline-offset-4 disabled:opacity-40"
+                  >
+                    Remove
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setItems((prev) => prev.filter((_, j) => j !== i))}
-                  disabled={items.length === 1}
-                  aria-label={`Remove ${it.name || `ingredient ${i + 1}`}`}
-                  className="mt-5 text-xs font-semibold text-danger-ink underline underline-offset-4 disabled:opacity-40"
-                >
-                  Remove
-                </button>
-              </div>
-              <div className="mt-3 grid gap-3 sm:grid-cols-5">
-                <Field label="kcal" value={it.kcal} onChange={(v) => update(i, { kcal: v })} />
-                <Field label="Protein g" value={it.protein_g} onChange={(v) => update(i, { protein_g: v })} />
-                <Field label="Carbs g" value={it.carb_g} onChange={(v) => update(i, { carb_g: v })} />
-                <Field label="Fat g" value={it.fat_g} onChange={(v) => update(i, { fat_g: v })} />
-                <Field label="Fibre g" optional value={it.fibre_g} onChange={(v) => update(i, { fibre_g: v })} />
-              </div>
-              <p className="mt-2 text-[0.6875rem] text-text-dim">
-                {/* Per-unit above, total here. Same reasoning as the day
-                    editor: a wrong quantity is invisible in a per-unit figure
-                    and obvious in a total. */}
-                {it.quantity || 0} × {it.serving_label || "serving"} ={" "}
-                {Math.round(num(it.kcal) * num(it.quantity))} kcal in the pot
-              </p>
-            </li>
-          ))}
+                <div className="mt-3 grid gap-3 sm:grid-cols-5">
+                  <Field label="kcal" value={it.kcal} onChange={(v) => update(i, { kcal: v })} />
+                  <Field label="Protein g" value={it.protein_g} onChange={(v) => update(i, { protein_g: v })} />
+                  <Field label="Carbs g" value={it.carb_g} onChange={(v) => update(i, { carb_g: v })} />
+                  <Field label="Fat g" value={it.fat_g} onChange={(v) => update(i, { fat_g: v })} />
+                  <Field label="Fibre g" optional value={it.fibre_g} onChange={(v) => update(i, { fibre_g: v })} />
+                </div>
+                <p className="mt-2 text-[0.6875rem] text-text-dim">
+                  {/* Per-unit above, total here. Same reasoning as the day
+                      editor: a wrong quantity is invisible in a per-unit figure
+                      and obvious in a total. */}
+                  {it.quantity || 0} × {it.serving_label || "serving"} ={" "}
+                  {Math.round(num(it.kcal) * num(it.quantity))} kcal in the pot
+                </p>
+              </li>
+            );
+          })}
         </ul>
 
         <button

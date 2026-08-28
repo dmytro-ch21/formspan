@@ -6,11 +6,13 @@
  */
 import {
   canLogByWeight,
+  gramsBasisFromLabel,
   macrosForGrams,
   parseQuantity,
   quantityOptions,
   servingBasisGrams,
   servingsForGrams,
+  servingsForLabelGrams,
 } from '../foodQuantity';
 import { fromDisplayGrams } from '../units';
 import type { CatalogFood } from '../catalogApi';
@@ -187,4 +189,72 @@ test('the same quantity logged in g and in oz is the same row', () => {
     servingsForGrams(banana, viaGrams),
     2,
   );
+});
+
+/**
+ * N90: editing an EXISTING entry has no gram basis column to read — only a
+ * free-text `serving_label` — so `gramsBasisFromLabel` has to tell a genuine
+ * weight ("100 g") apart from a label that merely contains a number ("1 scoop
+ * (30 g)") or none at all ("1 egg"). Getting this wrong in the permissive
+ * direction is the actual hazard: a false basis offers a grams control that
+ * silently starts counting scoops, or eggs, as grams.
+ */
+describe('gramsBasisFromLabel', () => {
+  test('a bare gram weight is read as a basis', () => {
+    expect(gramsBasisFromLabel('100 g')).toBe(100);
+    expect(gramsBasisFromLabel('182.5 g')).toBeCloseTo(182.5, 5);
+  });
+
+  test('no space, and a capital G, both still count', () => {
+    expect(gramsBasisFromLabel('30g')).toBe(30);
+    expect(gramsBasisFromLabel('30G')).toBe(30);
+  });
+
+  test('surrounding whitespace does not defeat it', () => {
+    expect(gramsBasisFromLabel('  100 g  ')).toBe(100);
+  });
+
+  test('a parenthetical gram note is NOT a basis for the label as a whole', () => {
+    // "1 scoop (30 g)" is not honestly a claim that one SERVING is 30 g — the
+    // 30 g describes the scoop parenthetically. A permissive regex here would
+    // offer a grams control that then counts scoops as grams.
+    expect(gramsBasisFromLabel('1 scoop (30 g)')).toBeNull();
+  });
+
+  test('a label with no gram claim at all has no basis', () => {
+    expect(gramsBasisFromLabel('1 egg')).toBeNull();
+    expect(gramsBasisFromLabel('1 bar')).toBeNull();
+    expect(gramsBasisFromLabel('serving')).toBeNull();
+  });
+
+  test('trailing text after the unit disqualifies it — the label must be BARE grams', () => {
+    // An unanchored end would let "100 g rounded" through as a 100 g basis.
+    // The label is supposed to be the whole claim, not a prefix of one.
+    expect(gramsBasisFromLabel('100 g rounded')).toBeNull();
+    expect(gramsBasisFromLabel('100 grams')).toBeNull();
+  });
+
+  test('zero grams is refused — a basis of zero would divide by zero downstream', () => {
+    expect(gramsBasisFromLabel('0 g')).toBeNull();
+  });
+
+  test('empty and whitespace-only labels have no basis', () => {
+    expect(gramsBasisFromLabel('')).toBeNull();
+    expect(gramsBasisFromLabel('   ')).toBeNull();
+  });
+});
+
+describe('servingsForLabelGrams', () => {
+  test('divides by the basis the label states', () => {
+    expect(servingsForLabelGrams('100 g', 250)).toBeCloseTo(2.5, 5);
+  });
+
+  test('is the exact inverse of the basis multiplication a caller does to redisplay it', () => {
+    const servings = servingsForLabelGrams('182 g', 273)!;
+    expect(servings * 182).toBeCloseTo(273, 5);
+  });
+
+  test('null for a label with no honest gram basis, rather than inventing one', () => {
+    expect(servingsForLabelGrams('1 egg', 250)).toBeNull();
+  });
 });

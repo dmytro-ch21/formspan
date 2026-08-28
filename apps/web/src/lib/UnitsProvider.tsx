@@ -3,8 +3,8 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
-import { updateUnitSystem } from "@/lib/api";
-import type { UnitSystem } from "@/lib/units";
+import { updateFoodUnit, updateUnitSystem } from "@/lib/api";
+import type { FoodUnit, UnitSystem } from "@/lib/units";
 
 /**
  * The athlete's display units — once, for the whole dashboard.
@@ -51,22 +51,37 @@ import type { UnitSystem } from "@/lib/units";
 type UnitsState = {
   units: UnitSystem;
   setUnits: (u: UnitSystem) => Promise<void>;
+  /**
+   * The unit food quantities are typed and shown in (N90).
+   *
+   * Same shape as `units` — one copy for the whole dashboard, optimistic
+   * write with rollback on failure — and the SAME account-level field mobile
+   * writes, so a choice made on the phone shows up here without a "sync"
+   * step, and vice versa.
+   */
+  foodUnit: FoodUnit;
+  setFoodUnit: (u: FoodUnit) => Promise<void>;
 };
 
 const UnitsContext = createContext<UnitsState>({
   units: "metric",
   setUnits: async () => {},
+  foodUnit: "g",
+  setFoodUnit: async () => {},
 });
 
 export function UnitsProvider({
   initial,
+  initialFoodUnit,
   children,
 }: {
   initial: UnitSystem;
+  initialFoodUnit: FoodUnit;
   children: React.ReactNode;
 }) {
   const { getToken } = useAuth();
   const [units, setLocal] = useState<UnitSystem>(initial);
+  const [foodUnit, setLocalFood] = useState<FoodUnit>(initialFoodUnit);
 
   const setUnits = useCallback(
     async (u: UnitSystem) => {
@@ -93,7 +108,27 @@ export function UnitsProvider({
     [getToken, units],
   );
 
-  const value = useMemo(() => ({ units, setUnits }), [units, setUnits]);
+  const setFoodUnit = useCallback(
+    async (u: FoodUnit) => {
+      // Same optimistic-with-rollback shape as `setUnits` above, and for the
+      // same reason: a failed write must not leave every mounted surface
+      // showing a preference the account never actually accepted.
+      const previous = foodUnit;
+      setLocalFood(u);
+      try {
+        await updateFoodUnit(getToken, u);
+      } catch (err) {
+        setLocalFood(previous);
+        throw err;
+      }
+    },
+    [getToken, foodUnit],
+  );
+
+  const value = useMemo(
+    () => ({ units, setUnits, foodUnit, setFoodUnit }),
+    [units, setUnits, foodUnit, setFoodUnit],
+  );
   return <UnitsContext.Provider value={value}>{children}</UnitsContext.Provider>;
 }
 

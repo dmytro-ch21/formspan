@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 
+import { gramsBasisFromLabel } from "@/lib/foodQuantity";
 import { formatDayLong, today } from "@/lib/history";
 import {
   deleteEntry,
@@ -15,6 +16,7 @@ import {
   type Target,
 } from "@/lib/nutritionApi";
 import { targetOn } from "@/lib/nutritionSeries";
+import { FoodQuantityInput } from "../../FoodQuantityInput";
 
 /**
  * Correcting a day that has already happened.
@@ -49,6 +51,16 @@ import { targetOn } from "@/lib/nutritionSeries";
  * **It does not recompute from a saved food.** An entry owns its numbers. The
  * `source_food_id` is provenance and is carried through a save unchanged, so
  * correcting a recipe next month cannot rewrite what this day says you ate.
+ *
+ * # Quantity in grams, when the entry can honestly say so (N90)
+ *
+ * `servings` is a multiplier against whatever `serving_label` says one
+ * serving is, and that label is free text. When it honestly states a gram
+ * weight ("100 g" — `gramsBasisFromLabel`) the "How much" fieldset offers
+ * `FoodQuantityInput`, the same grams/oz control the recipe editor and the
+ * phone both use, reading the same `profiles.food_unit`. Otherwise ("1 egg",
+ * "1 bar") it stays the plain servings field it always was — a false basis
+ * would silently start counting eggs as grams.
  */
 
 /** How many servings one tap moves. Halve and double, because the two errors a
@@ -555,6 +567,12 @@ function EntryForm({
   const kcal = Number(draft.kcal);
   const total =
     Number.isFinite(servings) && Number.isFinite(kcal) ? Math.round(servings * kcal) : null;
+  // Null when `serving_label` does not honestly state a gram weight — see the
+  // docstring above the component. Re-derived every render from the CURRENT
+  // label, so editing "One serving is" away from grams drops the control back
+  // to the plain multiplier rather than leaving it stuck in a stale mode.
+  const basis = gramsBasisFromLabel(draft.serving_label);
+  const grams = basis != null && Number.isFinite(servings) ? servings * basis : 0;
 
   return (
     <form
@@ -590,11 +608,19 @@ function EntryForm({
           How much
         </legend>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field
-            label="Servings"
-            value={draft.servings}
-            onChange={(v) => onChange({ ...draft, servings: v })}
-          />
+          {basis != null ? (
+            <FoodQuantityInput
+              label="Quantity"
+              grams={grams}
+              onGramsChange={(g) => onChange({ ...draft, servings: String(g / basis) })}
+            />
+          ) : (
+            <Field
+              label="Servings"
+              value={draft.servings}
+              onChange={(v) => onChange({ ...draft, servings: v })}
+            />
+          )}
           <Field
             label="One serving is"
             type="text"

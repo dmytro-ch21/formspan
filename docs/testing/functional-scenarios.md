@@ -13890,3 +13890,102 @@ on screen. That, and only that, is what moved.
   404/no-op rather than delete A's row).
 - Confirm the list itself only ever shows the signed-in athlete's own saved
   foods — no cross-account leakage through `GET /v1/nutrition/foods`.
+
+
+## N90 — quantity editing finishes: an existing entry, and web (`apps/mobile/app/food/entry/[id].tsx`, `apps/mobile/lib/foodQuantity.ts`, `apps/web/src/lib/foodQuantity.ts`, `apps/web/src/lib/UnitsProvider.tsx`, `apps/web/src/app/dashboard/nutrition/FoodQuantityInput.tsx`, `apps/web/src/app/dashboard/nutrition/recipes/RecipeEditor.tsx`, `apps/web/src/app/dashboard/nutrition/days/[date]/DayEditor.tsx`, `PATCH /v1/profile`)
+
+### Happy path — editing an existing entry (mobile)
+
+- Log a catalog food (serving label "100 g"), then open it from the day
+  screen to correct it. Confirm a grams/oz quantity control appears — four
+  preset chips plus a free-typed field — rather than the bare "Servings"
+  stepper.
+- Type a new gram quantity (e.g. 180 for a food logged at 100 g). Confirm the
+  visible macro fields rescale immediately to match, and saving records the
+  new quantity.
+- Tap the oz toggle. Confirm the field's number CONVERTS (e.g. "100" becomes
+  "3.53") rather than being relabelled onto the same digits, and that the
+  macros shown do not change when only the unit is toggled.
+- Tap one of the four preset chips (0.5×/1×/1.5×/2× the food's basis).
+  Confirm it fills the field with that chip's gram amount in the currently
+  selected unit and rescales the macros to match.
+- Type a macro field (e.g. Protein) directly after adjusting quantity.
+  Confirm quantity no longer rescales the macros on further edits (same
+  "manual" rule the pre-N90 servings stepper already had).
+- Open an entry logged from a food whose serving label is NOT a bare gram
+  figure (e.g. "1 egg", or a saved food labelled "1 scoop (30 g)"). Confirm
+  the screen falls back to the plain "Servings" stepper unchanged from
+  before this ticket — no grams control appears for either.
+- Change the g/oz preference from Settings (or another open tab of the app,
+  if reachable) while this edit screen is open. Confirm the field updates to
+  reflect the new unit without the athlete having touched anything on this
+  screen.
+
+### Happy path — web (recipes and the day editor)
+
+- On `dashboard/nutrition/recipes/new`, add an ingredient. Confirm "Of what"
+  defaults to "100 g" and the quantity field beside it is the grams/oz
+  control (a text field plus a g/oz toggle), not a bare number.
+- Type a gram quantity, toggle to oz, confirm the number converts rather
+  than relabels, and confirm the "kcal in the pot" preview beneath the row
+  updates live from what is typed.
+- Change "Of what" to something that is not a bare gram figure (e.g. "1
+  egg"). Confirm the quantity field reverts to the plain "How many" number
+  input on the next render.
+- On a day's edit page (`dashboard/nutrition/days/[date]`), edit an entry
+  whose "One serving is" reads a bare gram figure. Confirm the "How much"
+  fieldset shows the grams/oz control in place of the plain "Servings"
+  field, and that the "× kcal = total" preview beneath it still updates live
+  as the quantity changes.
+- Use "Add something you missed" with a serving label of "100 g" from the
+  start. Confirm the same grams/oz control appears on the add form.
+- Toggle the unit on the recipe editor's control, then open the day editor
+  in the same session (or reload). Confirm the day editor's control reflects
+  the same choice — both read `profiles.food_unit` through the one shared
+  `UnitsProvider`.
+
+### Stored-value invariance (criterion 7)
+
+- Log (or edit) the same real quantity of the same food once entirely in
+  grams and once entirely in ounces (e.g. "180" at g vs. "6.35" at oz, both
+  describing the same real amount). Confirm the two resulting rows —
+  `servings`/`quantity` and every macro field — are the same to the
+  precision the server stores, on both mobile and web.
+
+### Edge cases and errors
+
+- On mobile, back out of the entry-edit screen mid-type in the grams field
+  (before committing) without saving. Confirm nothing was written and the
+  entry still reads its pre-edit values on return.
+- On web, leave a recipe ingredient's grams field blank or type "0". Confirm
+  the row is treated as invalid the same way an empty/zero "How many" always
+  was — no NaN or negative quantity reaches the preview or the save payload.
+- Switch `unit_system` from metric to imperial for an account that has never
+  touched `food_unit` explicitly. Confirm `food_unit` follows (starts
+  showing oz) on both mobile and web, and confirm it STOPS following once
+  the athlete explicitly picks a food unit of their own — set it to grams
+  under an imperial account, then flip `unit_system` back to metric, and
+  confirm the food unit stays on grams rather than reverting.
+- Go offline on mobile, change the g/oz preference, then edit an entry's
+  quantity. Confirm the edit applies locally and the preference is written
+  to the server once connectivity returns (an "owed" pending-sync state, the
+  same mechanism `unit_system` already uses).
+- On web, trigger a failed `PATCH /v1/profile` while toggling the unit (e.g.
+  by revoking the session token first). Confirm the toggle rolls back to its
+  previous state rather than leaving every mounted control showing a
+  preference the server never accepted.
+
+### Auth / security
+
+- Confirm `PATCH /v1/profile` with `food_unit` set to anything other than
+  `"g"` or `"oz"` is rejected `invalid_input`, and that a request from one
+  account cannot alter another account's `food_unit` (standard per-user
+  profile scoping — no new authorization surface is introduced by this
+  field).
+
+### NEEDS HUMAN EVIDENCE
+
+- On a real phone, mid-kitchen: confirm the quantity control on the
+  entry-edit screen is usable one-handed with the numeric keyboard up, and
+  that the keyboard does not cover the field, the toggle, or the Save
+  button.
