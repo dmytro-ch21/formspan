@@ -311,3 +311,136 @@ func TestEveryNonSyllabusCurriculumStillHasMilestones(t *testing.T) {
 		t.Fatal("every seeded curriculum is a syllabus, so this test asserted nothing")
 	}
 }
+
+// N110 (#480): the belt/syllabus PAIRING, asserted rather than assumed.
+//
+// A belt's roadmap (`<belt>-belt-basics`, track "belt") and its reference
+// syllabus (`<belt>-belt-syllabus`, track "syllabus") are meant to be one
+// spine at two depths — the syllabus is what exists, the roadmap is the
+// worked subset an athlete is measured on — and they share a Belt value.
+// Nothing in the suite asserted that pairing before this test: a belt could
+// lose its syllabus, or a syllabus its belt, and every other guard in this
+// file would stay green, because each of them iterates ONE track at a time.
+//
+// # Why this test does not also compare phase titles and order
+//
+// N110 was filed on the claim that "a belt's roadmap and its syllabus share
+// their phase titles and their order, and differ only in depth and in
+// whether items carry criteria" — and asked for a test asserting exactly
+// that, slice-by-slice, so a future reorder or retitle on one side and not
+// the other would go red.
+//
+// That claim was checked against the embedded content while writing this
+// test (not asserted — measured, per this repo's own "verify that a check
+// can fail" rule), by writing the literal comparison the ticket describes
+// and running it against unmutated `main`. It fails, on every one of the
+// four pairs, with no mutation involved:
+//
+//   - White and purple match phase-for-phase in COUNT (11/11, 10/10) but not
+//     in TITLE TEXT. The roadmap carries docs/design/bjj-belt-curriculum.md's
+//     Title Case milestone names verbatim — TestEveryBeltRoadmapMatchesThe-
+//     SuppliedDocument in document_test.go enforces exactly that — while the
+//     syllabus predates that document (N20/#277) and reads in its own
+//     sentence-case narrative voice: roadmap "Turtle" / syllabus "Turtle,
+//     from both sides"; roadmap "Submission Defense" / syllabus "Know when
+//     you are in trouble". Lower-casing both sides before comparing does not
+//     rescue this — 5 of white belt's 11 phases differ in actual wording,
+//     not just case ("Sweep From Bottom" vs "Sweep from the bottom").
+//   - Blue and brown additionally disagree on PHASE COUNT — blue is 10
+//     roadmap phases vs 9 syllabus phases, brown is 10 vs 7 — so no title
+//     normalisation could pass them; there are not the same number of slots
+//     to line up.
+//
+// So the "cheap half" this ticket asked for turned out not to be cheap: the
+// stronger invariant it wanted to guard does not currently hold, on content
+// that shipped independently across two PRs (N20/#277 authored the
+// syllabuses; N97/#445 re-authored the roadmaps against the design document
+// without reconciling the syllabuses to match). Shipping the literal test
+// would mean committing it permanently red — not demonstrating a mutation,
+// just restating a pre-existing defect on every run — which breaks `verify`
+// and CI for everyone, not only for a future editor who introduces new
+// drift. And fixing the content to make it true is exactly the kind of
+// editorial call this ticket explicitly declines to make on its own
+// authority: retitling the syllabus is a "which is the source?" decision,
+// and blue/brown's count mismatch cannot be closed by a title edit at all —
+// items would have to move between phases, touching the per-belt notes
+// authored on them.
+//
+// So this test asserts the invariant that IS true today and stays true
+// under exactly the drift N110 was worried about (deleting or renaming a
+// counterpart, or forgetting one when a fifth belt is added): every belt
+// has exactly one syllabus and every syllabus has exactly one belt. The
+// stronger phase-title/order guard belongs in a follow-up once the content
+// itself is reconciled — see the 2026-08-28 history entry for the recorded
+// ruling.
+func TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart(t *testing.T) {
+	data, err := SeedData()
+	if err != nil {
+		t.Fatalf("parse seed: %v", err)
+	}
+
+	roadmaps := map[string]string{}   // belt -> curriculum id
+	syllabuses := map[string]string{} // belt -> curriculum id
+	for _, c := range data {
+		switch c.Track {
+		case "belt":
+			if prev, dup := roadmaps[c.Belt]; dup {
+				t.Errorf("two curricula on the belt track share belt %q: %s and %s", c.Belt, prev, c.ID)
+				continue
+			}
+			roadmaps[c.Belt] = c.ID
+		case "syllabus":
+			if prev, dup := syllabuses[c.Belt]; dup {
+				t.Errorf("two curricula on the syllabus track share belt %q: %s and %s", c.Belt, prev, c.ID)
+				continue
+			}
+			syllabuses[c.Belt] = c.ID
+		}
+	}
+
+	if len(roadmaps) == 0 {
+		t.Fatal("no curriculum is on the belt track, so this test asserted nothing")
+	}
+	if len(syllabuses) == 0 {
+		t.Fatal("no curriculum is on the syllabus track, so this test asserted nothing")
+	}
+
+	// novice-fundamentals is handled EXPLICITLY, not by silent exemption: it
+	// carries no Belt at all (it sits on the "foundations" track instead), so
+	// it can never appear in either map above. Assert that stays true, so a
+	// FUTURE syllabus authored for it doesn't quietly go unpaired the same
+	// way a belt/syllabus pair could.
+	found := false
+	for _, c := range data {
+		if c.ID != "novice-fundamentals" {
+			continue
+		}
+		found = true
+		if c.Track != "foundations" || c.Belt != "" {
+			t.Errorf("novice-fundamentals is the one curriculum expected to have no belt/syllabus "+
+				"counterpart, on track %q with no belt — got track=%q belt=%q; if that changed, it may "+
+				"now need a counterpart on the other track", "foundations", c.Track, c.Belt)
+		}
+	}
+	if !found {
+		t.Error("novice-fundamentals is missing entirely — this test's handling of curricula with no " +
+			"counterpart assumes it exists and is exempt by design, not by accident")
+	}
+
+	checked := 0
+	for belt, id := range roadmaps {
+		if _, ok := syllabuses[belt]; !ok {
+			t.Errorf("%s (belt %q) has no syllabus counterpart", id, belt)
+			continue
+		}
+		checked++
+	}
+	for belt, id := range syllabuses {
+		if _, ok := roadmaps[belt]; !ok {
+			t.Errorf("%s (belt %q) has no belt-track counterpart", id, belt)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("checked zero belt/syllabus pairs")
+	}
+}
