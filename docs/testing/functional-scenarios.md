@@ -14383,6 +14383,11 @@ on screen. That, and only that, is what moved.
   previous fill. This is a visual/animation-timing defect a test-runner
   clock cannot fully exercise; see the 2026-08-28 history entry for what is
   and isn't mechanically proven about the underlying stickiness mechanism.
+  Also eyeball two side effects of the fix (`frontend-reviewer`): every day
+  switch now replays the ring's full sweep-from-zero animation rather than
+  retargeting from wherever it currently sat, and there's a brief hold on
+  each remount while `useReducedMotion()` re-asks the OS — confirm neither
+  reads as a flicker or a stutter worth fixing separately.
 
 ### Auth / security
 

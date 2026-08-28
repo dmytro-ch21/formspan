@@ -47155,10 +47155,14 @@ new day's `readRings()` output instead of depending on the retargeting
 `useEffect` (which already lists `targetBase`/`targetOver` in its deps) to
 visually converge back down. Placed on `MomentumCard` rather than on
 `MacroRings` specifically: it's the minimal placement consistent with how
-`collapseKey={on}` is already threaded through this same screen, and it
-resets the card's `StatePill`/quick-add chip state too, which is no worse and
-arguably more consistent than a stale card visually agreeing with a new day's
-rings but not with anything else on it.
+`collapseKey={on}` is already threaded through this same screen. Correction
+(`frontend-reviewer`): this does NOT reset any `StatePill`/quick-add chip
+state — `MomentumCard` and every child except `Ring` are stateless, pure
+derivations of props (`StatePill`, the chips, the foot line all re-render
+correctly on props alone regardless of remounting). The only per-instance
+state anywhere in the subtree is `Ring`'s two `Animated.Value`s and each
+`useReducedMotion()` hook, both of which are exactly what the remount exists
+to reset.
 
 **What's proven versus hypothesised.** The missing day-key is a real,
 structural defect, independently confirmed by the established
@@ -47207,6 +47211,42 @@ today → previous day (logged) → today again, confirming the rings render
 empty from the first frame rather than sweeping down from a previous fill.
 
 **`pnpm run verify`**: green.
+
+### `ac-verifier`/`frontend-reviewer` findings, applied before merge
+
+**`ac-verifier` marked the test criterion NOT MET, and it was right to.** The
+argument above ("`.interpolate()` output isn't a plain prop this test suite
+can read back") was wrong on the facts, not just the framing
+`frontend-reviewer` separately called out: `strokeDashoffset` DOES resolve to
+a plain number under `react-test-renderer`'s `toJSON()` — confirmed directly
+(`base.interpolate(...)` renders as `194.78`, not an unresolved animated
+node) — because `useNativeDriver: false` keeps the whole interpolation on the
+JS thread. What's true is narrower than "cannot be read": under Reduce Motion
+(`setValue`, synchronous) the buggy and fixed paths converge to the SAME final
+value regardless of remounting, since the retargeting `useEffect`'s deps are
+correct either way — so a same-key-vs-new-key comparison at rest proves
+nothing. The bug is only observable **mid-transition**: with real animation
+timing and fake timers advanced partway into the 620ms sweep, a re-rendered
+`MomentumCard` with the SAME key still reads close to the previous (filled)
+offset, while a NEW key reads close to empty from the first frame — a ~230pt
+gap on a ~530pt circumference, measured directly.
+
+Added to `components/today/__tests__/momentumCard.test.tsx`: a `Host` wrapper
+reproducing `index.tsx`'s exact `key={on}` shape, rendering `MomentumCard`
+with Reduce Motion forced off, comparing the kcal ring's `strokeDashoffset`
+50ms after switching from a filled day to an empty one — same key vs. a new
+one. Mutation-verified: forced both rerenders onto the same key (the pre-fix
+shape), confirmed the assertion failed on a real value (difference collapsed
+to exactly `0`, not a compile error), restored, confirmed green by
+re-running.
+
+**What this test does NOT prove, stated plainly**: it does not execute
+`index.tsx`'s own `key={on}` line — rendering the full `TodayScreen` hits the
+same wall `todayScreen.test.tsx`'s own W13 comment describes (`listTargets`
+mocked to `[]` never reaches a real target). It protects the MECHANISM the
+real fix depends on (a day-tied `key` genuinely resets `Ring`'s animation
+mid-transition), not the wiring at the call site. The ticket's own `NEEDS
+HUMAN EVIDENCE` device check is still the closure for that gap, unchanged.
 
 ## Open items / known gaps as of this entry
 
