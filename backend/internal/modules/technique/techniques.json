@@ -1067,7 +1067,7 @@
     "position_detail": "Judo Ashi-waza",
     "to_position": "Guard - Top",
     "gi_no_gi": "Gi Only",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "Time the light advancing foot, sweep at the ankle, and steer the lapel-and-sleeve grips in the same direction.",
     "when_to_use": "Use from Judo Ashi-waza when grip or tie control lets you steer the upper body while one foot becomes light during a step. Choose it when the required collar, sleeve, belt, or pant grip is secure. Apply it before the opponent completes or consolidates retract foot.",
     "setup_from": [
@@ -3327,7 +3327,7 @@
     "position": "Turtle - Bottom",
     "position_detail": "Granby",
     "gi_no_gi": "Both",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "Protect the neck, roll across the near shoulder under the opponent's control, and thread the legs back between bodies.",
     "when_to_use": "Use from Granby during the transition before the passer connects chest-to-chest or clears both knees; rebuild inside frames first, then choose the guard.",
     "setup_from": [
@@ -9356,7 +9356,7 @@
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "Pin the near wrist, step the head-side leg over, sit close to the shoulder, clamp the knees, and control the thumb line.",
     "when_to_use": "Use from Chest-to-Chest after the elbow is isolated beyond the defensive line and the shoulder and wrist can be controlled together. Apply it before the opponent completes or consolidates elbow retract.",
     "setup_from": [
@@ -9527,7 +9527,7 @@
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "Drive the far arm across the neck, connect head and arm, walk toward the trapped side, and compress with chest pressure.",
     "when_to_use": "Use from Chest-to-Chest when one arm is inside and one arm is outside your leg line and posture can be broken before the lock closes. Apply it before the opponent completes or consolidates frame.",
     "setup_from": [
@@ -9719,7 +9719,7 @@
     "position": "Side Control - Top",
     "position_detail": "Chest-to-Chest",
     "gi_no_gi": "Both",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "Feed the far wrist behind the head, control it with the underhooking hand, and keep the near shoulder pinned for mount or back exposure.",
     "when_to_use": "Use from Chest-to-Chest immediately after a pass, takedown, turnover, or transition so the opponent cannot rebuild frames before your next attack. Apply it before the opponent completes or consolidates hand peel.",
     "setup_from": [
@@ -10721,7 +10721,7 @@
     "position": "Mount - Top",
     "position_detail": "Technical Mount",
     "gi_no_gi": "Both",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "When the opponent turns, wedge one knee behind the back, place the other foot near the hip, and control the upper shoulder and wrist.",
     "when_to_use": "Use from Technical Mount immediately after a pass, takedown, turnover, or transition so the opponent cannot rebuild frames before your next attack. Apply it before the opponent completes or consolidates hip escape.",
     "setup_from": [
@@ -10855,7 +10855,7 @@
     "position": "Mount - Top",
     "position_detail": "Low Mount",
     "gi_no_gi": "Both",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "Drive one arm across the neck, connect head and arm, lower the head-side hip, and dismount to the trapped-arm side to finish.",
     "when_to_use": "Use from Low Mount when one arm is inside and one arm is outside your leg line and posture can be broken before the lock closes. Apply it before the opponent completes or consolidates recover elbow.",
     "setup_from": [
@@ -11965,7 +11965,7 @@
     "position": "Back - Top (Back Control)",
     "position_detail": "Seatbelt",
     "gi_no_gi": "Both",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "When the opponent slides low, post behind, scoop the far hip back onto the lap, and reconnect the knee and shoulder lines.",
     "when_to_use": "Use from Seatbelt immediately after a pass, takedown, turnover, or transition so the opponent cannot rebuild frames before your next attack. Apply it before the opponent completes or consolidates shoulder-to-mat escape.",
     "setup_from": [
@@ -13045,7 +13045,7 @@
     "position": "Turtle - Top",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "Thread one arm inside the thigh and the other near the upper arm, stretch the base diagonally, and expose a hip for hooks.",
     "when_to_use": "Use from Rear Turtle immediately after a pass, takedown, turnover, or transition so the opponent cannot rebuild frames before your next attack. It is designed for no-gi control without relying on cloth grips. Apply it before the opponent completes or consolidates sit-out.",
     "setup_from": [
@@ -13793,7 +13793,7 @@
     "position": "Turtle - Bottom",
     "position_detail": "Rear Turtle",
     "gi_no_gi": "No-Gi Only",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "Control the near wrist, sit the hips out, reach around the far hip, and rotate behind while keeping the neck protected.",
     "when_to_use": "Use from Rear Turtle when the opponent has not yet secured both hooks or a locked choke and a hand-fight creates an open side. It is designed for no-gi control without relying on cloth grips. Apply it before the opponent completes or consolidates claw ride.",
     "setup_from": [
@@ -14963,7 +14963,7 @@
     "position": "Side Control - Bottom",
     "position_detail": "Defending the figure-four",
     "gi_no_gi": "Both",
-    "typical_belt": "Blue",
+    "typical_belt": "White",
     "description": "Grip your own belt or thigh to shorten the lever, bring the elbow tight to the ribs, and turn toward the trapped arm rather than away from it.",
     "when_to_use": "Use the instant the figure-four closes, before the arm is walked behind the back. Turning away lengthens the lever and finishes the lock for them, which is why the direction of the turn is the whole technique.",
     "setup_from": [
@@ -17241,7 +17241,7 @@
     "position_detail": "Rear Turtle",
     "to_position": "Back - Top (Back Control)",
     "gi_no_gi": "Both",
-    "typical_belt": "Purple",
+    "typical_belt": "White",
     "description": "With a seatbelt on the turtle, tuck your head to the mat beside them and roll over your own shoulder, carrying them through the roll so you land behind them with both hooks available.",
     "when_to_use": "Use when the turtle is too heavy to break down in place — the roll uses their base against them by taking the ground away. Commit fully: half a roll gives the back away instead of taking it.",
     "setup_from": [

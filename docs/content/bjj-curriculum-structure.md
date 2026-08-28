@@ -26,7 +26,10 @@ items. What a syllabus adds over a filter is sections in the order a round
 happens, an objective for each, and a subset short enough to read; that is
 curation, so the lists are curated. The cost is real and worth stating: an
 exhaustive list can answer "is X a blue belt technique?" negatively, and a
-curated one cannot.
+curated one cannot. (Read that as *recommended for* a belt, not gated to
+it — `typical_belt` is a starting-point suggestion, never a restriction; see
+`Summary.TypicalBelt`'s doc comment in `backend/internal/modules/technique/technique.go`
+for the full ruling, F19.)
 
 **They share section names, and since N97 they share the section ORDER too.**
 The reference is the atlas; the roadmap is a route through it. An athlete moving
