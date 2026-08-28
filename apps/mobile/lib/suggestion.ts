@@ -73,8 +73,12 @@ export type Suggestion = {
  * changing it is a decision about how eager the app should be, not a bug fix.
  * Anyone tempted to "correct" it to nine is re-opening a settled question and
  * should have a reason beyond the arithmetic.
+ *
+ * **Exported** so `classFocus.ts` can apply the same bar to a roadmap
+ * item's own evidence rather than inventing a second number for the same
+ * product call — see that file's doc comment.
  */
-const MIN_DRILLED = 6;
+export const MIN_DRILLED = 6;
 
 /**
  * Beyond this the gap is history rather than an opportunity.
@@ -82,8 +86,11 @@ const MIN_DRILLED = 6;
  * 60 days is roughly a training block. Long enough that a holiday or an injury
  * does not erase a real gap, short enough that the app is not reminding anyone
  * about a technique from a seminar last spring.
+ *
+ * **Exported** for the same reason `MIN_DRILLED` is — `classFocus.ts` reuses
+ * it rather than redefining "recent" a second way.
  */
-const MAX_AGE_DAYS = 60;
+export const MAX_AGE_DAYS = 60;
 
 /**
  * The single best funnel gap, or null.

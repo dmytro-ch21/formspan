@@ -41,6 +41,7 @@ import { formatElapsed } from '@/lib/rest';
 import type { Session } from '@/lib/sessions';
 import { trainingSince } from '@/lib/sessionStore';
 import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
+import { classFocus, classHintText, type ClassFocus } from '@/lib/classFocus';
 import { fetchProficiency } from '@/lib/proficiency';
 import {
   funnelGap,
@@ -814,6 +815,26 @@ export default function TodayScreen() {
   );
 
   /**
+   * #447 — the focus/suggestion line a scheduled BJJ class card shows beneath
+   * its Log button. See `lib/classFocus.ts` for the selection rule.
+   *
+   * `roadmaps === null` (not yet read) falls through to `null` here exactly
+   * like every other roadmap-dependent read on this screen — a beat of "no
+   * hint" reads as a plain class card, never as a false "no roadmap active".
+   *
+   * Evidence (the funnel + dismissals) is withheld, not just the suggestion
+   * result, when suggestions are off or either has not loaded — `classFocus`
+   * then still returns the FOCUS line (a fact the athlete committed to, not a
+   * suggestion) with an empty suggestion list, matching `RoadmapLine`'s own
+   * refusal to gate milestone reporting on the suggestions toggle.
+   */
+  const classFocusValue = useMemo(() => {
+    if (!roadmaps) return null;
+    const evidence = suggestionsOn && funnel && dismissed ? { funnel, dismissed } : null;
+    return classFocus(roadmaps, evidence, now);
+  }, [roadmaps, suggestionsOn, funnel, dismissed, now]);
+
+  /**
    * Say no to one technique, permanently.
    *
    * The SUGGESTION is recomputed every read and the DISMISSAL is stored, which
@@ -1014,6 +1035,7 @@ export default function TodayScreen() {
             isToday={isToday}
             isPast={isPast}
             dayLabel={dayLabel}
+            classFocusValue={classFocusValue}
             onOpenSession={(s) => router.push(sessionHref(s, modules))}
             onStart={startPlanned}
             onPlan={() => router.push('/(tabs)/workouts')}
@@ -1481,6 +1503,7 @@ function LeadBlock({
   isToday,
   isPast,
   dayLabel,
+  classFocusValue,
   onOpenSession,
   onStart,
   onPlan,
@@ -1504,6 +1527,11 @@ function LeadBlock({
   isPast: boolean;
   /** "TODAY", or the weekday and date — what the copy says for a browsed day. */
   dayLabel: string;
+  /**
+   * #447's roadmap focus/suggestion line, or null when there is nothing to
+   * say. Only reaches a BJJ plan in the `owed` branch — see there.
+   */
+  classFocusValue: ClassFocus | null;
   onOpenSession: (s: Session) => void;
   onStart: (p: { sport: string; workoutId: string | null }) => void;
   onPlan: () => void;
@@ -1624,6 +1652,12 @@ function LeadBlock({
             sport={p.sport}
             title={p.workoutName ?? `${labelFor(modules, p.sport)} session`}
             when={isToday ? 'Today' : dayLabel}
+            // #447: the roadmap's current focus and up to two things worth
+            // trying, beneath the Log button — BJJ only, since that is the
+            // only discipline with a roadmap or a suggestion tier at all, and
+            // never on a day already gone (a past class card says "Not
+            // logged", not what to try next on it).
+            hint={p.sport === 'bjj' && !isPast && classFocusValue ? classHintText(classFocusValue) : null}
             // A day already gone is a statement, not a control — the same
             // rule the plan card this replaced always drew: `past` drops the
             // handler and the Log button and says `pastLabel` instead of
@@ -1647,6 +1681,14 @@ function LeadBlock({
                     logsAfterwards(p.sport, modules) ? 'Log' : 'Start'
                   } ${p.workoutName ?? `${labelFor(modules, p.sport)} session`}, planned for ${
                     isToday ? 'today' : dayLabel.toLowerCase()
+                  }${
+                    // Explicit accessibilityLabel replaces UpNextCard's own
+                    // default (which appends `hint` for us) — so the hint has
+                    // to be repeated here, or a screen-reader user loses the
+                    // one thing sighted athletes now see on this card.
+                    p.sport === 'bjj' && classFocusValue
+                      ? `. ${classHintText(classFocusValue)}`
+                      : ''
                   }`
             }
             testID={`today-plan-${p.id}`}

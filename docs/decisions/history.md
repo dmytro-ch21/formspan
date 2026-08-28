@@ -45571,6 +45571,95 @@ contains an `ExpoCamera` symbol. Left unchecked; the PR still says `closes
 as every other device-gated ticket recently.
 
 
+## 2026-08-27 — N99: Today's BJJ class card carries the roadmap's focus and what would move it (#447)
+
+The payoff for the roadmap rework, in the user's own words: *"under it saying
+Focus and what we have to progress on"* — where "it" is Log your BJJ, the
+scheduled class card on Today. A roadmap said what an athlete intended;
+nothing until now connected that intent to what to actually try at the next
+class.
+
+**The architectural constraint held.** `curriculum.go`'s own doc comment says
+it is deliberately not a suggestion engine and never touches `bjj_focus`; the
+suggestion tiers (`lib/suggestion.ts`'s `funnelGap`, tier 1: drilled enough,
+never taken live, seen recently) already lived on the client. The ask was to
+combine the two without either package learning about the other — the same
+shape `lib/roadmapFocus.ts` already uses to bridge `curriculum` and
+`bjj_focus`.
+
+**New file, `apps/mobile/lib/classFocus.ts`, sitting outside both.** It reads
+a working roadmap's own items — structure and per-item `progress`, already
+returned by `GET /v1/curricula/working` and already fetched for Today's
+roadmap strip — and the technique funnel (`GET /v1/bjj/proficiency`, already
+fetched for the general suggestion card) to produce:
+
+- `focusLine` — "Milestone 3 of 11 · Mount: get out, then hold" or "Next up:
+  <name>", reusing `roadmapMilestone`/`nextStep` verbatim so this never
+  disagrees with `RoadmapLine`'s own wording for the same roadmap. Reported
+  regardless of the suggestions toggle — a milestone is a fact the athlete
+  committed to, not a suggestion, matching `RoadmapLine`'s own refusal to gate
+  on it.
+- up to `MAX_CLASS_SUGGESTIONS` (2 — tighter than `MAX_FOCUS`'s 5, "a few
+  things to try tonight" is not "your whole working set") roadmap STEPS
+  (never a reading item, never mastered, never dismissed) that clear the same
+  tier-1 bar `funnelGap` uses — `drilled_sessions >= MIN_DRILLED` distinct
+  sessions and `attempts === 0` — with recency read off the funnel row for the
+  same technique id, since a roadmap item's own `Progress` carries no
+  timestamp. A candidate with no funnel row at all is dropped rather than
+  assumed recent, the same discipline `funnelGap`'s own doc insists on. Both
+  thresholds are now **exported** from `suggestion.ts` rather than
+  re-declared, so the two files can never silently disagree about what
+  "drilled enough" or "recent" means. Also gated on `countersInUse` (also
+  exported from `suggestion.ts`) — the same precondition `funnelGap` checks,
+  and for the same reason: `attempts === 0` is unfalsifiable for an athlete
+  who has never used the live-tagging grid at all, so the whole rule is
+  skipped rather than producing an unfalsifiable "never live" claim. Caught in
+  review (`frontend-reviewer`) — the initial cut carried the threshold but not
+  the precondition.
+- Each suggestion carries a **reason string** — "drilled in 9 sessions, never
+  live" — never a bare instruction, per the acceptance criteria.
+  `drilled_sessions` counts distinct classes, not reps (see `Progress`'s own
+  field comment), and the wording says so explicitly rather than leaving
+  "times" to be misread as reps — also caught in review.
+
+**Ranked on the roadmap's own item order, not on evidence strength.**
+`funnelGap` ranks by most-drilled-first because it has nothing else to lean
+on; a roadmap does — order is the syllabus's authored content, the same value
+`nextStep` reads — so two suggestions drawn from one syllabus surface in the
+order the syllabus puts them. Ties (the schema doesn't forbid two items
+sharing an `order`) break on `technique_id`, so the answer is total. Mutation
+tested: dropping the recency filter, the dismissal filter, the `attempts ===
+0` gate, the cap, and both halves of the sort (order-first, then the
+tiebreak) each turned a passing test red; restored and re-run green.
+
+**`classHintText` folds both into the one line `UpNextCard.hint` already had
+a slot for.** N96 (#444) had already built that prop specifically for this
+ticket — "#447 puts the roadmap theme inside this card... #447 becomes a prop
+value rather than a layout change" — so no layout work was needed, only
+supplying the value: `Today`'s `LeadBlock` gained a `classFocusValue` prop,
+computed in a `useMemo` beside the existing `suggestion` one, and the `owed`
+branch passes `classHintText(classFocusValue)` as `UpNextCard`'s `hint` for a
+BJJ plan only, never a past one. The explicit `accessibilityLabel` on that
+card (which replaces `UpNextCard`'s own hint-appending default) had the same
+text appended, so a screen-reader user is not the one athlete who loses this.
+
+**Degrades cleanly.** No working roadmap, or a roadmap with nothing left
+(`nextStep` null on every one), returns `null` from `classFocus` and the card
+renders exactly as it did before — no empty scaffolding, matching AC4. A
+non-BJJ scheduled session never calls into any of this. Nothing here writes
+anything: `classFocus` only reads already-fetched state: the wizard still
+records.
+
+Backend and OpenAPI untouched — both inputs were already fetched client-side
+for Today's existing roadmap strip and suggestion card, so this is pure
+mobile-side integration, no new endpoint. 23 new tests in
+`lib/__tests__/classFocus.test.ts`; the full mobile suite (219 suites, 3369
+tests) and `typecheck:mobile` stayed green.
+
+**Left for the evidence latch**, since none of it is reachable from a check:
+seen on a device on a day with a BJJ class scheduled, with a roadmap active
+and, separately, deactivated.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
