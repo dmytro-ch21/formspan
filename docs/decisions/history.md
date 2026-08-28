@@ -45369,6 +45369,124 @@ a personal list that N78's own data suggests stays in the dozens rather than
 the hundreds are a separable, lower-priority follow-up.
 
 
+## 2026-08-27 — N90: quantity editing finishes — an existing entry, and web (#430)
+
+**#501 shipped the add path and left three criteria open: editing an existing
+entry still used a bare servings multiplier, the web half did not exist, and
+device evidence was outstanding.** This closes the first two; the third still
+needs a phone.
+
+**Backend, criteria 1/2/4/6/7: already done, unchanged here.**
+`profiles.food_unit` (migration 000073), `lib/units.ts`'s gram↔ounce
+conversion, N89's portion shortcuts wired into `FoodQuantity`, live macro
+preview, and the g/oz-round-trip storage-invariance test all landed in #501.
+Verified still present and still green before touching anything.
+
+**Editing an existing entry (criterion 3, mobile).**
+
+`nutrition_entries` has no gram column — `servings` is a multiplier against
+whatever free-text `serving_label` says one serving is — so there is nothing
+to read a "current quantity in grams" off directly. `gramsBasisFromLabel`
+(`apps/mobile/lib/foodQuantity.ts`, hand-duplicated to
+`apps/web/src/lib/foodQuantity.ts`) reads a basis back out of a label ONLY
+when it is honestly a bare gram figure — `/^\d+(\.\d+)?\s*g$/i` after
+trimming — and returns null for "1 scoop (30 g)" or "1 egg" rather than
+guessing. Almost every catalog-logged entry qualifies, because the catalog's
+own `serving_label` is always "100 g".
+
+`app/food/entry/[id].tsx` now shows a grams/oz quantity control (four preset
+chips plus a free field, mirroring `FoodQuantity`'s own layout) when the
+basis is known, and falls back to the pre-N90 plain servings stepper
+otherwise — a live re-derivation from the current label each render, not a
+mode flag that can go stale if the athlete edits the label away from grams.
+Typing a gram quantity converts to `servings` and rescales through the exact
+same `setServingCount` path the servings chips already used, so a gram
+quantity and a servings chip are two views of one number, never two that can
+disagree.
+
+Two subtleties carried over deliberately from `FoodQuantity`'s own design:
+the g/oz toggle CONVERTS the displayed number rather than reinterpreting it
+(read the quantity out under the old unit, redisplay under the new one, only
+then persist the choice), and a `lastUnit` ref-guarded effect re-renders the
+field if the unit changes from *outside* the screen (Settings, say, while
+this sheet is open) without fighting the athlete's own typing.
+
+**Web (criterion 5).**
+
+`apps/web` had no `food_unit` anywhere: `Profile`'s type didn't carry it, no
+`updateFoodUnit` existed, and `UnitsProvider` only tracked `unit_system`. All
+three now exist, mirroring the `unit_system` shape exactly (optimistic write,
+rollback on failure, one copy shared by the whole dashboard rather than a
+per-component hook — the same bug `UnitsProvider`'s own docstring already
+tells the story of). `dashboard/layout.tsx`'s `fetchUnits` (renamed from
+`fetchUnitSystem`) reads both fields off the ONE `/profile` request the
+layout already made, rather than adding a second request for the new field.
+
+**`FoodQuantityInput`** (`apps/web/src/app/dashboard/nutrition/`) is the web
+half of `FoodQuantity` — grams in, grams out via `onGramsChange`, the g/oz
+toggle owned entirely inside the component, reading the same
+`profiles.food_unit` through `useUnits()`. It is wired into two places, both
+gated the same way `entry/[id].tsx` is: a live `gramsBasisFromLabel` check on
+whichever free-text label the row currently carries.
+
+- **`RecipeEditor`**: each ingredient's "How many" field becomes the grams/oz
+  control when "Of what" is a bare gram figure — true for every NEW
+  ingredient, since `emptyItem()` already defaults to "100 g". Switching "Of
+  what" to "1 egg" drops back to the plain multiplier on the next render.
+- **`DayEditor`**: the "How much" fieldset's "Servings" field becomes the
+  same control under the same condition, for both correcting an existing
+  entry and the "Add something you missed" flow (which reuses `EntryForm`).
+
+**Web still has no catalog search** (`RecipeEditor`'s own docstring already
+states this is deliberate, filed as N42) — so unlike mobile, nothing on web
+funnels a *searched* food through this control. What web gets is quantity
+EDITING wherever a gram-labelled row already exists, which is what criterion
+5 actually asked for; building catalog search here is N42's job, not this
+one's.
+
+**Tests, and mutation-verifying the one that matters.**
+
+`gramsBasisFromLabel`/`servingsForLabelGrams` (mobile) and
+`gramsBasisFromLabel`/`quantityForLabelGrams` (web) each got a describe block
+covering: a bare gram weight, no-space and capital-G forms, surrounding
+whitespace, the parenthetical-note false positive, a label with no gram claim
+at all, zero grams, and — the one that actually earns its place — **trailing
+text after the unit**. An unanchored regex end (`/^\d+\s*g/i` rather than
+`/^\d+\s*g$/i`) passes every other test unchanged and makes "100 g rounded"
+and "100 grams" both read as a 100 g basis. Mutated both files' regex to drop
+the `$` and confirmed exactly that assertion goes red on each app, then
+restored and re-confirmed green — the CLAUDE.md discipline this repo has
+paid for eleven times over in one afternoon before.
+
+Web additionally got a criterion-7-shaped test: the same real quantity typed
+in g and in oz, run through `fromDisplayGrams` then `quantityForLabelGrams`,
+resolves to the same multiplier. Mobile's own criterion-7 test from #501 was
+re-run and confirmed still green rather than rewritten.
+
+`pnpm run verify` green on both apps; mobile's own lint ratchet (zero
+headroom) caught two new warnings during development — an unused
+`exhaustive-deps` disable comment on a plain `.then()` callback, and a
+`set-state-in-effect` warning on the `lastUnit` effect that `FoodQuantity`'s
+identically-shaped effect does not trigger, apparently because the extra
+guard branches this screen's version has defeat whatever heuristic exempts
+the simpler original. Fixed by removing the stray comment and adding a
+targeted, justified disable on the second, rather than restructuring away
+from the sanctioned ref-guard idiom.
+
+**What is still open:**
+
+- **Criterion 8, device evidence, is still unmet.** Nothing here has been
+  typed into on a phone with the keyboard up. Unchanged from #501's own
+  admission; the PR for this entry hands the user a device checklist.
+- **No standalone Settings toggle for `food_unit` was added to web.** The
+  ticket asked for the control in `dashboard/nutrition/recipes` and the day
+  editor specifically, and both now read the shared preference — but an
+  athlete on web can currently only change the unit by touching one of those
+  two controls, not from a dedicated settings row the way `unit_system`
+  itself has one. Small, and worth filing if the user wants exact parity with
+  mobile's Settings screen.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

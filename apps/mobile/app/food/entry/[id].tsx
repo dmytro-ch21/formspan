@@ -16,11 +16,25 @@
  * carries. Type into a macro field and that link is cut for the rest of the
  * edit: an explicit number always beats a derived one, and re-deriving under
  * the cursor is how a form fights its user.
+ *
+ * ## Quantity in grams, when the entry can honestly say so (N90)
+ *
+ * `nutrition_entries` has no gram column — `servings` is a multiplier against
+ * whatever `serving_label` says one serving is, and that label is free text.
+ * `gramsBasisFromLabel` reads a genuine weight back out of it ("100 g", which
+ * is what almost every catalog-logged entry carries) and refuses everything
+ * else ("1 scoop (30 g)", "1 egg") rather than inventing a basis. When it
+ * returns a number this screen shows a grams/oz control, converting to and
+ * from `servings` under the hood — `setServingCount` below is still what
+ * actually rescales the macros, so typing a gram quantity and picking a
+ * servings chip go through the exact same path. When it returns null (a food
+ * with no honest gram weight) this screen is unchanged from before N90: a
+ * plain servings stepper.
  */
 
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -28,8 +42,13 @@ import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { editEntry, localEntry, removeEntry } from '@/lib/foodLog';
+import { gramsBasisFromLabel, parseQuantity, servingsForLabelGrams } from '@/lib/foodQuantity';
 import { MEALS, rescale, type Entry, type Meal } from '@/lib/nutrition';
 import { request } from '@/lib/sync';
+import { useUnits } from '@/lib/UnitsProvider';
+import { foodUnitLabel, fromDisplayGrams, toDisplayGrams, type FoodUnit } from '@/lib/units';
+
+const FOOD_UNITS: FoodUnit[] = ['g', 'oz'];
 
 /** The four editable numbers, in the order a packet prints them. */
 const FIELDS = [
@@ -57,6 +76,12 @@ export default function EditEntryScreen() {
   const [saving, setSaving] = useState(false);
   const [gone, setGone] = useState(false);
 
+  const { foodUnit, setFoodUnit } = useUnits();
+  // A VIEW of `servings * basis`, in `foodUnit` — servings stays the source of
+  // truth (same reason `FoodQuantity` keeps grams, not the text field, as its
+  // state) so this and the servings chips can share one rescale path.
+  const [gramsText, setGramsText] = useState('');
+
   useEffect(() => {
     if (!userId || !id) return;
     let live = true;
@@ -77,6 +102,14 @@ export default function EditEntryScreen() {
           fat_g: String(round(e.fat_g)),
           fibre_g: e.fibre_g == null ? '' : String(round(e.fibre_g)),
         });
+        const basis = gramsBasisFromLabel(e.serving_label);
+        if (basis != null) {
+          // `foodUnit` is read at the unit the athlete already had set when
+          // this screen opened — the effect below handles it changing under
+          // the sheet afterwards, so this initial seed does not need it in
+          // this callback's own dependency list.
+          setGramsText(String(toDisplayGrams(e.servings * basis, foodUnit)));
+        }
       })
       .catch(() => {
         if (live) setMissing(true);
@@ -84,6 +117,7 @@ export default function EditEntryScreen() {
     return () => {
       live = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, id]);
 
   /**
@@ -110,6 +144,89 @@ export default function EditEntryScreen() {
     [entry, manual],
   );
 
+  /**
+   * Grams typed or picked -> servings, through the SAME rescale path the
+   * servings chips already use — a gram quantity and a servings chip are two
+   * views of one number, never two competing ones.
+   */
+  const commitGrams = useCallback(
+    (text: string) => {
+      setGramsText(text);
+      if (!entry) return;
+      const typed = parseQuantity(text);
+      if (typed == null) return;
+      const grams = fromDisplayGrams(typed, foodUnit);
+      const next = servingsForLabelGrams(entry.serving_label, grams);
+      if (next != null) setServingCount(String(next));
+    },
+    [entry, foodUnit, setServingCount],
+  );
+
+  const pickGrams = useCallback(
+    (grams: number) => {
+      if (!entry) return;
+      const next = servingsForLabelGrams(entry.serving_label, grams);
+      if (next == null) return;
+      setServingCount(String(next));
+      setGramsText(String(toDisplayGrams(grams, foodUnit)));
+    },
+    [entry, foodUnit, setServingCount],
+  );
+
+  /**
+   * The g/oz toggle CONVERTS the field rather than relabelling it — same rule
+   * and same ordering as `FoodQuantity`'s `switchUnit`: read the current
+   * quantity out under the OLD unit, redisplay it under the new one, and only
+   * then persist the choice.
+   */
+  const switchUnit = useCallback(
+    async (u: FoodUnit) => {
+      if (u === foodUnit || !entry) return;
+      const basis = gramsBasisFromLabel(entry.serving_label);
+      if (basis != null) {
+        const n = parse(servings);
+        setGramsText(String(toDisplayGrams(n * basis, u)));
+      }
+      await setFoodUnit(u);
+    },
+    [foodUnit, entry, servings, setFoodUnit],
+  );
+
+  // Re-renders the field when the unit changes from OUTSIDE this screen (the
+  // athlete flips it in Settings, say, while this sheet is open) — same
+  // mechanism and same reasoning as `FoodQuantity`'s own `lastUnit` effect.
+  // Keyed on the unit alone, never on `servings`, or it would fight the
+  // athlete's own typing.
+  const lastUnit = useRef(foodUnit);
+  useEffect(() => {
+    // `entry` checked BEFORE the ref write, not after: in the narrow window
+    // between mount and `localEntry` resolving, a unit change arriving while
+    // `entry` is still null must not be consumed here — advancing
+    // `lastUnit.current` past it would mean the seed effect above (whose
+    // `foodUnit` closure is frozen at mount) applies the STALE unit once the
+    // entry loads, leaving the field showing the old unit's number beside a
+    // toggle already lit for the new one. `entry` is now in the deps below so
+    // this effect gets another chance to run once loading finishes and pick
+    // the missed change back up — the ref guard still stops it firing on
+    // every keystroke, since `foodUnit` itself hasn't changed between those.
+    if (!entry) return;
+    if (lastUnit.current === foodUnit) return;
+    lastUnit.current = foodUnit;
+    const basis = gramsBasisFromLabel(entry.serving_label);
+    if (basis == null) return;
+    const n = parse(servings);
+    // This is the sanctioned "re-render because an external value changed"
+    // effect the ref guard above exists for — `FoodQuantity`'s identically
+    // shaped `lastUnit` effect is the same pattern. `servings` is read fresh
+    // via closure rather than added to the deps, which would fire this on
+    // every keystroke instead of only on an outside unit change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setGramsText(String(toDisplayGrams(n * basis, foodUnit)));
+    // `servings` deliberately still absent — see above; `entry` is now
+    // included so the effect gets a second chance once loading finishes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foodUnit, entry]);
+
   if (missing) {
     return (
       <View style={styles.gone}>
@@ -126,6 +243,10 @@ export default function EditEntryScreen() {
       </View>
     );
   }
+
+  // Recomputed every render rather than memoised: it is one cheap regex
+  // against a string that only ever changes when a fresh `entry` loads.
+  const quantityBasis = gramsBasisFromLabel(entry.serving_label);
 
   const save = async () => {
     if (!userId || saving) return;
@@ -211,33 +332,93 @@ export default function EditEntryScreen() {
         })}
       </View>
 
-      <View style={styles.field}>
-        <Text style={styles.fieldLabel}>Servings</Text>
-        <View style={styles.stepRow}>
-          {['0.5', '1', '1.5', '2'].map((s) => (
-            <Pressable
-              key={s}
-              onPress={() => setServingCount(s)}
-              style={[styles.chip, servings === s && { borderColor: accent.accent }]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: servings === s }}
-              accessibilityLabel={`${s} servings`}
-              testID={`edit-servings-${s}`}
-            >
-              <Text style={styles.chipText}>{s}</Text>
-            </Pressable>
-          ))}
-          <TextInput
-            style={[styles.input, styles.stepInput]}
-            value={servings}
-            onChangeText={setServingCount}
-            keyboardType="decimal-pad"
-            inputMode="decimal"
-            accessibilityLabel="Servings"
-            testID="edit-servings"
-          />
+      {quantityBasis != null ? (
+        // N90: `serving_label` honestly states a gram weight, so quantity is
+        // edited in grams (or oz) rather than as an abstract multiplier — the
+        // same control `FoodQuantity` offers on the way IN, offered again on
+        // the way back OUT.
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Quantity</Text>
+          <View style={styles.stepRow}>
+            {[0.5, 1, 1.5, 2].map((f) => {
+              const g = quantityBasis * f;
+              const on = Math.abs(parse(servings) - f) < 0.001;
+              return (
+                <Pressable
+                  key={f}
+                  onPress={() => pickGrams(g)}
+                  style={[styles.chip, on && { borderColor: accent.accent }]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={`${toDisplayGrams(g, foodUnit)}${foodUnitLabel(foodUnit)}`}
+                  testID={`edit-quantity-${g}`}
+                >
+                  <Text style={styles.chipText}>
+                    {toDisplayGrams(g, foodUnit)}
+                    {foodUnitLabel(foodUnit)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.quantityRow}>
+            <TextInput
+              style={[styles.input, styles.stepInput]}
+              value={gramsText}
+              onChangeText={commitGrams}
+              keyboardType="decimal-pad"
+              inputMode="decimal"
+              accessibilityLabel={`Quantity in ${foodUnit === 'oz' ? 'ounces' : 'grams'}`}
+              testID="edit-quantity"
+            />
+            <View style={styles.toggle}>
+              {FOOD_UNITS.map((u) => (
+                <Pressable
+                  key={u}
+                  onPress={() => void switchUnit(u)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: u === foodUnit }}
+                  accessibilityLabel={u === 'oz' ? 'Ounces' : 'Grams'}
+                  testID={`edit-quantity-unit-${u}`}
+                  style={[styles.unit, u === foodUnit && { backgroundColor: accent.accent }]}
+                >
+                  <Text style={[styles.unitText, u === foodUnit && { color: accent.on }]}>
+                    {foodUnitLabel(u)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
         </View>
-      </View>
+      ) : (
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Servings</Text>
+          <View style={styles.stepRow}>
+            {['0.5', '1', '1.5', '2'].map((s) => (
+              <Pressable
+                key={s}
+                onPress={() => setServingCount(s)}
+                style={[styles.chip, servings === s && { borderColor: accent.accent }]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: servings === s }}
+                accessibilityLabel={`${s} servings`}
+                testID={`edit-servings-${s}`}
+              >
+                <Text style={styles.chipText}>{s}</Text>
+              </Pressable>
+            ))}
+            <TextInput
+              style={[styles.input, styles.stepInput]}
+              value={servings}
+              onChangeText={setServingCount}
+              keyboardType="decimal-pad"
+              inputMode="decimal"
+              accessibilityLabel="Servings"
+              testID="edit-servings"
+            />
+          </View>
+        </View>
+      )}
 
       <View style={styles.macros}>
         {FIELDS.map(([key, label]) => (
@@ -359,6 +540,15 @@ const styles = StyleSheet.create({
   },
   chipText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
   stepInput: { flex: 1, minWidth: 70 },
+  quantityRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
+  toggle: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: vola.surface,
+  },
+  unit: { paddingVertical: 12, paddingHorizontal: 16 },
+  unitText: { fontSize: 14, fontWeight: '600', color: vola.textMuted },
   input: {
     borderWidth: 1,
     borderColor: vola.line,

@@ -943,6 +943,15 @@ export type Profile = {
    * has never said, which the target screen renders differently from a choice.
    */
   activity_level?: string | null;
+  /**
+   * Display unit for FOOD quantities — "g" | "oz" | null (N90).
+   *
+   * Null means "no opinion yet, derive it from `unit_system`" — see
+   * `defaultFoodUnit` in `lib/units.ts`, which is the ONLY place `unit_system`
+   * is consulted for this. Optional on the type for the same predates-the-field
+   * reason `activity_level` is.
+   */
+  food_unit?: string | null;
 };
 
 export type Token = () => Promise<string | null>;
@@ -1306,6 +1315,33 @@ export async function updateUnitSystem(
     request<Profile>(getToken, "/profile", {
       method: "PATCH",
       body: JSON.stringify({ unit_system: unit }),
+    });
+  try {
+    return await patch();
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 404) throw err;
+    await request<Profile>(getToken, "/profile", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    return patch();
+  }
+}
+
+/**
+ * Sets the FOOD quantity display unit (N90), creating the profile if there
+ * isn't one yet — same shape as `updateUnitSystem` right above, including the
+ * 404-then-create retry, because Settings can be the first thing an
+ * un-onboarded account ever writes.
+ */
+export async function updateFoodUnit(
+  getToken: Token,
+  unit: "g" | "oz",
+): Promise<Profile> {
+  const patch = () =>
+    request<Profile>(getToken, "/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ food_unit: unit }),
     });
   try {
     return await patch();

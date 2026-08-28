@@ -1,5 +1,5 @@
 import { newTraceId, traceparent } from "@/lib/trace";
-import type { UnitSystem } from "@/lib/units";
+import { defaultFoodUnit, type FoodUnit, type UnitSystem } from "@/lib/units";
 
 /**
  * The athlete's unit preference, server half — deliberately WITHOUT "use client".
@@ -26,8 +26,11 @@ const API_BASE = `${API_URL}/v1`;
 
 type Token = (opts?: { template?: string }) => Promise<string | null>;
 
+/** Both display-unit preferences, read together so the layout costs one request. */
+export type Units = { units: UnitSystem; foodUnit: FoodUnit };
+
 /**
- * The preference, or `metric` if it cannot be established.
+ * The preferences, or the defaults if they cannot be established.
  *
  * **Never throws**, and that is deliberate rather than lazy. The caller is a
  * layout that must render: a units read failing has to degrade to a default,
@@ -35,11 +38,16 @@ type Token = (opts?: { template?: string }) => Promise<string | null>;
  * alternative is a blank dashboard when the API hiccups. `metric` is also what
  * a new account gets, so the fallback is the same value the server would have
  * returned for most of the accounts that have never touched the setting.
+ *
+ * Reads `food_unit` off the SAME response rather than a second `/profile`
+ * request — this file's whole point is one read per dashboard render, and a
+ * second fetch for a second field would reintroduce the cost the `UnitsState`
+ * comment on `UnitsProvider.tsx` documents paying once already.
  */
-export async function fetchUnitSystem(getToken: Token, signal?: AbortSignal): Promise<UnitSystem> {
+export async function fetchUnits(getToken: Token, signal?: AbortSignal): Promise<Units> {
   try {
     const token = await getToken();
-    if (!token) return "metric";
+    if (!token) return { units: "metric", foodUnit: "g" };
     const res = await fetch(`${API_BASE}/profile`, {
       signal,
       headers: {
@@ -52,10 +60,15 @@ export async function fetchUnitSystem(getToken: Token, signal?: AbortSignal): Pr
       // units for as long as it lived. Correctness over one request.
       cache: "no-store",
     });
-    if (!res.ok) return "metric";
+    if (!res.ok) return { units: "metric", foodUnit: "g" };
     const body = await res.json().catch(() => null);
-    return body?.unit_system === "imperial" ? "imperial" : "metric";
+    const units: UnitSystem = body?.unit_system === "imperial" ? "imperial" : "metric";
+    // A null/absent `food_unit` is a real answer — nobody has chosen — so it
+    // is derived from `units` rather than coerced into a stored preference.
+    const foodUnit: FoodUnit =
+      body?.food_unit === "g" || body?.food_unit === "oz" ? body.food_unit : defaultFoodUnit(units);
+    return { units, foodUnit };
   } catch {
-    return "metric";
+    return { units: "metric", foodUnit: "g" };
   }
 }

@@ -9,10 +9,10 @@ import { auth } from "@clerk/nextjs/server";
 // listModules() from the server".
 import { listModules, type Module } from "@/lib/modules";
 import { ModulesProvider } from "@/lib/ModulesProvider";
-// Same server/client boundary reason as `modules` above: `fetchUnitSystem`
+// Same server/client boundary reason as `modules` above: `fetchUnits`
 // lives in its own directiveless module because `api.ts`'s `getProfile` is a
 // client reference and calling it from here throws at runtime.
-import { fetchUnitSystem } from "@/lib/unitSystem";
+import { fetchUnits } from "@/lib/unitSystem";
 import { UnitsProvider } from "@/lib/UnitsProvider";
 import { DashboardNav } from "./DashboardNav";
 import { ThemeToggle } from "../ThemeToggle";
@@ -47,13 +47,13 @@ export default async function DashboardLayout({
   }
   // Read here for the same reason `modules` is: awaited before anything
   // renders, so no unit-bearing number is ever painted in a unit we have not
-  // established. `fetchUnitSystem` never throws — it degrades to `metric`,
+  // established. `fetchUnits` never throws — it degrades to metric/grams,
   // which is what a new account gets — so this needs no catch of its own and
   // must not share the one above, whose `[]` fallback is about the nav.
-  const unitSystem = await fetchUnitSystem(getToken);
+  const { units: unitSystem, foodUnit } = await fetchUnits(getToken);
   return (
     <ModulesProvider initial={modules}>
-      <UnitsProvider initial={unitSystem}>
+      <UnitsProvider initial={unitSystem} initialFoodUnit={foodUnit}>
         <div className="flex min-h-screen bg-bg">
           <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-line-soft bg-surface">
             <Link
