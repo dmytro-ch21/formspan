@@ -1,5 +1,6 @@
 import {
   emptyDropSet,
+  groupSets,
   setOrdinals,
   soloReps,
   swapExercise,
@@ -89,14 +90,101 @@ describe('set numbering', () => {
     expect(t('warmup', 'working', 'working')).toEqual([1, 2, 3]);
   });
 
-  it('does not show a zero for a leading drop', () => {
-    // A drop with nothing above it is a client bug. It still has to render,
-    // and "set 0" is the one thing it must not say.
-    expect(t('drop', 'working')).toEqual([1, 1]);
+  it('does not show a zero for a leading drop, and does not share the next set’s number either', () => {
+    // A drop with nothing above it (in THIS array — a single group's rows) is
+    // orphaned: a client bug, per `DropsOf`'s server-side doc comment
+    // (backend/internal/modules/session/session.go). It still has to render,
+    // and "set 0" is the one thing it must not say — but sharing "1" with the
+    // legitimate working set right after it is not a kindness either: it
+    // reads as the drop belonging to that set's effort, which it does not.
+    // L9 (#664) changed this from [1, 1] to [1, 2] for exactly that reason.
+    expect(t('drop', 'working')).toEqual([1, 2]);
   });
 
   it('is empty for no sets', () => {
     expect(t()).toEqual([]);
+  });
+});
+
+/**
+ * L9 (#664): the mobile half of L7 (#386) — `DropsOf`'s server-side "an
+ * orphaned drop is skipped, not attached to somebody else's lift" pinned as a
+ * behaviour of the client's own on-screen grouping/numbering pipeline, which
+ * has no server-side counterpart at all (`DropsOf` has zero production
+ * callers).
+ *
+ * `ordinalsBySet` reproduces exactly what the session screen does: split into
+ * groups with `groupSets`, then number each group independently with
+ * `setOrdinals`. Testing the two functions in isolation would not catch a
+ * regression here — the bug this pins only exists in how their outputs are
+ * combined, one group at a time.
+ */
+function ordinalsBySet(sets: Pick<LoggedSet, 'exercise_id' | 'set_type'>[]): number[] {
+  const groups = groupSets(sets);
+  const out: number[] = [];
+  for (const g of groups) {
+    setOrdinals(g.indices.map((i) => sets[i])).forEach((ordinal, n) => {
+      out[g.indices[n]] = ordinal;
+    });
+  }
+  return out;
+}
+
+describe('drop attachment (L9, #664)', () => {
+  it('skips a drop that opens the whole session rather than attaching it to the set after it', () => {
+    const sets = [set({ set_type: 'drop' }), set({ set_type: 'working' })];
+    // Same ordinal on both rows is exactly the bug: it is what "drop off set
+    // 1" and "set 1" both saying "1" looks like on screen and to VoiceOver —
+    // the orphan reading as though it hangs off a set it has no relation to.
+    expect(ordinalsBySet(sets)).toEqual([1, 2]);
+  });
+
+  it('skips a drop that opens a new exercise group rather than attaching it to the working set after it', () => {
+    const sets = [
+      set({ exercise_id: 'squat', set_type: 'working' }),
+      set({ exercise_id: 'squat', set_type: 'working' }),
+      // Orphaned: nothing above it in this group belongs to bench-press, so
+      // it has no real parent within the group `groupSets` puts it in.
+      set({ exercise_id: 'bench-press', set_type: 'drop' }),
+      set({ exercise_id: 'bench-press', set_type: 'working' }),
+    ];
+    const ordinals = ordinalsBySet(sets);
+    expect(ordinals.slice(0, 2)).toEqual([1, 2]); // squat block, unaffected
+    // The orphan drop must not carry the same number as the legitimate bench
+    // working set right after it — that shared number is the silent
+    // attachment to the wrong working set this ticket exists to prevent.
+    expect(ordinals[2]).not.toBe(ordinals[3]);
+    expect(ordinals.slice(2)).toEqual([1, 2]);
+  });
+});
+
+describe('groupSets', () => {
+  it('keeps adjacent same-exercise rows in one group', () => {
+    const sets = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'bench-press' }),
+    ];
+    expect(groupSets(sets)).toEqual([
+      { exerciseID: 'squat', indices: [0, 1] },
+      { exerciseID: 'bench-press', indices: [2] },
+    ]);
+  });
+
+  it('starts a new group at the boundary even when the exercise repeats later', () => {
+    // squat / bench / squat is two separate blocks of squat work, not one
+    // group that swallows the bench set in between — same rule `DropsOf`
+    // applies server-side.
+    const sets = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'bench-press' }),
+      set({ exercise_id: 'squat' }),
+    ];
+    expect(groupSets(sets)).toEqual([
+      { exerciseID: 'squat', indices: [0] },
+      { exerciseID: 'bench-press', indices: [1] },
+      { exerciseID: 'squat', indices: [2] },
+    ]);
   });
 });
 

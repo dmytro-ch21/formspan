@@ -1217,6 +1217,44 @@ export function fillForward(
 }
 
 /**
+ * Splits the rows into exercise groups, so "+ Set" sits under the movement it
+ * belongs to and nobody has to re-pick the exercise for every set.
+ *
+ * A group is a maximal run of ADJACENT rows sharing an `exercise_id` — the
+ * same adjacency `DropsOf` walks server-side
+ * (backend/internal/modules/session/session.go), and for the same reason:
+ * squat / bench / squat is two separate blocks of work, not one squat group
+ * that swallows the bench in between.
+ *
+ * **Deliberately blind to `set_type`.** Grouping only needs to know where one
+ * exercise's rows end and the next begins, and `exercise_id` alone already
+ * answers that correctly — a drop can never pull rows from the wrong exercise
+ * into its group, because its `exercise_id` matches its real exercise, same
+ * as any other row. What adjacency-by-id does NOT know is whether the first
+ * row of a group is a legitimate one to lead with — a drop opening a group
+ * has no preceding same-exercise row to have come from, i.e. no real parent.
+ * That is `setOrdinals`'s job, not this function's: this function only ever
+ * has to answer "which exercise", and answering "and is this row's `set_type`
+ * sane here" as well would make it responsible for two rules a caller could
+ * get right independently and wrong together.
+ *
+ * Extracted from the session screen (L9, #664) alongside `setOrdinals` — an
+ * inline `sets.forEach` building this had no test coverage for either the
+ * ordinary case or the orphaned-drop one the ordinal fix above depends on.
+ */
+export function groupSets(
+  sets: Pick<LoggedSet, 'exercise_id'>[],
+): { exerciseID: string; indices: number[] }[] {
+  const groups: { exerciseID: string; indices: number[] }[] = [];
+  sets.forEach((s, i) => {
+    const last = groups[groups.length - 1];
+    if (last && last.exerciseID === s.exercise_id) last.indices.push(i);
+    else groups.push({ exerciseID: s.exercise_id, indices: [i] });
+  });
+  return groups;
+}
+
+/**
  * Move a whole exercise up or down, taking its sets with it.
  *
  * `order` is the current grouping as arrays of indices into `sets` — passed in
@@ -1320,7 +1358,26 @@ export function withSetChange(set: LoggedSet, patch: Partial<LoggedSet>): Logged
  * number of efforts, not the number of rows.
  *
  * A drop carries its parent's number, which is what lets the row read as
- * "the drop off set 3" rather than as a set with no identity.
+ * "the drop off set 3" rather than as a set with no identity — but only when
+ * it HAS a parent. `groupSets` groups purely by exercise adjacency (see its
+ * own doc comment), so the first row handed to this function is sometimes a
+ * drop with nothing above it in the group at all: the drop is the first set
+ * of the whole session, or the first set of a new exercise. That is
+ * `DropsOf`'s "orphaned" case (backend/internal/modules/session/session.go) —
+ * a drop belongs only to the immediately preceding same-exercise, non-drop
+ * row, and one with no such row is skipped rather than attached to anybody
+ * else's lift.
+ *
+ * **L9 (#664): an orphaned drop gets its OWN ordinal, counted like a working
+ * set, rather than borrowing whatever the next real set is about to claim.**
+ * The previous behaviour clamped it to 1 — which is also exactly the ordinal
+ * the following legitimate working set would then get, so the drop's row
+ * (and its accessibility label, "drop off set 1", spoken even though the row
+ * itself only ever shows "↳") read as though it hung off that set's effort.
+ * It never did: an orphaned drop has no real parent, by definition, so
+ * sharing an identity with an unrelated set is a false attachment, not a
+ * kindness. Giving it its own number keeps every ordinal a claim about one
+ * specific set — never a shared one — while still never showing a bare zero.
  *
  * Extracted from the session screen for the reason `ClampLimit` and
  * `ScopeFilter` were on the server: the rule is small, easy to get subtly
@@ -1328,11 +1385,21 @@ export function withSetChange(set: LoggedSet, patch: Partial<LoggedSet>): Logged
  */
 export function setOrdinals(setsInGroup: Pick<LoggedSet, 'set_type'>[]): number[] {
   let n = 0;
+  // Whether the current run of drops has a real (non-drop) row above it in
+  // this group to borrow a number from. Starts false: nothing has been seen
+  // yet, so a drop in the very first slot has nothing to attach to.
+  let hasParent = false;
   return setsInGroup.map((s) => {
-    if (s.set_type !== 'drop') n++;
-    // A leading drop has no parent to borrow from. It is a client bug either
-    // way, and 1 keeps it readable instead of showing a zero.
-    return Math.max(1, n);
+    if (s.set_type !== 'drop') {
+      n++;
+      hasParent = true;
+      return n;
+    }
+    if (hasParent) return n; // A real drop — shares its parent's number.
+    // An orphaned drop: skipped from the borrowing mechanism, not attached to
+    // whichever set happens to be adjacent. See the function doc above.
+    n++;
+    return n;
   });
 }
 
