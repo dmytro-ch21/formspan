@@ -6681,6 +6681,13 @@ All of these must be indistinguishable 404s:
 - Decline deletes: re-requesting afterwards succeeds (the moderation residual
   is recorded, not hidden).
 - DELETE covers decline / cancel / unfriend; unfriending is symmetric.
+- **T11 (#708): a friend or pending counterpart who has since released their
+  username must not 500 the list.** Not reachable through the app's own
+  Send/Accept — this needs a seeded row with the OTHER party's `username`
+  cleared directly in the database, the same way `TestUnfriendAndUnnamedAndSelf`
+  constructs it. Both `GET /v1/friends` and `GET /v1/friends/requests` must
+  return 200 with that card present (empty-string username, not omitted),
+  not a 500 that takes down every other card in the same response.
 
 ### Mobile screen (online-only by design)
 

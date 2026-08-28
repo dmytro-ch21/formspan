@@ -451,3 +451,69 @@ func TestPendingCardsCarryAvatarKeyOnlyWhenHasAvatar(t *testing.T) {
 			*alicesOutbox.Outgoing[0].AvatarKey)
 	}
 }
+
+// TestCardsSurviveOtherPartysUsernameGoingNull is T11 (#708): a friendship or
+// pending request can outlive the OTHER party's claimed username. Send and
+// Accept can never construct this state themselves — Send resolves the
+// target by username and Accept requires the caller to have one — but
+// friendships carries no foreign key to profiles, so nothing in the schema
+// stops a username being cleared out from under an existing row by some
+// other path (TestUnfriendAndUnnamedAndSelf above already relies on the same
+// raw UPDATE to build its edge case).
+//
+// Before this fix, cardSelect selected p.username directly and pgx refused
+// to scan a SQL NULL into Card.Username's non-pointer string, which crashed
+// the ENTIRE query — every card in the list, not just the one row — with
+// "cannot scan NULL into *string". Friends and Pending both read through
+// cardSelect, so both are pinned here; a fix that only covered one path is
+// exactly how this would have survived a partial fix.
+func TestCardsSurviveOtherPartysUsernameGoingNull(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	alice := person(t, pool, "fr_null_alice", "fr_null_alice_h")
+	bob := person(t, pool, "fr_null_bob", "fr_null_bob_h")
+	carol := person(t, pool, "fr_null_carol", "fr_null_carol_h")
+
+	if err := repo.Send(ctx, alice, "fr_null_bob_h"); err != nil {
+		t.Fatalf("send alice->bob: %v", err)
+	}
+	if err := repo.Accept(ctx, bob, "fr_null_alice_h"); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if err := repo.Send(ctx, carol, "fr_null_alice_h"); err != nil {
+		t.Fatalf("send carol->alice: %v", err)
+	}
+
+	// Bob (alice's accepted friend) and carol (alice's incoming pending
+	// requester) both lose their claimed handle, as if it happened through
+	// some path outside this package's own Send/Accept.
+	if _, err := pool.Exec(ctx, `UPDATE profiles SET username = NULL WHERE user_id = $1`, bob); err != nil {
+		t.Fatalf("null bob's username: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE profiles SET username = NULL WHERE user_id = $1`, carol); err != nil {
+		t.Fatalf("null carol's username: %v", err)
+	}
+
+	aliceFriends, err := repo.Friends(ctx, alice)
+	if err != nil {
+		t.Fatalf("Friends must not error when a friend has no username: %v", err)
+	}
+	if len(aliceFriends) != 1 {
+		t.Fatalf("alice's friends: got %d cards, want 1", len(aliceFriends))
+	}
+	if aliceFriends[0].Username != "" {
+		t.Errorf("bob's card username = %q, want empty string (his handle is null)", aliceFriends[0].Username)
+	}
+
+	alicesInbox, err := repo.Pending(ctx, alice)
+	if err != nil {
+		t.Fatalf("Pending must not error when a requester has no username: %v", err)
+	}
+	if len(alicesInbox.Incoming) != 1 {
+		t.Fatalf("alice's incoming requests: got %d cards, want 1", len(alicesInbox.Incoming))
+	}
+	if alicesInbox.Incoming[0].Username != "" {
+		t.Errorf("carol's card username = %q, want empty string (her handle is null)", alicesInbox.Incoming[0].Username)
+	}
+}

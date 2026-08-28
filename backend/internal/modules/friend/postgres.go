@@ -150,8 +150,25 @@ func (r *PostgresRepository) Remove(ctx context.Context, callerID, username stri
 // never assigned to a Card field directly, and setCardAvatar discards it the
 // moment the key exists. Same discipline profile.GetByUsername documents at
 // its own equivalent line.
+//
+// COALESCE(p.username, ''), NOT bare p.username — found in review (T11,
+// #708). `Send` requires the CALLER to hold a handle (`callerHandle` check)
+// and resolves the TARGET by handle (`resolve`, which cannot find someone
+// with none), so this package's OWN write paths can never construct a
+// friendship where either side currently lacks one — but `friendships`
+// carries no FK to `profiles` at all, so nothing in the schema actually
+// FORBIDS that state, and Card.Username is a bare Go `string`, which pgx
+// refuses to scan a SQL NULL into. The result before this fix: one friend
+// (or one pending request, in either direction) with no claimed handle —
+// reachable today only by a row written outside `Send`/`Accept` (seed data,
+// an admin action, a future migration), not by any path an athlete can
+// drive — took down the ENTIRE list with a 500, for every OTHER friend too.
+// `''` is a defensible placeholder specifically because it is not a real,
+// case-insensitively-unique username `ValidUsername` would ever accept
+// (`profile.go`), so it cannot collide with one — a client rendering `@`
+// with nothing after it is a correctly degraded card, not a wrong one.
 const cardSelect = `
-	SELECT p.user_id, p.username, p.display_name, p.has_avatar, %s
+	SELECT p.user_id, COALESCE(p.username, ''), p.display_name, p.has_avatar, %s
 	FROM friendships f
 	JOIN profiles p ON p.user_id = CASE WHEN f.user_a = $1 THEN f.user_b ELSE f.user_a END
 	WHERE (f.user_a = $1 OR f.user_b = $1)`
