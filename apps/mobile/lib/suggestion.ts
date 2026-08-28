@@ -74,7 +74,7 @@ export type Suggestion = {
  * Anyone tempted to "correct" it to nine is re-opening a settled question and
  * should have a reason beyond the arithmetic.
  *
- * **Exported** so `classFocus.ts` can apply the identical bar to a roadmap
+ * **Exported** so `classFocus.ts` can apply the same bar to a roadmap
  * item's own evidence rather than inventing a second number for the same
  * product call — see that file's doc comment.
  */

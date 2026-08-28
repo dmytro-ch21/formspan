@@ -1,6 +1,6 @@
 import { nextStep, type Curriculum, type CurriculumItem } from './curriculum';
 import { roadmapMilestone } from './roadmapEntry';
-import { MAX_AGE_DAYS, MIN_DRILLED } from './suggestion';
+import { countersInUse, MAX_AGE_DAYS, MIN_DRILLED } from './suggestion';
 import type { Proficiency } from './proficiency';
 
 /**
@@ -31,8 +31,9 @@ import type { Proficiency } from './proficiency';
  * A roadmap item's own `progress` (returned by `GET /v1/curricula/working`,
  * already fetched for Today's roadmap strip) carries `drilled_sessions` and
  * `attempts` (`scored + attempted`) computed against THAT item's criteria —
- * exactly the two numbers `funnelGap`'s tier-1 rule reads, just scoped to one
- * technique instead of the whole funnel. What it does NOT carry is a
+ * the same tier-1 bar `funnelGap` applies (`MIN_DRILLED` distinct sessions,
+ * zero attempts), just scoped to one technique instead of the whole funnel.
+ * What it does NOT carry is a
  * recency timestamp, so `last_seen` is read off the funnel (`Proficiency`)
  * for the same technique id — a second read of data Today already has in
  * memory, not a second network call.
@@ -119,6 +120,14 @@ function roadmapSuggestions(
   evidence: { funnel: readonly Proficiency[]; dismissed: ReadonlySet<string> },
   now: Date,
 ): ClassSuggestion[] {
+  // Same precondition `funnelGap` gates on, and for the same reason: the only
+  // writer of a technique-tagged attempted/scored row is the wizard's
+  // "Working on" grid, so for an athlete who has never used it,
+  // `attempts === 0` is structurally guaranteed rather than observed — see
+  // `countersInUse`'s own doc comment. Without this, "never live" is a claim
+  // the app has no way to back up.
+  if (!countersInUse(evidence.funnel as Proficiency[])) return [];
+
   const byTechnique = new Map(evidence.funnel.map((f) => [f.technique_id, f]));
   const cutoff = now.getTime() - MAX_AGE_DAYS * 86_400_000;
 
@@ -166,11 +175,17 @@ function roadmapSuggestions(
   return ordered.slice(0, MAX_CLASS_SUGGESTIONS).map((i) => ({
     techniqueId: i.technique_id,
     name: i.name,
+    // "Sessions", not "times": `drilled_sessions` counts distinct CLASSES the
+    // technique was tagged in, not reps (see `Progress`'s own field comment)
+    // — the same distinction `funnelGap`'s doc comment draws for `drilled`.
+    // "Drilled 6 times" reads as six reps to an athlete; "drilled in 6
+    // sessions" is the claim the number actually backs.
+    //
     // No singular/plural branch: `drilled_sessions` is always >= MIN_DRILLED
-    // (6) for anything that reaches here, so "1 time" can never occur — a
+    // (6) for anything that reaches here, so "1 session" can never occur — a
     // grammar branch that can never fire is exactly the dead-guard trap
     // CLAUDE.md's "verify that a check can fail" warns about.
-    reason: `drilled ${i.progress.drilled_sessions} times, never live`,
+    reason: `drilled in ${i.progress.drilled_sessions} sessions, never live`,
   }));
 }
 

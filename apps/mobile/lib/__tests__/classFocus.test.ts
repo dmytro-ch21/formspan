@@ -96,6 +96,16 @@ function fun(id: string, over: Partial<Proficiency> = {}): Proficiency {
   };
 }
 
+/** Appended to every funnel fixture in the suggestions block below, so
+ *  each test exercises the suggestion RULE it names rather than tripping
+ *  `countersInUse`'s own precondition (which gets its own dedicated test).
+ *  A row for a technique no other assertion references, carrying real
+ *  attempted/scored evidence — the same "athlete has used the live-tagging
+ *  grid on SOME technique" fact `countersInUse` checks for. */
+function withCounters(rows: Proficiency[]): Proficiency[] {
+  return [...rows, fun('__uses_counters__', { attempted: 1, drilled: 0, sessions: 0 })];
+}
+
 const noDismissals = new Set<string>();
 
 describe('classFocus — the focus line', () => {
@@ -139,9 +149,9 @@ describe('classFocus — suggestions', () => {
     const c = roadmap({
       items: [step('a', 0, { progress: progress({ drilled_sessions: 6, attempts: 0 }) })],
     });
-    const got = classFocus([c], { funnel: [fun('a')], dismissed: noDismissals }, NOW);
+    const got = classFocus([c], { funnel: withCounters([fun('a')]), dismissed: noDismissals }, NOW);
     expect(got?.suggestions).toEqual([
-      { techniqueId: 'a', name: 'Technique a', reason: 'drilled 6 times, never live' },
+      { techniqueId: 'a', name: 'Technique a', reason: 'drilled in 6 sessions, never live' },
     ]);
   });
 
@@ -152,20 +162,22 @@ describe('classFocus — suggestions', () => {
     const at = roadmap({
       items: [step('a', 0, { progress: progress({ drilled_sessions: 6, attempts: 0 }) })],
     });
-    expect(classFocus([below], { funnel: [fun('a')], dismissed: noDismissals }, NOW)?.suggestions).toEqual(
-      [],
-    );
     expect(
-      classFocus([at], { funnel: [fun('a')], dismissed: noDismissals }, NOW)?.suggestions[0]?.reason,
-    ).toBe('drilled 6 times, never live');
+      classFocus([below], { funnel: withCounters([fun('a')]), dismissed: noDismissals }, NOW)
+        ?.suggestions,
+    ).toEqual([]);
+    expect(
+      classFocus([at], { funnel: withCounters([fun('a')]), dismissed: noDismissals }, NOW)
+        ?.suggestions[0]?.reason,
+    ).toBe('drilled in 6 sessions, never live');
   });
 
   it('reports the exact drilled count in the reason, not the threshold', () => {
     const c = roadmap({
       items: [step('a', 0, { progress: progress({ drilled_sessions: 11, attempts: 0 }) })],
     });
-    const got = classFocus([c], { funnel: [fun('a')], dismissed: noDismissals }, NOW);
-    expect(got?.suggestions[0]?.reason).toBe('drilled 11 times, never live');
+    const got = classFocus([c], { funnel: withCounters([fun('a')]), dismissed: noDismissals }, NOW);
+    expect(got?.suggestions[0]?.reason).toBe('drilled in 11 sessions, never live');
   });
 
   it('does not suggest a technique already taken live — attempts, not a raw drilled count, gates it', () => {
@@ -175,7 +187,7 @@ describe('classFocus — suggestions', () => {
     const c = roadmap({
       items: [step('a', 0, { progress: progress({ drilled_sessions: 9, attempts: 2 }) })],
     });
-    const got = classFocus([c], { funnel: [fun('a')], dismissed: noDismissals }, NOW);
+    const got = classFocus([c], { funnel: withCounters([fun('a')]), dismissed: noDismissals }, NOW);
     expect(got?.suggestions).toEqual([]);
   });
 
@@ -183,7 +195,7 @@ describe('classFocus — suggestions', () => {
     const c = roadmap({
       items: [step('a', 0, { progress: progress({ drilled_sessions: 5, attempts: 0 }) })],
     });
-    const got = classFocus([c], { funnel: [fun('a')], dismissed: noDismissals }, NOW);
+    const got = classFocus([c], { funnel: withCounters([fun('a')]), dismissed: noDismissals }, NOW);
     expect(got?.suggestions).toEqual([]);
   });
 
@@ -197,7 +209,7 @@ describe('classFocus — suggestions', () => {
         step('b', 1),
       ],
     });
-    const got = classFocus([c], { funnel: [fun('a')], dismissed: noDismissals }, NOW);
+    const got = classFocus([c], { funnel: withCounters([fun('a')]), dismissed: noDismissals }, NOW);
     expect(got?.suggestions).toEqual([]);
   });
 
@@ -212,7 +224,7 @@ describe('classFocus — suggestions', () => {
         step('b', 1),
       ],
     });
-    const got = classFocus([c], { funnel: [fun('a')], dismissed: noDismissals }, NOW);
+    const got = classFocus([c], { funnel: withCounters([fun('a')]), dismissed: noDismissals }, NOW);
     expect(got?.suggestions).toEqual([]);
   });
 
@@ -222,7 +234,7 @@ describe('classFocus — suggestions', () => {
     });
     const got = classFocus(
       [c],
-      { funnel: [fun('a', { last_seen: CUTOFF_STALE })], dismissed: noDismissals },
+      { funnel: withCounters([fun('a', { last_seen: CUTOFF_STALE })]), dismissed: noDismissals },
       NOW,
     );
     expect(got?.suggestions).toEqual([]);
@@ -232,7 +244,7 @@ describe('classFocus — suggestions', () => {
     const c = roadmap({
       items: [step('a', 0, { progress: progress({ drilled_sessions: 9, attempts: 0 }) })],
     });
-    const got = classFocus([c], { funnel: [], dismissed: noDismissals }, NOW);
+    const got = classFocus([c], { funnel: withCounters([]), dismissed: noDismissals }, NOW);
     expect(got?.suggestions).toEqual([]);
   });
 
@@ -240,7 +252,7 @@ describe('classFocus — suggestions', () => {
     const c = roadmap({
       items: [step('a', 0, { progress: progress({ drilled_sessions: 9, attempts: 0 }) })],
     });
-    const got = classFocus([c], { funnel: [fun('a')], dismissed: new Set(['a']) }, NOW);
+    const got = classFocus([c], { funnel: withCounters([fun('a')]), dismissed: new Set(['a']) }, NOW);
     expect(got?.suggestions).toEqual([]);
   });
 
@@ -250,7 +262,7 @@ describe('classFocus — suggestions', () => {
       step(id, i, { progress: progress({ drilled_sessions: 9, attempts: 0 }) }),
     );
     const c = roadmap({ items });
-    const funnel = ['a', 'b', 'c'].map((id) => fun(id));
+    const funnel = withCounters(['a', 'b', 'c'].map((id) => fun(id)));
     const got = classFocus([c], { funnel, dismissed: noDismissals }, NOW);
     expect(got?.suggestions).toHaveLength(2);
     expect(got?.suggestions.map((s) => s.techniqueId)).toEqual(['a', 'b']);
@@ -265,7 +277,7 @@ describe('classFocus — suggestions', () => {
       step('b', 1, { progress: progress({ drilled_sessions: 20, attempts: 0 }) }),
     ];
     const c = roadmap({ items });
-    const funnel = [fun('a'), fun('b')];
+    const funnel = withCounters([fun('a'), fun('b')]);
     const got = classFocus([c], { funnel, dismissed: noDismissals }, NOW);
     expect(got?.suggestions.map((s) => s.techniqueId)).toEqual(['a', 'b']);
   });
@@ -276,7 +288,7 @@ describe('classFocus — suggestions', () => {
       step('a', 0, { progress: progress({ drilled_sessions: 6, attempts: 0 }) }),
     ];
     const c = roadmap({ items });
-    const funnel = [fun('z'), fun('a')];
+    const funnel = withCounters([fun('z'), fun('a')]);
     const got = classFocus([c], { funnel, dismissed: noDismissals }, NOW);
     expect(got?.suggestions.map((s) => s.techniqueId)).toEqual(['a', 'z']);
   });
@@ -287,7 +299,7 @@ describe('classFocus — suggestions', () => {
       step('b', 1, { progress: progress({ drilled_sessions: 9, attempts: 0 }) }),
     ];
     const c = roadmap({ items });
-    const funnel = [fun('a'), fun('b')];
+    const funnel = withCounters([fun('a'), fun('b')]);
     const first = classFocus([c], { funnel, dismissed: noDismissals }, NOW);
     const second = classFocus([c], { funnel, dismissed: noDismissals }, NOW);
     expect(first).toEqual(second);
@@ -300,6 +312,24 @@ describe('classFocus — suggestions', () => {
     const got = classFocus([c], null, NOW);
     expect(got).toEqual({ focusLine: 'Next up: Arm drag', suggestions: [] });
   });
+
+  it('suppresses every suggestion when the athlete has never used the live-tagging grid — countersInUse', () => {
+    // Same precondition `funnelGap` gates on: `attempts === 0` is
+    // structurally guaranteed, not observed, for an athlete who has never
+    // used the "Working on" grid on ANY technique, so "never live" would be
+    // an unfalsifiable claim rather than a real one. Deliberately does NOT
+    // use `withCounters` — an otherwise-fully-qualifying candidate ('a': 9
+    // drilled sessions, 0 attempts, seen recently) must still be suppressed
+    // because no funnel row anywhere has attempted + scored > 0.
+    const c = roadmap({
+      items: [step('a', 0, { progress: progress({ drilled_sessions: 9, attempts: 0 }) })],
+    });
+    const got = classFocus([c], { funnel: [fun('a')], dismissed: noDismissals }, NOW);
+    expect(got?.suggestions).toEqual([]);
+    // The focus line is a committed fact, not a suggestion — it must survive
+    // the same precondition that strips the suggestions.
+    expect(got?.focusLine).toBe('Next up: Technique a');
+  });
 });
 
 describe('classHintText', () => {
@@ -311,10 +341,10 @@ describe('classHintText', () => {
   it('appends the reasoned suggestions after the focus line', () => {
     const focus: ClassFocus = {
       focusLine: 'Next up: Arm drag',
-      suggestions: [{ techniqueId: 'a', name: 'Triangle', reason: 'drilled 6 times, never live' }],
+      suggestions: [{ techniqueId: 'a', name: 'Triangle', reason: 'drilled in 6 sessions, never live' }],
     };
     expect(classHintText(focus)).toBe(
-      'Next up: Arm drag. Try: Triangle — drilled 6 times, never live',
+      'Next up: Arm drag. Try: Triangle — drilled in 6 sessions, never live',
     );
   });
 
@@ -322,12 +352,12 @@ describe('classHintText', () => {
     const focus: ClassFocus = {
       focusLine: 'Next up: Arm drag',
       suggestions: [
-        { techniqueId: 'a', name: 'Triangle', reason: 'drilled 6 times, never live' },
-        { techniqueId: 'b', name: 'Scissor sweep', reason: 'drilled 8 times, never live' },
+        { techniqueId: 'a', name: 'Triangle', reason: 'drilled in 6 sessions, never live' },
+        { techniqueId: 'b', name: 'Scissor sweep', reason: 'drilled in 8 sessions, never live' },
       ],
     };
     expect(classHintText(focus)).toBe(
-      'Next up: Arm drag. Try: Triangle — drilled 6 times, never live; Scissor sweep — drilled 8 times, never live',
+      'Next up: Arm drag. Try: Triangle — drilled in 6 sessions, never live; Scissor sweep — drilled in 8 sessions, never live',
     );
   });
 });

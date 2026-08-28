@@ -45602,16 +45602,25 @@ fetched for the general suggestion card) to produce:
 - up to `MAX_CLASS_SUGGESTIONS` (2 — tighter than `MAX_FOCUS`'s 5, "a few
   things to try tonight" is not "your whole working set") roadmap STEPS
   (never a reading item, never mastered, never dismissed) that clear the same
-  tier-1 bar `funnelGap` uses — `drilled_sessions >= MIN_DRILLED` and
-  `attempts === 0` — with recency read off the funnel row for the same
-  technique id, since a roadmap item's own `Progress` carries no timestamp. A
-  candidate with no funnel row at all is dropped rather than assumed recent,
-  the same discipline `funnelGap`'s own doc insists on. Both thresholds are
-  now **exported** from `suggestion.ts` rather than re-declared, so the two
-  files can never silently disagree about what "drilled enough" or "recent"
-  means.
-- Each suggestion carries a **reason string** — "drilled 9 times, never
+  tier-1 bar `funnelGap` uses — `drilled_sessions >= MIN_DRILLED` distinct
+  sessions and `attempts === 0` — with recency read off the funnel row for the
+  same technique id, since a roadmap item's own `Progress` carries no
+  timestamp. A candidate with no funnel row at all is dropped rather than
+  assumed recent, the same discipline `funnelGap`'s own doc insists on. Both
+  thresholds are now **exported** from `suggestion.ts` rather than
+  re-declared, so the two files can never silently disagree about what
+  "drilled enough" or "recent" means. Also gated on `countersInUse` (also
+  exported from `suggestion.ts`) — the same precondition `funnelGap` checks,
+  and for the same reason: `attempts === 0` is unfalsifiable for an athlete
+  who has never used the live-tagging grid at all, so the whole rule is
+  skipped rather than producing an unfalsifiable "never live" claim. Caught in
+  review (`frontend-reviewer`) — the initial cut carried the threshold but not
+  the precondition.
+- Each suggestion carries a **reason string** — "drilled in 9 sessions, never
   live" — never a bare instruction, per the acceptance criteria.
+  `drilled_sessions` counts distinct classes, not reps (see `Progress`'s own
+  field comment), and the wording says so explicitly rather than leaving
+  "times" to be misread as reps — also caught in review.
 
 **Ranked on the roadmap's own item order, not on evidence strength.**
 `funnelGap` ranks by most-drilled-first because it has nothing else to lean

@@ -13998,9 +13998,13 @@ on screen. That, and only that, is what moved.
   class scheduled for today: confirm the "Up next" card shows the current
   milestone or next-step line beneath the Log button.
 - With that roadmap also carrying an item drilled at least 6 sessions and
-  never taken live (per the funnel), seen within the last 60 days: confirm
-  the same card additionally names that technique with its reason (e.g.
-  "drilled 9 times, never live").
+  never taken live (per the funnel), seen within the last 60 days, AND the
+  athlete has used the live-tagging grid on at least one technique somewhere
+  (`countersInUse`): confirm the same card additionally names that technique
+  with its reason (e.g. "drilled in 9 sessions, never live").
+- With a roadmap item that otherwise qualifies but the athlete has NEVER used
+  the live-tagging grid on any technique: confirm no suggestion appears — the
+  focus line still does, since a milestone is a fact, not a suggestion.
 - Confirm the reason line always states WHY — never a bare instruction with
   no evidence behind it.
 - Complete (master) that suggested item's criteria via logged sessions.
