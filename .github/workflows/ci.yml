@@ -385,6 +385,24 @@ jobs:
       - name: Agent policy contract
         run: python3 scripts/check-agent-policy.py
 
+      # H9 (#441). `apps/mobile/ios/` is generated and gitignored, so nothing
+      # in the repo verifies it matches `apps/mobile/package.json` — measured
+      # on #432/N91, `expo-camera` was in the JS bundle and absent from
+      # `Podfile.lock`, the autolinking manifest and the built binary: an
+      # instant, no-dialog termination in Release. The REAL check
+      # (`native-deps:check`) reads the actual `apps/mobile/ios/Podfile.lock`,
+      # which CI never has (CI installs from the lockfile and never runs `pod
+      # install`) — a CI job running it would be a permanent, silent no-op, so
+      # it deliberately stays local-only and outside both `verify` and CI.
+      # This step is only the OFFLINE self-test, same split as
+      # `check:ci-detector` above: synthetic fixtures, no real `ios/` needed,
+      # so it can and does run everywhere. It is also what proves the naive
+      # "PascalCase the package name" heuristic would have been wrong on two
+      # dependencies already in this repo (`expo-constants` ships
+      # `EXConstants`, `expo-dev-client` ships its own literal name).
+      - name: Native dependency guard self-test
+        run: python3 scripts/check-native-deps.py --self-test
+
       # Until this job existed, NOTHING in this repo read a .py file: no CI
       # step, no `verify` link, no pyproject/ruff config anywhere. The content
       # pipeline is Python, and the script that imports the whole catalog is
