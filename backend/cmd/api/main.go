@@ -752,6 +752,10 @@ func main() {
 	mux.Handle("PUT /v1/sessions/{sessionID}/sets", verifier.RequireAuth(http.HandlerFunc(sessionHandler.ReplaceSets)))
 	mux.Handle("POST /v1/sessions/{sessionID}/finish", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Finish)))
 	mux.Handle("PATCH /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Rename)))
+	// N436: a session's own date, corrected after logging — a sub-resource
+	// PATCH rather than folded into the bare {sessionID} one above, matching
+	// /sets and /finish's shape rather than growing that endpoint's body.
+	mux.Handle("PATCH /v1/sessions/{sessionID}/schedule", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Reschedule)))
 	mux.Handle("DELETE /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Delete)))
 
 	// The training plan — what the athlete INTENDS to train, as opposed to

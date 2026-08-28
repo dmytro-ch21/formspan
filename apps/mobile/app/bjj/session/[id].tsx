@@ -1,17 +1,19 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { SelectAllTextInput } from '@/components/SelectAllTextInput';
 import { SessionCelebration } from '@/components/SessionCelebration';
 import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
+import { Icon } from '@/components/ui/Icon';
 import { worthCelebrating, type SessionSummary } from '@/lib/celebration';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { addDays, dayString, monthGrid, weekDays as calendarWeekDays } from '@/lib/calendar';
 import {
   getDetail,
   KINDS,
@@ -29,6 +31,7 @@ import {
   readLocalBjjDetail,
   readLocalSession,
   renameLocalSession,
+  rescheduleLocalSession,
   type LocalSession,
 } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
@@ -239,6 +242,12 @@ export default function BjjSessionScreen() {
   const [remoteMissing, setRemoteMissing] = useState(true);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
+  // Which day the reschedule sheet is open to. Null means closed — not a
+  // separate boolean, so the sheet always opens anchored on the month the
+  // session's OWN date falls in rather than whatever month it was last left
+  // on, which matters the moment a correction is more than a few days back.
+  const [reschedulingAnchor, setReschedulingAnchor] = useState<Date | null>(null);
+  const [reschedulingError, setReschedulingError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!userId || !id) return;
@@ -387,6 +396,34 @@ export default function BjjSessionScreen() {
     }
   }
 
+  /**
+   * N436: the one field the "Edit detail" wizard can't touch, because it
+   * lives on the session record rather than in the reflection blob that
+   * wizard edits.
+   *
+   * Errors surface rather than being swallowed — unlike the rename above,
+   * this changes what the app has already been TOLD happened (mat time
+   * counts toward this day's training, this day's streak), so a silent
+   * failure here would leave the sheet claiming a move that never landed on
+   * this device, let alone the server.
+   */
+  async function commitReschedule(day: Date) {
+    if (!userId || !id) return;
+    try {
+      const ok = await rescheduleLocalSession(userId, id, day);
+      if (!ok) {
+        setReschedulingError("Couldn't find this session on this device.");
+        return;
+      }
+      setReschedulingAnchor(null);
+      setReschedulingError(null);
+      await load();
+      requestSync('bjj-session-rescheduled');
+    } catch (err) {
+      setReschedulingError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   // ABOVE the early returns below, and it has to stay there.
   //
   // This was the only hook after them, so the first render (loading) called one
@@ -531,13 +568,33 @@ export default function BjjSessionScreen() {
         </Pressable>
       )}
 
-      <Text style={styles.when}>
-        {new Date(session.started_at).toLocaleDateString(undefined, {
+      {/* N436: the date is the one field the "Edit detail" wizard below can't
+          touch — it lives on the session record, not the reflection blob
+          that wizard edits. Tap-to-edit, mirroring the name above it. */}
+      <Pressable
+        style={styles.whenPress}
+        onPress={() => {
+          setReschedulingError(null);
+          const d = new Date(session.started_at);
+          setReschedulingAnchor(new Date(d.getFullYear(), d.getMonth(), 1));
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`${new Date(session.started_at).toLocaleDateString(undefined, {
           weekday: 'long',
           day: 'numeric',
           month: 'long',
-        })}
-      </Text>
+        })}. Tap to change the date.`}
+        testID="bjj-session-date"
+      >
+        <Text style={styles.when}>
+          {new Date(session.started_at).toLocaleDateString(undefined, {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+          })}
+        </Text>
+        <Text style={styles.renameHint}>Tap to change date</Text>
+      </Pressable>
 
       {/* The numbers a mat session actually has. Deliberately not a volume
           tile — see the file header.
@@ -770,6 +827,160 @@ export default function BjjSessionScreen() {
         in there can hand the athlete a blank PNG. See
         `components/SessionShare.tsx`. */}
     <ShareCardHost share={share} />
+
+    {/* N436's date-correction sheet — a plain month grid over
+        `rescheduleLocalSession`, deliberately not a native date-picker
+        dependency: this app has none today, and "correct the day" needs
+        nothing a JS-only calendar can't already do (see `lib/calendar.ts`,
+        already shared with the training calendar). No past/future
+        restriction on the grid — the backend does not police it either, see
+        `Reschedule`'s own comment, and an athlete logging the morning after
+        or entering a class a day ahead of a scheduled seminar are both real. */}
+    <Modal
+      visible={reschedulingAnchor !== null}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => setReschedulingAnchor(null)}
+    >
+      <View style={styles.sheet} lightColor={vola.bg} darkColor={vola.bg} testID="bjj-reschedule-sheet">
+        <RNView style={styles.sheetHead}>
+          <Pressable
+            onPress={() =>
+              setReschedulingAnchor((a) => (a ? new Date(a.getFullYear(), a.getMonth() - 1, 1) : a))
+            }
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Previous month"
+            testID="bjj-reschedule-prev-month"
+          >
+            <RNView style={{ transform: [{ rotate: '180deg' }] }}>
+              <Icon name="chevron" size={16} color={vola.text} />
+            </RNView>
+          </Pressable>
+          <Text style={styles.sheetTitle}>
+            {(reschedulingAnchor ?? new Date()).toLocaleDateString(undefined, {
+              month: 'long',
+              year: 'numeric',
+            })}
+          </Text>
+          <Pressable
+            onPress={() =>
+              setReschedulingAnchor((a) => (a ? new Date(a.getFullYear(), a.getMonth() + 1, 1) : a))
+            }
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Next month"
+            testID="bjj-reschedule-next-month"
+          >
+            <Icon name="chevron" size={16} color={vola.text} />
+          </Pressable>
+          <Pressable
+            onPress={() => setReschedulingAnchor(null)}
+            hitSlop={12}
+            style={styles.sheetClose}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            testID="bjj-reschedule-cancel"
+          >
+            <Text style={[styles.close, { color: accent.ink }]}>Cancel</Text>
+          </Pressable>
+        </RNView>
+
+        {/* `KeyboardAwareScrollView`, not a bare `ScrollView` — this sheet has
+            no text field of its own, but `keyboardCoverage.test.ts` checks
+            per FILE, not per container, and this file already takes typing
+            elsewhere (the rename input above). Degrades to a plain scroll
+            view here: `KeyboardAwareScrollView` reads `FooterCtx` with a
+            default value when there is no `KeyboardAwareScreen` ancestor —
+            this Modal has none, and none of its three problems (a hidden
+            field, unreachable content, a buried footer) apply to a sheet with
+            no input and no footer — so this is exactly a `ScrollView` with
+            nothing extra engaged. */}
+        <KeyboardAwareScrollView contentContainerStyle={styles.sheetBody}>
+          <RNView style={styles.quickRow}>
+            <Pressable
+              onPress={() => void commitReschedule(new Date())}
+              style={styles.quickChip}
+              accessibilityRole="button"
+              testID="bjj-reschedule-today"
+            >
+              <Text style={styles.quickChipText}>Today</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void commitReschedule(addDays(new Date(), -1))}
+              style={styles.quickChip}
+              accessibilityRole="button"
+              testID="bjj-reschedule-yesterday"
+            >
+              <Text style={styles.quickChipText}>Yesterday</Text>
+            </Pressable>
+          </RNView>
+
+          {!!reschedulingError && (
+            <Text style={styles.reschedulingError} accessibilityLiveRegion="polite">
+              {reschedulingError}
+            </Text>
+          )}
+
+          <RNView style={styles.gridHead}>
+            {calendarWeekDays(new Date()).map((d) => (
+              <Text key={d.toISOString()} style={styles.gridHeadCell}>
+                {d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3).toUpperCase()}
+              </Text>
+            ))}
+          </RNView>
+
+          {monthGrid(reschedulingAnchor ?? new Date()).map((row) => (
+            <RNView key={row[0].key} style={styles.gridRow}>
+              {row.map((cell) => {
+                const isToday = cell.key === dayString(new Date());
+                const isCurrent = cell.key === dayString(new Date(session.started_at));
+                return (
+                  <Pressable
+                    key={cell.key}
+                    style={styles.gridCell}
+                    onPress={() => void commitReschedule(cell.date)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isCurrent }}
+                    accessibilityLabel={[
+                      cell.date.toLocaleDateString(undefined, {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                      }),
+                      isToday ? 'today' : null,
+                      isCurrent ? "this session's current date" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(', ')}
+                    testID={`bjj-reschedule-day-${cell.key}`}
+                  >
+                    <RNView
+                      style={[
+                        styles.gridDate,
+                        isCurrent && styles.gridDateSelected,
+                        isToday && [styles.gridDateToday, { backgroundColor: accent.accent }],
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.gridDateText,
+                          !cell.inMonth && styles.gridDateDim,
+                          isCurrent && styles.gridDateTextSelected,
+                          isToday && [styles.gridDateTextToday, { color: accent.on }],
+                        ]}
+                      >
+                        {cell.date.getDate()}
+                      </Text>
+                    </RNView>
+                  </Pressable>
+                );
+              })}
+            </RNView>
+          ))}
+        </KeyboardAwareScrollView>
+      </View>
+    </Modal>
     </>
   );
 }
@@ -801,7 +1012,8 @@ const styles = StyleSheet.create({
 
   title: { fontSize: 28, fontWeight: '800', color: vola.text },
   renameHint: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
-  when: { fontSize: 14, color: vola.textMuted, marginBottom: 16 },
+  when: { fontSize: 14, color: vola.textMuted },
+  whenPress: { marginBottom: 16 },
 
   renameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   renameInput: {
@@ -896,4 +1108,59 @@ const styles = StyleSheet.create({
   },
   destructiveText: { fontSize: 15, fontWeight: '600', color: vola.danger },
   footnote: { fontSize: 13, color: vola.textMuted, marginTop: 12, lineHeight: 19 },
+
+  // The reschedule sheet — same shape as `TrainingCalendar`'s own month
+  // sheet (`components/TrainingCalendar.tsx`), deliberately: an athlete who
+  // has already used that calendar should recognise this grid rather than
+  // learn a second one.
+  sheet: { flex: 1 },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+  },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: vola.text },
+  sheetClose: { marginLeft: 'auto' },
+  close: { fontWeight: '700', fontSize: 15 },
+  sheetBody: { paddingHorizontal: 16, paddingBottom: 44, gap: 4 },
+
+  quickRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  quickChip: {
+    flex: 1,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+  },
+  quickChipText: { fontSize: 15, fontWeight: '700', color: vola.text },
+
+  reschedulingError: { color: vola.danger, fontSize: 13, marginBottom: 12 },
+
+  gridHead: { flexDirection: 'row', marginBottom: 6 },
+  gridHeadCell: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    color: vola.textDim,
+  },
+  gridRow: { flexDirection: 'row', marginBottom: 4 },
+  gridCell: { flex: 1, alignItems: 'center', paddingVertical: 4 },
+  gridDate: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  gridDateSelected: { borderWidth: 1, borderColor: vola.line, backgroundColor: vola.surface },
+  gridDateToday: { borderWidth: 0 },
+  gridDateText: { fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'], color: vola.text },
+  gridDateDim: { color: vola.textDim, opacity: 0.5 },
+  gridDateTextSelected: { fontWeight: '800' },
+  // Colour comes from the same `accent.on` the background is set against —
+  // set inline where the style is applied, not here, matching
+  // `TrainingCalendar`'s own `dateTextToday`.
+  gridDateTextToday: {},
 });

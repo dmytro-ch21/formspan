@@ -878,10 +878,19 @@ func (r *PostgresRepository) ReplaceSets(ctx context.Context, userID, sessionID 
 // Rename changes only the session's name.
 //
 // Its own method rather than a general Update, because name is the only field
-// a client may change after the fact: sport decides which screen renders it,
-// started_at/ended_at are what history counts, and sets have their own
-// replace endpoint. A general PATCH would make all of those editable by
-// accident.
+// a client may change WITHOUT any further reasoning: sport decides which
+// screen renders it, and sets have their own replace endpoint. A general
+// PATCH would make those editable by accident.
+//
+// started_at is no longer in that "never" list — see Reschedule below, added
+// for N436 (product decision 2026-08-28) after an athlete had no way to fix a
+// BJJ session logged under the wrong day. This comment used to say
+// "started_at/ended_at are what history counts" as if that settled the
+// question; it doesn't — history counting a field is an argument for getting
+// it RIGHT, not for making it permanent once entered. ended_at still has no
+// dedicated PATCH: it is resent on every Finish call regardless of whether it
+// changed, so a client correcting a session's day already carries the
+// matching ended_at shift through that existing path.
 //
 // The name defaults to the workout or the BJJ kind ("Class"), which is right
 // until the session was a seminar, a comp class or an open mat — and until
@@ -904,6 +913,60 @@ func (r *PostgresRepository) Rename(ctx context.Context, userID, sessionID, name
 		`UPDATE sessions SET name = $2, updated_at = now() WHERE id = $1`,
 		sessionID, name); err != nil {
 		return nil, translatePgError(fmt.Errorf("session: rename: %w", err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("session: commit: %w", err)
+	}
+	return r.Get(ctx, userID, sessionID)
+}
+
+// Reschedule changes only started_at — the session's own record of WHEN it
+// happened, as opposed to `bjj_json`'s reflection content, which the mobile
+// wizard already lets an athlete correct freely.
+//
+// Its own method rather than folded into Rename, matching this module's own
+// established shape (one field, one method, same as Finish for ended_at):
+// a combined "update" would make sport and sets look editable through the
+// same door, and those still are not.
+//
+// No past/future validation, deliberately — N436 surveyed this file and found
+// none needed. A session logged the morning after training, or a class
+// entered a day ahead of a scheduled seminar, are both real and neither is
+// this repository's business to police; the client decides what date makes
+// sense, same as it always has for the CREATE path's started_at.
+func (r *PostgresRepository) Reschedule(ctx context.Context, userID, sessionID string, startedAt time.Time) (*Session, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("session: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
+
+	// Same ownership gate as Rename and Finish — an unguarded UPDATE here is
+	// the identical IDOR shape this module has already had to close once.
+	if _, err := requireOwner(ctx, tx, userID, sessionID); err != nil {
+		return nil, err
+	}
+	// `ended_at` shifts by the SAME delta as `started_at`, atomically in one
+	// statement — not left for the client to fix up via a later `/finish`
+	// call. `sessions_ends_after_start CHECK (ended_at IS NULL OR ended_at
+	// >= started_at)` makes the two updates order-dependent if done
+	// separately: moving a FINISHED session backward would send the old
+	// `ended_at` (now earlier than the new `started_at`) into the CHECK and
+	// fail with `invalid_input` — for the exact "logged today, meant
+	// yesterday" case this endpoint exists for, on every session shorter
+	// than the distance moved. Computing the shift here, from `ended_at -
+	// started_at` read on the PRE-update row (`$2 - started_at` refers to
+	// the value before this statement's own SET applies), keeps the
+	// session's real duration intact and the CHECK satisfied by
+	// construction — a NULL `ended_at` (still in progress) stays NULL.
+	if _, err := tx.Exec(ctx,
+		`UPDATE sessions
+		 SET started_at = $2,
+		     ended_at = CASE WHEN ended_at IS NOT NULL THEN ended_at + ($2 - started_at) ELSE ended_at END,
+		     updated_at = now()
+		 WHERE id = $1`,
+		sessionID, startedAt); err != nil {
+		return nil, translatePgError(fmt.Errorf("session: reschedule: %w", err))
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("session: commit: %w", err)
