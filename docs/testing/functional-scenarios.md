@@ -14352,6 +14352,48 @@ on screen. That, and only that, is what moved.
   data path. Confirm a signed-out state still routes to sign-in before any
   of the above is reachable, unchanged from before this ticket.
 
+## W15 — Today's macro rings stop carrying a previous day's fill after browsing away and back (`apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/components/today/MomentumCard.tsx`, `apps/mobile/components/today/MacroRings.tsx`)
+
+### Happy path
+
+- On Today with nothing logged yet today, browse the day switcher back to a
+  day with logged food. Confirm the rings fill to that day's proportions.
+- Return the switcher to TODAY. Confirm the rings render EMPTY (matching
+  "nothing logged"), not carrying the previous day's fill — the literal
+  regression from the user's report, where the numeric "calories left"
+  figure was already correct but the ring fill was not.
+- Repeat in the other direction: browse from a day with a small fill to a
+  day with a larger one, then to a day with none, confirming each ring
+  redraws for its own day rather than visually settling from the last one.
+
+### Edge cases and errors
+
+- Browse across more than two days in quick succession (today → three days
+  back → today) and confirm the ring never visibly holds at an
+  intermediate day's fill — this is a remount/state-identity bug, not a
+  data-race, so distance and speed of switching are both worth trying.
+- With Reduce Motion enabled (device accessibility setting), repeat the
+  above: confirm the ring snaps straight to each day's correct fill with no
+  sweep, and specifically does not snap to the WRONG (previous) day's value
+  first.
+- **NEEDS HUMAN EVIDENCE** — on a real device, reproduce the exact
+  sequence from the user's report (today with nothing logged → browse to a
+  day with logged food → browse back to today) and confirm the rings read
+  empty on today from the first frame, not mid-animation-down from a
+  previous fill. This is a visual/animation-timing defect a test-runner
+  clock cannot fully exercise; see the 2026-08-28 history entry for what is
+  and isn't mechanically proven about the underlying stickiness mechanism.
+  Also eyeball two side effects of the fix (`frontend-reviewer`): every day
+  switch now replays the ring's full sweep-from-zero animation rather than
+  retargeting from wherever it currently sat, and there's a brief hold on
+  each remount while `useReducedMotion()` re-asks the OS — confirm neither
+  reads as a flicker or a stutter worth fixing separately.
+
+### Auth / security
+
+- None — no new endpoint, no new permission surface, purely a client-side
+  rendering-identity fix.
+
 ## N426 — The scan-confirm screen reads as a nutrition-facts card, not a bare number field (`apps/mobile/app/food/scan.tsx`, `apps/mobile/components/food/AmountSheet.tsx`, `apps/mobile/components/food/NutritionPanel.tsx`, `apps/mobile/components/FoodQuantity.tsx`, `apps/mobile/lib/foodQuantity.ts`)
 
 ### Happy path

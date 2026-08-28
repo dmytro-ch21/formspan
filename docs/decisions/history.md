@@ -47123,6 +47123,131 @@ added a one-line pointer next to the `vola-ticket-sdlc` skill's existing
 `Status → Done` recipe (step 12) noting the `Status → Awaiting evidence`
 counterpart for a ticket the latch reopens.
 
+## 2026-08-28 — W15: Today's macro rings stop carrying a previous day's fill after browsing away and back (#703)
+
+**The report.** *"today for example no food logged yet and that is correct, i
+go to previous day and there are logged data. Once I go back to todays screen
+it carries the rings filled, still calories left look good but it shows the
+rings filled."* Today starts empty, correctly. Browsing to a previous day with
+logged food correctly fills the rings there. Browsing back to today: the
+numeric "calories left" figure is correct, but the ring FILL keeps the
+previous day's proportions.
+
+**The confirmed defect.** `MacroRings.tsx`'s `Ring` keeps its sweep animation
+in `useState(() => new Animated.Value(0))` (`base`/`over`), and is keyed only
+`key={reading.key}` (`'kcal'`/`'protein'`/…) — the same key on every day.
+Today's screen (`app/(tabs)/index.tsx`) never unmounts for the life of the
+process, so switching days never remounted `Ring`; React reused the same
+fiber and the same `Animated.Value`s across the switch. This is the *exact*
+one-shot trap `TrackerList`'s own doc comment on `collapseKey` already names
+for a `useState` on this same screen — a persisted-instance value with no
+day key is a value that survives a day switch it shouldn't. `<TrackerList
+collapseKey={on}>`, a few lines below where `MomentumCard` renders, is the
+established fix pattern for it.
+
+**The fix.** `app/(tabs)/index.tsx` — added `key={on}` to `<MomentumCard>`,
+using the same day key (`momentumDayKey(resume !== null, viewDay, todayKey)`)
+`collapseKey` already reads. Forcing a full remount of `MomentumCard` (and
+therefore `MacroRings` and every `Ring` inside it) on every day switch means
+each ring's `Animated.Value`s are freshly constructed at zero for the day now
+on screen, and render/animate from there — so the ring starts correct for the
+new day's `readRings()` output instead of depending on the retargeting
+`useEffect` (which already lists `targetBase`/`targetOver` in its deps) to
+visually converge back down. Placed on `MomentumCard` rather than on
+`MacroRings` specifically: it's the minimal placement consistent with how
+`collapseKey={on}` is already threaded through this same screen. Correction
+(`frontend-reviewer`): this does NOT reset any `StatePill`/quick-add chip
+state — `MomentumCard` and every child except `Ring` are stateless, pure
+derivations of props (`StatePill`, the chips, the foot line all re-render
+correctly on props alone regardless of remounting). The only per-instance
+state anywhere in the subtree is `Ring`'s two `Animated.Value`s and each
+`useReducedMotion()` hook, both of which are exactly what the remount exists
+to reset.
+
+**What's proven versus hypothesised.** The missing day-key is a real,
+structural defect, independently confirmed by the established
+`collapseKey`/`TrackerList` pattern existing on the very same screen for the
+very same reason. What is **not** mechanically proven: *why* the symptom
+reads as "stuck," rather than "briefly wrong, then animates back down" —
+the retargeting `useEffect` already re-runs with the fresh target on a day
+switch, so on paper `Animated.timing` should self-correct even without a
+remount. Reading the code statically can't settle whether the user's device
+was observed mid-animation, or whether there's a timing interaction (e.g.
+`Animated.timing`'s `useNativeDriver: false` path, since `strokeDashoffset`
+can't go to the native thread) that leaves it visually parked short of the
+target on some frames. The remount fix sidesteps the question rather than
+resolving it: the ring now renders the *correct* value from frame one instead
+of relying on a transition to arrive there, so whatever the exact stickiness
+mechanism was, it no longer has anything to act on.
+
+**Food screen checked, not touched.** `app/(tabs)/food.tsx` renders
+`TrackerList` (already correctly keyed via `collapseKey`, unaffected) but
+does **not** render `MomentumCard` or `MacroRings` at all — Food has no ring
+stack of its own to carry this bug. No change needed there.
+
+**Test: not added, deliberately.** `lib/macroRings.ts`'s pure functions
+(`readRings`, `sweepFor`) are unchanged by this fix and already have full
+coverage in `lib/__tests__/macroRings.test.ts` — the derivation was never
+wrong, only the animated *rendering* of an already-correct derivation carried
+over stale state. The actual defect here is a React rendering-identity issue
+(a missing `key`, causing fiber/state reuse across an unrelated prop change),
+not a pure-logic bug and not new application behaviour to specify. There is a
+component-render test precedent for `MomentumCard` itself
+(`components/today/__tests__/momentumCard.test.tsx`, from W13/#693) and for
+a day-key remount-adjacent case (`components/__tests__/trackerList.test.tsx`
+asserts `collapseKey` behaviour via `rerender`), but neither transfers
+cleanly here: `TrackerList`'s test works because `collapseKey` drives an
+observable *derived comparison* (`openFor === collapseKey`) rendered as plain
+text/visibility, whereas `MacroRings`' fill is an `Animated.Value` run through
+`.interpolate()` into `strokeDashoffset` — not a plain prop `@testing-library/
+react-native` can read back, and the effect the fix relies on (remount
+resetting `useState`'s initializer) is guaranteed React framework semantics,
+not application logic this codebase's tests would be asserting anything new
+by re-proving. Writing one anyway would either assert on internals no test
+here currently touches, or merely reconfirm that React remounts on a changed
+`key`, which is not a claim about VOLA's code. A `NEEDS HUMAN EVIDENCE`
+acceptance criterion is the honest way to close this out — a device check on
+today → previous day (logged) → today again, confirming the rings render
+empty from the first frame rather than sweeping down from a previous fill.
+
+**`pnpm run verify`**: green.
+
+### `ac-verifier`/`frontend-reviewer` findings, applied before merge
+
+**`ac-verifier` marked the test criterion NOT MET, and it was right to.** The
+argument above ("`.interpolate()` output isn't a plain prop this test suite
+can read back") was wrong on the facts, not just the framing
+`frontend-reviewer` separately called out: `strokeDashoffset` DOES resolve to
+a plain number under `react-test-renderer`'s `toJSON()` — confirmed directly
+(`base.interpolate(...)` renders as `194.78`, not an unresolved animated
+node) — because `useNativeDriver: false` keeps the whole interpolation on the
+JS thread. What's true is narrower than "cannot be read": under Reduce Motion
+(`setValue`, synchronous) the buggy and fixed paths converge to the SAME final
+value regardless of remounting, since the retargeting `useEffect`'s deps are
+correct either way — so a same-key-vs-new-key comparison at rest proves
+nothing. The bug is only observable **mid-transition**: with real animation
+timing and fake timers advanced partway into the 620ms sweep, a re-rendered
+`MomentumCard` with the SAME key still reads close to the previous (filled)
+offset, while a NEW key reads close to empty from the first frame — a ~230pt
+gap on a ~530pt circumference, measured directly.
+
+Added to `components/today/__tests__/momentumCard.test.tsx`: a `Host` wrapper
+reproducing `index.tsx`'s exact `key={on}` shape, rendering `MomentumCard`
+with Reduce Motion forced off, comparing the kcal ring's `strokeDashoffset`
+50ms after switching from a filled day to an empty one — same key vs. a new
+one. Mutation-verified: forced both rerenders onto the same key (the pre-fix
+shape), confirmed the assertion failed on a real value (difference collapsed
+to exactly `0`, not a compile error), restored, confirmed green by
+re-running.
+
+**What this test does NOT prove, stated plainly**: it does not execute
+`index.tsx`'s own `key={on}` line — rendering the full `TodayScreen` hits the
+same wall `todayScreen.test.tsx`'s own W13 comment describes (`listTargets`
+mocked to `[]` never reaches a real target). It protects the MECHANISM the
+real fix depends on (a day-tied `key` genuinely resets `Ring`'s animation
+mid-transition), not the wiring at the call site. The ticket's own `NEEDS
+HUMAN EVIDENCE` device check is still the closure for that gap, unchanged.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

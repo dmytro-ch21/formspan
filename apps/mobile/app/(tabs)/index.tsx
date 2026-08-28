@@ -1105,6 +1105,23 @@ export default function TodayScreen() {
             <SectionHeader label="Daily progress" />
             {foodEnabled ? (
               <MomentumCard
+                // W15 (#703): the macro rings' `Animated.Value`s live in
+                // `useState` inside `MacroRings`' `Ring`, and this screen
+                // never unmounts — the exact one-shot trap `collapseKey`
+                // below already exists to guard against for `TrackerList`.
+                // Without a day-tied `key` here, switching from a browsed
+                // day back to today reuses the SAME `Ring` fiber and its
+                // stale `Animated.Value`s rather than constructing fresh
+                // ones, so the ring fill can keep showing the previous day's
+                // proportions even though every number beside it (via
+                // `readRings`) is already correct for the new day. Keying on
+                // `on` — the same day key `collapseKey` uses just below —
+                // forces a full remount on every day switch, so the ring
+                // starts from a freshly-constructed zero value and animates
+                // (or, with Reduce Motion, snaps) straight to the correct
+                // fill for the day now on screen, instead of relying on the
+                // retargeting `useEffect` to visually catch up.
+                key={on}
                 eaten={foodEaten}
                 view={foodView}
                 rings={rings ?? DEFAULT_RINGS}
