@@ -180,7 +180,13 @@ export function MomentumCard({
       </Pressable>
 
       {/* Kept separate from the ring configuration: one opens the day, the
-          other changes what is drawn. The reference shows only the latter. */}
+          other changes what is drawn. The reference shows only the latter.
+
+          **Day-neutral wording, deliberately (N430/#692).** This card can be
+          showing a browsed day, not just today — `onOpenDay` opens THAT day
+          on Food (see the call site) — and "See today's food" on a screen
+          headed "FRI 28 AUG" was a false claim about which day was about to
+          open, on the one button whose whole job is opening a day. */}
       <Pressable
         onPress={onOpenDay}
         accessibilityRole="button"
@@ -188,7 +194,7 @@ export function MomentumCard({
         // card is actually reading today, on BOTH the spoken label and the
         // visible text below — ac-verifier caught the visible string still
         // reading "today's" on a browsed day when only the a11y label had
-        // been fixed. The link's NAVIGATION is unchanged (still N430's
+        // been fixed. The link's NAVIGATION is unchanged (N430/#692's
         // scope) — only wording follows `isToday`.
         accessibilityLabel={isToday ? "Open today's food log" : 'Open food log'}
         style={styles.openDay}

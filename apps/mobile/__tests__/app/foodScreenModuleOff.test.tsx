@@ -24,6 +24,10 @@ import { listTargets } from '@/lib/nutritionApi';
 const mockFocusCbs: (() => void | (() => void))[] = [];
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
+  // N430/#692 — `app/(tabs)/food.tsx` now reads `?date=` to seed its
+  // day stepper. `() => ({})` matches the global mock in `jest.setup.js`:
+  // no incoming param, so the screen behaves exactly as before.
+  useLocalSearchParams: () => ({}),
   // Keyed on the callback, matching React Navigation: a focus effect re-runs
   // when its callback identity changes while focused, which is exactly how the
   // module gate reaches the fetch (`refresh` changes when it flips).

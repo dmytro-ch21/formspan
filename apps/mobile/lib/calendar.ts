@@ -86,6 +86,37 @@ export function weekDays(now: Date): Date[] {
 }
 
 /**
+ * The whole-day OFFSET from `now` to the calendar day named by `on` — the
+ * inverse of {@link addDays} + {@link dayString}:
+ * `dayString(addDays(now, dayOffsetFor(on, now))) === on`.
+ *
+ * Built for a `?date=` deep link that has to seed a screen's own day-stepper
+ * (N430/#692 — `app/(tabs)/food.tsx` accepting an initial day from Today) as
+ * an OFFSET rather than an absolute `Date`, for the same reason
+ * `(tabs)/index.tsx`'s own `dayOffset` is one: held as a date it goes stale
+ * the moment the wall clock crosses midnight while the screen stays mounted,
+ * where an offset from `now` keeps re-resolving against the live clock.
+ *
+ * Parsed as LOCAL midnight (`${on}T00:00:00`, no `Z`), matching how every
+ * `on` day key in this app is produced (`dayString`, above) — parsing as UTC
+ * here would silently shift the result by a day for anyone not on UTC.
+ *
+ * `on` reaches this from a `?date=` URL param, which — unlike an internally
+ * constructed `dayString` — isn't guaranteed well-formed (a stale bookmark,
+ * a hand-typed link, a future app version's format). A malformed value
+ * parses to `Invalid Date`, and its `NaN` offset would otherwise ride
+ * silently into `addDays`/`dayString` downstream and land the day-stepper on
+ * `Invalid Date` with no error. Falls back to 0 (today) instead.
+ */
+export function dayOffsetFor(on: string, now: Date): number {
+  const target = new Date(`${on}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return 0;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+}
+
+/**
  * The week anchor to show once the clock has moved on — `now` if `anchor` has
  * fallen into a past week, otherwise `anchor` untouched.
  *

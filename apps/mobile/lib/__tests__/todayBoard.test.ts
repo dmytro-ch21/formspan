@@ -1,8 +1,16 @@
-import { dayString } from '@/lib/calendar';
+import { dayOffsetFor, dayString } from '@/lib/calendar';
 import type { Module } from '@/lib/modules';
 import type { PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
-import { buildTodayBoard, momentumDayKey, todayPlanWindow, type TodayLead } from '@/lib/todayBoard';
+import {
+  buildTodayBoard,
+  momentumDayKey,
+  momentumLogFoodHref,
+  momentumOpenFoodHref,
+  todayPlanWindow,
+  trackerTapDay,
+  type TodayLead,
+} from '@/lib/todayBoard';
 import { PLAN_WINDOW_DAYS, type Source } from '@/lib/trainBoard';
 import type { Workout } from '@/lib/workouts';
 
@@ -524,5 +532,67 @@ describe('momentumDayKey — a resume overrides any leftover browsed day (#584 f
     // when there is nothing to disagree about.
     const today = new Date(`${todayKey}T12:00:00`);
     expect(momentumDayKey(true, today, todayKey)).toBe(momentumDayKey(false, today, todayKey));
+  });
+});
+
+/**
+ * N430/#692 — "we have today already past 12am but I need to catch up with
+ * logs and I can't????". Four surfaces on Today all silently pinned to real
+ * today regardless of what the screen showed; these functions are the fix
+ * for three of them (`Log food`, the day link, the trackers) — the fourth,
+ * `quickLog`'s write, uses `momentumDayKey`'s own `on` directly and is
+ * already covered by the suite above.
+ */
+describe('momentumLogFoodHref / momentumOpenFoodHref — N430/#692', () => {
+  it('Log food carries the day Momentum is showing, not a bare route', () => {
+    // A bare `/food/add` is exactly the bug: `app/food/add.tsx` defaults an
+    // absent `?date=` to real today, so this must never regress to that.
+    expect(momentumLogFoodHref('2026-08-25')).toBe('/food/add?date=2026-08-25');
+  });
+
+  it('the day link opens Food on that same day', () => {
+    expect(momentumOpenFoodHref('2026-08-25')).toBe('/food?date=2026-08-25');
+  });
+
+  it('both take the exact `on` momentumDayKey produces for a browsed day, and Food decodes it back to the same day', () => {
+    const viewDay = new Date('2026-08-25T09:00:00'); // yesterday
+    const todayKey = '2026-08-26';
+    const on = momentumDayKey(false, viewDay, todayKey);
+
+    expect(momentumLogFoodHref(on)).toBe('/food/add?date=2026-08-25');
+    expect(momentumOpenFoodHref(on)).toBe('/food?date=2026-08-25');
+
+    // The round trip the whole handoff depends on: `dayOffsetFor` (what
+    // `app/(tabs)/food.tsx` uses to seed its stepper from this exact string)
+    // must decode it back to YESTERDAY, not today and not the day before.
+    expect(dayOffsetFor(on, new Date(`${todayKey}T08:00:00`))).toBe(-1);
+  });
+
+  it('resolves to real today when a session is resuming, regardless of a stale browsed day', () => {
+    const staleViewDay = new Date('2026-08-20T12:00:00'); // days-old leftover
+    const todayKey = '2026-08-26';
+    const on = momentumDayKey(true, staleViewDay, todayKey);
+    expect(momentumLogFoodHref(on)).toBe(`/food/add?date=${todayKey}`);
+  });
+});
+
+describe('trackerTapDay — N430/#692', () => {
+  it('on TODAY, resolves the clock fresh rather than trusting `on`', () => {
+    // `on` here is deliberately stale/wrong, to prove it is ignored on today
+    // — this is the tap-at-midnight guarantee: a phone left open overnight
+    // must file a 00:05 tap under the NEW day, not whatever `on` last held.
+    const freshlyAfterMidnight = () => new Date('2026-08-26T00:05:00');
+    expect(trackerTapDay(true, '2026-08-25', freshlyAfterMidnight)).toBe('2026-08-26');
+  });
+
+  it('on a BROWSED day, resolves to `on` rather than the live clock', () => {
+    const now = () => new Date('2026-08-26T12:00:00');
+    expect(trackerTapDay(false, '2026-08-20', now)).toBe('2026-08-20');
+  });
+
+  it('never reads the clock at all while browsing — a tap on a past day cannot be affected by what time it is', () => {
+    const now = jest.fn(() => new Date('2026-08-26T12:00:00'));
+    trackerTapDay(false, '2026-08-20', now);
+    expect(now).not.toHaveBeenCalled();
   });
 });

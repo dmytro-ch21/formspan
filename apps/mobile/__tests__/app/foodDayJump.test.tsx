@@ -54,6 +54,10 @@ const mockPush = jest.fn();
 const mockFocusCbs: (() => void | (() => void))[] = [];
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush, back: jest.fn(), replace: jest.fn() }),
+  // N430/#692 — `app/(tabs)/food.tsx` now reads `?date=` to seed its
+  // day stepper. `() => ({})` matches the global mock in `jest.setup.js`:
+  // no incoming param, so the screen behaves exactly as before.
+  useLocalSearchParams: () => ({}),
   useFocusEffect: (cb: () => void | (() => void)) => {
     const react = jest.requireActual('react') as typeof import('react');
     react.useEffect(() => {

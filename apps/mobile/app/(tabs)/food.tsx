@@ -24,7 +24,7 @@
  */
 
 import { useAuth } from '@clerk/clerk-expo';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
@@ -40,7 +40,15 @@ import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { addDays, addMonths, dayString, monthGrid, startOfMonth, weekDays } from '@/lib/calendar';
+import {
+  addDays,
+  addMonths,
+  dayOffsetFor,
+  dayString,
+  monthGrid,
+  startOfMonth,
+  weekDays,
+} from '@/lib/calendar';
 import { cacheTargets, localEntries, localLoggedDays, localTargetView, removeEntry } from '@/lib/foodLog';
 import {
   bySlot,
@@ -72,9 +80,34 @@ export default function FoodScreen() {
   const getToken = useAuthToken();
   const { lastSyncAt } = useSyncState();
 
+  /**
+   * N430/#692 — the day Today hands off with `?date=` (its "See logged food"
+   * link, or the Log food / quick-add day it just wrote to). `undefined` on a
+   * plain tab tap, which must NOT reset anything — see `appliedDateParam`
+   * below.
+   */
+  const params = useLocalSearchParams<{ date?: string }>();
+
   // An OFFSET rather than a Date, so the screen cannot drift out of sync with
   // the wall clock while it sits mounted — the same shape Today uses.
-  const [dayOffset, setDayOffset] = useState(0);
+  //
+  // Seeded from `?date=` on first mount so the initial paint is already on
+  // the right day rather than flashing today first — see the focus effect
+  // below for what re-seeds it on a SECOND deep link, which this lazy
+  // initializer cannot: this screen is a tab and stays mounted for the life
+  // of the process, so it only ever runs once.
+  const [dayOffset, setDayOffset] = useState(() =>
+    params.date ? dayOffsetFor(params.date, new Date()) : 0,
+  );
+  /**
+   * The last `?date=` this screen has already applied, so a mere refocus —
+   * switching tabs away and back with no new navigation — cannot re-seed the
+   * day and clobber a manual step the athlete took after arriving. Expo
+   * Router keeps handing back the SAME `params.date` on every refocus of an
+   * already-mounted tab; only a genuinely NEW value from a fresh
+   * `router.push` should move the stepper.
+   */
+  const appliedDateParam = useRef(params.date);
   // Keyed to the day, like `dated` below and for the same reason: unkeyed, a
   // day step leaves the PREVIOUS day's rows standing under the new date until
   // the read resolves, so the total on screen belongs to a day you are no
@@ -119,6 +152,37 @@ export default function FoodScreen() {
   const { disabled: foodDisabled, off: foodOff } = foodLogGate(modules, modulesReady);
 
   const on = dayString(addDays(new Date(), dayOffset));
+
+  /**
+   * Re-seeds the stepper on a SECOND `?date=` deep link.
+   *
+   * The lazy initializer above only ever runs once — this is a tab screen and
+   * stays mounted for the life of the process — so browsing to day A on
+   * Today, opening Food (correct, seeded on mount), going back to Today,
+   * browsing to day B and opening Food again would otherwise still show day
+   * A: the exact "browsed day silently shows the wrong day" failure N430/#692
+   * is about, just relocated to the second hop instead of fixed.
+   *
+   * `useFocusEffect`, not `useEffect` — this screen already has a same-shape
+   * precedent (`app/goals/history.tsx`'s own day reset on focus) that a plain
+   * `useEffect` calling `setState` synchronously does not: `useEffect` runs on
+   * every commit regardless of whether anything meaningful changed, which is
+   * the cascading-render pattern this codebase's lint ratchet holds a line
+   * against, while a focus event is a real, bounded trigger.
+   *
+   * Guarded on `appliedDateParam` so a bare refocus — switching tabs away and
+   * back with no new navigation, where Expo Router keeps handing back the
+   * SAME `params.date` — cannot re-seed the day and silently discard a manual
+   * step the athlete took after arriving.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      if (params.date && params.date !== appliedDateParam.current) {
+        appliedDateParam.current = params.date;
+        setDayOffset(dayOffsetFor(params.date, new Date()));
+      }
+    }, [params.date]),
+  );
 
   // The daily trackers, for whatever day is on screen.
   //

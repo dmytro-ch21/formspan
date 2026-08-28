@@ -1,3 +1,5 @@
+import type { Href } from 'expo-router';
+
 import { addDays, dayString, startOfWeek } from './calendar';
 import { owedOn } from './adherence';
 import type { Module } from './modules';
@@ -261,4 +263,50 @@ export function todayPlanWindow(now: Date, viewDay: Date = now): { from: string;
  */
 export function momentumDayKey(resume: boolean, viewDay: Date, todayKey: string): string {
   return resume ? todayKey : dayString(viewDay);
+}
+
+/**
+ * Where "Log food" goes from Momentum — the day it is SHOWING (`on`, i.e.
+ * {@link momentumDayKey}'s own result), not necessarily real today.
+ *
+ * **N430/#692.** This used to be a bare `/food/add`, which
+ * `app/food/add.tsx` defaults to real today when no `?date=` is given — so an
+ * athlete browsing yesterday who tapped `Log food` found the entry filed
+ * silently under today, with no way to log the day they were actually
+ * looking at.
+ *
+ * Returns `Href`, not `string`, for the same reason `lib/startSession.ts`'s
+ * href builders do: a bare `string` return would launder the route literal
+ * past Expo Router's generated types, which is the exact hole N32 shipped
+ * from — see that file's own doc comment.
+ */
+export function momentumLogFoodHref(on: string): Href {
+  return `/food/add?date=${on}`;
+}
+
+/**
+ * Where Momentum's day link opens Food — the day it is SHOWING, matching
+ * {@link momentumLogFoodHref} above and part of the same N430/#692 fix. Used
+ * to be a bare `/food`, which always opened on real today regardless of what
+ * Momentum displayed.
+ */
+export function momentumOpenFoodHref(on: string): Href {
+  return `/food?date=${on}`;
+}
+
+/**
+ * Which day a tracker tap on Today should be filed under. N430/#692 — the
+ * trackers on Today used to ignore the browsed day entirely.
+ *
+ * TODAY resolves the clock FRESH at the moment of call — `now` is a thunk,
+ * not a captured `Date`, matching why `TrackerList`'s own `dayAtTap` prop is
+ * itself a thunk: Today never unmounts, so a phone left open across midnight
+ * must not file a 00:05 tap under the day that just ended.
+ *
+ * A BROWSED day carries no such staleness risk — `dayOffset` is an explicit
+ * choice away from today, not a clock reading — so it resolves to `on`, the
+ * same day Momentum and `quickLog` read and write.
+ */
+export function trackerTapDay(isToday: boolean, on: string, now: () => Date): string {
+  return isToday ? dayString(now()) : on;
 }
