@@ -70,6 +70,27 @@ var searchFixtures = []fixture{
 	// A second market, so market coverage is a real distinction here and not
 	// a constant.
 	{"fd-fx-skyr", "Skyr, plain", "dairy", "is", nil, 63},
+	// An ALIAS-ONLY match with no general synonym backing it — "ahi" is not a
+	// key in `synonyms`, so this can only pass through the alias column, not
+	// through vocabulary expansion. N109's acceptance criteria name this case
+	// by name.
+	{"fd-fx-tuna-yellowfin", "Tuna, yellowfin", "seafood", "us", []string{"ahi"}, 130},
+	// N109's alias-boundary regression fixture, and its shape is deliberate.
+	//
+	// A single-WORD pair of aliases (say "arm"/"bar") can never cross a
+	// boundary in `aliases_text` (N109's prefilter): the join separator is a
+	// space, `searchTokens` never emits a token containing one, and a
+	// contiguous ILIKE match therefore cannot straddle the separator either —
+	// that class is safe BY CONSTRUCTION, proven in search.go's doc comment.
+	//
+	// `synonyms` values are the exception: they are NOT run back through
+	// `searchTokens`, so a few of them contain a literal space —
+	// `synonyms["pb"] = {"peanut butter"}`. THAT shape can genuinely cross a
+	// boundary: two aliases, neither containing "peanut butter" on its own,
+	// whose join happens to produce it right at the seam. If the exact
+	// `unnest`-based recheck were ever dropped, this fixture is what would
+	// start matching a query for "pb" that it must not.
+	{"fd-fx-alias-boundary", "Zzzznotarealfood, testing only", "test", "us", []string{"a fake peanut", "butter fake filler"}, 5},
 }
 
 func seedFixtures(t *testing.T, repo *PostgresRepository) context.Context {
@@ -174,6 +195,85 @@ func TestSearchMatchesARowAlias(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("alias column did not match")
+	}
+}
+
+// The alias column with NO general synonym backing it. `synonyms` has no
+// "ahi" key, so if this finds the yellowfin tuna row, it can only be through
+// `aliases` — this is the case N109's acceptance criteria name directly, and
+// the one the alias branch of SearchClause exists to serve.
+func TestSearchMatchesAnAliasWithNoGeneralSynonym(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := seedFixtures(t, repo)
+
+	got, _, err := repo.Search(ctx, SearchFilter{Query: "ahi", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range got {
+		if f.ID == "fd-fx-tuna-yellowfin" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("'ahi' did not find the yellowfin tuna row through its alias: %v", got)
+	}
+}
+
+// N109 added `aliases_text` — aliases joined into one string — as an
+// indexable prefilter alongside the untouched `unnest`-based exact check.
+// This is the guarantee that addition must never break, checked against a
+// real row and a real query rather than only at the SQL-generation level in
+// search_test.go.
+//
+// A single-WORD boundary (say "arm"/"bar") can never cross in `aliases_text`
+// — the join separator is a space and `searchTokens` never emits a token
+// containing one, so a contiguous ILIKE match cannot straddle the seam
+// either. The genuine risk is `synonyms`, whose VALUES are not re-tokenized
+// and can contain a literal space — `synonyms["pb"] = {"peanut butter"}`.
+// `fd-fx-alias-boundary` carries two aliases, neither containing "peanut
+// butter" on its own, whose join happens to produce it right at the seam —
+// this is the shape that would start matching a query for "pb" if the exact
+// `unnest`-based recheck were ever dropped in favour of the prefilter alone.
+func TestSearchRejectsATermThatCrossesAnAliasBoundary(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := seedFixtures(t, repo)
+
+	// Positive controls first: a word unique to EACH alias must still find
+	// the row on its own — proving the negative below isn't merely because
+	// nothing about this row is searchable at all. "peanut" lives only in
+	// the first alias, "filler" only in the second.
+	for _, q := range []string{"peanut", "filler"} {
+		got, _, err := repo.Search(ctx, SearchFilter{Query: q, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, f := range got {
+			if f.ID == "fd-fx-alias-boundary" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%q did not find fd-fx-alias-boundary through its own alias — the positive control is broken, so the negative below proves nothing", q)
+		}
+	}
+
+	// The boundary case: "pb" expands (via `synonyms`) to "peanut butter",
+	// which exists only at the SEAM between the row's two aliases — never
+	// inside either alias on its own. `unnest` only ever looks inside ONE
+	// alias at a time, so this must find nothing — the `arm bar` defect,
+	// reproduced in the food catalog through a synonym rather than a typed
+	// word.
+	got, _, err := repo.Search(ctx, SearchFilter{Query: "pb", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range got {
+		if f.ID == "fd-fx-alias-boundary" {
+			t.Fatalf("'pb' (-> \"peanut butter\") matched fd-fx-alias-boundary — a term crossed the boundary between two unrelated aliases")
+		}
 	}
 }
 

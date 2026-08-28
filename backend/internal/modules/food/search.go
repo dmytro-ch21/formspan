@@ -141,22 +141,80 @@ func HasSearchableTerm(q string) bool { return len(searchTokens(q)) > 0 }
 // and the technique-library entry is explicit that ORing terms is the bug:
 // `knee belly` must not return all 19 knee techniques.
 //
-// **Name and aliases are kept apart rather than concatenated**, which is the
-// other half of that lesson. Joining them into one string would let a single
-// token match across the boundary between two unrelated names — the exact
-// defect that made `arm bar` behave the way it did. `unnest` keeps each alias
-// its own string, so a term must live inside one of them.
+// **Name and aliases are kept apart for MATCHING PURPOSES, rather than
+// concatenated**, which is the other half of that lesson. Joining them into
+// one string and matching against THAT would let a single token match across
+// the boundary between two unrelated names -- the exact defect that made
+// `arm bar` behave the way it did. `unnest` keeps each alias its own string
+// for the clause that actually DECIDES a match, so a term must live inside
+// one of them. See TestSearchClauseMatchesAliasesSeparatelyFromName and
+// TestSearchClauseNeverLetsThePrefilterDecideAloneAcrossMultipleTokens below,
+// and the Postgres-integration counterpart
+// (TestSearchRejectsATermThatCrossesAnAliasBoundary) in postgres_test.go, for
+// that guarantee checked directly against real rows.
+//
+// # N109 -- the alias OR used to defeat food_catalog_name_trgm_idx
+//
+// Each token's clause used to be one flat OR: `f.name ILIKE $n OR EXISTS
+// (SELECT 1 FROM unnest(f.aliases) ...)`. An OR against a correlated
+// subquery forces Postgres to Seq Scan -- a GIN bitmap scan cannot be built
+// for one branch of an OR whose other branch is a subplan. Measured at
+// 12,651 rows on `chicken breast`: Seq Scan, 12,588 rows filtered, 31.6ms
+// (N88's original measurement) / 14.6ms (re-measured for this fix, same
+// plan, different hardware). The SAME predicate with the alias half removed
+// plans as a Bitmap Index Scan and runs in 0.97ms / 0.66ms.
+//
+// The fix ANDs in an indexable OVER-APPROXIMATION alongside the original,
+// UNCHANGED exact clause, per token:
+//
+//	(f.name ILIKE $n OR f.aliases_text ILIKE $n)                        -- prefilter, indexable
+//	AND
+//	(f.name ILIKE $n OR EXISTS (SELECT 1 FROM unnest(f.aliases) ...))   -- exact, unchanged
+//
+// `aliases_text` (migration 000078) is `aliases` joined with a space and
+// carries its own trigram GIN index. **It is provably a superset of the
+// exact clause, never a substitute for it**: if some alias element contains
+// the typed substring, the joined string still contains that same run of
+// characters -- joining can only add text AROUND a match, never break one
+// apart -- so `exact` implies `prefilter`, which makes `prefilter AND exact`
+// logically identical to `exact` alone for every row, for every query this
+// function can build. What changes is that Postgres now has an index to
+// bitmap-scan for CANDIDATES (on `name` and on `aliases_text`, combined via
+// BitmapOr/BitmapAnd), applying the untouched `EXISTS` clause only as a
+// Recheck/Filter on that narrowed set instead of against all 12,651 rows.
+//
+// This is also why the alias-boundary guarantee above survives having
+// `aliases_text` in the query at all: `aliases_text` can only ever produce a
+// FALSE-POSITIVE CANDIDATE, never a false-positive RESULT, because the final
+// answer is always gated by the unchanged `EXISTS` clause, which only ever
+// looks inside one alias at a time. A prefilter that is a safe superset
+// cannot narrow a correct result into a wrong one; it can only be redundant.
+//
+// That candidate can genuinely be a false positive, and it is worth being
+// precise about when. A single-WORD token can never cross the seam: the join
+// separator is a space, `searchTokens` never emits a token containing one, so
+// a contiguous ILIKE match cannot straddle it either — `{'arm','bar'}` joins
+// to `'arm bar'`, which does not contain `armbar`. The real case is
+// `synonyms`, whose VALUES are used as-is rather than re-tokenized, and a few
+// of them contain a literal space (`synonyms["pb"] = {"peanut butter"}`).
+// Two aliases like `{'... peanut', 'butter ...'}`, neither containing
+// "peanut butter" alone, DO produce it at the seam once joined — a query for
+// "pb" is a real false-positive CANDIDATE there. The `EXISTS` recheck is what
+// still correctly rejects it; see
+// TestSearchRejectsATermThatCrossesAnAliasBoundary in postgres_test.go, which
+// is built on exactly this shape (mutation-tested: dropping the `EXISTS`
+// recheck and keeping only `aliases_text` makes that test fail on "pb").
 //
 // `startAt` is the first placeholder number this may use, because the caller
 // has already bound others.
 func SearchClause(query string, startAt int) (string, []any) {
 	tokens := searchTokens(query)
 	if len(tokens) == 0 {
-		// A query that is ALL punctuation — "%", "_", "!!!".
+		// A query that is ALL punctuation -- "%", "_", "!!!".
 		//
 		// Returns a FALSE clause, never an empty one. An empty string leaves
 		// the caller to decide what no constraint means, and the obvious
-		// reading — "no clause, so no filter" — hands back the whole catalog
+		// reading -- "no clause, so no filter" -- hands back the whole catalog
 		// for a single stray "%". The exercise catalog regressed exactly that
 		// way and returned all 762 rows for a one-character query.
 		return "false", nil
@@ -177,20 +235,31 @@ func SearchClause(query string, startAt int) (string, []any) {
 		if strings.HasSuffix(tok, "e") && len(tok) > 4 {
 			alts = append(alts, strings.TrimSuffix(tok, "e"))
 		}
-		ors := make([]string, 0, len(alts)*2)
+		var (
+			exact     = make([]string, 0, len(alts)*2)
+			prefilter = make([]string, 0, len(alts)*2)
+		)
 		for _, alt := range alts {
 			args = append(args, database.LikeTerm(alt))
-			// One placeholder, two readings — the same bound term is tried
-			// against the name and against each alias separately.
-			ors = append(ors,
-				database.LikeClause("f.name", n),
+			// One placeholder, bound ONCE, referenced by BOTH clauses below --
+			// there is exactly one term per alt either way, so the arg count
+			// callers (and the tests) rely on is unchanged from before N109.
+			nameClause := database.LikeClause("f.name", n)
+			exact = append(exact, nameClause,
 				fmt.Sprintf(
 					"EXISTS (SELECT 1 FROM unnest(f.aliases) AS alias WHERE %s)",
-					database.LikeClause("alias", n)),
-			)
+					database.LikeClause("alias", n)))
+			prefilter = append(prefilter, nameClause,
+				database.LikeClause("f.aliases_text", n))
 			n++
 		}
-		clauses = append(clauses, "("+strings.Join(ors, " OR ")+")")
+		// prefilter AND exact -- never prefilter OR exact, and never
+		// prefilter alone. See the block comment above for why that AND is a
+		// no-op on the RESULT rather than a weakening of it.
+		clauses = append(clauses,
+			"("+strings.Join(prefilter, " OR ")+")"+
+				" AND "+
+				"("+strings.Join(exact, " OR ")+")")
 	}
 	return strings.Join(clauses, " AND "), args
 }
