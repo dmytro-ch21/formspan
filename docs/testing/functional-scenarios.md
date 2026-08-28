@@ -14103,6 +14103,24 @@ on screen. That, and only that, is what moved.
   endpoint; the mobile suite covers it directly by rejecting the relevant API
   call with `TimeoutError`/`RequestDroppedError`.)
 
+### Follow-up fixups — the same defect in two more sites, and one missed announcement
+
+- With a live phase already recorded, press "End this phase" while offline or
+  with a forced 5xx: confirm the problem text ("phase-problem") composes the
+  transport's own diagnosis (or the server's own words for a 5xx) rather than
+  the old fixed "Could not end it. Check your connection and try again." —
+  same for pressing "Start" to begin a new phase.
+- Open the target history screen (`goals/history.tsx`) with the network off
+  or the endpoint forced to a 5xx: confirm "history-unavailable" leads with
+  the transport's diagnosis (or a neutral sentence for a server-answered
+  failure), not the old fixed "this one needs a connection" text, and the
+  "Try again" retry control still works.
+- With VoiceOver/TalkBack on, press "Use this target" while offline or
+  against a forced 5xx: confirm the failure is SPOKEN (an accessibility
+  announcement), not just rendered — matching the "Saved" receipt on the
+  success path and the equivalent failure announcement on the manual-save
+  and weekly-adjustment buttons.
+
 ### Auth / security
 
 - None of these are auth-gated differently from the screens' existing

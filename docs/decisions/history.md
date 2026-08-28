@@ -45729,13 +45729,43 @@ had stubbed a plain `Error('offline')` rather than a real sentinel; a new
 conversion. Full mobile suite (220 suites, 3395 tests), `lint:mobile` and
 `typecheck:mobile` all green.
 
-**Not touched, and worth naming so it is not mistaken for an oversight**:
-`phase/index.tsx`'s `start`/`stop` catches ("Could not start it. Check your
-connection and try again.") carry the same shape of defect but were not part
-of this ticket's three cited sites, and `goals/history.tsx`'s own write paths
-inherit the `refusalOrWeather` fix automatically without a test asserting it
-directly — worth a follow-up if a dedicated history-screen test file is ever
-written.
+**Follow-up, same day, caught in `frontend-reviewer` and fixed before
+merge**: the paragraph above originally read "not touched" for
+`phase/index.tsx`'s `start`/`stop` catches and `goals/history.tsx`'s read
+path — both carried the identical unconditional-network-blame defect, one
+function and one file away from the sites the ticket named, and shipping the
+file half-fixed invites "wasn't this already fixed?" later. Both are now
+fixed alongside the named sites rather than left as a follow-up:
+
+- `phase/index.tsx`'s `start`/`stop` catches now read `transportDiagnosis(err)`
+  the same way `refresh` does, falling back to a neutral `'Could not start
+  it.'`/`'Could not end it.'` only for a server-answered `ApiError`.
+- `goals/history.tsx`'s failed-read catch used to discard its error entirely
+  (`.catch(() => setRead({ status: 'unavailable' }))`) and the render
+  asserted one fixed "this one needs a connection" sentence regardless of
+  cause. `TargetRead`'s `unavailable` variant and `TargetHistory`'s matching
+  `kind` both gained an optional `diagnosis` field, threaded from the catch
+  through `buildHistory` to the render, which now composes it with the
+  screen's own "It is not gone; we just could not ask." — falling back to a
+  neutral sentence for a server-answered failure, same pattern as
+  everywhere else in this ticket.
+- `accept()`'s catch (`goals.tsx`, the "Use this target" button) also gained
+  the `AccessibilityInfo.announceForAccessibility(why)` call its two sibling
+  write catches (`saveManual`, `acceptAdjustment`) already had — a VoiceOver
+  user hitting a real failure there previously heard nothing at all, the
+  button just un-dimmed. Caught in the same review pass.
+
+Mutation-verified the same way as the rest of the ticket: folding
+`phase/index.tsx`'s two write catches back to the unconditional wording
+turned 4 assertions red across the new `describe('why start/stop failed', …)`
+block; folding `buildHistory`'s `unavailable` passthrough back to dropping
+`diagnosis` turned the new `targetHistory.test.ts` case red. Both restored
+and re-confirmed green. `goals/history.tsx`'s catch-site wiring itself has no
+component-test harness (this repo deliberately does not write mobile
+component tests) — its correctness rests on `buildHistory`'s passthrough,
+which is what the mutation above exercises.
+
+Full mobile suite after these fixups: 220 suites, 3402 tests, `verify` green.
 
 ## Open items / known gaps as of this entry
 

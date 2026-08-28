@@ -1,8 +1,8 @@
-import { configure, render, screen } from '@testing-library/react-native';
+import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import PhaseScreen from '../phase/index';
 import { ApiError, OfflineError, RequestDroppedError, TimeoutError } from '@/lib/apiError';
-import { listPhases } from '@/lib/body';
+import { createPhase, endPhase, listPhases } from '@/lib/body';
 import type { UnitSystem } from '@/lib/units';
 
 /**
@@ -47,6 +47,8 @@ jest.mock('@/lib/useUnits', () => ({
 }));
 
 const mockList = listPhases as jest.MockedFunction<typeof listPhases>;
+const mockCreate = createPhase as jest.MockedFunction<typeof createPhase>;
+const mockEnd = endPhase as jest.MockedFunction<typeof endPhase>;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -107,5 +109,82 @@ describe('why the read failed', () => {
 
     await screen.findByTestId('phase-problem');
     expect(screen.queryByTestId('phase-start')).toBeNull();
+  });
+});
+
+/**
+ * N94 (follow-up, same ticket): the two WRITE catches, `start` and `stop`,
+ * carried the identical unconditional-network-blame defect the ticket's
+ * named `refresh` catch was fixed for — just one function down in the same
+ * file. Not in the issue's own three named sites, but the same class of bug
+ * in the same screen, caught in review and fixed alongside it rather than
+ * left half-done.
+ */
+describe('why start/stop failed', () => {
+  beforeEach(() => {
+    mockList.mockResolvedValue([]);
+  });
+
+  it('start: never says "could not reach the server" for a failure the server answered', async () => {
+    mockCreate.mockRejectedValue(new ApiError('could not create phase', 'internal', 500));
+    render(<PhaseScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('phase-start')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('phase-start'));
+
+    const problem = await screen.findByTestId('phase-problem');
+    expect(problem).not.toHaveTextContent(/reach the server/i);
+  });
+
+  it('stop: never says "could not reach the server" for a failure the server answered', async () => {
+    mockList.mockResolvedValue([
+      {
+        id: 'p1',
+        user_id: 'u1',
+        kind: 'cut',
+        started_on: '2026-08-01',
+        target_on: null,
+        target_weight_kg: null,
+        ended_on: null,
+        notes: '',
+      },
+    ]);
+    mockEnd.mockRejectedValue(new ApiError('could not end phase', 'internal', 500));
+    render(<PhaseScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('phase-end')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('phase-end'));
+
+    const problem = await screen.findByTestId('phase-problem');
+    expect(problem).not.toHaveTextContent(/reach the server/i);
+  });
+
+  it.each([
+    ['no route to the API', new OfflineError()],
+    ['a timeout', new TimeoutError()],
+    ['a dropped connection', new RequestDroppedError()],
+  ] as const)('start composes the transport’s own diagnosis for %s', async (_label, err) => {
+    mockCreate.mockRejectedValue(err);
+    render(<PhaseScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('phase-start')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('phase-start'));
+
+    const problem = await screen.findByTestId('phase-problem');
+    expect(problem).toHaveTextContent(new RegExp(escapeRe(err.diagnosis)));
+  });
+
+  it('still tells the three transport failures apart for a failed start — a fold-back to one sentence would pass individually but not this', async () => {
+    const renders: string[] = [];
+    for (const err of [new OfflineError(), new TimeoutError(), new RequestDroppedError()]) {
+      mockCreate.mockRejectedValue(err);
+      const { unmount } = render(<PhaseScreen />);
+      await waitFor(() => expect(screen.getByTestId('phase-start')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('phase-start'));
+      const problem = await screen.findByTestId('phase-problem');
+      renders.push(problem.props.children);
+      unmount();
+    }
+    expect(new Set(renders).size).toBe(3);
   });
 });

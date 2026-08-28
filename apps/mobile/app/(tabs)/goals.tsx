@@ -743,7 +743,14 @@ export default function TargetScreen() {
       // diagnosis instead — the server's own words for a refusal, the
       // transport's own diagnosis for a dead request — so this stops sending
       // an athlete with four bars to go and look for signal.
-      setSaveFailed(refusalOrWeather(e));
+      const why = refusalOrWeather(e);
+      setSaveFailed(why);
+      // SPOKEN, not just rendered — same reasoning as the success path three
+      // lines up, and the same shape `saveManual`/`acceptAdjustment` already
+      // use for their own failure catches. Missing here meant a VoiceOver
+      // user who tapped "Use this target" and hit a real failure heard
+      // nothing at all; the button just un-dimmed.
+      AccessibilityInfo.announceForAccessibility(why);
     } finally {
       setSaving(false);
     }

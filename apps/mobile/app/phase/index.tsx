@@ -121,8 +121,13 @@ export default function PhaseScreen() {
         target_weight_kg: weight > 0 ? weight : null,
       });
       refresh();
-    } catch {
-      setProblem('Could not start it. Check your connection and try again.');
+    } catch (err) {
+      // N94's own fix, applied to the two write catches the ticket's
+      // acceptance criteria didn't name — same file, same defect: a server
+      // 500 got blamed on the connection as readily as a dead radio. See the
+      // `refresh()` catch above for the load-bearing version of this
+      // comment.
+      setProblem(transportDiagnosis(err) ?? 'Could not start it.');
     } finally {
       setBusy(false);
     }
@@ -135,8 +140,8 @@ export default function PhaseScreen() {
     try {
       await endPhase(getToken, live.id, today);
       refresh();
-    } catch {
-      setProblem('Could not end it. Check your connection and try again.');
+    } catch (err) {
+      setProblem(transportDiagnosis(err) ?? 'Could not end it.');
     } finally {
       setBusy(false);
     }
