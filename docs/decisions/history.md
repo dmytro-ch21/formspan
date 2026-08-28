@@ -48291,6 +48291,63 @@ BJJ scenario for the date-correction sheet, covering the happy path, moving
 onto a day that already has another session, and moving to today/a future
 date.
 
+## 2026-08-28 — N439 (#726), part 1 of 4: a `classplan` module — the coach's own lesson plan
+
+**Net-new domain.** Verified before starting: nothing in this codebase had an
+instructor role or a class/lesson concept — a coach who teaches has always
+had to re-derive the shape of tonight's class from memory. First of a
+four-ticket sequence (N439 backend → N440 web authoring → N441 mobile guided
+runner → N442 Plan/calendar scheduling), dispatched one at a time per the
+"interlocking work is a sequence, not a fan-out" rule — N440 was not started
+until this one landed.
+
+**Shape.** A `ClassPlan` is an ordered list of `Block`s — `warmup` /
+`technique_drill` / `live_rounds` / `notes` — each with a duration. Only
+`technique_drill` blocks reference anything: either an existing catalog
+technique (`technique_id`, validated against `GET /v1/techniques` content at
+write time) or free text, exactly one of the two, never both, never neither.
+Deliberately **not** reusing `sequence` or `curriculum`'s shape even though
+all three are ordered technique lists pointing at the same catalog — a
+sequence's order is causal, a curriculum's is pedagogical, a class plan's is
+a schedule (ten minutes of this, then fifteen of that), and forcing one
+table to carry all three meanings was judged worse than three small tables.
+
+**No sharing, no VOLA-authored rows — unlike every sibling.** `owner_user_id`
+is `NOT NULL`; there is no reference content to publish and no `Copy`
+capability anticipated. That single fact collapses "not yours" and "does not
+exist" into the identical `ErrNotFound` on *every* path this module has,
+reads and writes alike — a deliberate divergence from `sequence`'s
+`ErrForbidden`-on-write split, which exists there only because `sequence`
+does have an ownerless, publicly-readable row. Documented at length in both
+`classplan.go`'s package doc and the migration, specifically so the next
+person who reaches for `sequence` as the template does not carry over a
+distinction that has nothing to attach to here.
+
+**Client-suppliable ids, matching `sequence`/`workouts`/`activities`**, not
+`curriculum`: a coach jotting a plan down between classes is exactly the
+gym-dead-spot offline-capture case those three exist for, and the mobile
+guided-runner (N441) will need the same idempotent-retry mechanism the moment
+it lands.
+
+**Built:** `backend/internal/modules/classplan/` (domain + `Repository` +
+Postgres implementation + handler), migration `000080` (`class_plans` +
+`class_plan_blocks`, the latter's technique/free-text XOR enforced in Go
+*and* as a defence-in-depth Postgres CHECK), five endpoints under
+`/v1/classplans` wired in `cmd/api/main.go`, and the OpenAPI entry
+(`pnpm run lint:openapi` clean). Integration tests cover the round trip,
+ownership isolation (`ErrNotFound` for a foreign row on every verb), wholesale
+block replacement vs. nil-means-unchanged, an invalid `technique_id` naming
+the offending block index, and the XOR validation on both the pure-Go
+validator and the Postgres CHECK. `go build`/`go vet`/`gofmt` clean; the new
+package's tests and the neighboring `sequence`/`profile` suites all green
+against a real Postgres, run twice to confirm the `t.Cleanup` ordering is
+actually idempotent rather than merely looking right.
+
+**Open for N440–N442:** this ticket ships no client-visible surface at all —
+list/create/get/update/delete only, nothing a coach can reach from web or
+mobile yet. N440 (web authoring) is next.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
