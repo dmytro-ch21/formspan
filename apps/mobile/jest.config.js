@@ -48,7 +48,23 @@ const config = {
    * set below, and only for CI.
    */
   testTimeout: 15_000,
+  /**
+   * `**\/__tests__/**` alone would still match `app/__tests__/**` if that
+   * directory ever came back — which is exactly the trap N104 (#477) fixed.
+   * Expo Router's `require.context` pulls in everything under the app root
+   * except `+api`/`+html`/`+middleware`, so a `*.test.tsx` file living under
+   * `app/` resolves to a real route: reachable from `/_sitemap` in dev, and
+   * fatal with no red box in a Release build if anyone ever navigates to one
+   * (evaluating `test(...)`/`expect(...)` at module scope outside a test
+   * runner throws during route-module evaluation). All app-route test suites
+   * now live under `apps/mobile/__tests__/app/` instead, mirroring the route
+   * tree one level outside it, alongside `lib/__tests__/` and
+   * `components/__tests__/` — so `testMatch` no longer needs an `app/` case
+   * at all, but the exclusion stays explicit rather than relying on nobody
+   * re-adding one.
+   */
   testMatch: ['**/__tests__/**/*.test.ts?(x)'],
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/app/__tests__/'],
   collectCoverageFrom: ['lib/**/*.ts', 'components/**/*.tsx', 'app/**/*.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
 };
