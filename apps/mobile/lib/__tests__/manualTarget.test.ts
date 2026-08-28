@@ -1,8 +1,11 @@
+import { ApiError, OfflineError, RequestDroppedError, TimeoutError } from '../apiError';
 import {
   MAX_KCAL,
   MAX_MACRO_G,
   MIN_KCAL,
+  offlineMessage,
   parseManualTarget,
+  refusalOrWeather,
   targetMacrosLookOff,
   type ManualDraft,
 } from '../manualTarget';
@@ -203,5 +206,74 @@ describe('the macros-do-not-add-up nudge', () => {
     // ignore the nudge that matters.
     const r = parseManualTarget(draft({ protein_g: '0', carb_g: '0', fat_g: '0' }));
     expect(r.ok && targetMacrosLookOff(r.input)).toBe(false);
+  });
+});
+
+/**
+ * Why a write failed, in the words the athlete needs (N94).
+ *
+ * `refusalOrWeather` used to answer every non-`ApiError` failure with one
+ * fixed sentence — "this one needs a connection … try again when you have
+ * signal" — which is what `messageForLookupFailure` in `food/scan.tsx` was
+ * already written to avoid one screen over. A timeout and a dropped
+ * connection are not "no route to the API", and telling an athlete on a live
+ * connection to go and find signal they already have is the exact
+ * misdiagnosis N55 introduced the transport family to stop.
+ */
+describe('why a write failed', () => {
+  it('shows a server refusal in the server’s own words, never the offline sentence', () => {
+    const msg = refusalOrWeather(
+      new ApiError('kcal must be between 800 and 8000', 'invalid_input', 400),
+    );
+    expect(msg).toBe('kcal must be between 800 and 8000');
+    expect(msg).not.toMatch(/signal/i);
+  });
+
+  const dead = [
+    ['no route to the API', new OfflineError()],
+    ['a timeout', new TimeoutError()],
+    ['a dropped connection', new RequestDroppedError()],
+  ] as const;
+
+  it.each(dead)('composes the transport’s own diagnosis for %s', (_l, err) => {
+    const msg = refusalOrWeather(err);
+    // The wording of WHAT happened stays central...
+    expect(msg).toContain(err.diagnosis);
+    // ...composed with the screen-local knowledge that survives every cause:
+    // the write never landed, so nothing changed.
+    expect(msg).toContain('Nothing has changed');
+  });
+
+  it('never tells a timeout or a dropped connection to go and find signal', () => {
+    // THE regression this covers. Before N94 this function's answer for any
+    // non-`ApiError` was `offlineMessage()` verbatim — the same sentence for
+    // all three transport failures — so a request that ran for thirty seconds
+    // over a perfectly live connection was told the same thing as no route at
+    // all.
+    expect(refusalOrWeather(new TimeoutError())).not.toBe(offlineMessage());
+    expect(refusalOrWeather(new RequestDroppedError())).not.toBe(offlineMessage());
+    expect(refusalOrWeather(new TimeoutError())).not.toMatch(/needs a connection/);
+    expect(refusalOrWeather(new RequestDroppedError())).not.toMatch(/needs a connection/);
+  });
+
+  it('still tells the three transport failures apart from one another', () => {
+    // Folding the branch back into one sentence collapses this to a set of
+    // size one — which is exactly the failure shape this ticket describes: a
+    // screen rendering plausible copy for the wrong reason.
+    const messages = dead.map(([, err]) => refusalOrWeather(err));
+    expect(new Set(messages).size).toBe(3);
+  });
+
+  it('carries the attempted verb into the composed message too', () => {
+    const msg = refusalOrWeather(new TimeoutError(), 'remove');
+    expect(msg).toContain(new TimeoutError().diagnosis);
+    expect(msg).toMatch(/remove/);
+  });
+
+  it('falls back to the generic offline sentence only for something that is neither kind of error', () => {
+    // Should not happen — every API caller throws an ApiError or a
+    // TransportError subclass (`apiError.ts`) — but this stays an honest
+    // last resort rather than a silent one if it ever does.
+    expect(refusalOrWeather(new Error('unexpected'))).toBe(offlineMessage());
   });
 });

@@ -41,6 +41,7 @@ import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { RATE_TARGETS, type PhaseKind } from '@/lib/anthropometry';
+import { transportDiagnosis } from '@/lib/apiError';
 import { PHASE_LABELS, createPhase, endPhase, listPhases, type Phase } from '@/lib/body';
 import { dayString } from '@/lib/calendar';
 import { formatWeight, fromDisplayWeight, weightUnit, weightUnitName } from '@/lib/units';
@@ -73,10 +74,15 @@ export default function PhaseScreen() {
         setLive(ps.find((p) => p.ended_on == null) ?? null);
         setLoaded(true);
       })
-      .catch(() => {
+      .catch((err) => {
         // Online-only, like the rest of the body module: a phase is started at
-        // a desk, once every few months, not in a gym dead-spot.
-        if (alive) setProblem('Could not reach the server.');
+        // a desk, once every few months, not in a gym dead-spot. But "no
+        // answer" and "the server answered badly" are not the same failure
+        // (N55/N94) — this `.catch` used to be unconditional, so a 500 read
+        // exactly like a dead radio. Composing the transport's own diagnosis
+        // means a failure the server actually answered never gets network
+        // wording, whatever its status.
+        if (alive) setProblem(transportDiagnosis(err) ?? 'Could not load this phase.');
       });
     return () => {
       alive = false;
@@ -254,7 +260,11 @@ export default function PhaseScreen() {
           </>
         ) : null}
 
-        {problem ? <Text style={styles.problem}>{problem}</Text> : null}
+        {problem ? (
+          <Text style={styles.problem} testID="phase-problem">
+            {problem}
+          </Text>
+        ) : null}
 
         <Pressable
           onPress={() => router.back()}
