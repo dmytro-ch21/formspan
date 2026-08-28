@@ -460,6 +460,62 @@ func TestInboxIsScopedAndTheHandleIsLive(t *testing.T) {
 	}
 }
 
+// TestCardsSurviveOtherPartysUsernameGoingNull is the T11 (#708) shape found
+// in this package during that fix's own review sweep: Create can only reach
+// a counterpart through h.frnds.FriendID, which only resolves an accepted
+// friend, so this package's own write path can never address a share to
+// someone currently without a handle — but shares carries no foreign key to
+// profiles, so nothing stops a username being cleared out from under an
+// existing row afterwards. Before the fix, pendingCards selected p.username
+// directly into cardRow.handle (a bare Go string), and pgx refused to scan
+// the resulting NULL — crashing the WHOLE inbox or outbox, not just the one
+// card. Both directions share pendingCards, so both are pinned here.
+func TestCardsSurviveOtherPartysUsernameGoingNull(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_null_alice", "sh_null_alice_h")
+	bob := person(t, h.pool, "sh_null_bob", "sh_null_bob_h")
+	befriend(t, h, alice, "sh_null_alice_h", bob, "sh_null_bob_h")
+	seq := makeSequence(t, h, alice, "Bob's copy")
+
+	if err := h.repo.Create(ctx, alice, New{ToUsername: "sh_null_bob_h", ResourceType: "sequence", ResourceID: seq.ID}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+
+	// Both sides lose their claimed handle, as if through some path outside
+	// this package's own Create — Inbox joins the SENDER (alice) as its
+	// counterpart, Sent joins the RECIPIENT (bob) as its counterpart, so both
+	// need covering independently.
+	if _, err := h.pool.Exec(ctx, `UPDATE profiles SET username = NULL WHERE user_id = $1`, alice); err != nil {
+		t.Fatalf("null alice's username: %v", err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE profiles SET username = NULL WHERE user_id = $1`, bob); err != nil {
+		t.Fatalf("null bob's username: %v", err)
+	}
+
+	inbox, err := h.repo.Inbox(ctx, bob)
+	if err != nil {
+		t.Fatalf("Inbox must not error when the sender has no username: %v", err)
+	}
+	if len(inbox) != 1 {
+		t.Fatalf("bob's inbox: got %d cards, want 1", len(inbox))
+	}
+	if inbox[0].From != "" {
+		t.Errorf("alice's card in bob's inbox: From = %q, want empty string (her handle is null)", inbox[0].From)
+	}
+
+	sent, err := h.repo.Sent(ctx, alice)
+	if err != nil {
+		t.Fatalf("Sent must not error when the recipient has no username: %v", err)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("alice's sent list: got %d cards, want 1", len(sent))
+	}
+	if sent[0].To != "" {
+		t.Errorf("bob's card in alice's sent list: To = %q, want empty string (his handle is null)", sent[0].To)
+	}
+}
+
 func TestUnknownResourceTypeIsRefusedBeforeAnythingIsResolved(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

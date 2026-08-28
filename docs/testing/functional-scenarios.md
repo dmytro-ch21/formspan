@@ -6569,6 +6569,13 @@ All of these must be indistinguishable 404s:
 - Sender deletes the resource, then recipient accepts → **410**, the share is
   cleared from the inbox, and no copy is created.
 - Unknown `resource_type` → 400, rejected before the handle is resolved.
+- **T11's shape, found in this module during that fix's own review (#708):
+  a counterpart who has since released their username must not 500 the
+  inbox/outbox.** Not reachable through normal use — needs the OTHER
+  party's `username` cleared directly in the database after the share
+  exists. Both `GET /v1/shares` (inbox) and `GET /v1/shares/sent` must
+  return 200 with that card present (empty-string handle, not omitted),
+  not a 500 that takes down every other card in the same list.
 
 ### The sent list (`GET /v1/shares/sent`)
 

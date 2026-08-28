@@ -47840,11 +47840,30 @@ fix. Mutation-tested: reverted the `COALESCE` back to bare `p.username`,
 confirmed the test failed with the real pgx scan error (not a compile error),
 restored, confirmed green by re-running.
 
-Swept the rest of `internal/modules/friend` and the adjacent `profile`
-module for the same shape: `Send`'s own caller-handle lookup already scans
-into a `*string`; `profile.PublicProfile.Username` is safe by construction
-(it can only ever be the row matched by an exact username, which cannot be
-NULL). No other instance found.
+Swept `internal/modules/friend` and the adjacent `profile` module for the
+same shape: `Send`'s own caller-handle lookup already scans into a
+`*string`; `profile.PublicProfile.Username` is safe by construction (it can
+only ever be the row matched by an exact username, which cannot be NULL).
+That first pass concluded "no other instance" — wrong, and caught by
+`/pre-merge`'s own `ac-verifier` gate rather than by the sweep itself:
+**`internal/modules/share/postgres.go`'s `pendingCards`** has the identical
+shape. `Create` can only reach a counterpart through `friends.FriendID`
+(an accepted friend), so this package's own write path has the same
+can't-construct-it-at-creation argument `friend.Send`/`Accept` do — and
+`shares` carries no foreign key to `profiles` either, so the same
+after-the-fact NULL is possible. `pendingCards` selected `p.username`
+straight into `cardRow.handle` (also a bare Go `string`), which would have
+crashed a caller's entire inbox or outbox the identical way. Fixed the same
+way — `COALESCE(p.username, '')` — with its own mutation-tested regression
+test (`TestCardsSurviveOtherPartysUsernameGoingNull` in
+`share/postgres_test.go`, covering both `Inbox` and `Sent`, since they share
+`pendingCards` exactly as `Friends`/`Pending` share `cardSelect`). `feed`
+was checked too and is already correct: `visibleFrom` filters
+`p.username IS NOT NULL` and its own scan already uses `*string`. The
+lesson worth keeping: "grep and conclude" is not the same as "grep and have
+an independent pass check the conclusion" — this shipped only because a
+review gate re-ran the same search rather than trusting the sweep's own
+result.
 
 ## Open items / known gaps as of this entry
 
