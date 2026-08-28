@@ -101,6 +101,20 @@ const navItems: {
       m.some((x) => x.enabled && x.capabilities.catalog === "techniques"),
   },
   {
+    href: "/dashboard/classplans",
+    label: "Class plans",
+    // Directly after Sequences, the third member of the same family: all
+    // three are ordered technique-catalog lists an athlete owns, and what
+    // differs each time is what the order MEANS — pedagogical for a
+    // curriculum, causal for a sequence, a SCHEDULE here (ten minutes of
+    // this, then fifteen of that). Same capability predicate as its two
+    // neighbours, and the same accepted over-inclusion: a class plan's
+    // technique_drill blocks point at TECHNIQUES, so it needs a discipline
+    // whose catalog is techniques, not `key === "bjj"` specifically.
+    needs: (m) =>
+      m.some((x) => x.enabled && x.capabilities.catalog === "techniques"),
+  },
+  {
     href: "/dashboard/proficiency",
     label: "Technique funnel",
     // A capability, not a sport name — same reasoning as Records above. The

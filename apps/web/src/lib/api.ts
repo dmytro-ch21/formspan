@@ -3150,6 +3150,155 @@ export async function copySequence(
   );
 }
 
+/**
+ * Class plans: a coach's schedule for one class — warmup, drilling, live
+ * rounds, notes — each with a duration, in the order the class runs.
+ *
+ * Distinct from `Sequence` and `CurriculumItem`, though all three point into
+ * the technique catalog. A sequence's order is CAUSAL and a curriculum's is
+ * PEDAGOGICAL; a class plan's is a SCHEDULE — ten minutes of this, then
+ * fifteen of that, then rounds. Only `technique_drill` blocks reference the
+ * catalog at all; `warmup`, `live_rounds` and `notes` blocks are plain
+ * schedule entries with a duration and, optionally, a note.
+ *
+ * NO `editable`/`official` fields, unlike `Sequence`. This domain has no
+ * VOLA-authored rows and no sharing — every plan the caller can see they
+ * own (backend/internal/modules/classplan/classplan.go's package comment
+ * spells out why: `owner_user_id` is `NOT NULL`, so "not owned" and "does
+ * not exist" are the same case on every path). Inventing an authorization
+ * field that does not exist on the wire would be reaching for sequence's
+ * shape without sequence's reason for it.
+ */
+
+export type ClassPlanBlock = {
+  /** Zero-based, assigned by the server from array order. */
+  order: number;
+  type: "warmup" | "technique_drill" | "live_rounds" | "notes";
+  duration_minutes: number;
+  /** Set only on a `technique_drill` block, and then exactly one of
+   *  `technique_id`/`free_text` — never both, never neither. Absent (null)
+   *  on every other block type. */
+  technique_id?: string | null;
+  /** The other half of the `technique_drill` XOR — a drill with no catalog
+   *  entry ("coach's own variant"). Absent (null) on every other block
+   *  type. */
+  free_text?: string | null;
+  /** Resolved from the library on every read, never stored on the block —
+   *  which is what makes a renamed technique read correctly everywhere.
+   *  Absent unless `technique_id` is set, and absent from the write type
+   *  for the same reason `SequenceStep`'s equivalents are. */
+  technique_name?: string;
+  technique_position?: string;
+  /** The coach's own note. For a `notes` block this IS the block's content;
+   *  for every other type it is supplementary detail. */
+  notes: string;
+};
+
+export type ClassPlan = {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+  /** On BOTH the list and the single read, so a card says "6 blocks"
+   *  without fetching them. */
+  block_count: number;
+  /** The sum of every block's duration. Present on both the list and the
+   *  single read, so a card says "45 min" without fetching the blocks. */
+  total_duration_minutes: number;
+  /** Absent on list responses. Present on a single read whenever the plan
+   *  has any blocks, and absent (not `[]`) when it has none — read
+   *  `block_count` to tell the two apart, since it is present either way. */
+  blocks?: ClassPlanBlock[];
+};
+
+export type ClassPlanBlockWrite = {
+  type: "warmup" | "technique_drill" | "live_rounds" | "notes";
+  duration_minutes: number;
+  /** `technique_drill` blocks only — exactly one of `technique_id`/
+   *  `free_text` must be set, and setting either on any other block type is
+   *  a 400. */
+  technique_id?: string | null;
+  free_text?: string | null;
+  notes?: string;
+};
+
+export type ClassPlanWrite = {
+  name?: string;
+  description?: string;
+  /** Omit to leave the plan's blocks alone; `[]` clears them; a list
+   *  replaces them wholesale. Three distinct states — collapsing the first
+   *  two makes every rename delete every block. Replace-all rather than
+   *  per-block patching because the ORDER is the content: a reorder is not
+   *  a sequence of independent edits, and two clients patching indices at
+   *  once would interleave into a schedule neither of them authored. */
+  blocks?: ClassPlanBlockWrite[];
+};
+
+/** Mirrored from the Go module's `maxBlocks`. The server decides; this
+ *  exists so a builder can stop the coach at the cap instead of showing
+ *  them a 400. */
+export const MAX_CLASS_PLAN_BLOCKS = 40;
+
+export function listClassPlans(
+  getToken: Token,
+  signal?: AbortSignal,
+): Promise<ClassPlan[]> {
+  return request<{ class_plans: ClassPlan[] }>(
+    getToken,
+    "/classplans",
+    {},
+    signal,
+  ).then((b) => b.class_plans ?? []);
+}
+
+export function getClassPlan(
+  getToken: Token,
+  id: string,
+  signal?: AbortSignal,
+): Promise<ClassPlan> {
+  return request<ClassPlan>(
+    getToken,
+    `/classplans/${encodeURIComponent(id)}`,
+    {},
+    signal,
+  );
+}
+
+export function createClassPlan(
+  getToken: Token,
+  input: ClassPlanWrite,
+): Promise<ClassPlan> {
+  return request<ClassPlan>(getToken, "/classplans", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateClassPlan(
+  getToken: Token,
+  id: string,
+  input: ClassPlanWrite,
+): Promise<ClassPlan> {
+  return request<ClassPlan>(
+    getToken,
+    `/classplans/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function deleteClassPlan(
+  getToken: Token,
+  id: string,
+): Promise<void> {
+  await request<void>(getToken, `/classplans/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
 /* ── Friends and sharing ─────────────────────────────────────────────────────
  *
  * Everyone is addressed by HANDLE, never by user id — the API does not accept
