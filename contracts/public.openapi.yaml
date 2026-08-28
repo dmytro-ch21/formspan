@@ -2450,11 +2450,12 @@ components:
           type: string
           example: White
           description: >
-            The belt this is commonly taught from — an observation, NOT a
-            recommendation and NOT a rule. It sits beside IBJJF legality and
-            the two answer different questions: you may drill a technique long
-            before you are allowed to compete it. Present it subordinate to
-            `ibjjf`, never as a gate.
+            The belt at which this is recommended to start — never a gate.
+            An athlete below that belt is not doing anything out of order by
+            drilling it. It sits beside IBJJF legality and the two answer
+            different questions: you may drill a technique long before you
+            are allowed to compete it. Present it subordinate to `ibjjf`,
+            never as a gate.
         description:
           type: string
           description: The mechanics — how the technique is performed.

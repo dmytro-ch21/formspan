@@ -114,7 +114,10 @@ type Summary struct {
 
 	GiNoGi string `json:"gi_no_gi"`
 
-	// Presented as "commonly taught from", never as a recommendation. It sits
+	// The belt at which the technique is RECOMMENDED to start — never a gate.
+	// An athlete below that belt is not doing anything out of order by
+	// drilling it; ruled explicitly on 2026-08-20 (F19) after white-belt
+	// roadmap items were found tagged as if this were a restriction. It sits
 	// beside IBJJF legality, and two belt-shaped fields where one is advisory
 	// and one is a rule you can be disqualified for breaking is a genuinely
 	// confusing pairing. Drilling a technique and being allowed to compete it
@@ -236,7 +239,9 @@ type Technique struct {
 	// never "goes nowhere".
 	ToPosition string `json:"to_position,omitempty"`
 
-	GiNoGi      string `json:"gi_no_gi"` // Both | Gi Only | No-Gi Only
+	GiNoGi string `json:"gi_no_gi"` // Both | Gi Only | No-Gi Only
+
+	// Recommended-to-start belt, never a gate — see Summary.TypicalBelt.
 	TypicalBelt string `json:"typical_belt"`
 
 	// Source is "seed" (the embedded JSON owns it, and a deploy rewrites it)

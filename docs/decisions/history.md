@@ -47625,6 +47625,76 @@ fixture asserts `16:10`) — reproduced identically against an unmodified
 `origin/main` checkout via `git stash`, so unrelated to this change and not
 fixed here.
 
+## 2026-08-28 — F19: `typical_belt` is a recommendation, not a gate — 12 white-belt roadmap items were tagged as if it were one (#481)
+
+The user ruled on 2026-08-20: *"Recommended doesn't mean we can't learn at
+white, so it's fine — we can switch those to recommended white."*
+`typical_belt` on a technique means the belt at which it is recommended to
+**start**, never a restriction on when an athlete may drill it.
+
+Cross-checking `backend/internal/modules/curriculum/curricula.json`'s
+`white-belt-basics` roadmap (81 `technique_id` items across 11 phases)
+against `backend/internal/modules/technique/techniques.json`'s
+`typical_belt` found 12 disagreements — the roadmap places these techniques
+at white belt, the catalog tagged 11 of them Blue and one
+(`rolling-back-take-from-turtle`) Purple: `de-ashi-barai`,
+`side-control-gift-wrap`, `side-control-near-side-armbar`,
+`arm-triangle-side-control`, `technical-mount-control`,
+`arm-triangle-mount`, `back-control-hip-scoop`, `turtle-granby-to-guard`,
+`turtle-spiral-ride`, `rolling-back-take-from-turtle`,
+`turtle-switch-escape`, `side-control-kimura-defence`. Retagged all 12 to
+`"White"` (matching the field's existing capitalisation) — value-only, no
+schema change, no migration.
+
+Also fixed `technique.go`'s `Summary.TypicalBelt` doc comment, which had
+drifted to state the exact opposite of the ruling above (*"never as a
+recommendation"*) — it was written before the ruling and nobody circled
+back. Rewritten to say what the field now unambiguously means: a
+recommended starting belt, not a gate, with the useful adjacent point (still
+true) that it's a different question from IBJJF legality. Added a short
+pointer comment on `Technique.TypicalBelt` (same field, detail struct) back
+to the summary doc rather than duplicating the essay. Added one clarifying
+parenthetical to `docs/content/bjj-curriculum-structure.md`, which mentions
+`typical_belt` in the context of syllabus-vs-roadmap coverage — not wrong
+before, but the phrase "is X a blue belt technique?" reads ambiguously
+without stating which way the field cuts.
+
+Audited every consumer (`grep -rniI 'typical_belt\|TypicalBelt'` across the
+whole repo): the mobile/web Library belt filter (`atOrBelowBelt` in
+`apps/mobile/app/library.tsx` / `apps/web/src/lib/libraryTiles.ts`) was
+already a user-changeable, defaulted-not-locked cap, and both
+`apps/mobile/lib/techniques.ts` and `apps/web/src/lib/api.ts` already
+carried the correct doc comment ("an observation, never a gate") on the
+TypeScript type. `docs/testing/functional-scenarios.md`'s existing
+"Technique library belt filter" section already specifies this cap-not-gate
+behaviour in full (raising the cap only adds rows, an unrecognised belt is
+never hidden, "the filter answers 'commonly taught from,' not 'may I compete
+with this'") — no scenario addition made, since this ticket is a data
+correction and a doc-comment fix, not a behaviour change; the existing
+scenarios already cover the observable filter mechanics for the corrected
+rows. Admin CRUD, `exportcontent` and the Postgres repositories are pure
+plumbing that reads and writes the value without interpreting it. The
+OpenAPI contract is NOT plumbing here, though — `ac-verifier` caught that
+`contracts/public.openapi.yaml`'s own `typical_belt` description carried
+the same stale reading as the Go comment ("an observation, NOT a
+recommendation and NOT a rule"), at a genuine definition site the
+criterion "wherever it is defined" covers. Rewritten to match, alongside
+the Go comment — correcting this same paragraph's earlier claim that the
+contract needed no change.
+
+`backend/internal/modules/curriculum/...` and
+`backend/internal/modules/technique/...` suites pass unchanged (value-only
+content, no shape change); `gofmt -l` and `go vet ./...` clean. Wrote a
+throwaway cross-check confirming all 81 `white-belt-basics` `technique_id`
+entries now resolve to `typical_belt` case-insensitively `"white"` in the
+catalog — the roadmap and the syllabus agree for white belt now, which is
+what motivated this ticket.
+
+**Nothing here builds the check that would have caught this
+automatically** — that's #480, a standing roadmap-vs-catalog consistency
+check, not built as part of this ticket. Until it lands, a future roadmap
+edit can reintroduce the same drift silently.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
