@@ -47695,6 +47695,108 @@ automatically** — that's #480, a standing roadmap-vs-catalog consistency
 check, not built as part of this ticket. Until it lands, a future roadmap
 edit can reintroduce the same drift silently.
 
+**Correction, same day: the paragraph above mischaracterises #480.** #480
+(N110) is a roadmap-vs-**syllabus** phase-title/order guard, not a
+roadmap-vs-catalog `typical_belt` check — see the entry immediately below,
+which is that ticket. The two are easy to conflate because both are about a
+roadmap silently drifting from something it is supposed to agree with, but
+they guard different pairs of files and neither substitutes for the other.
+
+## 2026-08-28 — N110: the belt/syllabus pairing gets a guard — and the ordering it was meant to police turns out already broken (#480)
+
+**What #480 asked for** was the "cheap half" of a duplication worry filed out
+of #445 (N97): `<belt>-belt-basics` (the roadmap) and `<belt>-belt-syllabus`
+(the reference syllabus) are meant to be one spine at two depths, sharing
+phase titles and their order. N97's own history entry (2026-08-20, above)
+said as much — "the reference syllabuses... were *already* on this
+ordering... the ordering did not have to be invented, only moved onto the
+roadmaps." The ticket wanted a test asserting exactly that: identical phase
+titles, identical order, per belt, slice-by-slice — cheap, no database, no
+restructuring, `backend/internal/modules/curriculum/seed_test.go`'s existing
+style.
+
+**Measured before writing it, per this repo's own "verify that a check can
+fail" rule, rather than trusting the ticket's premise: the premise is false.**
+The literal comparison the ticket describes was written as a throwaway probe
+and run against unmutated `main`. It failed on **all four belts, with zero
+mutation involved**:
+
+- White and purple match phase-for-phase in COUNT (11/11, 10/10) but not in
+  TITLE TEXT. The roadmap carries `docs/design/bjj-belt-curriculum.md`'s
+  Title Case milestone names verbatim (`TestEveryBeltRoadmapMatchesThe-
+  SuppliedDocument`, `document_test.go`, already enforces this and passes);
+  the syllabus predates that document (N20/#277) and reads in its own
+  sentence-case narrative voice — roadmap `"Turtle"` vs syllabus `"Turtle,
+  from both sides"`; roadmap `"Submission Defense"` vs syllabus `"Know when
+  you are in trouble"`. Lower-casing both sides first does not rescue this:
+  5 of white belt's 11 phases differ in actual wording, not only case
+  (`"Sweep From Bottom"` vs `"Sweep from the bottom"`).
+- Blue and brown additionally disagree on PHASE COUNT — blue is 10 roadmap
+  phases vs 9 syllabus phases, brown is 10 vs 7 — so no title normalisation
+  could pass them; there are not the same number of slots to line up.
+
+So the two artifacts N97 believed had converged never actually did, past
+general topic order — N20/#277 authored the syllabuses first, in their own
+voice; N97/#445 later re-authored the roadmaps against the design document
+without reconciling the syllabuses to match it. Nothing caught this because,
+as #480 itself predicted, nothing was looking.
+
+**What was built instead of the literal spec.** Committing the literal test
+would mean shipping it permanently red on every run — not a mutation
+demonstration, a restatement of a pre-existing defect — which breaks
+`verify` and every CI run off `main` for a reason unrelated to whatever a
+future PR actually changes. Fixing the content to make the literal test true
+was ruled out for this ticket: retitling the syllabus is exactly the
+"which is the source?" editorial call the ticket's own open questions defer,
+and blue/brown's count mismatch cannot be closed by a title edit alone —
+items would have to move between phases, touching the per-belt notes N20
+recorded on 27 of them.
+
+`TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart`
+(`seed_test.go`) guards the invariant that IS true today and stays true
+under exactly the drift #480 was worried about: every belt-track curriculum
+has exactly one syllabus-track counterpart by `Belt`, and vice versa,
+checked bidirectionally with per-mismatch `t.Errorf`s naming the curriculum
+id and belt. `novice-fundamentals` (the one curriculum with no counterpart,
+on the `foundations` track with no `Belt`) is handled by an explicit
+assertion that it stays that way, not a silent skip — a future syllabus
+authored for it would need this test updated deliberately rather than
+slipping through. `t.Fatal`s if the seed file is empty on either side, or if
+zero pairs were checked, so the guard cannot pass by matching nothing.
+
+**Mutation-verified, not asserted**, per AC #2: set `white-belt-syllabus`'s
+`belt` field to a value with no roadmap counterpart. Baseline green
+(`--- PASS`, fresh `-count=1` run) → mutated red (`--- FAIL`, two real
+`t.Errorf`s: the roadmap now reports no syllabus counterpart, the syllabus
+now reports no roadmap counterpart) → reverted via `git checkout --` and
+re-run fresh (not from cache) → green again. Full package
+(`go test ./internal/modules/curriculum/...`) passes unchanged (Postgres-
+backed tests skip without `TEST_DATABASE_URL`, as designed); `gofmt -l` and
+`go vet ./...` both clean.
+
+**The ruling this ticket also asked for, on the expensive half (deriving one
+artifact from the other): not now, for the same reason as always — the
+ticket's own open questions are real design decisions, not implementation
+details.** Which side is the source is unresolved (syllabus is the natural
+superset, but the roadmap carries criteria and per-belt notes the syllabus
+deliberately omits); the per-belt, per-artifact notes on 27 techniques would
+need an explicit preservation rule under any derivation; and
+`novice-fundamentals` already breaks "every curriculum has a twin" as a
+blanket assumption. None of that got easier by writing this guard — if
+anything, discovering how far the two artifacts have already drifted argues
+for reconciling the CONTENT first (a bounded, real task: retitle syllabus
+phases to the design document's wording where counts already match, and
+work out where blue and brown's extra roadmap phases should split the
+syllabus) before attempting a structural derivation on top of content that
+does not yet agree. That reconciliation is its own scoped piece of work,
+deliberately not undertaken here — this ticket's guard would need updating
+once it lands, and would then finally enforce the stronger invariant #480
+originally asked for.
+
+`docs/testing/functional-scenarios.md` — deliberately not touched. This is a
+backend content/test-suite change with no user-facing surface and no new API
+endpoint; nothing an athlete-facing functional test would exercise changed.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
