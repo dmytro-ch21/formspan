@@ -14127,3 +14127,48 @@ on screen. That, and only that, is what moved.
   requests — no new endpoint, no new permission surface. Confirm a
   signed-out state still routes to sign-in before any of the above is
   reachable, unchanged from before this ticket.
+
+## N428 — a fresh install (or reinstall) backfills the food log too (`apps/mobile/lib/foodLog.ts`, `apps/mobile/lib/nutritionApi.ts`, `apps/mobile/lib/sync.ts`, `GET /v1/nutrition/entries`)
+
+### Happy path
+
+- Sign in with an account that has real nutrition history spread across
+  several months, on a device that has NEVER held this account's food log
+  (a fresh install, or an uninstall/reinstall). Confirm `app/(tabs)/food.tsx`
+  eventually shows entries for days before the install, not only whatever
+  was logged after — the fix for the incident this ticket was filed from.
+- Confirm the backfill is silent: no toast, spinner or banner is expected —
+  the log fills in once the automatic post-sign-in sync completes, the same
+  way N85's session backfill behaves.
+- On the SAME device, log a new meal after the backfill has landed, then
+  background and reopen the app: confirm the day's total still reflects
+  both the backfilled history and the freshly logged meal.
+
+### Edge cases and errors
+
+- An account whose logging history spans more than ~1 year: confirm the
+  most RECENT year backfills (the bounded window), and that nothing crashes
+  or hangs when the ceiling is reached — older history staying absent on
+  this pass is the accepted, documented limit, not a bug to chase.
+- Log a meal on the device BEFORE the automatic sign-in sync has had a
+  chance to run (e.g. captured while still offline immediately after
+  install): confirm the meal survives — the fresh-install detection reads
+  the local table at the moment sync runs, so a meal logged first must not
+  be silently treated as "this device already has history" in a way that
+  discards it, and must not be clobbered by the server's own copy if the
+  same meal also exists there under a different id.
+- Force the entries backfill's request to fail (airplane mode partway
+  through sign-in, or a forced 5xx on `GET /v1/nutrition/entries`): confirm
+  the rest of sync (sessions, plans, foods) is unaffected, and that the next
+  successful sync retries the backfill from scratch rather than leaving the
+  log permanently short.
+- An account with NO nutrition history at all: confirm the food log simply
+  stays empty after the backfill runs, with no error surfaced for "found
+  nothing."
+
+### Auth / security
+
+- Two different accounts signed in sequentially on the same physical device
+  (sign out, sign in as someone else): confirm the second account's backfill
+  only ever requests and writes THAT account's own entries — never the
+  previous signed-in account's history.

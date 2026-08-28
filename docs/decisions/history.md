@@ -45989,6 +45989,73 @@ already read as "judge for yourself" rather than "resolve before merge". If
 that turns out to be too soft, the same file:line requirement generalizes
 to `[suggestion]` findings that name a repo convention.
 
+### 2026-08-27 — N428: a fresh install (or reinstall) backfills the food log too (#686)
+
+**The mistake that surfaced this**: mid-session, a device uninstall was run
+against the user's own phone to rule out a stale-binary theory during N426
+device verification, without weighing that it wipes the app's local SQLite
+container — including every food entry cached only on that device. The
+underlying data was never at risk (confirmed directly against the real
+staging Postgres: the athlete's `nutrition_entries` were all present, most
+recent synced seconds before the uninstall), but the phone's own food log
+screen showed completely empty after the reinstall, with no way back short
+of this fix. That is on this session, not on the code — see the git history
+around this entry for the full account — but the empty screen was real, and
+this ticket is the permanent fix for the class of bug, not just the incident.
+
+**Root cause**: `food_entries` sync (`apps/mobile/lib/foodLog.ts`) has always
+been push-only, by original design — nothing on web writes an entry, so
+there was nothing to routinely pull, and the file's own doc comment said so.
+But push-only has a silent failure mode nobody had reasoned through: a fresh
+install (or reinstall) starts the local table at zero, and with no pull at
+all, EVERY meal logged before that install becomes permanently invisible on
+the new device. The athlete's history was never gone — the app just never
+asked the server for it. Exactly the shape N85 fixed for `local_sessions`
+five weeks earlier; nutrition never got the equivalent.
+
+**The fix** mirrors N85's pattern deliberately rather than inventing a new
+one, with one adaptation forced by the wire contract: `GET /v1/nutrition/
+entries` is windowed by calendar date (`from`/`to`, capped server-side at 31
+days via `maxEntryWindowDays`), not paged by `limit`/`offset` like sessions —
+so the backfill walks backward through fixed 31-day windows (newest first)
+rather than numbered pages, bounded at 12 windows (~1 year, deliberately
+generous for a log kept 3–6×/day) rather than N85's 10 pages of 200. Detected
+the same way N85 detects it — an empty `food_entries` table for the signed-in
+user, not a persisted flag, so the branch stops firing on its own once
+history has landed. One deliberate departure from N85's loop: no early exit
+on a short/empty window, because an empty CALENDAR window is not evidence
+there is nothing further back (an athlete can take a quiet month) the way a
+short OFFSET page is; every window in the 12-window budget runs regardless.
+
+Wired into the already-existing, already-tested `cacheEntries` (`foodLog.ts`)
+and `listEntries` (`nutritionApi.ts`) — `cacheEntries` was written well
+before this ticket, specifically anticipating a second writer, and had sat
+unwired ("wire it when there is a second writer") since it landed. N428 is
+that day for the fresh-install case; a routine web-editor pull is still not
+wired and still has no caller, which the file's own comment now says
+explicitly rather than leaving the old broader claim to go stale.
+
+**UI signal: deliberately none, matching N85.** The existing sync trigger
+(`lib/sync.ts`'s `setSyncIdentity` firing `request('sign-in')`) already runs
+the backfill automatically on reinstall + sign-in with no screen having to
+ask for it, and `app/(tabs)/food.tsx` already re-reads local entries whenever
+`lastSyncAt` changes — so the log simply fills in once the backfill lands,
+the same silent behaviour N85 shipped for session history. A toast or banner
+was considered and rejected for the same reason N85 didn't add one: the
+backfill is a correctness fix for data that should already have been there,
+not a feature worth announcing.
+
+Mutation-tested: the fresh-install gate (COUNT-of-zero check) and the
+offline/stalled gate were each individually broken and confirmed to make the
+covering tests fail as real assertion failures (not compile errors), then
+restored and re-confirmed green. New fixture suite:
+`apps/mobile/lib/__tests__/foodBackfill.test.ts`, alongside the existing
+`historyBackfill.test.ts` it was modelled on.
+
+**Left outstanding**: the `NEEDS HUMAN EVIDENCE` criterion — an actual
+device reinstall + sign-in showing the food log repopulate — has not been
+run yet as of this entry; that is the remaining step before this closes.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
