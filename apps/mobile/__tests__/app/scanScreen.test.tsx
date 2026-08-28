@@ -130,6 +130,17 @@ async function scan(code = CODE) {
   });
 }
 
+/**
+ * N426: the amount editor lives in a sheet, not an always-visible field —
+ * "Amount" on the card is a tap target that opens it, and the field/portion
+ * chips/servings-fallback control mount only once the sheet is open. Every
+ * test below that reads or types into that control opens the sheet first.
+ */
+async function openAmountSheet() {
+  await waitFor(() => expect(screen.getByTestId('scan-amount-row')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('scan-amount-row'));
+}
+
 describe('a resolved barcode', () => {
   beforeEach(() => mockLookup.mockResolvedValue({ status: 'found', food: OATS, source: 'off' }));
 
@@ -141,7 +152,9 @@ describe('a resolved barcode', () => {
   it('proposes an entry and logs nothing until it is confirmed', async () => {
     await scan();
     await waitFor(() => expect(screen.getByTestId('scan-name')).toBeTruthy());
-    expect(screen.getByTestId('scan-name')).toHaveTextContent('Rolled oats');
+    // N426: name and brand render as ONE line now (`displayName`), matching
+    // the reference screenshot's single title bar rather than two lines.
+    expect(screen.getByTestId('scan-name')).toHaveTextContent('Flahavans Rolled oats');
     expect(mockLogFood).not.toHaveBeenCalled();
   });
 
@@ -154,6 +167,7 @@ describe('a resolved barcode', () => {
    */
   it('logs the scaled figures once confirmed', async () => {
     await scan();
+    await openAmountSheet();
     await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
     fireEvent.changeText(screen.getByTestId('food-quantity-input'), '80');
     await act(async () => {
@@ -172,6 +186,32 @@ describe('a resolved barcode', () => {
   });
 
   /**
+   * N426, found in review: the sheet is a `Modal`, which UNMOUNTS its
+   * children while closed rather than merely hiding them — so without
+   * `initialGrams` seeding a remount from the current amount, closing the
+   * sheet after typing a number and reopening it silently reset back to
+   * the packet default. Concretely: type 80, tap Done (the card correctly
+   * showed "80 g" — screen and log stayed in sync so nothing looked wrong
+   * from the outside), tap Amount again — the field would show "40" (the
+   * packet default) rather than resuming at "80".
+   */
+  it('resumes the typed amount when the sheet is reopened, rather than resetting it', async () => {
+    await scan();
+    await openAmountSheet();
+    await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '80');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('amount-sheet-done'));
+    });
+    expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('80 g');
+
+    await openAmountSheet();
+    await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+    // 80, not OATS' 40 g default — the sheet RESUMED, it did not reset.
+    expect(screen.getByTestId('food-quantity-input').props.value).toBe('80');
+  });
+
+  /**
    * A fractional amount must survive to what gets logged, not round or
    * truncate to a whole number. Typed as two separate keystrokes ("6" then
    * "60", each a complete `fireEvent.changeText` value rather than a
@@ -182,6 +222,7 @@ describe('a resolved barcode', () => {
    */
   it('keeps a half serving a half rather than rounding it away', async () => {
     await scan();
+    await openAmountSheet();
     await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
     fireEvent.changeText(screen.getByTestId('food-quantity-input'), '6');
     fireEvent.changeText(screen.getByTestId('food-quantity-input'), '60');
@@ -222,20 +263,104 @@ describe('a resolved barcode', () => {
 
     beforeEach(() => mockLookup.mockResolvedValue({ status: 'found', food: KINDER, source: 'off' }));
 
-    it('opens the amount pre-filled to the packet’s own serving, not 100 g', async () => {
+    /**
+     * N426: the headline "Amount" row must show the packet's own serving on
+     * FIRST LOOK — before the athlete has ever tapped it open — which is the
+     * reference screenshot's whole point ("Amount: 2 Pieces" pre-filled).
+     */
+    it('shows the packet’s own serving on the Amount row before the sheet is ever opened', async () => {
       await scan();
+      await waitFor(() => expect(screen.getByTestId('scan-amount-value')).toBeTruthy());
+      expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('2 pieces (25 g)');
+      // The nutrition grid already reflects that default too, not a bare summary line.
+      expect(screen.getByTestId('nutrition-panel-kcal')).toHaveTextContent('140');
+      expect(screen.getByTestId('nutrition-panel-protein_g-value')).toHaveTextContent('0.5g');
+    });
+
+    /**
+     * N426: opens in the packet's OWN unit ("2 pieces"), not grams — the
+     * user's own words, reported after N426's first pass: "if I scan kinder
+     * it should give me 1 piece/grams/macros... the measurement unit should
+     * logically make sense." The underlying gram amount is still 25 g (the
+     * packet's own serving, N117) — only the DISPLAY defaults to pieces.
+     */
+    it('opens in the packet’s own unit — pieces — not grams', async () => {
+      await scan();
+      await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
-      // The default amount is 25 g (the packet's own), not 100 g.
-      expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
+      // "2", not "25" — the field opens showing pieces, matching the box.
+      expect(screen.getByTestId('food-quantity-input').props.value).toBe('2');
+      // The pieces pill is selected by default.
+      expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(true);
       // The unchanged arithmetic basis still reads "Per 100 g" — checkable.
       expect(screen.getByText('Per 100 g')).toBeTruthy();
-      // The packet's own serving offered as a selectable, already-selected chip.
+      // The packet's own serving still offered as a selectable, already-selected chip.
       expect(screen.getByTestId('food-portion-25')).toBeTruthy();
+    });
+
+    /**
+     * Switching to grams CONVERTS the displayed number (2 pieces = 25 g),
+     * the same rule the existing g/oz toggle already enforces — and leaves
+     * the underlying amount, and therefore what gets logged, unchanged.
+     */
+    it('switching to grams converts the pieces count, it does not relabel it', async () => {
+      await scan();
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('food-unit-g'));
+      expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
+      expect(screen.getByTestId('food-unit-g').props.accessibilityState.selected).toBe(true);
+      expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(false);
+    });
+
+    /**
+     * Found in review, alongside the reset-on-reopen amount bug: without
+     * remembering the CHOSEN unit mode (not just the amount), reopening the
+     * sheet after explicitly switching to grams silently switched the
+     * DISPLAY back to pieces — the number was still right (`initialGrams`
+     * already covers that), but the unit the athlete had deliberately
+     * picked was not.
+     */
+    it('remembers grams was chosen, rather than reopening back in pieces', async () => {
+      await scan();
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('food-unit-g'));
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('amount-sheet-done'));
+      });
+
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
+      expect(screen.getByTestId('food-unit-g').props.accessibilityState.selected).toBe(true);
+      expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(false);
+    });
+
+    /**
+     * Typing a piece count converts to grams correctly and logs the scaled
+     * macros — not just the display, the actual number that gets saved.
+     */
+    it('typing a piece count logs the correctly scaled macros', async () => {
+      await scan();
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      fireEvent.changeText(screen.getByTestId('food-quantity-input'), '4');
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('amount-sheet-done'));
+      });
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('scan-log'));
+      });
+      // 4 pieces = 50 g = double the box's own 140 kcal / 0.5 g protein.
+      const entry = mockLogFood.mock.calls[0][1];
+      expect(entry.kcal).toBe(280);
+      expect(entry.protein_g).toBe(1);
     });
 
     it('logs the box’s own numbers when confirmed without touching the amount', async () => {
       await scan();
-      await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('scan-log')).toBeTruthy());
       await act(async () => {
         fireEvent.press(screen.getByTestId('scan-log'));
       });
@@ -369,15 +494,23 @@ describe('the local cache', () => {
 
     it('offers a servings count, never a fabricated grams field', async () => {
       await scan();
+      await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
       expect(screen.queryByTestId('food-quantity-input')).toBeNull();
       // States what the number is per, same as the grams path.
       expect(screen.getByText('Per 1 egg')).toBeTruthy();
     });
 
+    /** N426: the Amount row itself must not fabricate a gram figure either. */
+    it('shows the servings count on the Amount row, never a gram figure', async () => {
+      await scan();
+      await waitFor(() => expect(screen.getByTestId('scan-amount-value')).toBeTruthy());
+      expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('1 × 1 egg');
+    });
+
     it('logs the food’s own numbers for the default 1 serving', async () => {
       await scan();
-      await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('scan-log')).toBeTruthy());
       await act(async () => {
         fireEvent.press(screen.getByTestId('scan-log'));
       });
@@ -389,6 +522,7 @@ describe('the local cache', () => {
 
     it('scales every macro when the servings count changes', async () => {
       await scan();
+      await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
       fireEvent.changeText(screen.getByTestId('scan-servings-fallback'), '2');
       await act(async () => {
@@ -398,6 +532,23 @@ describe('the local cache', () => {
       expect(entry.kcal).toBe(156);
       expect(entry.protein_g).toBe(12);
       expect(entry.servings).toBe(2);
+    });
+
+    /** N426: `ServingsFallback`'s half of the same resume-not-reset fix. */
+    it('resumes the typed servings count when the sheet is reopened', async () => {
+      await scan();
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
+      fireEvent.changeText(screen.getByTestId('scan-servings-fallback'), '2');
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('amount-sheet-done'));
+      });
+      expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('2 × 1 egg');
+
+      await openAmountSheet();
+      await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
+      // 2, not the "1" default — resumed, not reset.
+      expect(screen.getByTestId('scan-servings-fallback').props.value).toBe('2');
     });
   });
 });

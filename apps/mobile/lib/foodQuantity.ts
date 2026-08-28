@@ -45,6 +45,103 @@ export type QuantifiableFood = Macros &
   };
 
 /**
+ * Name and brand, without repeating the brand when it is already in the name
+ * (N426, found in review) — a scanned "Kinder Chocolate" whose brand is
+ * "Kinder" must read as "Kinder Chocolate", not the literal, wrong
+ * "Kinder Kinder Chocolate" a naive `${brand} ${name}` produces.
+ *
+ * Shared by every caller that renders a food's name — `scan.tsx` had its own
+ * copy of this exact check before N426 (`FoodQuantity` did not, which is
+ * where the duplicate-name bug actually surfaced) — so a future caller gets
+ * the guard automatically rather than needing to remember to add it.
+ */
+export function displayName(food: Pick<QuantifiableFood, 'name' | 'brand'>): string {
+  if (!food.brand) return food.name;
+  if (food.name.toLowerCase().includes(food.brand.toLowerCase())) return food.name;
+  return `${food.brand} ${food.name}`;
+}
+
+/**
+ * A discrete unit derived from the packet's OWN stated serving (N426,
+ * reported from a device against N427's own scoping question: "a discrete
+ * count for a food whose per-serving figures are already in per-piece
+ * terms... is derivable without more data than OFF states"). "2 pieces
+ * (25 g)" implies one piece weighs 12.5 g — no density, no per-item catalog
+ * fact, nothing this codebase does not already have.
+ *
+ * Deliberately narrow, matching N117's own discipline: this parses ONE
+ * shape (a leading count, a word, matched against the packet's own label —
+ * never a catalog portion like "1 large" or "1 cup", which is why this
+ * takes the raw label rather than being folded into `quantityOptions`)
+ * and returns `null` for anything it cannot read cleanly. A "pieces" toggle
+ * that sometimes shows the wrong weight is a worse instance of exactly the
+ * bug N117 fixed — offering none is safer than guessing at one.
+ */
+export type NaturalUnit = {
+  /** Singular, for "1 piece" — "pieces" crudely singularised. */
+  word: string;
+  /** As the packet states it — "pieces", "bars", "cookies" — for the toggle. */
+  wordPlural: string;
+  gramsPerUnit: number;
+};
+
+const NATURAL_UNIT_LABEL_RE = /^(\d+(?:\.\d+)?)\s+([A-Za-z]+)/;
+
+/**
+ * Words the regex can match that are NOT a natural count unit — found in
+ * review: OFF's `serving_size` is a free-text string with no shape
+ * guarantee, and `"25 g"` matches the same `<count> <word>` pattern
+ * `"2 pieces"` does. Offering "g" as a second, duplicate unit pill (beside
+ * the real grams toggle) — or "x" from `"2 x 25 g"` — is exactly the
+ * confusing-screen failure this feature exists to fix, just relocated.
+ */
+const NOT_A_NATURAL_UNIT = new Set([
+  'g',
+  'gr',
+  'gram',
+  'grams',
+  'oz',
+  'ounce',
+  'ounces',
+  'ml',
+  'l',
+  'kg',
+  'mg',
+  'x',
+]);
+
+export function naturalUnitFor(label: string | null, totalGrams: number | null): NaturalUnit | null {
+  if (!label || totalGrams == null || !Number.isFinite(totalGrams) || totalGrams <= 0) return null;
+  const m = label.match(NATURAL_UNIT_LABEL_RE);
+  if (!m) return null;
+  const count = Number(m[1]);
+  if (!Number.isFinite(count) || count <= 0) return null;
+  const wordPlural = m[2];
+  // Found in review: `[A-Za-z]+` stops at the first non-ASCII character, so
+  // "2 Stück (25 g)" matches only "St" — a real word cut short, not a real
+  // unit. The character immediately after the match has to be whitespace,
+  // an opening paren, or punctuation for the match to be trusted as whole;
+  // anything else means the regex stopped mid-word.
+  const boundary = label[m[0].length];
+  if (boundary && !/[\s(),.]/.test(boundary)) return null;
+  if (NOT_A_NATURAL_UNIT.has(wordPlural.toLowerCase())) return null;
+  return { word: singularize(wordPlural), wordPlural, gramsPerUnit: totalGrams / count };
+}
+
+/** "pieces" → "piece". Deliberately crude — wrong only cosmetically (a stray
+ *  "1 pieces" reads oddly but claims nothing false), never worth a real
+ *  pluralisation library for a label this narrow. */
+function singularize(word: string): string {
+  // "glasses"/"classes" → "glass"/"class": the -sses plural drops "es", not
+  // "s" — stripping only the last letter left the wrong, ungrammatical
+  // "glasse". Checked first because the general rule below would otherwise
+  // fire on these too (they end in "s").
+  if (word.length > 4 && /sses$/i.test(word)) return word.slice(0, -2);
+  if (word.length > 3 && /s$/i.test(word) && !/ss$/i.test(word)) return word.slice(0, -1);
+  return word;
+}
+
+/**
  * The gram basis one "serving" of this food represents.
  *
  * `serving_grams` is nullable on the wire — an egg has no honest gram weight —

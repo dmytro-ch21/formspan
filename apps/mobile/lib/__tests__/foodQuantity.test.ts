@@ -6,8 +6,11 @@
  */
 import {
   canLogByWeight,
+  displayName,
   gramsBasisFromLabel,
   macrosForGrams,
+  macrosForServings,
+  naturalUnitFor,
   parseQuantity,
   quantityOptions,
   servingBasisGrams,
@@ -256,5 +259,94 @@ describe('servingsForLabelGrams', () => {
 
   test('null for a label with no honest gram basis, rather than inventing one', () => {
     expect(servingsForLabelGrams('1 egg', 250)).toBeNull();
+  });
+});
+
+/**
+ * N426: the shared name/brand guard, moved out of `scan.tsx` into here so
+ * `FoodQuantity.tsx` can use the same check (it previously had none — the
+ * bug this fixes was found there, not in `scan.tsx`, which already had this
+ * exact table of cases as an unshared private function).
+ */
+describe('displayName', () => {
+  test('folds the brand in when the name does not already state it', () => {
+    expect(displayName({ name: 'Chocolate Nut Granola', brand: 'nutrail' })).toBe(
+      'nutrail Chocolate Nut Granola',
+    );
+  });
+
+  test('does not repeat the brand when the name already contains it', () => {
+    expect(displayName({ name: 'Kinder Chocolate', brand: 'Kinder' })).toBe('Kinder Chocolate');
+  });
+
+  test('is case-insensitive about the match', () => {
+    expect(displayName({ name: 'KINDER Chocolate', brand: 'kinder' })).toBe('KINDER Chocolate');
+  });
+
+  test('a blank brand is not prepended', () => {
+    expect(displayName({ name: 'Banana', brand: '' })).toBe('Banana');
+  });
+});
+
+/**
+ * N426: the servings-based scaling `ServingsFallback` uses for a food with
+ * no gram basis — a sibling of `macrosForGrams`, not a re-derivation, so
+ * both share `scaleMacros` underneath.
+ */
+describe('macrosForServings', () => {
+  test('scales every macro by the servings count directly, no gram basis involved', () => {
+    const scaled = macrosForServings(banana, 2);
+    expect(scaled.kcal).toBe(178);
+    expect(scaled.protein_g).toBeCloseTo(2.2, 5);
+  });
+
+  test('keeps a null macro null rather than turning it into zero', () => {
+    expect(macrosForServings(banana, 2).added_sugar_g).toBeNull();
+  });
+});
+
+/**
+ * N426, reported from a device: "if I scan kinder it should give me 1
+ * piece/grams/macros... the measurement unit should logically make sense."
+ * Deliberately narrow — see the function's own doc comment for why this
+ * parses ONE shape and returns `null` for anything else, mirroring N117's
+ * own never-fabricate-a-unit discipline.
+ */
+describe('naturalUnitFor', () => {
+  test('derives grams-per-unit from a leading count and word', () => {
+    const u = naturalUnitFor('2 pieces (25 g)', 25);
+    expect(u).toEqual({ word: 'piece', wordPlural: 'pieces', gramsPerUnit: 12.5 });
+  });
+
+  test('singularises only for the singular form, keeps the plural as stated', () => {
+    const u = naturalUnitFor('1 bar (40 g)', 40);
+    // "bar" has no trailing s to strip — singular and plural read the same.
+    expect(u).toEqual({ word: 'bar', wordPlural: 'bar', gramsPerUnit: 40 });
+  });
+
+  test('singularises the -sses plural correctly, not by stripping one letter', () => {
+    const u = naturalUnitFor('3 glasses (300 g)', 300);
+    // "glass", not the ungrammatical "glasse" a bare trailing-s strip gives.
+    expect(u?.word).toBe('glass');
+    expect(u?.wordPlural).toBe('glasses');
+  });
+
+  test.each([
+    ['no label at all', null, 25],
+    ['no total grams', '2 pieces (25 g)', null],
+    ['a zero total', '2 pieces (0 g)', 0],
+    ['a negative total', '2 pieces (-5 g)', -5],
+    ['a label with no leading count', 'pieces (25 g)', 25],
+    ['a label with a zero count', '0 pieces (25 g)', 25],
+    // Found in review: OFF's `serving_size` is free text with no shape
+    // guarantee — these all match `<count> <word>` without being a real
+    // natural unit, and offering one would be exactly the confusing-screen
+    // failure this feature exists to fix, just relocated.
+    ['the serving_size is itself just a gram figure', '25 g', 25],
+    ['the serving_size is itself an ounce figure', '1.5 oz (42 g)', 42],
+    ['a multiplication sign, not a unit', '2 x 25 g', 25],
+    ['a word cut short by a non-ASCII letter', '2 Stück (25 g)', 25],
+  ])('returns null rather than a fabricated unit: %s', (_label, label, grams) => {
+    expect(naturalUnitFor(label, grams)).toBeNull();
   });
 });

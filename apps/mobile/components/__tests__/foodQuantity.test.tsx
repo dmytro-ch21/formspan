@@ -155,3 +155,98 @@ test('an outside unit change does not fight the athlete mid-keystroke', () => {
   fireEvent.changeText(screen.getByTestId('food-quantity-input'), '10');
   expect(screen.getByTestId('food-quantity-input').props.value).toBe('10');
 });
+
+/**
+ * N426, found in review: a food whose NAME already states its brand — a
+ * scanned "Kinder Chocolate" whose brand is "Kinder" — used to render the
+ * literal, wrong "Kinder Kinder Chocolate" via a naive `${brand} ${name}`.
+ * Screen-reported against a device running this exact product.
+ */
+test('does not repeat the brand when the name already states it', () => {
+  render(
+    <FoodQuantity
+      food={{ ...egg, name: 'Kinder Chocolate', brand: 'Kinder' }}
+      onLog={jest.fn()}
+    />,
+  );
+  expect(screen.getByText('Kinder Chocolate')).toBeTruthy();
+  expect(screen.queryByText('Kinder Kinder Chocolate')).toBeNull();
+});
+
+/**
+ * N426: the scan screen's amount sheet already shows the food's name on the
+ * card behind it — `hideName` is how that caller avoids showing it a SECOND
+ * time inside the sheet, which is the duplicate-DISPLAY half of the same bug
+ * the test above fixes the duplicate-TEXT half of.
+ */
+test('hideName suppresses the name line entirely', () => {
+  render(<FoodQuantity food={egg} onLog={jest.fn()} hideName />);
+  expect(screen.queryByText('Egg')).toBeNull();
+});
+
+/**
+ * N426, reported from a device: "if I scan kinder it should give me 1
+ * piece/grams/macros... the measurement unit should logically make sense."
+ * `naturalUnit` is `FoodQuantity`'s piece of that fix — the pieces pill,
+ * defaulted on when a natural unit is offered.
+ */
+describe('naturalUnit', () => {
+  const KINDER_25G = { word: 'piece', wordPlural: 'pieces', gramsPerUnit: 12.5 };
+
+  test('opens showing the packet’s own unit, not grams', () => {
+    // `portions: []`, deliberately — `egg`'s own portions would otherwise
+    // become the default amount (via `quantityOptions`), which is a
+    // different behaviour this test isn't about; falls back to `serving_grams`.
+    render(
+      <FoodQuantity food={{ ...egg, serving_grams: 100, portions: [] }} onLog={jest.fn()} naturalUnit={KINDER_25G} />,
+    );
+    // 100 g / 12.5 g-per-piece = 8 pieces — the default amount in the
+    // packet's own terms, not "100".
+    expect(screen.getByTestId('food-quantity-input').props.value).toBe('8');
+    expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(true);
+  });
+
+  test('typing a piece count converts to the correct grams', () => {
+    const onLog = jest.fn();
+    render(<FoodQuantity food={{ ...egg, serving_grams: 100 }} onLog={onLog} naturalUnit={KINDER_25G} />);
+    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '2');
+    fireEvent.press(screen.getByTestId('food-quantity-log'));
+    expect(onLog).toHaveBeenCalledWith(25);
+  });
+
+  /** CONVERTS, the same rule the existing g/oz toggle already enforces — not
+   *  a relabel of the same digits onto a new unit. */
+  test('switching to grams converts the piece count, it does not relabel it', () => {
+    render(<FoodQuantity food={{ ...egg, serving_grams: 100 }} onLog={jest.fn()} naturalUnit={KINDER_25G} />);
+    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '2');
+    fireEvent.press(screen.getByTestId('food-unit-g'));
+    expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
+    expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(false);
+  });
+
+  test('switching back to pieces after grams converts again, correctly', () => {
+    render(<FoodQuantity food={{ ...egg, serving_grams: 100 }} onLog={jest.fn()} naturalUnit={KINDER_25G} />);
+    fireEvent.press(screen.getByTestId('food-unit-g'));
+    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '50');
+    fireEvent.press(screen.getByTestId('food-unit-natural'));
+    expect(screen.getByTestId('food-quantity-input').props.value).toBe('4');
+  });
+
+  test('a portion chip re-renders in the currently selected unit', () => {
+    render(
+      <FoodQuantity
+        food={{ ...egg, serving_grams: 100, portions: [{ seq: 1, label: '1 large', grams: 50 }] }}
+        onLog={jest.fn()}
+        naturalUnit={KINDER_25G}
+      />,
+    );
+    fireEvent.press(screen.getByTestId('food-portion-50'));
+    // Still in pieces mode (the chip doesn't itself change the unit) — 4.
+    expect(screen.getByTestId('food-quantity-input').props.value).toBe('4');
+  });
+
+  test('no naturalUnit prop means no third pill — today’s g/oz-only toggle, unaffected', () => {
+    render(<FoodQuantity food={egg} onLog={jest.fn()} />);
+    expect(screen.queryByTestId('food-unit-natural')).toBeNull();
+  });
+});

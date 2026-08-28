@@ -213,6 +213,21 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "universally, including in the US, and the reference designs pair them with a "
         "weight in lb. Product decision, tracked as N111 (#494).",
     ),
+    (
+        "apps/mobile/lib/foodQuantity.ts",
+        "ml",
+        "'ml',",
+        "N426: an entry in NOT_A_NATURAL_UNIT, the denylist naturalUnitFor rejects a "
+        "packet's own serving-size word against (so '25 g' or '1.5 oz (42 g)' never "
+        "become a fake 'natural unit' pill). Compared against parsed label text, "
+        "never rendered on screen.",
+    ),
+    (
+        "apps/mobile/lib/foodQuantity.ts",
+        "kg",
+        "'kg',",
+        "Same NOT_A_NATURAL_UNIT denylist as the 'ml' entry above, same reason.",
+    ),
 ]
 
 
