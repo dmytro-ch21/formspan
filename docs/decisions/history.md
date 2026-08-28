@@ -47797,6 +47797,74 @@ originally asked for.
 backend content/test-suite change with no user-facing surface and no new API
 endpoint; nothing an athlete-facing functional test would exercise changed.
 
+## 2026-08-28 — T11 (#708): the friends list 500'd for the whole caller the moment any one friend had no username
+
+**Found during L1's (#380) joint device-verification pass, filed as its own
+ticket, fixed the same day.** `GET /v1/friends` and the pending-requests
+endpoint both crashed with a 500 — not a degraded card for one relationship,
+the *entire* response — the moment any friend or pending counterpart lacked a
+claimed username.
+
+**Root cause:** `friend.Card.Username` is a plain non-pointer Go `string`,
+and `cardSelect` (shared by both `Friends` and `Pending` in
+`internal/modules/friend/postgres.go`) selected `p.username` straight from
+`profiles`. pgx refuses to scan a SQL `NULL` into a non-pointer `string`, so
+the whole query errored with `cannot scan NULL into *string` on the first
+NULL row it hit — one bad row poisoned every row after it in the same result
+set.
+
+**Reachability:** not reachable through this package's own `Send`/`Accept` —
+`Send` requires the *caller* to already have a handle (`ErrNoUsername`
+otherwise) and resolves the *target* by username (`ErrNotFound` if none
+currently claims it), so a friendship or pending row can never be *created*
+with either side unnamed. But `friendships` carries no foreign key to
+`profiles`, so nothing in the schema stops a username being cleared out from
+under an *existing* row by some other path — and the test suite already had
+precedent for constructing exactly that edge case by hand
+(`TestUnfriendAndUnnamedAndSelf`'s direct `UPDATE profiles SET username =
+NULL`). Treated as a genuine defensive gap rather than a live-flow bug, and
+fixed at the SQL layer only: `cardSelect` now selects
+`COALESCE(p.username, '')`. `Card.Username`'s Go type, the JSON wire shape,
+and both mobile (`apps/mobile/lib/friends.ts`) and web clients are unchanged
+— an empty string is never a value `profile.ValidUsername` would accept, so
+it cannot collide with a real handle, and neither client needed to learn a
+new falsy state.
+
+New regression test (`TestCardsSurviveOtherPartysUsernameGoingNull`) seeds a
+friendship and a pending request, nulls the *other* party's username via raw
+SQL exactly the way the precedent test does, and asserts both `Friends` and
+`Pending` return 200 with the affected card present and `Username == ""`
+rather than erroring — pinning both call sites that share `cardSelect`, since
+a fix that only covered one is exactly how this would have survived a partial
+fix. Mutation-tested: reverted the `COALESCE` back to bare `p.username`,
+confirmed the test failed with the real pgx scan error (not a compile error),
+restored, confirmed green by re-running.
+
+Swept `internal/modules/friend` and the adjacent `profile` module for the
+same shape: `Send`'s own caller-handle lookup already scans into a
+`*string`; `profile.PublicProfile.Username` is safe by construction (it can
+only ever be the row matched by an exact username, which cannot be NULL).
+That first pass concluded "no other instance" — wrong, and caught by
+`/pre-merge`'s own `ac-verifier` gate rather than by the sweep itself:
+**`internal/modules/share/postgres.go`'s `pendingCards`** has the identical
+shape. `Create` can only reach a counterpart through `friends.FriendID`
+(an accepted friend), so this package's own write path has the same
+can't-construct-it-at-creation argument `friend.Send`/`Accept` do — and
+`shares` carries no foreign key to `profiles` either, so the same
+after-the-fact NULL is possible. `pendingCards` selected `p.username`
+straight into `cardRow.handle` (also a bare Go `string`), which would have
+crashed a caller's entire inbox or outbox the identical way. Fixed the same
+way — `COALESCE(p.username, '')` — with its own mutation-tested regression
+test (`TestCardsSurviveOtherPartysUsernameGoingNull` in
+`share/postgres_test.go`, covering both `Inbox` and `Sent`, since they share
+`pendingCards` exactly as `Friends`/`Pending` share `cardSelect`). `feed`
+was checked too and is already correct: `visibleFrom` filters
+`p.username IS NOT NULL` and its own scan already uses `*string`. The
+lesson worth keeping: "grep and conclude" is not the same as "grep and have
+an independent pass check the conclusion" — this shipped only because a
+review gate re-ran the same search rather than trusting the sweep's own
+result.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

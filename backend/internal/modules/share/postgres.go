@@ -74,8 +74,18 @@ func (r *PostgresRepository) Create(ctx context.Context, callerID string, in New
 // The counterpart's handle is joined LIVE, so a rename propagates to every
 // list it appears in. The label beside it is the deliberate exception — it is
 // a record of what was said, not a view of a live thing.
+//
+// COALESCE'd to an empty string, NOT bare p.username — the same T11 (#708)
+// shape found in the friend package's cardSelect, and present here for the
+// identical reason: Create only reaches a counterpart THROUGH r.friends
+// .FriendID, which itself only resolves an accepted friend, so this
+// package's own write path can never address a share to someone currently
+// without a handle. But shares carries no FK to profiles, and cardRow.handle
+// is a bare Go string — pgx refuses to scan a SQL NULL into it, so a
+// counterpart whose username later goes NULL would take down this caller's
+// entire inbox or outbox with the same scan error T11 fixed for friends.
 const pendingCards = `
-	SELECT s.id, s.resource_type, s.resource_label, p.username, s.created_at
+	SELECT s.id, s.resource_type, s.resource_label, COALESCE(p.username, ''), s.created_at
 	FROM shares s
 	JOIN profiles p ON p.user_id = s.%s
 	WHERE s.%s = $1 AND s.status = 'pending'

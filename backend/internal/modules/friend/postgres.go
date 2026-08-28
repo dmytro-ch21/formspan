@@ -145,13 +145,42 @@ func (r *PostgresRepository) Remove(ctx context.Context, callerID, username stri
 // requests inflate the victim's inbox without the victim doing anything. The
 // username tiebreak is part of the same argument: a bare timestamp DESC can
 // tie, and ties reorder between queries, which wobbles the ETag of a body
-// nobody changed.
+// nobody changed. p.user_id is a THIRD tiebreak, trailing username, for the
+// same reason cardSelect COALESCEs a missing username (T11, #708) — two
+// out-of-band, currently-unnamed counterparts tied on both timestamp and
+// the coalesced empty string would otherwise still wobble; user_id is
+// unique, so the order is now total.
 // p.user_id is selected ONLY to build the hashed AvatarKey below — it is
 // never assigned to a Card field directly, and setCardAvatar discards it the
 // moment the key exists. Same discipline profile.GetByUsername documents at
 // its own equivalent line.
+//
+// COALESCE'd to an empty string, NOT bare p.username — found in review
+// (T11, #708). `Send` requires the CALLER to hold a handle (`callerHandle` check)
+// and resolves the TARGET by handle (`resolve`, which cannot find someone
+// with none), so this package's OWN write paths can never construct a
+// friendship where either side currently lacks one — but `friendships`
+// carries no FK to `profiles` at all, so nothing in the schema actually
+// FORBIDS that state, and Card.Username is a bare Go `string`, which pgx
+// refuses to scan a SQL NULL into. The result before this fix: one friend
+// (or one pending request, in either direction) with no claimed handle —
+// reachable today only by a row written outside `Send`/`Accept` (seed data,
+// an admin action, a future migration), not by any path an athlete can
+// drive — took down the ENTIRE list with a 500, for every OTHER friend too.
+// The empty string is a defensible placeholder specifically because it is
+// not a real, case-insensitively-unique username `ValidUsername` would ever accept
+// (`profile.go`), so it cannot collide with one — a client rendering `@`
+// with nothing after it is a correctly degraded card, not a wrong one.
+//
+// That degraded card is deliberately left UNADDRESSABLE by this fix: Remove
+// and Accept resolve the counterpart by handle, and resolve("") matches
+// nothing, so a handle-less friend can't be unfriended and a handle-less
+// pending request can't be accepted or declined (and still counts toward
+// PendingCount). Strictly better than the 500 this fix replaces, and — like
+// the NULL itself — reachable only out-of-band. Tracked, not fixed here:
+// L10 (#717).
 const cardSelect = `
-	SELECT p.user_id, p.username, p.display_name, p.has_avatar, %s
+	SELECT p.user_id, COALESCE(p.username, ''), p.display_name, p.has_avatar, %s
 	FROM friendships f
 	JOIN profiles p ON p.user_id = CASE WHEN f.user_a = $1 THEN f.user_b ELSE f.user_a END
 	WHERE (f.user_a = $1 OR f.user_b = $1)`
@@ -171,7 +200,7 @@ func (r *PostgresRepository) Friends(ctx context.Context, callerID string) ([]Ca
 	rows, err := r.pool.Query(ctx,
 		fmt.Sprintf(cardSelect, "f.accepted_at")+`
 		AND f.status = 'accepted'
-		ORDER BY f.accepted_at DESC, p.username
+		ORDER BY f.accepted_at DESC, p.username, p.user_id
 		LIMIT 500`, callerID)
 	if err != nil {
 		return nil, translate(err, "friends")
@@ -186,7 +215,7 @@ func (r *PostgresRepository) Pending(ctx context.Context, callerID string) (Requ
 	rows, err := r.pool.Query(ctx,
 		fmt.Sprintf(cardSelect, "f.created_at, f.requested_by")+`
 		AND f.status = 'pending'
-		ORDER BY f.created_at DESC, p.username
+		ORDER BY f.created_at DESC, p.username, p.user_id
 		LIMIT 500`, callerID)
 	if err != nil {
 		return out, translate(err, "pending")
