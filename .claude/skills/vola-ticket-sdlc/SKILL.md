@@ -93,7 +93,9 @@ authority; this skill is the ordered checklist those sections add up to.
 12. **Board Status does NOT auto-sync when the issue closes.** Measured on
     N187 and N188: the issue closed, the board still said In Progress. Set
     Status → Done by hand after the merge, via the `updateProjectV2ItemFieldValue`
-    mutation.
+    mutation. Same recipe, different value, for a ticket the evidence latch
+    reopens: Status → Awaiting evidence — CI writes the `evidence-outstanding`
+    label, never the Status field.
 
 13. **Clean up**: `git worktree remove`, `git worktree prune`,
     `git branch -D` — from the primary checkout, not from inside the

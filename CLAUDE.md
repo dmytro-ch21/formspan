@@ -525,14 +525,22 @@ Two things about how it decides, because both are easy to get wrong:
   evidence criterion is not touched, not labelled and not commented on. Closing
   as `not planned` is likewise left alone — that is a decision, not a slip.
 
-There is no `Awaiting evidence` column on the board, deliberately: writing a
-Projects v2 field from CI needs a long-lived PAT, and that credential is the
-board owner's call to make. The label carries the state without one.
+The board's `Status` field does carry an `Awaiting evidence` option (and a
+`Blocked` one) — but CI never writes either. Writing a Projects v2 field from
+CI still needs a long-lived PAT, and that credential is still the board
+owner's call to make, so the reasoning that kept this out of automation holds.
+`Status → Awaiting evidence` is a manual value, set by hand the same way
+`Status → Done` is (see the `vola-ticket-sdlc` skill's pipeline checklist,
+step 12) — typically right after the evidence latch reopens a ticket. The
+`evidence-outstanding` label remains the thing CI itself actually writes;
+the Status option is a hand-set convenience layered on top of it, not a
+substitute for it.
 
-**The zero-credential version of that column is a saved board view filtered on
-`label:evidence-outstanding`** — ten seconds in the Projects UI, no secret, and
-it makes "merged, awaiting evidence" readable at a glance. Not done here because
-it is a UI action on somebody else's board, not a change to this repo.
+**The zero-credential version of that state is still a saved board view
+filtered on `label:evidence-outstanding`** — ten seconds in the Projects UI,
+no secret, and it makes "merged, awaiting evidence" readable at a glance even
+for a ticket whose `Status` hasn't been updated by hand yet. Not done here
+because it is a UI action on somebody else's board, not a change to this repo.
 
 **Never post a comment containing `/evidence` at the start of a line unless you
 mean it.** The latch reads column zero only, and stamps its own comments with a
