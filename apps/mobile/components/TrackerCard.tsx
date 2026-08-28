@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  AccessibilityInfo,
   Animated,
   Pressable,
   StyleSheet,
@@ -126,7 +127,20 @@ export function TrackerCard({
   // separate "cancel" affordance, and there does not need to be one: `+` is
   // already the control that opened it.
   const [picking, setPicking] = useState(false);
-  const handleAdd = hasChoices ? () => setPicking((p) => !p) : onAdd;
+  const handleAdd = hasChoices
+    ? () =>
+        setPicking((p) => {
+          const next = !p;
+          // frontend-reviewer, N432 review: opening the chip row moved no
+          // focus and announced nothing — a VoiceOver user double-tapped,
+          // heard silence, and had to discover the row by swiping. `+`'s own
+          // label already changes to say a picker is coming; this states the
+          // row's actual arrival, the same way this app announces elsewhere
+          // (`goals.tsx`'s `saveManual`/`acceptAdjustment`).
+          if (next) AccessibilityInfo.announceForAccessibility('Choose a drink type');
+          return next;
+        })
+    : onAdd;
   const handleChoice = (key: string) => {
     setPicking(false);
     onAddChoice?.(key);
@@ -229,9 +243,14 @@ export function TrackerCard({
           form — the one-handed, standing-up discipline this app states
           elsewhere for logging. */}
       {hasChoices && picking ? (
+        // frontend-reviewer, N432 review: `radiogroup` on a container of
+        // plain `button`s was mismatched semantics — a real radiogroup's
+        // children carry `radio`, and picking a chip doesn't leave a
+        // selection to reflect (the row closes). `none` — just a container —
+        // is honest about what this actually is.
         <RNView
           style={styles.choices}
-          accessibilityRole="radiogroup"
+          accessibilityRole="none"
           testID={`tracker-choices-${tracker.id}`}
         >
           {addChoices?.map((c) => (
@@ -239,6 +258,10 @@ export function TrackerCard({
               key={c.key}
               onPress={() => handleChoice(c.key)}
               style={styles.choice}
+              // Clears the 44pt touch-target bar this file states elsewhere
+              // (the `+`, the glyphs) without inflating the chip's own drawn
+              // size — frontend-reviewer, N432 review.
+              hitSlop={4}
               accessibilityRole="button"
               accessibilityLabel={c.accessibilityLabel ?? c.label}
               testID={`tracker-choice-${tracker.id}-${c.key}`}

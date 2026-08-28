@@ -20,11 +20,13 @@
  * gap and this ticket does not close it.
  */
 
-import { StyleSheet } from 'react-native';
+import { AccessibilityInfo, StyleSheet } from 'react-native';
 import { fireEvent, render, screen } from '@testing-library/react-native';
 
 import { TrackerCard } from '../TrackerCard';
 import type { Tracker, TrackerEntry } from '@/lib/trackerModel';
+
+jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
 
 /** The shipped coffee preset, field for field. See `tracker/presets.go`. */
 const coffee: Tracker = {
@@ -300,6 +302,24 @@ describe('addChoices: a picker instead of a plain increment tap', () => {
     expect(onAdd).not.toHaveBeenCalled();
     expect(screen.getByTestId('tracker-choice-cof-espresso')).toBeTruthy();
     expect(screen.getByTestId('tracker-choice-cof-drip')).toBeTruthy();
+  });
+
+  it('announces the picker opening, and does not re-announce on close', () => {
+    // frontend-reviewer, N432 review: opening the chip row moved no focus
+    // and announced nothing, so a VoiceOver user double-tapped, heard
+    // silence, and had to discover the row by swiping.
+    (AccessibilityInfo.announceForAccessibility as jest.Mock).mockClear();
+    const onAddChoice = jest.fn();
+    renderCard(coffee, [], { addChoices: choices, onAddChoice });
+
+    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
+      'Choose a drink type',
+    );
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(screen.getByTestId('tracker-add-cof')); // closes it again
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
   });
 
   it('picking a choice fires onAddChoice with its key, and closes the picker', () => {

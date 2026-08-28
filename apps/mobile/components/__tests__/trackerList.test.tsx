@@ -182,8 +182,8 @@ describe('N432: coffee taps also post to caffeine, when the athlete has one', ()
   const caffeine = tracker('caf-1', { preset: 'caffeine', name: 'Caffeine', target: 400 });
   const water = tracker('water-1', { preset: 'water', name: 'Water' });
 
-  it('offers a drink-type picker on the coffee card, and not on water', () => {
-    render(<TrackerList day={day([coffee, water])} {...props} />);
+  it('offers a drink-type picker on the coffee card when there is a caffeine tracker to feed, and not on water', () => {
+    render(<TrackerList day={day([coffee, caffeine, water])} {...props} />);
 
     fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
     expect(screen.getByTestId('tracker-choice-coffee-1-espresso')).toBeTruthy();
@@ -203,17 +203,22 @@ describe('N432: coffee taps also post to caffeine, when the athlete has one', ()
     expect(addCoffeeTap).toHaveBeenCalledWith(coffee, caffeine, 63, '2026-08-20');
   });
 
-  it('passes null for the caffeine tracker when the athlete does not have one', () => {
+  it('taps a plain cup with no picker at all when the athlete has no caffeine tracker', () => {
     // No caffeine tracker at all in this athlete's list — the criterion that
-    // a coffee tap must behave as if this ticket never shipped.
+    // a coffee tap must behave as if this ticket never shipped. Offering a
+    // picker whose every choice discards its mg is a behaviour change in
+    // itself (frontend-reviewer, N432 review) — the fix is no picker at all,
+    // same single instant tap every other tracker gets.
+    const addTap = jest.fn(async () => {});
     const addCoffeeTap = jest.fn(async () => {});
-    const d = { ...day([coffee]), addCoffeeTap };
+    const d = { ...day([coffee]), addTap, addCoffeeTap };
     render(<TrackerList day={d} {...props} />);
 
+    expect(screen.queryByTestId('tracker-choice-coffee-1-drip')).toBeNull();
     fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
-    fireEvent.press(screen.getByTestId('tracker-choice-coffee-1-drip'));
 
-    expect(addCoffeeTap).toHaveBeenCalledWith(coffee, null, 95, '2026-08-20');
+    expect(addTap).toHaveBeenCalledWith(coffee, '2026-08-20');
+    expect(addCoffeeTap).not.toHaveBeenCalled();
   });
 
   it('passes null mg for "Other" — never an invented figure', () => {

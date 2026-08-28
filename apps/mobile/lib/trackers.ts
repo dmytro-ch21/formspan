@@ -570,23 +570,32 @@ export async function logCoffeeTap(
 ): Promise<string> {
   const db = await getDb();
   const coffeeId = randomUUID();
-  const coffeeAt = stamp();
-  await db.runAsync(
-    `INSERT INTO tracker_entries
-       (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
-     VALUES (?,?,?,?,?,?,?,1,0)`,
-    coffeeId, coffeeTracker.id, userId, on, coffeeAt, coffeeTracker.increment, coffeeAt,
-  );
-  if (caffeineTracker && caffeineMg != null) {
-    const caffeineId = pairedCaffeineEntryId(coffeeId);
-    const caffeineAt = stamp();
+  // frontend-reviewer, N432 review: two inserts belong in one transaction —
+  // this file already states the rule for exactly this shape (see the
+  // reorder function's own comment) and the two writes here had drifted
+  // from it. Without it, a caffeine-insert failure after the coffee insert
+  // commits leaves a real cup logged while the promise still rejects, so
+  // the tap looks like it did nothing and the athlete retaps into a
+  // duplicate cup.
+  await withTransaction(db, async () => {
+    const coffeeAt = stamp();
     await db.runAsync(
       `INSERT INTO tracker_entries
          (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
        VALUES (?,?,?,?,?,?,?,1,0)`,
-      caffeineId, caffeineTracker.id, userId, on, caffeineAt, caffeineMg, caffeineAt,
+      coffeeId, coffeeTracker.id, userId, on, coffeeAt, coffeeTracker.increment, coffeeAt,
     );
-  }
+    if (caffeineTracker && caffeineMg != null) {
+      const caffeineId = pairedCaffeineEntryId(coffeeId);
+      const caffeineAt = stamp();
+      await db.runAsync(
+        `INSERT INTO tracker_entries
+           (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
+         VALUES (?,?,?,?,?,?,?,1,0)`,
+        caffeineId, caffeineTracker.id, userId, on, caffeineAt, caffeineMg, caffeineAt,
+      );
+    }
+  });
   return coffeeId;
 }
 

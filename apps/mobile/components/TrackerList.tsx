@@ -154,6 +154,18 @@ export function TrackerList({
         // the day, which is exactly what "does the athlete have a caffeine
         // tracker" needs and `TrackerCard` must not have to ask for.
         const isCoffee = t.preset === 'coffee';
+        // Only OFFER the picker when it can actually do something — kept
+        // separate from `isCoffee` (which still routes removal through
+        // `removeCoffeeTap`, safe as a no-op if no paired entry exists,
+        // e.g. one logged before the athlete's caffeine tracker was
+        // removed). frontend-reviewer, N432 review: gating the chip row on
+        // `isCoffee` alone showed it even to an athlete with no caffeine
+        // tracker, where every chip did the identical thing — log one cup,
+        // mg discarded. That is a real behaviour change for them, against
+        // this ticket's own "no caffeine tracker → behaves exactly as
+        // before" criterion: what was an instant tap became two taps that
+        // bought nothing.
+        const showPicker = isCoffee && caffeineTracker != null;
         return (
           <TrackerCard
             // Keyed on the day too, not just the tracker — see `on`'s own doc
@@ -176,9 +188,9 @@ export function TrackerList({
                 : void day.removeEntry(entryID, dayAtTap())
             }
             onEdit={() => day.openSettings(t)}
-            addChoices={isCoffee ? COFFEE_ADD_CHOICES : undefined}
+            addChoices={showPicker ? COFFEE_ADD_CHOICES : undefined}
             onAddChoice={
-              isCoffee
+              showPicker
                 ? (key) =>
                     void day.addCoffeeTap(t, caffeineTracker, caffeineMgFor(key), dayAtTap())
                 : undefined

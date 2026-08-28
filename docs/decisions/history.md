@@ -47521,6 +47521,56 @@ the no-caffeine-tracker and "Other" cases, and coffee removal routes through
 `docs/testing/functional-scenarios.md` updated with the drink-type-picker and
 cross-tracker-posting scenarios under Daily trackers.
 
+### `ac-verifier`/`frontend-reviewer` findings, applied before merge
+
+`ac-verifier`: 7 MET / 0 NOT MET, every criterion traced against the diff
+(including independently confirming the id-derivation collision math and the
+no-caffeine-tracker no-op path). `backend-reviewer` not run — this ticket is
+mobile-only, confirmed by an empty `git diff --name-only backend/`.
+
+`frontend-reviewer`: no blocking findings, several suggestions — the one
+applied as a real fix rather than left as a judgment call:
+
+- **The picker showed even with no caffeine tracker to feed.** Gating the
+  chip row on `isCoffee` alone (rather than `isCoffee && caffeineTracker`)
+  meant every chip did the identical thing for that athlete — log one cup,
+  mg discarded — turning what used to be an instant tap into two taps that
+  bought nothing, directly against this ticket's own "no caffeine tracker →
+  behaves exactly as before" criterion. `TrackerList.tsx` now has a separate
+  `showPicker` gate; `isCoffee` alone still routes removal through
+  `removeCoffeeTap` (safe as a no-op if no paired entry exists — e.g. one
+  logged before the athlete's caffeine tracker was removed). Two existing
+  tests updated/renamed to match: a coffee tap with no caffeine tracker now
+  asserts the plain `addTap` path fires and `addCoffeeTap` does not, and the
+  picker-is-offered test now includes a caffeine tracker in its fixture.
+
+Also applied, all cheap: `logCoffeeTap`'s two inserts now run inside
+`withTransaction` (this file already states the rule for exactly this
+shape — the two writes here had drifted from it, and a caffeine-insert
+failure after the coffee insert commits would otherwise leave a real cup
+logged while the promise still rejected); the chip row's
+`accessibilityRole="radiogroup"` corrected to `"none"` (its children are
+plain buttons with nothing that reads as a persisted selection); `hitSlop={4}`
+on each chip, clearing the 44pt touch-target bar this file states elsewhere
+for the `+`/glyphs/settings controls; and an
+`AccessibilityInfo.announceForAccessibility('Choose a drink type')` when the
+picker opens (not on close) — a VoiceOver user previously double-tapped,
+heard silence, and had to discover the chip row by swiping.
+
+Mutation-verified all four: the `showPicker` gate (reverted to `isCoffee`
+alone, confirmed the renamed test failed on a real `toHaveBeenCalledWith`
+mismatch), and the announcement (removed the call, confirmed the new
+`trackerCard.test.tsx` test failed with zero calls recorded, not a compile
+error) — both restored, confirmed green by re-running.
+
+Left as the reviewer's own stated judgment call, not fixed here: the
+one-handed cost of the picker for athletes who DO have a caffeine tracker
+(the reviewer's own read was that mg fidelity is the feature and the
+two-tap cost is a fair trade there); the empty-glyph accessibility hint
+text still says "Double tap to add it" rather than mentioning the picker
+(the `+` button's label already changes, and the hint lives in
+`trackerModel.ts`'s pure functions, which stay preset-unaware by design).
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
