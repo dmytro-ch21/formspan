@@ -46571,6 +46571,40 @@ acceptance criteria are scoped to the DAY, not the meal, and `Log food`'s
 full form already lets the athlete correct the meal explicitly. Worth its own
 ticket if it turns out to matter in practice.
 
+**`frontend-reviewer` findings, applied before merge, after a rebase onto
+`origin/main` picked up W13+W14 (#693, #694).** Rebasing surfaced that W13
+had already fixed the MomentumCard accessibility-label mismatch the reviewer
+flagged here — and better than this branch's own attempt: W13's version keys
+both the spoken label and the visible text off `isToday`, not just a
+same-string derivation, so "Open today's food log" only claims "today" when
+the card is actually showing today. Kept W13's version outright rather than
+layering a second fix on top.
+
+Two findings this branch's own rebase couldn't inherit, both mutation-verified:
+
+1. **`trackerTapDay`'s resume branch.** `dayAtTap` passed bare `isToday`, but
+   `on` itself falls back to real today during a resume (`momentumDayKey`)
+   regardless of `isToday` — and that fallback reads `todayKey`, a
+   render-time value, not the tap-time thunk `trackerTapDay` exists to give
+   TODAY. A resume session left open across midnight with a stale
+   `dayOffset` would file a tap under whichever day the last render saw.
+   Fixed by routing `resume !== null` through the same fresh-clock branch:
+   `trackerTapDay(isToday || resume !== null, on, () => new Date())`.
+2. **`dayOffsetFor`'s unvalidated `on`.** Unlike an internally-built
+   `dayString`, Food's `?date=` param can be malformed (a stale bookmark, a
+   hand-typed link) — `new Date('${on}T00:00:00')` on garbage input is
+   `Invalid Date`, and the arithmetic silently produced `NaN` rather than
+   erroring, landing the day-stepper nowhere with no error. Falls back to 0
+   (today) on an unparseable `on`.
+
+Two other suggestions were read and left as-is, with reasons: the
+`appliedDateParam` refocus corner case (same-date re-push vs. plain refocus)
+is real but narrow, and the reviewer's own framing was a judgment call, not a
+blocker; and the quick-add-chip design choice — collapsing straight into the
+switched day's totals with no "logged to yesterday" confirmation — matches
+this screen's existing pattern for every other browsed-day write here
+(`Log food`, the day-link) rather than introducing a new one.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

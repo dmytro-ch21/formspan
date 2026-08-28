@@ -96,6 +96,14 @@ describe('dayOffsetFor', () => {
   test('crosses a month boundary correctly', () => {
     expect(dayOffsetFor('2026-09-02', noon(2026, 7, 31))).toBe(2);
   });
+
+  // frontend-reviewer, N430/#692: `on` comes from a `?date=` URL param, not
+  // an internally-constructed `dayString` — a malformed value must not ride
+  // silently into `Invalid Date`/`NaN` and land the day-stepper nowhere.
+  test('a malformed date falls back to 0 rather than NaN', () => {
+    expect(dayOffsetFor('not-a-date', noon(2026, 7, 26))).toBe(0);
+    expect(dayOffsetFor('', noon(2026, 7, 26))).toBe(0);
+  });
 });
 
 describe('addDays', () => {

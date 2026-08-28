@@ -1182,7 +1182,15 @@ export default function TodayScreen() {
               // already an explicit choice away from today, not a clock
               // reading — so it resolves to `on`, the same day the cards
               // above and `quickLog` write to.
-              dayAtTap={() => trackerTapDay(isToday, on, () => new Date())}
+              //
+              // EXCEPT while a session is resuming: `on` falls back to
+              // `todayKey` then (see `on`'s own comment above), and
+              // `todayKey` is a render-time read, not a tap-time one — a
+              // resume left open across midnight with a stale `dayOffset`
+              // would otherwise file the tap under whichever day the last
+              // render happened to see. `resume !== null` routes through the
+              // same fresh-clock branch as `isToday` for exactly that case.
+              dayAtTap={() => trackerTapDay(isToday || resume !== null, on, () => new Date())}
               units={units}
               unitsReady={unitsReady}
               // Three, then a disclosure row — N78's answer to "several
