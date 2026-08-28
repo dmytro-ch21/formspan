@@ -299,7 +299,16 @@ describe('pushing', () => {
 
   it('a permanent rejection stops owing but keeps the reason', async () => {
     const id = await logFood(USER, meal());
-    mockApi.mockRejectedValue(new ApiError('servings must be more than 0', 'invalid_input', 400));
+    // Scoped to the entry's own PUT, not every call: an empty account also
+    // owes the fresh-install backfill's own GET this same sync (N428, #686),
+    // and a blanket rejection would fail that too — a second, unrelated
+    // failure this test has no opinion about.
+    mockApi.mockImplementation(async (_t: unknown, _path: string, init?: { method?: string }) => {
+      if (init?.method === 'PUT') {
+        throw new ApiError('servings must be more than 0', 'invalid_input', 400);
+      }
+      return {};
+    });
 
     const res = await syncFood(USER, token);
 

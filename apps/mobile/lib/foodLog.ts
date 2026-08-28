@@ -13,20 +13,28 @@
  *
  * ## Two shapes, and deliberately not a third
  *
- * **Entries push only** — `sequences.ts`'s shape. The phone is where food is
- * logged.
+ * **Entries push only IN STEADY STATE** — `sequences.ts`'s shape. The phone is
+ * where food is logged, and nothing on web writes an entry, so there is
+ * nothing to routinely pull. The one exception is `push()`'s fresh-install
+ * backfill (N428, #686): a reinstall starts `food_entries` at zero, and
+ * without a ONE-TIME pull of history the server already has, every meal
+ * logged before that install would be permanently invisible on the new
+ * device — the routine push/no-pull rule above still holds once that backfill
+ * has run.
  *
- * **Foods pull as well as push** — `workout_cache`'s shape. Web authors
- * recipes, the phone saves what it just ate, and both must survive the other.
+ * **Foods pull as well as push, routinely** — `workout_cache`'s shape. Web
+ * authors recipes, the phone saves what it just ate, and both must survive
+ * the other.
  */
 
 import { randomUUID } from 'expo-crypto';
 
 import { isPermanentRejection, isTransportFailure, retryAfterOf } from './apiError';
+import { addDays, dayString } from './calendar';
 import { getDb, withTransaction } from './db';
 import type { Entry, Food, Macros, Meal, RecipeItem, Target, TargetView } from './nutrition';
 import * as api from './nutritionApi';
-import { PREF_TARGETS_FETCHED_AT, readPref, writePref } from './prefs';
+import { PREF_FOOD_BACKFILL_DONE_AT, PREF_TARGETS_FETCHED_AT, readPref, writePref } from './prefs';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -286,13 +294,14 @@ export async function localEntry(userId: string, id: string): Promise<Entry | nu
 /**
  * Merge a server window of ENTRIES into the local store.
  *
- * **Not wired to anything yet, deliberately, and that is worth stating rather
- * than leaving to be discovered.** `food_entries` is push-only today: nothing
- * on web writes an entry, so there is nothing to pull. This exists and is
- * tested because the moment web can correct a day (N28) the phone needs a merge
- * that does not clobber what it still owes — and writing that merge under
- * pressure, next to a scoped DELETE, is how a sync loses data. Wire it when
- * there is a second writer; until then it is a specification with tests.
+ * **Wired to exactly one caller as of N428 (#686): `push()`'s fresh-install
+ * backfill below, and nothing routine.** `food_entries` is still push-only in
+ * steady state — nothing on web writes an entry, so there is still nothing to
+ * routinely pull. This was written and tested well before that backfill
+ * existed, against the day web can correct an entry (N28) and the day a fresh
+ * install needs a merge that does not clobber what it still owes; N428 is the
+ * second of those two days, not the first — a web writer still has no caller
+ * here.
  *
  * Never clobbers a row this device still owes, and absent-from-the-server is
  * only evidence of deletion for rows the server KNOWS about — an entry logged
@@ -691,7 +700,27 @@ export type FoodSyncResult = {
   errorKind?: 'offline' | 'permanent' | 'transient';
   /** The largest `Retry-After` seen this run, in ms (F17, #403). */
   retryAfterMs?: number;
+  /** Entries fetched by the fresh-install backfill below (N428, #686). */
+  pulled?: number;
 };
+
+/**
+ * The server's own `maxEntryWindowDays` (`nutrition/handler.go`), matched
+ * exactly. The server rejects a `from`/`to` pair with `daysBetween >= 31`, so
+ * a window spanning 31 CALENDAR days (30 days back from the end date) is the
+ * widest one call can ever ask for without a 400 — one day wider and the
+ * fresh-install backfill below would fail on its very first request.
+ */
+const BACKFILL_WINDOW_DAYS = 31;
+
+/**
+ * A hard ceiling on how many 31-day windows one fresh-install backfill will
+ * fetch, so a long logging history can't turn one sync call into an unbounded
+ * fetch loop — the same discipline `sessionStore.ts`'s `BACKFILL_MAX_PAGES`
+ * documents for training history. `BACKFILL_MAX_WINDOWS * BACKFILL_WINDOW_DAYS`
+ * ≈ 1 year, deliberately generous for a log kept 3–6×/day.
+ */
+const BACKFILL_MAX_WINDOWS = 12;
 
 function classify(err: unknown): 'offline' | 'permanent' | 'transient' {
   if (isTransportFailure(err)) return 'offline';
@@ -951,6 +980,97 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
       // writing a single row, in production, silently and forever. A branch
       // that cannot fail is a branch nobody finds out about.
       result.error = result.error ?? (err instanceof Error ? err.message : 'pull failed');
+    }
+  }
+
+  // The entries BACKFILL (N428, #686) — run AT MOST ONCE per account per
+  // device. Nothing else pulls `food_entries`: this file's own doc comment
+  // above states entries are push-only in steady state, because nothing on
+  // web writes one yet (`cacheEntries` exists and is tested for exactly that
+  // day — "wire it when there is a second writer" — this is not that day).
+  // But a fresh install starts this device's `food_entries` table at zero,
+  // and with no pull at all every meal ever logged before this install
+  // becomes permanently invisible on THIS phone — the athlete's history is
+  // still on the server, the app simply never asks for it. Same defect shape
+  // N85 fixed for `local_sessions`, filed here after a device uninstall wiped
+  // a real athlete's local food log and the reinstall after it showed nothing
+  // at all.
+  //
+  // **Gated on a PERSISTED PREF, not on the local table being empty — the
+  // first version of this fix used a row-count gate, matching N85 exactly,
+  // and both `ac-verifier` and `frontend-reviewer` independently found the
+  // same failure mode in it from two different angles.** Whatever briefly
+  // makes `food_entries` non-empty — a meal logged (and successfully
+  // pushed) before the very first sync completes, several meals logged
+  // OFFLINE across days before connectivity returns, or this very backfill's
+  // own window 1 landing before window 2 throws — permanently disarmed the
+  // row-count check, and the history it exists to fetch never arrived. A row
+  // count answers "does this device hold anything"; the actual question is
+  // "has this device ever FINISHED asking the server for its history", and
+  // only a fact independent of `food_entries` itself answers that reliably.
+  // `PREF_SEEDED_AT` (`lib/seed.ts`) already carries exactly this shape for
+  // the once-per-device catalog seed — `PREF_FOOD_BACKFILL_DONE_AT` reuses
+  // the pattern rather than inventing a second one.
+  //
+  // The pref is written ONLY once every window in the budget has been asked
+  // for and NONE has thrown (see the `catch` below) — a partial run (window
+  // 3 of 12 fails) leaves it unset, so the next sync retries the WHOLE pass.
+  // That re-asks windows 1–2 needlessly, but `cacheEntries`'s upsert is
+  // idempotent, so the cost is a few wasted requests, not wrong data — the
+  // alternative (marking partial progress "done") is what leaves an athlete
+  // permanently missing whatever window never landed.
+  //
+  // Windowed by CALENDAR DATE rather than paged by offset, because
+  // `GET /nutrition/entries` takes `from`/`to` (bound to the server's own
+  // `maxEntryWindowDays`, matched by `BACKFILL_WINDOW_DAYS` above) rather
+  // than limit/offset — `nutritionApi.ts`'s `listEntries` has no other shape
+  // to page through. Walked BACKWARD from today, newest window first, so the
+  // history Today/Progress actually read lands first if
+  // `BACKFILL_MAX_WINDOWS` is ever what stops the loop — mirroring
+  // `runSync`'s own most-recent-first session pages.
+  //
+  // No short-window early exit, unlike `runSync`'s "a short page means the
+  // server has nothing left". That inference only holds for offset paging
+  // over one ordered list; a CALENDAR window can come back empty because an
+  // athlete took a quiet month, not because history stops there, so an empty
+  // window here is not evidence of anything and every window in the budget
+  // runs regardless.
+  if (!stalled && result.errorKind !== 'offline') {
+    try {
+      const alreadyBackfilled = (await readPref(userId, PREF_FOOD_BACKFILL_DONE_AT)) !== null;
+      if (!alreadyBackfilled) {
+        let windowEnd = new Date();
+        for (let i = 0; i < BACKFILL_MAX_WINDOWS; i++) {
+          const to = dayString(windowEnd);
+          const windowStart = addDays(windowEnd, -(BACKFILL_WINDOW_DAYS - 1));
+          const from = dayString(windowStart);
+          const entries = await api.listEntries(getToken, { from, to });
+          if (entries.length) {
+            await cacheEntries(userId, from, to, entries);
+            result.pulled = (result.pulled ?? 0) + entries.length;
+          }
+          windowEnd = addDays(windowStart, -1);
+        }
+        // Reached only if every window above returned without throwing.
+        await writePref(userId, PREF_FOOD_BACKFILL_DONE_AT, stamp());
+      }
+    } catch (err) {
+      // Reported the same way `sessionStore.ts`'s own backfill pull reports
+      // a failure — `failed`, a ranked `errorKind`, and any `Retry-After` —
+      // deliberately NOT the lighter way the foods-pull catch just above
+      // reports one. That catch covers a routine, idempotent, every-sync
+      // fetch, where a quiet retry next time is the right amount of urgency.
+      // This one guards a ONE-TIME, unresumed-until-retried history fetch,
+      // and `sync.ts`'s orchestrator only schedules a backoff retry when
+      // `result.failed` is nonzero — found in review (`frontend-reviewer`):
+      // the first version of this catch only set `result.error`, which a
+      // sync whose pushes all succeeded still reports as `lastError: null` /
+      // `online: true` with no retry scheduled, silently stranding the
+      // backfill until the athlete happens to relaunch the app.
+      result.failed++;
+      result.error = result.error ?? (err instanceof Error ? err.message : 'backfill failed');
+      result.errorKind = worseKind(result.errorKind, classify(err));
+      noteRetryAfter(result, err);
     }
   }
 
