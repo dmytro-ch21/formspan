@@ -14152,16 +14152,25 @@ on screen. That, and only that, is what moved.
   this pass is the accepted, documented limit, not a bug to chase.
 - Log a meal on the device BEFORE the automatic sign-in sync has had a
   chance to run (e.g. captured while still offline immediately after
-  install): confirm the meal survives — the fresh-install detection reads
-  the local table at the moment sync runs, so a meal logged first must not
-  be silently treated as "this device already has history" in a way that
-  discards it, and must not be clobbered by the server's own copy if the
-  same meal also exists there under a different id.
-- Force the entries backfill's request to fail (airplane mode partway
-  through sign-in, or a forced 5xx on `GET /v1/nutrition/entries`): confirm
-  the rest of sync (sessions, plans, foods) is unaffected, and that the next
-  successful sync retries the backfill from scratch rather than leaving the
-  log permanently short.
+  install), or log several meals across multiple days OFFLINE before
+  connectivity returns: confirm the older history still backfills once sync
+  succeeds — detection is a persisted per-device flag (`PREF_FOOD_BACKFILL_
+  DONE_AT`), not "is the table currently empty," precisely so a meal logged
+  first is never mistaken for "this device already has history." Also
+  confirm the locally-logged meal itself survives and is not clobbered by
+  the server's own copy if the same meal also exists there under a
+  different id.
+- Force the entries backfill's request to fail PARTWAY THROUGH (e.g. the
+  first couple of windows succeed, then airplane mode or a forced 5xx):
+  confirm the rest of sync (sessions, plans, foods) is unaffected; confirm
+  whatever already landed from the successful windows is still there; and
+  confirm the NEXT successful sync retries the WHOLE backfill pass (not
+  just the missing tail) rather than treating the partial result as done.
+- With the sync screen's error/retry surface visible, force the backfill to
+  fail: confirm it is reported as a genuine sync failure (contributes to the
+  pending/failed count, eligible for the same backoff retry as any other
+  sync failure) rather than silently swallowed while the rest of sync
+  reports success.
 - An account with NO nutrition history at all: confirm the food log simply
   stays empty after the backfill runs, with no error surfaced for "found
   nothing."

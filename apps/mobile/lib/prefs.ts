@@ -324,6 +324,26 @@ export const PREF_PINNED_RECORDS = 'pinned_records';
 export const PREF_TARGETS_FETCHED_AT = 'targets_fetched_at';
 
 /**
+ * When this device last FINISHED a fresh-install backfill of the food log
+ * (N428, #686) — a full pass, every window in the budget asked for with none
+ * throwing, never a partial one.
+ *
+ * Same shape and reasoning as {@link PREF_SEEDED_AT}: `food_entries`'s own
+ * row count cannot answer "has this device ever asked the server for its
+ * history" reliably, because a meal logged (and pushed) before the backfill
+ * runs, several meals logged offline before connectivity returns, or the
+ * backfill's own window 1 landing before window 2 throws would all make the
+ * table non-empty without the backfill ever having FINISHED — and a
+ * row-count gate reads any of those as "already backfilled", permanently.
+ * This pref is the fact the row count cannot be trusted to carry.
+ *
+ * Local-only: written with `dirty = 0` and never pushed, same as
+ * {@link PREF_TARGETS_FETCHED_AT} — it is a fact about this device's own
+ * sync history, not a preference the account holds.
+ */
+export const PREF_FOOD_BACKFILL_DONE_AT = 'food_backfill_done_at';
+
+/**
  * Carry pre-v10 OWED flags onto the `dirty` column.
  *
  * The companion-key scheme worked; it just did not generalise. Migrating

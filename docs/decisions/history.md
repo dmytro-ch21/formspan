@@ -46019,13 +46019,11 @@ entries` is windowed by calendar date (`from`/`to`, capped server-side at 31
 days via `maxEntryWindowDays`), not paged by `limit`/`offset` like sessions —
 so the backfill walks backward through fixed 31-day windows (newest first)
 rather than numbered pages, bounded at 12 windows (~1 year, deliberately
-generous for a log kept 3–6×/day) rather than N85's 10 pages of 200. Detected
-the same way N85 detects it — an empty `food_entries` table for the signed-in
-user, not a persisted flag, so the branch stops firing on its own once
-history has landed. One deliberate departure from N85's loop: no early exit
-on a short/empty window, because an empty CALENDAR window is not evidence
-there is nothing further back (an athlete can take a quiet month) the way a
-short OFFSET page is; every window in the 12-window budget runs regardless.
+generous for a log kept 3–6×/day) rather than N85's 10 pages of 200. One
+deliberate departure from N85's loop: no early exit on a short/empty window,
+because an empty CALENDAR window is not evidence there is nothing further
+back (an athlete can take a quiet month) the way a short OFFSET page is;
+every window in the 12-window budget runs regardless.
 
 Wired into the already-existing, already-tested `cacheEntries` (`foodLog.ts`)
 and `listEntries` (`nutritionApi.ts`) — `cacheEntries` was written well
@@ -46034,6 +46032,35 @@ unwired ("wire it when there is a second writer") since it landed. N428 is
 that day for the fresh-install case; a routine web-editor pull is still not
 wired and still has no caller, which the file's own comment now says
 explicitly rather than leaving the old broader claim to go stale.
+
+**Detection went through two designs, and the first one shipped with the
+exact bug this ticket exists to fix, still in it.** The first version copied
+N85 literally — gated on `food_entries` being empty for the signed-in user,
+no persisted flag, "the first backfilled window makes the table non-empty so
+the branch stops firing on its own." `ac-verifier` and `frontend-reviewer`,
+run independently before this ever reached a PR, both found the same failure
+mode from different angles: whatever briefly makes the table non-empty
+permanently disarms a row-count gate, and three ordinary sequences do exactly
+that — a meal logged (and successfully pushed) before the very first sync
+completes; several meals logged OFFLINE across days before connectivity
+returns; or the backfill's OWN window 1 landing before window 2 throws on a
+transient failure. All three leave the athlete permanently missing whatever
+history never arrived, which is the bug restated in miniature rather than
+fixed. **Replaced with a persisted pref**, `PREF_FOOD_BACKFILL_DONE_AT`
+(`lib/prefs.ts`, same shape as the existing `PREF_SEEDED_AT`), written only
+once every window in the 12-window budget has been asked for and none has
+thrown — a partial run leaves it unset, so the next sync retries the WHOLE
+pass (re-asking windows that already landed, which `cacheEntries`'s upsert
+makes harmless, rather than silently stopping short). The row count was
+never the fact worth checking; "has this device ever *finished* asking" is,
+and only a fact independent of `food_entries` itself can answer that
+reliably. A related finding from the same review pass: the first version's
+failure catch set `result.error` but never `result.failed`, so `sync.ts`'s
+orchestrator read a sync whose pushes all succeeded as clean and scheduled no
+retry — fixed to report the same way `sessionStore.ts`'s own pull failure
+does (`failed`, a ranked `errorKind`, `Retry-After`), so a failed backfill
+gets the backoff retry it needs rather than waiting for the athlete to
+happen to relaunch the app.
 
 **UI signal: deliberately none, matching N85.** The existing sync trigger
 (`lib/sync.ts`'s `setSyncIdentity` firing `request('sign-in')`) already runs
@@ -46045,12 +46072,18 @@ was considered and rejected for the same reason N85 didn't add one: the
 backfill is a correctness fix for data that should already have been there,
 not a feature worth announcing.
 
-Mutation-tested: the fresh-install gate (COUNT-of-zero check) and the
-offline/stalled gate were each individually broken and confirmed to make the
-covering tests fail as real assertion failures (not compile errors), then
-restored and re-confirmed green. New fixture suite:
-`apps/mobile/lib/__tests__/foodBackfill.test.ts`, alongside the existing
-`historyBackfill.test.ts` it was modelled on.
+Mutation-tested: the pref gate, the pref-write-on-completion, the
+offline/stalled gate, and the new `result.failed++` failure reporting were
+each individually broken and confirmed to make the covering tests fail as
+real assertion failures (not compile errors), then restored and
+re-confirmed green. New fixture suite:
+`apps/mobile/lib/__tests__/foodBackfill.test.ts` (12 cases, including a
+retry-after-partial-failure test that pins the fix directly), alongside the
+existing `historyBackfill.test.ts` it was modelled on. One pre-existing
+`foodLog.test.ts` test needed a more precisely scoped mock (it rejected
+every API call indiscriminately, which now also catches the backfill's own
+GET on an account with an empty log) — not a behaviour change, a test that
+had never had to distinguish the two before.
 
 **Left outstanding**: the `NEEDS HUMAN EVIDENCE` criterion — an actual
 device reinstall + sign-in showing the food log repopulate — has not been

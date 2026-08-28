@@ -14,14 +14,25 @@ import { migratedFixture, type FixtureDb } from './support/sqlite';
  * (`historyBackfill.test.ts` pins that one); this file pins the nutrition
  * equivalent.
  *
- * The mechanism differs from N85's in one respect worth stating up front:
- * `GET /nutrition/entries` is windowed by CALENDAR DATE (`from`/`to`, capped
- * server-side at 31 days), not paged by `limit`/`offset` like sessions — so
- * this walks backward through fixed-width date windows instead of numbered
- * pages, and (unlike sessions) never stops early on an empty window, because
- * an empty CALENDAR window is not evidence there is nothing further back —
- * an athlete can take a quiet month. Only the window-count ceiling ends the
- * loop.
+ * The mechanism differs from N85's in two respects worth stating up front:
+ *
+ * 1. `GET /nutrition/entries` is windowed by CALENDAR DATE (`from`/`to`,
+ *    capped server-side at 31 days), not paged by `limit`/`offset` like
+ *    sessions — so this walks backward through fixed-width date windows
+ *    instead of numbered pages, and (unlike sessions) never stops early on
+ *    an empty window, because an empty CALENDAR window is not evidence
+ *    there is nothing further back — an athlete can take a quiet month.
+ *    Only the window-count ceiling ends the loop.
+ * 2. It is gated on a PERSISTED PREF (`PREF_FOOD_BACKFILL_DONE_AT`), not on
+ *    `food_entries` being empty. A row-count gate was this ticket's FIRST
+ *    version, and both `ac-verifier` and `frontend-reviewer` independently
+ *    found the same failure mode in it: whatever briefly makes the table
+ *    non-empty — a meal logged (and pushed) before the very first sync, a
+ *    few meals logged offline before connectivity returns, or the
+ *    backfill's own window 1 landing before window 2 throws — permanently
+ *    disarms it. The describe block below, "a device that logs before its
+ *    history has landed", and the retry test in the failure block, pin
+ *    exactly those three cases.
  */
 
 let db: FixtureDb;
@@ -184,10 +195,88 @@ describe('a device that has never held a food entry for this athlete', () => {
 
     // The one window attempted, and no more — the whole backfill aborts on
     // its first failure rather than pressing on with a partial, silently
-    // incomplete history. It is retried whole on the next sync, same as the
-    // foods pull's own failure handling just above it.
+    // incomplete history.
     expect(entryCalls()).toHaveLength(1);
     expect(res.error).toBeTruthy();
+  });
+
+  it('reports a failed window as a sync FAILURE the orchestrator will retry with backoff, not just a message', async () => {
+    // `frontend-reviewer`'s finding: a catch that only sets `result.error`
+    // (matching the routine foods-pull catch beside it) leaves `failed` at 0
+    // for a sync whose pushes all succeeded — `sync.ts`'s orchestrator reads
+    // that as a clean run and schedules no retry, so a backfill this device
+    // still owes waits for the athlete to happen to relaunch the app.
+    mockApi.mockRejectedValue(new ApiError('upstream', 'internal', 500));
+
+    const res = await syncFood(USER, token);
+
+    expect(res.failed).toBeGreaterThan(0);
+    expect(res.errorKind).toBeDefined();
+  });
+
+  it('retries the WHOLE pass on the next sync after a failed window — nothing already landed is lost, nothing is skipped', async () => {
+    // Window 1 succeeds and writes a row; window 2 throws. The fix for
+    // `frontend-reviewer`'s blocking finding: a row landing before a later
+    // window throws must not permanently disarm the rest of the backfill —
+    // which is exactly what a row-count gate would do the moment window 1's
+    // entry made the table non-empty.
+    let n = 0;
+    mockApi.mockImplementation(async (_t: unknown, path: string) => {
+      if (!String(path).startsWith('/nutrition/entries?')) return {};
+      n++;
+      if (n === 1) return { entries: [serverEntry({ id: 'srv-1' })] };
+      throw new ApiError('upstream', 'internal', 500);
+    });
+
+    const first = await syncFood(USER, token);
+    expect(first.failed).toBeGreaterThan(0);
+    expect(await localEntries(USER, '2026-08-18')).toHaveLength(1); // window 1's row survived
+
+    // A second sync, everything now answering cleanly — the point under test
+    // is only that the backfill is ATTEMPTED again at all, not skipped
+    // because the table (thanks to window 1) is no longer empty.
+    entriesReturn([]);
+    mockApi.mockClear();
+    const second = await syncFood(USER, token);
+
+    expect(second.error).toBeFalsy();
+    expect(entryCalls().length).toBeGreaterThan(0);
+  });
+
+  it('does not repeat the backfill on a later sync once a full pass has completed', async () => {
+    entriesReturn([]);
+    await syncFood(USER, token); // 12 empty windows, all clean — the pref gets written
+
+    mockApi.mockClear();
+    await syncFood(USER, token);
+
+    expect(entryCalls()).toHaveLength(0);
+  });
+
+  it('still runs even though the device already holds an entry logged before the very first sync completed', async () => {
+    // The exact sequence `ac-verifier` found breaks a row-count gate:
+    // reinstall, sign in, log a meal before any sync has finished. That meal
+    // is a real local row by the time the backfill section is reached, and
+    // must not read as "this device already has confirmed history".
+    await logFood(USER, entryInput({ name: 'Logged before the first sync' }));
+    entriesReturn([]);
+
+    await syncFood(USER, token);
+
+    expect(entryCalls()).toHaveLength(12);
+  });
+
+  it('still runs even though the device already holds several entries logged OFFLINE across days', async () => {
+    // The multi-day variant of the same gap: several meals logged while
+    // offline, never yet confirmed by the server, well before connectivity
+    // (and the backfill's own chance to run) ever returns.
+    await logFood(USER, entryInput({ name: 'Day 1, offline' }));
+    await logFood(USER, entryInput({ name: 'Day 2, offline', eaten_on: '2026-08-17' }));
+    entriesReturn([]);
+
+    await syncFood(USER, token);
+
+    expect(entryCalls()).toHaveLength(12);
   });
 
   it('never asks at all once a DIRTY FOOD push has already stalled the sync offline', async () => {
@@ -222,21 +311,12 @@ describe('a device that has never held a food entry for this athlete', () => {
   });
 });
 
-describe('a device that already holds a food entry', () => {
-  it('does not run the backfill at all — self-limiting, with no separate flag', async () => {
-    await logFood(USER, entryInput({ name: 'Already here' }));
-    entriesReturn([serverEntry({ id: 'srv-old', eaten_on: '2025-01-01' })]);
+it('another user’s COMPLETED backfill does not disguise this account’s own fresh install as already done', async () => {
+  entriesReturn([]);
+  await syncFood('u2', token); // finishes u2's backfill and writes u2's own pref
 
-    await syncFood(USER, token);
-
-    expect(entryCalls()).toHaveLength(0);
-  });
-});
-
-it('another user’s local rows do not disguise a fresh install as an established one', async () => {
-  await logFood('u2', entryInput({ name: 'Not u1' }));
+  mockApi.mockClear();
   entriesReturn([serverEntry()]);
-
   await syncFood(USER, token);
 
   expect(entryCalls()).toHaveLength(12);

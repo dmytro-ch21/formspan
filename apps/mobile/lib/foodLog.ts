@@ -34,7 +34,7 @@ import { addDays, dayString } from './calendar';
 import { getDb, withTransaction } from './db';
 import type { Entry, Food, Macros, Meal, RecipeItem, Target, TargetView } from './nutrition';
 import * as api from './nutritionApi';
-import { PREF_TARGETS_FETCHED_AT, readPref, writePref } from './prefs';
+import { PREF_FOOD_BACKFILL_DONE_AT, PREF_TARGETS_FETCHED_AT, readPref, writePref } from './prefs';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -983,8 +983,8 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
     }
   }
 
-  // The entries BACKFILL (N428, #686) — for a FRESH INSTALL (or reinstall)
-  // ONLY. Nothing else pulls `food_entries`: this file's own doc comment
+  // The entries BACKFILL (N428, #686) — run AT MOST ONCE per account per
+  // device. Nothing else pulls `food_entries`: this file's own doc comment
   // above states entries are push-only in steady state, because nothing on
   // web writes one yet (`cacheEntries` exists and is tested for exactly that
   // day — "wire it when there is a second writer" — this is not that day).
@@ -996,10 +996,29 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
   // a real athlete's local food log and the reinstall after it showed nothing
   // at all.
   //
-  // Detected the same way N85 detects it: an empty local table for THIS
-  // user, not a persisted flag — the first backfilled window makes the table
-  // non-empty, so this branch stops firing on its own once history has
-  // landed, with no extra state to keep in sync with reality.
+  // **Gated on a PERSISTED PREF, not on the local table being empty — the
+  // first version of this fix used a row-count gate, matching N85 exactly,
+  // and both `ac-verifier` and `frontend-reviewer` independently found the
+  // same failure mode in it from two different angles.** Whatever briefly
+  // makes `food_entries` non-empty — a meal logged (and successfully
+  // pushed) before the very first sync completes, several meals logged
+  // OFFLINE across days before connectivity returns, or this very backfill's
+  // own window 1 landing before window 2 throws — permanently disarmed the
+  // row-count check, and the history it exists to fetch never arrived. A row
+  // count answers "does this device hold anything"; the actual question is
+  // "has this device ever FINISHED asking the server for its history", and
+  // only a fact independent of `food_entries` itself answers that reliably.
+  // `PREF_SEEDED_AT` (`lib/seed.ts`) already carries exactly this shape for
+  // the once-per-device catalog seed — `PREF_FOOD_BACKFILL_DONE_AT` reuses
+  // the pattern rather than inventing a second one.
+  //
+  // The pref is written ONLY once every window in the budget has been asked
+  // for and NONE has thrown (see the `catch` below) — a partial run (window
+  // 3 of 12 fails) leaves it unset, so the next sync retries the WHOLE pass.
+  // That re-asks windows 1–2 needlessly, but `cacheEntries`'s upsert is
+  // idempotent, so the cost is a few wasted requests, not wrong data — the
+  // alternative (marking partial progress "done") is what leaves an athlete
+  // permanently missing whatever window never landed.
   //
   // Windowed by CALENDAR DATE rather than paged by offset, because
   // `GET /nutrition/entries` takes `from`/`to` (bound to the server's own
@@ -1018,10 +1037,8 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
   // runs regardless.
   if (!stalled && result.errorKind !== 'offline') {
     try {
-      const localCount = await db.getFirstAsync<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM food_entries WHERE user_id = ?`, userId,
-      );
-      if ((localCount?.n ?? 0) === 0) {
+      const alreadyBackfilled = (await readPref(userId, PREF_FOOD_BACKFILL_DONE_AT)) !== null;
+      if (!alreadyBackfilled) {
         let windowEnd = new Date();
         for (let i = 0; i < BACKFILL_MAX_WINDOWS; i++) {
           const to = dayString(windowEnd);
@@ -1034,14 +1051,26 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
           }
           windowEnd = addDays(windowStart, -1);
         }
+        // Reached only if every window above returned without throwing.
+        await writePref(userId, PREF_FOOD_BACKFILL_DONE_AT, stamp());
       }
     } catch (err) {
-      // A failed backfill is not a failed sync — everything owed has already
-      // gone, and this device simply stays exactly as empty as it was before
-      // this attempt, to be retried on the next sync. Recorded rather than
-      // swallowed, matching the foods-pull catch above, for the same reason:
-      // a catch that cannot fail is a catch nobody finds out about.
+      // Reported the same way `sessionStore.ts`'s own backfill pull reports
+      // a failure — `failed`, a ranked `errorKind`, and any `Retry-After` —
+      // deliberately NOT the lighter way the foods-pull catch just above
+      // reports one. That catch covers a routine, idempotent, every-sync
+      // fetch, where a quiet retry next time is the right amount of urgency.
+      // This one guards a ONE-TIME, unresumed-until-retried history fetch,
+      // and `sync.ts`'s orchestrator only schedules a backoff retry when
+      // `result.failed` is nonzero — found in review (`frontend-reviewer`):
+      // the first version of this catch only set `result.error`, which a
+      // sync whose pushes all succeeded still reports as `lastError: null` /
+      // `online: true` with no retry scheduled, silently stranding the
+      // backfill until the athlete happens to relaunch the app.
+      result.failed++;
       result.error = result.error ?? (err instanceof Error ? err.message : 'backfill failed');
+      result.errorKind = worseKind(result.errorKind, classify(err));
+      noteRetryAfter(result, err);
     }
   }
 
