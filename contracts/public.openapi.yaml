@@ -4958,6 +4958,155 @@ components:
           items:
             $ref: "#/components/schemas/SequenceStepWrite"
 
+    ClassPlanBlock:
+      type: object
+      description: >
+        One scheduled segment of a class — warmup, a technique drill, live
+        rounds, or a free-text note.
+
+
+        `technique_name` and `technique_position` are RESOLVED from the
+        shared library on every read, never stored on the block, so a
+        renamed technique reads correctly everywhere. They are absent from
+        `ClassPlanBlockWrite` for the same reason `SequenceStep`'s
+        equivalents are: accepting them would let a client store a name that
+        disagrees with the catalog.
+      required: [order, type, duration_minutes, notes]
+      properties:
+        order: { type: integer, description: Zero-based. Assigned by the server from array order. }
+        type:
+          type: string
+          enum: [warmup, technique_drill, live_rounds, notes]
+        duration_minutes: { type: integer, minimum: 1, maximum: 180 }
+        technique_id:
+          type: string
+          nullable: true
+          description: >
+            Set only on a `technique_drill` block, and then exactly one of
+            `technique_id`/`free_text` — never both, never neither. Absent
+            (null) on every other block type.
+        free_text:
+          type: string
+          nullable: true
+          description: >
+            The other half of the `technique_drill` XOR — a drill with no
+            catalog entry ("coach's own variant"). Absent (null) on every
+            other block type.
+        technique_name:
+          type: string
+          description: From the library. Absent unless `technique_id` is set.
+        technique_position:
+          type: string
+          description: From the library. Absent unless `technique_id` is set.
+        notes:
+          type: string
+          description: >
+            The coach's own note. For a `notes` block this IS the block's
+            content; for every other type it is supplementary detail.
+
+    ClassPlan:
+      type: object
+      description: >
+        A coach's schedule for one class: an ordered list of blocks with a
+        duration each, private to the coach who wrote it.
+
+
+        Distinct from `Sequence` and `CurriculumItem`, though all three point
+        into the technique catalog. A sequence's order is CAUSAL and a
+        curriculum's is PEDAGOGICAL; a class plan's is a SCHEDULE — ten
+        minutes of this, then fifteen of that. Only `technique_drill` blocks
+        reference the catalog at all.
+
+
+        No sharing and no VOLA-authored rows exist for this resource, unlike
+        `Sequence` — every class plan has an owner, and every id a caller can
+        read is one they also own.
+      required:
+        [id, name, description, created_at, updated_at, block_count,
+         total_duration_minutes]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        block_count:
+          type: integer
+          description: Present on BOTH the list and the single read, so a card can say "6 blocks" without fetching them.
+        total_duration_minutes:
+          type: integer
+          description: >
+            The sum of every block's duration. Present on both the list and
+            the single read, so a card can say "45 min" without fetching the
+            blocks.
+        blocks:
+          type: array
+          description: >
+            Omitted on list responses. Present on a single read whenever the
+            plan has any blocks, and absent (not `[]`) when it has none —
+            read `block_count` to tell the two apart, since it is present on
+            every response either way.
+          items:
+            $ref: "#/components/schemas/ClassPlanBlock"
+
+    ClassPlanBlockWrite:
+      type: object
+      required: [type, duration_minutes]
+      properties:
+        type:
+          type: string
+          enum: [warmup, technique_drill, live_rounds, notes]
+        duration_minutes: { type: integer, minimum: 1, maximum: 180 }
+        technique_id:
+          type: string
+          nullable: true
+          description: >
+            `technique_drill` blocks only — exactly one of `technique_id`/
+            `free_text` must be set, and setting either on any other block
+            type is a 400.
+        free_text:
+          type: string
+          nullable: true
+          maxLength: 500
+        notes: { type: string, maxLength: 1000 }
+
+    ClassPlanWrite:
+      type: object
+      description: >
+        Ownership is not a field: a class plan is always the caller's, and a
+        request that could name an owner is a request that could name
+        somebody else.
+
+
+        `id` is optional and POST-only. The phone supplies one so an offline
+        capture's sync retry is idempotent; web omits it and the server
+        picks. Re-POSTing an id you already own returns the STORED plan
+        unchanged — it does not overwrite it, so a late retry cannot revert
+        an edit made in between. An id owned by somebody else is a 409.
+
+
+        On PATCH every field is optional. `blocks` OMITTED leaves the
+        schedule alone; `blocks` present (including `[]`) REPLACES it
+        wholesale — order is the content, so per-block patching would let
+        two clients interleave into a schedule neither authored.
+      properties:
+        id:
+          type: string
+          minLength: 8
+          maxLength: 64
+          description: Client-generated, POST only, optional. Ignored on PATCH.
+        name: { type: string, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+        blocks:
+          type: array
+          maxItems: 40
+          description: >
+            Capped at 40. A real class is a handful of blocks over 45-90
+            minutes; something that size would already be unreadable as a
+            single class.
+          items:
+            $ref: "#/components/schemas/ClassPlanBlockWrite"
+
     CurriculumPhase:
       type: object
       description: >
@@ -7275,6 +7424,150 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /classplans:
+    get:
+      summary: Class plans the caller owns
+      operationId: listClassPlans
+      description: >
+        The caller's own plans only, newest first and capped at 200. There is
+        no public/VOLA-authored arm — every class plan is private to the
+        coach who wrote it. Blocks are omitted; read one to get them.
+      tags: [Class Plans]
+      responses:
+        "200":
+          description: The caller's class plans.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [class_plans]
+                properties:
+                  class_plans:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ClassPlan"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      summary: Create a class plan
+      operationId: createClassPlan
+      description: >
+        Always owned by the caller.
+
+
+        `id` is OPTIONAL. Omit it and the server generates one — the web
+        path. Supply one and it is used, which is what lets the phone
+        capture a plan offline (jotted down between classes) and retry the
+        push idempotently.
+
+
+        Re-POSTing an id you already own returns the STORED plan unchanged
+        rather than overwriting it, so a late retry cannot revert an edit
+        made in between. An id owned by anyone else is a 409 and discloses
+        nothing about that row beyond its existence — the accepted cost of
+        client-chosen ids here and in `/v1/sequences`.
+      tags: [Class Plans]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClassPlanWrite"
+      responses:
+        "201":
+          description: The created class plan, with its blocks.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassPlan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: >
+            A client-supplied `id` that belongs to another caller. The same
+            owner re-sending their own id is an idempotent retry and
+            succeeds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: >
+            Body over 256 KB. This module caps the body before parsing, the
+            same way `/v1/sequences` does, because the block-count limit can
+            only be checked once the whole request is already in memory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /classplans/{classPlanID}:
+    parameters:
+    - name: classPlanID
+      in: path
+      required: true
+      schema: { type: string }
+    get:
+      summary: One class plan, with its blocks
+      operationId: getClassPlan
+      description: >
+        404 for a plan that does not exist AND for one belonging to somebody
+        else — identically, and deliberately. Distinguishing them tells a
+        caller that an id they guessed is real. This domain has no
+        VOLA-authored row at all, so unlike `/sequences` there is no
+        "readable but not yours" case — every foreign id is a 404.
+      tags: [Class Plans]
+      responses:
+        "200":
+          description: The class plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassPlan"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      summary: Update a class plan
+      operationId: updateClassPlan
+      description: >
+        Partial. See `ClassPlanWrite` for how omitted and empty `blocks`
+        differ — the distinction between leaving a schedule alone and
+        clearing it lives there.
+
+
+        404, not 403, for a plan belonging to somebody else: unlike
+        `/sequences/{sequenceID}`, there is no ownerless row a caller could
+        legitimately read but not write, so "not yours" and "does not exist"
+        are the same answer on every path this resource has.
+      tags: [Class Plans]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClassPlanWrite"
+      responses:
+        "200":
+          description: The updated class plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassPlan"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete a class plan
+      operationId: deleteClassPlan
+      description: Blocks go with it. 404 for anything the caller does not own.
+      tags: [Class Plans]
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /curricula:
     get:

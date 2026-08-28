@@ -19,6 +19,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/bjj"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/body"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/classplan"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/contest"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/curriculum"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/exercise"
@@ -198,6 +199,11 @@ func main() {
 	}()
 
 	sessionCardHandler := sessioncard.NewHandler(sessioncard.NewPostgresRepository(pool))
+	// classplan needs nothing from any other module: technique-id validity is
+	// enforced by the FK onto `techniques` inside the repository, not by a
+	// Go-level cross-module reference — the same shape sequence.Repository
+	// uses for its own technique_id.
+	classplanHandler := classplan.NewHandler(classplan.NewPostgresRepository(pool))
 	sequenceRepo := sequence.NewPostgresRepository(pool)
 	friendRepo := friend.NewPostgresRepository(pool)
 	workoutRepo := workout.NewPostgresRepository(pool)
@@ -650,6 +656,16 @@ func main() {
 	// again" and the reason it is not idempotent.
 	mux.Handle("POST /v1/sequences/{sequenceID}/copy", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Copy)))
 	mux.Handle("DELETE /v1/sequences/{sequenceID}", verifier.RequireAuth(http.HandlerFunc(sequenceHandler.Delete)))
+
+	// Class plans: a coach's schedule for one class — warmup, drilling, live
+	// rounds, notes — private and owner-only, with no VOLA-authored row and
+	// no copy/share verb (see classplan.go's package comment for why this
+	// differs from sequences).
+	mux.Handle("GET /v1/classplans", verifier.RequireAuth(http.HandlerFunc(classplanHandler.List)))
+	mux.Handle("POST /v1/classplans", verifier.RequireAuth(http.HandlerFunc(classplanHandler.Create)))
+	mux.Handle("GET /v1/classplans/{classPlanID}", verifier.RequireAuth(http.HandlerFunc(classplanHandler.Get)))
+	mux.Handle("PATCH /v1/classplans/{classPlanID}", verifier.RequireAuth(http.HandlerFunc(classplanHandler.Update)))
+	mux.Handle("DELETE /v1/classplans/{classPlanID}", verifier.RequireAuth(http.HandlerFunc(classplanHandler.Delete)))
 
 	// Username lookup — the first athlete-to-athlete read, and the reason it
 	// is authenticated: handle enumeration was accepted with the username

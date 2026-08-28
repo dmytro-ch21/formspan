@@ -14940,3 +14940,66 @@ Reading the diff cannot settle any of these.
    session, actually walk away for a real day, come back and finish it, and
    judge whether the resulting duration reads as confusing enough to warrant
    a follow-up ticket.
+
+## N439 — a `classplan` backend module: ordered blocks, technique refs or free text (`POST /v1/classplans`, `GET /v1/classplans`, `GET /v1/classplans/{classPlanID}`, `PATCH /v1/classplans/{classPlanID}`, `DELETE /v1/classplans/{classPlanID}`)
+
+Backend-only, part 1 of 4 of the class-plan workstream (N439 → N440 web
+authoring → N441 mobile guided runner → N442 Plan/calendar scheduling). No
+client surface exists yet — these scenarios are API-level, to be exercised
+directly or folded into N440/N441's own scenarios once a UI exists to drive
+them.
+
+### Happy path
+
+- `POST /v1/classplans` with a name and a handful of blocks (`warmup`,
+  `technique_drill` referencing a real catalog `technique_id`,
+  `live_rounds`, `notes`). Response is `201`, echoes the plan with
+  `block_count` and `total_duration_minutes` correctly summed, and the
+  `technique_drill` block carries `technique_name`/`technique_position`
+  resolved from the catalog.
+- `GET /v1/classplans` lists the caller's own plans, newest-edited first,
+  each with `block_count`/`total_duration_minutes` but no `blocks` array —
+  confirm a list of several plans does not fetch every block (no N+1).
+- `GET /v1/classplans/{id}` on one of them returns the full ordered `blocks`
+  array, in the order submitted.
+- `PATCH /v1/classplans/{id}` with only `name` set leaves the blocks and
+  description untouched. A separate PATCH with a `blocks` array (even
+  reordered, or shorter) replaces the whole schedule wholesale.
+- `DELETE /v1/classplans/{id}` removes it; a subsequent `GET` on the same id
+  is `404`.
+- Create a `technique_drill` block with `free_text` instead of
+  `technique_id` (a drill with no catalog entry) — succeeds, and the block's
+  `technique_name`/`technique_position` are empty in the response.
+
+### Edge cases & errors
+
+- A `technique_drill` block with **both** `technique_id` and `free_text`
+  set — `400 invalid_input`, naming the offending block.
+- A `technique_drill` block with **neither** set — same.
+- A non-`technique_drill` block (`warmup`/`live_rounds`/`notes`) that sets
+  `technique_id` or `free_text` anyway — `400 invalid_input`.
+- A `technique_id` that does not exist in the catalog — `400 invalid_input`
+  naming the block index, not a raw foreign-key/database error.
+- `duration_minutes` of `0`, negative, or above the 180-minute cap —
+  `400 invalid_input`.
+- More than 40 blocks in one plan — `400 invalid_input`.
+- An unknown block `type` string — `400 invalid_input`.
+- A client-supplied `id` on create that is too short/long or outside the
+  allowed charset — `400 invalid_input`; a well-formed id already taken by
+  **another** caller — `409 already_exists`; the **same** caller resubmitting
+  their own id (an offline sync retry) — `200`, returns the existing plan
+  without silently reverting a since-made edit.
+- `PATCH`/`DELETE` with `blocks: []` (present, empty) on update clears the
+  schedule to zero blocks — distinct from omitting `blocks` entirely, which
+  must leave the existing schedule untouched.
+
+### Auth/security
+
+- `GET`/`PATCH`/`DELETE` on another caller's `classPlanID` — `404`, not
+  `403` and not a different shape than a nonexistent id, on every verb. This
+  domain has no ownerless/public row at all, so there is no legitimate case
+  where a caller may read a plan they don't own — confirm a foreign id and a
+  nonrandom nonexistent id are genuinely indistinguishable in the response.
+- No auth header — `401` on every route, matching every other `/v1` module.
+- A `classPlanID` that is syntactically a valid id but belongs to no one —
+  `404`, same as a foreign one (no existence oracle).
