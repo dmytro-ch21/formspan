@@ -14,7 +14,8 @@ import {
 } from '@/lib/nutrition';
 
 /**
- * `TODAY'S MOMENTUM` — the nutrition centrepiece.
+ * The nutrition centrepiece — `TODAY'S MOMENTUM` on today, `MOMENTUM` on any
+ * browsed day (W13, #693; see `isToday` below).
  *
  * **Pure render. It fetches nothing** — Today owns the data, exactly as
  * `NutritionCard` does, and for the same reason: two components on one screen
@@ -42,6 +43,22 @@ export type MomentumCardProps = {
   view: TargetView;
   rings: readonly RingKey[];
   /**
+   * Whether the day this card is reading (`eaten`/`view`) is real today.
+   *
+   * **Not the switcher's `dayOffset === 0`.** The card's data follows
+   * `momentumDayKey` (`lib/todayBoard.ts`), which falls back to real today
+   * whenever a session is resuming, regardless of what the switcher was last
+   * left showing (see the comment on `on` in `app/(tabs)/index.tsx`). The
+   * title has to agree with the DATA, so the caller passes the same
+   * day-key comparison that produced `eaten`/`view`, not the switcher's own
+   * `isToday`.
+   *
+   * Drives the title (`TODAY'S MOMENTUM` vs. a day-neutral `MOMENTUM` — W13,
+   * #693) and the "Open …food log" accessibility label below, so the two
+   * never say different things about which day this card describes.
+   */
+  isToday: boolean;
+  /**
    * Two-tap quick add, ranked for the current meal slot.
    *
    * **Carried over from `NutritionCard` rather than dropped.** The reference
@@ -61,6 +78,7 @@ export function MomentumCard({
   eaten,
   view,
   rings,
+  isToday,
   quickAdd,
   onLog,
   onQuickAdd,
@@ -77,7 +95,17 @@ export function MomentumCard({
 
   return (
     <View style={styles.card} testID={testID}>
-      <Text style={styles.title}>TODAY’S MOMENTUM</Text>
+      {/*
+        `TODAY'S MOMENTUM` only when the day the card is READING is real
+        today (W13, #693). A hardcoded title claimed to be about today on
+        every browsed day too, while every number under it already followed
+        `viewDay`. `MOMENTUM` is deliberately generic rather than a day name
+        ("THURSDAY'S MOMENTUM") — the switcher pill directly above this card
+        already states which day, in the same short/full-date form used
+        everywhere else on this screen, so a second day label here would be
+        the exact duplication W14 (#694) removes one control up.
+      */}
+      <Text style={styles.title}>{isToday ? 'TODAY’S MOMENTUM' : 'MOMENTUM'}</Text>
       <StatePill eaten={eaten} view={view} />
 
       <RNView style={styles.body}>
@@ -156,7 +184,10 @@ export function MomentumCard({
       <Pressable
         onPress={onOpenDay}
         accessibilityRole="button"
-        accessibilityLabel="Open today's food log"
+        // Agrees with the title above (W13, #693): "today's" only when this
+        // card is actually reading today. The link's NAVIGATION is unchanged
+        // (still N430's scope) — only this label's wording follows `isToday`.
+        accessibilityLabel={isToday ? "Open today's food log" : 'Open food log'}
         style={styles.openDay}
         testID="today-open-food"
       >

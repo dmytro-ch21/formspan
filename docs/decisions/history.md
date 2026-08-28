@@ -46200,6 +46200,85 @@ added back under `app/` directly rather than under the new `__tests__/app/`.
 Left for the user, correctly marked `NEEDS HUMAN EVIDENCE` in the issue and not
 attempted here: confirming `/_sitemap` on a real dev build lists no test routes.
 
+## 2026-08-28 — W13 + W14: Today's momentum card and day-switcher pill stop overclaiming on a browsed day (#693, #694)
+
+Two small, closely related device-reported cosmetic bugs, both on the same
+screen (Today) and found in the same report, fixed together in one PR because
+each is a one-line change and neither touches the other's code.
+
+**W13 (#693).** `MomentumCard`'s title was a hardcoded `TODAY'S MOMENTUM` —
+Text, not a prop — so stepping the day switcher back or forward left the
+title claiming "today" while every number under it (rings, macro rows, the
+entry count) already followed the browsed day. N179/#584 had already made the
+card's *data* follow `viewDay` via `momentumDayKey`; only the label was never
+threaded through.
+
+The card now takes an `isToday: boolean` prop, driving both the title
+(`TODAY'S MOMENTUM` unchanged on today, a day-neutral `MOMENTUM` on any other
+day) and the "Open …food log" accessibility label underneath it
+(`"Open today's food log"` vs. `"Open food log"`) — the two are threaded from
+the same boolean so they cannot drift apart. `MOMENTUM` was chosen over a
+day-name title (`THURSDAY'S MOMENTUM`) deliberately: the switcher pill
+directly above the card already states which day, in both short and full
+form, so a day name on the card too would be exactly the restatement W14 (in
+the same PR) removes one control up — and it avoids inventing a second place
+to format a day name when `index.tsx` already has one.
+
+**The subtlety worth recording**: the boolean passed is **not** the
+switcher's own `isToday` (`dayOffset === 0`). It is `on === todayKey`, the
+same day-key comparison `momentumDayKey` already produces to decide what
+`eaten`/`view` read — because that fallback goes to real today whenever a
+session is resuming, *regardless of what `dayOffset` was last left at* (the
+switcher itself is hidden during a resume, so there is no way to notice or
+correct a stale `dayOffset` from an earlier browse, and this screen stays
+mounted for the process's life). Driving the title off the switcher's
+`isToday` instead would have reintroduced a narrower version of the exact bug
+this ticket fixes: title and data disagreeing about which day is on screen,
+just in the other direction. The title now agrees with the DATA because it is
+computed from the same expression the data is.
+
+The link's own navigation is unchanged — N430, worked in parallel in a
+different worktree, owns making `onOpenDay` itself day-aware; this PR only
+touches the label's wording so it stops contradicting the title next to it.
+
+**W14 (#694).** N179/#584 folded Today's date into the `PeriodSwitcher` pill's
+`subLabel` specifically to stop a duplication — `TODAY` in the pill and
+"Wednesday, 26 August" repeated in a standalone `<Text>` right under it, one
+fact stated twice. Its fix reasoned this should be **one expression**, not an
+`isToday` branch, "so the two could not quietly drift apart" — true on today,
+but it missed that `dayLabel` (the pill's own main label) is *already*
+`todayLabel(viewDay)`'s short form once `isToday` is false: `FRI, AUG 28` in
+the pill, `Friday, 28 August` repeated in the sub-line directly under it. The
+"one expression" fix for the first duplication silently reintroduced the same
+duplication one level down, on every day except today.
+
+The call site in `app/(tabs)/index.tsx` now reads
+`subLabel={isToday ? todayLabel(viewDay) : undefined}` — `PeriodSwitcher`
+itself needed no change; `subLabel` was already optional and already renders
+nothing when omitted (confirmed by its own existing test suite, which stayed
+green untouched). On today, behaviour is byte-for-byte unchanged. On any
+other day, the sub-line is gone and the pill's short label is the only date
+on screen.
+
+**Tests**, extending the existing suites rather than adding new files (per
+CLAUDE.md's testing discipline — `apps/mobile/__tests__/app/todayScreen.test.tsx`
+already covered both areas from the N179/#584 work):
+- W13: today reads `TODAY'S MOMENTUM`; stepping away reads bare `MOMENTUM`
+  with no `TODAY'S MOMENTUM` node present; returning to today via the pill's
+  label restores it; the "Open …food log" a11y label matches the title's
+  day-neutrality on both today and a browsed day.
+- W14: a browsed day renders no full weekday-and-date text anywhere on
+  screen, and the pill's accessible name carries no second, comma-preceded
+  full-date fact (`PeriodSwitcher`'s own `subLabel` tests are untouched and
+  stayed green, confirming the fix is caller-side only).
+
+Mutation-verified: each fix was individually reverted (title hardcoded back
+to `TODAY'S MOMENTUM`; `subLabel` unconditional again) and its covering
+test(s) went red as genuine assertion failures — not compile errors — the
+`subLabel` mutation's failure message showing the exact duplication
+(`"FRI, AUG 28, Friday, August 28. Back to today"`) that W14 exists to
+prevent. Both were then restored and reconfirmed green.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

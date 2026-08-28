@@ -1188,6 +1188,16 @@ separate line below the switcher repeating the same date** — that duplication
 is the bug this replaced. A screen reader announces both lines together
 (`"TODAY, Wednesday, 26 August"`), not just the word above the date.
 
+**The sub-line only appears on today (W14, #694).** The fix above still left
+one duplication: on any browsed day, the pill's own main line is *already*
+the short date (`FRI, AUG 28`), and the sub-line was unconditionally repeating
+it in full (`Friday, 28 August`) directly underneath — one fact, twice, one
+level down from the bug it replaced. Step the switcher away from today and
+confirm there is **no sub-line at all** — the pill shows only its main line —
+and that the pill's accessible name is the short label alone, with no
+comma-joined second date. Step back to today and confirm the sub-line
+returns exactly as before (unchanged from the paragraph above).
+
 **Momentum (the Fuel card / `today-momentum`) now follows the browsed day,
 reversed from N179's own shipped behaviour (#584 follow-up).** Step the
 switcher to a past day with different food logged than today: the rings, the
@@ -1196,6 +1206,18 @@ pinned to real today's. Step to a future day with nothing logged: the card
 must read as an unread/empty day for THAT day, never today's numbers. Step
 back to today (press the label, or `today-day-next`/`prev` back to zero): the
 card must return to real today's figures.
+
+- **The card's title agrees with which day it is reading (W13, #693).** On
+  today the title reads `TODAY'S MOMENTUM`; on any other day it reads a
+  day-neutral `MOMENTUM`, never a claim about "today" for a day that is not.
+  The "Open …food log" link's accessibility label follows the same rule
+  (`"Open today's food log"` vs. `"Open food log"`) — its *navigation* is
+  unaffected (that is N430's separate scope), only the label's wording. Check
+  in particular the resume-override case immediately below: if a session
+  resumes while the switcher was left on a browsed day, the title must read
+  `TODAY'S MOMENTUM` (because the card's figures fell back to real today too),
+  not the day-neutral form a naive "switcher's isToday" implementation would
+  have shown.
 
 - **NEEDS HUMAN EVIDENCE** — the stale-day flash. Log different amounts on two
   different days, then step between them quickly (prev, prev, next, next) and
