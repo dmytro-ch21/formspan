@@ -805,6 +805,40 @@ describe('the date, folded into the switcher (N179/#584 follow-up)', () => {
     // leaves exactly one.
     expect(screen.getAllByText(/^[A-Z][a-z]+day, [A-Z][a-z]+ \d{1,2}$/)).toHaveLength(1);
   });
+
+  // W14 (#694): the N179/#584 fix above unconditionally paired `label` with
+  // `subLabel={todayLabel(viewDay)}`, reasoning it was "one expression, not
+  // an isToday branch" — true on today, but on any other day `label` is
+  // ALREADY that same date in short form (`FRI 28 AUG`), so the pill stated
+  // it once and the sub-line restated it in full (`Friday, 28 August`)
+  // directly underneath. These two guard the browsed-day half this describe
+  // block never covered.
+
+  it('omits the sub-line date on a browsed day — the pill’s own label already states it', async () => {
+    render(<TodayScreen />);
+    await screen.findByTestId('today-day');
+    fireEvent.press(screen.getByTestId('today-day-next'));
+
+    // No standalone "Friday, 28 August"-shaped line anywhere once browsing —
+    // only the pill's own short label (`FRI 28 AUG`), which does not match
+    // this shape (it abbreviates the weekday and reorders day/month).
+    expect(screen.queryByText(/^[A-Z][a-z]+day, [A-Z][a-z]+ \d{1,2}$/)).toBeNull();
+  });
+
+  it('the browsed-day pill speaks its label alone — no full-date second fact appended', async () => {
+    render(<TodayScreen />);
+    await screen.findByTestId('today-day');
+    fireEvent.press(screen.getByTestId('today-day-next'));
+
+    const label = await screen.findByTestId('today-day-label');
+    // `dayLabel` itself is short and all-caps ("FRI, AUG 28"); `subLabel`'s
+    // full form ("Friday, 28 August") is the only thing on this screen that
+    // matches a title-case weekday followed by a comma. `PeriodSwitcher`
+    // joins `label, subLabel` only when a subLabel was passed (see its own
+    // tests) — its absence here is the caller-side proof this call site
+    // omitted it on a browsed day.
+    expect(label.props.accessibilityLabel).not.toMatch(/[A-Z][a-z]+day,/);
+  });
 });
 
 describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
@@ -850,6 +884,62 @@ describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
     fireEvent.press(await screen.findByTestId('today-log-food'));
     expect(mockPush).toHaveBeenCalledWith('/food/add');
   });
+
+  // W13 (#693): the card's DATA has followed the browsed day since N179/#584
+  // (the tests above), but its title stayed hardcoded to `TODAY'S MOMENTUM`
+  // regardless — overstating what a past or future day's numbers are.
+
+  it('reads TODAY’S MOMENTUM with nothing browsed', async () => {
+    render(<TodayScreen />);
+    const momentum = within(await screen.findByTestId('today-momentum'));
+    expect(await momentum.findByText('TODAY’S MOMENTUM')).toBeTruthy();
+  });
+
+  it('drops the "today" claim once the switcher has stepped away', async () => {
+    render(<TodayScreen />);
+    await screen.findByTestId('today-momentum');
+    fireEvent.press(screen.getByTestId('today-day-next'));
+
+    const momentum = within(await screen.findByTestId('today-momentum'));
+    expect(await momentum.findByText('MOMENTUM')).toBeTruthy();
+    expect(momentum.queryByText('TODAY’S MOMENTUM')).toBeNull();
+  });
+
+  it('returns to TODAY’S MOMENTUM when the switcher returns to today', async () => {
+    render(<TodayScreen />);
+    await screen.findByTestId('today-momentum');
+    fireEvent.press(screen.getByTestId('today-day-next'));
+    await within(screen.getByTestId('today-momentum')).findByText('MOMENTUM');
+
+    fireEvent.press(screen.getByTestId('today-day-label'));
+
+    const momentum = within(await screen.findByTestId('today-momentum'));
+    expect(await momentum.findByText('TODAY’S MOMENTUM')).toBeTruthy();
+  });
+
+  it('agrees the accessibility label with the title on a browsed day', async () => {
+    // The ticket's third criterion: the "Open …food log" a11y label must not
+    // claim "today's" when the title itself no longer does. Only the WORDING
+    // changes here — the link's own navigation is N430's separate scope.
+    render(<TodayScreen />);
+    await screen.findByTestId('today-momentum');
+    fireEvent.press(screen.getByTestId('today-day-next'));
+
+    const link = await screen.findByTestId('today-open-food');
+    expect(link.props.accessibilityLabel).toBe('Open food log');
+  });
+
+  it('keeps the "today\'s" accessibility label unchanged on today', async () => {
+    render(<TodayScreen />);
+    const link = await screen.findByTestId('today-open-food');
+    expect(link.props.accessibilityLabel).toBe("Open today's food log");
+  });
+
+  // The VISIBLE link text ("See today's food" / "See logged food") needs a
+  // real target set to reach its own branch, and this suite's `listTargets`
+  // mock always resolves `[]` — every render here holds `view.state ===
+  // 'none'`, so the branch is unreachable from this file. Covered directly
+  // against MomentumCard instead: components/today/__tests__/momentumCard.test.tsx.
 });
 
 describe('offline', () => {

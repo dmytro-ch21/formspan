@@ -1001,15 +1001,20 @@ export default function TodayScreen() {
               label={dayLabel}
               // The full date, folded into the pill rather than repeated in a
               // standalone line under it — see N179/#584. `TODAY` and
-              // "Wednesday, 26 August" were the same fact stated twice; a
-              // browsed day's short label (`FRI 28 AUG`) and its own full date
-              // were the same duplication one level down.
+              // "Wednesday, 26 August" were the same fact stated twice.
               //
-              // ONE expression, not an `isToday` branch that formats the same
-              // string two ways — `viewDay` already equals `now` exactly when
-              // `isToday` (`addDays(now, 0)`), so `todayLabel(viewDay)` covers
-              // both without a second place the two could quietly drift apart.
-              subLabel={todayLabel(viewDay)}
+              // **Only on today, though (W14, #694).** The N179/#584 fix
+              // above reasoned this should be ONE expression regardless of
+              // `isToday`, on the grounds that `todayLabel(viewDay)` already
+              // covers both cases without a second place to drift — true, but
+              // it stated the SAME fact `label` already states on every other
+              // day too: `dayLabel` is `todayLabel(viewDay)`'s own short form
+              // (`FRI 28 AUG`) once `isToday` is false, so pairing them
+              // reintroduced exactly the duplication this prop exists to
+              // remove, one level down. `label` alone already carries the
+              // date on a browsed day; the sub-line adds nothing there and is
+              // omitted.
+              subLabel={isToday ? todayLabel(viewDay) : undefined}
               onPrev={() => setDayOffset((d) => d - 1)}
               onNext={() => setDayOffset((d) => d + 1)}
               onPress={isToday ? undefined : () => setDayOffset(0)}
@@ -1076,6 +1081,13 @@ export default function TodayScreen() {
                 eaten={foodEaten}
                 view={foodView}
                 rings={rings ?? DEFAULT_RINGS}
+                // NOT the switcher's `isToday` (`dayOffset === 0`). This card
+                // reads whichever day `on` names — which falls back to real
+                // today while a session is resuming, regardless of
+                // `dayOffset` — so the title has to agree with THAT, not
+                // with the switcher (W13, #693). See `on`'s own comment
+                // above for why the two can disagree.
+                isToday={on === todayKey}
                 quickAdd={foodQuick}
                 onLog={() => router.push('/food/add')}
                 onQuickAdd={(f) => void quickLog(f)}
