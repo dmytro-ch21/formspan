@@ -15087,3 +15087,103 @@ on N439's API-level scenarios above — these are UI-level, exercising the same
   no ownerless row to gate against, so Edit/Delete are unconditionally
   rendered and rely entirely on the server's ownership check on the
   subsequent request.
+
+## N441 — BJJ class-plan mobile guided runner: current block, timer, next-up (`apps/mobile/app/classplans/index.tsx`, `apps/mobile/app/classplans/[id]/run.tsx`, `apps/mobile/components/ClassPlanTimer.tsx`, `apps/mobile/lib/classPlanRun.ts`, `apps/mobile/lib/classplans.ts`)
+
+Mobile-only, part 3 of 4 of the class-plan workstream (N439 backend → N440 web
+authoring → N441 mobile guided runner → N442 Plan/calendar scheduling).
+Read-only against N439's `/v1/classplans` contract — there is no create/edit
+surface here, matching `sequence/index.tsx`'s split between mobile capture-or-
+read and web authoring, except this domain has no mobile capture at all (see
+`lib/classplans.ts`'s header).
+
+### Happy path
+
+- `/classplans` with plans lists each as a card showing name and
+  "N blocks · M min" (`planSummary`); tapping one opens
+  `/classplans/{id}/run`.
+- The run screen fetches the plan once and shows the first block: its type
+  label (Warmup / Technique drill / Live rounds / Notes), a large countdown
+  (`m:ss`) counting down from `duration_minutes * 60`, and its content —
+  including "Next up" showing the second block's type and a short summary.
+- Run through a plan containing **every** block type in one pass: a
+  `technique_drill` block with a `technique_id` shows the resolved
+  `technique_name`/`technique_position` (no second fetch); one with
+  `free_text` shows that text instead; a `notes` block shows its `notes` as
+  the primary content; a `warmup`/`live_rounds` block shows its `notes` (if
+  any) as supplementary detail underneath, matching
+  `apps/web/src/app/dashboard/classplans/[id]/page.tsx`'s per-type reasoning
+  exactly.
+- Letting a block's timer run out: a haptic and a sound fire, and the run
+  auto-advances to the next block, arming a fresh full-duration countdown for
+  it — "Next up" now shows what was previously two blocks ahead.
+- Tapping "Next" before the timer elapses advances immediately, cancelling
+  the current block's countdown cleanly (no stale digits or a flash of the
+  old block's remaining time bleeding into the new block's display).
+- Tapping "Back" returns to the previous block with a freshly-armed
+  full-duration countdown for it (not a resumed one) — going back does not
+  replay what was already spent on that block the first time through.
+- Advancing past the last block (by timer or by "Finish") shows a clear
+  "Plan complete" end state with a way back to `/classplans` — not a crash
+  and not a blank screen.
+- The progress bar under the digits and the "Block X of N" label both track
+  the current position accurately through a full run.
+
+### Edge cases & errors
+
+- A plan with a single block: "Back" is disabled/no-effect from the start
+  (there is nothing before block one), and letting its timer elapse (or
+  tapping "Next"/"Finish") goes straight to "Plan complete".
+- Tapping "Back" while already on the first block is a no-op — no crash, no
+  negative block index, no change to what is displayed (`wentBack`'s
+  documented behavior in `lib/classPlanRun.ts`).
+- A plan with zero blocks shows "This class plan has no blocks yet" rather
+  than an empty runner or a division-by-zero on the (absent) timer.
+- **Backgrounding mid-block and returning**: the displayed remaining time is
+  computed from the block's wall-clock deadline, not an elapsed counter that
+  stopped ticking while backgrounded — confirm the digits shown on return
+  reflect the actual time that passed, not the time at which the app was
+  backgrounded. See the device-evidence subsection below; this is the one
+  property a test cannot observe.
+- A block whose timer elapses while the screen is backgrounded: on
+  foreground, the block auto-advances (via the `AppState` listener backstop)
+  rather than sitting frozen at `0:00` waiting for a foreground interval tick
+  that already fired while suspended.
+- Two triggers for the same advance arriving close together (e.g. a timer
+  elapsing at the same moment "Next" is tapped) must not double-advance —
+  skip two blocks on one transition.
+- `getClassPlan` failing (no network, 404 for a plan that stopped being the
+  caller's own mid-session) shows the screen's error state rather than a
+  blank runner; the empty-plan and loading states are visually distinct from
+  each other and from the error state.
+- Fetching the classplans list while offline/unreachable shows the screen's
+  error state (not a false "No class plans yet", which would misreport a
+  coach's real plans as absent) — same reasoning as `sequence/index.tsx`'s
+  own error/empty split.
+
+### Device-evidence — NEEDS HUMAN EVIDENCE, not reachable by any test in this suite
+
+- Timer readable at arm's length: on a real device, held or propped up as it
+  would be on a gym floor, confirm the digits and block content are legible
+  without picking the phone up.
+- Advance/back reachable and operable one-handed while standing, per the
+  mobile-first live-logging convention's physical constraints.
+- A full class plan run end-to-end on a real device, including at least one
+  genuine background/foreground cycle mid-block (lock the phone, wait past
+  the block's remaining time, unlock) — confirm the block auto-advances (or
+  shows the correct remaining time if not yet elapsed) rather than either
+  freezing or double-advancing.
+- `expo-keep-awake` is NOT used on this screen (see the N441 history entry) —
+  confirm on a real device whether the screen actually locks mid-run with the
+  default idle timeout, since that is exactly the failure mode the omission
+  risks and no simulator/test can observe it.
+
+### Auth/security
+
+- `/classplans` and `/classplans/{id}/run` require a signed-in session, same
+  as every other authenticated mobile route (`useAuthToken`/`useAuth`).
+- Opening `/classplans/{id}/run` for a plan id owned by a different account
+  shows the same generic error the API's 404 produces for a foreign or
+  nonexistent id (N439's own auth scenarios) — no plan content, no partial
+  block list, and no client-side check to bypass, since the server never
+  returns another user's plan.
