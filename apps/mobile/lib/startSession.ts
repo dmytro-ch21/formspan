@@ -35,11 +35,35 @@ import { logsAfterwards, type Module } from './modules';
 export function startSessionHref(
   pick: { sport: string; workoutId: string | null },
   modules: Module[],
+  /**
+   * A day key (`YYYY-MM-DD`), when this is backfilling a day other than
+   * today (N434/#721) — carried through as `?date=`, matching the
+   * `?date=` convention `momentumLogFoodHref`/`momentumOpenFoodHref`
+   * already use in `lib/todayBoard.ts` for the same "which day is this
+   * for" question. Absent on the ordinary path, so an existing caller that
+   * never passes a third argument gets the exact same `Href` as before.
+   */
+  date?: string,
 ): Href {
-  if (logsAfterwards(pick.sport, modules)) return '/bjj/log';
-  return pick.workoutId
-    ? `/session/start?sport=${pick.sport}&workout=${pick.workoutId}`
-    : `/session/start?sport=${pick.sport}`;
+  if (logsAfterwards(pick.sport, modules)) {
+    return date ? `/bjj/log?date=${date}` : '/bjj/log';
+  }
+  // Four literal-prefixed template branches rather than building the query
+  // string up through an intermediate `base` variable: Expo Router's typed
+  // routes check the LITERAL text of the template against the generated
+  // pattern, and a `base` already widened to plain `string` by an earlier
+  // interpolation cannot be narrowed back — `${base}&date=${date}` fails
+  // typecheck even though every branch it could produce is a real route.
+  if (pick.workoutId && date) {
+    return `/session/start?sport=${pick.sport}&workout=${pick.workoutId}&date=${date}`;
+  }
+  if (pick.workoutId) {
+    return `/session/start?sport=${pick.sport}&workout=${pick.workoutId}`;
+  }
+  if (date) {
+    return `/session/start?sport=${pick.sport}&date=${date}`;
+  }
+  return `/session/start?sport=${pick.sport}`;
 }
 
 /**

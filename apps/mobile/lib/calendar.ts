@@ -117,6 +117,60 @@ export function dayOffsetFor(on: string, now: Date): number {
 }
 
 /**
+ * `base`'s time-of-day, moved onto the calendar day named by `on` — how a
+ * backfilled BJJ/strength session (N434/#721) picks a `started_at` for a day
+ * that is not today. The clock stays plausible — the moment the athlete is
+ * actually filling the form in — while the calendar day matches the one
+ * they are backfilling, rather than defaulting every past-dated log to
+ * midnight.
+ *
+ * Parsed as LOCAL midnight, exactly like {@link dayOffsetFor} above, and the
+ * same malformed-input rule for the same reason: `on` reaches this from a
+ * `?date=` URL param built by this app's own links today, but a URL param is
+ * never guaranteed well-formed the way an internally-produced `dayString` is
+ * — a stale bookmark, a hand-typed link, a future app version's format. A
+ * malformed value parses to `Invalid Date`; rather than let a `NaN` field
+ * ride into `started_at` and mint a session nobody can ever find again, this
+ * falls back to `base` untouched — the caller's ordinary "no override"
+ * behaviour, exactly as `dayOffsetFor` falls back to 0.
+ */
+export function backdatedTimestamp(on: string, base: Date): Date {
+  const target = new Date(`${on}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return base;
+  target.setHours(base.getHours(), base.getMinutes(), base.getSeconds(), base.getMilliseconds());
+  return target;
+}
+
+/**
+ * `ended_at` for a session finishing right now — `undefined` (caller's
+ * "stamp it with real now") unless `startedAt` was backdated (N434), in
+ * which case the finish moment's own time-of-day is mapped onto the
+ * session's own day, the same rule {@link backdatedTimestamp} applied at
+ * start.
+ *
+ * That "same rule, both ends" is what makes this safe rather than a second
+ * guess: `started_at` and `ended_at` both equal `<session day> + <a real
+ * wall-clock time-of-day>`, so their difference is EXACTLY the real elapsed
+ * time between starting and finishing — a 3-minute backfill stays a
+ * 3-minute session, not a multi-day one. Without this, every backfilled
+ * strength session would get `started_at` on the chosen past day and
+ * `ended_at` stamped with whatever real moment Finish was tapped, days
+ * later — read literally by the elapsed Stat, `weekReview.ts`'s totals, the
+ * finish celebration card, and the history list.
+ *
+ * Clamped to never end before it started (crossing local midnight mid-log,
+ * say) — a full minute is invented rather than a zero-length session, which
+ * would divide by zero wherever duration is a denominator.
+ */
+export function finishTimestampFor(startedAt: Date, now: Date): string | undefined {
+  const startedDay = dayString(startedAt);
+  if (startedDay === dayString(now)) return undefined;
+  const mapped = backdatedTimestamp(startedDay, now);
+  const safe = mapped.getTime() >= startedAt.getTime() ? mapped : new Date(startedAt.getTime() + 60_000);
+  return safe.toISOString();
+}
+
+/**
  * The week anchor to show once the clock has moved on — `now` if `anchor` has
  * fallen into a past week, otherwise `anchor` untouched.
  *

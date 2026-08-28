@@ -81,6 +81,39 @@ describe('startSessionHref', () => {
       '/session/start?sport=rowing',
     );
   });
+
+  // N434/#721 — backfilling a missed session for a past day.
+  describe('with a date override', () => {
+    it('carries the date through to the BJJ log screen', () => {
+      expect(startSessionHref({ sport: 'bjj', workoutId: null }, [bjj], '2026-08-25')).toBe(
+        '/bjj/log?date=2026-08-25',
+      );
+    });
+
+    it('carries the date through to an empty strength session', () => {
+      expect(
+        startSessionHref({ sport: 'strength', workoutId: null }, [strength], '2026-08-25'),
+      ).toBe('/session/start?sport=strength&date=2026-08-25');
+    });
+
+    // The vector that separates a real append from string luck: the date has
+    // to land AFTER the workout id, not silently before or instead of it.
+    it('carries the date through alongside a chosen template', () => {
+      expect(
+        startSessionHref({ sport: 'strength', workoutId: 'w7' }, [strength], '2026-08-25'),
+      ).toBe('/session/start?sport=strength&workout=w7&date=2026-08-25');
+    });
+
+    // Omitting the third argument entirely — the ordinary, unaffected
+    // call every existing caller makes — has to produce byte-identical
+    // output to before this ticket touched the file.
+    it('is a no-op when omitted', () => {
+      expect(startSessionHref({ sport: 'bjj', workoutId: null }, [bjj])).toBe('/bjj/log');
+      expect(startSessionHref({ sport: 'strength', workoutId: 'w1' }, [strength])).toBe(
+        '/session/start?sport=strength&workout=w1',
+      );
+    });
+  });
 });
 
 /**

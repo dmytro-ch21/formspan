@@ -1,7 +1,9 @@
 import {
   addDays,
+  backdatedTimestamp,
   dayOffsetFor,
   dayString,
+  finishTimestampFor,
   monthGrid,
   refreshedAnchor,
   startOfWeek,
@@ -103,6 +105,89 @@ describe('dayOffsetFor', () => {
   test('a malformed date falls back to 0 rather than NaN', () => {
     expect(dayOffsetFor('not-a-date', noon(2026, 7, 26))).toBe(0);
     expect(dayOffsetFor('', noon(2026, 7, 26))).toBe(0);
+  });
+});
+
+describe('backdatedTimestamp', () => {
+  // N434/#721: a backfilled BJJ/strength session's `started_at` — the
+  // browsed day, with the time-of-day the athlete is actually filling the
+  // form in right now.
+  test('moves the calendar day, keeps the time of day', () => {
+    const base = new Date(2026, 7, 28, 19, 45, 12, 250);
+    const result = backdatedTimestamp('2026-08-25', base);
+    expect(dayString(result)).toBe('2026-08-25');
+    expect(result.getHours()).toBe(19);
+    expect(result.getMinutes()).toBe(45);
+    expect(result.getSeconds()).toBe(12);
+    expect(result.getMilliseconds()).toBe(250);
+  });
+
+  test('today round-trips to the same moment', () => {
+    const base = new Date(2026, 7, 28, 9, 0, 0);
+    expect(backdatedTimestamp('2026-08-28', base).getTime()).toBe(base.getTime());
+  });
+
+  test('crosses a month boundary correctly', () => {
+    const base = new Date(2026, 7, 28, 6, 30, 0);
+    expect(dayString(backdatedTimestamp('2026-07-31', base))).toBe('2026-07-31');
+  });
+
+  // The vector this test exists to catch: a malformed `on` must not ride a
+  // `NaN` field into `started_at` and mint a session with an unreachable
+  // date. Mutating the guard away (e.g. dropping the `Number.isNaN` check,
+  // or returning `target` instead of `base`) turns this into
+  // `expect(Invalid Date's time).toBe(base's time)`, which fails.
+  test('a malformed date falls back to base, not Invalid Date', () => {
+    const base = new Date(2026, 7, 28, 9, 0, 0);
+    expect(backdatedTimestamp('not-a-date', base).getTime()).toBe(base.getTime());
+    expect(backdatedTimestamp('', base).getTime()).toBe(base.getTime());
+  });
+});
+
+describe('finishTimestampFor', () => {
+  // N434 follow-up: a backfilled strength session finishes on a real day
+  // that isn't the day it's dated to. Without this, `ended_at` would be
+  // stamped with the real "now" — days after a backdated `started_at` —
+  // corrupting the elapsed Stat, week totals, the finish celebration card
+  // and history rows with a multi-day "duration".
+  test('is undefined for an ordinary same-day finish — caller stamps real now', () => {
+    const startedAt = new Date(2026, 7, 28, 9, 0, 0);
+    const now = new Date(2026, 7, 28, 9, 45, 0);
+    expect(finishTimestampFor(startedAt, now)).toBeUndefined();
+  });
+
+  test('preserves the REAL elapsed duration for a backdated session', () => {
+    // Backfilled Monday at 19:45, actually logged (and finished) at 20:03
+    // real time on Thursday — 18 minutes of real logging. The session must
+    // read as an 18-minute Monday session, not a multi-day one.
+    const startedAt = new Date(2026, 7, 24, 19, 45, 0); // Monday 19:45
+    const finishedNow = new Date(2026, 7, 27, 20, 3, 0); // Thursday 20:03 real
+    const endedAt = finishTimestampFor(startedAt, finishedNow);
+    expect(endedAt).toBeDefined();
+    const ended = new Date(endedAt!);
+    expect(dayString(ended)).toBe('2026-08-24'); // lands on the SESSION's day
+    expect((ended.getTime() - startedAt.getTime()) / 60_000).toBeCloseTo(18, 5); // 18 real minutes
+  });
+
+  // The vector this test exists to catch: a naive `backdatedTimestamp` call
+  // with no clamp can map to a time BEFORE `started_at` if the real
+  // wall-clock crosses local midnight between start and finish (e.g. start
+  // backfilling at 23:50, finish logging at 00:10 the next real day).
+  test('clamps to at least a minute after started_at, never before it', () => {
+    const startedAt = new Date(2026, 7, 24, 23, 50, 0);
+    // Finished for real at 00:10 — mapped onto the 24th that is 00:10, which
+    // is BEFORE 23:50 the same day.
+    const finishedNow = new Date(2026, 7, 25, 0, 10, 0);
+    const endedAt = finishTimestampFor(startedAt, finishedNow);
+    const ended = new Date(endedAt!);
+    expect(ended.getTime()).toBeGreaterThan(startedAt.getTime());
+    expect((ended.getTime() - startedAt.getTime()) / 60_000).toBe(1); // the invented minute
+  });
+
+  test('a resumed session finished the same day it started is a no-op, even hours later', () => {
+    const startedAt = new Date(2026, 7, 28, 6, 0, 0);
+    const now = new Date(2026, 7, 28, 22, 0, 0);
+    expect(finishTimestampFor(startedAt, now)).toBeUndefined();
   });
 });
 

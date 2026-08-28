@@ -124,6 +124,7 @@ import {
   type SuggestionCode,
   type Volume,
 } from '@/lib/sessions';
+import { finishTimestampFor } from '@/lib/calendar';
 import { OptionSelect } from '@/components/ui/OptionSelect';
 import { gripGuide, setTypeGuide } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';
@@ -2036,7 +2037,14 @@ export default function SessionScreen() {
             onConfirm={async () => {
               try {
                 await flush(); // the last set typed must land before the session closes
-                await finishLocalSession(userId!, id!);
+                // A BACKFILLED session (N434) finishes on a real day that
+                // isn't the day it's dated to — `new Date()` alone would
+                // stamp `ended_at` days after `started_at`. See
+                // `finishTimestampFor`'s own doc for why mapping the finish
+                // moment onto the session's day keeps the real elapsed
+                // duration intact.
+                const endedAt = finishTimestampFor(new Date(session!.started_at), new Date());
+                await finishLocalSession(userId!, id!, endedAt);
                 const s = await readLocalSession(userId!, id!);
                 if (s) {
                   setSession(s);

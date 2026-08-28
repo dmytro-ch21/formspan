@@ -43,7 +43,7 @@
  */
 
 import { useAuth } from '@clerk/clerk-expo';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -59,6 +59,7 @@ import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { backdatedTimestamp } from '@/lib/calendar';
 import {
   KINDS,
   describeRPE,
@@ -98,6 +99,12 @@ export default function DictateReflectionScreen() {
   const accent = useAccent();
   const getToken = useAuthToken();
   const { userId } = useAuth();
+  /**
+   * Carried through from `/bjj/log` when this is backfilling a missed
+   * session (N434/#721) rather than dictating today's — see that screen's
+   * own `date` comment. Absent on the ordinary path.
+   */
+  const { date } = useLocalSearchParams<{ date?: string }>();
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -196,12 +203,16 @@ export default function DictateReflectionScreen() {
         // and a BJJ session without one contributes nothing to mat time.
         const minutes =
           detail.rounds && detail.round_minutes ? detail.rounds * detail.round_minutes : 60;
-        const startedAt = new Date(Date.now() - minutes * 60_000);
+        // N434/#721 — same rule as `log.tsx`'s own `commit`: `date` absent
+        // means `endBase` is real "now", so this is byte-identical to before
+        // this ticket touched the file on the ordinary path.
+        const endBase = date ? backdatedTimestamp(date, new Date()) : new Date();
+        const startedAt = new Date(endBase.getTime() - minutes * 60_000);
         const session = await startLocalSession(userId, {
           sport: 'bjj',
           name: KINDS.find((k) => k.key === detail.kind)?.label ?? 'BJJ',
           started_at: startedAt.toISOString(),
-          ended_at: new Date().toISOString(),
+          ended_at: endBase.toISOString(),
         });
         sessionId = session.id;
         createdRef.current = sessionId;
@@ -260,9 +271,20 @@ export default function DictateReflectionScreen() {
     setUnresolved((list) => list.filter((x) => x !== p));
   }, []);
 
+  // N434/#721: names the day this backfills in the header, the one place
+  // guaranteed visible on every state this screen renders — the draft view,
+  // the empty-draft view and the error view all sit under the same Stack
+  // header, so this is cheaper than repeating a banner in each.
+  const title = date
+    ? `Say what happened — ${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'short',
+      })}`
+    : 'Say what happened';
+
   return (
     <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
-      <Stack.Screen options={{ title: 'Say what happened' }} />
+      <Stack.Screen options={{ title }} />
 
       {!draft && (
         <>

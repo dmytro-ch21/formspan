@@ -10,6 +10,7 @@ import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuth } from '@clerk/clerk-expo';
 
+import { backdatedTimestamp } from '@/lib/calendar';
 import { labelFor } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -28,6 +29,16 @@ import { listWorkouts, summariseTargets, type Sport, type Workout } from '@/lib/
  * empty session is the fallback — and when there are none for this sport, the
  * screen says so and offers the one thing that fixes it rather than leaving a
  * blank list.
+ *
+ * **N434/#721 — a `?date=` reaches here for a missed strength session.**
+ * Reused, deliberately, rather than a separate "backfill a summary" screen:
+ * the live set logger this leads into already supports entering a session
+ * after the fact with no signal, and a second flow doing the same job with a
+ * narrower feature set is the divergence this module pattern exists to avoid.
+ * The one thing a backdated session does NOT get for free is a correctly
+ * backdated `ended_at` if the athlete resumes it days later — `Finish` always
+ * writes the moment it is pressed, same as any other unfinished session; see
+ * the history entry for why that is scoped out rather than silently wrong.
  */
 export default function StartSessionScreen() {
   const accent = useAccent();
@@ -35,9 +46,14 @@ export default function StartSessionScreen() {
   // `workout` arrives only from a planned day on the Today screen: the plan
   // already names the template, so re-asking which one would make "start
   // today's session" a two-step chooser again.
-  const { sport, workout: plannedWorkoutId } = useLocalSearchParams<{
+  //
+  // `date` is N434/#721: a day key, present only when this is backfilling a
+  // missed session for a past day rather than starting today's — carried
+  // through by `startSessionHref`'s `?date=`. Absent on the ordinary path.
+  const { sport, workout: plannedWorkoutId, date } = useLocalSearchParams<{
     sport: Sport;
     workout?: string;
+    date?: string;
   }>();
   const getToken = useAuthToken();
   const { userId } = useAuth();
@@ -137,11 +153,18 @@ export default function StartSessionScreen() {
       // Created locally, so a session starts with no signal at all. The push
       // is opportunistic — the ID is already fixed, so it can land later
       // without duplicating anything.
+      //
+      // N434/#721: `date` absent means no `started_at` override at all, so
+      // `startLocalSession` defaults to `new Date()` exactly as before this
+      // ticket touched the file — the live, current-day flow is unaffected.
+      // Present, it backdates the CALENDAR DAY only, keeping the time of day
+      // the athlete is actually starting this at.
       const session = await startLocalSession(userId, {
         sport,
         name: workout ? workout.name : `${label} session`,
         workout_id: workout ? workout.id : null,
         sets,
+        ...(date ? { started_at: backdatedTimestamp(date, new Date()).toISOString() } : {}),
       });
       requestSync('session-started');
       // replace, not push: finishing a session and pressing back should not
@@ -153,9 +176,20 @@ export default function StartSessionScreen() {
     }
   }
 
+  // N434/#721: names the day in the header rather than only in the title —
+  // the header survives scrolling and every branch below it (loading, the
+  // empty state, the workout list), so this is cheaper than repeating a
+  // banner in each.
+  const title = date
+    ? `Log ${label} — ${new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'short',
+      })}`
+    : `Start ${label}`;
+
   return (
     <View style={styles.container} testID="session-start-screen">
-      <Stack.Screen options={{ title: `Start ${label}` }} />
+      <Stack.Screen options={{ title }} />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         {error && (

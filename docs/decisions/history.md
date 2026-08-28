@@ -47994,6 +47994,127 @@ body). Unit/duration-toggle access while correcting a set typed in the
 minor friction, not blocking, and easy to add later without touching the
 scoping or persistence decisions above.
 
+## 2026-08-28 — N434 (#721): backfilling a missed BJJ or strength session, on mobile
+
+**There was no route to logging a missed day at all, ever.** `apps/mobile/app/bjj/log.tsx`
+and `dictate.tsx` only backdated `started_at` by the session's own duration
+(max ~2hr); `apps/mobile/app/session/start.tsx` → `startLocalSession()` always
+set `started_at` to `new Date()` with no override; and Today's past-day "Up
+next" card deliberately drops the Log/Start button entirely (`past={isPast}`,
+"A day already gone is a statement, not a control"). Direct product-owner
+feedback confirmed the gap: *"being able to edit past sessions that weren't
+logged."*
+
+**What shipped, mobile-only (the ticket's own scope — web parity is #725/N438).**
+The route is Today's existing **New log** FAB — it already floats over every
+day the day-switcher shows, past or future, and already silently created a
+session dated *now* regardless of the browsed day (the same shape of bug
+N430/#692 fixed for food logging on this same screen). `startPlanned` in
+`app/(tabs)/index.tsx` now threads `isPast ? dayString(viewDay) : undefined`
+through `startSessionHref` (`lib/startSession.ts`), which carries it as a
+`?date=` query param — the same convention `momentumLogFoodHref`/
+`momentumOpenFoodHref` already use in `lib/todayBoard.ts`. **Only `isPast`,
+never a future `dayOffset`**: the ticket's scope is "any past day", and a
+session dated tomorrow has not happened yet. On `isToday` the call passes
+`undefined`, which is a no-op — `startSessionHref`'s own tests pin that the
+current-day flow is byte-identical to before, satisfying the "unaffected"
+acceptance criterion directly rather than by inspection.
+
+`/bjj/log.tsx` and `/bjj/dictate.tsx` read the `date` param and, when
+present, apply a new pure helper — `backdatedTimestamp(on, base)` in
+`lib/calendar.ts` — which moves `base`'s calendar day onto `on` while keeping
+its time-of-day, then compute both `started_at` AND `ended_at` from that
+moved base rather than from `Date.now()`. That fixes `ended_at` for the
+backfill case too, not just `started_at`: both screens already derived
+`started_at` from `ended_at - duration`, so once `ended_at` itself is
+correctly dated the whole session lands on the right day with a plausible
+duration — no separate fix needed. `/session/start.tsx` reads the same param
+and, when present, passes `started_at: backdatedTimestamp(date, new
+Date()).toISOString()` into `startLocalSession` (which already accepted an
+optional `started_at` override — this needed no `sessionStore.ts` change at
+all, confirming the ticket's own survey that this was pure frontend work).
+All three screens also surface the backfilled day in their header/banner —
+`New log for FRI 28 AUG` on the picker sheet's title, `Logging for Friday, 28
+August` above the BJJ form, `Log Strength — 28 Aug` on the session-start
+screen's title — so the athlete has the same confirmation on every step
+rather than a silent redate.
+
+**The strength path's `ended_at` gap — flagged as a scope-out above, and
+corrected before merge as a genuine `[blocking]` finding instead.**
+`frontend-reviewer` traced the consequence chain and it is not the
+cosmetic edge case the paragraph above (this ticket's own first draft)
+argued it was: it is the ticket's OWN MAINLINE FLOW. Every backfilled
+strength session finishes via the live logger's `Finish`, which means
+every one of them — not a rare resumed-session case — got `started_at` on
+the chosen past day and `ended_at` stamped with the real moment `Finish`
+was tapped, potentially days later. That garbage duration is read
+literally by the live elapsed Stat (climbing past 24h during logging),
+`weekReview.ts`'s week totals, `celebration.ts`'s finish-card duration,
+and the history/calendar rows — all four confirmed by grep, not assumed.
+
+Fixed with a new pure helper, `finishTimestampFor(startedAt, now)` in
+`lib/calendar.ts`: `undefined` (caller stamps real `now`, unchanged
+behaviour) for an ordinary same-day finish, or — when `startedAt` was
+backdated — the finish moment's own time-of-day mapped onto the session's
+OWN day via `backdatedTimestamp`, clamped to never land before
+`started_at` (a full invented minute rather than a zero/negative
+duration, guarding the local-midnight-crossing case). The "same rule at
+both ends" is what makes this safe rather than a second guess:
+`started_at` and `ended_at` both equal `<session day> + <a real
+wall-clock time-of-day>`, so their difference is EXACTLY the real elapsed
+logging time — an 18-minute backfill stays an 18-minute session,
+regardless of which real day `Finish` happened to land on.
+`finishLocalSession` (`lib/sessionStore.ts`) gained an optional `endedAt`
+param rather than inferring the backdate itself, keeping the "which day"
+decision at the call site where `session.started_at` is already in scope.
+This is the SAME earlier instinct — "don't touch the shared function,
+it's used by every session" — corrected: the fix lives entirely in a new
+optional parameter and a new pure function the caller opts into, so a
+plain `finishLocalSession(userID, id)` call (every OTHER session in the
+app, live or resumed) is byte-for-byte unaffected. BJJ's own path still
+has no equivalent gap — both its timestamps were already computed from
+`backdatedTimestamp` directly.
+
+Four new tests on `finishTimestampFor` (same-day no-op, the 18-minute
+real-duration-preserved case above, the midnight-crossing clamp, and a
+same-day-but-hours-later resumed session staying a no-op) — mutation-
+verified the clamp specifically (removed it, confirmed the clamp test
+failed on a real `toBeGreaterThan` assertion rather than a compile error,
+restored, confirmed green by re-running, not by grepping). Full mobile
+suite (195 suites, 3144 tests under this narrower filter) and
+`typecheck:mobile` both re-run green after the fix.
+
+**Tests.** `backdatedTimestamp` (`lib/calendar.ts`) — calendar-day move while
+keeping time-of-day, a same-day round-trip, a month-boundary cross, and the
+malformed-`?date=` fallback to `base` rather than `Invalid Date` — mutation-
+verified (dropped the `Number.isNaN` guard, confirmed the malformed-input
+test goes red with the real `NaN`-time mismatch rather than a compile error,
+restored, confirmed green). `startSessionHref`'s new `date` branches —
+BJJ-with-date, empty-strength-with-date, template-plus-date (the ordering
+vector: date has to land *after* `workout=`, not silently replace it), and
+the omitted-third-argument no-op case. Full mobile suite (227 suites, 3563
+tests) and `typecheck:mobile` both green. One real typecheck failure found
+and fixed along the way: `${base}&date=${date}` built from an intermediate
+`string` variable does not narrow back to `Href` under Expo Router's typed
+routes even though every branch it can produce is a real route — rewritten
+as four literal-prefixed template branches instead (see the comment in
+`startSessionHref`), the same class of trap N32 exists to catch, just on the
+appending side rather than the route-name side.
+
+**Not built:** a bespoke "log the whole session's summary for date X" screen
+distinct from the live logger, which the ticket's own design guidance floated
+as possibly more appropriate than reusing the live flow. Reusing
+`session/start.tsx` → the existing set logger kept the change to pure
+parameter-threading with no new screen, and the module-pattern argument
+against a second flow doing the same job (see `session/start.tsx`'s own
+header comment) outweighed the live-affordance mismatch given the
+`ended_at`-on-`Finish` limitation above is scoped and documented rather than
+silently wrong. The Up Next card's past-day "Not logged" statement (`past={isPast}`
+on `UpNextCard`) is deliberately left untouched — it is recently, carefully
+reasoned accessibility code (dimmed-opacity and `disabled`-role traps both
+already fixed once), and the New Log FAB already reaches every past day,
+planned or not, without touching it.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

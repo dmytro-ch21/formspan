@@ -381,7 +381,7 @@ export default function TodayScreen() {
   }, [userId]);
 
   /**
-   * Start what was planned.
+   * Start what was planned — or, browsing a past day, backfill it.
    *
    * The branch itself lives in `lib/startSession.ts` — Train makes the same
    * decision, and two copies of it is how a technique-shaped discipline ends up
@@ -389,12 +389,19 @@ export default function TodayScreen() {
    * KIND (`logsAfterwards`), never on `key === 'bjj'`, so a second
    * technique-shaped discipline gets the right screen without this file
    * learning its name.
+   *
+   * **The date override is N434/#721.** `isPast` only — never a FUTURE
+   * `dayOffset` — because "any past day" is this ticket's whole scope and a
+   * session dated tomorrow is not a thing that has happened yet. On `isToday`
+   * this passes `undefined`, which is a no-op in `startSessionHref` (see its
+   * own tests): the current-day flow is byte-identical to before this ticket
+   * touched the file, matching the ticket's own "unaffected" criterion.
    */
   const startPlanned = useCallback(
     (p: { sport: string; workoutId: string | null }) => {
-      router.push(startSessionHref(p, modules));
+      router.push(startSessionHref(p, modules, isPast ? dayString(viewDay) : undefined));
     },
-    [modules, router],
+    [modules, router, isPast, viewDay],
   );
 
   const [checkins, setCheckins] = useState<Checkin[]>([]);
@@ -1488,7 +1495,10 @@ export default function TodayScreen() {
           visible={picking}
           modules={modules}
           userId={userId ?? null}
-          title="New log"
+          // N434/#721: says out loud which day a tap here backfills, rather
+          // than silently logging a browsed-past-day tap under today — the
+          // exact bug `refreshFoodWeek`'s comment above documents for food.
+          title={isPast ? `New log for ${dayLabel}` : 'New log'}
           onClose={() => setPicking(false)}
           onPick={(pick) => {
             // Closed before navigating: leaving the modal mounted over a push
