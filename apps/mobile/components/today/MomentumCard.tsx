@@ -267,29 +267,57 @@ function Centre({ eaten, view }: { eaten: EatenView; view: TargetView }) {
   // prohibition and the `RemainingBlock` this card replaced honoured it.
   if (view.state === 'unknown') {
     return (
-      <>
+      <CentrePlate>
         <Text style={styles.centreBig}>{fmt(totals?.kcal ?? 0)}</Text>
         <Text style={styles.centreUnit}>eaten</Text>
-      </>
+      </CentrePlate>
     );
   }
   if (!target || target.kcal <= 0) {
     return (
-      <>
+      <CentrePlate>
         <Text style={styles.centreBig}>{fmt(totals?.kcal ?? 0)}</Text>
         <Text style={styles.centreUnit}>eaten</Text>
-      </>
+      </CentrePlate>
     );
   }
 
   const left = target.kcal - (totals?.kcal ?? 0);
   return (
-    <>
+    <CentrePlate>
       <Text style={styles.centreBig}>{fmt(Math.abs(Math.round(left)))}</Text>
       {/* "over" rather than a negative number: a minus sign in a big figure
           reads as an error, and the word is what an athlete would say. */}
       <Text style={styles.centreUnit}>{left >= 0 ? 'left' : 'over'}</Text>
-    </>
+    </CentrePlate>
+  );
+}
+
+/**
+ * A small translucent scrim behind the ring's headline figure — device
+ * feedback 2026-08-28: the number "overlaps ugly" and "you barely see the
+ * numbers" where a ring's stroke passes directly behind the text.
+ *
+ * The centre hole is ~34pt across (see the comment on `ringColumn`'s caller);
+ * `centreBig` + `centreUnit` stacked are taller than that, so the text was
+ * always going to spill past the innermost ring's edge — the fix is not to
+ * shrink the text or grow the hole, it's to give it a ground of its own to
+ * sit on, the same way `ShareToFriend.tsx`'s sheet backdrop does: `vola.bg`
+ * (this app's OWN darkest surface, not a new colour) at partial opacity,
+ * rather than the ring colours showing straight through.
+ *
+ * A rounded RECTANGLE, not a circle matching the hole — a circle sized to
+ * the hole still wouldn't contain this content's height, and a bigger circle
+ * would cover more of the rings than the text needs. A plate that hugs the
+ * text and overlaps the innermost ring's stroke at top and bottom reads as a
+ * badge sitting on the rings, which is the legible version of what was
+ * already happening geometrically.
+ */
+function CentrePlate({ children }: { children: React.ReactNode }) {
+  return (
+    <RNView style={styles.centrePlate} testID="today-centre-plate">
+      {children}
+    </RNView>
   );
 }
 
@@ -442,6 +470,20 @@ const styles = StyleSheet.create({
   rows: { flex: 1, gap: 12 },
   absent: { fontSize: 13, color: vola.textDim },
 
+  // rgba() of `vola.bg` itself (#080B12 → rgb(8,11,18)) — the same scrim
+  // convention `ShareToFriend.tsx`'s sheet backdrop uses, just a plate
+  // rather than a full-screen wash. 0.72 rather than that backdrop's 0.86:
+  // this sits on top of the athlete's OWN progress rings, so it needs to
+  // dim them, not hide them — a fully opaque plate would erase the ring
+  // colour peeking around the text, which is information (which macro is
+  // over/under), not decoration.
+  centrePlate: {
+    alignItems: 'center',
+    borderRadius: 12,
+    backgroundColor: 'rgba(8,11,18,0.72)',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
   centreBig: {
     fontSize: 30,
     fontWeight: '800',

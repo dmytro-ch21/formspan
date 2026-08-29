@@ -14518,6 +14518,37 @@ on screen. That, and only that, is what moved.
 - None — no new endpoint, no new permission surface, purely a client-side
   rendering-identity fix.
 
+## N443 — the macro rings' headline figure gets its own legibility plate (`apps/mobile/components/today/MomentumCard.tsx`)
+
+### Happy path
+
+- With a real target set and enough logged to have a nonzero "left"/"over"
+  figure, confirm the number and its unit word sit on a visibly darker
+  rounded plate — not directly on the bare ring colours — and both remain
+  readable regardless of which macro ring is drawn behind them.
+- With no target set (or before the target check resolves), confirm the
+  "eaten" figure gets the same plate treatment.
+- Confirm the plate does NOT fully obscure the rings — the colour of
+  whichever ring sits behind it should still be visible peeking around the
+  plate's edges. This is deliberately a dim, not an erase: "which macro is
+  over/under" is information the rings carry, and the plate exists to fix
+  legibility, not to hide the rings it sits on.
+
+### Edge cases and errors
+
+- A four-digit "left"/"eaten"/"over" figure (≥1,000 kcal) — the widest
+  content the plate has to fit — still reads cleanly with no clipped
+  digits or crowding against the plate's edges.
+- **NEEDS HUMAN EVIDENCE** — on a real device, with real logged data and an
+  active target (the state the original report was about — an empty
+  "0 / eaten" account does not reproduce the overlap), confirm the fix
+  actually resolves the legibility complaint as reported.
+
+### Auth / security
+
+- None — no new endpoint, no new permission surface, purely a client-side
+  rendering fix.
+
 ## N426 — The scan-confirm screen reads as a nutrition-facts card, not a bare number field (`apps/mobile/app/food/scan.tsx`, `apps/mobile/components/food/AmountSheet.tsx`, `apps/mobile/components/food/NutritionPanel.tsx`, `apps/mobile/components/FoodQuantity.tsx`, `apps/mobile/lib/foodQuantity.ts`)
 
 ### Happy path
