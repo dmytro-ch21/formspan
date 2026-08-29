@@ -48810,6 +48810,42 @@ re-running. Full mobile suite (231 suites / 3620 tests) and `lint:mobile`
 knowing where it is"* — cannot be produced by a session that already read
 the fix's own source; genuinely needs someone encountering the sentence cold.
 
+## 2026-08-28 — N443 (#739): Today's macro-ring headline gets its own legibility plate
+
+User-reported directly from a device screenshot: "the rings are cool but
+calories left overlaps ugly and you barely see the numbers." Real root
+cause, not a rendering glitch: the ring stack's centre hole is ~34pt across
+(`MomentumCard.tsx`'s own comment on `ringColumn`), and the headline figure
+it hosts — the big number plus its unit word, stacked — is taller than
+that by construction. The text was always going to spill past the
+innermost ring's edge and paint directly over ring colour; nothing was
+broken, the geometry just never left the text anywhere legible to land.
+
+**Fix:** a small translucent plate behind the headline — `rgba(8,11,18,0.72)`,
+which is `vola.bg` (this app's own darkest surface) at partial opacity, the
+same scrim convention `ShareToFriend.tsx`'s sheet backdrop already
+establishes, just as a plate instead of a full-screen wash. Deliberately a
+rounded RECTANGLE that hugs the text rather than a circle sized to the hole
+— a circle at 34pt still wouldn't contain the content's height, and a
+bigger circle would dim more of the rings than the text needs. 0.72 rather
+than the backdrop's 0.86: this sits on top of the athlete's own progress
+rings, so it needs to dim them, not erase them — the ring colour still
+shows around the plate's edges, which is the "which macro is over/under"
+information the rings exist to carry.
+
+New regression test (`momentumCard.test.tsx`) asserts the headline figure
+is a CHILD of the plate (`within(plate).getByText(...)`), not merely present
+on screen — a regression that drew the plate beside the text instead of
+behind it would still pass a bare `getByText`. Mutation-tested: reverted the
+`CentrePlate` wrapper on the "left" branch back to a bare fragment, confirmed
+the test failed on a real `getByTestId` throw (no plate found), restored,
+confirmed green.
+
+Full mobile suite (231 suites / 3622 tests) and typecheck green.
+`NEEDS HUMAN EVIDENCE` left for the user — the empty-account state verified
+here ("0 / eaten") doesn't reproduce the original overlap; only real logged
+data with an active target does.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
