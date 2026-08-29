@@ -48921,6 +48921,54 @@ mutation produces a real assertion failure, plus unit coverage for
 `withAlpha` itself. Full mobile suite (234/3644), typecheck, and
 `lint:mobile` (0 errors, same pre-existing 50/50 ceiling) all green.
 
+## 2026-08-29 — N446 (#744): avatar upload's "That didn't get through. Try again." — the citable half fixed, the likelier half left for a device
+
+User-reported directly from the reporting device: avatar upload from Profile
+fails immediately with `RequestDroppedError`'s message
+(`apps/mobile/lib/apiError.ts`) — `netFetch`'s catch branch in
+`authedFetch.ts` when `fetch()` throws something that is not our own
+abort/deadline AND a follow-up `/v1/healthz` probe confirms the network
+itself is reachable. In other words: the network is up, this specific
+request died mid-flight.
+
+**Two candidate causes, ranked, and only one is fixable from a keyboard.**
+`apps/mobile/lib/profile.ts`'s `uploadAvatar()` was the one multi-megabyte
+upload in the app that did NOT pass `{ timeoutMs: SLOW_REQUEST_TIMEOUT_MS }`
+to `apiRequest` — every sibling (`body.ts`'s checkin photo, `identifyApi.ts`,
+`estimateApi.ts`'s text and photo paths, `reflectApi.ts`) already opts into
+the 45s slow budget instead of the 30s default, each with a comment naming
+the same reason: a multi-megabyte body over gym wifi needs more than the
+budget sized for a JSON read. `uploadAvatar` silently ran on 15 fewer
+seconds than every other request doing the same kind of work. Fixed —
+`uploadAvatar` now passes the option, matching the exact pattern
+`identifyApi.ts`/`estimateApi.ts` already use.
+
+**The likelier cause cannot be fixed from here.** N12's own history entry
+(2026-08-26) already flagged it: no device pass has ever exercised the
+camera or library picker for avatar upload, and no test in the suite
+exercises the `RequestDroppedError` path for this route.
+`authedFetch.ts`'s own doc comment names uploads as "the likeliest
+producer" of this error — biggest body, longest round trip, most exposed to
+a real network dropping it mid-stream (Wi-Fi handoff, backgrounding, a gym's
+captive portal). The 256 KiB early-body-close bug (N92) was checked and
+ruled out: `DrainRequestBody` is wired globally through `apihttp.Assemble`
+and already covered `/v1/profile/avatar` before avatar upload shipped.
+
+New test: `profileApi.test.ts` gained an assertion that `uploadAvatar` asks
+for `SLOW_REQUEST_TIMEOUT_MS`, not the default — mutation-tested by
+reverting the option, confirming the new assertion failed for the real
+reason (`Expected: 45000, Received: undefined`, not a compile error),
+restoring, and confirming green by re-running. Full mobile suite
+(234 suites / 3649 tests) and typecheck both green.
+
+**Left for the user, as the issue's `NEEDS HUMAN EVIDENCE` criterion says
+plainly**: confirm on the reporting device that upload now succeeds, from
+both the library and the camera, ideally including a slower/flakier
+connection if reproducible. If the same failure still reproduces after this
+fix, that is the transport-level cause surfacing on its own and belongs in
+its own follow-up ticket with whatever the device pass captures (size,
+network type, timing) — not something to keep guessing at from static code.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

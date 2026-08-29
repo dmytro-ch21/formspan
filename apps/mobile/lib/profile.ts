@@ -1,6 +1,6 @@
 import { ApiError, isNotFound, parseRetryAfterMs } from './apiError';
 import { apiRequest } from './apiRequest';
-import { netFetch } from './authedFetch';
+import { netFetch, SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 import { newTraceId, traceparent } from './trace';
 import type { FoodUnit, UnitSystem } from './units';
@@ -220,7 +220,15 @@ export function uploadAvatar(
     name: 'avatar.jpg',
     type: photo.mimeType,
   } as unknown as Blob);
-  return apiRequest<Profile>(getToken, '/profile/avatar', { method: 'POST', body: form });
+  return apiRequest<Profile>(
+    getToken,
+    '/profile/avatar',
+    { method: 'POST', body: form },
+    // A photo upload is the same multi-megabyte-body case every other
+    // upload in this app opts into the slow budget for; the default
+    // deadline is sized for a JSON read, not a body going over gym wifi.
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
+  );
 }
 
 /** Remove the avatar. The monogram is the fallback everywhere it was shown. */

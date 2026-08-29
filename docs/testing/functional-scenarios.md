@@ -13578,6 +13578,18 @@ on screen. That, and only that, is what moved.
   after tapping a photo) and confirm the previous avatar (or the monogram, if
   there was none) is still showing afterward — never a broken image, never a
   stuck spinner.
+- **NEEDS HUMAN EVIDENCE (N446, #744)** — on the reporting device, pick a
+  photo from the library and confirm upload succeeds; take one with the
+  camera and confirm the same. Try on a slower/flakier connection if one is
+  reproducible. `uploadAvatar` now asks for the 45s slow budget
+  (`SLOW_REQUEST_TIMEOUT_MS`) instead of the 30s default, matching every
+  sibling multi-megabyte upload (`body.ts`, `identifyApi.ts`,
+  `estimateApi.ts`, `reflectApi.ts`) — that is the one part of the
+  "That didn't get through. Try again." failure a static fix can address. If
+  the same `RequestDroppedError` still reproduces after this fix, the
+  transport-level cause (untested real-network path — no device pass has
+  ever exercised this) is a separate follow-up, not something to re-diagnose
+  from code alone.
 
 ### The fallback (`Avatar` component, used wherever an avatar renders)
 
