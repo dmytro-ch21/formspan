@@ -770,7 +770,17 @@ Visual/interaction refinement only — nothing below changes the engine
 (`sessionStore`, set transforms, rest-timer logic, sync). The properties above
 this subsection (carry-forward, warm-up exclusion, save serialisation, the
 timer surface, grip, N4's timed sets) are unchanged and still apply; this adds
-scenarios for the header split and the Finish footer specifically.
+scenarios for the header split and (originally) the Finish footer.
+
+**N445 (2026-08-29) reverted the Finish-footer half of this section.** Finish
+moved back into ordinary scroll content, after the last exercise / "+ Add
+exercise" — see that entry in `docs/decisions/history.md` for why (a
+`KeyboardAwareFooter` lifts itself to sit just above an open keyboard, which
+put Finish immediately beside whatever set row was being edited; a mis-tap
+while typing a weight could end the whole session). The header-split scenarios
+below are untouched by N445 and still describe the current screen; the Finish
+scenarios that follow them describe the **pre-N445, pinned-footer** behaviour
+and are superseded by the N445 subsection right after this one.
 
 - **The fastest normal-set path is still two taps.** "+ Set" (carrying the
   previous weight/reps forward), then the row's ✓. Anything that adds a tap
@@ -798,28 +808,59 @@ scenarios for the header split and the Finish footer specifically.
   mode, timed, weighted, runnable), the header row wraps to a second line
   without pushing the reorder/swap/remove row anywhere but directly below the
   name.
-- **Finish is reachable without scrolling.** With enough exercises logged that
-  the content overflows the screen, Finish must be visible (as a pinned
-  footer below the scroll content) without scrolling to the bottom — this is
-  the discoverability gap N184 exists to close.
-- **Finish disappears, and only Finish, once the session ends.** After
-  confirming Finish, the footer is gone entirely (nothing left to confirm on
-  a read-only record); Delete session and the Share button remain exactly
-  where they were, inline in the scrolled content, unpromoted.
-- **NEEDS HUMAN EVIDENCE — the numeric keypad and the Finish footer, on a
-  device.** Open a set's weight field (numeric keyboard up), and confirm
-  Finish is not obscured underneath it — the footer is meant to lift clear of
-  the keyboard via `KeyboardAwareFooter`, which nothing in the suite can
-  actually raise a keyboard to prove.
-- **NEEDS HUMAN EVIDENCE — background the app with a field focused and the
-  Finish footer visible**, then foreground it: the in-progress entry and the
-  footer's position must be exactly as they were, matching this screen's
-  existing backgrounding guarantee for everything else on it.
+- **~~Finish is reachable without scrolling, as a pinned footer.~~ Superseded
+  by N445 — see the subsection immediately below.** (Kept struck-through
+  rather than deleted: it was this screen's actual behaviour for three days
+  and is exactly the shape a regression could bring back.)
+- **Finish disappears, and only Finish, once the session ends.** Still true
+  post-N445 — after confirming Finish, the control is gone entirely (nothing
+  left to confirm on a read-only record); Delete session and the Share button
+  remain exactly where they were, inline in the scrolled content, unpromoted.
 - **Untouched by this ticket — assert nothing changed.** The rest timer's own
   top-of-screen bar/card (`components/Timer.tsx`), the completed-set row
   tint, and the suggestion hint's position directly above "+ Set" (previous
   performance, still visible at the point of entry) are all pinned by their
   own existing behaviour and were not touched here.
+
+### Finish session moved back into scroll content (N445, mobile, `app/session/[id].tsx`)
+
+Reverts the Finish-footer half of N184 above; the header-split scenarios in
+that section are unaffected. Root cause: `KeyboardAwareFooter` actively lifts
+itself to sit just above an open keyboard, so the pinned Finish button tracked
+whichever set row was being edited — directly below the Reps/Weight/RIR/RPE
+fields, right above the numeric keypad. Reported by the user with a device
+screenshot: a mis-tap while logging a set could end the whole session.
+
+- **Finish renders as regular scroll content**, after the last exercise
+  section and the "+ Add exercise" control (`session-add-exercise`), not a
+  screen-pinned footer. `testID="session-finish"` is unchanged.
+- **Finish never moves toward an open keyboard.** Expand a set's editor
+  (Reps/Weight/Assisted/RIR/RPE) low enough in a multi-exercise session that
+  Finish would previously have been forced adjacent to it, open the numeric
+  keypad, and confirm Finish's on-screen position is whatever the normal
+  scroll offset puts it at — never pinned just above the keyboard.
+- **Finish is still reachable in one motion once the athlete is done** —
+  scrolling to the bottom of a finished-but-not-yet-`Finish`ed workout reaches
+  it directly, same as any other item at the end of the list.
+- **The hold-to-confirm gesture is unchanged.** Same `HoldToConfirm` label,
+  holding label, confirm title/body, and destructive-hold behaviour as before
+  N445 — only the container moved from a `KeyboardAwareFooter` to a plain
+  `View` inside the scroll content. A short tap still does nothing; the hold
+  still has to complete.
+- **No regression to the rest timer / minimized-timer bar.** `TimerSurface`
+  renders outside the scroll view exactly as before N445 (unmoved by this
+  change) — confirm its position and the `TIMER_BAR_SPACE` top padding on the
+  scroll content are unaffected whether or not Finish has been scrolled past.
+- **The scroll view's own keyboard handling reverts to the no-footer default**
+  (`automaticallyAdjustKeyboardInsets` on, native iOS field-lifting on) now
+  that this screen registers no `KeyboardAwareFooter` — covered generically by
+  `components/__tests__/keyboardFooterCoordination.test.tsx`, not per-screen.
+- **NEEDS HUMAN EVIDENCE — on a device, confirm the numeric keypad never
+  covers or sits adjacent to Finish while editing a set**, and that scrolling
+  to the end of a long, multi-exercise session still reaches Finish in the
+  same single scroll gesture as reaching "+ Add exercise". This is the
+  criterion N445 exists to satisfy and nothing in the suite can raise a real
+  keyboard to prove it.
 
 ## Progression rules — double progression (`GET /v1/sessions/suggestions`, both clients)
 

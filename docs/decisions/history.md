@@ -48969,6 +48969,76 @@ fix, that is the transport-level cause surfacing on its own and belongs in
 its own follow-up ticket with whatever the device pass captures (size,
 network type, timing) — not something to keep guessing at from static code.
 
+## 2026-08-29 — N445: Finish session moved back into scroll content, reverting N184 (#743)
+
+Reported by the user directly, with a device screenshot: "Finish session"
+sat immediately below the currently-expanded set editor
+(Reps/Weight/Assisted/RIR/RPE), directly above the numeric keyboard, while
+the athlete was actively typing a set's weight — a mis-tap while logging a
+set could end the whole session. Their words: *"this needs to be cleaned
+asap, this finish button is very intrusive... it has to be at the very end
+of all sets of a workout not pushing in when i log stuff."*
+
+**Root cause.** N184 (#658, 2026-08-26) deliberately moved Finish out of
+scroll content into a `KeyboardAwareFooter` — a sibling of the scroll view —
+specifically so it would be reachable without "scrolling past the whole
+workout". `KeyboardAwareFooter` actively lifts itself to sit just above the
+keyboard whenever one is open (`components/KeyboardAwareScroll.tsx`), which
+is exactly the mechanism that put it adjacent to whatever set row was being
+edited. **This is a real, explicit reversal of a documented product
+decision, not a bug fix layered on top of it** — N184's own acceptance
+criterion ("Finish is reachable without scrolling") is exactly what this
+entry gives up, because the user has now stated directly that proximity to
+active input controls matters more than that reachability guarantee.
+
+**What changed.** `HoldToConfirm`'s "Finish session" block moved from inside
+the `KeyboardAwareFooter` sibling back into ordinary scroll content, after
+the last exercise section and the "+ Add exercise" control — the same
+position it held before N184. Every `HoldToConfirm` prop (label, holding
+label, confirm title/body, `onConfirm`, the `accent.on` fill-colour
+reasoning) is byte-for-byte unchanged; only the container changed, from
+`<KeyboardAwareFooter style={styles.finishFooter}>` to a plain
+`<View style={styles.finishSection}>`. `styles.finishFooter`'s
+keyboard-safe-area `paddingBottom: 28` is gone (no longer a screen-edge
+control, so the scroll view's own `contentContainerStyle` padding covers
+it, same as every other item in the list); the hairline top border is kept
+as `finishSection`'s visual separator.
+
+Removing the `KeyboardAwareFooter` also un-registers this screen from
+`KeyboardAwareScroll.tsx`'s footer-coordination context automatically — no
+code change needed there. `needsPlatformKeyboardInset` now resolves to
+`true` for this screen's scroll view again (the plain, footer-less default:
+`automaticallyAdjustKeyboardInsets` on, native iOS field-lifting on), which
+is the correct behaviour for a screen with no pinned sibling any more. That
+mechanism's own tests (`keyboardFooterCoordination.test.tsx`) are generic
+across every screen and needed no change; one comment in
+`inputErgonomics.test.ts` that used this screen as its example of a
+footer'd screen was updated to point at the screens that still are
+(`food/add.tsx`'s quantity sheet, the BJJ reflection wizard).
+
+**Testing.** No dedicated render test exists for `app/session/[id].tsx` —
+it is the largest screen in the app, wired to SQLite, sync, the rest timer
+and the celebration flow, and mocking that whole graph to check one
+control's position would be disproportionate to what the regression
+actually is: a structural placement bug. Added
+`apps/mobile/__tests__/app/strengthSessionFinishPlacement.test.ts`, a
+static source-text guard in the same style as
+`components/__tests__/keyboardCoverage.test.ts` — it asserts
+`testID="session-finish"` sits inside the `KeyboardAwareScrollView`, after
+`testID="session-add-exercise"`, that the file no longer imports or renders
+`KeyboardAwareFooter`, that the `HoldToConfirm` confirm-gesture copy is
+unchanged, and that `TimerSurface` still renders outside the scroll view.
+All five guards were mutation-tested individually (each one broken,
+confirmed a real assertion failure rather than a compile error, restored,
+confirmed green again). Full mobile suite (235/3653), `tsc --noEmit`, and
+`lint:mobile` all green.
+
+**Open**: a `NEEDS HUMAN EVIDENCE` criterion on #743 — confirming on a real
+device that the numeric keypad never covers or sits adjacent to Finish
+while editing a set, and that scrolling to the end of a long session still
+reaches it in one motion — cannot be produced by this session and is owed
+to the user.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
