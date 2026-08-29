@@ -1,4 +1,4 @@
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, StyleSheet } from 'react-native';
 import { act, render, within } from '@testing-library/react-native';
 
 import { MomentumCard } from '../MomentumCard';
@@ -227,6 +227,12 @@ describe('MomentumCard — the headline figure sits on its own legibility plate 
     // behind it would still pass a bare `getByText`.
     expect(within(plate).getByText('800')).toBeTruthy();
     expect(within(plate).getByText('left')).toBeTruthy();
+    // `within` only pins the HIERARCHY — a plate with no backgroundColor at
+    // all (drawing nothing) would still pass both assertions above. Pin the
+    // scrim itself: `vola.bg` (#080B12 → rgb(8,11,18)) at partial opacity,
+    // not a new colour.
+    const style = StyleSheet.flatten(plate.props.style);
+    expect(style.backgroundColor).toBe('rgba(8,11,18,0.72)');
   });
 
   it('wraps the "eaten" figure in the plate when no target is set', () => {
@@ -234,6 +240,31 @@ describe('MomentumCard — the headline figure sits on its own legibility plate 
       <MomentumCard
         eaten={EATEN}
         view={{ state: 'none' }}
+        rings={['kcal', 'protein']}
+        isToday
+        quickAdd={[]}
+        onLog={() => {}}
+        onQuickAdd={() => {}}
+        onOpenDay={() => {}}
+        onConfigureRings={() => {}}
+        testID="momentum"
+      />,
+    );
+    const plate = screen.getByTestId('today-centre-plate');
+    expect(within(plate).getByText('1,200')).toBeTruthy();
+    expect(within(plate).getByText('eaten')).toBeTruthy();
+  });
+
+  // The THIRD branch `Centre` can take — `view.state === 'unknown'`, "we
+  // could not check your target" rather than "you have none" — is its own
+  // return statement wrapping its own `CentrePlate`. Covered separately so
+  // an edit that unwraps just this one (the rarest of the three to hit on a
+  // device) cannot stay green.
+  it('wraps the "eaten" figure in the plate when the target check itself failed', () => {
+    const screen = render(
+      <MomentumCard
+        eaten={EATEN}
+        view={{ state: 'unknown' }}
         rings={['kcal', 'protein']}
         isToday
         quickAdd={[]}
