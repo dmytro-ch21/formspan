@@ -43,15 +43,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "VOLA uses your photos so you can attach a progress picture to a check-in, or set a profile photo. Progress pictures stay private to your account; a profile photo is visible to other athletes.",
-          "cameraPermission": "VOLA uses the camera so you can photograph a meal to estimate it, photograph a gym machine to identify it, scan a barcode off a food packet, or take a profile photo. A meal, machine or barcode photo is read and not stored; a barcode never leaves your phone; a profile photo is stored, resized, and visible to other athletes.",
+          "photosPermission": "VOLA uses your photos so you can attach a progress picture to a check-in, set a profile photo, or choose a photo for your session share card. Progress pictures stay private to your account; a profile photo is visible to other athletes; a share-card photo never leaves your phone — it's only used to render the image you export.",
+          "cameraPermission": "VOLA uses the camera so you can photograph a meal to estimate it, photograph a gym machine to identify it, scan a barcode off a food packet, take a profile photo, or take a photo for your session share card. A meal, machine or barcode photo is read and not stored; a barcode never leaves your phone; a profile photo is stored, resized, and visible to other athletes; a share-card photo never leaves your phone either — it's only used to render the image you export.",
           "microphonePermission": false
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "VOLA uses the camera so you can photograph a meal to estimate it, photograph a gym machine to identify it, scan a barcode off a food packet, or take a profile photo. A meal, machine or barcode photo is read and not stored; a barcode never leaves your phone; a profile photo is stored, resized, and visible to other athletes.",
+          "cameraPermission": "VOLA uses the camera so you can photograph a meal to estimate it, photograph a gym machine to identify it, scan a barcode off a food packet, take a profile photo, or take a photo for your session share card. A meal, machine or barcode photo is read and not stored; a barcode never leaves your phone; a profile photo is stored, resized, and visible to other athletes; a share-card photo never leaves your phone either — it's only used to render the image you export.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }

@@ -55,7 +55,17 @@ export const SessionCard = forwardRef<RNView, { data: CardData; width: number }>
 
     return (
       <RNView ref={ref} style={[s.card, { width, height: width }]} collapsable={false}>
-        <Image source={MOUNTAINS[peak]} style={s.photo} contentFit="cover" transition={0} />
+        {/* An athlete's own photo (N449, #747) takes the frame the mountain
+            otherwise fills — same `s.photo` box, same `cover` fit, so an
+            arbitrary phone photo crops the same way a mountain sized for
+            this frame would rather than needing its own layout. */}
+        <Image
+          source={data.backgroundUri ? { uri: data.backgroundUri } : MOUNTAINS[peak]}
+          style={s.photo}
+          contentFit="cover"
+          transition={0}
+          testID="session-card-photo"
+        />
 
         {/* The glow sits BEHIND the peak's silhouette and above the photo, so
             the accent reads as light coming off the summit rather than a

@@ -39,6 +39,19 @@ export type CardData = {
   detail?: { name: string; figure?: string; outcome?: string; count?: number }[];
   /** How many rows `detail` omitted, for a "+4 more" line. */
   more?: number;
+  /**
+   * A local file URI, in place of the deterministic mountain (N449, #747).
+   *
+   * Never a remote URL — this never leaves the device. The picked photo is
+   * rendered straight into the card and captured into the exported PNG by
+   * `captureRef`, so there is nothing to upload and nowhere a server-hosted
+   * URL would come from. See `SessionShare.tsx`'s `useSessionShare` for where
+   * this gets set.
+   *
+   * Absent is the default and the common case: `SessionCard` falls back to
+   * `mountainFor(id)`, exactly as before this existed.
+   */
+  backgroundUri?: string;
 };
 
 /**

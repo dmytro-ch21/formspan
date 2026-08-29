@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import {
   ShareCardHost,
@@ -7,6 +7,23 @@ import {
   useSessionShare,
 } from '@/components/SessionShare';
 import type { SessionSummary } from '@/lib/celebration';
+import { MOUNTAINS, mountainFor } from '@/lib/mountains';
+
+const mockManipulate = jest.fn();
+jest.mock('expo-image-manipulator', () => ({
+  manipulateAsync: (...a: unknown[]) => mockManipulate(...a),
+}));
+
+const mockRequestCamera = jest.fn();
+const mockLaunchCamera = jest.fn();
+const mockRequestLibrary = jest.fn();
+const mockLaunchLibrary = jest.fn();
+jest.mock('expo-image-picker', () => ({
+  requestCameraPermissionsAsync: (...a: unknown[]) => mockRequestCamera(...a),
+  launchCameraAsync: (...a: unknown[]) => mockLaunchCamera(...a),
+  requestMediaLibraryPermissionsAsync: (...a: unknown[]) => mockRequestLibrary(...a),
+  launchImageLibraryAsync: (...a: unknown[]) => mockLaunchLibrary(...a),
+}));
 
 /**
  * F2: the card is seen before it is posted.
@@ -26,6 +43,12 @@ import type { SessionSummary } from '@/lib/celebration';
 const mockShareCard = jest.fn();
 jest.mock('@/lib/shareCard', () => ({
   shareCard: (...a: unknown[]) => mockShareCard(...a),
+  // Real value, not a mock: N449's resize call (`pickBackgroundPhoto` in
+  // `SessionShare.tsx`) imports this from the same module, and mocking the
+  // whole module out from under it would silently turn the resize target
+  // into `undefined` rather than the real export width — see the "resizes"
+  // test below, which is the one this would otherwise defeat.
+  CARD_EXPORT_WIDTH: 1080,
 }));
 
 // The server's decorating numbers never arrive in this test — the card is
@@ -51,9 +74,9 @@ const summary: SessionSummary = {
 // which card was captured — see the capture-source test below.
 let captureRef: unknown = null;
 
-function Harness() {
+function Harness({ sessionID = 's1' }: { sessionID?: string } = {}) {
   const share = useSessionShare({
-    sessionID: 's1',
+    sessionID,
     summary,
     formatTonnage: (v) => `${v}kg`,
     formatWeight: (v) => `${v}kg`,
@@ -76,6 +99,13 @@ function Harness() {
 beforeEach(() => {
   captureRef = null;
   mockShareCard.mockReset().mockResolvedValue({ ok: true });
+  mockManipulate.mockReset().mockResolvedValue({ uri: 'file:///cache/resized-1080.jpg' });
+  mockRequestCamera.mockReset().mockResolvedValue({ granted: true });
+  mockRequestLibrary.mockReset().mockResolvedValue({ granted: true });
+  mockLaunchCamera.mockReset();
+  mockLaunchLibrary
+    .mockReset()
+    .mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///picked-from-library.jpg' }] });
 });
 
 it('opens the preview instead of posting, and captures nothing yet', async () => {
@@ -191,4 +221,294 @@ it('does not show a stale error when the preview is reopened', async () => {
 
   expect(await screen.findByTestId('share-preview')).toBeTruthy();
   expect(screen.queryByText('No image was produced.')).toBeNull();
+});
+
+/**
+ * N449 (#747): an athlete's own photo, in place of the deterministic
+ * mountain.
+ *
+ * These pin the thing `sessionCardBackgroundPhoto.test.tsx` cannot reach —
+ * the picker's wiring through `useSessionShare` and into the actual card
+ * `ShareCardHost` mounts — rather than `SessionCard`'s own rendering of a
+ * `backgroundUri` prop it is simply handed. Between the two: a build that
+ * wired the picker to the wrong piece of state, or that mutated the wrong
+ * card, still fails here even though `SessionCard` itself is innocent.
+ */
+describe('replacing the mountain with a photo (N449/#747)', () => {
+  /**
+   * Every `SessionCard` mount in the tree — the off-screen capture source
+   * AND, once the preview is open, the visible one — shares the SAME `card`
+   * object from the hook. Asserting on all of them (rather than picking one
+   * by position) is what makes this test agnostic to which one `captureRef`
+   * actually reads, while still proving the off-screen one is among them.
+   */
+  function photoSources() {
+    // `includeHiddenElements` — the off-screen host is deliberately marked
+    // hidden from assistive tech (see `ShareCardHost`'s own comment on why),
+    // and RNTL's default queries skip anything behind that flag, the same
+    // reason `Avatar.test.tsx` needs it for the hidden monogram.
+    return screen
+      .getAllByTestId('session-card-photo', { includeHiddenElements: true })
+      .map((el) => el.props.source);
+  }
+
+  it('starts on the deterministic mountain, before any photo is picked', async () => {
+    render(<Harness />);
+    // The off-screen host is mounted unconditionally, before the preview is
+    // ever opened — see ShareCardHost's file comment.
+    expect(photoSources()).toEqual([MOUNTAINS[mountainFor('s1')]]);
+  });
+
+  it('threads a library photo onto every mount of the card, including the off-screen one captureRef reads', async () => {
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-library'));
+    });
+
+    await waitFor(() =>
+      expect(photoSources().every((s) => s?.uri === 'file:///cache/resized-1080.jpg')).toBe(true),
+    );
+    // Never posted on its own — picking a photo is not sharing.
+    expect(mockShareCard).not.toHaveBeenCalled();
+  });
+
+  it('threads a camera photo the same way, via the camera permission/launch pair', async () => {
+    mockLaunchCamera.mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///camera/IMG_1.heic' }],
+    });
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-camera'));
+    });
+
+    await waitFor(() =>
+      expect(photoSources().every((s) => s?.uri === 'file:///cache/resized-1080.jpg')).toBe(true),
+    );
+    expect(mockRequestCamera).toHaveBeenCalled();
+    expect(mockLaunchCamera).toHaveBeenCalled();
+    expect(mockRequestLibrary).not.toHaveBeenCalled();
+  });
+
+  it('resizes the picked frame to the export width rather than rendering the raw camera frame', async () => {
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-library'));
+    });
+
+    await waitFor(() => expect(mockManipulate).toHaveBeenCalled());
+    expect(mockManipulate).toHaveBeenCalledWith(
+      'file:///picked-from-library.jpg',
+      [{ resize: { width: 1080 } }],
+      // `compress: 1` — deliberately not the network path's 0.8: this photo
+      // never leaves the phone, so there is nothing to shrink a transfer for.
+      { compress: 1 },
+    );
+  });
+
+  it('lets the athlete go back to the mountain after picking a photo', async () => {
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-library'));
+    });
+    await waitFor(() =>
+      expect(photoSources().every((s) => s?.uri === 'file:///cache/resized-1080.jpg')).toBe(true),
+    );
+
+    fireEvent.press(screen.getByTestId('share-photo-clear'));
+
+    await waitFor(() =>
+      expect(photoSources().every((s) => s === MOUNTAINS[mountainFor('s1')])).toBe(true),
+    );
+  });
+
+  it('declines the library picker when photo-library permission is refused, and leaves the mountain in place', async () => {
+    mockRequestLibrary.mockResolvedValue({ granted: false });
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-library'));
+    });
+
+    expect(await screen.findByText(/needs access to your photos/i)).toBeTruthy();
+    expect(mockLaunchLibrary).not.toHaveBeenCalled();
+    expect(mockManipulate).not.toHaveBeenCalled();
+    expect(photoSources().every((s) => s === MOUNTAINS[mountainFor('s1')])).toBe(true);
+  });
+
+  it('declines the camera when camera permission is refused, and does not crash', async () => {
+    mockRequestCamera.mockResolvedValue({ granted: false });
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-camera'));
+    });
+
+    expect(await screen.findByText(/needs camera access/i)).toBeTruthy();
+    expect(mockLaunchCamera).not.toHaveBeenCalled();
+    expect(photoSources().every((s) => s === MOUNTAINS[mountainFor('s1')])).toBe(true);
+  });
+
+  it('shows the picker/permission rejection as an error rather than an unhandled rejection', async () => {
+    // Both the permission request and the picker itself can reject outright
+    // (an OS-level failure, a Simulator with no camera) rather than merely
+    // resolve `canceled: true` — the same gap `food/describe.tsx`'s own
+    // `photograph` guards against. This button is `void`-called from a
+    // `Pressable`, so an unguarded throw here would be a silent no-op, not a
+    // visible error.
+    mockRequestLibrary.mockRejectedValue(new Error('picker unavailable'));
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-library'));
+    });
+
+    expect(await screen.findByText('picker unavailable')).toBeTruthy();
+  });
+
+  it('the "Replace photo" label only appears once a photo has actually been picked', async () => {
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+
+    expect(screen.getByText('Choose photo')).toBeTruthy();
+    expect(screen.queryByText('Replace photo')).toBeNull();
+    expect(screen.queryByTestId('share-photo-clear')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-library'));
+    });
+
+    await waitFor(() => expect(screen.getByText('Replace photo')).toBeTruthy());
+    expect(screen.queryByText('Choose photo')).toBeNull();
+    expect(screen.getByTestId('share-photo-clear')).toBeTruthy();
+  });
+
+  /**
+   * The scoping guard itself — `background.id === sessionID` in
+   * `useSessionShare`. Same reasoning as `numbers`' own `{id, value}` state:
+   * a screen instance that moves to a DIFFERENT session (`router.replace`
+   * onto the same route) must not decorate the new card with the photo that
+   * was picked for the one it left. Nothing above exercises a sessionID
+   * change — every other test in this file picks a photo and reads it back
+   * for the SAME session.
+   */
+  it('does not carry a picked photo onto a different session', async () => {
+    const { rerender } = render(<Harness sessionID="s1" />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-library'));
+    });
+    await waitFor(() =>
+      expect(photoSources().every((s) => s?.uri === 'file:///cache/resized-1080.jpg')).toBe(true),
+    );
+
+    // A different session, same mounted hook instance — the shape a
+    // `router.replace` onto the same route produces.
+    rerender(<Harness sessionID="s2" />);
+
+    expect(photoSources().every((s) => s === MOUNTAINS[mountainFor('s2')])).toBe(true);
+  });
+
+  /**
+   * Cancelling out of the OS picker (`canceled: true`) is not a failure —
+   * `pickBackgroundPhoto` returns early on it, same as the app's other four
+   * picker sites. Nothing above exercises this path; every other test's
+   * `mockLaunchLibrary`/`mockLaunchCamera` resolves with a real asset.
+   */
+  it('leaves the mountain in place, with no error, when the picker is dismissed', async () => {
+    // A stale `assets` entry alongside `canceled: true` — deliberately, not
+    // the more typical `assets: null` a real cancellation returns. This is
+    // what actually pins the `canceled` check ITSELF: `assets: null` alone
+    // would make even a guard that dropped `picked.canceled` and kept only
+    // `!picked.assets[0]` return early too (a null-assets read throws, which
+    // the outer catch also turns into "no photo set"), so that shape cannot
+    // tell the two guards apart. With a real asset present, only checking
+    // `canceled` stops it.
+    mockLaunchLibrary.mockResolvedValue({
+      canceled: true,
+      assets: [{ uri: 'file:///should-not-be-used.jpg' }],
+    });
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('share-photo-library'));
+    });
+
+    // No manipulator call — there was never an asset to resize.
+    await waitFor(() => expect(mockRequestLibrary).toHaveBeenCalled());
+    expect(mockManipulate).not.toHaveBeenCalled();
+    expect(photoSources().every((s) => s === MOUNTAINS[mountainFor('s1')])).toBe(true);
+    // Still "Choose photo", not "Replace photo" — nothing was actually picked.
+    expect(screen.getByText('Choose photo')).toBeTruthy();
+    expect(screen.getByTestId('share-preview-cancel').props.accessibilityState?.disabled).toBe(
+      false,
+    );
+  });
+
+  /**
+   * The race this closes: `pickBackgroundPhoto` awaits a permission prompt,
+   * an OS picker AND a resize before `setBackground` ever runs — none of
+   * that is instant, and `sharing` alone does not cover it. A Share tap that
+   * lands in that window would capture the card BEFORE the just-picked photo
+   * is on it, exporting the outgoing mountain instead.
+   */
+  it('disables Share and Not now while a photo is still being resized, not only while sharing', async () => {
+    let resolveManipulate: (v: { uri: string }) => void;
+    mockManipulate.mockReturnValue(
+      new Promise((resolve) => {
+        resolveManipulate = resolve;
+      }),
+    );
+    render(<Harness />);
+    fireEvent.press(screen.getByTestId('share-button'));
+    await screen.findByTestId('share-preview');
+
+    fireEvent.press(screen.getByTestId('share-photo-library'));
+
+    // Mid-resize: the picker and permission prompt have both already
+    // resolved (they're separately-mocked immediate promises), the resize
+    // has not.
+    await waitFor(() =>
+      expect(screen.getByTestId('share-preview-confirm').props.accessibilityState?.disabled).toBe(
+        true,
+      ),
+    );
+    expect(screen.getByTestId('share-preview-cancel').props.accessibilityState?.disabled).toBe(
+      true,
+    );
+    // And nothing was captured while disabled — the guard is pointless if a
+    // disabled button's press handler still fires.
+    expect(mockShareCard).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveManipulate({ uri: 'file:///cache/resized-1080.jpg' });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('share-preview-confirm').props.accessibilityState?.disabled).toBe(
+        false,
+      ),
+    );
+  });
 });
