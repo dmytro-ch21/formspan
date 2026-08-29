@@ -762,9 +762,11 @@ const styles = StyleSheet.create({
   weekday: { fontSize: 10, fontWeight: '700', letterSpacing: 0.6, color: vola.textDim },
   date: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   /**
-   * Today's chip, and the one place in this app that uses a shadow.
+   * Today's chip.
    *
-   * **The glow is GONE (N108).** This chip used to carry an accent-coloured
+   * **The glow is GONE (N108), and — since N444 (#741) stripped Workouts'
+   * "New workout" FAB to match — no button, pill or chip in this app uses a
+   * shadow at all any more.** This chip used to carry an accent-coloured
    * bloom — `accentGlow` at the call site supplying the colour, and the four
    * properties here supplying the geometry. The user asked twice for no haze
    * anywhere on Today, and this calendar renders on Today, so both halves went.
