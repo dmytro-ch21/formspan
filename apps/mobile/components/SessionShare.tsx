@@ -14,7 +14,7 @@ import { SessionCard } from '@/components/SessionCard';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { statsFor, type SessionSummary } from '@/lib/celebration';
+import { prBadgeFor, statsFor, type SessionSummary } from '@/lib/celebration';
 import { cardFromSummary, type CardData } from '@/lib/sessionCard';
 import { getSessionCard, type SessionCardNumbers } from '@/lib/sessionCardApi';
 import { shareCard } from '@/lib/shareCard';
@@ -88,6 +88,12 @@ export function useSessionShare(opts: {
   /** Injected so nothing here has to know about unit preferences. */
   formatTonnage: (kg: number) => string;
   /**
+   * Same reason `formatTonnage` is injected: this builds the PR badge's
+   * evidence ("152kg × 5") in the athlete's own unit system without this
+   * hook having to know what that system is.
+   */
+  formatWeight: (kg: number) => string;
+  /**
    * `carried` means this session is what kept the streak alive.
    *
    * Passed only by the celebration, and that asymmetry is deliberate: a
@@ -104,7 +110,7 @@ export function useSessionShare(opts: {
    */
   date?: Date;
 }): SessionShare {
-  const { sessionID, summary, formatTonnage, streak = null, date } = opts;
+  const { sessionID, summary, formatTonnage, formatWeight, streak = null, date } = opts;
   const getToken = useAuthToken();
 
   const cardRef = useRef<RNView>(null);
@@ -150,6 +156,7 @@ export function useSessionShare(opts: {
           stats: statsFor(summary, formatTonnage),
           streak,
           numbers: forThisSession,
+          prBadge: prBadgeFor(summary.records, formatWeight),
           now: date,
         })
       : null;

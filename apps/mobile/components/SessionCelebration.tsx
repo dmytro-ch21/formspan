@@ -101,6 +101,7 @@ function Flares({ color }: { color: string }) {
 export function SessionCelebration({
   summary,
   formatTonnage,
+  formatWeight,
   onDismiss,
   streak = null,
   milestone = null,
@@ -113,6 +114,11 @@ export function SessionCelebration({
   summary: SessionSummary;
   /** Injected so the card never has to know about unit preferences. */
   formatTonnage: (kg: number) => string;
+  /** Same reason: builds the shareable card's PR badge in the athlete's own
+   *  unit system. This modal never captions a record itself — see the
+   *  de-slugified `exerciseID.replace` below, which is a separate, known
+   *  gap — but the card `useSessionShare` mounts underneath it does. */
+  formatWeight: (kg: number) => string;
   onDismiss: () => void;
   /** Weekly streak, once history answers. `carried` means this session did it. */
   streak?: { weeks: number; carried: boolean } | null;
@@ -179,7 +185,7 @@ export function SessionCelebration({
   // in `useSessionShare` now, because the same three are needed by every
   // screen that reads a finished session back. See that file for why the card
   // it mounts has to sit at the screen root.
-  const share = useSessionShare({ sessionID, summary, formatTonnage, streak });
+  const share = useSessionShare({ sessionID, summary, formatTonnage, formatWeight, streak });
 
   useEffect(() => {
     // The haptic is the part that lands even face-down in a bag; the sound

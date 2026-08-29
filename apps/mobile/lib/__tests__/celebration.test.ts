@@ -3,10 +3,14 @@ import {
   celebratesStreak,
   feltFor,
   formatDuration,
+  prBadgeFor,
+  prEvidence,
   recordsFromSession,
   statsFor,
   subtitleFor,
   summariseSession,
+  topRecord,
+  type SessionRecord,
   type SessionSummary,
   worthCelebrating,
 } from '../celebration';
@@ -95,6 +99,112 @@ describe('which records this session set', () => {
   it('is empty when records could not be fetched at all', () => {
     // Offline is the ordinary case in a basement gym. Silence is not a claim.
     expect(recordsFromSession([], 'S1')).toEqual([]);
+  });
+
+  it('resolves each record to the name its own exercise id maps to (N447/#745)', () => {
+    // Not the FIRST id, not a constant — the resolver has to be called per
+    // exercise. A mutation that hard-coded one name or ignored the argument
+    // would still pass a single-exercise fixture.
+    const two: ExerciseRecords[] = [
+      { exercise_id: 'bench', records: [record({ session_id: 'S1' })] },
+      { exercise_id: 'squat', records: [record({ session_id: 'S1' })] },
+    ];
+    const names: Record<string, string> = { bench: 'Bench Press', squat: 'Back Squat' };
+    const got = recordsFromSession(two, 'S1', (id) => names[id] ?? null);
+    expect(got.find((r) => r.exerciseID === 'bench')?.exerciseName).toBe('Bench Press');
+    expect(got.find((r) => r.exerciseID === 'squat')?.exerciseName).toBe('Back Squat');
+  });
+
+  it('carries no name at all when no resolver is given', () => {
+    // The default behaviour every caller that only cares about the FILTER
+    // (this file's other tests, the celebration modal) relies on.
+    const got = recordsFromSession(all, 'S1');
+    expect(got[0].exerciseName).toBeFalsy();
+  });
+});
+
+describe('the PR badge (N447/#745)', () => {
+  const named = (exerciseID: string, exerciseName: string | null, over: Partial<PersonalRecord> = {}): SessionRecord => ({
+    exerciseID,
+    exerciseName,
+    record: record(over),
+  });
+
+  describe('topRecord', () => {
+    it('is null when the session set nothing', () => {
+      expect(topRecord([])).toBeNull();
+    });
+
+    it('picks the FIRST record when there is more than one', () => {
+      // Pins "top one only" — see the function's own doc for why. A mutation
+      // that picked the last, or joined both, needs two DISTINCT records to
+      // be caught, which is why this fixture uses two different exercises
+      // rather than one repeated.
+      const bench = named('bench', 'Bench Press');
+      const squat = named('squat', 'Back Squat');
+      expect(topRecord([bench, squat])).toBe(bench);
+      expect(topRecord([squat, bench])).toBe(squat);
+    });
+  });
+
+  describe('prEvidence', () => {
+    const fmt = (kg: number) => `${Math.round(kg)}kg`;
+
+    it('reads the measured weight and reps, in "weight × reps" order', () => {
+      expect(prEvidence({ weight_kg: 152, reps: 5 }, fmt)).toBe('152kg × 5');
+    });
+
+    it('never prints the calculated 1RM — the whole point of this ticket', () => {
+      // `estimated_1rm`'s `value` IS the model's output (see `RECORD_BASIS`
+      // in `lib/records.ts`); the call site passes the WHOLE record, exactly
+      // like `prBadgeFor` does with `top.record`, so this pins that
+      // `prEvidence` reads `weight_kg`/`reps` off it and never `value` — a
+      // mutation that swapped in `record.value` would print 999 here.
+      const estimated1rm = record({ kind: 'estimated_1rm', value: 999, weight_kg: 100, reps: 3 });
+      expect(prEvidence(estimated1rm, fmt)).toBe('100kg × 3');
+      expect(prEvidence(estimated1rm, fmt)).not.toContain('999');
+    });
+
+    it('falls back to a bare rep count with no weight', () => {
+      expect(prEvidence({ weight_kg: null, reps: 20 }, fmt)).toBe('20 reps');
+    });
+
+    it('is null with neither — the kinds this format does not cover', () => {
+      expect(prEvidence({ weight_kg: null, reps: null }, fmt)).toBeNull();
+    });
+  });
+
+  describe('prBadgeFor', () => {
+    const fmt = (kg: number) => `${Math.round(kg)}kg`;
+
+    it('matches the shape the ticket asked for', () => {
+      const records = [named('back-squat', 'Back Squat', { weight_kg: 152, reps: 5 })];
+      expect(prBadgeFor(records, fmt)).toBe('Back Squat · 152kg × 5 PR');
+    });
+
+    it('is null with no records', () => {
+      expect(prBadgeFor([], fmt)).toBeNull();
+    });
+
+    it('is null rather than a raw id when the name never resolved', () => {
+      const records = [named('back-squat', null, { weight_kg: 152, reps: 5 })];
+      expect(prBadgeFor(records, fmt)).toBeNull();
+    });
+
+    it('is null when the top record has no describable evidence', () => {
+      const records = [named('plank', 'Plank', { weight_kg: null, reps: null })];
+      expect(prBadgeFor(records, fmt)).toBeNull();
+    });
+
+    it('captions only the top record when the session set several', () => {
+      const records = [
+        named('back-squat', 'Back Squat', { weight_kg: 152, reps: 5 }),
+        named('bench-press', 'Bench Press', { weight_kg: 100, reps: 3 }),
+      ];
+      const badge = prBadgeFor(records, fmt);
+      expect(badge).toContain('Back Squat');
+      expect(badge).not.toContain('Bench Press');
+    });
   });
 });
 
@@ -205,6 +315,15 @@ describe('the objective tiles', () => {
     expect(statsFor(summary({ tonnageKg: 4200, tonnageUnknown: false }), kg).find((s) => s.label === 'Volume')?.value).toBe(
       '4200 kg',
     );
+  });
+
+  it('never shows a Reps tile, even when there were plenty (N447/#745)', () => {
+    // Reported as "gets crowded". The PR badge now carries its own reps
+    // figure when there is one; a session-wide rep COUNT sitting next to it
+    // said nothing that wasn't said better elsewhere, so it was dropped —
+    // Sets and Volume are what's left of the strength strip.
+    const stats = statsFor(summary({ reps: 96 }), kg);
+    expect(stats.map((s) => s.label)).toEqual(['Time', 'Sets', 'Volume']);
   });
 
   it('always leads with time, for both sports', () => {

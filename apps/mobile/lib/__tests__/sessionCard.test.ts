@@ -1,5 +1,5 @@
 import { MOUNTAIN_ORDER, mountainFor } from '../mountains';
-import { headlineFor, type CardData } from '../sessionCard';
+import { cardFromSummary, headlineFor, type CardData } from '../sessionCard';
 
 const card = (id: string, over: Partial<CardData> = {}): CardData => ({
   id,
@@ -92,5 +92,70 @@ describe('headlineFor', () => {
     // 8 peaks × 4 ordinary lines = 32 combinations. A shared seed collapses
     // this to 8 — one line per peak, every time.
     expect(pairs.size).toBeGreaterThan(20);
+  });
+});
+
+describe('cardFromSummary — the PR badge (N447/#745)', () => {
+  const baseInput = (over: Partial<Parameters<typeof cardFromSummary>[0]> = {}) => ({
+    id: 'S1',
+    summary: { title: 'Push Day A', sport: 'strength', records: [] as unknown[] },
+    stats: [{ label: 'Time', value: '1h 04m' }],
+    now: new Date('2026-08-29T10:00:00Z'),
+    ...over,
+  });
+
+  it('shows the caller-formatted badge verbatim, not a count', () => {
+    const card = cardFromSummary(
+      baseInput({
+        summary: { title: 'Push Day A', sport: 'strength', records: [{}] },
+        prBadge: 'Back Squat · 152kg × 5 PR',
+      }),
+    );
+    expect(card.badges).toEqual(['Back Squat · 152kg × 5 PR']);
+  });
+
+  it('never falls back to a bare count when there is no badge text', () => {
+    // The exact failure this ticket reports: "2 personal bests" told the
+    // athlete nothing a real caption wouldn't have. A record whose exercise
+    // name never resolved should show NO badge line, not that count.
+    const card = cardFromSummary(
+      baseInput({ summary: { title: 'Push Day A', sport: 'strength', records: [{}, {}] } }),
+    );
+    expect(card.badges).toEqual([]);
+  });
+
+  it('still claims the headline even when the badge could not be captioned', () => {
+    // `hasRecord` (the headline driver) reads `summary.records.length`, which
+    // is independent of `prBadge` — a record with no resolvable name is still
+    // a real PR, so "NEW BEST." must not silently downgrade to an ordinary
+    // line just because the caption is missing.
+    const card = cardFromSummary(
+      baseInput({ summary: { title: 'Push Day A', sport: 'strength', records: [{}] } }),
+    );
+    expect(card.highlight).toBe('pr');
+  });
+
+  it('does not claim a record for an ordinary session', () => {
+    const card = cardFromSummary(baseInput());
+    expect(card.highlight).toBeUndefined();
+    expect(card.badges).toEqual([]);
+  });
+
+  it('leaves room for the streak badge alongside a real PR caption', () => {
+    // Two slots, and a genuine PR session that also carried the streak needs
+    // both of them.
+    const card = cardFromSummary(
+      baseInput({
+        summary: { title: 'Push Day A', sport: 'strength', records: [{}] },
+        prBadge: 'Back Squat · 152kg × 5 PR',
+        streak: { weeks: 4, carried: true },
+      }),
+    );
+    expect(card.badges).toEqual(['Back Squat · 152kg × 5 PR', '4 weeks unbroken']);
+  });
+
+  it('falls back to the streak highlight when there is no record', () => {
+    const card = cardFromSummary(baseInput({ streak: { weeks: 3, carried: true } }));
+    expect(card.highlight).toBe('streak');
   });
 });

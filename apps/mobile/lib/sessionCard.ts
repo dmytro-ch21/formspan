@@ -107,17 +107,35 @@ export function cardFromSummary(input: {
   } | null;
   /** `carried` means this session is what kept the streak alive. */
   streak?: { weeks: number; carried: boolean } | null;
+  /**
+   * The PR badge's text, already formatted — e.g. "Back Squat · 152kg × 5
+   * PR" — built by `lib/celebration`'s `prBadgeFor`. Pre-formatted for the
+   * same reason `stats` is: naming the record needs an exercise-name lookup
+   * and a unit-aware weight formatter, and this file stays free of both so
+   * it can keep rendering off-screen for the export — see the file comment.
+   *
+   * Null or undefined is a real, common state — no record this session, or
+   * one that could not be captioned (see `prBadgeFor`'s own doc) — and is
+   * NOT the same as `hasRecord` below: a record with no resolvable caption
+   * still earns the "NEW BEST." headline, it just gets no badge pill.
+   */
+  prBadge?: string | null;
   handle?: string;
   now?: Date;
 }): CardData {
-  const { id, summary, stats, streak, handle } = input;
+  const { id, summary, stats, streak, handle, prBadge } = input;
   const when = input.now ?? new Date();
 
   const badges: string[] = [];
-  const prCount = summary.records.length;
-  if (prCount > 0) {
-    badges.push(prCount === 1 ? 'Personal best' : `${prCount} personal bests`);
-  }
+  // Whether THIS session set a personal record at all — drives the headline
+  // (see `highlight` below) independently of whether the badge could be
+  // captioned. `prBadge` failing to resolve a name should not un-happen the
+  // record.
+  const hasRecord = summary.records.length > 0;
+  // No bare-count fallback ("2 personal bests") any more (N447/#745): the
+  // caller either has a real caption or it doesn't, and a count is exactly
+  // the uninformative line the ticket's complaint was about.
+  if (prBadge) badges.push(prBadge);
   // Only when THIS session carried it. "4 weeks" on a session that merely
   // happened during a streak claims credit the session did not earn.
   if (streak?.carried && streak.weeks > 1) {
@@ -155,6 +173,6 @@ export function cardFromSummary(input: {
     more: numbers?.more ?? 0,
     badges,
     handle,
-    highlight: prCount > 0 ? 'pr' : streak?.carried ? 'streak' : undefined,
+    highlight: hasRecord ? 'pr' : streak?.carried ? 'streak' : undefined,
   };
 }
