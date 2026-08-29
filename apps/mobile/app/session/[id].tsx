@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'react-native';
 
 import {
-  KeyboardAwareFooter,
   KeyboardAwareScreen,
   KeyboardAwareScrollView,
   useEnsureVisible,
@@ -1256,12 +1255,13 @@ export default function SessionScreen() {
     : 0;
 
   return (
-    /* The scroll view and the Finish footer below it are siblings
-       compensating for the same keyboard — `KeyboardAwareScreen` is how they
-       find that out. Without it both would inset for the keyboard, and the
-       surplus shows up as a blank band above the footer, exactly as it did
-       on the reflection wizard before this file existed. See
-       `needsPlatformKeyboardInset`. */
+    /* N445 — this screen no longer has a `KeyboardAwareFooter` (Finish moved
+       back into ordinary scroll content, reverting N184 — see that block's
+       own comment below). `KeyboardAwareScreen` still wraps the screen: it is
+       a no-op with no footer registered (the "no footer" default in
+       `KeyboardAwareScroll.tsx`), and keeping it is cheap insurance against a
+       future sibling footer reintroducing the coordination need silently
+       instead of by inspection. See `needsPlatformKeyboardInset`. */
     <KeyboardAwareScreen>
       <View style={styles.container} testID="session-screen">
       <Stack.Screen
@@ -1280,13 +1280,13 @@ export default function SessionScreen() {
           timerState.timer && timerState.minimized ? { paddingTop: TIMER_BAR_SPACE } : null,
         ]}
         // `keyboardShouldPersistTaps` and `automaticallyAdjustKeyboardInsets`
-        // used to be restated here. They were the wrapper's defaults already,
-        // and restating the inset is now actively unsafe: it is no longer a
-        // constant but a value the wrapper computes from whether a
-        // `KeyboardAwareFooter` shares the screen — which, since N184, this one
-        // does whenever the session is still open. Pinning it `true` here
-        // would silently defeat that coordination and bring back the blank
-        // band the wizard lost. The wrapper is the authority — see
+        // used to be restated here. They are the wrapper's defaults, and as of
+        // N445 this screen has no `KeyboardAwareFooter` sibling any more, so
+        // the wrapper resolves the inset to plain `true` — the ordinary,
+        // native-lift behaviour every footer-less screen gets. Left unstated
+        // rather than pinned so a future footer on this screen (should one
+        // come back) is picked up automatically instead of silently
+        // overridden. The wrapper is the authority — see
         // `needsPlatformKeyboardInset`.
       >
         {/* Three numbers while you train — time, sets, reps — and volume
@@ -1903,6 +1903,102 @@ export default function SessionScreen() {
           </Pressable>
         )}
 
+        {/* N445 — reverts N184. Finish used to live here, then moved to a
+            `KeyboardAwareFooter` sibling of this scroll view specifically so
+            it would not be "reachable only by scrolling past the whole
+            workout" — see that entry in docs/decisions/history.md. That
+            footer actively lifts itself to sit just above the keyboard
+            whenever one is open, which put "Finish session" directly beside
+            (often immediately below) whichever set row was being edited: a
+            mis-tap while typing a set's weight could end the whole session.
+            The user reported this directly, with a device screenshot, and
+            asked for it back at the end of the content — this is a deliberate
+            reversal of that decision, not a bug fix on top of it.
+
+            Ordinary scroll content again: it scrolls with the page, so it is
+            never adjacent to an actively-edited field, and it is still
+            reachable in one motion — scrolling to the bottom of a finished
+            workout is the expected gesture. `HoldToConfirm` itself, and every
+            prop it's given, is unchanged; only the container moved. */}
+        {!finished && (
+          <View style={styles.finishSection}>
+            <HoldToConfirm
+              label="Finish session"
+              holdingLabel="Keep holding to finish…"
+              confirmTitle="Finish session?"
+              confirmBody="You won't be able to add to it afterwards."
+              style={[styles.finish, { backgroundColor: accent.accent }]}
+              textStyle={styles.finishText}
+              /*
+                `accent.on`, not the default lime. This button's background IS
+                `accent.accent`, and on the default (brand) palette that is
+                `#D3EC52` — the exact value of `vola.lime`. A lime fill over a
+                lime button at 28% opacity is lime: the fill was mathematically
+                invisible on the one button this control was built for. Every
+                accent ships an `on` colour precisely because it reads against
+                that accent, so this contrasts whichever one is chosen.
+              */
+              fillColor={accent.on}
+              testID="session-finish"
+              onConfirm={async () => {
+                try {
+                  await flush(); // the last set typed must land before the session closes
+                  // A BACKFILLED session (N434) finishes on a real day that
+                  // isn't the day it's dated to — `new Date()` alone would
+                  // stamp `ended_at` days after `started_at`. See
+                  // `finishTimestampFor`'s own doc for why mapping the finish
+                  // moment onto the session's day keeps the real elapsed
+                  // duration intact.
+                  const endedAt = finishTimestampFor(new Date(session!.started_at), new Date());
+                  await finishLocalSession(userId!, id!, endedAt);
+                  const s = await readLocalSession(userId!, id!);
+                  if (s) {
+                    setSession(s);
+                    setSets(s.sets);
+                    setVolume(localVolume(s.sets));
+                  }
+                  requestSync('session-finished');
+                  // Raised AFTER the finish has been written and the push
+                  // requested — the card is a report, never a step in the flow.
+                  if (s) {
+                    const summary = summariseSession(s, localVolume(s.sets), showEffort);
+                    // An empty session gets the plain read-only screen. Marking
+                    // "opened it and finished it" with a card is the hollow
+                    // praise that teaches people to stop reading the app.
+                    if (worthCelebrating(summary)) {
+                      /*
+                        Every piece of async celebration state, cleared together.
+
+                        These lines exist because somebody judged the transition
+                        into a celebration worth defending, and the list had
+                        already drifted: `celebrationMilestone` and
+                        `streakSettled` were added without joining it. A second
+                        celebration in one mount would then open with a fresh
+                        `chimed` ref and a STALE milestone — showing and chiming
+                        a rung this session did not cross, which is the exact
+                        wrong-congratulation this feature is built to avoid.
+
+                        No path to a second celebration exists today (the finish
+                        control renders only while `ended_at` is null), so this
+                        is defence, not a fix. It is written as one block so the
+                        next state added here is obvious. Raised in review.
+                      */
+                      setCelebrationRecords([]);
+                      setRecordsSettled(false);
+                      setCelebrationStreak(null);
+                      setCelebrationMilestone(null);
+                      setStreakSettled(false);
+                      setCelebrating(summary);
+                    }
+                  }
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : String(err));
+                }
+              }}
+            />
+          </View>
+        )}
+
         {finished && (
           <>
             {/*
@@ -2001,97 +2097,6 @@ export default function SessionScreen() {
           }}
         />
       </KeyboardAwareScrollView>
-
-      {/* N184 — Finish, pinned below the scroll rather than scrolled with it.
-
-          It used to sit at the very end of the content, after every exercise
-          and "+ Add exercise" — reachable only by scrolling past the whole
-          workout, which is exactly backwards for the one control every
-          session ends with. A `KeyboardAwareFooter` is a SIBLING of the
-          scroll view, so it stays on screen (and, per its own doc comment,
-          above the keyboard) without anything here having to compute that.
-
-          Still a hold, not a tap — see the control's own comment for why —
-          and still gone entirely once the session is finished: a read-only
-          session has nothing left to confirm. */}
-      {!finished && (
-        <KeyboardAwareFooter style={styles.finishFooter}>
-          <HoldToConfirm
-            label="Finish session"
-            holdingLabel="Keep holding to finish…"
-            confirmTitle="Finish session?"
-            confirmBody="You won't be able to add to it afterwards."
-            style={[styles.finish, { backgroundColor: accent.accent }]}
-            textStyle={styles.finishText}
-            /*
-              `accent.on`, not the default lime. This button's background IS
-              `accent.accent`, and on the default (brand) palette that is
-              `#D3EC52` — the exact value of `vola.lime`. A lime fill over a
-              lime button at 28% opacity is lime: the fill was mathematically
-              invisible on the one button this control was built for. Every
-              accent ships an `on` colour precisely because it reads against
-              that accent, so this contrasts whichever one is chosen.
-            */
-            fillColor={accent.on}
-            testID="session-finish"
-            onConfirm={async () => {
-              try {
-                await flush(); // the last set typed must land before the session closes
-                // A BACKFILLED session (N434) finishes on a real day that
-                // isn't the day it's dated to — `new Date()` alone would
-                // stamp `ended_at` days after `started_at`. See
-                // `finishTimestampFor`'s own doc for why mapping the finish
-                // moment onto the session's day keeps the real elapsed
-                // duration intact.
-                const endedAt = finishTimestampFor(new Date(session!.started_at), new Date());
-                await finishLocalSession(userId!, id!, endedAt);
-                const s = await readLocalSession(userId!, id!);
-                if (s) {
-                  setSession(s);
-                  setSets(s.sets);
-                  setVolume(localVolume(s.sets));
-                }
-                requestSync('session-finished');
-                // Raised AFTER the finish has been written and the push
-                // requested — the card is a report, never a step in the flow.
-                if (s) {
-                  const summary = summariseSession(s, localVolume(s.sets), showEffort);
-                  // An empty session gets the plain read-only screen. Marking
-                  // "opened it and finished it" with a card is the hollow
-                  // praise that teaches people to stop reading the app.
-                  if (worthCelebrating(summary)) {
-                    /*
-                      Every piece of async celebration state, cleared together.
-
-                      These lines exist because somebody judged the transition
-                      into a celebration worth defending, and the list had
-                      already drifted: `celebrationMilestone` and
-                      `streakSettled` were added without joining it. A second
-                      celebration in one mount would then open with a fresh
-                      `chimed` ref and a STALE milestone — showing and chiming
-                      a rung this session did not cross, which is the exact
-                      wrong-congratulation this feature is built to avoid.
-
-                      No path to a second celebration exists today (the finish
-                      control renders only while `ended_at` is null), so this
-                      is defence, not a fix. It is written as one block so the
-                      next state added here is obvious. Raised in review.
-                    */
-                    setCelebrationRecords([]);
-                    setRecordsSettled(false);
-                    setCelebrationStreak(null);
-                    setCelebrationMilestone(null);
-                    setStreakSettled(false);
-                    setCelebrating(summary);
-                  }
-                }
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-              }
-            }}
-          />
-        </KeyboardAwareFooter>
-      )}
 
       {/* OUTSIDE the scroll view, deliberately — a `ScrollView` clips its
           content, and the capture reads the real native view. See
@@ -3205,21 +3210,19 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   primaryText: { fontWeight: '700', fontSize: 15 },
-  // The footer `Finish` sits in, a sibling of the scroll view — see the
-  // `KeyboardAwareFooter` call site. A hairline rather than a filled ground:
-  // the screen behind it is already themed, and a full-width fill would read
-  // as a second surface competing with the card boundaries above it.
-  //
-  // `paddingBottom: 28`, matching the reflection wizard's own footer rather
-  // than picking a fresh number — that one was device-verified against the
-  // home-indicator safe area, and this hold target sits exactly as close to
-  // the bottom edge as that one does. `frontend-reviewer` flagged the
-  // original 20 here as untested and closer to the indicator than the
-  // wizard's verified value.
-  finishFooter: {
-    paddingHorizontal: 16,
+  // N445 — `finish` sits in ordinary scroll content now, not a pinned
+  // `KeyboardAwareFooter` sibling (see that block's own comment for why the
+  // footer was reverted). `finishSection` is the content-block equivalent of
+  // the old footer's padding: a hairline rather than a filled ground, same
+  // reasoning as before — the screen behind it is already themed, and a
+  // full-width fill would read as a second surface competing with the card
+  // boundaries above it. No bottom safe-area padding is needed any more:
+  // this is one more scrollable item, not a screen-edge control, so the
+  // scroll view's own `contentContainerStyle` padding is what clears the
+  // home indicator, exactly as it does for every other item in this list.
+  finishSection: {
+    marginTop: 20,
     paddingTop: 10,
-    paddingBottom: 28,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: vola.lineSoft,
   },

@@ -238,8 +238,10 @@ describe('who lifts the field when the keyboard appears', () => {
     expect(nativeScrollsFocusedFieldClear('android')).toBe(false);
   });
 
-  // N184 — a `KeyboardAwareFooter` on screen (the session screen's sticky
-  // Finish) runs `automaticallyAdjustKeyboardInsets` OFF on every platform,
+  // N184 — a `KeyboardAwareFooter` on screen (e.g. the food-logging quantity
+  // sheet's sticky Add, or the BJJ reflection wizard's Next — the strength
+  // session screen reverted to no footer at all in N445, see its own
+  // comment) runs `automaticallyAdjustKeyboardInsets` OFF on every platform,
   // including iOS — see `needsPlatformKeyboardInset`. Without this, iOS was
   // told "the platform already does it" on a screen where the platform had
   // just been switched off, and neither mechanism lifted the field. Found by
