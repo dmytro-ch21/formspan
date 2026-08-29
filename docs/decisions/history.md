@@ -48763,6 +48763,53 @@ gaps (already flagged on #728) and this entry's own click-through — a
 signed-in browser session was not available in this environment, matching
 N440's own note on why — remain **NEEDS HUMAN EVIDENCE**.
 
+## 2026-08-28 — N471 (#471): five module-off screens pointed at a "Sports" section that has never existed
+
+Every module-off notice told the athlete some form of *"Turn it back on
+under Sports in your profile"*. `apps/mobile/app/profile/edit.tsx`'s section
+heading has always been **"What you train"** — there has never been a
+"Sports" heading. And for nutrition it was wrong twice: nutrition is not a
+sport (`lib/modules.ts`'s `is_sport` exists precisely to keep it out of
+anything sport-shaped), so the sentence sent the athlete to a section named
+after something nutrition explicitly is not.
+
+**Found by 7, not 5.** The issue's own grep found five screens when it was
+filed; a fresh grep at fix time found the same wrong sentence rendered in
+**seven** places — `bjj/index.tsx`, `bjj/log.tsx`, `bjj/positions.tsx`,
+`PromotionForm.tsx`, `ModuleOffNotice.tsx` (shared by the Food/Goals
+module-off screens), `(tabs)/progress.tsx`, and `components/progress/
+Reading.tsx`. Two more copies of the sentence had been hand-written into the
+app in the time between the ticket being filed and it being picked up —
+exactly the propagation `ModuleOffNotice.tsx`'s own doc comment already
+named as the risk: #370 established the pattern, #423 matched it
+deliberately for consistency, and the wrong destination rode along both
+times.
+
+**Fix: one string in one place, not one string in seven.** The issue's own
+acceptance criteria offered two options — keep it as one string repeated
+correctly in every location, or consolidate to one string in one place. Given
+this exact sentence had already independently drifted into two *more*
+screens since the ticket was filed, repeating a corrected literal seven times
+would only reset the clock on the next screen doing the same thing by hand.
+`lib/modules.ts` — already the "the same list wasn't written down six times"
+module for the discipline registry itself — now exports
+`MODULE_TOGGLE_LOCATION = 'What you train'`, and all seven render sites
+interpolate it instead of hardcoding the sentence's destination clause. A
+future rename of that heading is now a one-line change instead of a grep.
+
+`components/__tests__/moduleOffNotice.test.tsx`'s two assertions on the old
+`/Sports in your profile/` regex were updated to match the corrected
+destination and mutation-tested: reverted the fix, confirmed the test failed
+on `Unable to find an element with text: /What you train in your profile/`
+(a real match failure, not a compile error), restored, confirmed green by
+re-running. Full mobile suite (231 suites / 3620 tests) and `lint:mobile`
+(0 errors, same pre-existing 50/50 warning ceiling) both green.
+
+**Left for the user**: the issue's one `NEEDS HUMAN EVIDENCE` criterion —
+*"read the sentence on a device and then find the toggle without already
+knowing where it is"* — cannot be produced by a session that already read
+the fix's own source; genuinely needs someone encountering the sentence cold.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

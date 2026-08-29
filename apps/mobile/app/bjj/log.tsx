@@ -22,6 +22,7 @@ import {
 } from '@/lib/bjjSession';
 import { fetchFocus, type Focus } from '@/lib/bjjFocus';
 import { backdatedTimestamp } from '@/lib/calendar';
+import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { PREF_BJJ_LAST_LOG, readPref, writePref } from '@/lib/prefs';
 import { saveLocalBjjDetail, startLocalSession } from '@/lib/sessionStore';
@@ -267,7 +268,7 @@ export default function LogBjjScreen() {
         <Stack.Screen options={{ title: 'Log BJJ' }} />
         <Text style={styles.centreTitle}>BJJ tracking is off</Text>
         <Text style={styles.centreMuted}>
-          Turn it back on under Sports in your profile to log a session.
+          Turn it back on under {MODULE_TOGGLE_LOCATION} in your profile to log a session.
         </Text>
       </View>
     );

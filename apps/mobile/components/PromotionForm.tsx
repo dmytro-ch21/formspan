@@ -18,6 +18,7 @@ import {
   type PromotionInput,
   type Rank,
 } from '@/lib/bjj';
+import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -131,7 +132,7 @@ export function PromotionForm({
         <Stack.Screen options={{ title: initial ? 'Edit promotion' : 'Add promotion' }} />
         <Text style={styles.centreTitle}>BJJ tracking is off</Text>
         <Text style={styles.centreMuted}>
-          Turn it back on under Sports in your profile before recording a promotion.
+          Turn it back on under {MODULE_TOGGLE_LOCATION} in your profile before recording a promotion.
         </Text>
       </View>
     );

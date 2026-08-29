@@ -219,6 +219,25 @@ const FALLBACK: Module[] = [
   },
 ];
 
+/**
+ * Where an athlete actually finds the toggle for a disabled module —
+ * `profile/edit.tsx`'s "What you train" section heading, verbatim.
+ *
+ * N471 (#471): "Turn it back on under Sports in your profile" was written by
+ * hand in `bjj/index`, `bjj/log`, `bjj/positions` and `PromotionForm`
+ * (`ModuleOffNotice` picked the same wording up for Food/Goals, and
+ * `progress.tsx`/`Reading.tsx` later did too) — SEVEN places, all pointing at
+ * a "Sports" heading that has never existed; the real one has always been
+ * "What you train", and nutrition being told to look "under Sports" was
+ * doubly wrong, since `is_sport` is false for it.
+ *
+ * This is the fix the ticket's own acceptance criteria named as the better
+ * of the two options — "one string in five places" kept re-drifting every
+ * time a new screen copied the sentence by hand; one string in ONE place is
+ * the version a future rename of the heading cannot silently un-agree with.
+ */
+export const MODULE_TOGGLE_LOCATION = 'What you train';
+
 /** A copy, so a caller filtering or sorting can't corrupt the fallback. */
 export function fallbackModules(): Module[] {
   return FALLBACK.map((m) => ({ ...m, capabilities: { ...m.capabilities } }));

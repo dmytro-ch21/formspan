@@ -15,8 +15,10 @@ import type { Module } from '@/lib/modules';
  * entry point at all. An absent row here is the whole thing gone.
  *
  * The destination screen already explains itself properly ("BJJ tracking is
- * off. Turn it back on under Sports in your profile"). Nothing linked to it,
- * so the athlete never reached the screen that would say so.
+ * off. Turn it back on under What you train in your profile" — see N471/
+ * #471, which fixed this sentence's destination in all seven places it was
+ * rendered). Nothing linked to it, so the athlete never reached the screen
+ * that would say so.
  */
 
 const mockPush = jest.fn();

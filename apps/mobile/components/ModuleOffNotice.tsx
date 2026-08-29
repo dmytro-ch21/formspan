@@ -2,7 +2,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import type { Module } from '@/lib/modules';
+import { MODULE_TOGGLE_LOCATION, type Module } from '@/lib/modules';
 
 /**
  * A whole route saying which module is turned off — N61 / #423.
@@ -11,8 +11,10 @@ import type { Module } from '@/lib/modules';
  *
  * `bjj/index`, `bjj/log`, `bjj/positions` and `PromotionForm` already do this
  * by hand: with the discipline off they replace their entire body with "BJJ
- * tracking is off / turn it back on under Sports in your profile". #370's
- * finding was that those screens were never the problem — nothing LINKED to
+ * tracking is off / turn it back on under {MODULE_TOGGLE_LOCATION} in your
+ * profile" (that wrongly said "Sports" everywhere until N471/#471 — see that
+ * constant's own doc comment). #370's finding was that those screens were
+ * never the problem — nothing LINKED to
  * them while the module was off, so the athlete never reached the screen that
  * would explain itself. The fix there was to restore the links.
  *
@@ -79,7 +81,7 @@ export function ModuleOffNotice({
               a capitalised key gives "Bjj" where the registry says "BJJ". */}
           <Text style={styles.title}>{module.label} is turned off</Text>
           <Text style={styles.muted}>
-            Turn it back on under Sports in your profile to {action}.
+            Turn it back on under {MODULE_TOGGLE_LOCATION} in your profile to {action}.
           </Text>
         </>
       )}

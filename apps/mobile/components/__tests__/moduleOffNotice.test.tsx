@@ -45,7 +45,7 @@ it('names the module that is off, and says where to turn it back on', () => {
   // The destination is NAMED. #370's whole finding was that the athlete never
   // reached the screen that would explain itself; an explanation with no next
   // step repeats that failure one screen later.
-  expect(screen.getByText(/Sports in your profile/)).toBeTruthy();
+  expect(screen.getByText(/What you train in your profile/)).toBeTruthy();
   expect(screen.getByText(/log food/)).toBeTruthy();
 });
 
@@ -77,5 +77,5 @@ it('makes no offer when this deployment has no such module', () => {
   expect(screen.getByText('Not available')).toBeTruthy();
   expect(screen.getByText(/Nothing here is set up to log food/)).toBeTruthy();
   expect(screen.queryByText(/turned off/)).toBeNull();
-  expect(screen.queryByText(/Sports in your profile/)).toBeNull();
+  expect(screen.queryByText(/What you train in your profile/)).toBeNull();
 });

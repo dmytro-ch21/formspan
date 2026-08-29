@@ -2,6 +2,7 @@ import { ActivityIndicator, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 import type { Reading } from '@/lib/progress';
 
 /**
@@ -68,8 +69,8 @@ export function ReadingState({
         <Text style={styles.muted}>Couldn&apos;t load {subject} just now.</Text>
       ) : reading.state === 'off' ? (
         <Text style={styles.muted}>
-          {offLabel ?? 'This'} is turned off. Turn it back on under Sports in your profile and
-          this fills in.
+          {offLabel ?? 'This'} is turned off. Turn it back on under {MODULE_TOGGLE_LOCATION} in
+          your profile and this fills in.
         </Text>
       ) : empty !== null ? (
         <Text style={styles.muted}>{empty}</Text>
