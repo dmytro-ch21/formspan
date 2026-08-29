@@ -5,6 +5,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, View as RNView } from 'react
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import {
   fetchPositions,
@@ -80,7 +81,7 @@ export default function PositionMapScreen() {
       <View style={styles.centre} testID="positions-disabled">
         <Stack.Screen options={{ title: 'Position map' }} />
         <Text style={styles.emptyTitle}>BJJ tracking is off</Text>
-        <Text style={styles.muted}>Turn it back on under Sports in your profile.</Text>
+        <Text style={styles.muted}>Turn it back on under {MODULE_TOGGLE_LOCATION} in your profile.</Text>
       </View>
     );
   }

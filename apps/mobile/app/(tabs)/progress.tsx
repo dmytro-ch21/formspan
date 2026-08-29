@@ -17,7 +17,12 @@ import { shiftDate, trendWeight } from '@/lib/anthropometry';
 import { listCheckins, type Checkin } from '@/lib/body';
 import { dayString, weekDays } from '@/lib/calendar';
 import { localLoggedDays } from '@/lib/foodLog';
-import { hasFoodLog, moduleOffWithCatalog, moduleWithCatalog } from '@/lib/modules';
+import {
+  hasFoodLog,
+  MODULE_TOGGLE_LOCATION,
+  moduleOffWithCatalog,
+  moduleWithCatalog,
+} from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import type { LoggedDaysView } from '@/lib/nutrition';
 import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
@@ -406,7 +411,7 @@ export default function ProgressScreen() {
           {modulesReady && !bjj && bjjOff && (
             <Text style={styles.off} testID="progress-bjj-off">
               {bjjOff.label} is turned off, so its position map is not shown. Turn it back on
-              under Sports in your profile.
+              under {MODULE_TOGGLE_LOCATION} in your profile.
             </Text>
           )}
         </View>

@@ -7,6 +7,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { describeTimeAtBelt, getStanding, nextRank, type Promotion, type Standing } from '@/lib/bjj';
+import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -93,7 +94,7 @@ export default function BjjStandingScreen() {
         <Stack.Screen options={{ title: 'Your rank' }} />
         <Text style={styles.heroTitle}>BJJ tracking is off</Text>
         <Text style={styles.heroMuted}>
-          Turn it back on under Sports in your profile to see your rank again.
+          Turn it back on under {MODULE_TOGGLE_LOCATION} in your profile to see your rank again.
         </Text>
       </View>
     );

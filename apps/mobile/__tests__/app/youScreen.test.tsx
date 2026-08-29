@@ -599,8 +599,9 @@ describe('the Sports row', () => {
     const row = await screen.findByTestId('you-sports');
     fireEvent.press(row);
     // The destination screens explain themselves ("BJJ tracking is off, turn
-    // it back on under Sports"). Nothing linked to them while they were off,
-    // which is why the athlete never reached the screen that would say so.
+    // it back on under What you train" — N471/#471). Nothing linked to them
+    // while they were off, which is why the athlete never reached the screen
+    // that would say so.
     expect(mockPush).toHaveBeenCalledWith('/profile/edit');
   });
 });

@@ -515,7 +515,11 @@ function Row({ label, value }: { label: string; value: string }) {
  * module-gated surface in this app disappears silently when its discipline is
  * off: the belt roadmaps, the Plan tab's curricula strip, BJJ in the session
  * picker, and the Food and Goals TABS. The destination screens explain
- * themselves properly ("BJJ tracking is off, turn it back on under Sports")
+ * themselves properly ("BJJ tracking is off, turn it back on under What you
+ * train" — N471/#471 corrected this row's own quoted copy, which had drifted
+ * to naming a "Sports" section that never existed). This row's OWN label and
+ * hint still say "Sports" over a value that lists every enabled module,
+ * nutrition included — the same category error, not fixed here: W17/#737.
  * — but nothing links to them while they are off, so the athlete never reaches
  * the screen that would say so. The user went looking for the belt roadmaps on
  * a real phone and reported them missing; they exist and work.

@@ -11571,6 +11571,16 @@ The scenarios that matter are the ones distinguishing three states, not two.
   session" is nonsense, so `is_sport` filtering is load-bearing.
 - Reaching `/bjj/log` or `/bjj/positions` directly with BJJ off still shows the
   screen's own explanation — that behaviour predates this and must not regress.
+- **N471 (#471): the destination named in "Turn it back on under ___ in your
+  profile" must be a section that actually exists, cold.** Every module-off
+  screen (`bjj/index`, `bjj/log`, `bjj/positions`, `PromotionForm`,
+  `ModuleOffNotice`'s Food/Goals callers, `progress.tsx`, `progress/
+  Reading.tsx`) now interpolates `lib/modules.ts`'s `MODULE_TOGGLE_LOCATION`
+  rather than a hand-typed literal — **NEEDS HUMAN EVIDENCE**: read the
+  sentence on a device with no prior knowledge of where the toggle lives, and
+  confirm you land on it. This is the scenario the original "Sports" wording
+  failed silently for months, because nothing exercised the destination, only
+  that a sentence rendered.
 
 ### Regression trap
 
