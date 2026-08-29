@@ -5,6 +5,7 @@
  */
 
 import { uploadAvatar, removeAvatar } from '../profile';
+import { DEFAULT_TIMEOUT_MS, SLOW_REQUEST_TIMEOUT_MS } from '../authedFetch';
 
 const mockApi = jest.fn();
 jest.mock('../apiRequest', () => ({ apiRequest: (...a: unknown[]) => mockApi(...a) }));
@@ -22,6 +23,7 @@ describe('uploadAvatar', () => {
       getToken,
       '/profile/avatar',
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+      expect.anything(),
     );
   });
 
@@ -45,6 +47,16 @@ describe('uploadAvatar', () => {
     await expect(
       uploadAvatar(getToken, { uri: 'file:///photo.jpg', mimeType: 'image/jpeg' }),
     ).rejects.toThrow('boom');
+  });
+
+  it('asks for the slow budget, not the default — N446, a multi-megabyte body over gym wifi', async () => {
+    mockApi.mockResolvedValue({});
+    await uploadAvatar(getToken, { uri: 'file:///photo.jpg', mimeType: 'image/jpeg' });
+
+    const opts = mockApi.mock.calls[0][3] as { timeoutMs?: number } | undefined;
+    expect(opts?.timeoutMs).toBe(SLOW_REQUEST_TIMEOUT_MS);
+    // Stated as a difference, so a mutation making them equal cannot pass.
+    expect(opts?.timeoutMs).not.toBe(DEFAULT_TIMEOUT_MS);
   });
 });
 
