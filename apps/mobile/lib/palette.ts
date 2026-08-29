@@ -1,4 +1,3 @@
-import type { ViewStyle } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 import { MONO_KEY, isMono, type AccentName } from '@/constants/Colors';
@@ -54,22 +53,46 @@ export function monoNeedsRelaunch(name: AccentName): boolean {
 }
 
 /**
- * The accent-coloured bloom under a primary control — and nothing at all in
- * monochrome.
+ * A token colour at partial opacity, as an `rgba()` string React Native
+ * accepts directly in `backgroundColor`/`borderColor`.
  *
- * Three surfaces (the Today action, the Workouts action, the calendar's selected
- * day) set `shadowColor` to the accent rather than to black, so the button reads
- * as lit rather than as lifted. In colour that is a soft green or amber halo. In
- * mono the accent is a near-white, and a near-white bloom on a near-black ground
- * is not subtle — it is a glow, on the one theme whose whole point is being
- * plain.
+ * N444 (#741): the design-tokens rule is "no arbitrary new colours" — this
+ * is the derivation the rule expects rather than the exception to it, the
+ * same move `ShareToFriend.tsx`'s sheet backdrop and `MomentumCard.tsx`'s
+ * ring-centre plate already made by hand (`rgba(8,11,18,0.86)`, computed from
+ * `vola.bg` and never written down as a function). Centralised here so a
+ * THIRD hand-computed `rgba(8,11,18,…)` literal doesn't appear the next time
+ * somebody needs a scrim.
  *
- * `shadowOpacity` and `elevation` are zeroed rather than just the colour:
- * a transparent iOS shadow still costs an offscreen pass, and Android draws
- * `elevation` on its own regardless of what colour it was told.
+ * Takes any 6-digit `#rrggbb` hex — including a per-athlete accent colour,
+ * which a literal never could — and only that shape: no shorthand `#rgb`, no
+ * named CSS colours, because every token this app defines is already 6-digit
+ * hex (`assets/brand/design-tokens.json`, `constants/Colors.ts`'s `accents`)
+ * and a silent wrong-length parse is worse than a loud one.
  */
-export function accentGlow(accent: string): ViewStyle {
-  return isMono ? NO_GLOW : { shadowColor: accent };
+export function withAlpha(hex: string, alpha: number): string {
+  const match = /^#([0-9a-fA-F]{6})$/.exec(hex);
+  if (!match) {
+    // A malformed token is a bug at the CALL SITE, not something to paper
+    // over with a guess — but a crash mid-render is worse than a visibly
+    // wrong (fully opaque) colour, so fail toward "too solid" rather than
+    // toward invisible or throwing.
+    return hex;
+  }
+  const r = parseInt(match[1].slice(0, 2), 16);
+  const g = parseInt(match[1].slice(2, 4), 16);
+  const b = parseInt(match[1].slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
-const NO_GLOW: ViewStyle = { shadowColor: 'transparent', shadowOpacity: 0, elevation: 0 };
+/**
+ * Was: the accent-coloured bloom under a primary control. **Removed in N444
+ * (#741)** along with its one remaining call site (`workouts.tsx`'s "New
+ * workout" FAB) — the user reported that FAB's glow as the concrete example
+ * of an inconsistency with Today's identically-shaped, deliberately flat
+ * "New log" (N108: "the user has said twice that they do not want haze
+ * anywhere"), and asked for one rule buttons follow, not two. N108's answer
+ * wins: no glow, anywhere, ever again — so this helper has no reason to
+ * exist. If a future screen wants to reintroduce a shadow, that is a new
+ * decision to raise, not a reason to resurrect this function.
+ */

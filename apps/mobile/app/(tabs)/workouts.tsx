@@ -46,7 +46,6 @@ import { vola } from '@/constants/Colors';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
-import { accentGlow } from '@/lib/palette';
 
 /**
  * "1 exercise", not "1 exercises".
@@ -592,7 +591,7 @@ export default function WorkoutsScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.fab,
-            { backgroundColor: accent.accent }, accentGlow(accent.accent),
+            { backgroundColor: accent.accent },
             pressed && styles.fabPressed,
           ]}
           onPress={() => setComposing(true)}
@@ -1146,21 +1145,15 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 12,
     paddingHorizontal: 18,
-    // A flat pill on a dark ground cannot separate itself from a list that
-    // scrolls underneath it. `shadowColor` is set INLINE to the accent, not to
-    // black: 35% black over this bg is a 1.02:1 step — literally invisible —
-    // and the accent instead reads as light coming off the pill. Same trick as
-    // the one shadow in `TrainingCalendar` — including its `height: 0`, whose
-    // comment is explicit that an offset makes it "read as a drop shadow rather
-    // than light". Keeping 4 while taking the accent was the worst of both.
-    //
-    // On Android this is no longer elevation-only: RN 0.86 forwards
-    // `shadowColor` to `setOutlineSpotShadowColor` on API 28+, so the tint
-    // lands there too.
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 4,
+    // NO GLOW (N108/N444, #741). This used to bloom the accent colour behind
+    // the pill on the "flat pill can't separate from scrolling content"
+    // argument — a real one, but Today's identically-shaped "New log" never
+    // got that treatment (N108: "the user has said twice that they do not
+    // want haze anywhere"), and the user reported the mismatch directly:
+    // "New Log one has glow another doesnt - they both should be more
+    // modern". N108's flat answer wins for both, so this pill now matches
+    // Today's exactly — same radius, same padding, same `bottom`, and now
+    // the same absence of a shadow, not just the first three.
   },
   fabPressed: { opacity: 0.85 },
   // No `color` here: the call site always sets it from `accent.on`, and a

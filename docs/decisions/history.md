@@ -48846,6 +48846,81 @@ Full mobile suite (231 suites / 3622 tests) and typecheck green.
 here ("0 / eaten") doesn't reproduce the original overlap; only real logged
 data with an active target does.
 
+## 2026-08-28 — N444 (#741): shared Button/Pill primitives — the foundation, not the migration
+
+User-reported directly, from three device screenshots: the date pill on
+Today and the date pill on Food are visually different controls; "New log"
+and "New workout" are the same shape except one has a glow and the other
+doesn't; and a general ask — "everything customizable from one place, and
+components are reused... if you need to change a style of all buttons we
+do it in one place."
+
+**Audit, before any code**: `apps/mobile` had no shared `Button`, `Pill`,
+`Chip`, or `Badge` component anywhere — `components/ui/PeriodSwitcher.tsx`
+was the one genuinely reused control. At least 15 independently-declared
+"chip"/"pill" `StyleSheet` blocks were found across `workouts.tsx`,
+`library.tsx`, `profile/edit.tsx`, `bjj/log.tsx`, `bjj/reflect/[id].tsx`,
+`bjj/proficiency.tsx`, `bjj/dictate.tsx`, `session/history.tsx`,
+`food/entry/[id].tsx`, `technique/[id].tsx`, `PromotionForm.tsx`,
+`TrackerForm.tsx`, `RoadmapSummary.tsx`, `MomentumCard.tsx`,
+`CurriculumEditor.tsx` — three different radii among them (999/10/12) for
+the same visual idea. The declared token scale
+(`assets/brand/design-tokens.json`) is `[8, 12, 16, 24]`; the actual
+observed radii across button/pill/card/badge contexts span 1–30, 95 and
+999 — and 999, the de facto pill standard, wasn't a token at all. The only
+surviving glow on any button/pill in the app was `workouts.tsx`'s "New
+workout" FAB; its visually-identical sibling, Today's "New log", has been
+deliberately flat since N108 ("the user has said twice that they do not
+want haze anywhere on this screen") — a decision that was never turned
+into a rule, so it silently didn't propagate to the second FAB.
+
+**Direction confirmed by the user before writing code** (three questions,
+since this touches nearly every screen and reopens a documented past
+ruling): incremental migration, not one giant PR; **no glow anywhere**,
+keeping N108 — the fix for "New workout" vs "New log" is stripping the
+glow, not adding one; and **one radius for every pill/chip/badge: `999`**,
+not a tiered scale.
+
+**What landed**:
+
+- `assets/brand/design-tokens.json` gains `"pillRadius": 999` — a token,
+  not tribal knowledge.
+- `lib/palette.ts` gains `withAlpha(hex, alpha)` — a 6-digit-hex-to-`rgba()`
+  helper, the derivation the "no arbitrary new colours" design-token rule
+  actually expects. Two files (`ShareToFriend.tsx`, `MomentumCard.tsx` —
+  see the N443 entry above) had already hand-computed the identical
+  `rgba(8,11,18,…)` literal without a shared function; this is the third
+  time that exact scrim would have been typed out by hand.
+- `lib/palette.ts`'s `accentGlow`/`NO_GLOW` are **deleted**, along with
+  their one remaining call site (the "New workout" FAB) — dead the moment
+  N108's no-glow ruling applies to both FABs instead of one.
+- `components/ui/Button.tsx` — `primary`/`secondary`/`ghost`, radius `999`
+  always, no shadow/elevation in any variant, `primary`'s fill is the
+  athlete's chosen accent (`useAccent()`) at 92% opacity via `withAlpha`
+  rather than a hardcoded colour or a fully solid fill.
+- `components/ui/Pill.tsx` — one component for both "badge" and "chip":
+  `onPress` present makes it an interactive, selectable `Pressable` with
+  `accessibilityRole: "button"`; `onPress` absent makes it a static `View`
+  badge with no button semantics. Radius `999` always; `active` tints
+  toward the accent via the same `withAlpha` derivation.
+- `workouts.tsx`'s "New workout" FAB loses its glow, now matching Today's
+  "New log" exactly — the one concrete inconsistency named in the report.
+
+**What did NOT land, deliberately**: migrating the ≥15 existing ad-hoc
+chip/pill declarations onto the new components; fixing `food/add.tsx` and
+`FoodQuantity.tsx`'s hardcoded-`vola.accent` "Log" buttons (a second,
+independent hardcoded-colour bug the audit also found); or resolving the
+`components/SessionCard.tsx` / `components/ui/SessionCard.tsx` naming
+collision. Each is its own follow-up ticket per the user's own confirmed
+"incremental, not one giant PR" direction — filed as part of N444's
+acceptance criteria rather than folded in here.
+
+New tests: mutation-tested guards on both components (no-shadow-on-any-
+variant, radius-always-999-on-both-badge-and-chip) confirming a reverted
+mutation produces a real assertion failure, plus unit coverage for
+`withAlpha` itself. Full mobile suite (234/3644), typecheck, and
+`lint:mobile` (0 errors, same pre-existing 50/50 ceiling) all green.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

@@ -15311,3 +15311,52 @@ drew for authoring/scheduling versus running.
   sets it, so an offline device cannot accidentally schedule (or re-point) a
   class regardless of what UI bugs might exist elsewhere; confirm no mobile
   screen offers a class-plan picker.
+
+## N444 — shared Button/Pill primitives, the foundation (`apps/mobile/components/ui/Button.tsx`, `apps/mobile/components/ui/Pill.tsx`, `apps/mobile/lib/palette.ts`, `apps/mobile/app/(tabs)/workouts.tsx`)
+
+This lands the shared components; it does NOT migrate any existing screen
+onto them (that is a sequence of follow-up tickets — see the acceptance
+criteria on #741). The only user-visible change in THIS ticket is the one
+named below.
+
+### The one visible change: Workouts' "New workout" FAB loses its glow
+
+- Open Plan → My workouts. The "New workout" pill (bottom-right) must look
+  IDENTICAL to Today's "New log" pill — same radius, same padding, same
+  position — and specifically must carry **no shadow/glow/halo** around it
+  on either iOS or Android. This is the literal bug report: the two FABs
+  used to disagree on exactly this one property.
+- Confirm this holds in every accent colour (Settings → accent picker),
+  including Mono — a glow reappearing only in one accent, or only on
+  Android (`elevation` is separate from `shadowColor` and both had to be
+  removed), would be a partial fix.
+- The FAB still opens the "new workout" composer sheet exactly as before —
+  this is a pure style change, no behavior moved.
+
+### Button / Pill — not yet reachable from any screen
+
+These two components have no current call site (migration is future work),
+so there is nothing on-device to walk yet. When a future ticket migrates a
+screen onto either:
+
+- **Button**: `primary` fills with the athlete's chosen accent, `secondary`
+  is an outlined neutral fill, `ghost` has no fill — confirm the label text
+  stays legible against all three, in every accent, and that changing the
+  accent in Settings updates an on-screen `Button` immediately (it reads
+  `useAccent()` live, unlike the hardcoded-`vola.accent` buttons this
+  ticket found and deliberately left unmigrated).
+- **Pill**: a badge (no `onPress`) must never be tappable and must never
+  announce itself as a button to VoiceOver/TalkBack; a chip (`onPress`
+  present) must announce "button" and its selected state, and tapping it
+  must fire the handler. Confirm `active` visibly tints toward the current
+  accent, not a fixed colour.
+- Both: confirm the radius is the same full-capsule shape as the existing
+  "New log"/"New workout" pills wherever adopted — that consistency is the
+  entire point of the ticket.
+
+### Not covered here
+
+- The ≥15 existing ad-hoc chip/pill screens (unaffected by this PR — each
+  gets its own scenario entry when its own migration ticket lands).
+- `food/add.tsx`/`FoodQuantity.tsx`'s hardcoded-accent "Log" buttons
+  (tracked separately, not fixed here).
