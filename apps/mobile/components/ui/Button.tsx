@@ -32,12 +32,19 @@ import { withAlpha } from '@/lib/palette';
  *
  * `primary`'s fill is the athlete's own accent at 92% opacity
  * (`withAlpha`, `lib/palette.ts`) — not a new colour, the same accent every
- * other filled control already uses, just not fully solid. This is safe for
- * the LABEL specifically because alpha blending only affects what the fill
- * composites against (the card or screen behind the button); the label text
- * is drawn on top of the already-composited fill, so its contrast against
- * that fill is unchanged by the button's own transparency — only how much
- * of the ground behind the button shows through changes.
+ * other filled control already uses, just not fully solid. The label
+ * composites against the BLEND of the accent and whatever is behind the
+ * button, not against the solid accent — so contrast does move a little,
+ * not zero. Measured (`frontend-reviewer`, N444's own review) against
+ * `vola.bg`, the darkest ground in the app and the worst case: every accent
+ * stays AA for this label's size/weight at 0.92, `blue` the closest at
+ * ~4.5:1 (from ~5.15:1 solid). The reason 8% see-through is safe is that
+ * **every surface in this app is darker than every accent** — the ground
+ * showing through can only pull a light fill toward dark, which is the
+ * direction that helps a dark-on-light or light-on-dark label's contrast,
+ * never hurts it past the floor. If a future change lowers the opacity
+ * further than 0.92, re-check `blue` first — it is the accent with the
+ * least headroom.
  *
  * ## Radius is always `999`
  *

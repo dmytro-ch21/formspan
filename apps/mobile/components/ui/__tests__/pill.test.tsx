@@ -25,15 +25,19 @@ describe('Pill — radius is always the full-pill token (999)', () => {
 });
 
 describe('Pill — onPress is what decides chip vs badge, exhaustively', () => {
-  it('without onPress: a plain label, no button role, inert', () => {
-    const clickSpy = jest.fn();
+  it('without onPress: a plain label, no button role, and pressing it is a no-op', () => {
     render(<Pill label="Public" testID="pill" />);
     const pill = screen.getByTestId('pill');
     expect(pill.props.accessibilityRole).not.toBe('button');
-    // Nothing to press — confirms this never silently gained button
-    // semantics without a handler.
-    fireEvent.press(pill);
-    expect(clickSpy).not.toHaveBeenCalled();
+    // `Pressable`'s `onPress` prop is what `fireEvent.press` invokes — the
+    // badge path passes none, so this is not `undefined && called()`,
+    // it is genuinely nothing wired to press. Confirmed by the RNView the
+    // badge path renders (`Pill.tsx`'s `!onPress` branch) having no
+    // `onPress` prop at all, which `fireEvent.press` silently no-ops
+    // against rather than throwing — a spy here would assert its own
+    // absence, not the component's behaviour.
+    expect(pill.props.onPress).toBeUndefined();
+    expect(() => fireEvent.press(pill)).not.toThrow();
   });
 
   it('with onPress: a real button that fires and announces its selected state', () => {
