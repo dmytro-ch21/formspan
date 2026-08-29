@@ -38,9 +38,18 @@ export const FALLBACK_SERVING_GRAMS = 100;
  * and a `category` just to satisfy the compiler for a food that has neither —
  * so this is the actual contract, and `CatalogFood` satisfies it structurally
  * with nothing extra to add.
+ *
+ * `natural_serving_label`/`natural_serving_grams` (N448) are `Partial` rather
+ * than required for the same reason: they exist only on the general catalog
+ * `Food` type, and `ScannedFood` has its own, separately-named pair
+ * (`PacketServingLabel`/`PacketServingGrams`, N117) that this file
+ * deliberately never reads — see `quantityOptions`'s doc for why the two must
+ * not be conflated. Absent (`undefined`) reads the same as `null` everywhere
+ * below: no natural serving to prefer.
  */
 export type QuantifiableFood = Macros &
-  Pick<CatalogFood, 'name' | 'brand' | 'serving_grams'> & {
+  Pick<CatalogFood, 'name' | 'brand' | 'serving_grams'> &
+  Partial<Pick<CatalogFood, 'natural_serving_label' | 'natural_serving_grams'>> & {
     portions?: CatalogPortion[];
   };
 
@@ -233,13 +242,43 @@ function scaleMacros(food: Macros, s: number): Macros {
  *
  * Deduped on gram weight so a food whose only portion happens to weigh 100 g
  * does not offer the same amount twice under two names.
+ *
+ * **N448: seeded with `natural_serving_label`/`natural_serving_grams` FIRST,
+ * ahead of `portions` itself.** That pair is `portions[0]` under a different
+ * name (see `Food.NaturalServingLabel` server-side) and, unlike `portions`, it
+ * is present on a SEARCH result — `fetchCatalogFood`'s own doc explains why
+ * `portions` is not. So a caller that opens a quantity sheet on a bare search
+ * result (`add.tsx`'s `openQuantity`, `IngredientPicker`'s `openCatalog` — both
+ * show the sheet immediately and upgrade to the full food, portions included,
+ * a moment later) has the REAL default and its label from the very first
+ * render, not only once the upgrade resolves. This is what fixes N448's
+ * mount-race: `FoodQuantity`'s `initial` reads `options[0]`, so a caller no
+ * longer has to choose between blocking on a network call and flashing
+ * "100 g" for a food that has a real serving.
+ *
+ * Once `portions` DOES arrive, its own first entry is the identical gram
+ * figure and is deduped away here rather than appended as a second, redundant
+ * chip — the visible option list therefore never differs from what it always
+ * was, and this only changes what is available BEFORE that array loads.
  */
 export function quantityOptions(
-  food: Pick<CatalogFood, 'serving_grams'>,
+  food: Pick<CatalogFood, 'serving_grams'> &
+    Partial<Pick<CatalogFood, 'natural_serving_label' | 'natural_serving_grams'>>,
   portions: CatalogPortion[] | undefined,
 ): { label: string; grams: number }[] {
   const out: { label: string; grams: number }[] = [];
   const seen = new Set<number>();
+  const naturalLabel = food.natural_serving_label;
+  const naturalGrams = food.natural_serving_grams;
+  if (
+    naturalLabel != null &&
+    naturalGrams != null &&
+    Number.isFinite(naturalGrams) &&
+    naturalGrams > 0
+  ) {
+    seen.add(naturalGrams);
+    out.push({ label: naturalLabel, grams: naturalGrams });
+  }
   for (const p of portions ?? []) {
     if (!Number.isFinite(p.grams) || p.grams <= 0) continue;
     if (seen.has(p.grams)) continue;

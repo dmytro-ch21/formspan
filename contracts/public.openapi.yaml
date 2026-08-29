@@ -379,6 +379,31 @@ components:
           description: >
             Null when a serving has no honest gram weight. Inventing one would
             make every gram-based total quietly fictional.
+        natural_serving_label:
+          type: string
+          nullable: true
+          example: "1 can 8.4 fl oz"
+          description: >
+            This food's OWN most representative measure (N448) — additive to
+            and deliberately separate from `serving_label`/`serving_grams`
+            above, which stay "the amount every macro on this object
+            represents" (always "100 g") and are untouched by this pair, the
+            same separation `BarcodeFood.packet_serving_label` (N117) makes
+            for a scanned packet. A client uses this only to pick a better
+            STARTING amount than "100 g" for its "how much" field — Red Bull
+            opens to "1 can 8.4 fl oz" / ~110 kcal instead of "100 g" / ~43
+            kcal — while every amount, including that one, is still computed
+            as `kcal_per_100g * (grams / 100)`. Derived from `portions[0]`
+            (USDA's own most-representative entry) and present on BOTH search
+            results and `GET .../{id}`, even though `portions` itself is
+            absent from search results — see `portions` below. Null for the
+            268 of 12,651 catalog rows with no USDA portion data — never a
+            fabricated serving standing in for one USDA never stated.
+        natural_serving_grams:
+          type: number
+          nullable: true
+          example: 258
+          description: Paired with `natural_serving_label` above; both null or both present.
         kcal: { type: number }
         protein_g: { type: number }
         carb_g: { type: number }
@@ -449,7 +474,10 @@ components:
             **Returned by `GET /v1/nutrition/catalog/{id}` only, and ABSENT from
             search results.** A 25-row search page would carry ~60 portions for a
             choice the athlete has not made yet. Clients must not expect this
-            field on a list response.
+            field on a list response. `natural_serving_label`/
+            `natural_serving_grams` above ARE present on search results — they
+            are `portions[0]` alone, cheap enough to include on a list page,
+            without paying for the rest of the array (N448).
 
 
             100 g is deliberately NOT in this array — it is always available from

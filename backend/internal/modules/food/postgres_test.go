@@ -3,6 +3,7 @@ package food
 import (
 	"context"
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
@@ -902,6 +903,135 @@ func TestSearchDoesNotCarryPortions(t *testing.T) {
 	}
 }
 
+// N448: Get derives NaturalServingLabel/NaturalServingGrams from the FIRST
+// portion in USDA's own sequence order, not insertion order — same guard
+// against the same bug TestGetReturnsPortionsInSequenceOrder covers for
+// Portions itself, because a natural serving built from `ORDER BY seq` wrong
+// would be a confident wrong default rather than an absent one.
+func TestGetDerivesNaturalServingFromTheFirstPortion(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := seedTierFixtures(t, repo, []tierFixture{
+		{"fd-n448-get-egg", "Egg, whole, raw, fresh", "egg", 0},
+	})
+	// Inserted out of seq order, same discipline as
+	// TestGetReturnsPortionsInSequenceOrder: an ORDER-BY-insertion bug would
+	// still pass an in-order insert.
+	for _, p := range []struct {
+		seq   int
+		label string
+		grams float64
+	}{
+		{2, "1 extra large", 56},
+		{1, "1 large", 50},
+	} {
+		if _, err := repo.pool.Exec(ctx,
+			`INSERT INTO food_catalog_portions (food_id, seq, label, grams) VALUES ($1,$2,$3,$4)`,
+			"fd-n448-get-egg", p.seq, p.label, p.grams); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := repo.Get(ctx, "fd-n448-get-egg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NaturalServingLabel == nil || *got.NaturalServingLabel != "1 large" {
+		t.Errorf("natural_serving_label = %s, want \"1 large\" (seq 1, not seq 2)", strPtrOrNil(got.NaturalServingLabel))
+	}
+	if got.NaturalServingGrams == nil || *got.NaturalServingGrams != 50 {
+		t.Errorf("natural_serving_grams = %s, want 50", f64PtrOrNil(got.NaturalServingGrams))
+	}
+}
+
+// N448: the whole point of the ticket. Search must carry the natural serving
+// EVEN THOUGH it still must not carry the full Portions array — the two
+// guards (this one and TestSearchDoesNotCarryPortions) are independent and
+// a fix for one must not silently break the other.
+func TestSearchIncludesTheNaturalServingWithoutTheFullPortionsArray(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := seedTierFixtures(t, repo, []tierFixture{
+		{"fd-n448-search-redbull", "Red Bull Energy Drink", "beverages", 0},
+	})
+	for _, p := range []struct {
+		seq   int
+		label string
+		grams float64
+	}{
+		{2, "1 fl oz", 30},
+		{1, "1 can 8.4 fl oz", 258},
+	} {
+		if _, err := repo.pool.Exec(ctx,
+			`INSERT INTO food_catalog_portions (food_id, seq, label, grams) VALUES ($1,$2,$3,$4)`,
+			"fd-n448-search-redbull", p.seq, p.label, p.grams); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, _, err := repo.Search(ctx, SearchFilter{Query: "Red Bull", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range got {
+		if f.ID != "fd-n448-search-redbull" {
+			continue
+		}
+		found = true
+		if len(f.Portions) != 0 {
+			t.Errorf("search returned %d portions; the list must still not carry the full array", len(f.Portions))
+		}
+		if f.NaturalServingLabel == nil || *f.NaturalServingLabel != "1 can 8.4 fl oz" {
+			t.Errorf("natural_serving_label = %s, want \"1 can 8.4 fl oz\"", strPtrOrNil(f.NaturalServingLabel))
+		}
+		if f.NaturalServingGrams == nil || *f.NaturalServingGrams != 258 {
+			t.Errorf("natural_serving_grams = %s, want 258", f64PtrOrNil(f.NaturalServingGrams))
+		}
+	}
+	if !found {
+		t.Fatal("fixture did not match — the assertions above never ran")
+	}
+}
+
+// N448: a food USDA never gave a household portion to must keep showing
+// "100 g" honestly rather than gaining a fabricated one — the ticket's own
+// third acceptance criterion. Checked on both Get and Search, since they
+// derive the pair through two different code paths (portionsFor's slice vs.
+// the LATERAL join) that could disagree.
+func TestNaturalServingIsNilWithNoPortionData(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := seedTierFixtures(t, repo, []tierFixture{
+		{"fd-n448-no-portions", "Mystery Powder", "supplements", 0},
+	})
+
+	got, err := repo.Get(ctx, "fd-n448-no-portions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NaturalServingLabel != nil || got.NaturalServingGrams != nil {
+		t.Errorf("Get: natural serving = (%s, %s), want (nil, nil) — no portion data exists to derive one from",
+			strPtrOrNil(got.NaturalServingLabel), f64PtrOrNil(got.NaturalServingGrams))
+	}
+
+	results, _, err := repo.Search(ctx, SearchFilter{Query: "Mystery Powder", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range results {
+		if f.ID != "fd-n448-no-portions" {
+			continue
+		}
+		found = true
+		if f.NaturalServingLabel != nil || f.NaturalServingGrams != nil {
+			t.Errorf("Search: natural serving = (%s, %s), want (nil, nil) — no portion data exists to derive one from",
+				strPtrOrNil(f.NaturalServingLabel), f64PtrOrNil(f.NaturalServingGrams))
+		}
+	}
+	if !found {
+		t.Fatal("fixture did not match — the search assertion above never ran")
+	}
+}
+
 // **The guard that silently loses console work if it is dropped.**
 //
 // A deploy replaces portions wholesale rather than diffing them, and both the
@@ -958,4 +1088,21 @@ func TestSeedDoesNotTouchPortionsOfAnAdminOwnedFood(t *testing.T) {
 	if got.Portions[0].Label != "1 hand-authored scoop" || got.Portions[0].Grams != 31 {
 		t.Errorf("deploy overwrote an admin-owned food's portion: got %q = %v g", got.Portions[0].Label, got.Portions[0].Grams)
 	}
+}
+
+// strPtrOrNil/f64PtrOrNil print a legible value in a test failure message —
+// %v on a non-nil *string/*float64 prints the pointer's hex address, not the
+// value it points to, which is useless in a "got X want Y" line.
+func strPtrOrNil(p *string) string {
+	if p == nil {
+		return "nil"
+	}
+	return *p
+}
+
+func f64PtrOrNil(p *float64) string {
+	if p == nil {
+		return "nil"
+	}
+	return strconv.FormatFloat(*p, 'g', -1, 64)
 }

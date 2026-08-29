@@ -49131,6 +49131,116 @@ ticket's scope, and the same failure mode this ticket fixed on the PNG.
 narrow enough that it wasn't worth blocking this ticket on a distance/time
 evidence formatter nobody asked for yet.
 
+## 2026-08-29 — N448: the catalog's per-100g default ignores real serving data it already has
+
+Reported directly by the user: searching a food (e.g. "Red Bull") and
+logging it shows nutrition per 100 g rather than per real serving ("1
+can... 110 [kcal]"). "This applies to all foods." Different flow from N117
+(#506, above), which fixed **barcode-scanned** products only — this is the
+general text-search catalog (`backend/internal/modules/food/foods.json`,
+12,651 USDA rows).
+
+### The data was already there, unused — same shape as N117, one layer up
+
+Confirmed on the real Red Bull row (`id: "usda-173210"`): `portions` already
+carries `"1 can 8.4 fl oz", 258 g` as a real, importable USDA entry — but
+nothing treated it as a default. The catalog `Food` type had `Portions
+[]Portion` and no "which one is the natural default" field, the exact gap
+N117 closed for `BarcodeFood` with `PacketServingLabel`/`PacketServingGrams`
+and never extended to the general catalog.
+
+A second, independent bug sat underneath it: `FoodQuantity.tsx`'s `options[0]
+?.grams ?? 100` only picks up a real portion if `food.portions` is already
+populated at mount, but `add.tsx` opens the quantity sheet with the partial
+**search-result** food (search deliberately never carries `portions` — a
+25-row page would haul ~60 of them for a choice not yet made) before
+`fetchCatalogFood` resolves the full one. So the sheet opened at 100 g even
+for a food whose real portion arrives a moment later.
+
+### The fix: `NaturalServingLabel`/`NaturalServingGrams`, present on Search too
+
+`food.go` gains `NaturalServingLabel *string` / `NaturalServingGrams
+*float64` on the catalog `Food` type — additive, deliberately not collapsed
+into `BarcodeFood`'s pair (the file's own comments already explain why the
+two types stay separate) and deliberately **derived, not stored**: a
+migration would have meant a backfill for something fully computable from
+`Portions[0]` (Portion's own doc: USDA lists the most representative portion
+first, so index zero already IS "the natural one"). `naturalServing(portions
+[]Portion) (*string, *float64)` is the one definition both read paths use.
+
+The part that made this more than a one-line getter: `Search` deliberately
+never loads `Portions` (the same 60-portions-on-a-list-page reasoning as
+above), so `Get`'s "already have the slice, take index zero" approach
+doesn't reach search results — which is exactly where the ticket was
+reported. Fixed with a `LEFT JOIN LATERAL` in `Search`'s query, fetching only
+`food_catalog_portions`' first row per food (`WHERE food_id = f.id ORDER BY
+seq ASC LIMIT 1`) rather than the whole array — the primary key `(food_id,
+seq)` already serves that lookup, so no new index. `Portions` itself stays
+absent from search results, unchanged; only the two new scalar fields ride
+along. **Both null for the 268 of 12,651 rows with no USDA portion data** —
+this is about using data that exists, never inventing a serving USDA never
+stated, which is the ticket's own third acceptance criterion.
+
+Verified against the real seeded catalog, not just fixtures: after `cmd/seed`
+against a scratch database, `usda-173210` returns `natural_serving_label: "1
+can 8.4 fl oz"`, `natural_serving_grams: 258` from both `Search` and `Get`,
+and `43 kcal/100g * 258g = 110.9` — matching the user's reported "110" to
+within rounding.
+
+### The client: the natural serving becomes the DEFAULT, not just a chip
+
+`lib/foodQuantity.ts`'s `quantityOptions` now seeds its returned list with
+`natural_serving_label`/`natural_serving_grams` FIRST, ahead of `portions`
+itself — deduped against `portions[0]` (the identical gram figure) so the
+visible chip list never gains a duplicate once the full array arrives. This
+is what fixes N448's mount-race, and not by adding a loading state: the
+natural pair is present on a bare SEARCH result (unlike `portions`), so
+`FoodQuantity`'s `initial = options[0]?.grams ?? 100` is already correct on
+the very FIRST render — there is no longer a window where the right answer
+is unknown, so there is nothing to flash away from. `QuantifiableFood` picks
+up the pair as `Partial`, so `ScannedFood` (N117's own pair, deliberately
+never conflated with this one) and every other caller are unaffected by
+construction rather than by convention.
+
+`CatalogCard.tsx`'s `servingLine` — the line the ticket was reported
+against literally, "cals per 100 g" on a search row — now prefers the
+natural serving the same way: "111 cals per 1 can 8.4 fl oz" for Red Bull,
+falling back to the per-100g basis exactly as before when a food has none.
+
+`contracts/public.openapi.yaml`'s `CatalogFood` schema gained the two
+fields, cross-referenced against `portions`' own doc so a reader sees both
+halves of "why is this array missing but these two scalars aren't."
+
+### Tests, mutation-checked on both sides of the stack
+
+Backend: a pure-function suite for `naturalServing` (first-portion selection,
+nil-on-empty, no aliasing of the input slice) plus four `postgres_test.go`
+cases against a real database — `Get` derives from the first portion in
+USDA's own `seq` order (not insertion order, same discipline as the existing
+portions test), `Search` carries the pair while still not carrying the full
+array (two independent guards that a fix for one must not silently break),
+and both paths agree on nil when a food has no portion data. Mutated:
+swapping `portions[0]` for the last element, and flipping the LATERAL join's
+`ORDER BY seq ASC` to `DESC` — both produce real test failures naming the
+wrong label/grams, not compile errors.
+
+Frontend: `quantityOptions`'s natural-serving seeding (leads the list with no
+`portions` loaded, is deduped once `portions` arrives, refuses a non-positive
+`natural_serving_grams` the same way it already refuses a bad portion);
+`FoodQuantity`'s own render-level test for the mount-race itself (opens
+already showing "258", not "100", when handed the exact partial-search-result
+shape `add.tsx` passes before its `fetchCatalogFood` upgrade resolves); and
+`servingLine`'s new preference, including a defensive case for a
+label/grams pairing that should never be split server-side. Mutated: deleting
+the seeding block from `quantityOptions` and the preference branch from
+`servingLine` — both produce real, readable test failures ("Expected: 258,
+Received: 100" and "Expected: ...1 can 8.4 fl oz, Received: ...100 g").
+
+Full backend suite (37 packages) and full mobile suite (236 suites / 3683
+tests) green against a fresh migrated database; `tsc --noEmit` and
+`lint:openapi` clean.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

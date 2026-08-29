@@ -106,6 +106,39 @@ type Food struct {
 	// gram-based total quietly fictional.
 	ServingGrams *float64 `json:"serving_grams"`
 
+	// NaturalServingLabel/NaturalServingGrams are this food's OWN most
+	// representative measure — "1 can 8.4 fl oz (258 g)" for Red Bull, "1
+	// large (50 g)" for an egg — derived from Portions[0] when this food has
+	// any (see naturalServing and Portion's own doc comment: USDA lists the
+	// most representative portion first, so index zero already IS "the
+	// natural one", not a guess dressed as one).
+	//
+	// The BarcodeFood pair this mirrors is PacketServingLabel/
+	// PacketServingGrams (N117), and the same separation applies for the same
+	// reason: ServingLabel/ServingGrams mean "the amount every macro on this
+	// struct represents" everywhere they are read, and that is always 100 g
+	// here — redefining them to the natural serving while the macros stayed
+	// per-100g would be the exact two-serving-bases mixup this file's history
+	// already warns against, just moved to the general catalog (N448).
+	//
+	// These two exist ONLY so a client can pick a better STARTING amount than
+	// "100 g" — Red Bull opens to "1 can 8.4 fl oz" / ~110 kcal instead of
+	// "100 g" / ~43 kcal — while every amount, including that starting one, is
+	// still computed as `perHundredG * (grams/100)` against the fields above.
+	//
+	// Both nil for the 268 of 12,651 catalog rows with no USDA portion data —
+	// see Portions below. Never a fabricated serving standing in for one USDA
+	// never stated.
+	//
+	// DERIVED, not stored: computed from the first food_catalog_portions row
+	// by BOTH Search and Get (see naturalServing and
+	// PostgresRepository.Search's LATERAL join), even though Search never
+	// populates Portions itself — Search asks Postgres for only the first row
+	// per food rather than paying for the whole array a list page has no use
+	// for.
+	NaturalServingLabel *string  `json:"natural_serving_label"`
+	NaturalServingGrams *float64 `json:"natural_serving_grams"`
+
 	KCal     float64 `json:"kcal"`
 	ProteinG float64 `json:"protein_g"`
 	CarbG    float64 `json:"carb_g"`
@@ -470,4 +503,27 @@ type Portion struct {
 	Seq   int     `json:"seq"`
 	Label string  `json:"label"`
 	Grams float64 `json:"grams"`
+}
+
+// naturalServing returns the label/grams of a food's natural default
+// serving — its most representative portion — or nil, nil when it has none.
+//
+// portions must already be in USDA's own sequence order (portionsFor and the
+// Search LATERAL join both guarantee that), because "the natural serving" is
+// defined as index zero of that order, not as anything this function
+// recomputes — see Portion's own doc comment for why re-sorting client- or
+// server-side would replace USDA's editorial judgement with a guess.
+//
+// A tiny pure function so Get (which already has the whole slice) and Search
+// (which asks Postgres for only the first row — see
+// PostgresRepository.Search) agree on exactly one definition of "natural
+// serving" rather than two call sites reimplementing "index zero" slightly
+// differently (N448).
+func naturalServing(portions []Portion) (label *string, grams *float64) {
+	if len(portions) == 0 {
+		return nil, nil
+	}
+	l := portions[0].Label
+	g := portions[0].Grams
+	return &l, &g
 }

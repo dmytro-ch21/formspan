@@ -143,6 +143,8 @@ const catalogFood: CatalogFood = {
     aliases: [],
     serving_label: '100 g',
     serving_grams: 100,
+    natural_serving_label: null,
+    natural_serving_grams: null,
     kcal: 165,
     protein_g: 31,
     carb_g: 0,
