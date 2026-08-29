@@ -49039,6 +49039,98 @@ while editing a set, and that scrolling to the end of a long session still
 reaches it in one motion — cannot be produced by this session and is owed
 to the user.
 
+## 2026-08-29 — N447 (#745): share card drops Reps, PR badge names the real record
+
+User-reported directly: "the share png we generate the one we save on our
+phone gets crowded. take off the reps from there. Also show the PRs like
+Back Squat - 335 x 5 PR something like that no need for calculated 1RM."
+
+**Reps tile removed.** `lib/celebration.ts`'s `statsFor` no longer pushes a
+`Reps` stat for strength sessions — Sets and Volume are what is left of the
+strip. Nothing else on the card restated the session-wide rep count, so
+nothing had to move to replace it.
+
+**The PR badge now names the record instead of counting them.**
+`sessionCard.ts`'s `cardFromSummary` used to build the badge from
+`summary.records.length` alone — `"Personal best"` / `"N personal bests"` —
+which named nothing. It now takes a pre-formatted `prBadge` string and shows
+it verbatim, or shows no badge at all; there is no bare-count fallback any
+more.
+
+**Where the string is built, and why it lives there.** `cardFromSummary`
+and `celebration.ts` are both deliberately free of anything that fetches or
+formats units — that boundary is what lets the card render off-screen for
+the export, and is stated in `cardFromSummary`'s own doc comment. So the
+new pure pieces (`lib/celebration.ts`):
+
+- `topRecord(records)` — **top one only**, the first record in the array.
+  The badge shares its two-slot rail with the streak line
+  (`cardFromSummary` still pushes "N weeks unbroken" into the second slot),
+  and the card was already reported as crowded — a second PR in one session
+  is genuinely rare, and naming a third thing would read as truncated, not
+  "and more". Documented in the function's own comment as the explicit
+  answer to the ticket's "decide and document the rule" criterion.
+- `prEvidence(record, formatWeight)` — the evidence text, e.g. `"152kg × 5"`.
+  Reads the record's own MEASURED `weight_kg`/`reps` rather than its
+  `value` — for `estimated_1rm`, `value` IS the modelled number the ticket
+  asked to stop showing, while `weight_kg`/`reps` are the actual set that
+  produced it. Returns null (no evidence) for a `longest_time`/
+  `furthest_distance` record with neither field — a real but narrow gap;
+  those two kinds fall back to no badge line rather than an unformatted or
+  wrong one.
+- `prBadgeFor(records, formatWeight)` — composes the two into
+  `"Back Squat · 152kg × 5 PR"`, and returns null (never a raw id, never a
+  count) when there's no record, the top one's name never resolved, or it
+  has no describable evidence.
+
+`formatWeight` is injected exactly like `statsFor`'s existing
+`formatTonnage` — the unit system stays a screen-layer concern.
+
+**Exercise-name resolution reuses the client's existing catalog, not a new
+fetch.** `app/session/[id].tsx` already loads the full strength catalog
+into a `Map<string, Exercise>` (`catalog`, for the exercise picker and the
+session's own detail rows) before a session ever finishes. `SessionRecord`
+gained an optional `exerciseName` field, attached at RENDER time via a new
+`withExerciseNames(records, catalog)` helper — merged the same way
+`celebrationRecords`/`readBackRecords` were already merged into their
+summaries ("merged at render, so filling this in cannot feed back into the
+effect that fetches them"), so a catalog that finishes loading after the
+records fetch is still picked up on the next render rather than being
+stuck with a stale closure. Unresolved reads as `null`, never the raw
+kebab-case id — the exact "de-slugified id" failure mode the ticket called
+out on `SessionCelebration.tsx`'s modal (`exerciseID.replace(/-/g, ' ')`,
+left alone — that's a different screen, out of this ticket's scope per its
+own text).
+
+BJJ sessions hard-code `records: []` (no record equivalent exists yet), so
+`prBadgeFor` is a no-op there; both BJJ call sites pass a trivial
+`formatWeight` stub for type parity, mirroring the existing `formatTonnage`
+stub.
+
+**New tests**, `lib/__tests__/celebration.test.ts` and `sessionCard.test.ts`:
+Reps is asserted absent from the strength stat strip; `recordsFromSession`
+resolves per-exercise names via its new optional third argument and still
+defaults to no name when none is given; `topRecord` picks the first of two
+distinct records (mutation-tested — swapping in "last" or "join both" both
+fail two tests); `prEvidence` pins the weight-first order, is proven to
+never surface `estimated_1rm`'s `.value` (mutation-tested: reading `.value`
+instead of `.weight_kg` makes the test print "999" and fail), and falls
+back to a bare rep count or null; `prBadgeFor` matches the ticket's own
+example string exactly, and is proven to drop the bare-count fallback
+(mutation-tested: reintroducing it makes a test that expects `[]` badges
+see `"2 personal bests"` and fail).
+
+Full mobile suite (234 suites / 3667 tests), `tsc --noEmit`, and the three
+touched-file test runs all green.
+
+**Left for later**: the celebration modal's own `exerciseID.replace(/-/g,
+' ')` de-slugification (`SessionCelebration.tsx`) — explicitly out of this
+ticket's scope, and the same failure mode this ticket fixed on the PNG.
+`longest_time`/`furthest_distance` records get no PR badge caption at all
+(the highlight still says NEW BEST, just with no badge pill) — a real gap,
+narrow enough that it wasn't worth blocking this ticket on a distance/time
+evidence formatter nobody asked for yet.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

@@ -129,6 +129,33 @@ import { gripGuide, setTypeGuide } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';
 
 /**
+ * Attaches the real exercise name to each record, from the catalog already
+ * loaded for this screen (N447/#745).
+ *
+ * A plain `.map` rather than something threaded into the fetch effects that
+ * built `records` in the first place: `catalog` arrives on its own schedule
+ * (cache first, then the network) and can update AFTER a records effect has
+ * already run, so resolving names inside those effects would read whatever
+ * `catalog` closed over at fetch time and could silently miss a name that
+ * had, by the time of rendering, already arrived. Doing it here instead — at
+ * render, alongside the other "merged at render" record-shaping below — means
+ * a late-arriving catalog is picked up on the very next render for free.
+ *
+ * `null`, not the raw id, when the catalog has nothing: `SessionRecord`'s own
+ * doc explains why, and `prBadgeFor` treats it as "no caption" rather than a
+ * name.
+ */
+function withExerciseNames(
+  records: SessionRecord[],
+  catalog: Map<string, Exercise>,
+): SessionRecord[] {
+  return records.map((r) => ({
+    ...r,
+    exerciseName: catalog.get(r.exerciseID)?.name ?? null,
+  }));
+}
+
+/**
  * Logging a session, on the phone, mid-workout.
  *
  * The whole screen is designed around one number: taps per set. Someone
@@ -425,8 +452,11 @@ export default function SessionScreen() {
   const sessionShare = useSessionShare({
     // Undefined while the session is live, which is what hides the button.
     sessionID: readBackSummary ? id : undefined,
-    summary: readBackSummary ? { ...readBackSummary, records: readBackRecords } : null,
+    summary: readBackSummary
+      ? { ...readBackSummary, records: withExerciseNames(readBackRecords, catalog) }
+      : null,
     formatTonnage: (v) => formatVolume(v, units),
+    formatWeight: (v) => formatWeight(v, units),
     // The session's own date, not today's. Without this, a workout shared a
     // week later posts stamped with the day it was shared.
     date: session?.ended_at ? new Date(session.ended_at) : undefined,
@@ -2106,14 +2136,16 @@ export default function SessionScreen() {
       {celebrating && (
         <SessionCelebration
           // Merged at render, so filling the records in cannot feed back into
-          // the effect that fetches them.
-          summary={{ ...celebrating, records: celebrationRecords }}
+          // the effect that fetches them. Same reasoning for the exercise
+          // names — see `withExerciseNames`.
+          summary={{ ...celebrating, records: withExerciseNames(celebrationRecords, catalog) }}
           sessionID={id}
           streak={celebrationStreak}
           milestone={celebrationMilestone}
           recordsSettled={recordsSettled}
           streakSettled={streakSettled}
           formatTonnage={(v) => formatVolume(v, units)}
+          formatWeight={(v) => formatWeight(v, units)}
           onDismiss={() => {
             setCelebrating(null);
             setCelebrationRecords([]);

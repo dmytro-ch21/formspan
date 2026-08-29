@@ -467,6 +467,10 @@ export default function BjjSessionScreen() {
     // BJJ never shows a tonnage tile, so this is never called — passed because
     // the card takes one formatter, not one per sport.
     formatTonnage: (v) => `${Math.round(v)}`,
+    // BJJ hard-codes `records: []` (see `bjjSummaryFor`), so `prBadgeFor`
+    // never gets a record to caption and this is never called either — same
+    // reasoning as `formatTonnage` above.
+    formatWeight: (v) => `${Math.round(v)}`,
     // The night of the class, not the night you got round to sharing it.
     date: session?.ended_at ? new Date(session.ended_at) : undefined,
   });
@@ -802,6 +806,9 @@ export default function BjjSessionScreen() {
           // BJJ never shows a tonnage tile, so this is never called — passed
           // because the card takes one formatter, not one per sport.
           formatTonnage={(v) => `${Math.round(v)}`}
+          // Same reasoning: BJJ hard-codes `records: []`, so the PR badge
+          // formatter is never invoked either.
+          formatWeight={(v) => `${Math.round(v)}`}
           onDismiss={() => setCelebrating(null)}
           streak={celebrationStreak}
           accomplishment={celebrationBadge}

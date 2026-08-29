@@ -6372,6 +6372,47 @@ number would describe something still happening.
   every card shows the same peak, the hash is clustering.
 - Share is absent, not disabled, when there is no session id.
 
+### Card content — the stat strip and the PR badge (N447, #745)
+
+- Finish a strength session with at least one completed set → the exported
+  card's stat strip shows **Time, Sets, Volume** — never a fourth "Reps"
+  tile, even when the session logged plenty of reps. (Calories/VOLA score
+  bump Volume out to a detail row below the strip once the server's numbers
+  arrive — that's the existing 4-wide-ceiling behaviour, unrelated to this
+  entry — but Reps must not be the thing that ever appears.)
+- Finish a strength session with one PR (e.g. a heavier Back Squat than ever
+  logged before) → the card's badge reads like **"Back Squat · 152kg × 5
+  PR"** — the real exercise name, the weight and reps that were actually on
+  the bar, ending in "PR". It must NOT read a bare count ("Personal best",
+  "2 personal bests") or a calculated 1RM figure.
+- Set an `estimated_1rm` record and a `heaviest_weight` record on the SAME
+  set in the SAME session (a heavy enough double, say) → the badge still
+  shows the set's actual weight × reps, never the modelled 1RM number that
+  `estimated_1rm` carries as its own value.
+- Set PRs on two different exercises in one session → the badge names only
+  ONE of them (the first the records endpoint returned) — this is a
+  documented product decision (top one only, given the card's limited
+  space), not a bug to "fix" by trying to fit both in.
+- **Exercise-name resolution, offline/cold-start edge**: finish a session
+  and open its share preview before the exercise catalog has finished its
+  first fetch for this device (e.g. right after a fresh install, airplane
+  mode toggled back on mid-load) → the PR badge should either show the real
+  name (if the cached catalog already had it) or show NO badge at all. It
+  must never show the raw exercise id (a kebab-case slug like
+  `back-squat`) — that is the specific failure this ticket exists to keep
+  off the card. The headline ("NEW BEST.") should still appear regardless,
+  since it doesn't depend on the name resolving.
+- A record on a **timed or distance** exercise (e.g. a farmer's carry logged
+  for distance) is a known, accepted gap as of this entry: the card shows
+  no PR badge line for it (the "NEW BEST." headline still fires), rather
+  than an unformatted or wrong figure. Not a regression to chase — see the
+  history.md entry's "Left for later" note.
+- The celebration MODAL (the full-screen congratulation right after
+  finishing, distinct from the exported card/PNG) still de-slugifies the
+  exercise id for its own PR list — a known, separate gap, explicitly out
+  of this ticket's scope. Do not conflate a modal screenshot with the share
+  PNG when filing a bug against either.
+
 ### Sharing — temp-file cleanup (L5, #384)
 
 `shareCard` releases the captured PNG (`react-native-view-shot`'s

@@ -56,6 +56,7 @@ function Harness() {
     sessionID: 's1',
     summary,
     formatTonnage: (v) => `${v}kg`,
+    formatWeight: (v) => `${v}kg`,
   });
   // In an effect, not during render. Assigning a module variable while
   // rendering is a side effect, and `react-hooks` treats it as an ERROR in this

@@ -71,7 +71,20 @@ export type SessionSummary = {
   recordExerciseIDs: string[];
 };
 
-export type SessionRecord = { exerciseID: string; record: PersonalRecord };
+export type SessionRecord = {
+  exerciseID: string;
+  /**
+   * The exercise's real name, resolved by the caller — never set by
+   * `recordsFromSession` itself, which only knows an id. Optional/nullable
+   * rather than falling back to the id: `undefined` here means "nobody has
+   * tried to resolve it yet" (the ordinary state right after the fetch),
+   * `null` means "resolution was attempted and the catalog had nothing" —
+   * and both read as "say nothing" wherever this is captioned, matching the
+   * de-slugified-id ban this ticket exists to end (see `prBadgeFor`).
+   */
+  exerciseName?: string | null;
+  record: PersonalRecord;
+};
 
 /**
  * Which of the athlete's records were set by THIS session.
@@ -87,13 +100,29 @@ export type SessionRecord = { exerciseID: string; record: PersonalRecord };
  * finished in a basement gym shows no PR section rather than a guessed one.
  * Silence is not a claim, a wrong medal is.
  */
-export function recordsFromSession(all: ExerciseRecords[], sessionID: string): SessionRecord[] {
+export function recordsFromSession(
+  all: ExerciseRecords[],
+  sessionID: string,
+  /**
+   * Resolves an exercise id to its display name, or null when unresolved.
+   *
+   * Optional, and defaulted to "unresolved" rather than made required — this
+   * function has no catalog of its own to consult (it only ever sees ids),
+   * so asking every caller for a resolver would make the common
+   * filter-only usage (this file's own tests, the celebration modal, which
+   * never captions a record by name) thread a no-op through for no reason.
+   * A caller that DOES need names — `SessionShare`'s badge — passes a real
+   * one.
+   */
+  exerciseName: (exerciseID: string) => string | null = () => null,
+): SessionRecord[] {
   if (!sessionID) return [];
-  return all.flatMap((e) =>
-    e.records
+  return all.flatMap((e) => {
+    const name = exerciseName(e.exercise_id);
+    return e.records
       .filter((r) => r.session_id === sessionID)
-      .map((record) => ({ exerciseID: e.exercise_id, record })),
-  );
+      .map((record) => ({ exerciseID: e.exercise_id, exerciseName: name, record }));
+  });
 }
 
 // `accomplishment` is the mat's half: a BJJ first, derived and stamped by the
@@ -216,6 +245,74 @@ export function celebratesStreak(opts: {
   return opts.recordsSettled && !opts.hasRecords && opts.carried;
 }
 
+/**
+ * Which record gets the share card's PR badge, when a session set more than
+ * one.
+ *
+ * **TOP ONE ONLY** (N447/#745). The badge shares a two-slot rail with the
+ * streak line — `cardFromSummary` still pushes "N weeks unbroken" into the
+ * second slot — so this rail was never room for a list, and the whole reason
+ * this ticket exists is that the card already reads as crowded. A second PR
+ * in one session is genuinely rare; naming a third thing would not read as
+ * "and more", it would read as truncated.
+ *
+ * The FIRST record wins, matching `recordsFromSession`'s own order (the
+ * order the records endpoint returned exercises in, then each exercise's own
+ * record order) — deterministic without needing this function to know
+ * anything about which kind of record outranks another.
+ */
+export function topRecord(records: SessionRecord[]): SessionRecord | null {
+  return records[0] ?? null;
+}
+
+/**
+ * The badge's evidence — what was actually done, never a calculated number.
+ *
+ * `estimated_1rm`'s own `value` IS a model's output (a rep-max curve — see
+ * `RECORD_BASIS` in `lib/records.ts`), and a share card showing that number
+ * instead of the set that produced it is the other half of what N447/#745
+ * reports. So this never reads `record.value` — it reads the MEASURED
+ * `weight_kg`/`reps` off the record instead, which exist for every strength
+ * kind because every record, `estimated_1rm` included, is set BY a specific
+ * logged set.
+ *
+ * Returns null for a record with neither — a bodyweight-only record with no
+ * rep count, or a `longest_time`/`furthest_distance` kind, which this format
+ * does not cover. The card omits the badge line rather than print something
+ * unit-less or wrong; `cardFromSummary`'s highlight still says NEW BEST
+ * regardless, since that only needs to know a record exists.
+ */
+export function prEvidence(
+  record: Pick<PersonalRecord, 'weight_kg' | 'reps'>,
+  formatWeight: (kg: number) => string,
+): string | null {
+  if (record.weight_kg != null && record.reps != null) {
+    return `${formatWeight(record.weight_kg)} × ${record.reps}`;
+  }
+  if (record.reps != null) return `${record.reps} reps`;
+  return null;
+}
+
+/**
+ * The share card's PR badge text — "Back Squat · 152kg × 5 PR" — or null.
+ *
+ * Null covers three honest reasons, and none of them fall back to a count or
+ * a raw id: no record this session, the top record's exercise name could not
+ * be resolved (`SessionRecord.exerciseName`, see its own doc), or the record
+ * carries neither a weight nor a rep count for `prEvidence` to describe. A
+ * card that cannot caption a PR correctly says nothing instead of guessing.
+ */
+export function prBadgeFor(
+  records: SessionRecord[],
+  formatWeight: (kg: number) => string,
+): string | null {
+  const top = topRecord(records);
+  if (!top?.exerciseName) return null;
+  const evidence = prEvidence(top.record, formatWeight);
+  if (!evidence) return null;
+  return `${top.exerciseName} · ${evidence} PR`;
+}
+
 export function worthCelebrating(summary: Pick<SessionSummary, 'sets' | 'rounds'>): boolean {
   return summary.sets > 0 || (summary.rounds ?? 0) > 0;
 }
@@ -256,7 +353,12 @@ export function statsFor(
   }
 
   stats.push({ label: 'Sets', value: String(summary.sets) });
-  if (summary.reps > 0) stats.push({ label: 'Reps', value: String(summary.reps) });
+  // Reps used to be a third tile here. Dropped (N447/#745): with the PR badge
+  // now naming the exercise plus its own weight-and-reps evidence, a bare
+  // rep COUNT for the whole session sat next to it saying nothing the badge
+  // did not already say better, and the card was reported as "crowded" with
+  // it in. Sets and Volume stay — neither is restated anywhere else on the
+  // card.
   // `!summary.tonnageUnknown` — a positive number here can still be wrong
   // (#425): an unresolved offline swap makes `tonnageKg` a silent
   // under-count, and a celebration card is exactly the "moments after" case
