@@ -49387,6 +49387,33 @@ unmount or a successful share, neither of which this hook currently
 tracks) and getting it wrong risks deleting a file still in use — a correctness
 bug on the belief of a cleanup one.
 
+## 2026-08-29 — N451 (#754): the share card's accent glow was a stray circle, not lighting
+
+Direct product-owner feedback, verbatim: *"make now the shared png picture
+without that circle that mountain has."* Investigated before touching
+anything: the "circle" is `SessionCard.tsx`'s `s.glow` — a circular
+accent-colored overlay (`borderRadius: 95 * u` on a 190×190 box, opacity
+0.34) positioned over the top-right of the card, whose own doc comment
+described it as meant to read as "light coming off the summit." It
+rendered **unconditionally**, over the default mountain and over an
+athlete's own replacement photo (N449/#747) identically — it is a separate
+layer independent of whichever image sits beneath it, not a mask or crop
+on the mountain art itself. `SessionCard` is the same component behind all
+three call sites its own top-of-file comment names — the session
+completion screen, a feed row, and the exported/shared PNG — so the fix
+lands everywhere the card is drawn, not just the export.
+
+**Fix:** removed the `<RNView style={s.glow} .../>` element and its style
+definition entirely, and updated the file's top-of-file doc comment (which
+had described the glow alongside the eyebrow and score ring as part of the
+accent-color design) to note the removal and why, rather than leave a
+stale claim about a layer that no longer exists.
+
+No test asserted on the glow's presence (checked before removing it) —
+`sessionCardBackgroundPhoto.test.tsx` and `shareCardPreview.test.tsx`
+(22 tests between them, covering both the default-mountain and
+custom-photo cases) pass unmodified. `typecheck:mobile` clean.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

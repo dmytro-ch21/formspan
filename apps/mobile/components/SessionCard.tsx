@@ -30,10 +30,16 @@ import { headlineFor, type CardData } from '@/lib/sessionCard';
  *
  * ## The accent is the athlete's, not the card's
  *
- * The glow behind the peak, the eyebrow and the score ring all take
+ * The eyebrow takes `accent.ink`; the PR/streak badges and the foot rule take
  * `accent.accent`. Six accents × eight peaks is forty-eight looks before
  * anything repeats, which is what stops a feed of these reading as a template
  * — and it costs nothing, because the accent already exists as a setting.
+ *
+ * (A circular accent "glow" used to sit over the photo here — behind the
+ * peak's silhouette, meant to read as light coming off the summit. Removed
+ * on the user's direct request: it rendered unconditionally over an
+ * athlete's own replacement photo too, not just the default mountain, and
+ * read as a stray shape rather than lighting.)
  *
  * ## What the lime does NOT do
  *
@@ -66,11 +72,6 @@ export const SessionCard = forwardRef<RNView, { data: CardData; width: number }>
           transition={0}
           testID="session-card-photo"
         />
-
-        {/* The glow sits BEHIND the peak's silhouette and above the photo, so
-            the accent reads as light coming off the summit rather than a
-            coloured overlay on a picture. */}
-        <RNView style={[s.glow, { backgroundColor: accent.accent }]} pointerEvents="none" />
 
         {/* Two gradients, not one. A single top-to-bottom scrim either drowns
             the sky or leaves the stat strip illegible; this darkens the left
@@ -206,15 +207,6 @@ const buildStyles = (u: number) =>
     // source renders top out at 1254px, and filling a card at 3× would upscale
     // them visibly. See assets/images/mountains/README.md.
     photo: { position: 'absolute', top: 0, right: 0, width: '100%', height: '78%' },
-    glow: {
-      position: 'absolute',
-      top: '10%',
-      right: '6%',
-      width: 190 * u,
-      height: 190 * u,
-      borderRadius: 95 * u,
-      opacity: 0.34,
-    },
     inner: { flex: 1, padding: 22 * u },
 
     top: { flexDirection: 'row', alignItems: 'center' },
