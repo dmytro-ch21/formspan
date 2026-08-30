@@ -36,6 +36,30 @@ let tokenSource: (() => Promise<string | null>) | null = null;
 let installed = false;
 let previousErrorHandler: ((e: unknown, isFatal?: boolean) => void) | null = null;
 let rejectionTrackingInstalled = false;
+// Bumped on every install and on `resetTelemetry`. The self-test below
+// resolves on its own timer, well after `installRejectionTracking` returns —
+// long enough that a test's `resetTelemetry` (or Fast Refresh re-running this
+// module) can land in between. A stale timer completing after that must not
+// overwrite state a newer install (or a reset) already owns.
+let rejectionTrackingEpoch = 0;
+let rejectionSelfTestTimer: ReturnType<typeof setTimeout> | null = null;
+// Real time, not simulated: the underlying tracker (either engine) waits to
+// see if a late `.catch` shows up before calling `onUnhandled` at all — the
+// `promise` package's own fallback path waits up to 2000ms for anything not
+// in its TypeError/RangeError/ReferenceError whitelist, which our marker
+// never is. 3000ms clears that with margin. Overridable for tests, which
+// would otherwise carry that wait for real, once per `installTelemetry` call.
+let rejectionSelfTestTimeoutMs = 3000;
+
+/**
+ * Exists for tests — the production default above would make every test in
+ * this file that calls `installTelemetry` carry a real multi-second wait for
+ * a self-test result nothing in that test even reads. Harmless in
+ * production; nothing there calls it.
+ */
+export function setRejectionSelfTestTimeoutMsForTests(ms: number): void {
+  rejectionSelfTestTimeoutMs = ms;
+}
 
 /**
  * One trace id for the whole app run.
@@ -222,18 +246,54 @@ export function installTelemetry(getToken: () => Promise<string | null>): void {
  * `ExceptionsManager.handleException` **directly**, bypassing the `ErrorUtils`
  * global handler entirely. So neither hook above would ever have seen one.
  *
- * The fix is to re-enable rejection tracking with options that wrap RN's own,
- * which is what every reporter that works on RN does. RN's `onUnhandled` is
- * still called, so the development warning is unchanged.
+ * **The fix that shipped for that (N43) composed over
+ * `promise/setimmediate/rejection-tracking` and set the flag true the instant
+ * `enable()` returned without throwing — and that is a second, quieter version
+ * of the exact same bug (N463).** `enable()` patches
+ * `Promise._B`/`Promise._C` on `promise/setimmediate/core`'s OWN Promise
+ * class — not `globalThis.Promise`. On Hermes, which is this app's engine on
+ * every platform it ships to, `Core/polyfillPromise.js` takes the
+ * `HermesInternal.hasPromise()` branch and never replaces `globalThis.Promise`
+ * with that class, so the two are unrelated objects: the tracker patches a
+ * Promise class the app never constructs anything from. `enable()` still
+ * returns cleanly — it has no way to know its target is disconnected — so the
+ * old flag came back `true` while genuinely observing nothing, forever, on
+ * every build this app ships. That is defect #1 from #463 in its most
+ * concrete form: "enable() didn't throw" is not "rejections arrive".
  *
- * **If this cannot be installed, it says so out loud.** A reporter whose
- * rejection half is quietly missing is the exact failure this project keeps
- * meeting — a CI run with no checks reading as passing, a skipped test printing
- * `ok`, an empty array meaning both "none" and "we never asked". So a failure
- * here buffers a `client_error` rather than being swallowed: the Health screen
- * shows the gap instead of showing nothing.
+ * **The fix: use whichever tracker actually sees `globalThis.Promise`, and
+ * prove it rather than assume it.** Hermes ships its own tracker,
+ * `HermesInternal.enablePromiseRejectionTracker`, typed identically to
+ * `promise/setimmediate/rejection-tracking`'s `enable` (RN's own
+ * `flow/HermesInternalType.js` says so) — and it is wired to the SAME
+ * `globalThis.Promise` the app's code actually uses, because Hermes's
+ * `hasPromise()` is exactly the condition under which `globalThis.Promise`
+ * stays Hermes's own. Where Hermes does not provide native Promise support,
+ * `polyfillPromise.js` DOES replace `globalThis.Promise` with
+ * `promise/setimmediate/es6-extensions` — the very class
+ * `promise/setimmediate/rejection-tracking` patches — so the original
+ * mechanism is exactly right there. Which one is live is chosen once, here,
+ * by asking Hermes rather than assuming either engine.
+ *
+ * That still leaves "the composed handler is wired to the right Promise but
+ * something else about it is wrong" — RN re-enabling tracking after us, this
+ * app's options shape drifting from what either API expects, a second
+ * consumer overwriting the handler. So immediately after installing, this
+ * deliberately rejects a promise NOBODY catches and waits, on a real clock,
+ * to see whether the handler installed above is the one that reports it. Only
+ * that observation — not the `enable()` call returning — sets the flag true.
+ *
+ * **If this cannot be installed, or installs but never delivers, it says so
+ * out loud**, with DIFFERENT wording for the two cases so they read apart in
+ * `health_events`: a reporter whose rejection half is quietly missing is the
+ * exact failure this project keeps meeting — a CI run with no checks reading
+ * as passing, a skipped test printing `ok`, an empty array meaning both "none"
+ * and "we never asked".
  */
 function installRejectionTracking(): void {
+  const epoch = ++rejectionTrackingEpoch;
+  if (rejectionSelfTestTimer) clearTimeout(rejectionSelfTestTimer);
+  rejectionSelfTestTimer = null;
   try {
     // Required lazily and defensively: these are RN-internal paths, stable
     // across versions in practice but not contractually. A version that moves
@@ -258,10 +318,25 @@ function installRejectionTracking(): void {
       | ((id: unknown, rejection: unknown) => void)
       | undefined;
 
-    tracking.enable({
+    // A fresh object per install: it can only ever be `===` the rejection we
+    // deliberately create below, never a real error the app throws — even one
+    // that happens to share a message, a code, or (for an object rejection) a
+    // reference from elsewhere in the same run.
+    const selfTestMarker: Record<string, never> = {};
+    let selfTestObserved = false;
+
+    const composedOptions = {
       ...rnOptions,
       allRejections: true,
       onUnhandled: (id: unknown, rejection: unknown) => {
+        if (rejection === selfTestMarker) {
+          // Our own probe, not a real rejection. Observed, not reported —
+          // and not chained to `rnUnhandled` either, which would otherwise
+          // print a dev-mode "Uncaught (in promise)" warning for a promise
+          // that was never a real problem.
+          selfTestObserved = true;
+          return;
+        }
         try {
           capture('error', 'client_error', describe(rejection), {
             reason: 'unhandled_rejection',
@@ -275,8 +350,66 @@ function installRejectionTracking(): void {
           rnUnhandled?.(id, rejection);
         }
       },
-    });
-    rejectionTrackingInstalled = true;
+    };
+
+    const hermes = (
+      globalThis as {
+        HermesInternal?: {
+          hasPromise?: () => boolean;
+          enablePromiseRejectionTracker?: (opts: Record<string, unknown>) => void;
+        };
+      }
+    ).HermesInternal;
+
+    // Which `Promise` constructor the self-test rejects on has to match
+    // whichever one the tracker just installed is actually wired to — see the
+    // doc comment above. On Hermes that is `globalThis.Promise` itself. In
+    // the fallback branch it is NOT `globalThis.Promise` under Jest (Node's
+    // own native Promise, unrelated to either tracker) — it is this exact
+    // class, the same one `enable()` just patched, and the same one
+    // `Core/Promise.js` makes `globalThis.Promise` on a real non-Hermes
+    // device. Requiring it explicitly rather than reading `globalThis.Promise`
+    // is what keeps the self-test faithful in both places it runs.
+    let selfTestPromise: { reject: (v: unknown) => unknown };
+
+    if (hermes?.hasPromise?.() === true && typeof hermes.enablePromiseRejectionTracker === 'function') {
+      // The branch that matters on-device: Hermes owns `globalThis.Promise`
+      // here, and this is the tracker actually wired to it.
+      hermes.enablePromiseRejectionTracker(composedOptions);
+      selfTestPromise = globalThis.Promise;
+    } else {
+      tracking.enable(composedOptions);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      selfTestPromise = require('promise/setimmediate/es6-extensions') as {
+        reject: (v: unknown) => unknown;
+      };
+    }
+
+    // Deliberately unhandled: no `.catch`, no `await`. Whichever tracker was
+    // just installed above is the one that has to notice THIS.
+    selfTestPromise.reject(selfTestMarker);
+
+    rejectionSelfTestTimer = setTimeout(() => {
+      rejectionSelfTestTimer = null;
+      // A later install or a `resetTelemetry` already moved on; this result
+      // is about an install nothing points at any more.
+      if (epoch !== rejectionTrackingEpoch) return;
+      if (selfTestObserved) {
+        rejectionTrackingInstalled = true;
+      } else {
+        rejectionTrackingInstalled = false;
+        // Distinct wording from the require-throws message below on purpose:
+        // this is "installed, but proven not to deliver", a different failure
+        // mode that needs to read apart in `health_events`.
+        capture(
+          'error',
+          'client_error',
+          'telemetry: rejection tracking installed but not delivering',
+          { reason: 'self_test_not_observed' },
+        );
+      }
+    }, rejectionSelfTestTimeoutMs);
+    (rejectionSelfTestTimer as unknown as { unref?: () => void }).unref?.();
   } catch {
     rejectionTrackingInstalled = false;
     // Deliberately visible. This is the one failure that would otherwise leave
@@ -287,8 +420,17 @@ function installRejectionTracking(): void {
   }
 }
 
-/** Whether the rejection hook is live. Read by tests, and worth having as a
- *  fact rather than an assumption, given the first version was a no-op. */
+/**
+ * Whether we have PROVEN a rejection reaches our handler — not whether
+ * `enable()` returned without throwing. Read by tests and (via
+ * `apps/mobile/app/settings.tsx`) by an athlete on the device it is actually
+ * about, and worth having as a fact rather than an assumption: the first
+ * version of this file was a no-op that believed itself installed, and the
+ * second (N463) was `enable()` returning cleanly while patching a Promise
+ * class the app never used — both looked identical to this function's old
+ * body, which is why what it returns now is the outcome of a real self-test,
+ * not the success of a call that could not tell the difference.
+ */
 export function rejectionTrackingActive(): boolean {
   return rejectionTrackingInstalled;
 }
@@ -324,6 +466,12 @@ export function resetTelemetry(): void {
   ).ErrorUtils;
   if (previousErrorHandler) errorUtils?.setGlobalHandler?.(previousErrorHandler);
   previousErrorHandler = null;
+  if (rejectionSelfTestTimer) clearTimeout(rejectionSelfTestTimer);
+  rejectionSelfTestTimer = null;
+  // Invalidates any self-test still in flight, so its result — arriving on
+  // its own timer, after this call returns — cannot land on a state this
+  // reset already claimed to have cleared.
+  rejectionTrackingEpoch++;
   rejectionTrackingInstalled = false;
   installed = false;
   tokenSource = null;

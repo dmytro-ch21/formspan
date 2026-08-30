@@ -15557,3 +15557,44 @@ one.
   two additional read-only fields (`natural_serving_label`,
   `natural_serving_grams`) to an already-public response shape, with no new
   write surface and no change to who can call either endpoint.
+
+## N463 — rejection tracking proves delivery, not just that `enable()` returned (`apps/mobile/lib/telemetryClient.ts`, `apps/mobile/app/settings.tsx`)
+
+`rejectionTrackingActive()` now reflects a self-test that has actually
+observed its own deliberately-unhandled promise, not merely that installing
+the tracker didn't throw. Mostly a device/manual concern — the self-test
+itself runs automatically on every launch, with no user action to trigger.
+
+### Happy path
+
+- Launch the app fresh (cold start) and go straight to Settings. Confirm
+  the diagnostics line reads "not yet confirmed on this device" briefly
+  (the self-test can take a few seconds to settle after launch) and then,
+  after a few seconds and re-visiting the screen (leave and come back, or
+  background/foreground), reads "active on this device" instead — this is
+  the self-test resolving, not a bug.
+- With the app fully settled (open for at least 10 seconds), open Settings
+  directly. Confirm the diagnostics line reads "active on this device"
+  immediately.
+
+### Edge cases and errors
+
+- Confirm the diagnostics line updates on EVERY visit to Settings, not
+  just the first — leave the screen and return; it should not be frozen at
+  whatever value it read on first mount.
+- This cannot be forced to the "not delivering" (installed-but-inactive)
+  or "unavailable" (require-throws) states without a build that breaks the
+  underlying `promise/setimmediate/rejection-tracking` or
+  `HermesInternal.enablePromiseRejectionTracker` wiring on purpose — not a
+  scenario an athlete can trigger. Covered instead by
+  `apps/mobile/lib/__tests__/telemetryClient.test.ts`, which exercises both
+  failure paths against the real underlying package and mutation-verifies
+  the self-test's own decision logic.
+
+### Auth / security
+
+- No change to authorization or the wire contract — this is a client-only
+  diagnostic. The distinguishing `client_error` messages
+  ("...installed but not delivering" vs "...unavailable") reach
+  `health_events` the same way every other captured telemetry event
+  already does, with no new fields and no new endpoint.
