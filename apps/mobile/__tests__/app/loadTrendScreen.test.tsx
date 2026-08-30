@@ -28,6 +28,23 @@ jest.mock('@/lib/records', () => ({
   fetchLoadHistory: (...a: unknown[]) => mockFetch(...a),
 }));
 
+// Relative to test-run time, not hardcoded calendar dates: the screen computes
+// its window as `today - 90 days` off the REAL clock (`app/records/[exerciseId]/trend.tsx`'s
+// `today = dayString(new Date())`, not mockable here — no prop or context
+// overrides it), and the default range is `'3M'` (90 days, `lib/trendSeries.ts`).
+// A fixture pinned to specific 2026 calendar dates decays as the window slides
+// past it — measured 2026-08-30, when a `2026-06-01` point that was safely
+// inside a 90-day window when written had drifted to the exact edge of one and
+// intermittently dropped out, failing `load-trend-delta` in real CI. Offsets
+// well clear of both edges (60 and 5 days back) keep this true regardless of
+// when the suite runs.
+const daysAgo = (n: number) => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - n);
+  d.setUTCHours(10, 0, 0, 0);
+  return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+};
+
 const point = (started_at: string, top_weight_kg: number | null) => ({
   session_id: started_at,
   started_at,
@@ -53,20 +70,22 @@ it('shows the unavailable message on a failed load, not "no sessions yet"', asyn
 });
 
 it('renders sessions as entries and a readable delta once loaded', async () => {
+  const older = daysAgo(60);
+  const recent = daysAgo(5);
   mockFetch.mockResolvedValue({
     exercise_id: 'back-squat',
     load_type: 'weight_reps',
-    points: [point('2026-06-01T10:00:00Z', 100), point('2026-08-10T10:00:00Z', 110)],
+    points: [point(older, 100), point(recent, 110)],
   });
   render(<LoadTrendScreen />);
 
   expect(await screen.findByTestId('load-trend-delta')).toBeTruthy();
-  expect(screen.getByTestId(`load-trend-entry-2026-06-01T10:00:00Z`)).toBeTruthy();
-  expect(screen.getByTestId(`load-trend-entry-2026-08-10T10:00:00Z`)).toBeTruthy();
+  expect(screen.getByTestId(`load-trend-entry-${older}`)).toBeTruthy();
+  expect(screen.getByTestId(`load-trend-entry-${recent}`)).toBeTruthy();
 });
 
 it('says a non-strength exercise needs a logged weight, rather than drawing an empty chart', async () => {
-  mockFetch.mockResolvedValue({ exercise_id: 'plank', load_type: 'time', points: [point('2026-08-10T10:00:00Z', null)] });
+  mockFetch.mockResolvedValue({ exercise_id: 'plank', load_type: 'time', points: [point(daysAgo(5), null)] });
   render(<LoadTrendScreen />);
   expect(await screen.findByTestId('load-trend-no-weight')).toBeTruthy();
   expect(screen.queryByTestId('load-trend-chart')).toBeNull();
@@ -76,7 +95,7 @@ it('switching the range does not re-fetch — it slices what is already loaded',
   mockFetch.mockResolvedValue({
     exercise_id: 'back-squat',
     load_type: 'weight_reps',
-    points: [point('2026-08-10T10:00:00Z', 100)],
+    points: [point(daysAgo(5), 100)],
   });
   render(<LoadTrendScreen />);
   await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
