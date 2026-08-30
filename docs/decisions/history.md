@@ -49241,6 +49241,152 @@ tests) green against a fresh migrated database; `tsc --noEmit` and
 `lint:openapi` clean.
 
 
+## 2026-08-29 — N449 (#747): the share card's photo, not just the mountain
+
+User, direct: *"at the end of workout we should be able to take and add a
+photo instead of the mountain [default background], and it generates one
+nice png without the mountain default."* Follow-up to N447/#745, which
+landed the same day — that ticket fixed what the card SAYS, this one lets
+the athlete replace what it SHOWS.
+
+**One new optional field carries the whole feature.** `CardData` (`lib/
+sessionCard.ts`) gained `backgroundUri?: string` — a local file URI, never a
+remote one, because this photo never leaves the device. `SessionCard.tsx`'s
+`<Image>` now reads `data.backgroundUri ? { uri: data.backgroundUri } :
+MOUNTAINS[peak]` in place of the old unconditional `MOUNTAINS[peak]` — same
+`s.photo` frame, same `contentFit="cover"`, same gradient scrims and accent
+glow layered on top unchanged. That reuse is what answers the ticket's
+aspect-ratio criterion: an arbitrary phone photo crops into the frame
+exactly the way a mountain pre-sized for it already does, because `cover`
+was already doing that job and never cared what the source was.
+
+**Where the picker lives, and why there.** `useSessionShare`
+(`components/SessionShare.tsx`) gained `backgroundUri`, `pickingPhoto`,
+`pickBackgroundPhoto(fromCamera)` and `clearBackgroundPhoto()`, and
+`ShareCardHost`'s preview modal grew a row of "Take photo" / "Choose
+photo" / "Use default" controls between the preview note and the error
+line. Deliberately not a separate screen or a control beside the Share
+button: the preview modal is already the one place F2 (#N-share-preview,
+history above) put the card in front of the athlete before it goes
+anywhere, and swapping the background is exactly the kind of decision that
+wants to see the frame it's landing in. Because the off-screen capture
+host and the visible preview both render off the SAME `card` object, no
+extra plumbing was needed to make a picked photo reach what `captureRef`
+actually exports — a test pins that "every mount of the card, including
+the off-screen one" reflects the new `backgroundUri` after a pick.
+
+**State shape mirrors `numbers`, on purpose.** The picked photo is stored
+as `{id, uri}`, keyed to `sessionID` the same way the server's decorating
+numbers already are — the same reasoning applies: a screen instance that
+`router.replace`s onto a different session must not decorate the new card
+with the previous one's photo. `backgroundUri` reads as `undefined` the
+instant `sessionID` changes underneath it, with no extra effect or render
+pass.
+
+**Permission handling matches the other four picker sites exactly** —
+`profile/edit.tsx`'s wording verbatim (`"VOLA needs camera access to take
+a photo."` / `"VOLA needs access to your photos to set one."`), the same
+try/catch shape around both the permission request and the launch call
+(both can reject outright, not just resolve `canceled: true`), reported
+through the same `error` state the preview already surfaces.
+
+**Not `prepareImageForUpload` — a smaller, deliberate divergence from N74's
+"one place" helper.** That helper's `compress: 0.8` JPEG re-encode exists
+to shrink what crosses the network; this photo never crosses it; it is
+rendered locally and captured straight into the exported PNG. So
+`pickBackgroundPhoto` calls `ImageManipulator.manipulateAsync` directly
+with `[{ resize: { width: CARD_EXPORT_WIDTH } }]` at `compress: 1` —
+`CARD_EXPORT_WIDTH` imported from `lib/shareCard.ts` rather than a second
+1080 constant, so a future change to the export size cannot leave the
+picker resizing to the wrong target unnoticed. The resize itself still
+matters: a raw 12MP camera frame decoded straight into a 1080px-wide
+capture is unnecessary memory pressure this card has no reason to pay for.
+
+**Tests**, three files:
+
+- `lib/__tests__/sessionCard.ts`'s existing suite needed no changes —
+  `backgroundUri` is additive and `cardFromSummary` never sets it; it's
+  merged in by the hook.
+- New `components/__tests__/sessionCardBackgroundPhoto.test.tsx` pins what
+  `SessionCard` renders directly: the mountain when `backgroundUri` is
+  absent, the athlete's own `{ uri }` source when it's set (mutation-tested
+  — reverting the conditional to the unconditional mountain fails two
+  tests), and an empty string treated as "no photo" rather than a broken
+  `Image`.
+- `components/__tests__/shareCardPreview.test.tsx` gained a
+  `describe('replacing the mountain with a photo (N449/#747)')` block:
+  threading a library photo and a camera photo onto every mount of the
+  card including the off-screen one (`getAllByTestId(...,
+  {includeHiddenElements: true})` — the off-screen host is deliberately
+  hidden from assistive tech, so the default query misses it, same
+  reason `Avatar.test.tsx` needs the flag); the resize call's exact
+  arguments (`width: 1080, compress: 1`, not the network path's `0.8`);
+  going back to the mountain via "Use default"; both permissions refused,
+  each mutation-tested (disabling the `if (!perm.granted)` guard makes two
+  tests fail — the permission requests still fire but nothing stops the
+  launch); and a rejected permission/launch call surfacing as the same
+  `error` text a `Pressable`'s `void`-called handler would otherwise drop
+  silently.
+
+Full mobile suite green (236 suites / 3686 tests — one incidental
+`bjjSessionScreen.test.tsx` failure surfaced once under full-suite
+parallel load and reproduced as a pass in isolation and on a clean
+re-run of the full suite; not this branch's diff, not chased further
+here), `tsc --noEmit` clean, `routes:mobile` clean.
+
+**NEEDS HUMAN EVIDENCE, left for the PR's checklist.** Every acceptance
+criterion above is code- and test-verified except the one that can't be:
+finishing a real session on a device, picking a real camera and a real
+library photo, and confirming the exported/saved PNG composites correctly
+— not stretched, not cropped wrong, legible under the text overlay. No
+device run happened for this ticket.
+
+**What `ac-verifier`/`frontend-reviewer` found, and what changed in response.**
+No `[blocking]` findings; three real issues were fixed before the PR opened:
+
+- **The Share/Not-now buttons were disabled only while `sharing`, not while
+  `pickingPhoto`.** `pickBackgroundPhoto` awaits a permission prompt, an OS
+  picker AND a resize before `setBackground` ever runs — none of that is
+  instant, and a fast tap on Share during that window would have captured
+  the card BEFORE the just-picked photo landed on it, exporting the
+  outgoing mountain instead. Both buttons now read `disabled={sharing ||
+  pickingPhoto}`. New test, mutation-tested (reverting the guard to
+  `sharing` alone makes it fail): "disables Share and Not now while a photo
+  is still being resized, not only while sharing" — a deferred manipulator
+  promise holds `pickingPhoto` true and asserts both buttons' disabled
+  state mid-resize, then confirms they re-enable once it settles.
+- **No test exercised the session-scoping guard**
+  (`background.id === sessionID`) itself — every existing test picked a
+  photo and read it back for the SAME session. New test rerenders the
+  harness with a different `sessionID` after a pick and confirms the
+  mountain returns, mutation-tested (dropping the `sessionID` match from
+  the guard makes it fail).
+- **No test exercised the `canceled: true` picker path.** New test mocks a
+  cancellation that deliberately still carries a stale `assets` entry
+  (rather than the more typical `assets: null`) — the shape that actually
+  isolates the `canceled` check from the `!assets[0]` check, since a
+  null-assets read alone would make even a guard that dropped `canceled`
+  return early too (via the outer catch). Mutation-tested: dropping
+  `picked.canceled` from the guard's condition makes it fail, and the
+  correct code passes.
+
+Two of the three `[suggestion]` items were also cheap enough to take:
+`accessibilityState={{disabled: sharing}}` added to all three photo-picker
+Pressables (they had `disabled` but nothing announcing it), and `app.json`'s
+`photosPermission`/`cameraPermission` strings (both `expo-image-picker` and
+`expo-camera` plugin configs) now mention the share-card use case explicitly
+rather than leaving it uncovered by the permission prompt's own explanation.
+**Left as a follow-up, not fixed here:** the resized photo's temp file
+(`ImageManipulator`'s cache-directory output) is never cleaned up the way
+`shareCard.ts`'s exported PNG is (`releaseCapture` on a delay) — picking
+several photos across a session, or across sessions, accumulates cache
+files with nothing deleting them. Not fixed in this PR because the safe
+window to delete one is genuinely unclear (a picked photo can still be
+read by an in-flight capture, and "safe" would need to be tied to either
+unmount or a successful share, neither of which this hook currently
+tracks) and getting it wrong risks deleting a file still in use — a correctness
+bug on the belief of a cleanup one.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

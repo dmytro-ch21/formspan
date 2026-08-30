@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   StyleSheet,
@@ -9,6 +10,8 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 
 import { SessionCard } from '@/components/SessionCard';
 import { Text, View } from '@/components/Themed';
@@ -17,7 +20,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { prBadgeFor, statsFor, type SessionSummary } from '@/lib/celebration';
 import { cardFromSummary, type CardData } from '@/lib/sessionCard';
 import { getSessionCard, type SessionCardNumbers } from '@/lib/sessionCardApi';
-import { shareCard } from '@/lib/shareCard';
+import { CARD_EXPORT_WIDTH, shareCard } from '@/lib/shareCard';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -70,6 +73,18 @@ export type SessionShare = {
   cancel: () => void;
   /** Capture and hand off to the share sheet. */
   share: () => Promise<void>;
+  /**
+   * The athlete's own photo, once picked (N449, #747) — undefined until then,
+   * which is also what `card.backgroundUri` carries, so `SessionCard` falls
+   * back to the deterministic mountain with no extra plumbing.
+   */
+  backgroundUri?: string;
+  /** True while the picker/permission/resize sequence is in flight. */
+  pickingPhoto: boolean;
+  /** Opens the camera when `true`, the library when `false`. */
+  pickBackgroundPhoto: (fromCamera: boolean) => Promise<void>;
+  /** Back to the deterministic mountain. */
+  clearBackgroundPhoto: () => void;
 };
 
 export function useSessionShare(opts: {
@@ -148,17 +163,34 @@ export function useSessionShare(opts: {
   }, [sessionID, getToken]);
   const forThisSession = numbers && numbers.id === sessionID ? numbers.value : null;
 
+  /**
+   * The athlete's own photo, in place of the deterministic mountain (N449,
+   * #747).
+   *
+   * Same `{id, value}` shape as `numbers` above, and for the same reason:
+   * this describes ONE session, and a screen instance that moves between
+   * sessions (`router.replace` onto the same route) must not decorate the
+   * new card with the photo picked for the previous one.
+   */
+  const [background, setBackground] = useState<{ id: string; uri: string } | null>(null);
+  const [pickingPhoto, setPickingPhoto] = useState(false);
+  const backgroundUri =
+    background && sessionID && background.id === sessionID ? background.uri : undefined;
+
   const card =
     sessionID && summary
-      ? cardFromSummary({
-          id: sessionID,
-          summary,
-          stats: statsFor(summary, formatTonnage),
-          streak,
-          numbers: forThisSession,
-          prBadge: prBadgeFor(summary.records, formatWeight),
-          now: date,
-        })
+      ? {
+          ...cardFromSummary({
+            id: sessionID,
+            summary,
+            stats: statsFor(summary, formatTonnage),
+            streak,
+            numbers: forThisSession,
+            prBadge: prBadgeFor(summary.records, formatWeight),
+            now: date,
+          }),
+          backgroundUri,
+        }
       : null;
 
   /*
@@ -181,6 +213,63 @@ export function useSessionShare(opts: {
   }, []);
   const cancel = useCallback(() => setPreviewing(false), []);
 
+  /**
+   * Ask for a photo and thread it onto the card (N449, #747).
+   *
+   * Same permission → launch sequence as the app's other four picker sites
+   * (`profile/edit.tsx` is the canonical one) — guarded the same way, because
+   * both the permission prompt and the picker itself can reject rather than
+   * merely resolve `canceled: true` (an OS-level failure, a Simulator with no
+   * camera), and this is a `void`-called handler from a `Pressable`.
+   *
+   * **Not `prepareImageForUpload`.** That helper's 0.8 JPEG compress exists to
+   * shrink what crosses the network — nothing here ever does. This photo is
+   * rendered locally and captured straight into the exported PNG by
+   * `captureRef`, so the only cost worth paying is decoding a full 12MP
+   * camera frame into a view that is at most `CARD_EXPORT_WIDTH` px wide.
+   * Resizing to that width, at `compress: 1`, keeps the resize without the
+   * quality loss the network path pays for and this one has no reason to.
+   */
+  const pickBackgroundPhoto = useCallback(
+    async (fromCamera: boolean) => {
+      if (!sessionID || pickingPhoto) return;
+      setPickingPhoto(true);
+      setError(null);
+      try {
+        const perm = fromCamera
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          setError(
+            fromCamera
+              ? 'VOLA needs camera access to take a photo.'
+              : 'VOLA needs access to your photos to set one.',
+          );
+          return;
+        }
+        const picked = fromCamera
+          ? await ImagePicker.launchCameraAsync({ quality: 1 })
+          : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+        if (picked.canceled || !picked.assets[0]) return;
+
+        const resized = await ImageManipulator.manipulateAsync(
+          picked.assets[0].uri,
+          [{ resize: { width: CARD_EXPORT_WIDTH } }],
+          { compress: 1 },
+        );
+        setBackground({ id: sessionID, uri: resized.uri });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setPickingPhoto(false);
+      }
+    },
+    [sessionID, pickingPhoto],
+  );
+
+  /** Back to the deterministic mountain. */
+  const clearBackgroundPhoto = useCallback(() => setBackground(null), []);
+
   const share = useCallback(async () => {
     if (sharing) return;
     setSharing(true);
@@ -197,7 +286,20 @@ export function useSessionShare(opts: {
     if (result.ok) setPreviewing(false);
   }, [sharing]);
 
-  return { card, cardRef, sharing, error, previewing, preview, cancel, share };
+  return {
+    card,
+    cardRef,
+    sharing,
+    error,
+    previewing,
+    preview,
+    cancel,
+    share,
+    backgroundUri,
+    pickingPhoto,
+    pickBackgroundPhoto,
+    clearBackgroundPhoto,
+  };
 }
 
 /**
@@ -263,7 +365,18 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
   // `share` object as a ref, after which `share.card` beside it reads as
   // accessing a ref value during render — two warnings for code that does
   // neither. Pulling both out first is what makes them plain locals again.
-  const { card, cardRef, previewing, sharing, error, cancel } = share;
+  const {
+    card,
+    cardRef,
+    previewing,
+    sharing,
+    error,
+    cancel,
+    backgroundUri,
+    pickingPhoto,
+    pickBackgroundPhoto,
+    clearBackgroundPhoto,
+  } = share;
   const accent = useAccent();
   const { width } = useWindowDimensions();
   if (!card) return null;
@@ -341,6 +454,57 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
             This is what gets posted. Nothing leaves VOLA until you pick where.
           </Text>
 
+          {/* Swap the deterministic mountain for the athlete's own photo
+              (N449, #747). Lives here rather than beside the Share button —
+              this is the one place the athlete already sees the frame the
+              photo has to fit, the same reason F2 exists as a preview
+              instead of a confirm dialog. */}
+          <RNView style={styles.photoRow} testID="share-photo-row">
+            {pickingPhoto ? (
+              <ActivityIndicator accessibilityLabel="Preparing your photo" />
+            ) : (
+              <>
+                <Pressable
+                  onPress={() => void pickBackgroundPhoto(true)}
+                  disabled={sharing}
+                  hitSlop={8}
+                  testID="share-photo-camera"
+                  accessibilityRole="button"
+                  accessibilityLabel="Take a photo for the card"
+                  accessibilityState={{ disabled: sharing }}
+                >
+                  <Text style={[styles.photoAction, { color: accent.ink }]}>Take photo</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void pickBackgroundPhoto(false)}
+                  disabled={sharing}
+                  hitSlop={8}
+                  testID="share-photo-library"
+                  accessibilityRole="button"
+                  accessibilityLabel="Choose a photo from your library"
+                  accessibilityState={{ disabled: sharing }}
+                >
+                  <Text style={[styles.photoAction, { color: accent.ink }]}>
+                    {backgroundUri ? 'Replace photo' : 'Choose photo'}
+                  </Text>
+                </Pressable>
+                {!!backgroundUri && (
+                  <Pressable
+                    onPress={clearBackgroundPhoto}
+                    disabled={sharing}
+                    hitSlop={8}
+                    testID="share-photo-clear"
+                    accessibilityRole="button"
+                    accessibilityLabel="Use the default background instead"
+                    accessibilityState={{ disabled: sharing }}
+                  >
+                    <Text style={[styles.photoAction, styles.photoClear]}>Use default</Text>
+                  </Pressable>
+                )}
+              </>
+            )}
+          </RNView>
+
           {!!error && (
             <Text style={styles.previewError} accessibilityLiveRegion="polite">
               {error}
@@ -350,25 +514,30 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
           <RNView style={styles.previewActions}>
             <Pressable
               onPress={cancel}
-              // Disabled mid-capture. Otherwise: tap Share, tap Not now before
-              // the sheet appears, and the sheet arrives anyway over the screen
-              // you just returned to — the capture was already in flight and
-              // cancelling the preview never cancelled it.
-              disabled={sharing}
-              style={[styles.previewCancel, sharing && styles.previewCancelBusy]}
+              // Disabled mid-capture, AND mid-pick (N449, #747): a Share tap
+              // that lands while `pickBackgroundPhoto` is still awaiting the
+              // resize would capture the card BEFORE `setBackground` ever
+              // runs, exporting the outgoing mountain instead of the photo
+              // that was just tapped — the resize is not instant, and a fast
+              // double-tap is exactly the timing this closes.
+              disabled={sharing || pickingPhoto}
+              style={[
+                styles.previewCancel,
+                (sharing || pickingPhoto) && styles.previewCancelBusy,
+              ]}
               accessibilityRole="button"
-              accessibilityState={{ disabled: sharing }}
+              accessibilityState={{ disabled: sharing || pickingPhoto }}
               testID="share-preview-cancel"
             >
               <Text style={styles.previewCancelText}>Not now</Text>
             </Pressable>
             <Pressable
               onPress={share.share}
-              disabled={sharing}
+              disabled={sharing || pickingPhoto}
               style={[styles.previewShare, { backgroundColor: accent.accent }]}
               accessibilityRole="button"
               accessibilityLabel="Share this card"
-              accessibilityState={{ busy: sharing, disabled: sharing }}
+              accessibilityState={{ busy: sharing, disabled: sharing || pickingPhoto }}
               testID="share-preview-confirm"
             >
               <Text style={[styles.previewShareText, { color: accent.on }]}>
@@ -414,6 +583,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   previewError: { fontSize: 13, color: vola.danger, textAlign: 'center' },
+  photoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18 },
+  photoAction: { fontSize: 13, fontWeight: '700' },
+  photoClear: { color: vola.textMuted },
   // Same shape as the celebration's action row, and for the same reason: the
   // two buttons have to line up, so the row owns the spacing and `stretch`
   // owns the height rather than each button guessing.

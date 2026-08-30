@@ -6413,6 +6413,51 @@ number would describe something still happening.
   of this ticket's scope. Do not conflate a modal screenshot with the share
   PNG when filing a bug against either.
 
+### Custom photo background (N449, #747)
+
+- Finish a session → open the share preview → "Take photo"/"Choose photo"
+  both appear before any photo is picked, and neither "Replace photo" nor
+  a "Use default" control is on screen yet.
+- Pick a library photo → it renders in the card in the mountain's exact
+  frame, with the accent glow and both gradient scrims still composited
+  over it the same as they are over a mountain — text must stay legible.
+  The label under the picker switches to "Replace photo" and a "Use
+  default" control appears.
+- Take a photo with the camera → same result as the library path; the
+  camera permission prompt is asked (not the library one), and the photo
+  composites the same way.
+- **NEEDS HUMAN EVIDENCE**: export/share the card after picking a photo and
+  confirm the SAVED PNG — not just the on-screen preview — shows the
+  photo, correctly cropped for an arbitrary aspect ratio (portrait,
+  landscape, and a near-square shot), not stretched, and with the headline
+  text still readable over it. No device run has happened for this ticket;
+  everything above is code/test-verified only, down to the exact `source`
+  prop `SessionCard`'s `<Image>` receives — not an actual rendered pixel.
+- Deny library access → an explicit message ("VOLA needs access to your
+  photos to set one.") appears, the picker never opens, and the card stays
+  on the deterministic mountain. Deny camera access → the camera-specific
+  wording, same non-crashing behaviour.
+- Cancel out of the OS picker (library or camera) without choosing a photo
+  → no error, no state change — the card stays exactly as it was before
+  the picker opened (mountain, or whichever photo was already set).
+- Tap "Use default" after picking a photo → the card reverts to the same
+  deterministic mountain it would have shown with no photo ever picked —
+  this is a revert, not a "photo removed, no background" state.
+- **No photo picked, ever** → the whole flow is unchanged from before this
+  ticket: same mountain, same PNG. This has to stay true for every athlete
+  who never touches the new controls — the feature is additive.
+- Finish a SECOND, different session in the same app session (without
+  restarting) and open ITS share preview → it must NOT show the previous
+  session's picked photo. A photo picked for one session's card is scoped
+  to that session, not carried onto the next one navigated to.
+- The exported/saved PNG (not merely the live preview) is what N449 is
+  actually about — the ticket that opened it exists specifically because a
+  build could get the on-screen preview right while the capture path
+  (`captureRef` reads the OFF-SCREEN mounted card, not the visible one —
+  see the "Sharing" section above) still exported the mountain. Confirming
+  both the preview AND a real exported/shared image show the photo is the
+  point, not either alone.
+
 ### Sharing — temp-file cleanup (L5, #384)
 
 `shareCard` releases the captured PNG (`react-native-view-shot`'s
