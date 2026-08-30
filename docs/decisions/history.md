@@ -49414,6 +49414,48 @@ No test asserted on the glow's presence (checked before removing it) —
 (22 tests between them, covering both the default-mountain and
 custom-photo cases) pass unmodified. `typecheck:mobile` clean.
 
+## 2026-08-30 — a hardcoded fixture date decayed into a live CI blocker, unrelated to N451
+
+Found while getting #758 (the N451 fix above) green: `loadTrendScreen.test.tsx`'s
+"renders sessions as entries and a readable delta once loaded" was failing in
+real GitHub Actions CI, not just locally — meaning it was blocking every open
+PR through this repo's normal CI-green gate, not just this one. Confirmed
+pre-existing and unrelated to N451 by stashing the SessionCard.tsx change and
+reproducing the same failure on an otherwise-clean tree.
+
+Root cause: the test's fixture pinned two absolute calendar dates
+(`2026-06-01T10:00:00Z`, `2026-08-10T10:00:00Z`) and asserted `load-trend-delta`
+renders. `app/records/[exerciseId]/trend.tsx` computes `today =
+dayString(new Date())` off the **real system clock** — no prop or context lets
+a test override it — and its default range is `'3M'`, a 90-day window
+(`lib/trendSeries.ts`). `deltaOf` (same file) requires at least two readings
+inside that window. On 2026-08-30 a 90-day window back from "today" lands
+exactly on `2026-06-01` — the fixture's older point had drifted from safely
+inside the window (when the test was written) to sitting right on its edge,
+and a delta needs the point to still be counted as `day >= 0`. Verified the
+exact boundary computation and reproduced the failure directly: reverting to
+the original hardcoded dates and running the suite fails on
+`load-trend-delta` every time now; it did not when the fixture was written.
+
+**Fix:** replaced both hardcoded dates with a `daysAgo(n)` helper computed off
+`new Date()` at test-run time (60 and 5 days back, clear of both window
+edges), so the fixture's position relative to the window it's tested against
+no longer decays with wall-clock time. Also swapped the file's two other
+hardcoded `2026-08-10` points (used by the non-strength-exercise and
+range-switching tests) to the same helper for the same reason, even though
+neither was failing yet — both were the identical class of bug on a slower
+fuse. Mutation-verified: reverting the fix reproduces the original failure;
+the fix passes under both `TZ=UTC` and the repo's own pinned
+`TZ=America/Los_Angeles` (`package.json`'s `test` script). Full mobile suite
+(237 suites, 3698 tests) green under the correct `TZ=America/Los_Angeles`
+invocation; `tsc --noEmit` and `eslint` clean.
+
+Landed on the same branch/PR as the N451 fix above rather than as its own
+ticket, since it was actively blocking that PR's merge and is a pure test fix
+with no product-facing behavior change — flagged separately in the PR body as
+an unrelated pre-existing bug rather than folded silently into the N451
+narrative.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
