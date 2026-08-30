@@ -15454,3 +15454,61 @@ screen onto either:
   gets its own scenario entry when its own migration ticket lands).
 - `food/add.tsx`/`FoodQuantity.tsx`'s hardcoded-accent "Log" buttons
   (tracked separately, not fixed here).
+
+## N448 — the food catalog's per-100g default ignores real serving data it already has (`backend/internal/modules/food/food.go`, `postgres.go`, `apps/mobile/lib/foodQuantity.ts`, `apps/mobile/components/FoodQuantity.tsx`, `apps/mobile/app/food/add.tsx`, `apps/mobile/components/food/CatalogCard.tsx`, `apps/mobile/components/food/IngredientPicker.tsx`)
+
+The general-catalog sequel to N117 above, which fixed **barcode-scanned**
+products only. This is the text-search catalog — `GET /v1/nutrition/catalog`
+and `GET /v1/nutrition/catalog/{id}` both now carry `natural_serving_label`/
+`natural_serving_grams`, derived from a food's own `portions[0]` when it has
+one.
+
+### Happy path
+
+- Search "Red Bull" (or another catalog item known to carry a real USDA
+  portion — `usda-173210` at the time of writing). Confirm the search
+  result card reads "N cals per 1 can 8.4 fl oz", NOT "cals per 100 g".
+- Tap that result to open the quantity sheet. Confirm the amount field
+  opens ALREADY at the real serving (258 for this product) with a matching
+  portion chip selected — not "100", and not a visible flash from 100 down
+  to 258 a moment after opening. This is the literal bug report: "1 can...
+  110 [kcal]" shown instead of a per-100g figure.
+- Confirm the calorie figure shown at that default matches the real
+  serving's macros (kcal scaled to 258 g), not the per-100g figure.
+- Search a food with NO real portion data (most of the catalog — 268 of
+  12,651 rows). Confirm it still shows "cals per 100 g" honestly on the
+  search card and opens the quantity sheet at 100 g — this ticket is about
+  USING data that exists, not inventing a serving USDA never stated.
+- Repeat the "opens already at the real serving" check from the
+  **ingredient picker** (`components/food/IngredientPicker.tsx`, recipe
+  authoring), which opens a catalog quantity sheet through the same
+  code path as the food-log flow above and shares the same defect.
+
+### Edge cases and errors
+
+- Search a food that DOES have portion data but with more than one entry
+  (e.g. Red Bull also has "1 fl oz"). Confirm the quantity sheet's chip
+  list shows the natural serving first, the food's other portions after it
+  (in USDA's own order), and "100 g" last — and that the natural-serving
+  chip is NOT duplicated once the full portion list loads a moment later.
+- On a slow or offline connection, confirm the quantity sheet's default
+  amount and chip are correct on the FIRST render — before the follow-up
+  `fetchCatalogFood` call (which loads the rest of `portions`) has had a
+  chance to resolve or fail. This is the mount-race the ticket named
+  directly; it should no longer be observable even on a throttled network,
+  because the default now arrives with the SEARCH result rather than
+  waiting on the follow-up fetch.
+- Toggle the amount field's unit (grams/ounces) after opening on the
+  natural default; confirm the number CONVERTS rather than relabelling —
+  same rule N90/N117 already established, unaffected by this change.
+- Scan a barcode (N117's own flow) for a product with a packet serving.
+  Confirm nothing here regressed it — the barcode path's
+  `packet_serving_label`/`packet_serving_grams` pair is untouched and this
+  ticket is additive to the general catalog only.
+
+### Auth / security
+
+- No change to authorization on either catalog endpoint — this ticket adds
+  two additional read-only fields (`natural_serving_label`,
+  `natural_serving_grams`) to an already-public response shape, with no new
+  write surface and no change to who can call either endpoint.

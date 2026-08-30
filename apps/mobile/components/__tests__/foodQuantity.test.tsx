@@ -32,6 +32,10 @@ const egg: CatalogFood = {
   category: 'egg',
   serving_label: '100 g',
   serving_grams: 100,
+  // Set per-test below, where it matters (N448) — null here is the common
+  // "no household portion" case this fixture otherwise represents.
+  natural_serving_label: null,
+  natural_serving_grams: null,
   kcal: 143,
   protein_g: 12.6,
   carb_g: 0.7,
@@ -123,6 +127,50 @@ test('an unusable quantity cannot be logged', () => {
 test('a food with no portions still offers 100 g', () => {
   render(<FoodQuantity food={{ ...egg, portions: [] }} onLog={jest.fn()} />);
   expect(screen.getByTestId('food-portion-100')).toBeTruthy();
+});
+
+/**
+ * N448: the mount-race this ticket named directly — "the sheet flashes/opens
+ * at 100g even for a food whose real portions arrive a moment later." A
+ * caller (`add.tsx`, `IngredientPicker`) opens this control on a bare SEARCH
+ * result, which has no `portions` array yet but DOES carry
+ * `natural_serving_label`/`natural_serving_grams` (N448's backend half) — so
+ * the fix is that the control must default to THAT, not to "100" while it
+ * waits for `portions` to resolve.
+ */
+test('defaults to the natural serving on the FIRST render, before portions ever load', () => {
+  const onLog = jest.fn();
+  render(
+    <FoodQuantity
+      // The exact shape `add.tsx`'s `openQuantity` passes in before its
+      // `fetchCatalogFood` upgrade resolves: no `portions` at all.
+      food={{
+        ...egg,
+        portions: undefined,
+        natural_serving_label: '1 can 8.4 fl oz',
+        natural_serving_grams: 258,
+      }}
+      onLog={onLog}
+    />,
+  );
+  // Not "100" — the field opens already showing the real serving.
+  expect(screen.getByTestId('food-quantity-input').props.value).toBe('258');
+  expect(screen.getByTestId('food-portion-258')).toBeTruthy();
+
+  fireEvent.press(screen.getByTestId('food-quantity-log'));
+  expect(onLog).toHaveBeenCalledWith(258);
+});
+
+test('a food with no natural serving AND no portions still opens at 100g, honestly', () => {
+  // The ticket's own third acceptance criterion, checked at the control
+  // level too: no portion data anywhere means no invented default.
+  render(
+    <FoodQuantity
+      food={{ ...egg, portions: undefined, natural_serving_label: null, natural_serving_grams: null }}
+      onLog={jest.fn()}
+    />,
+  );
+  expect(screen.getByTestId('food-quantity-input').props.value).toBe('100');
 });
 
 /**

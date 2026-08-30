@@ -107,11 +107,23 @@ func (r *PostgresRepository) Search(ctx context.Context, f SearchFilter) ([]Food
 	args = append(args, f.Offset)
 	offsetN := len(args)
 
+	// LEFT JOIN LATERAL rather than loading the whole Portions array (which
+	// Search deliberately never does — see Food.Portions): this fetches only
+	// food_catalog_portions' first row per food, ordered the same way
+	// portionsFor orders it, so `np.label`/`np.grams` IS `naturalServing`'s
+	// definition of "index zero" computed in SQL instead of Go. The primary
+	// key `(food_id, seq)` already serves `WHERE food_id = f.id ORDER BY seq
+	// LIMIT 1` — no new index needed. A food with no portions gets NULLs
+	// here, which pgx scans straight into the pointer fields as nil (N448).
 	//nolint:gosec // every fragment is composed from compile-time constants
 	// and bound placeholders; no user input reaches the SQL text.
 	query := fmt.Sprintf(`
-		SELECT %s, count(*) OVER () AS total
+		SELECT %s, count(*) OVER () AS total, np.label, np.grams
 		FROM food_catalog f
+		LEFT JOIN LATERAL (
+			SELECT label, grams FROM food_catalog_portions
+			WHERE food_id = f.id ORDER BY seq ASC LIMIT 1
+		) np ON true
 		%s
 		ORDER BY %s
 		LIMIT $%d OFFSET $%d`, selectColumns, clause, order, limitN, offsetN)
@@ -131,8 +143,9 @@ func (r *PostgresRepository) Search(ctx context.Context, f SearchFilter) ([]Food
 		)
 		// **This is the SECOND scanner over `selectColumns`**, the other being
 		// `scanFood`, and the two must be kept in step by hand — it cannot use
-		// `scanFood` because this query appends a window-function count that
-		// the shared projection knows nothing about.
+		// `scanFood` because this query appends a window-function count (and,
+		// as of N448, the LATERAL join's natural-serving pair) that the shared
+		// projection knows nothing about.
 		//
 		// N52 found that out the hard way: widening `selectColumns` by five
 		// columns left this one at nineteen destinations and every search test
@@ -148,6 +161,7 @@ func (r *PostgresRepository) Search(ctx context.Context, f SearchFilter) ([]Food
 			&item.SodiumMG, &item.CholesterolMG,
 			&item.Market, &item.RankTier, &item.Source,
 			&item.ExternalID, &item.ExternalSource, &item.CreatedAt, &item.UpdatedAt, &n,
+			&item.NaturalServingLabel, &item.NaturalServingGrams,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("food: scan: %w", err)
@@ -186,6 +200,7 @@ func (r *PostgresRepository) Get(ctx context.Context, id string) (*Food, error) 
 		return nil, err
 	}
 	f.Portions = portions
+	f.NaturalServingLabel, f.NaturalServingGrams = naturalServing(portions)
 	return f, nil
 }
 

@@ -27,6 +27,10 @@ const banana: CatalogFood = {
   category: 'fruit',
   serving_label: '100 g',
   serving_grams: 100,
+  // No natural serving on this fixture — N448's tests below (against a food
+  // that DOES carry one) live near `quantityOptions`.
+  natural_serving_label: null,
+  natural_serving_grams: null,
   kcal: 89,
   protein_g: 1.1,
   carb_g: 22.8,
@@ -117,6 +121,56 @@ test('portions with no usable weight are dropped, not shown as zero', () => {
     { seq: 2, label: '1 small', grams: 101 },
   ]);
   expect(opts.map((o) => o.label)).toEqual(['1 small', '100 g']);
+});
+
+/**
+ * N448: the whole point of the mount-race fix. `natural_serving_label`/
+ * `natural_serving_grams` are present on a SEARCH result — unlike `portions`,
+ * which `fetchCatalogFood`'s own doc explains is fetched separately — so a
+ * caller opening a quantity sheet on a bare search result must get the real
+ * default from THIS pair, not have to wait for `portions` to arrive.
+ */
+describe('quantityOptions and the natural serving (N448)', () => {
+  const redBull = {
+    ...banana,
+    id: 'usda-173210',
+    name: 'Beverages, Energy drink, RED BULL',
+    natural_serving_label: '1 can 8.4 fl oz',
+    natural_serving_grams: 258,
+  };
+
+  test('the natural serving leads the list EVEN WITH NO portions array loaded', () => {
+    // This is the exact search-result shape: `portions` is `undefined`
+    // (search never carries it), but the natural pair already is.
+    const opts = quantityOptions(redBull, undefined);
+    expect(opts[0]).toEqual({ label: '1 can 8.4 fl oz', grams: 258 });
+  });
+
+  test('once portions load, the natural serving is not duplicated as a second chip', () => {
+    // portions[0] IS the natural serving under a different name — dropping
+    // through both a search result and a `fetchCatalogFood` upgrade must not
+    // show "1 can 8.4 fl oz" twice.
+    const opts = quantityOptions(redBull, [
+      { seq: 1, label: '1 can 8.4 fl oz', grams: 258 },
+      { seq: 2, label: '1 fl oz', grams: 30 },
+    ]);
+    expect(opts.map((o) => o.label)).toEqual(['1 can 8.4 fl oz', '1 fl oz', '100 g']);
+  });
+
+  test('a food with no natural serving falls back to portions/100g exactly as before', () => {
+    // banana itself carries `natural_serving_label/grams: null` — the common
+    // case, unaffected by this change.
+    const opts = quantityOptions(banana, [{ seq: 1, label: '1 small', grams: 101 }]);
+    expect(opts.map((o) => o.label)).toEqual(['1 small', '100 g']);
+  });
+
+  test('a non-positive natural_serving_grams is refused, same guard as a portion', () => {
+    const opts = quantityOptions(
+      { ...banana, natural_serving_label: 'broken', natural_serving_grams: 0 },
+      undefined,
+    );
+    expect(opts).toEqual([{ label: '100 g', grams: 100 }]);
+  });
 });
 
 test('a quantity that cannot be logged parses as null rather than NaN', () => {

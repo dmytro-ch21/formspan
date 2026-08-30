@@ -85,6 +85,21 @@ export type CatalogFood = Macros & {
   category: string;
   serving_label: string;
   serving_grams: number | null;
+  /**
+   * This food's OWN most representative measure — "1 can 8.4 fl oz" for Red
+   * Bull — derived server-side from `portions[0]` (N448). Additive to and
+   * deliberately separate from `serving_label`/`serving_grams` above, which
+   * stay "the amount every macro on this object represents" (always
+   * "100 g") — the same separation N117's `packet_serving_label` makes for a
+   * scanned packet.
+   *
+   * **Present on search results too**, unlike `portions` below — it is
+   * `portions[0]` alone, cheap enough for a list page. Both null for the 268
+   * of 12,651 catalog rows with no USDA portion data; never a fabricated
+   * serving standing in for one USDA never stated.
+   */
+  natural_serving_label: string | null;
+  natural_serving_grams: number | null;
   /** Present on a single-food GET, absent from search results. */
   portions?: CatalogPortion[];
 };

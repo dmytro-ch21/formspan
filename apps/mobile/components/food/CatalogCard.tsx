@@ -34,6 +34,7 @@ import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import type { CatalogFood } from '@/lib/catalogApi';
 import { glyphFor } from '@/lib/foodGlyph';
+import { servingBasisGrams } from '@/lib/foodQuantity';
 
 export type CatalogCardProps = {
   food: CatalogFood;
@@ -55,8 +56,28 @@ export type CatalogCardProps = {
   accentText?: string;
 };
 
-/** Calories against the food's OWN serving, never an invented unit. */
+/**
+ * Calories against the food's OWN serving, never an invented unit.
+ *
+ * N448: prefers the NATURAL serving — "111 cals per 1 can 8.4 fl oz" for Red
+ * Bull — over the per-100g basis every seeded row states its raw numbers on,
+ * whenever the catalog has one (`natural_serving_label`/`natural_serving_grams`,
+ * present on a search result — see `CatalogFood`'s own doc). This is the exact
+ * line the ticket was reported against: a search result showing "cals per
+ * 100 g" for a can of Red Bull rather than "cals per 1 can".
+ *
+ * Falls back to the per-100g basis exactly as before for the 268 of 12,651
+ * catalog rows with no portion data — the ticket's own third acceptance
+ * criterion: showing "100 g" honestly rather than inventing a serving USDA
+ * never stated.
+ */
 export function servingLine(food: CatalogFood): string {
+  const grams = food.natural_serving_grams;
+  const label = food.natural_serving_label;
+  if (grams != null && label != null && Number.isFinite(grams) && grams > 0) {
+    const kcal = Math.round(food.kcal * (grams / servingBasisGrams(food)));
+    return `${kcal} cals per ${label}`;
+  }
   return `${Math.round(food.kcal)} cals per ${food.serving_label}`;
 }
 
