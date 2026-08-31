@@ -49788,6 +49788,95 @@ Same per-lesson `inFocus`-is-not-claim-aware gap N100 already recorded as
 out of scope — untouched here, and the reworded comment above documents why
 more precisely rather than promising it will be fixed.
 
+## 2026-08-30 — a collision-safe scratchpad path, and why a naming rule wasn't enough (#453)
+
+**The bug this closes**: two concurrent agents each staged a PR body at the
+same bare scratchpad path (`scratchpad/body.md`). The second write silently
+clobbered the first, and the first agent then `PATCH`ed its own PR with what
+was now the other ticket's body — for about a minute one PR carried another
+ticket's description, with nothing erroring or warning in either direction.
+Recorded at the time in this file's 2026-08-19 entry ("The per-session
+scratchpad is not per-session") but never given a structural fix — the ticket
+this closes asked for one explicitly, and asked, in these words, that it not
+be "asking sessions to be careful," because the incident happened to a session
+that was.
+
+**What shipped**: `scripts/scratchpad_path.py` — given a purpose filename, it
+prints a scratch path namespaced by the current git branch, creating that
+subdirectory if needed. It does not touch the file itself, and it does not,
+and cannot, change where the harness assigns a session's scratchpad in the
+first place — that happens outside this repo entirely, so no code here can
+reach it. What it fixes is the one piece this repo does control: the filename
+a session picks once it has a scratchpad to write into.
+
+**Why the branch name, specifically.** This repo's own worktree convention
+already guarantees every concurrent unit of work has its own branch (Git / PR
+workflow, above) — so keying the scratch subdirectory off the branch name
+reuses a uniqueness property already enforced for an unrelated reason, rather
+than inventing and documenting a second one that could itself drift out of
+sync with reality. A caller with no usable branch (detached HEAD, no git repo)
+falls back to a PID+timestamp component rather than silently returning a
+shared path.
+
+**Demonstrated, per the ticket's own acceptance criterion** ("two writes
+under the convention do not collide, a convention nobody tests is a
+convention nobody follows"): `--self-test` reproduces the exact incident
+shape — two branches, the identical purpose filename `body.md` — and asserts
+the two resulting paths differ, that both are independently writable without
+clobbering each other's content, that the same branch called twice is
+idempotent (revisiting your own scratch file lands in the same place), that
+an unsafe branch name (`feature/N80: fix (again)!`) sanitises into a single
+safe path component rather than escaping the computed subdirectory, and that
+a purpose containing `..` is rejected rather than silently accepted. All
+verified by running the script, not by reading it — `python3
+scripts/scratchpad_path.py --self-test` exits 0 and prints the pass line.
+
+**`ac-verifier` caught a real gap in the self-test, and it is now fixed.** The
+unsafe-branch-name assertion originally checked `"/" not in
+unsafe.relative_to(root).parts[0]` — which is true by construction, because a
+single `pathlib` path component can never itself contain `/`; that is what
+makes it one component rather than two. So the assertion would have passed
+even with `sanitize_component` gutted to a no-op, which mutation-testing
+confirmed directly: reverting sanitisation to `cleaned = raw` left the
+self-test green. Fixed to assert the actual property — the branch name
+collapses to exactly one path component under the scratch root
+(`len(unsafe_rel_parts) == 2`, counting the branch's subdirectory plus the
+purpose filename) — and re-verified per this repo's "verify that a check can
+fail" discipline: baseline green, the same mutation now fails loudly with the
+right message, reverted, green again by re-running.
+
+**What this ticket's other criterion — "existing generic files are either
+namespaced or removed" — does not apply to, and what `ac-verifier` found
+while checking that reasoning.** The generic scratch files the issue named
+(`body.md`, `pr.md`, `history.md`, `scenarios.md`) lived on whichever machine
+ran the incident's session at the time, in that session's own ephemeral
+scratchpad — never in this repository. There was nothing in *this checkout*
+to namespace or remove. `ac-verifier` went further and searched the host this
+branch was authored on: it found a live `body.md` in a **different**,
+concurrently-running session's scratchpad, and watched it disappear within
+seconds as that session churned its own files. That is not evidence the
+reasoning above is wrong — it is direct, unplanned confirmation of it: the
+file is real, ephemeral, and being recreated right now by a session that has
+not adopted this convention, which is every session until this merges and
+gets read. A one-time sweep of that file would have been theatre — gone
+before anyone could act on it, and unrelated to this branch's own commits.
+The fix that matters is that the NEXT collision does not happen, which is
+what the script and the CLAUDE.md convention pointing at it are for.
+
+**Documented in [CLAUDE.md](../../CLAUDE.md)** under "Scratchpad files are
+shared, not per-session" — the acceptance criterion asked for this explicitly
+("written where a session will actually read it — CLAUDE.md, not only
+here"), since a convention that only lives on the issue that proposed it is a
+convention the next session has no way to find.
+
+**Left open**: this is a convention a session has to remember to invoke, not
+one the harness enforces on every write — nothing in this repo can reach into
+the harness's own scratchpad assignment to force that. If a future session
+finds itself reaching for `scripts/scratchpad_path.py` and forgetting to, that
+is a real signal the next iteration on this needs to make the safe path the
+ONLY path (e.g. a wrapper session sessions are told to write through) rather
+than merely the documented one.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
