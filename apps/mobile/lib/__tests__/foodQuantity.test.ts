@@ -8,6 +8,7 @@ import {
   canLogByWeight,
   displayName,
   gramsBasisFromLabel,
+  loggedAmountLabel,
   macrosForGrams,
   macrosForServings,
   naturalUnitFor,
@@ -313,6 +314,37 @@ describe('servingsForLabelGrams', () => {
 
   test('null for a label with no honest gram basis, rather than inventing one', () => {
     expect(servingsForLabelGrams('1 egg', 250)).toBeNull();
+  });
+});
+
+/**
+ * N124/N113 (#514/#502): the meal-card row's amount, unit-aware (#483) — the
+ * blocking gap `ac-verifier` found when the row was still printing the raw
+ * stored `serving_label` regardless of the athlete's chosen unit.
+ */
+describe('loggedAmountLabel', () => {
+  test('a gram-basis label converts through the athlete\'s unit, metric', () => {
+    expect(loggedAmountLabel(1.5, '100 g', 'g')).toBe('150g');
+  });
+
+  test('the SAME entry, in ounces — the profile decides, not the stored label', () => {
+    expect(loggedAmountLabel(1.5, '100 g', 'oz')).toBe(
+      `${(150 / 28.349523125).toFixed(2)}oz`,
+    );
+  });
+
+  test('a non-gram label is never relabelled as a weight, in either unit', () => {
+    expect(loggedAmountLabel(1, '1 Each', 'g')).toBe('1 × 1 Each');
+    expect(loggedAmountLabel(1, '1 Each', 'oz')).toBe('1 × 1 Each');
+    expect(loggedAmountLabel(2, '1 Cup', 'oz')).toBe('2 × 1 Cup');
+  });
+
+  test('1.0 servings of a non-gram label reads as "1", not "1.0"', () => {
+    expect(loggedAmountLabel(1.0, '1 Each', 'g')).toBe('1 × 1 Each');
+  });
+
+  test('a fractional servings count of a non-gram label keeps its precision', () => {
+    expect(loggedAmountLabel(1.5, '1 Cup', 'g')).toBe('1.5 × 1 Cup');
   });
 });
 

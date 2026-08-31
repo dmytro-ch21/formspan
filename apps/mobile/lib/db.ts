@@ -283,6 +283,13 @@ const CREATE_FOOD_ENTRIES = `
     sodium_mg REAL,
     cholesterol_mg REAL,
     source_food_id TEXT,
+    -- N124/N113: a COPY from the catalog food this row was logged from, if
+    -- any — the glyph derivation (N58/#375) draws from this and nothing else.
+    -- Null for the ordinary case today (a saved food, an AI draft, a barcode
+    -- scan), and null is the honest answer, not a gap — see Entry.category's
+    -- own doc comment in nutrition.ts. (No backticks in here: this is inside
+    -- a template literal.)
+    category TEXT,
     notes TEXT NOT NULL DEFAULT '',
     logged_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -570,7 +577,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 29;
+const SCHEMA_VERSION = 30;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1157,6 +1164,20 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // CREATE_PLANNED's own comment. Every existing row simply has no class
     // plan until the next pull says otherwise.
     await addColumnIfMissing(db, 'planned_sessions', 'class_plan_id', 'TEXT');
+  }
+
+  if (current < 30) {
+    // N124/N113: the meal-section glyph is derived from a food's CATEGORY, and
+    // until now nothing this table stores has one. Real ALTER, same reason as
+    // every branch above: `CREATE TABLE IF NOT EXISTS` is a no-op on a device
+    // already past this version, so it would keep a `food_entries` table with
+    // no `category` and every read that selects it would throw.
+    //
+    // Nullable, no backfill: every existing row predates this column and
+    // genuinely has no category to give it — `glyphFor(null)` already
+    // degrades to the neutral plate for exactly this reason, so leaving these
+    // rows at null is the honest answer rather than a gap to paper over.
+    await addColumnIfMissing(db, 'food_entries', 'category', 'TEXT');
   }
 
   // The day query the card runs on every render of Today.

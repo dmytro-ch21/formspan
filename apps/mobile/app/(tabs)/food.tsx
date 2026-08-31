@@ -7,11 +7,25 @@
  *
  * ## The order, and why
  *
- * One remaining block, then the meal slots. There is
- * NO per-meal calorie allocation: "536 calories now available for breakfast"
- * requires knowing a day the app cannot see, it is wrong the moment you eat a
- * big lunch, and it manufactures four budgets to fail against instead of one
- * honest total. The slots group the day — that is all they do.
+ * One remaining block, then a `MealCard` per slot.
+ *
+ * **This used to say, right here: "There is NO per-meal calorie allocation:
+ * '536 calories now available for breakfast' requires knowing a day the app
+ * cannot see, it is wrong the moment you eat a big lunch, and it manufactures
+ * four budgets to fail against instead of one honest total."** That was true
+ * of the version of this screen that shipped it — a single day-remaining line
+ * (`mealBudgetLine`) repeated under every section header, chosen specifically
+ * as a counter-proposal to true per-meal budgets after `nutrition-design.md`
+ * §5 rejected them by that same argument.
+ *
+ * **REVERSED 2026-08-31 (N124/N113).** The user saw a reference design built
+ * on true per-meal budgets and confirmed — twice, after being told this is
+ * the identical tension the counter-proposal above already answered once —
+ * that this app should build them, matching the reference. Each `MealCard`
+ * now states what that slot itself cost (populated) or what is still
+ * available for it (empty), via `mealAvailable`/`bySlot` in `lib/nutrition.ts`
+ * — see that file's own reversal note for the allocation algorithm and why it
+ * was chosen. This is not a call this file gets to re-litigate a third time.
  *
  * ## Training is stated, not spent
  *
@@ -31,13 +45,11 @@ import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-
 import { Text, View } from '@/components/Themed';
 import { ModuleOffNotice } from '@/components/ModuleOffNotice';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
-import { SwipeToDelete } from '@/components/SwipeToDelete';
+import { MealCard } from '@/components/food/MealCard';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
 import { TargetRow } from '@/components/food/TargetRow';
 import { TrackerList } from '@/components/TrackerList';
-import { Icon } from '@/components/ui/Icon';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
-import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import {
@@ -53,7 +65,8 @@ import { cacheTargets, localEntries, localLoggedDays, localTargetView, removeEnt
 import {
   bySlot,
   eatenFrom,
-  mealBudgetLine,
+  mealAvailable,
+  viewTarget,
   type EatenView,
   type Entry,
   type Meal,
@@ -280,17 +293,16 @@ export default function FoodScreen() {
   const entries = eaten.state === 'ready' ? eaten.rows : [];
   const slots = bySlot(entries);
   const view: TargetView = dated.on === on ? dated.view : { state: 'checking' };
-  // Computed ONCE for the day and shown on every section, rather than four
-  // different figures. Null unless both halves are known: with no target there
-  // is nothing left to be left of, and with no read there is no eaten figure
-  // to subtract — and inventing either is the false precision this replaces.
-  // Only on TODAY. The screen has a day stepper, and both halves resolve for
-  // whatever day is being viewed — so on yesterday this rendered yesterday's
-  // remaining under the words "left today", and on tomorrow it rendered the
-  // whole target the same way. Correct numbers, false sentence, on 100% of
-  // non-today views. A past day has nothing "left", so suppression is the
-  // honest state rather than a rewording. Found in review.
-  const budget = isToday ? mealBudgetLine(eaten, view) : null;
+  // The target each `MealCard` divides for its own "available" figure.
+  //
+  // Only on TODAY — same suppression the day-level `budget` line this
+  // replaced used to carry, and for the identical reason: "available" is a
+  // forward-looking claim about what can still go in a slot. On a past day
+  // there is nothing left to still eat, and on a future day the target has
+  // not been lived into yet either — showing it there is a correct number
+  // inside a false sentence, on 100% of non-today views. Found in review, of
+  // the original the same way.
+  const mealTarget = isToday ? viewTarget(view) : null;
 
   const todayKey = dayString(new Date());
   // Weekday abbreviations for the grid's head row, read off any Monday-first
@@ -504,67 +516,24 @@ export default function FoodScreen() {
                 : 'Your meals could not be read from this device.'}
             </Text>
           ) : (
-            slots.map((slot) => (
-            <RNView key={slot.meal} style={styles.slot}>
-              <SectionHeader
-                label={`${MEAL_LABELS[slot.meal]}${slot.kcal > 0 ? ` · ${Math.round(slot.kcal)} kcal` : ''}`}
-              />
-              {/* **The day's remaining, not a per-meal budget**, and the
-                  distinction is the whole reason this line reads the way it
-                  does. The user asked for "536 calories now available" per
-                  meal; `nutrition-design.md` §5 rejects that by name as false
-                  precision — it requires knowing a day the app cannot see, it
-                  is wrong the moment you eat a big lunch, and it manufactures
-                  four budgets to fail against instead of one honest total.
-                  They chose this counter-proposal: the placement they asked
-                  for, one true number under it. "left today" is doing load-
-                  bearing work in that sentence and must not be shortened. */}
-              {budget && (
-                <Text style={styles.budget} testID={`food-budget-${slot.meal}`}>
-                  {budget}
-                </Text>
-              )}
-              {slot.entries.map((e) => (
-                <SwipeToDelete
-                  key={e.id}
-                  onDelete={() => void onDelete(e.id)}
-                  accessibilityLabel={e.name}
-                  closeOn={entries.length}
-                  testID={`food-entry-${e.id}`}
-                >
-                  <Pressable
-                    style={styles.row}
-                    onPress={() => router.push(`/food/entry/${e.id}`)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${e.name}, ${Math.round(e.kcal)} calories`}
-                  >
-                    <RNView style={styles.rowMain}>
-                      <Text style={styles.rowName} numberOfLines={1}>
-                        {e.name}
-                      </Text>
-                      <Text style={styles.rowServing}>
-                        {trimZero(e.servings)} × {e.serving_label}
-                      </Text>
-                    </RNView>
-                    <RNView style={styles.rowRight}>
-                      <Text style={styles.rowKcal}>{Math.round(e.kcal)}</Text>
-                      <Text style={styles.rowProtein}>{Math.round(e.protein_g)} g P</Text>
-                    </RNView>
-                  </Pressable>
-                </SwipeToDelete>
+            <RNView style={styles.cards}>
+              {slots.map((slot) => (
+                <MealCard
+                  key={slot.meal}
+                  meal={slot.meal}
+                  label={MEAL_LABELS[slot.meal]}
+                  entries={slot.entries}
+                  totals={slot.totals}
+                  available={mealAvailable(slot.totals, mealTarget)}
+                  addColor={accent.ink}
+                  onAdd={() => router.push(`/food/add?meal=${slot.meal}&date=${on}`)}
+                  onEntryPress={(id) => router.push(`/food/entry/${id}`)}
+                  onDelete={(id) => void onDelete(id)}
+                  testID={`food-meal-${slot.meal}`}
+                />
               ))}
-              <Pressable
-                style={styles.add}
-                onPress={() => router.push(`/food/add?meal=${slot.meal}&date=${on}`)}
-                accessibilityRole="button"
-                accessibilityLabel={`Add to ${MEAL_LABELS[slot.meal]}`}
-                testID={`food-add-${slot.meal}`}
-              >
-                <Icon name="plus" size={13} color={accent.ink} />
-                <Text style={[styles.addText, { color: accent.ink }]}>Add</Text>
-              </Pressable>
             </RNView>
-          )))}
+          )}
         </RNView>
       </ScrollView>
 
@@ -711,11 +680,6 @@ export default function FoodScreen() {
   );
 }
 
-/** 1.5 stays 1.5; 1.0 becomes 1. Nobody writes "1.0 × 100 g". */
-function trimZero(n: number): string {
-  return String(Math.round(n * 100) / 100);
-}
-
 /**
  * The signed day offset of a `YYYY-MM-DD` key from today, in whole days.
  *
@@ -750,33 +714,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   slotsAbsent: { fontSize: 13, color: vola.textMuted, marginTop: 18 },
-  budget: { fontSize: 12, color: vola.textMuted, marginTop: -2, marginBottom: 6 },
-  slot: { gap: 6 },
-  // Matches SwipeToDelete's own backing exactly — surface at radius 12 — or the
-  // revealed action shows a seam behind the row.
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: vola.surface,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  rowMain: { flex: 1, gap: 2 },
-  rowName: { fontSize: 14, fontWeight: '600' },
-  rowServing: { fontSize: 12, color: vola.textDim },
-  rowRight: { alignItems: 'flex-end' },
-  rowKcal: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  rowProtein: { fontSize: 11, color: vola.textMuted },
-  add: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  addText: { fontSize: 13, fontWeight: '600' },
+  // One gap between the four `MealCard`s — the card itself owns everything
+  // inside it now (N124/N113); this screen only stacks them.
+  cards: { gap: 12 },
 
   // The month-jump sheet — N81/#415. Styling matches `WeekPlanner`'s own
   // month grid exactly (same tokens, same sizes) rather than a fresh set: one

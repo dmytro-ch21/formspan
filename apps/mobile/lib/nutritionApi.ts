@@ -38,6 +38,8 @@ export type EntryInput = Macros & {
   servings: number;
   serving_label: string;
   source_food_id?: string | null;
+  /** See `Entry.category`'s own doc comment in `nutrition.ts`. */
+  category?: string | null;
   notes?: string;
 };
 

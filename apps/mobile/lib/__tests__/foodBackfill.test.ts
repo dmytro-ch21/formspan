@@ -99,6 +99,7 @@ function serverEntry(over: Partial<Entry> = {}): Entry {
     sodium_mg: null,
     cholesterol_mg: null,
     source_food_id: null,
+    category: null,
     notes: '',
     ...over,
   };

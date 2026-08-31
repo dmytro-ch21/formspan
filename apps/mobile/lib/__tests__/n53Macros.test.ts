@@ -1,12 +1,4 @@
-import {
-  daysLogged,
-  macroSplit,
-  mealBudgetLine,
-  type EatenView,
-  type Macros,
-  type Target,
-  type TargetView,
-} from '../nutrition';
+import { daysLogged, macroSplit, type Macros, type Target } from '../nutrition';
 
 /**
  * The two pieces of N53 that are arithmetic rather than layout.
@@ -130,78 +122,18 @@ describe('days logged — a count, not a streak', () => {
 });
 
 /**
- * The meal-section line — the REAL function this time.
+ * The meal-section line used to be tested here — REMOVED 2026-08-31
+ * (N124/N113), not just edited.
  *
- * The first version of this block was three tautologies. `mealBudgetLine` lived
- * in `food.tsx` and was not exported, so the tests re-declared a local `left`
- * lambda and asserted on hand-written literals: "never divides the target
- * between meals" was `expect(1500).not.toBe(600)`. Deleting the shipped
- * function, or changing it to divide by four, left all three green — and the
- * commit message counted them among its test total.
- *
- * That is the exact failure this suite was founded on ("every assertion here
- * should fail when the code it covers is deleted"), and it is why the function
- * moved into `lib/`: a rule inside a component is a rule no test can reach.
- * Found in review.
+ * `mealBudgetLine` computed the DAY's remaining and repeated it under every
+ * section header, as a deliberate counter-proposal to true per-meal budgets —
+ * this describe block used to open with a comment naming that tradeoff
+ * explicitly, and its own tests pinned the shipped string so a change back to
+ * per-meal division would go red. The user has since confirmed, twice, that
+ * this app should build TRUE per-meal budgets after all, matching a supplied
+ * reference. `mealBudgetLine` is gone; `mealAllocation` and `mealAvailable` in
+ * `nutrition.ts` are the replacement, and their tests now live in
+ * `nutrition.test.ts` alongside the rest of that file's arithmetic — see the
+ * reversal note at the top of `nutrition.ts` for the full account, and
+ * `docs/decisions/history.md`'s N124/N113 entry for why.
  */
-describe('the meal-section line is the DAY’s remaining, not a per-meal budget', () => {
-  const view: TargetView = { state: 'set', target };
-  const ready = (m: Partial<Macros> = {}): EatenView => ({
-    state: 'ready',
-    rows: [],
-    totals: { ...totals, ...m },
-  });
-
-  it('subtracts the whole day from the whole target', () => {
-    expect(mealBudgetLine(ready(), view)).toBe(
-      '1500 kcal left today · 81g protein · 138g carbs · 33g fat',
-    );
-  });
-
-  it('never divides the target between meals', () => {
-    // The failure the design doc names: 2400 / 4 = 600 per meal is a number the
-    // app invented, and each of the four is wrong the moment one meal is bigger
-    // than a quarter of the day. Asserted against the SHIPPED string, so
-    // changing the function to divide turns this red.
-    const line = mealBudgetLine(ready(), view);
-    expect(line).toContain('1500 kcal');
-    expect(line).not.toContain('600 kcal');
-  });
-
-  it('floors at zero rather than showing a negative "left"', () => {
-    expect(mealBudgetLine(ready({ kcal: 2540, protein_g: 200 }), view)).toBe(
-      '0 kcal left today · 0g protein · 138g carbs · 33g fat',
-    );
-  });
-
-  it('is NULL with no target, not a line with no denominator', () => {
-    expect(mealBudgetLine(ready(), { state: 'none' })).toBeNull();
-    expect(mealBudgetLine(ready(), { state: 'unknown' })).toBeNull();
-    expect(mealBudgetLine(ready(), { state: 'checking' })).toBeNull();
-  });
-
-  it('is NULL when the day has not been read, not a line from the target alone', () => {
-    // The half-an-answer case. Without the eaten half this would print the
-    // whole target as "left", which is a confident claim from a read that
-    // never happened.
-    expect(mealBudgetLine({ state: 'loading' }, view)).toBeNull();
-    expect(mealBudgetLine({ state: 'unavailable' }, view)).toBeNull();
-  });
-
-  it('says "left today", which the caller only renders on today', () => {
-    // The words are load-bearing: the Food screen has a day stepper, and this
-    // sentence is false on any other day. `food.tsx` gates on `isToday`; this
-    // pins the wording that gate exists for.
-    expect(mealBudgetLine(ready(), view)).toContain('left today');
-  });
-
-  it('carries exactly the four macros, not N52’s five new ones', () => {
-    const line = mealBudgetLine(ready(), view) ?? '';
-    expect(line).toContain('protein');
-    expect(line).toContain('carbs');
-    expect(line).toContain('fat');
-    for (const later of ['sodium', 'sugar', 'saturated', 'cholesterol', 'fibre']) {
-      expect(line).not.toContain(later);
-    }
-  });
-});

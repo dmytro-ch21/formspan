@@ -55,7 +55,7 @@ const entryCols = `
 	name, servings, serving_label,
 	kcal, protein_g, carb_g, fat_g, fibre_g,
 	saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-	source_food_id::text, notes, created_at, updated_at`
+	source_food_id::text, category, notes, created_at, updated_at`
 
 func scanEntry(row pgx.Row) (Entry, error) {
 	var e Entry
@@ -64,7 +64,7 @@ func scanEntry(row pgx.Row) (Entry, error) {
 		&e.Name, &e.Servings, &e.ServingLabel,
 		&e.Kcal, &e.ProteinG, &e.CarbG, &e.FatG, &e.FibreG,
 		&e.SaturatedFatG, &e.SugarG, &e.AddedSugarG, &e.SodiumMG, &e.CholesterolMG,
-		&e.SourceFoodID, &e.Notes, &e.CreatedAt, &e.UpdatedAt,
+		&e.SourceFoodID, &e.Category, &e.Notes, &e.CreatedAt, &e.UpdatedAt,
 	)
 	return e, err
 }
@@ -120,9 +120,9 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 			name, servings, serving_label,
 			kcal, protein_g, carb_g, fat_g, fibre_g,
 			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-			source_food_id, notes)
+			source_food_id, category, notes)
 		VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-		        $13, $14, $15, $16, $17, $18, $19)
+		        $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (id) DO UPDATE SET
 			eaten_on = EXCLUDED.eaten_on,
 			meal = EXCLUDED.meal,
@@ -140,6 +140,7 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 			sodium_mg = EXCLUDED.sodium_mg,
 			cholesterol_mg = EXCLUDED.cholesterol_mg,
 			source_food_id = EXCLUDED.source_food_id,
+			category = EXCLUDED.category,
 			notes = EXCLUDED.notes,
 			updated_at = now()
 		WHERE nutrition_entries.user_id = $2
@@ -148,7 +149,7 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 		e.Name, e.Servings, e.ServingLabel,
 		e.Kcal, e.ProteinG, e.CarbG, e.FatG, e.FibreG,
 		e.SaturatedFatG, e.SugarG, e.AddedSugarG, e.SodiumMG, e.CholesterolMG,
-		e.SourceFoodID, e.Notes)
+		e.SourceFoodID, e.Category, e.Notes)
 
 	out, err := scanEntry(row)
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -287,6 +287,10 @@ export default function EditEntryScreen() {
         sodium_mg: rescaled.sodium_mg,
         cholesterol_mg: rescaled.cholesterol_mg,
         source_food_id: entry.source_food_id,
+        // Carried through unchanged, like `source_food_id` above: an edit to
+        // the amount or macros says nothing about what food this was, so the
+        // glyph it draws must not change underneath the athlete.
+        category: entry.category,
         notes: entry.notes,
       });
       request('food edited');

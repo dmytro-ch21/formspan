@@ -11455,29 +11455,23 @@ row" is the drift they exist to catch.
   at all while loading — "0 of 7" from a query that has not run is a claim about
   somebody's week, and a discouraging one.
 
-### The meal-section line
+### The meal-section line — REPLACED 2026-08-31 by N124/N113, do not test this shape
 
-- Each section shows `536 kcal left today · 28g protein · 48g carbs · 13g fat`.
-- **It is the DAY's remaining, not a per-meal budget**, and the wording carries
-  that. Assert the figure equals the day's target minus the day's total — not
-  the target divided by four. A per-meal allocation is wrong the moment one meal
-  is bigger than a quarter of the day, which is §5's stated objection.
-- Assert the same figure appears on every section, since there is one day and
-  one number. (If it reads as noise on a device, showing it only on the slot
-  matching the clock is the smaller fix — `slotForClock` exists.)
-- **Absent when either half is unknown.** No target, or an unread day, means no
-  line — not a partial one. A line assembled from half an answer is the failure
-  N54 was filed for.
-- Never negative: past the target it floors at zero, because "−140 kcal left" is
-  a contradiction and `RemainingBlock` already says "140 over" in its own words.
+**The scenarios that used to be here described `mealBudgetLine`: one
+day-remaining figure, repeated identically under every section header.** That
+function is deleted — the user confirmed, twice, that this app should build
+TRUE per-meal budgets after all, reversing the counter-proposal this
+subsection used to describe and test. See "N124/N113 — the Food screen's meal
+sections, rebuilt as cards with true per-meal budgets" below for the current
+scenarios: each section now states what it itself cost (populated) or what is
+still available for it (empty), not one repeated day-level line.
 
 ### Needs a device
 
-- **The two screens grew rows.** Both have `ScrollView`s (checked after N68
-  found `food/target.tsx` had outgrown a plain `View`), but neither the Today
-  card's new height nor the repetition of the meal line across four sections has
-  been seen on a real screen. Those are the two judgement calls to look at
-  first.
+- **The Food screen's cards grew real height** — four `MealCard`s each
+  carrying a header, a macro line and however many food rows, replacing four
+  bare `SectionHeader`s. Not yet seen scrolling on a real screen with several
+  meals populated.
 ## "Does this look right?" — the feasibility check (N69)
 
 When the phase's goal weight is reached at its own rate, and whether that beats
@@ -15684,3 +15678,117 @@ itself runs automatically on every launch, with no user action to trigger.
   ("...installed but not delivering" vs "...unavailable") reach
   `health_events` the same way every other captured telemetry event
   already does, with no new fields and no new endpoint.
+
+## N124/N113 — the Food screen's meal sections, rebuilt as cards with true per-meal budgets (`apps/mobile/app/(tabs)/food.tsx`, `apps/mobile/components/food/MealCard.tsx`, `apps/mobile/lib/nutrition.ts`, `apps/mobile/lib/foodLog.ts`, `backend/internal/modules/nutrition`, migration `000082`)
+
+Two paired tickets against one device reference (`IMG_5681`): N113 is the
+arithmetic, N124 is the card shape. Landed together. **This section also
+supersedes "The meal-section line" under N53 above** — that subsection
+described `mealBudgetLine`, which no longer exists; see this section for the
+current behaviour.
+
+### The reversal, and why it matters for testing
+
+`food.tsx` used to show one DAY-remaining line, identical under every section.
+The user confirmed — twice — that this app should build TRUE per-meal budgets
+instead, reversing that counter-proposal. **A scenario asserting "the same
+figure appears under every section" is now testing the WRONG, removed
+behaviour** — the whole point of this change is that each section's figure is
+its own.
+
+### Happy path — a populated section
+
+- A section with entries shows its OWN totals in the header and macro line:
+  `Breakfast · 145 kcal` then, beneath it, `11g protein · 0g carbs · 11g fat`
+  — the actual EATEN figures for that slot, not a day-level number.
+- These figures are DERIVED from the slot's own entries (`bySlot`'s `totals`),
+  never stored — log, edit or delete an entry in that section and the header
+  and macro line update immediately, with no separate write path to keep in
+  sync.
+- **The section totals and the day's totals agree, always.** Sum every
+  section's `kcal`/`protein_g`/`carb_g`/`fat_g` and assert it equals the day
+  total (`RemainingBlock`'s own eaten figure) exactly, for a day with entries
+  spread unevenly across slots and at least one slot left empty. Two figures
+  on one screen computed under two rules is the W2/W4 shape this repo has
+  already paid for twice.
+
+### Happy path — an empty section
+
+- A section with no entries shows what is still AVAILABLE, never a row of
+  zeroes: `938 kcal now available` then `41g protein · 74g carbs · 16g fat`.
+- **The allocation is an even quarter of the day's target per slot** (25%
+  each, breakfast through snack) minus whatever that slot has already eaten
+  — which for an empty slot is the whole quarter. Assert the four slots'
+  allocations sum back to the day's target exactly.
+- **Floors at zero, per macro independently.** A slot that has already eaten
+  past its calorie quarter but stayed under its protein quarter shows `0 kcal
+  available` alongside a real, non-zero protein figure — one macro going to
+  zero must not zero the others.
+- **Absent with no target**, not a fabricated allocation — a section with
+  nothing logged and no target set shows neither an eaten line nor an
+  available one.
+- **Absent on any day but today.** The screen has a day stepper; "available"
+  is a forward-looking claim, so stepping to yesterday or tomorrow suppresses
+  it on every section — a past day has nothing left to still eat, and a
+  future day's target has not been lived into.
+
+### Food rows
+
+- Glyph, name, amount (muted, beneath the name), calories (right-aligned) —
+  in that order, no per-row protein figure.
+- **The glyph is category-derived, never keyword-matched from the name**
+  (reusing N58/#375's `glyphFor`). A category this build does not recognise,
+  or an entry with no category at all, degrades to the neutral plate glyph —
+  assert this explicitly for an entry logged from the athlete's own saved
+  foods list (which carries no category today) and confirm it is the SAME
+  neutral glyph a genuinely unrecognised category produces, not a crash and
+  not a guess from the food's name.
+- **A steak logged with a `plant_protein` category must show the plant glyph,
+  not a meat one** — the regression N58's own design exists to prevent, now
+  reachable through a logged entry rather than only a search result.
+- **Amount is unit-aware (#483), not the raw stored label** — a gram-basis
+  entry (`"100 g"`) converts through `loggedAmountLabel`/the athlete's chosen
+  `foodUnit`, the SAME conversion `entry/[id].tsx`'s edit sheet already
+  applies to the identical label, so a card and its own edit screen cannot
+  disagree about one entry's amount. Assert an imperial athlete sees ounces on
+  a gram-logged row, not "100 g" regardless of profile — the gap `ac-verifier`
+  found (both #514 and #502 name it explicitly: "the reference's `20 Grams`
+  follows the profile, not the reference"). A non-gram label ("1 Each", "1
+  Cup") is shown exactly as logged, never relabelled as a weight — assert this
+  in BOTH units, since a naive fix could wrongly convert a count into ounces.
+- Swipe-to-delete and tap-through to the entry detail screen both still work,
+  scoped per card now rather than per flat list.
+
+### The category copy (N124/N113's backend half)
+
+- **Logging a food from the catalog search** copies that food's `category`
+  onto the entry at the moment of logging. Later editing `food_catalog`'s row
+  (an admin re-categorising a food) must NOT change the glyph an already-
+  logged entry shows — the same "logged row owns its numbers" rule this
+  table already applies to every macro.
+- **Logging from the athlete's own saved foods, an AI draft, or a barcode
+  scan** stores `category: null` — none of those sources carries one today.
+  Assert this renders the neutral glyph, not an error and not a keyword guess.
+- **Editing an entry's amount or macros must not change its category.** The
+  entry-detail edit screen carries the existing value through unchanged.
+- A pre-migration entry (logged before this shipped) has `category: null` on
+  every client and server read — never a crash from a missing column, never a
+  fabricated value.
+
+### Auth / security
+
+- No new authorization surface: `category` rides the existing entry
+  create/update endpoint (`PUT /v1/nutrition/entries/{id}`), scoped by the
+  same `user_id` predicate every other field on that row already is.
+- `category` is free text (1–40 chars, matching `food_catalog`'s own bound) —
+  no new injection surface beyond what every other text field on this table
+  already carries, and it is rendered as an emoji lookup key
+  (`Object.hasOwn`, never `??`), not interpolated into anything.
+
+### Needs a device
+
+- Several sections populated and at least one empty, on a real phone —
+  confirm the card layout, the macro-dot colours (matching Goals'
+  `MacroDonut`) and the glyphs read correctly at a glance.
+- The section sums checked by hand against the day total on a real logged
+  day, not just asserted in a unit test.

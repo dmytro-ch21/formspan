@@ -49877,6 +49877,217 @@ is a real signal the next iteration on this needs to make the safe path the
 ONLY path (e.g. a wrapper session sessions are told to write through) rather
 than merely the documented one.
 
+## 2026-08-31 — N124 (#514) + N113 (#502): the Food screen's meal sections are rebuilt as cards, and true per-meal budgets REVERSE a prior counter-proposal
+
+**Two paired tickets from one device reference (`IMG_5681`), landed together
+because they are the same screen's two halves: N113 is the arithmetic, N124 is
+the shape.** Both close in this PR.
+
+### The reversal — read this section before touching `mealAllocation` or `mealAvailable`
+
+`food.tsx` shipped a deliberate counter-proposal to per-meal budgets. Its own
+comment block, verbatim, said: *"There is NO per-meal calorie allocation: '536
+calories now available for breakfast' requires knowing a day the app cannot
+see, it is wrong the moment you eat a big lunch, and it manufactures four
+budgets to fail against instead of one honest total."* That was
+`nutrition-design.md` §5's own objection, and the shipped answer was
+`mealBudgetLine` — one true day-remaining figure, repeated under every section
+header instead of a per-meal split.
+
+**The user has since seen a reference design built on true per-meal budgets
+and confirmed — twice — that this app should build them, matching the
+reference, after being told explicitly that this is the identical tension the
+counter-proposal above was already a response to.** That is not ambiguous and
+is not this PR's call to relitigate a third time. `mealBudgetLine` is deleted.
+`mealAllocation` and `mealAvailable` (`lib/nutrition.ts`) are the replacement,
+and every place the old reasoning was written down as if still current has
+been rewritten to state the reversal instead — `nutrition.ts`'s package doc,
+`food.tsx`'s own doc comment, and `n53Macros.test.ts`'s test block (removed
+outright; its replacement tests live in `nutrition.test.ts`).
+
+**The allocation algorithm — chosen here because neither ticket specifies one
+beyond the visual output "938 calories now available":** the day's target is
+divided EVENLY across the four meal slots, 25% each (`1 / MEALS.length`, not a
+hardcoded 4 — a fifth slot would change the split rather than silently
+starving three others of headroom). Each slot's "available" figure is that
+quarter minus what has already been eaten IN THAT SLOT, floored at zero per
+macro independently — the same floor `mealBudgetLine` used, for the same
+reason ("−40g protein available" is a contradiction, not a fact). Chosen over
+a time-of-day-weighted or historical-pattern split because those would
+reintroduce the exact "requires knowing a day the app cannot see" objection
+the counter-proposal was built on; an even split needs nothing the app cannot
+already see and is honest about being a fixed allocation rather than
+pretending to be a smarter one. `mealAllocation`'s own doc comment carries this
+same reasoning next to the code, and `nutrition.ts`'s file-level doc comment
+carries the full account — old reasoning quoted, reversal stated, algorithm
+named — as the load-bearing version of this section.
+
+### N113 — the arithmetic
+
+`bySlot` (already existed, grouping entries by meal) now returns each slot's
+own `Macros` totals via `dayTotals` scoped to that slot's entries — the SAME
+function the day-level total already goes through, so a section's figures and
+the day's are structurally unable to disagree (this ticket's own AC: "two
+figures on one screen computed under two rules is W2/W4, which this repo has
+paid for twice"). Pinned by a test that sums all four slots' totals and
+asserts the result equals `dayTotals` on the whole entry list, for a mixed set
+of entries across slots including one deliberately-empty slot.
+
+A populated section states what was EATEN in it: `Breakfast · 145 kcal` /
+`11g protein · 0g carbs · 11g fat`. An empty one states what is still
+AVAILABLE — never a row of zeroes, which the AC calls out by name ("a zero
+reads as an achievement, and this project does not present absence as an
+answer"). `mealAvailable` returns null with no target (nothing to show,
+matching `remaining()`'s own refusal one level up), and the screen also
+suppresses "available" entirely on any day but today — the identical
+suppression the old `mealBudgetLine` carried, for the identical reason: a past
+day has nothing left to still eat, and a future day's target has not been
+lived into yet either.
+
+### N124 — the shape
+
+Each meal is now its own card (`components/food/MealCard.tsx`, new), not a
+bare `SectionHeader` + rows. It is a thin renderer by design, following this
+repo's own review-learned lesson (quoted in the removed `mealBudgetLine`'s
+doc comment): "a rule in a component is a rule no test can reach." Every
+figure it prints — `totals`, `available` — arrives pre-computed from
+`nutrition.ts`, which is where the arithmetic is tested.
+
+Food rows: glyph, name + amount (muted), calories (right-aligned) — dropping
+the per-row protein figure the old rendering carried, since the reference
+doesn't have one and the AC only asks for calories right-aligned. Swipe-to-
+delete, the tap-through to the entry detail screen, and the loading/failed-
+read banner (the N28-shaped guard already in `food.tsx`) are all preserved
+unchanged.
+
+**The glyph (AC: reuse #375/N58's derivation, never keyword-matched from the
+name) exposed a real gap: a logged entry had no category to derive one
+from.** Only `food_catalog` rows (search results) carried a category; the
+`Entry`/`nutrition_entries` shape never did. Closed the same way `RecipeItem`
+already closes the identical question for macros — a COPY, taken at log time,
+never a live join:
+
+- Migration `000082_nutrition_entry_category` — nullable `category TEXT` on
+  `nutrition_entries`, `CHECK` matching `food_catalog`'s own bound (1–40
+  chars).
+- Backend: `Entry.Category *string`, threaded through `Validate`, `SaveEntry`'s
+  INSERT and its `ON CONFLICT DO UPDATE` SET clause (both halves — a new
+  integration test, `TestEntryCategoryIsCopiedAndSurvivesAnEditToTheFood`,
+  exercises the re-save path specifically, because this exact table's
+  `updateWithin` has silently dropped a column from its SET clause before;
+  the test was mutation-verified: removing `category = EXCLUDED.category`
+  turns it red with the expected message), `entryBody`/`SaveEntry` handler,
+  `contracts/public.openapi.yaml`.
+- Mobile: `Entry.category: string | null`, `db.ts` schema v30 (`food_entries`
+  gains the column, `SCHEMA_VERSION` 29→30, both fresh-install and upgrade
+  paths tested in `schema.test.ts`), `foodLog.ts` (`NewEntry`, `logFood`,
+  `editEntry`, `cacheEntries`, the push loop's `api.saveEntry` call all carry
+  it through), `nutritionApi.ts`'s `EntryInput`.
+
+**Scoped deliberately, and stated rather than hidden: only a CATALOG pick
+carries a category today.** `add.tsx`'s `logCatalog` (the catalog-search log
+path) is the one call site with a category to copy — `food.category` on
+`CatalogFood` is a plain required string. An athlete's own saved food
+(`nutrition_foods`/the local `foods` table) has no category column at all, and
+neither does an AI draft or a barcode scan — so those entries log with
+`category: null`, and `glyphFor(null)` degrades to the neutral plate exactly
+as its own doc comment says it should for a category this build doesn't
+recognise. Closing that for saved foods (adding category to `nutrition_foods`
+too) is real follow-on work, not something this migration should force by
+inventing a category nobody stated. Editing an entry (`entry/[id].tsx`)
+carries the existing category through unchanged, the same way it already does
+for `source_food_id`.
+
+### What was found and NOT changed
+
+`RemainingBlock` (the top budget card) roughly already matches the
+reference's "budget card, top" description — a ring is absent (it's a bar)
+and there's no settings glyph or explicit Food/Exercise breakdown, but neither
+ticket's AC list names it and rebuilding it was explicitly out of scope for
+this pair. Recorded here rather than silently left alone: a future ticket
+covering `RemainingBlock` should know the reference described a ring +
+settings glyph + Food/Exercise split, none of which exist yet.
+
+The reference's `⋯` overflow on each card header has no defined action in
+either ticket's acceptance criteria, so it was not built — a decorative
+control with nothing behind it is worse than its absence.
+
+### Testing
+
+`nutrition.ts`: `bySlot`'s new `totals`, the section/day-total invariant,
+`mealAllocation`, `mealAvailable` (even split, floor-per-macro independently
+once over budget, empty-slot-gets-the-whole-share, null-with-no-target) — all
+in `nutrition.test.ts`, and the floor-at-zero guard was mutation-verified
+(removing `Math.max(0, ...)` turns the relevant test red with the exact wrong
+number, restored, re-confirmed green by re-running, never by reading the
+diff). Backend: the category copy-and-persist integration test above, plus
+the full existing `nutrition` package suite and the full backend suite, both
+green. `pnpm run lint:openapi`, `pnpm run typecheck:mobile`, `pnpm run
+lint:mobile` and `pnpm run test:mobile` (237 suites, 3715 tests) all green.
+
+### Review pass — one blocking finding, fixed before the PR opened
+
+`ac-verifier`, `backend-reviewer` and `frontend-reviewer` all ran against this
+branch (on `sonnet` — the account's Fable spend limit returned HTTP 429 on the
+first launch of all three; confirmed model-specific, not account-wide, with a
+throwaway `sonnet` probe agent before relaunching, so this is a same-session
+substitution rather than a skipped gate).
+
+**`ac-verifier` found one genuine `[blocking]` gap: the meal-card food row
+ignored the athlete's unit preference (#483), which both #514 and #502 name
+explicitly** ("the reference's `20 Grams` follows the profile, not the
+reference"). The row printed the raw stored `serving_label` — the exact same
+`{servings} × {serving_label}` line the pre-rebuild `food.tsx` used, moved
+into `MealCard.tsx` unchanged, so this was a carried-over gap rather than
+something the rebuild introduced, and it was correctly flagged as unaddressed
+rather than a stated scope cut. Fixed: `loggedAmountLabel` (new,
+`lib/foodQuantity.ts`) converts a gram-basis label through
+`formatFoodQuantity`/the athlete's `foodUnit` — the same conversion
+`entry/[id].tsx`'s edit sheet already applies to the identical label, so a
+card and its own edit screen can no longer disagree about the same entry's
+amount. A non-gram label ("1 Each", "1 Cup") is left exactly as logged, per
+`gramsBasisFromLabel`'s own no-guessing rule. Five new unit tests in
+`foodQuantity.test.ts`, plus two in the new `MealCard.test.tsx` asserting the
+conversion at the render layer.
+
+`backend-reviewer` (no blocking): mutation-tested the `category` SET clause
+itself (removed `category = EXCLUDED.category`, confirmed the integration
+test goes red with the exact wrong value, restored, re-confirmed green) and
+found no `updateWithin`-class blanking bug. One `[suggestion]`, fixed anyway
+since it was cheap: `Category` reached `SaveEntry` untrimmed while `Name`/
+`ServingLabel` are trimmed in the handler — `"  poultry  "` would validate and
+persist with whitespace intact. `handler.go`'s `SaveEntry` now trims it the
+same way.
+
+`frontend-reviewer` (no blocking, three `[suggestion]`s): the reversal is
+complete with no dead `mealBudgetLine` references; `MealCard` is genuinely
+thin; glyph/macro-colour/empty-state conventions all hold. Two suggestions
+addressed: a mobile-side `category` round-trip test (write → `localEntries`
+→ edit → push payload, four new cases in `foodLog.test.ts` — the mobile
+equivalent of the backend's dedicated test, closing the one column in this
+table with a threading bug class and no test that could catch it) and
+`docs/decisions/nutrition-design.md` §5's stale "no per-meal allocation"
+bullet, now struck through with a pointer to this entry rather than left to
+contradict what shipped. The third suggestion (a component test for
+`MealCard`'s populated/empty branch) is also covered by the same new
+`MealCard.test.tsx`.
+
+Also found and fixed independently of any reviewer: **`pnpm run verify`'s
+first run failed on `__tests__/app/goalsScreen.test.tsx`, a file this PR
+never touches.** Isolated, the file passes 64/64. Cross-checked against
+`origin/main` with the identical full-suite command (via a disposable
+worktree, `node_modules` symlinked since no dependency changed) — that run
+*also* failed, but on a *different* file (`todayScreen.test.tsx`'s pre-PR
+version), confirming this is the jest worker-oversubscription flakiness
+`vola-testing` already documents (missing elements under a `waitFor`, never a
+wrong value), not a regression. `pnpm run test:mobile` at `--maxWorkers=3`
+came back 238 suites / 3725 tests, 0 failures, and the full `pnpm run verify`
+chain (default settings) was subsequently green end to end.
+
+**NEEDS HUMAN EVIDENCE, both tickets** — seen on a device with several
+sections populated and at least one empty; the section sums checked by hand
+against the day total.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

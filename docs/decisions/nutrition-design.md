@@ -152,12 +152,24 @@ later cites it as precedent.
 
 Reviewed against a full walkthrough of Lose It!'s onboarding and logging:
 
-- **Per-meal calorie allocation** ("536 calories now available for breakfast").
-  False precision: it requires knowing a day the app cannot see, it is wrong the
-  moment you eat a big lunch, and it manufactures four budgets to fail against
-  instead of one honest running total. The *slots* stay — they are how people
-  remember food and they make a twenty-row day scannable — but there is one
-  remaining figure.
+- ~~**Per-meal calorie allocation** ("536 calories now available for
+  breakfast"). False precision: it requires knowing a day the app cannot see,
+  it is wrong the moment you eat a big lunch, and it manufactures four budgets
+  to fail against instead of one honest running total. The *slots* stay — they
+  are how people remember food and they make a twenty-row day scannable — but
+  there is one remaining figure.~~ **SUPERSEDED 2026-08-31 by N124/N113
+  (#514/#502)**, the same way the "mobile-first" section of CLAUDE.md
+  supersedes an earlier §5 assignment above: the user saw a reference design
+  built on true per-meal budgets and confirmed, twice, that this app should
+  build them after being told this is the identical tension this bullet
+  states. `mealBudgetLine` (the one-line, day-remaining answer this bullet
+  argued for) is deleted; `mealAllocation`/`mealAvailable` in
+  `apps/mobile/lib/nutrition.ts` are the replacement — full reasoning, and why
+  an even 25%-per-slot split doesn't reintroduce the "requires knowing a day
+  the app cannot see" objection above, is in that file's doc comment and in
+  `docs/decisions/history.md`'s 2026-08-31 entry. Left struck-through rather
+  than deleted, so a future reader sees both the original objection and why it
+  no longer holds — deleting it would look like nobody ever raised it.
 - **Streaks and a "Done Logging" toggle.** A missed day becomes a loss, and a
   streak rewards logging a fake day to save it. Against the no-shame rule, and
   the app should not ask for a declaration about its own use.
