@@ -69,25 +69,83 @@ export type FocusProposal = {
    * than offering a button that does nothing.
    *
    * **Two conditions, not one — this is N100.** The list has to match AND
-   * every id this roadmap is a reason for (`fromRoadmap`) has to already
-   * carry THIS curriculum's claim. List-match alone gets a second roadmap
-   * wrong: when its techniques are already all in focus (placed there by a
-   * FIRST roadmap, or by hand), `next` equals `current` and the naive answer
-   * is "unchanged" — but applying is still a real write, because it registers
+   * every id this roadmap is a reason for (`fromRoadmap`) has to either
+   * already carry THIS curriculum's claim OR be provably unclaimable (N100.1
+   * — see `isUnclaimable`). List-match alone gets a second roadmap wrong:
+   * when its techniques are already all in focus (placed there by a FIRST
+   * roadmap, or by hand), `next` equals `current` and the naive answer is
+   * "unchanged" — but applying is still a real write, because it registers
    * this roadmap's own claim in `bjj_focus_sources`. Skip that write and the
    * technique has no source but the first roadmap's; deactivate that one and
    * the technique leaves focus while this roadmap is still working it, which
    * is exactly the bug N95 closed for one roadmap and N100 closes for two.
+   *
+   * **The "or unclaimable" half is N100.1.** A technique the athlete
+   * hand-picked (or one whose provenance predates the `origin` column) has
+   * `curriculum_ids: []` and the server's claim INSERT is guarded by
+   * `origin = 'roadmap'` — it will never register ANY roadmap's claim on
+   * that row. Requiring `alreadyClaims` alone for such a row makes
+   * `unchanged` false forever: the list never changes, no claim is ever
+   * granted, and the apply control never clears. `isUnclaimable` recognises
+   * that case and lets `unchanged` become true once there is truly nothing
+   * left the server would do differently.
    */
   unchanged: boolean;
 };
 
 /** Whether `curriculumID` already has a registered claim on `techniqueID`,
  *  per the athlete's CURRENT focus list — the fact `unchanged` above needs
- *  and a plain list comparison cannot see. */
+ *  and a plain list comparison cannot see.
+ *
+ *  `?? []` guards a `curriculum_ids` that never arrived: `getBjjFocus`
+ *  normalises the top-level array but not this per-row field, so a server
+ *  that hasn't deployed this column yet — a real rollout skew, not a
+ *  hypothetical — would otherwise hand this `undefined` and throw on
+ *  `.includes` DURING RENDER: `FocusPanel`'s proposal is computed directly
+ *  in JSX (`dashboard/curricula/[id]/page.tsx`), so this would take the
+ *  whole page down rather than degrading to "nothing claimed". */
 function alreadyClaims(current: BjjFocus[], techniqueID: string, curriculumID: string): boolean {
   return current.some(
-    (f) => f.technique_id === techniqueID && f.curriculum_ids.includes(curriculumID),
+    (f) => f.technique_id === techniqueID && (f.curriculum_ids ?? []).includes(curriculumID),
+  );
+}
+
+/**
+ * Whether `techniqueID` is an EXISTING focus row no roadmap will ever be
+ * allowed to claim — the other fact `unchanged` needs and `alreadyClaims`
+ * cannot answer on its own.
+ *
+ * **Only defined for a row already in `current`.** An id absent from
+ * `current` is a NEW addition — `added` covers that, and it is a real write,
+ * so this must not be asked about it (it would vacuously return `false`,
+ * which happens to be correct, but for the wrong reason — don't rely on it).
+ *
+ * **The proof, not a guess.** `SetFocus` (`focus_postgres.go`) only ever
+ * gives a row `origin = 'roadmap'` in the SAME transaction it inserts that
+ * roadmap's claim into `bjj_focus_sources`, and `ReleaseFocusSource` deletes
+ * a `'roadmap'`-origin row in the SAME statement that removes its last
+ * source — so a `'roadmap'`-origin row can never be read back with zero
+ * sources. An empty `curriculum_ids` on an existing row is therefore proof
+ * the row is `'athlete'`- or `'unknown'`-origin, and the server's own guard
+ * (`WHERE f.origin = 'roadmap'` on the claim INSERT) will refuse to attach
+ * any curriculum to it, forever. Treating that refusal as a pending write is
+ * the N100.1 bug: the apply control never clears for a roadmap that overlaps
+ * a hand-picked (or pre-provenance) technique.
+ *
+ * **One acknowledged exception, not silently missed.** A `'roadmap'`-origin
+ * row CAN be read back with zero sources if a client claims a technique
+ * without enrolling and the owner later deletes that curriculum —
+ * `bjj_focus_sources.curriculum_id` is `ON DELETE CASCADE`, not blocked by
+ * enrollment, and `migrations/000069_bjj_focus_provenance.up.sql` documents
+ * this as "a real state, not an impossible one". Such a row IS still
+ * claimable, so `isUnclaimable` would wrongly call it unclaimable and hide
+ * the control. This needs a non-conforming client plus a curriculum
+ * deletion, is self-inflicted, and is recoverable by re-editing the focus
+ * list by hand — accepted rather than guarded against here.
+ */
+function isUnclaimable(current: BjjFocus[], techniqueID: string): boolean {
+  return current.some(
+    (f) => f.technique_id === techniqueID && (f.curriculum_ids ?? []).length === 0,
   );
 }
 
@@ -163,15 +221,18 @@ export function proposeFocus(
     dropped,
     // Same members AND same order — the athlete's own ranking, and the wizard
     // renders the chips in it, so a reshuffle is a real change even when the
-    // set is identical — AND every roadmap-owned id in `next` already carries
-    // THIS curriculum's claim. That last clause is N100: without it, a second
-    // roadmap whose techniques are already all in focus reads as unchanged and
-    // the apply control disappears, so it can never register its own claim.
+    // set is identical — AND every roadmap-owned id in `next` either already
+    // carries THIS curriculum's claim OR is provably unclaimable (N100.1 — a
+    // hand-picked or pre-provenance row the server will never let this
+    // roadmap attach to, so there is nothing left for "apply" to write). That
+    // claim clause is N100: without it, a second roadmap whose techniques are
+    // already all in focus reads as unchanged and the apply control
+    // disappears, so it can never register its own claim.
     unchanged:
       next.length === current.length &&
       next.every((id, i) => current[i]?.technique_id === id) &&
       next
         .filter((id) => inRoadmap.has(id))
-        .every((id) => alreadyClaims(current, id, curriculumID)),
+        .every((id) => alreadyClaims(current, id, curriculumID) || isUnclaimable(current, id)),
   };
 }

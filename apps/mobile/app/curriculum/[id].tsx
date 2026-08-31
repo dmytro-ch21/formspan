@@ -259,12 +259,20 @@ export default function CurriculumScreen() {
    * "Work on this" from an expanded lesson — one technique, nothing behind it.
    *
    * The `unchanged` guard stays as a backstop, but the button is no longer
-   * RENDERED for a technique already in focus, which is the real fix: a control
-   * that returns silently is indistinguishable from a control that is broken,
-   * and the athlete's reasonable reading of "nothing happened" is that the app
-   * dropped their tap. The row says "Already in your focus" instead — which is
-   * also the more useful answer, since it tells them the chip is waiting for
-   * them in the reflection wizard.
+   * RENDERED for a technique already in focus (see `inFocus` below), which is
+   * the real fix: a control that returns silently is indistinguishable from a
+   * control that is broken, and the athlete's reasonable reading of "nothing
+   * happened" is that the app dropped their tap. The row says "Already in
+   * your focus" instead — which is also the more useful answer, since it
+   * tells them the chip is waiting for them in the reflection wizard.
+   *
+   * **`inFocus` is plain list membership, not claim awareness** — so this
+   * control never reaches N100/N100.1's claim-only case (a technique already
+   * in focus but not yet claimed by THIS roadmap, whether that gap is real or
+   * unclaimable): whenever the technique is already in focus, the button is
+   * hidden regardless. Registering (or not being able to register) a claim
+   * for an already-focused technique is what `openMenu`'s whole-roadmap
+   * "Update your focus for this roadmap" option is for, not this one.
    */
   const workOnLesson = useCallback(
     (techniqueID: string) => {

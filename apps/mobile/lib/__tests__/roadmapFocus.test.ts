@@ -243,15 +243,34 @@ describe('unchanged', () => {
    * out of focus while this one is still working it.
    */
   describe('claim awareness', () => {
-    it('is false when the technique is in focus but this roadmap has never claimed it', () => {
-      // The exact shape of the bug: 'a' is already in focus (say, hand-picked,
-      // or claimed only by a DIFFERENT roadmap) and ROADMAP_A's own step for it
-      // is unmastered. The list would not change, but applying still WRITES —
-      // it registers ROADMAP_A's claim — so this must not read as unchanged.
-      const p = proposeFocus([step('a', false)], [focus('a')], ROADMAP_A);
+    it('is false when the technique is in focus but claimed only by a DIFFERENT roadmap', () => {
+      // 'a' is already in focus, claimed by ROADMAP_B, and ROADMAP_A's own
+      // step for it is unmastered. The list would not change, but applying
+      // still WRITES — it registers ROADMAP_A's own claim, which is a real
+      // and grantable claim (a 'roadmap'-origin row can always gain a second
+      // source) — so this must not read as unchanged.
+      const p = proposeFocus([step('a', false)], [focus('a', [ROADMAP_B])], ROADMAP_A);
       expect(p.next).toEqual(['a']);
       expect(p.fromRoadmap).toEqual(['a']);
       expect(p.unchanged).toBe(false);
+    });
+
+    /**
+     * N100.1. The case `alreadyClaims` alone gets wrong: 'a' is hand-picked
+     * (or pre-provenance) — `curriculum_ids: []` — and ROADMAP_A's own step
+     * for it overlaps. The server's claim INSERT is guarded by
+     * `origin = 'roadmap'`, so it will REFUSE this claim on every single
+     * apply, forever. Before `isUnclaimable`, this read as unchanged:false
+     * permanently: the apply control never went away, applying it never
+     * changed anything, and a fresh GET still showed `curriculum_ids: []`.
+     * That is the exact bug frontend-reviewer found in this file's
+     * `unchanged` clause — this test is the regression guard for it.
+     */
+    it('is true (not permanent noise) when the overlapping technique is hand-picked and unclaimable', () => {
+      const p = proposeFocus([step('a', false)], [focus('a')], ROADMAP_A);
+      expect(p.next).toEqual(['a']);
+      expect(p.fromRoadmap).toEqual(['a']);
+      expect(p.unchanged).toBe(true);
     });
 
     it("is true once this roadmap's own claim is registered", () => {
@@ -287,12 +306,40 @@ describe('unchanged', () => {
       expect(stillA.unchanged).toBe(true);
     });
 
+    // `focus('a')` above (default `curriculum_ids: []`) stands in for BOTH
+    // 'athlete'-origin (hand-picked) and 'unknown'-origin (pre-provenance,
+    // predating the `origin` column) rows — the client cannot tell those two
+    // apart and does not need to: both give `curriculum_ids: []`, and the
+    // server refuses a roadmap claim on either one identically (its guard is
+    // `origin = 'roadmap'`, and neither 'athlete' nor 'unknown' is that). So
+    // this one case covers both provenances by construction, not by omission.
+
     it('a hand-picked entry outside the roadmap is never required to carry a claim', () => {
       // 'x' is not part of ROADMAP_A's items at all (rule 3 — it is kept, not
       // claimed), so its empty curriculum_ids must never make this false.
       const p = proposeFocus([step('a', false)], [focus('a', [ROADMAP_A]), focus('x')], ROADMAP_A);
       expect(p.unchanged).toBe(true);
       expect(p.fromRoadmap).toEqual(['a']);
+    });
+  });
+
+  /**
+   * A server that has not yet deployed this field is a real rollout skew,
+   * not a hypothetical — `fetchFocus` normalises the top-level `focus`
+   * array (`?? []`) but not this per-row one. Without the `?? []` guards in
+   * `alreadyClaims`/`isUnclaimable`, a missing `curriculum_ids` throws
+   * `TypeError: Cannot read properties of undefined` the moment the athlete
+   * opens the overflow menu on a roadmap that overlaps ANY existing focus
+   * row — not a rare path.
+   */
+  describe('a curriculum_ids the server has not started sending yet', () => {
+    it('does not throw, and treats the row as unclaimable rather than already claimed', () => {
+      const undocumented = { ...focus('a') } as Focus;
+      // @ts-expect-error — simulating a server response older than this field.
+      delete undocumented.curriculum_ids;
+      expect(() => proposeFocus([step('a', false)], [undocumented], ROADMAP_A)).not.toThrow();
+      const p = proposeFocus([step('a', false)], [undocumented], ROADMAP_A);
+      expect(p.unchanged).toBe(true);
     });
   });
 });
@@ -351,8 +398,13 @@ describe('proposeOneFocus', () => {
 
   /** N100, single-technique form. Same claim-awareness rule as `proposeFocus`. */
   describe('claim awareness', () => {
-    it('is false when it is already in focus, in the same place, but unclaimed by this roadmap', () => {
-      const p = proposeOneFocus([step('a', false)], [focus('a'), focus('b')], ROADMAP_A, 'a');
+    it('is false when it is already in focus, claimed only by a DIFFERENT roadmap', () => {
+      const p = proposeOneFocus(
+        [step('a', false)],
+        [focus('a', [ROADMAP_B]), focus('b')],
+        ROADMAP_A,
+        'a',
+      );
       expect(p.unchanged).toBe(false);
       expect(p.added).toEqual([]);
       expect(p.fromRoadmap).toEqual(['a']);
@@ -367,6 +419,20 @@ describe('proposeOneFocus', () => {
       );
       expect(p.unchanged).toBe(true);
       expect(p.added).toEqual([]);
+    });
+
+    /** N100.1, single-technique form. Same regression as `proposeFocus`'s
+     *  "hand-picked and unclaimable" case above — 'a' is already in focus
+     *  in the right place, but hand-picked (`curriculum_ids: []`), so the
+     *  server will never grant ROADMAP_A a claim on it. Without
+     *  `isUnclaimable` this is `unchanged: false` forever, and "Work on
+     *  this" from the lesson never stops offering a write that does
+     *  nothing. */
+    it('is true (not permanent noise) when it is already in focus, in the same place, but hand-picked', () => {
+      const p = proposeOneFocus([step('a', false)], [focus('a'), focus('b')], ROADMAP_A, 'a');
+      expect(p.unchanged).toBe(true);
+      expect(p.added).toEqual([]);
+      expect(p.fromRoadmap).toEqual(['a']);
     });
   });
 });

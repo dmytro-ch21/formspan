@@ -451,6 +451,7 @@ describe('a lesson', () => {
         position: 'Guard - Bottom',
         category: 'Sweep',
         started_on: '2026-01-02',
+        curriculum_ids: [],
       },
     ]);
     await open();
@@ -766,13 +767,13 @@ describe('the overflow menu: applying focus when a technique is already there (N
     },
   ];
 
-  it('still offers to work it when every technique is in focus but unclaimed by this roadmap', async () => {
-    // Unclaimed — empty `curriculum_ids`, the shape of hand-picked entries or
-    // ones only a DIFFERENT roadmap ever claimed. Either way this roadmap has
-    // never registered its own claim on any of them, and `added` is empty
-    // because nothing is NEW — this is what the old `added.length > 0` gate
-    // got wrong.
-    mockFetchFocus.mockResolvedValue(allThreeInFocus([]));
+  it('still offers to work it when every technique is in focus but claimed only by a DIFFERENT roadmap', async () => {
+    // Claimed — but only by a different roadmap ('blue-belt-basics'), so this
+    // roadmap has never registered its own claim on any of them, and `added`
+    // is empty because nothing is NEW. This is a REAL, grantable claim (a
+    // 'roadmap'-origin row can always gain a second source) — this is what
+    // the old `added.length > 0` gate got wrong.
+    mockFetchFocus.mockResolvedValue(allThreeInFocus(['blue-belt-basics']));
     await open();
 
     const options = pressMenuAndGetOptions();
@@ -802,6 +803,28 @@ describe('the overflow menu: applying focus when a technique is already there (N
 
   it('says nothing needs doing once this roadmap already claims every technique — the control is not permanent noise', async () => {
     mockFetchFocus.mockResolvedValue(allThreeInFocus(['white-belt-basics']));
+    await open();
+
+    const options = pressMenuAndGetOptions();
+    expect(
+      options.find(
+        (o) => o.text.startsWith('Work these next') || o.text === 'Update your focus for this roadmap',
+      ),
+    ).toBeUndefined();
+  });
+
+  /**
+   * N100.1. Empty `curriculum_ids` is the shape of a hand-picked or
+   * pre-provenance row — NOT "claimed only by a different roadmap" (that
+   * case is covered above, with a real curriculum id). The server's claim
+   * INSERT is guarded by `origin = 'roadmap'`, so it refuses this claim on
+   * every single apply: before `isUnclaimable`, this read as
+   * `unchanged: false` forever, and the option above stayed on the menu
+   * permanently, writing an identical list every time it was pressed. This
+   * is the regression this whole fix pass exists for.
+   */
+  it('says nothing needs doing when every technique is hand-picked and unclaimable — not permanent noise', async () => {
+    mockFetchFocus.mockResolvedValue(allThreeInFocus([]));
     await open();
 
     const options = pressMenuAndGetOptions();

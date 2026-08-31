@@ -49673,6 +49673,121 @@ acceptance criteria are both about the roadmap-level apply control, and making
 lesson-row prop chain for a narrower affordance than the one actually
 reported. Worth a follow-up if it turns out to matter in practice.
 
+## 2026-08-30 — N100.1 (#458 follow-up): the hand-picked-overlap case N100 named but didn't cover
+
+Found by `frontend-reviewer` on N100's own PR before it pushed, against the
+already-committed diff above — `[blocking]`, and correctly so: N100's own
+"Left out of scope" section (and its `unchanged` doc-comment) talked about
+"a hand-picked entry outside the roadmap", which rule 3 always protected, but
+never noticed the one it didn't — a hand-picked technique **inside** the
+roadmap's own step list.
+
+Walkthrough: athlete hand-picks technique `a` (`origin='athlete'`,
+`curriculum_ids: []`). They open a roadmap whose steps include `a`, the rest
+already matching. `alreadyClaims(current, 'a', curriculumID)` is false →
+`unchanged: false` → apply control shows. They apply. The claim INSERT
+(`focus_postgres.go` — `WHERE f.origin = 'roadmap'`) correctly refuses to
+attribute an `'athlete'`-origin row, per the N95 invariant N100 was careful
+not to regress. A fresh `GET /v1/bjj/focus` still reads `curriculum_ids: []`
+for `a`, so `unchanged` is **still false** — forever. The apply control never
+clears: exactly the "permanent noise" AC #3 was written to rule out, just for
+the one overlap shape N100's own scenario matrix never exercised (both its
+two-roadmap cases used `origin='roadmap'` rows on both sides).
+
+**Fix: a second disjunct, not a different condition.** `unchanged` already
+needed `alreadyClaims(current, id, curriculumID)` for every roadmap-owned id
+in `next`; it now accepts `alreadyClaims(...) || isUnclaimable(current, id)`.
+`isUnclaimable` is a new named helper (mirroring `alreadyClaims`'s own
+doc-comment density) that returns true only for an id **already present** in
+`current` whose `curriculum_ids` is empty. The proof it leans on: `SetFocus`
+only ever gives a row `origin = 'roadmap'` in the same transaction it inserts
+that roadmap's `bjj_focus_sources` claim, and `ReleaseFocusSource` deletes a
+`'roadmap'`-origin row in the same statement that removes its last source —
+so a `'roadmap'`-origin row can never be read back with zero sources, and an
+empty `curriculum_ids` on an existing row is proof of `'athlete'`/`'unknown'`
+origin, which the claim INSERT's own guard will refuse forever. One
+acknowledged exception is written into both doc-comments rather than left for
+someone to rediscover: a claim placed without enrolling, followed by the
+curriculum being deleted, can strand a genuinely-claimable `'roadmap'`-origin
+row at zero sources (`bjj_focus_sources.curriculum_id` is `ON DELETE CASCADE`,
+not blocked by enrollment — `migrations/000069_bjj_focus_provenance.up.sql`
+already documents this as "a real state, not an impossible one"); accepted
+as self-inflicted and hand-recoverable rather than guarded against.
+
+`isUnclaimable` deliberately answers `false` for an id **absent** from
+`current` — that is a genuine new addition, which `added` already drives as
+a real write, and asking `isUnclaimable` about it would be asking the wrong
+question for the right reason (it happens to return the correct `false`
+either way, which is exactly the kind of accidental-correctness the function's
+own doc-comment now warns against relying on).
+
+### A second, independent finding folded into the same pass
+
+A parallel review of the same N100 diff caught a separate real bug in the
+same two functions: `alreadyClaims` (and, once added, `isUnclaimable`) read
+`f.curriculum_ids.includes(...)` / `.length` with no guard against
+`curriculum_ids` being `undefined`. The field is new — `fetchFocus`
+(mobile)/`getBjjFocus` (web) normalise the top-level `focus` array (`?? []`)
+but never touched this per-row one — so a client on this branch talking to a
+backend that hasn't deployed the column yet is a real rollout-skew window,
+not a hypothetical, and would throw a `TypeError` the moment the athlete
+opened a roadmap's overflow menu (mobile) or, worse, **during render** on web
+— `FocusPanel` computes `proposeFocus(...)` directly in JSX in
+`dashboard/curricula/[id]/page.tsx`, so the crash would take the whole page
+down rather than degrade to "nothing claimed". Both functions in both files
+now do `(f.curriculum_ids ?? []).includes(...)` / `(f.curriculum_ids ?? [])
+.length`, matching the existing `?? []` convention `bjjFocus.ts`/`api.ts`
+already use one level up.
+
+### Copy
+
+**Web's `FocusPanel` had no equivalent of mobile's added-vs-claim-only copy
+split**, noted but left out of scope by N100 itself. Fixed here: the panel
+heading now reads "Update your focus for this roadmap" (not "Work these
+next") and the apply button reads "Update my focus" (not "Put these in my
+focus") whenever `proposal.added.length === 0` — mirroring the menu-option
+split `curriculum/[id].tsx` already had. Also rewrote a stale comment near
+mobile's `workOnLesson`: it read as though the per-lesson `unchanged` guard
+were a meaningful backstop for the claim-only case, when in fact that
+control's `inFocus` gate is plain list membership and never reaches the
+claim-only case at all — the whole-roadmap "Update your focus" menu option is
+what actually carries it (unchanged from N100's own "Left out of scope",
+restated more precisely).
+
+### What was mutation-verified
+
+Reverted the `unchanged` clause in both `roadmapFocus.ts` copies back to
+`alreadyClaims`-only (no `isUnclaimable` disjunct) and confirmed four tests
+went red for the right reason — three assertion failures (`expect(true).toBe`
+receiving `false`) in the two libraries' own unit tests plus one in
+`roadmapScreen.test.tsx` (the menu option that should have disappeared was
+still present) — then restored the fix and confirmed all four green again,
+alongside the full existing suites for both files.
+
+### Tests
+
+Split a pre-existing test in both `roadmapFocus.test.ts` copies that had
+conflated two different `curriculum_ids: []`-adjacent scenarios under one
+assertion ("unclaimed... say, hand-picked, or claimed only by a DIFFERENT
+roadmap") into two real ones: claimed-by-a-different-roadmap (non-empty
+`curriculum_ids`, still a genuine pending write, `unchanged` stays `false`)
+and hand-picked/unclaimable (empty `curriculum_ids`, now correctly
+`unchanged: true`). Added the equivalent split to mobile's `proposeOneFocus`
+tests and to `roadmapScreen.test.tsx`'s screen-level menu-option tests. Added
+one case in each `roadmapFocus.test.ts` for an existing row with
+`curriculum_ids` entirely absent (simulating the rollout-skew case above),
+asserting no throw and that the missing field degrades to "unclaimable"
+rather than "already claimed". A comment records that `curriculum_ids: []`
+stands in for both `'athlete'`- and `'unknown'`-origin rows without a
+separate fixture, because the client cannot distinguish them and the server
+treats both identically for this purpose.
+
+### Left out of scope
+
+Same per-lesson `inFocus`-is-not-claim-aware gap N100 already recorded as
+out of scope — untouched here, and the reworded comment above documents why
+more precisely rather than promising it will be fixed.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

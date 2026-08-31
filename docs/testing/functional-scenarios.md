@@ -3692,12 +3692,12 @@ must not regress.
 
 **Edge cases and errors**
 
-- A technique already in focus that is claimed by NEITHER the applying
-  roadmap NOR any other (a hand-picked entry the roadmap also happens to
-  list) → the apply control still appears, and applying registers the
-  roadmap's claim on it. Confirm the technique's `curriculum_ids` picks up the
-  new id while whatever made it hand-picked in the first place (its `origin`)
-  is untouched server-side.
+- A technique already in focus that is claimed by a DIFFERENT roadmap only
+  (non-empty `curriculum_ids`, but not this applying roadmap's id) → the
+  apply control still appears, and applying registers the applying roadmap's
+  claim on it too. Confirm the technique's `curriculum_ids` picks up the new
+  id alongside the existing one, and that both roadmaps' own claims still
+  read back correctly afterward.
 - A roadmap whose every technique is already claimed BY IT → the control is
   correctly absent (this is the pre-N100 case, still correct) — regression-
   test this alongside the new case so the fix does not overcorrect into always
@@ -3709,6 +3709,34 @@ must not regress.
 - `curriculum_ids` on an unclaimed row reads back `[]`, never `null` — a
   client iterating or calling `.includes()` on it must never need a null
   guard.
+
+**N100.1 correction (#458 follow-up) — a hand-picked overlap must not become
+permanent noise either**
+
+N100's own first pass got the "claimed by neither" case above wrong for one
+overlap shape: a technique that is in the applying roadmap's own step list
+AND already in focus AND `curriculum_ids: []` because it was hand-picked (or
+predates the `origin` column) can **never** be claimed by any roadmap — the
+server's claim INSERT is guarded by `origin = 'roadmap'`, and a hand-picked
+row is `origin = 'athlete'`. The corrected behaviour, which is the opposite
+of what the paragraph above used to say for this specific case:
+
+- Hand-pick technique `a`, then enrol in and open a roadmap that also lists
+  `a` (rest of its steps already in focus, so this is the only outstanding
+  item) → the panel/menu says nothing needs doing, with **no apply control
+  offered at all** — offering one and having every single apply silently
+  change nothing (the server refuses the claim every time) is the exact
+  "permanent noise" regression this correction exists to prevent. Confirm by
+  applying anyway if the control is somehow reachable: `curriculum_ids` for
+  `a` must still read back `[]` afterward, and `origin` must still be
+  `'athlete'`.
+- The same technique, this time claimed by a DIFFERENT roadmap (non-empty
+  `curriculum_ids`, but not the applying one) rather than hand-picked, must
+  still behave per the "claimed by a different roadmap" case above — the
+  apply control appears and a real claim gets registered. The two cases look
+  identical on the technique list (both already in focus, both missing this
+  roadmap's own id) and differ only in whether `curriculum_ids` is empty or
+  not — a regression test should cover both side by side, not just one.
 
 **Auth and security**
 
