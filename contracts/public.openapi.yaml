@@ -4723,7 +4723,7 @@ components:
       description: >
         One technique the athlete is deliberately working on. The list is short
         by design (at most 5) and turns over every few weeks.
-      required: [technique_id, name, position, category, started_on]
+      required: [technique_id, name, position, category, started_on, curriculum_ids]
       properties:
         technique_id: { type: string, example: armbar-from-guard }
         name: { type: string, example: Armbar from Guard }
@@ -4736,6 +4736,20 @@ components:
             When this technique JOINED the list. Preserved across re-saves, so
             reordering or adding an entry does not reset it — it is what makes
             "you have been on this five weeks, consider rotating" answerable.
+        curriculum_ids:
+          type: array
+          items: { type: string }
+          example: ["c_a1b2c3"]
+          description: >
+            Which curricula currently claim this row (empty for a hand-picked
+            or pre-provenance entry — never null). This is what lets a client
+            tell "applying this roadmap would register a new claim" apart from
+            "applying it would change nothing", which a plain list-membership
+            comparison cannot: a second roadmap whose techniques are already
+            all in focus changes no `technique_id`, but still needs its own
+            row in `bjj_focus_sources` or a later deactivation of the FIRST
+            roadmap takes the technique away while this one is still working
+            it (N100).
 
     CurriculumCriteria:
       type: object

@@ -3659,6 +3659,64 @@ is no cosmetic case here.**
 - Un-enrolment is self-scoped: no request can name another athlete.
 - Unauthenticated → 401, and no focus rows are released.
 
+### A second overlapping roadmap can register its own claim (N100 — `GET`/`PUT /v1/bjj/focus`, `app/curriculum/[id].tsx`, `/curricula/{id}`)
+
+Follow-up to the section above. N95 made a focus row record why it is there;
+this is the read side of that fact — `GET /v1/bjj/focus` now returns
+`curriculum_ids` per row, and both curriculum screens use it to tell "this
+roadmap's techniques are already in the list" apart from "this roadmap has
+already registered ITS OWN claim on them". Every scenario below is either the
+reported bug (a claim silently never registered) or the N95 invariant this
+must not regress.
+
+**Happy path**
+
+- Apply roadmap A (its techniques enter focus, claimed by A). Enrol in roadmap
+  B whose techniques are the SAME ones, already all in focus → **B is still
+  offered an apply control**, and using it registers B's own claim — assert
+  directly against `bjj_focus_sources`/`GET /v1/bjj/focus`'s `curriculum_ids`,
+  not only that the list is unchanged (it is — that is exactly the trap: the
+  list not changing must not mean nothing happened).
+- With both A and B claiming the shared technique, deactivate A → **the
+  technique stays in focus**, because B's claim remains. This is the concrete
+  case the bug produced: before the fix, B never held a claim to begin with,
+  so this step alone deleted the technique out from under B.
+- Once B's own claim is registered, re-open B's screen → the panel/menu now
+  says nothing needs doing (`GET /v1/bjj/focus` shows B's own id in
+  `curriculum_ids`) — **the apply control must not become permanent noise**
+  once it has done its job.
+- `GET /v1/bjj/focus` on a technique claimed by two curricula returns both ids
+  in `curriculum_ids`, in either order the server chooses (client does not
+  depend on array order here — unlike the list itself, which is the athlete's
+  ranking and IS order-sensitive).
+
+**Edge cases and errors**
+
+- A technique already in focus that is claimed by NEITHER the applying
+  roadmap NOR any other (a hand-picked entry the roadmap also happens to
+  list) → the apply control still appears, and applying registers the
+  roadmap's claim on it. Confirm the technique's `curriculum_ids` picks up the
+  new id while whatever made it hand-picked in the first place (its `origin`)
+  is untouched server-side.
+- A roadmap whose every technique is already claimed BY IT → the control is
+  correctly absent (this is the pre-N100 case, still correct) — regression-
+  test this alongside the new case so the fix does not overcorrect into always
+  showing the button.
+- **The N95 invariant must not regress**: a hand-picked technique the applying
+  roadmap does not itself list is never required to carry ANY claim, and never
+  gains one merely by being present when the roadmap applies. Its
+  `curriculum_ids` must read back `[]` before and after.
+- `curriculum_ids` on an unclaimed row reads back `[]`, never `null` — a
+  client iterating or calling `.includes()` on it must never need a null
+  guard.
+
+**Auth and security**
+
+- `curriculum_ids` on `GET /v1/bjj/focus` is scoped to the caller's own rows
+  only — the same self-scoping the rest of this endpoint already has. No
+  request can read which OTHER athletes' curricula claim a technique, since
+  focus rows themselves are already per-athlete.
+
 ### Logging advances an active roadmap (`app/curriculum/[id].tsx`, `/curricula/{id}`)
 
 The loop the whole roadmap feature rests on: log a technique a roadmap names, and

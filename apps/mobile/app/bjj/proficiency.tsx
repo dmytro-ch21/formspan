@@ -126,6 +126,11 @@ export default function ProficiencyScreen() {
               position: p.position,
               category: p.category,
               started_on: '',
+              // A hand add from this screen sends no `roadmap` block, so the
+              // server can only ever record this as 'athlete' — no curriculum
+              // claims it yet. The real value comes back moments later; this
+              // is only the optimistic placeholder.
+              curriculum_ids: [],
             },
           ];
       save(next);

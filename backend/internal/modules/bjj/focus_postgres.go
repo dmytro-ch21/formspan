@@ -12,7 +12,15 @@ import (
 
 func (r *PostgresRepository) Focus(ctx context.Context, userID string) ([]Focus, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT f.technique_id, lib.name, lib.position, lib.category, f.started_on
+		SELECT f.technique_id, lib.name, lib.position, lib.category, f.started_on,
+		       -- Which curricula currently claim this row — see Focus.CurriculumIDs.
+		       -- LEFT, because most rows (hand-picked, or 'unknown') have no
+		       -- source at all and must still be returned; COALESCE turns the
+		       -- LEFT join's NULL into an empty array rather than leaving a nil
+		       -- slice for the scan to hand back. A LATERAL subquery keeps this
+		       -- to one query rather than an N+1 per focus row, per the ticket's
+		       -- own sketch.
+		       COALESCE(src.curriculum_ids, ARRAY[]::TEXT[]) AS curriculum_ids
 		FROM bjj_focus f
 		-- INNER, unlike the proficiency read's LEFT. There, a row with an
 		-- unresolvable technique is an athlete's history and must survive; here
@@ -20,6 +28,11 @@ func (r *PostgresRepository) Focus(ctx context.Context, userID string) ([]Focus,
 		-- CASCADE means it cannot happen anyway -- this join simply agrees with
 		-- the FK instead of quietly disagreeing with it.
 		JOIN techniques lib ON lib.id = f.technique_id
+		LEFT JOIN LATERAL (
+			SELECT array_agg(s.curriculum_id ORDER BY s.curriculum_id) AS curriculum_ids
+			FROM bjj_focus_sources s
+			WHERE s.user_id = f.user_id AND s.technique_id = f.technique_id
+		) src ON true
 		WHERE f.user_id = $1
 		-- The athlete's own order. technique_id makes it total, so two entries
 		-- sharing a position cannot swap between reads.
@@ -41,7 +54,9 @@ func (r *PostgresRepository) Focus(ctx context.Context, userID string) ([]Focus,
 			f         Focus
 			startedOn time.Time
 		)
-		if err := rows.Scan(&f.TechniqueID, &f.Name, &f.Position, &f.Category, &startedOn); err != nil {
+		f.CurriculumIDs = []string{}
+		if err := rows.Scan(&f.TechniqueID, &f.Name, &f.Position, &f.Category, &startedOn,
+			&f.CurriculumIDs); err != nil {
 			return nil, fmt.Errorf("bjj: scan focus: %w", err)
 		}
 		// Formatted here rather than left to encoding/json — see the field.

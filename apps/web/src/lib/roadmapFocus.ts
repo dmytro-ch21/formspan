@@ -64,14 +64,41 @@ export type FocusProposal = {
    * by the cap, which is the only case worth a warning.
    */
   dropped: { focus: BjjFocus; reason: "mastered" | "evicted" }[];
-  /** True when applying would change nothing — so the UI can say so rather
-   *  than offering a button that does nothing. */
+  /**
+   * True when applying would change nothing — so the UI can say so rather
+   * than offering a button that does nothing.
+   *
+   * **Two conditions, not one — this is N100.** The list has to match AND
+   * every id this roadmap is a reason for (`fromRoadmap`) has to already
+   * carry THIS curriculum's claim. List-match alone gets a second roadmap
+   * wrong: when its techniques are already all in focus (placed there by a
+   * FIRST roadmap, or by hand), `next` equals `current` and the naive answer
+   * is "unchanged" — but applying is still a real write, because it registers
+   * this roadmap's own claim in `bjj_focus_sources`. Skip that write and the
+   * technique has no source but the first roadmap's; deactivate that one and
+   * the technique leaves focus while this roadmap is still working it, which
+   * is exactly the bug N95 closed for one roadmap and N100 closes for two.
+   */
   unchanged: boolean;
 };
+
+/** Whether `curriculumID` already has a registered claim on `techniqueID`,
+ *  per the athlete's CURRENT focus list — the fact `unchanged` above needs
+ *  and a plain list comparison cannot see. */
+function alreadyClaims(current: BjjFocus[], techniqueID: string, curriculumID: string): boolean {
+  return current.some(
+    (f) => f.technique_id === techniqueID && f.curriculum_ids.includes(curriculumID),
+  );
+}
 
 export function proposeFocus(
   items: CurriculumItem[],
   current: BjjFocus[],
+  /**
+   * The roadmap being applied — needed only to compute `unchanged` correctly.
+   * See `FocusProposal.unchanged`.
+   */
+  curriculumID: string,
   max: number = MAX_BJJ_FOCUS,
 ): FocusProposal {
   // Concept items carry no technique_id — they are ideas, and an idea cannot
@@ -134,11 +161,17 @@ export function proposeFocus(
     fromRoadmap: next.filter((id) => inRoadmap.has(id)),
     added,
     dropped,
-    // Same members AND same order. Order matters: it is the athlete's own
-    // ranking and the wizard renders the chips in it, so a reshuffle is a real
-    // change even when the set is identical.
+    // Same members AND same order — the athlete's own ranking, and the wizard
+    // renders the chips in it, so a reshuffle is a real change even when the
+    // set is identical — AND every roadmap-owned id in `next` already carries
+    // THIS curriculum's claim. That last clause is N100: without it, a second
+    // roadmap whose techniques are already all in focus reads as unchanged and
+    // the apply control disappears, so it can never register its own claim.
     unchanged:
       next.length === current.length &&
-      next.every((id, i) => current[i]?.technique_id === id),
+      next.every((id, i) => current[i]?.technique_id === id) &&
+      next
+        .filter((id) => inRoadmap.has(id))
+        .every((id) => alreadyClaims(current, id, curriculumID)),
   };
 }

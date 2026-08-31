@@ -1459,6 +1459,18 @@ export type BjjFocus = {
   category: string;
   /** YYYY-MM-DD. When it JOINED the list — survives reordering and re-saves. */
   started_on: string;
+  /**
+   * Which curricula currently claim this row. Empty — never absent — for a
+   * hand-picked or pre-provenance entry.
+   *
+   * **This is what N100 fixes.** `roadmapFocus.ts`'s `unchanged` used to be
+   * computed from the technique list alone, which cannot tell "a second
+   * roadmap wants exactly what's already in focus, so applying it would
+   * register a new claim" apart from "applying it would change nothing at
+   * all" — those look identical on the list, and only this field tells them
+   * apart.
+   */
+  curriculum_ids: string[];
 };
 
 /** Matches the backend's maxFocus. The cap is the feature: twenty is the library again. */

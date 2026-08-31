@@ -269,7 +269,7 @@ export default function CurriculumScreen() {
   const workOnLesson = useCallback(
     (techniqueID: string) => {
       if (!curriculum || !focus) return;
-      const proposal = proposeOneFocus(curriculum.items ?? [], focus, techniqueID);
+      const proposal = proposeOneFocus(curriculum.items ?? [], focus, curriculum.id, techniqueID);
       if (proposal.unchanged) return;
       confirmFocus(proposal);
     },
@@ -313,12 +313,22 @@ export default function CurriculumScreen() {
    */
   const openMenu = useCallback(() => {
     if (!curriculum) return;
-    const proposal = focus ? proposeFocus(curriculum.items ?? [], focus) : null;
+    const proposal = focus ? proposeFocus(curriculum.items ?? [], focus, curriculum.id) : null;
     const options: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
 
-    if (proposal && !proposal.unchanged && proposal.added.length > 0) {
+    // `!proposal.unchanged` ALONE, not `&& proposal.added.length > 0` — the
+    // second half used to hide this option for exactly the case N100 exists
+    // to fix. A second roadmap whose techniques are ALREADY all in focus adds
+    // nothing new (`added` is empty), but applying still WRITES: it registers
+    // this roadmap's own claim in `bjj_focus_sources`, without which a later
+    // deactivation of whichever roadmap DOES hold the claim takes the
+    // technique out of focus while this one is still working it.
+    if (proposal && !proposal.unchanged) {
       options.push({
-        text: `Work these next (${proposal.added.length})`,
+        text:
+          proposal.added.length > 0
+            ? `Work these next (${proposal.added.length})`
+            : 'Update your focus for this roadmap',
         onPress: () => confirmFocus(proposal),
       });
     }

@@ -98,7 +98,7 @@ export default function CurriculumDetailPage() {
     if (!c || !focus) return;
     setBusy(true);
     try {
-      const p = proposeFocus(c.items ?? [], focus);
+      const p = proposeFocus(c.items ?? [], focus, c.id);
       // `fromRoadmap`, never `next` — the difference is the athlete's own
       // entries, which this roadmap carries along but does not own. Attributing
       // those to it would delete them when it is deactivated.
@@ -249,7 +249,7 @@ export default function CurriculumDetailPage() {
 
       {isRoadmap && c.enrolled && focus && (
         <FocusPanel
-          proposal={proposeFocus(c.items ?? [], focus)}
+          proposal={proposeFocus(c.items ?? [], focus, c.id)}
           busy={busy}
           onApply={applyFocus}
         />
