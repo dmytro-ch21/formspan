@@ -50025,6 +50025,65 @@ the full existing `nutrition` package suite and the full backend suite, both
 green. `pnpm run lint:openapi`, `pnpm run typecheck:mobile`, `pnpm run
 lint:mobile` and `pnpm run test:mobile` (237 suites, 3715 tests) all green.
 
+### Review pass — one blocking finding, fixed before the PR opened
+
+`ac-verifier`, `backend-reviewer` and `frontend-reviewer` all ran against this
+branch (on `sonnet` — the account's Fable spend limit returned HTTP 429 on the
+first launch of all three; confirmed model-specific, not account-wide, with a
+throwaway `sonnet` probe agent before relaunching, so this is a same-session
+substitution rather than a skipped gate).
+
+**`ac-verifier` found one genuine `[blocking]` gap: the meal-card food row
+ignored the athlete's unit preference (#483), which both #514 and #502 name
+explicitly** ("the reference's `20 Grams` follows the profile, not the
+reference"). The row printed the raw stored `serving_label` — the exact same
+`{servings} × {serving_label}` line the pre-rebuild `food.tsx` used, moved
+into `MealCard.tsx` unchanged, so this was a carried-over gap rather than
+something the rebuild introduced, and it was correctly flagged as unaddressed
+rather than a stated scope cut. Fixed: `loggedAmountLabel` (new,
+`lib/foodQuantity.ts`) converts a gram-basis label through
+`formatFoodQuantity`/the athlete's `foodUnit` — the same conversion
+`entry/[id].tsx`'s edit sheet already applies to the identical label, so a
+card and its own edit screen can no longer disagree about the same entry's
+amount. A non-gram label ("1 Each", "1 Cup") is left exactly as logged, per
+`gramsBasisFromLabel`'s own no-guessing rule. Five new unit tests in
+`foodQuantity.test.ts`, plus two in the new `MealCard.test.tsx` asserting the
+conversion at the render layer.
+
+`backend-reviewer` (no blocking): mutation-tested the `category` SET clause
+itself (removed `category = EXCLUDED.category`, confirmed the integration
+test goes red with the exact wrong value, restored, re-confirmed green) and
+found no `updateWithin`-class blanking bug. One `[suggestion]`, fixed anyway
+since it was cheap: `Category` reached `SaveEntry` untrimmed while `Name`/
+`ServingLabel` are trimmed in the handler — `"  poultry  "` would validate and
+persist with whitespace intact. `handler.go`'s `SaveEntry` now trims it the
+same way.
+
+`frontend-reviewer` (no blocking, three `[suggestion]`s): the reversal is
+complete with no dead `mealBudgetLine` references; `MealCard` is genuinely
+thin; glyph/macro-colour/empty-state conventions all hold. Two suggestions
+addressed: a mobile-side `category` round-trip test (write → `localEntries`
+→ edit → push payload, four new cases in `foodLog.test.ts` — the mobile
+equivalent of the backend's dedicated test, closing the one column in this
+table with a threading bug class and no test that could catch it) and
+`docs/decisions/nutrition-design.md` §5's stale "no per-meal allocation"
+bullet, now struck through with a pointer to this entry rather than left to
+contradict what shipped. The third suggestion (a component test for
+`MealCard`'s populated/empty branch) is also covered by the same new
+`MealCard.test.tsx`.
+
+Also found and fixed independently of any reviewer: **`pnpm run verify`'s
+first run failed on `__tests__/app/goalsScreen.test.tsx`, a file this PR
+never touches.** Isolated, the file passes 64/64. Cross-checked against
+`origin/main` with the identical full-suite command (via a disposable
+worktree, `node_modules` symlinked since no dependency changed) — that run
+*also* failed, but on a *different* file (`todayScreen.test.tsx`'s pre-PR
+version), confirming this is the jest worker-oversubscription flakiness
+`vola-testing` already documents (missing elements under a `waitFor`, never a
+wrong value), not a regression. `pnpm run test:mobile` at `--maxWorkers=3`
+came back 238 suites / 3725 tests, 0 failures, and the full `pnpm run verify`
+chain (default settings) was subsequently green end to end.
+
 **NEEDS HUMAN EVIDENCE, both tickets** — seen on a device with several
 sections populated and at least one empty; the section sums checked by hand
 against the day total.

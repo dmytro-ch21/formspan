@@ -23,6 +23,7 @@
  */
 import type { CatalogFood, CatalogPortion } from './catalogApi';
 import type { Macros } from './nutrition';
+import { formatFoodQuantity, type FoodUnit } from './units';
 
 /** A catalog food can always be measured, even with no portions listed. */
 export const FALLBACK_SERVING_GRAMS = 100;
@@ -343,6 +344,30 @@ export function servingsForLabelGrams(servingLabel: string, grams: number): numb
   const basis = gramsBasisFromLabel(servingLabel);
   if (basis == null) return null;
   return grams / basis;
+}
+
+/**
+ * How a LOGGED entry's amount reads on screen — the Food-tab meal-card row
+ * (N124/N113, reported from a device: "the reference's `20 Grams` follows the
+ * profile, not the reference"). `entry/[id].tsx`'s edit sheet already converts
+ * a gram-basis label through {@link toDisplayGrams} for its editable field;
+ * this is the read-only equivalent for a list row, and the two must apply the
+ * SAME rule or an athlete could see "150g" on the card and "5.3oz" one tap
+ * away on the same entry.
+ *
+ * Only a label {@link gramsBasisFromLabel} recognises as an honest gram basis
+ * converts — `servings x basis` grams, formatted via `formatFoodQuantity` in
+ * the athlete's chosen unit. Anything else ("1 Each", "1 Cup", a recipe's own
+ * portion name) has no gram claim to convert and is left exactly as logged:
+ * "1.5 × 1 Cup". Relabelling a non-gram serving as though it were a weight is
+ * the identical bug `gramsBasisFromLabel`'s own doc comment already refuses.
+ */
+export function loggedAmountLabel(servings: number, servingLabel: string, unit: FoodUnit): string {
+  const basis = gramsBasisFromLabel(servingLabel);
+  if (basis != null) {
+    return formatFoodQuantity(servings * basis, unit);
+  }
+  return `${round1(servings) === Math.trunc(round1(servings)) ? Math.trunc(round1(servings)) : round1(servings)} × ${servingLabel}`;
 }
 
 function round1(v: number): number {

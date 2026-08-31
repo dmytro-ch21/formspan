@@ -107,6 +107,44 @@ beforeEach(async () => {
   mockApi.mockReset().mockResolvedValue({});
 });
 
+/**
+ * N124/N113 (#514/#502): `category` threads through the full local write/read
+ * cycle and the outbound push — the mobile-side equivalent of the backend's
+ * `TestEntryCategoryIsCopiedAndSurvivesAnEditToTheFood`, closing the gap
+ * `frontend-reviewer` flagged: every other fixture in this file sets
+ * `category: null`, so nothing here previously went red if a real value were
+ * silently dropped on write, read, edit or push — the exact `updateWithin`-
+ * shaped column-threading bug CLAUDE.md warns about, on the one column in
+ * this table with no test that could catch it.
+ */
+describe('category (N124/N113)', () => {
+  it('survives the write/read round trip through SQLite', async () => {
+    await logFood(USER, meal({ category: 'poultry' }));
+    const [entry] = await localEntries(USER, TODAY);
+    expect(entry.category).toBe('poultry');
+  });
+
+  it('a null category round-trips as null, not the string "null"', async () => {
+    await logFood(USER, meal({ category: null }));
+    const [entry] = await localEntries(USER, TODAY);
+    expect(entry.category).toBeNull();
+  });
+
+  it('editing an entry keeps its category when the edit does not change it', async () => {
+    const id = await logFood(USER, meal({ category: 'poultry' }));
+    await editEntry(USER, id, meal({ category: 'poultry', kcal: 200 }));
+    const [entry] = await localEntries(USER, TODAY);
+    expect(entry).toMatchObject({ category: 'poultry', kcal: 200 });
+  });
+
+  it('is included in the payload a push sends to the server', async () => {
+    await logFood(USER, meal({ category: 'poultry' }));
+    await syncFood(USER, token);
+    const [, , init] = mockApi.mock.calls[0] as [unknown, string, { body: string }];
+    expect(JSON.parse(init.body)).toMatchObject({ category: 'poultry' });
+  });
+});
+
 describe('logging', () => {
   it('writes locally and owes a push, without touching the network', async () => {
     const id = await logFood(USER, meal());

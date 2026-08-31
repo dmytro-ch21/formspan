@@ -49,15 +49,10 @@ import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { glyphFor } from '@/lib/foodGlyph';
+import { loggedAmountLabel } from '@/lib/foodQuantity';
 import { macroColor } from '@/lib/macroModel';
 import { fmtAmount, type Entry, type Macros, type Meal } from '@/lib/nutrition';
-
-/** 1.5 stays 1.5; 1.0 becomes 1. Nobody writes "1.0 × 100 g". Mirrors
- *  `food.tsx`'s own copy of this — kept local so this file has no dependency
- *  on the screen around it. */
-function trimZero(n: number): string {
-  return String(Math.round(n * 100) / 100);
-}
+import { useUnits } from '@/lib/useUnits';
 
 function macroLine(protein: number, carb: number, fat: number): { key: string; colour: string; text: string }[] {
   return [
@@ -97,6 +92,7 @@ export function MealCard({
   testID?: string;
 }) {
   const hasEntries = entries.length > 0;
+  const { foodUnit } = useUnits();
 
   return (
     <RNView style={styles.card} testID={testID}>
@@ -150,9 +146,7 @@ export function MealCard({
               <Text style={styles.rowName} numberOfLines={1}>
                 {e.name}
               </Text>
-              <Text style={styles.rowServing}>
-                {trimZero(e.servings)} × {e.serving_label}
-              </Text>
+              <Text style={styles.rowServing}>{loggedAmountLabel(e.servings, e.serving_label, foodUnit)}</Text>
             </RNView>
             <Text style={styles.rowKcal}>{Math.round(e.kcal)}</Text>
           </Pressable>

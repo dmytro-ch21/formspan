@@ -153,12 +153,21 @@ func (h *Handler) SaveEntry(w http.ResponseWriter, r *http.Request) {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}
+	// Trimmed here, like Name/ServingLabel above — not left to Validate(),
+	// which only checks the trimmed length and discards the result. Category
+	// is a *string (nil means "not supplied"), so only a non-nil value gets
+	// trimmed in place.
+	category := in.Category
+	if category != nil {
+		trimmed := strings.TrimSpace(*category)
+		category = &trimmed
+	}
 	e := Entry{
 		ID: r.PathValue("id"), UserID: userID,
 		EatenOn: in.EatenOn, Meal: in.Meal, Name: strings.TrimSpace(in.Name),
 		Servings: in.Servings, ServingLabel: strings.TrimSpace(in.ServingLabel),
 		Macros:       Macros{Kcal: in.Kcal, ProteinG: in.ProteinG, CarbG: in.CarbG, FatG: in.FatG, FibreG: in.FibreG},
-		SourceFoodID: in.SourceFoodID, Category: in.Category, Notes: in.Notes,
+		SourceFoodID: in.SourceFoodID, Category: category, Notes: in.Notes,
 	}
 	if err := e.Validate(); err != nil {
 		writeError(w, r, err)

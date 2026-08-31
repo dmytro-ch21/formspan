@@ -15746,9 +15746,16 @@ its own.
 - **A steak logged with a `plant_protein` category must show the plant glyph,
   not a meat one** — the regression N58's own design exists to prevent, now
   reachable through a logged entry rather than only a search result.
-- Amount respects the athlete's own units/serving-label formatting — the
-  existing convention (`servings × serving_label`), never a hardcoded
-  "Grams"/"Cup"/"Each" pulled from a reference screenshot.
+- **Amount is unit-aware (#483), not the raw stored label** — a gram-basis
+  entry (`"100 g"`) converts through `loggedAmountLabel`/the athlete's chosen
+  `foodUnit`, the SAME conversion `entry/[id].tsx`'s edit sheet already
+  applies to the identical label, so a card and its own edit screen cannot
+  disagree about one entry's amount. Assert an imperial athlete sees ounces on
+  a gram-logged row, not "100 g" regardless of profile — the gap `ac-verifier`
+  found (both #514 and #502 name it explicitly: "the reference's `20 Grams`
+  follows the profile, not the reference"). A non-gram label ("1 Each", "1
+  Cup") is shown exactly as logged, never relabelled as a weight — assert this
+  in BOTH units, since a naive fix could wrongly convert a count into ounces.
 - Swipe-to-delete and tap-through to the entry detail screen both still work,
   scoped per card now rather than per flat list.
 
