@@ -37,6 +37,26 @@ type Focus struct {
 	// athlete west of UTC once a client localises midnight-UTC. A bad look on a
 	// field whose whole job is "how many weeks has this been here".
 	StartedOn string `json:"started_on"`
+	// CurriculumIDs is which curricula currently claim this row — the read side
+	// of bjj_focus_sources, joined by Focus(). Named to match FocusSource's own
+	// CurriculumID/curriculum_id rather than the ticket's "roadmap_ids": the
+	// column, the FK and the request body all already say "curriculum", and
+	// "roadmap" is UI language for the same object.
+	//
+	// THIS EXISTS TO FIX N100. `proposeFocus`/`proposeOneFocus` used to compute
+	// `unchanged` from the technique list alone, which is right for "would this
+	// write change the SET" and wrong for "would this write change anything" —
+	// a second roadmap whose techniques are already all in focus changes
+	// nothing about the set but still needs to register its own claim, or its
+	// techniques have no source and a later deactivation of the FIRST roadmap
+	// takes them away while the second is still working them. A client can only
+	// tell those two cases apart if the read exposes who already claims what,
+	// which is what this field is for.
+	//
+	// Non-nil, matching Focus() 's own out := []Focus{} convention: an
+	// athlete-only row marshals to [], never null, so a client's `.includes()`
+	// never has to guard a possibly-missing array.
+	CurriculumIDs []string `json:"curriculum_ids"`
 }
 
 // maxFocus bounds the list, and the bound is the feature.

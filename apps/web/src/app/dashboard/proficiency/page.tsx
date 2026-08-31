@@ -236,6 +236,12 @@ export default function ProficiencyPage() {
               // Only the server knows the real one. Empty renders as nothing
               // rather than as "0 weeks", which would read as a fact.
               started_on: "",
+              // A hand add from this screen sends no `roadmap` block (see
+              // `save` below), so the server can only ever record this as
+              // 'athlete' — no curriculum claims it yet. The real value comes
+              // back in `stored` moments later; this is only the optimistic
+              // placeholder.
+              curriculum_ids: [],
             },
           ];
       save(next);

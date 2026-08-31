@@ -427,6 +427,72 @@ func TestATechniqueHeldByBothHandAndRoadmapSurvivesDeactivation(t *testing.T) {
 	}
 }
 
+// TestFocusReadsBackWhichCurriculaClaimEachRow is N100: the GET side of
+// provenance. A client cannot tell "this write would register a new claim"
+// from "this write changes nothing" unless the read exposes who already
+// claims what — which is exactly what let a second roadmap whose techniques
+// were already all in focus never register its own claim, so deactivating the
+// FIRST roadmap took them away while the second was still working them.
+func TestFocusReadsBackWhichCurriculaClaimEachRow(t *testing.T) {
+	repo, pool, userID := focusFixture(t)
+	ctx := context.Background()
+	first := seedRoadmap(t, pool, "test-focus-roadmap", userID, "First roadmap")
+	second := seedRoadmap(t, pool, "test-focus-roadmap-2", userID, "Second roadmap")
+
+	if err := repo.SetFocus(ctx, userID, []string{"test-focus-a", "test-focus-c"},
+		&FocusSource{CurriculumID: first,
+			TechniqueIDs: []string{"test-focus-a"}}); err != nil {
+		t.Fatalf("apply first roadmap: %v", err)
+	}
+	// Second roadmap claims the SAME technique the first one did, plus one the
+	// athlete holds unclaimed by anybody (test-focus-c stays hand-picked here —
+	// SetFocus only attributes ids named in source.TechniqueIDs).
+	if err := repo.SetFocus(ctx, userID, []string{"test-focus-a", "test-focus-c"},
+		&FocusSource{CurriculumID: second,
+			TechniqueIDs: []string{"test-focus-a"}}); err != nil {
+		t.Fatalf("apply second roadmap: %v", err)
+	}
+
+	got, err := repo.Focus(ctx, userID)
+	if err != nil {
+		t.Fatalf("focus: %v", err)
+	}
+	byID := map[string]Focus{}
+	for _, f := range got {
+		byID[f.TechniqueID] = f
+	}
+
+	a, ok := byID["test-focus-a"]
+	if !ok {
+		t.Fatal("test-focus-a missing from the read")
+	}
+	if len(a.CurriculumIDs) != 2 {
+		t.Fatalf("test-focus-a.curriculum_ids = %v, want both roadmaps", a.CurriculumIDs)
+	}
+	wantA := map[string]bool{first: true, second: true}
+	for _, id := range a.CurriculumIDs {
+		if !wantA[id] {
+			t.Errorf("test-focus-a claimed by unexpected curriculum %q: %v", id, a.CurriculumIDs)
+		}
+	}
+
+	// Claimed by neither — origin defaults to 'athlete' since it was never
+	// named in either roadmap's TechniqueIDs — so this MUST read back empty,
+	// not null, per the field's own doc comment.
+	c, ok := byID["test-focus-c"]
+	if !ok {
+		t.Fatal("test-focus-c missing from the read")
+	}
+	if c.CurriculumIDs == nil {
+		t.Error("an unclaimed row read back a nil curriculum_ids — must be [] so a client's " +
+			".includes() never has to guard a possibly-missing array")
+	}
+	if len(c.CurriculumIDs) != 0 {
+		t.Errorf("test-focus-c.curriculum_ids = %v, want none — it was never named by either roadmap",
+			c.CurriculumIDs)
+	}
+}
+
 func TestReleaseRefusesToDeleteARowItDoesNotOwnEvenIfAClaimNamesIt(t *testing.T) {
 	// The release's OWN origin guard, exercised against a state SetFocus cannot
 	// produce — a claim on a row whose origin is not 'roadmap'.

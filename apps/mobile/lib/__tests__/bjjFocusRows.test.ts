@@ -16,6 +16,7 @@ const focus = (technique_id: string, name: string, category: string, position: s
   category,
   position,
   started_on: '2026-07-01',
+  curriculum_ids: [],
 });
 
 describe('focusRows', () => {

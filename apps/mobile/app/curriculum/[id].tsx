@@ -259,17 +259,25 @@ export default function CurriculumScreen() {
    * "Work on this" from an expanded lesson — one technique, nothing behind it.
    *
    * The `unchanged` guard stays as a backstop, but the button is no longer
-   * RENDERED for a technique already in focus, which is the real fix: a control
-   * that returns silently is indistinguishable from a control that is broken,
-   * and the athlete's reasonable reading of "nothing happened" is that the app
-   * dropped their tap. The row says "Already in your focus" instead — which is
-   * also the more useful answer, since it tells them the chip is waiting for
-   * them in the reflection wizard.
+   * RENDERED for a technique already in focus (see `inFocus` below), which is
+   * the real fix: a control that returns silently is indistinguishable from a
+   * control that is broken, and the athlete's reasonable reading of "nothing
+   * happened" is that the app dropped their tap. The row says "Already in
+   * your focus" instead — which is also the more useful answer, since it
+   * tells them the chip is waiting for them in the reflection wizard.
+   *
+   * **`inFocus` is plain list membership, not claim awareness** — so this
+   * control never reaches N100/N100.1's claim-only case (a technique already
+   * in focus but not yet claimed by THIS roadmap, whether that gap is real or
+   * unclaimable): whenever the technique is already in focus, the button is
+   * hidden regardless. Registering (or not being able to register) a claim
+   * for an already-focused technique is what `openMenu`'s whole-roadmap
+   * "Update your focus for this roadmap" option is for, not this one.
    */
   const workOnLesson = useCallback(
     (techniqueID: string) => {
       if (!curriculum || !focus) return;
-      const proposal = proposeOneFocus(curriculum.items ?? [], focus, techniqueID);
+      const proposal = proposeOneFocus(curriculum.items ?? [], focus, curriculum.id, techniqueID);
       if (proposal.unchanged) return;
       confirmFocus(proposal);
     },
@@ -313,12 +321,22 @@ export default function CurriculumScreen() {
    */
   const openMenu = useCallback(() => {
     if (!curriculum) return;
-    const proposal = focus ? proposeFocus(curriculum.items ?? [], focus) : null;
+    const proposal = focus ? proposeFocus(curriculum.items ?? [], focus, curriculum.id) : null;
     const options: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
 
-    if (proposal && !proposal.unchanged && proposal.added.length > 0) {
+    // `!proposal.unchanged` ALONE, not `&& proposal.added.length > 0` — the
+    // second half used to hide this option for exactly the case N100 exists
+    // to fix. A second roadmap whose techniques are ALREADY all in focus adds
+    // nothing new (`added` is empty), but applying still WRITES: it registers
+    // this roadmap's own claim in `bjj_focus_sources`, without which a later
+    // deactivation of whichever roadmap DOES hold the claim takes the
+    // technique out of focus while this one is still working it.
+    if (proposal && !proposal.unchanged) {
       options.push({
-        text: `Work these next (${proposal.added.length})`,
+        text:
+          proposal.added.length > 0
+            ? `Work these next (${proposal.added.length})`
+            : 'Update your focus for this roadmap',
         onPress: () => confirmFocus(proposal),
       });
     }

@@ -98,7 +98,7 @@ export default function CurriculumDetailPage() {
     if (!c || !focus) return;
     setBusy(true);
     try {
-      const p = proposeFocus(c.items ?? [], focus);
+      const p = proposeFocus(c.items ?? [], focus, c.id);
       // `fromRoadmap`, never `next` — the difference is the athlete's own
       // entries, which this roadmap carries along but does not own. Attributing
       // those to it would delete them when it is deactivated.
@@ -249,7 +249,7 @@ export default function CurriculumDetailPage() {
 
       {isRoadmap && c.enrolled && focus && (
         <FocusPanel
-          proposal={proposeFocus(c.items ?? [], focus)}
+          proposal={proposeFocus(c.items ?? [], focus, c.id)}
           busy={busy}
           onApply={applyFocus}
         />
@@ -533,11 +533,20 @@ function FocusPanel({
 
   return (
     <section className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
-      <h2 className="text-sm font-semibold">Work these next</h2>
+      {/* N100's claim-only case: `unchanged` is false (this roadmap has a
+          real claim left to register) but `added` is empty — every one of
+          its techniques is already in focus, via a first roadmap or by hand.
+          "Work these next" over an empty chip list reads as broken; say what
+          the button actually does instead. Mirrors the mobile menu's own
+          `proposal.added.length > 0 ? … : 'Update your focus for this
+          roadmap'` split in `curriculum/[id].tsx`. */}
+      <h2 className="text-sm font-semibold">
+        {proposal.added.length > 0 ? "Work these next" : "Update your focus for this roadmap"}
+      </h2>
       <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
-        Putting them in your focus list makes them one-tap chips in the phone&apos;s
-        reflection wizard — which is what records the evidence these criteria
-        read. Otherwise you would be naming them by hand out of 542.
+        {proposal.added.length > 0
+          ? "Putting them in your focus list makes them one-tap chips in the phone's reflection wizard — which is what records the evidence these criteria read. Otherwise you would be naming them by hand out of 542."
+          : "Every technique here is already in your focus — this registers this roadmap as a reason for it, so deactivating a different roadmap that shares it won't take it out of your focus while you're still working it."}
       </p>
 
       {proposal.added.length > 0 && (
@@ -579,7 +588,11 @@ function FocusPanel({
         disabled={busy}
         className="mt-3 rounded-lg bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
       >
-        {busy ? "Saving…" : "Put these in my focus"}
+        {busy
+          ? "Saving…"
+          : proposal.added.length > 0
+            ? "Put these in my focus"
+            : "Update my focus"}
       </button>
     </section>
   );

@@ -451,6 +451,7 @@ describe('a lesson', () => {
         position: 'Guard - Bottom',
         category: 'Sweep',
         started_on: '2026-01-02',
+        curriculum_ids: [],
       },
     ]);
     await open();
@@ -707,5 +708,130 @@ describe('the overflow menu: Edit and Delete (N83)', () => {
     // Delete was never reached.
     expect(confirmOptions.find((o) => o.text === 'Cancel')?.onPress).toBeUndefined();
     expect(mockDeleteCurriculum).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * N100 — a second roadmap whose techniques are already in focus can never
+ * claim them.
+ *
+ * `scissor-sweep` is already in focus in every test below; what varies is
+ * whether `white-belt-basics` (this screen's own curriculum) already claims
+ * it. The bug was that the overflow menu asked only "does the list change",
+ * never "does THIS roadmap already own what's there" — so a technique placed
+ * by hand, or by a DIFFERENT roadmap, could never be claimed by this one, and
+ * a later deactivation of whoever DID hold the claim would take it out of
+ * focus while this roadmap was still counting it.
+ */
+describe('the overflow menu: applying focus when a technique is already there (N100)', () => {
+  function pressMenuAndGetOptions(): { text: string; style?: string; onPress?: () => void }[] {
+    fireEvent.press(screen.getByTestId('roadmap-menu'));
+    const call = jest.mocked(Alert.alert).mock.calls.at(-1);
+    if (!call) throw new Error('Alert.alert was not called');
+    return call[2] as { text: string; style?: string; onPress?: () => void }[];
+  }
+
+  beforeEach(() => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  });
+
+  // Every technique WHITE has (grappling-stance, scissor-sweep, hip-bump-sweep)
+  // is already in focus, so `added` is EMPTY — this is the exact shape of the
+  // bug: nothing new to add, only a claim to register, so the old
+  // `proposal.added.length > 0` gate hid the option outright regardless of
+  // `unchanged`.
+  const allThreeInFocus = (curriculumIds: string[]) => [
+    {
+      technique_id: 'grappling-stance',
+      name: 'Grappling stance',
+      position: 'Guard - Bottom',
+      category: 'Sweep',
+      started_on: '2026-01-02',
+      curriculum_ids: curriculumIds,
+    },
+    {
+      technique_id: 'scissor-sweep',
+      name: 'Scissor sweep',
+      position: 'Guard - Bottom',
+      category: 'Sweep',
+      started_on: '2026-01-02',
+      curriculum_ids: curriculumIds,
+    },
+    {
+      technique_id: 'hip-bump-sweep',
+      name: 'Hip bump sweep',
+      position: 'Guard - Bottom',
+      category: 'Sweep',
+      started_on: '2026-01-02',
+      curriculum_ids: curriculumIds,
+    },
+  ];
+
+  it('still offers to work it when every technique is in focus but claimed only by a DIFFERENT roadmap', async () => {
+    // Claimed — but only by a different roadmap ('blue-belt-basics'), so this
+    // roadmap has never registered its own claim on any of them, and `added`
+    // is empty because nothing is NEW. This is a REAL, grantable claim (a
+    // 'roadmap'-origin row can always gain a second source) — this is what
+    // the old `added.length > 0` gate got wrong.
+    mockFetchFocus.mockResolvedValue(allThreeInFocus(['blue-belt-basics']));
+    await open();
+
+    const options = pressMenuAndGetOptions();
+    const apply = options.find(
+      (o) => o.text.startsWith('Work these next') || o.text === 'Update your focus for this roadmap',
+    );
+    expect(apply).toBeTruthy();
+
+    apply!.onPress?.();
+    await waitFor(() => expect(mockSetFocus).toHaveBeenCalled());
+    const [, ids, roadmap] = mockSetFocus.mock.calls[0] as [unknown, string[], unknown];
+    // The list is unchanged in membership — every technique was already
+    // there — but the write still happens, because it is what registers this
+    // roadmap's claim on all three.
+    expect(ids).toEqual(
+      expect.arrayContaining(['grappling-stance', 'scissor-sweep', 'hip-bump-sweep']),
+    );
+    expect(roadmap).toEqual({
+      curriculum_id: 'white-belt-basics',
+      technique_ids: expect.arrayContaining([
+        'grappling-stance',
+        'scissor-sweep',
+        'hip-bump-sweep',
+      ]),
+    });
+  });
+
+  it('says nothing needs doing once this roadmap already claims every technique — the control is not permanent noise', async () => {
+    mockFetchFocus.mockResolvedValue(allThreeInFocus(['white-belt-basics']));
+    await open();
+
+    const options = pressMenuAndGetOptions();
+    expect(
+      options.find(
+        (o) => o.text.startsWith('Work these next') || o.text === 'Update your focus for this roadmap',
+      ),
+    ).toBeUndefined();
+  });
+
+  /**
+   * N100.1. Empty `curriculum_ids` is the shape of a hand-picked or
+   * pre-provenance row — NOT "claimed only by a different roadmap" (that
+   * case is covered above, with a real curriculum id). The server's claim
+   * INSERT is guarded by `origin = 'roadmap'`, so it refuses this claim on
+   * every single apply: before `isUnclaimable`, this read as
+   * `unchanged: false` forever, and the option above stayed on the menu
+   * permanently, writing an identical list every time it was pressed. This
+   * is the regression this whole fix pass exists for.
+   */
+  it('says nothing needs doing when every technique is hand-picked and unclaimable — not permanent noise', async () => {
+    mockFetchFocus.mockResolvedValue(allThreeInFocus([]));
+    await open();
+
+    const options = pressMenuAndGetOptions();
+    expect(
+      options.find(
+        (o) => o.text.startsWith('Work these next') || o.text === 'Update your focus for this roadmap',
+      ),
+    ).toBeUndefined();
   });
 });
