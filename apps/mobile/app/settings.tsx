@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { clearSessionToken } from '@/lib/session';
-import { Stack, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
@@ -17,6 +17,7 @@ import { readVoiceEnabled, speak, writeVoiceEnabled } from '@/lib/voice';
 import { useTrackEffort } from '@/lib/useTrackEffort';
 import { isNotFound } from '@/lib/apiError';
 import { getProfile, updateProfile } from '@/lib/profile';
+import { rejectionTrackingActive } from '@/lib/telemetryClient';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -51,6 +52,23 @@ export default function SettingsScreen() {
   }, [userId]);
 
   const { trackEffort, setTrackEffort, unsynced: effortUnsynced } = useTrackEffort();
+
+  /**
+   * Whether a crash mid-session actually reaches us — read fresh on every
+   * visit, not just at mount. `rejectionTrackingActive()` is the outcome of a
+   * self-test that runs once per app launch and can take a few seconds to
+   * settle (see `telemetryClient.ts`); a value captured only when this
+   * screen first mounted could report the transient "not yet proven" state
+   * from just after launch instead of the settled one. Deliberately not on
+   * the admin Health screen: that is an operator's view of every athlete's
+   * device, not this athlete's own.
+   */
+  const [crashReportingActive, setCrashReportingActive] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setCrashReportingActive(rejectionTrackingActive());
+    }, []),
+  );
 
   /**
    * The privacy switch, read straight from the profile rather than through a
@@ -307,6 +325,10 @@ export default function SettingsScreen() {
       <Text style={styles.note}>
         More preferences will land here as the app grows — notifications, integrations, and
         per-sport defaults.
+      </Text>
+      <Text style={styles.note} testID="settings-diagnostics">
+        Crash & error reporting:{' '}
+        {crashReportingActive ? 'active on this device.' : 'not yet confirmed on this device.'}
       </Text>
     </ScrollView>
   );

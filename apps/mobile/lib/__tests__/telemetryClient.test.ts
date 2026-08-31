@@ -3,9 +3,41 @@ import {
   clearTelemetryForSignOut,
   flush,
   installTelemetry,
-  rejectionTrackingActive,
   resetTelemetry,
+  setRejectionSelfTestTimeoutMsForTests,
 } from '../telemetryClient';
+
+/**
+ * Every `installTelemetry` call in this file makes the self-test deliberately
+ * reject a promise nobody catches — and the REAL
+ * `promise/setimmediate/rejection-tracking` schedules a `setTimeout` per
+ * rejection it is asked to watch (up to 2000ms for a non-whitelisted error,
+ * which our marker always is) that nothing ever explicitly clears. Left
+ * un-mocked, every one of the many unrelated tests below that just happen to
+ * call `installTelemetry` would each leak one of those, and Jest warns about
+ * exactly that at the end of the run.
+ *
+ * So this file mocks `enable`/`disable` to no-ops by default — which, because
+ * the underlying package's own `Promise._C` hook is `null` until `enable()`
+ * actually sets it (see `promise/setimmediate/core.js`), makes the self-test's
+ * rejection a completely inert operation for every test that does not care
+ * about rejection tracking. The two tests that DO care load the REAL,
+ * unmocked package via `jest.requireActual` — this project's own rule is to
+ * verify an external contract against the real thing at least once, and a
+ * mock built from an assumption about the library's own scheduling could not
+ * falsify that assumption.
+ */
+jest.mock('promise/setimmediate/rejection-tracking', () => ({
+  enable: jest.fn(),
+  disable: jest.fn(),
+}));
+
+// The production self-test window is a real 3s wall-clock wait (see
+// telemetryClient.ts) — long enough to clear the underlying tracker's own
+// worst-case scheduling delay. Every test below that calls `installTelemetry`
+// would otherwise carry that wait for real, whether or not it reads
+// `rejectionTrackingActive()`. Shrunk once, for the whole file.
+setRejectionSelfTestTimeoutMsForTests(20);
 
 /**
  * The transport half, which had no tests at all — and which is where four of
@@ -272,14 +304,141 @@ describe('the global handler observes, it does not intercept', () => {
   });
 });
 
-describe('rejection tracking is either live or says it is not', () => {
-  it('reports its own state rather than leaving it unknown', () => {
-    installTelemetry(token('A'));
-    // The first version hooked `addEventListener('unhandledrejection')`, which
-    // React Native does not have — so it installed nothing, silently, and the
-    // half of the feature that matters most did not exist. Whatever the answer
-    // is here, it is an answer: a `false` buffers a `client_error` saying so.
-    expect(typeof rejectionTrackingActive()).toBe('boolean');
+describe('rejection tracking proves delivery, not just that enable() returned', () => {
+  /**
+   * The bug this replaces (#463): the old flag went `true` the instant
+   * `enable()` returned without throwing. On Hermes — this app's engine on
+   * every platform it ships to — that call patches a Promise class
+   * `globalThis.Promise` is not, so it always returned cleanly while
+   * observing nothing. `enable()` not throwing is exactly what every test
+   * below refuses to treat as an answer.
+   *
+   * The first two tests run against the REAL `promise/setimmediate/rejection-
+   * tracking` package — deliberately not a hand-rolled stand-in, and not the
+   * file's default no-op mock above (`jest.requireActual` steps around it).
+   * This project's own standing rule ("verify an external contract against
+   * the real service at least once") applies here precisely because a mock
+   * built from an assumption about how the library schedules `onUnhandled`
+   * cannot falsify that assumption; only the real package can. The two tests
+   * differ only in how long they give it to report: long enough to clear its
+   * internal delay, or deliberately not. Each loads `telemetryClient` fresh
+   * via `jest.resetModules()`, so its self-test state is its own and this
+   * describe block's real (unmocked) tracking module never leaks into the
+   * rest of the file's tests, which keep using the top-level, still-mocked
+   * import.
+   */
+  const TRACKING_MODULE = 'promise/setimmediate/rejection-tracking';
+
+  /**
+   * `telemetryClient` requires this module LAZILY, inside
+   * `installRejectionTracking`, on every call — by design (see that
+   * function's doc comment). So the file-level no-op mock above is not a
+   * one-time binding baked into the top-level `installTelemetry` import: it
+   * is whatever this module resolves to at the moment of the NEXT call,
+   * including calls from tests in describe blocks below this one. Restoring
+   * the no-op explicitly (rather than `jest.dontMock`, which would leave the
+   * REAL package active for everything that runs afterward) is what keeps
+   * that true.
+   */
+  function restoreNoOpTracking(): void {
+    jest.doMock(TRACKING_MODULE, () => ({ enable: jest.fn(), disable: jest.fn() }));
+    jest.resetModules();
+  }
+
+  function loadWithRealTracking(): typeof import('../telemetryClient') {
+    jest.doMock(TRACKING_MODULE, () => jest.requireActual(TRACKING_MODULE));
+    jest.resetModules();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('../telemetryClient') as typeof import('../telemetryClient');
+  }
+
+  afterEach(() => {
+    restoreNoOpTracking();
+  });
+
+  it('reports active once the real tracker actually observes its own rejection', async () => {
+    const mod = loadWithRealTracking();
+    try {
+      // `promise/setimmediate/rejection-tracking` schedules `onUnhandled` at
+      // 100ms for TypeError/RangeError/ReferenceError and 2000ms for anything
+      // else (see its source) — our marker is a plain object, so it is the
+      // slow path. This window has to clear that with margin, which is also
+      // why it is not the file's default: every OTHER test in this file
+      // would otherwise carry the same wait for a result it never reads.
+      mod.setRejectionSelfTestTimeoutMsForTests(2300);
+      mod.installTelemetry(token('A'));
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      expect(mod.rejectionTrackingActive()).toBe(true);
+    } finally {
+      mod.resetTelemetry();
+    }
+  }, 10_000);
+
+  it('reports inactive, and says why, before the real tracker has had time to report', async () => {
+    const mod = loadWithRealTracking();
+    const localPosted: { body: { events: Record<string, unknown>[] } }[] = [];
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      localPosted.push({ body: JSON.parse(String(init.body)) });
+      return { ok: true, status: 202 } as Response;
+    }) as unknown as typeof fetch;
+
+    try {
+      // The file's default 20ms window is far short of the real package's
+      // 2000ms worst-case delay above — so checking this early is, itself,
+      // the failure mode the OLD flag could not see: the require succeeded
+      // and `enable()` returned cleanly, and delivery still has not been
+      // proven.
+      mod.setRejectionSelfTestTimeoutMsForTests(20);
+      mod.installTelemetry(token('A'));
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(mod.rejectionTrackingActive()).toBe(false);
+
+      await mod.flush();
+      const messages = localPosted.flatMap((p) => p.body.events.map((e) => e.message));
+      // Distinct from the require-throws message in the next test, on
+      // purpose — the two failure modes have to read apart in
+      // `health_events`.
+      expect(messages).toContain('telemetry: rejection tracking installed but not delivering');
+    } finally {
+      // The real package's own ~2000ms internal timer for THIS install is
+      // still pending at this point — `resetTelemetry` clears our own timer
+      // but has no handle on the third-party library's. Letting it finish
+      // rather than abandoning it is what keeps this file from leaking a
+      // background timer past the end of the run.
+      await new Promise((resolve) => setTimeout(resolve, 2300));
+      globalThis.fetch = savedFetch;
+      mod.resetTelemetry();
+    }
+  }, 10_000);
+
+  it('still reports a boolean, and buffers a DIFFERENT message, when the require itself throws', async () => {
+    jest.doMock('promise/setimmediate/rejection-tracking', () => {
+      throw new Error('module moved');
+    });
+    jest.resetModules();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('../telemetryClient') as typeof import('../telemetryClient');
+
+    const localPosted: { body: { events: Record<string, unknown>[] } }[] = [];
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      localPosted.push({ body: JSON.parse(String(init.body)) });
+      return { ok: true, status: 202 } as Response;
+    }) as unknown as typeof fetch;
+
+    try {
+      mod.installTelemetry(token('A'));
+      expect(mod.rejectionTrackingActive()).toBe(false);
+
+      await mod.flush();
+      const messages = localPosted.flatMap((p) => p.body.events.map((e) => e.message));
+      expect(messages).toContain('telemetry: rejection tracking unavailable');
+    } finally {
+      globalThis.fetch = savedFetch;
+      mod.resetTelemetry();
+      // The describe-level `afterEach` restores the shared no-op mock.
+    }
   });
 });
 

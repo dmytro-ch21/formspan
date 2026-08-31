@@ -49456,6 +49456,105 @@ with no product-facing behavior change — flagged separately in the PR body as
 an unrelated pre-existing bug rather than folded silently into the N451
 narrative.
 
+## 2026-08-30 — N463 (#463): rejection tracking proved nothing, only that `enable()` didn't throw
+
+Self-reported by the session that wrote N43's replacement, and verified
+independently before filing. `rejectionTrackingInstalled` was set `true` the
+line after `require('promise/setimmediate/rejection-tracking').enable(...)`
+returned without throwing — "enable() didn't throw", not "rejections arrive".
+Its own test, `expect(typeof rejectionTrackingActive()).toBe('boolean')`,
+passed whether the value was `true` or `false`. And nothing in `apps/mobile/app/`
+read the function at all, so no device pass could have caught either problem.
+
+**Root cause, found while building the self-test the ticket asked for: the
+flag was not merely optimistic, it was patching the wrong Promise class,
+unconditionally, on every build this app ships.** `enable()` hooks
+`Promise._B`/`Promise._C` on `promise/setimmediate/core`'s own Promise
+class — not `globalThis.Promise`. RN's `Core/polyfillPromise.js` only
+replaces `globalThis.Promise` with that class when `HermesInternal.hasPromise()`
+is false; on Hermes, which this app uses on every platform it ships to,
+`globalThis.Promise` stays Hermes's own native class, entirely disconnected
+from the one `enable()` patches. So the tracker was never wired to any
+promise the app's own code actually creates — `enable()` had no way to know
+its target was disconnected, so it kept returning cleanly while observing
+nothing, forever.
+
+**Fix:** two parts.
+
+1. Use whichever tracker is actually wired to `globalThis.Promise`.
+   `HermesInternal.enablePromiseRejectionTracker` — typed identically to
+   `promise/setimmediate/rejection-tracking`'s `enable` per RN's own
+   `flow/HermesInternalType.js` — is the one Hermes ships, wired to the SAME
+   `globalThis.Promise` the app's code uses, precisely because
+   `hasPromise()` true is the condition under which `globalThis.Promise`
+   stays Hermes's own. Where Hermes does not provide native Promise, the
+   original `promise/setimmediate/rejection-tracking` path is exactly
+   right, because `polyfillPromise.js` DOES replace `globalThis.Promise`
+   with that same class there. Which one is live is decided once, per
+   install, by asking Hermes rather than assuming either engine.
+
+2. Prove it rather than assume it, even now that the wiring is correct —
+   RN could re-enable tracking after us, a second consumer could overwrite
+   the handler, an options shape could drift. Immediately after installing,
+   `installRejectionTracking` deliberately rejects a promise nobody catches
+   (via whichever Promise class the tracker just installed is actually
+   wired to — Hermes's `globalThis.Promise`, or an explicit
+   `require('promise/setimmediate/es6-extensions')` in the fallback branch,
+   which is what `globalThis.Promise` equals on a real non-Hermes device but
+   is NOT under Jest, where it would otherwise be Node's native, unrelated
+   Promise). A real clock (`rejectionSelfTestTimeoutMs`, 3000ms in
+   production — clears the underlying library's own worst-case 2000ms
+   scheduling delay) decides whether the composed `onUnhandled` actually
+   observed it before setting `rejectionTrackingInstalled`. If not, the
+   flag goes `false` and `capture()`s a DIFFERENT `client_error` message
+   ("...installed but not delivering") from the pre-existing require-throws
+   one ("...unavailable"), so the two failure modes read apart in
+   `health_events`. An epoch counter guards the async self-test against a
+   `resetTelemetry()` (or Fast Refresh) landing in the window between
+   install and the timer firing.
+
+**Test:** the vacuous assertion is replaced with two tests that exercise the
+REAL `promise/setimmediate/rejection-tracking` package end to end rather than
+a hand-rolled stand-in — this project's "verify an external contract against
+the real service at least once" rule applies directly here, since a mock
+built from an assumption about the library's own scheduling could not
+falsify that assumption. One waits long enough to clear the library's
+internal delay and asserts `true`; the other checks before that delay has
+elapsed and asserts `false` plus the distinct capture message. A third,
+isolated-module test keeps the original require-throws coverage. Mutation-
+verified: baseline green, then `if (selfTestObserved)` forced to
+`if (true)` in the decision branch — the "reports inactive" test goes RED as
+a real assertion failure (`Expected: false, Received: true`), not a compile
+error; reverted; confirmed green again by re-running, not by reading the
+diff. `pnpm --filter mobile exec eslint` and `tsc --noEmit` both clean.
+Full mobile suite (237 suites, 3700 tests) green.
+
+A genuinely-unhandled promise rejection is fatal to whatever Jest test
+happens to be running when Node notices it — a property of Node's native
+Promise, not of anything this file does — so every test that installs
+telemetry now goes through a file-level no-op mock of the tracking package
+(`Promise._C` stays `null` until `enable()` actually sets it, per
+`promise/setimmediate/core.js`, so the self-test's rejection is inert
+without it) and the two tests that need the real package load an isolated
+module instance via `jest.requireActual`, restored afterward so it never
+leaks into the rest of the file.
+
+**Observable on-device:** `apps/mobile/app/settings.tsx` reads
+`rejectionTrackingActive()` on every focus (not just at mount, since the
+self-test can take a few seconds to settle after launch) and shows one line
+— "Crash & error reporting: active / not yet confirmed on this device" —
+deliberately not on the admin Health screen, which the ticket named as the
+wrong audience: an operator's view of every athlete's device is not the
+same as this athlete's own.
+
+**Why this matters more than its size**: the offline sync path this repo's
+hard bugs actually live in is almost entirely promises. A rejection tracker
+that silently proves nothing is a second instance of the exact family N43
+itself was written to end — measuring nothing while reporting confidently
+is the standing failure mode this project keeps finding across its own
+apparatus, and this was it, in the guard written specifically to prevent it.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
