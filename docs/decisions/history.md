@@ -50088,6 +50088,64 @@ chain (default settings) was subsequently green end to end.
 sections populated and at least one empty; the section sums checked by hand
 against the day total.
 
+## 2026-08-31 — every mobile build was broken, and no check in this repo could have caught it (#763)
+
+**Measured directly, on the primary checkout, on `main` right after N463
+(#463/PR #759) merged**: `expo run:ios --device <udid> --configuration
+Release` failed to bundle at all —
+
+```
+Unable to resolve module promise/setimmediate/es6-extensions from
+  apps/mobile/lib/telemetryClient.ts
+```
+
+N463's fallback-tracker self-test `require()`s `promise/setimmediate/
+es6-extensions` and `promise/setimmediate/rejection-tracking` directly.
+`promise@8.3.0` genuinely exists in the pnpm store — it's a real dependency
+of `react-native` itself (`"promise": "^8.3.0"` in `react-native`'s own
+`package.json`) — but it was never a *direct* dependency of
+`apps/mobile/package.json`. Under this repo's package manager (pnpm, strict
+linking, no hoisting by default), a package is only visible to `require()`
+from code in another package if that package declares it directly. A
+transitive dependency of a dependency simply isn't symlinked into the
+requiring package's own `node_modules`, so Metro's bundler — unlike Jest's
+resolver, which the PR's own test suite used successfully — could not find
+it.
+
+**Why this passed `verify`, CI, and all three review agents on PR #759.**
+Every one of them ran `telemetryClient.test.ts` under Jest, which resolved
+the import fine (Jest's module graph apparently had broader visibility into
+the pnpm store, or its resolution algorithm differs enough not to enforce
+the same direct-dependency requirement Metro does). Nobody — not `verify`,
+not CI, not `ac-verifier`, not `backend-reviewer`/`frontend-reviewer` — ran
+an actual `expo run:ios` bundle step, because nothing in this repo's pipeline
+does. The PR's own mutation-verification, its full green `verify` run, and
+its 5/5 CI checks all genuinely happened and all genuinely mean what they
+say about the *test suite* — they just don't reach the one runtime path that
+was broken.
+
+**The fix**: `promise` added as a direct dependency of
+`apps/mobile/package.json`, pinned to the same `^8.3.0` range
+`react-native` already requires (so both resolve to one shared installed
+copy, never two versions of the same package in the tree). `pnpm install`
+now produces a real symlink at `apps/mobile/node_modules/promise`, and
+`require.resolve('promise/setimmediate/es6-extensions', {paths:
+[.../apps/mobile]})` resolves. Verified against a genuine `expo run:ios`
+bundle from the primary checkout (never from a worktree, per this file's own
+rule) — not merely `pnpm run verify`'s Jest pass, which is the exact
+evidence class that was missing the first time.
+
+**Left open, named rather than fixed here**: `pnpm run verify` (and CI) have
+no step that would catch this class of bug again — a Metro bundle-resolution
+failure is invisible to every check currently in the pipeline, the same way
+a database `column does not exist` is invisible to a fresh-migrated CI
+database (this file's own migration-numbering section, above). A lightweight
+Metro bundle smoke check, distinct from Jest's own resolution, would close
+this gap without requiring a full device build in CI — filed as an open
+question in #763 rather than decided unilaterally here, since the
+cost/benefit (extra CI time vs. a class of bug that has now happened exactly
+once) is a judgment call for whoever picks it up next.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
