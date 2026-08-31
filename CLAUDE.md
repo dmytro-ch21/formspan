@@ -846,6 +846,46 @@ more when they know which properties are load-bearing.
 
 [README.md](README.md) is the first thing anyone (human or AI) sees — it drifted stale once already (still described a two-app, four-endpoint repo well after `apps/mobile`/`apps/admin` and several backend modules existed) because, unlike the two rules above, nothing required it to be updated. Whenever a new app, a new top-level backend route, or a new "how do I run this locally" step lands, **update README.md's "Current state" and "Run it locally" sections** as part of finishing that work. It should always be accurate enough that "how do I start X" never needs to be answered from outside it.
 
+## Scratchpad files are shared, not per-session (hard rule)
+
+**The scratchpad handed to a session or agent reads as private and is not.**
+It is shared with whatever else is concurrently running under the same parent
+session or the same fleet worker. Two agents writing to the same bare path —
+`scratchpad/body.md`, `scratchpad/pr.md` — silently clobber each other, and
+the failure is invisible in both directions: the writer overwrites with no
+warning, and the reader gets a file that looks exactly like its own draft and
+is somebody else's work. **This already happened**: two concurrent agents each
+staged a PR body at the same path, the second write clobbered the first, and
+the first agent then `PATCH`ed its own PR with what was now the other ticket's
+body — for about a minute one PR carried another's description. A PR body is
+the one artefact nobody re-reads after posting, so the swap survived until a
+human noticed the mismatch by hand.
+
+**Do not fix this by being careful with filenames.** The incident above
+happened to a session that was being careful — a generic name (`body.md`,
+`pr.md`, `history.md`, `scenarios.md`) is the natural thing to reach for under
+task pressure, and "remember to pick a unique one" is a rule every session
+re-derives and re-forgets independently.
+
+Instead, run **`python3 scripts/scratchpad_path.py <purpose> --root
+$SCRATCHPAD_ROOT`** (substituting the actual scratchpad root you were given)
+before staging anything you would be upset to lose to a collision — a PR body
+draft, a `history.md`/`functional-scenarios.md` insert staged before editing
+the real file, anything more than a few seconds' work to redo. It prints a
+path namespaced by the current git branch, creating that subdirectory if
+needed, and does not touch the file itself. Because this repo's own worktree
+convention already gives every concurrent unit of work its own branch (see
+"Git / PR workflow" above), this reuses a uniqueness guarantee the repo
+already enforces for an unrelated reason, rather than asking anyone to invent
+and remember a second one. Run `python3 scripts/scratchpad_path.py --self-test`
+to see the collision this prevents demonstrated directly — two branches, the
+same filename, no clobber.
+
+This does not, and cannot, change where the harness itself decides to put a
+session's scratchpad — that assignment happens outside this repo entirely.
+What it fixes is the one piece this repo controls: the filename a session
+picks once it is there.
+
 ## Local dev setup
 
 ```bash
