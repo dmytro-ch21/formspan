@@ -82,6 +82,7 @@ type EntryRow = {
   sodium_mg: number | null;
   cholesterol_mg: number | null;
   source_food_id: string | null;
+  category: string | null;
   notes: string;
   updated_at: string;
   deleted_at: string | null;
@@ -106,6 +107,7 @@ function toEntry(r: EntryRow): Entry {
     sodium_mg: r.sodium_mg,
     cholesterol_mg: r.cholesterol_mg,
     source_food_id: r.source_food_id,
+    category: r.category,
     notes: r.notes,
   };
 }
@@ -117,6 +119,9 @@ export type NewEntry = Macros & {
   servings: number;
   serving_label: string;
   source_food_id?: string | null;
+  /** See `Entry.category`'s own doc comment in `nutrition.ts`. Omitted or
+   *  null when this entry has no category source — the ordinary case today. */
+  category?: string | null;
   notes?: string;
 };
 
@@ -140,12 +145,12 @@ export async function logFood(userId: string, input: NewEntry): Promise<string> 
        id, user_id, eaten_on, meal, name, servings, serving_label,
        kcal, protein_g, carb_g, fat_g, fibre_g,
        saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-       source_food_id, notes, logged_at, updated_at, dirty, remote)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0)`,
+       source_food_id, category, notes, logged_at, updated_at, dirty, remote)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0)`,
     id, userId, input.eaten_on, input.meal, input.name, input.servings, input.serving_label,
     input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
     input.saturated_fat_g, input.sugar_g, input.added_sugar_g, input.sodium_mg, input.cholesterol_mg,
-    input.source_food_id ?? null, input.notes ?? '', now, now,
+    input.source_food_id ?? null, input.category ?? null, input.notes ?? '', now, now,
   );
   if (input.source_food_id) await noteFoodUsed(userId, input.source_food_id, input.eaten_on);
   return id;
@@ -159,12 +164,12 @@ export async function editEntry(userId: string, id: string, input: NewEntry): Pr
         SET eaten_on = ?, meal = ?, name = ?, servings = ?, serving_label = ?,
             kcal = ?, protein_g = ?, carb_g = ?, fat_g = ?, fibre_g = ?,
             saturated_fat_g = ?, sugar_g = ?, added_sugar_g = ?, sodium_mg = ?, cholesterol_mg = ?,
-            source_food_id = ?, notes = ?, dirty = 1, updated_at = ?, last_error = NULL
+            source_food_id = ?, category = ?, notes = ?, dirty = 1, updated_at = ?, last_error = NULL
       WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     input.eaten_on, input.meal, input.name, input.servings, input.serving_label,
     input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
     input.saturated_fat_g, input.sugar_g, input.added_sugar_g, input.sodium_mg, input.cholesterol_mg,
-    input.source_food_id ?? null, input.notes ?? '', stamp(), id, userId,
+    input.source_food_id ?? null, input.category ?? null, input.notes ?? '', stamp(), id, userId,
   );
   if (r.changes === 0) throw new Error('That entry no longer exists on this device.');
 }
@@ -329,8 +334,8 @@ export async function cacheEntries(
            id, user_id, eaten_on, meal, name, servings, serving_label,
            kcal, protein_g, carb_g, fat_g, fibre_g,
            saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-           source_food_id, notes, logged_at, updated_at, dirty, remote)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+           source_food_id, category, notes, logged_at, updated_at, dirty, remote)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
          ON CONFLICT(id) DO UPDATE SET
            eaten_on = excluded.eaten_on, meal = excluded.meal, name = excluded.name,
            servings = excluded.servings, serving_label = excluded.serving_label,
@@ -339,12 +344,13 @@ export async function cacheEntries(
            saturated_fat_g = excluded.saturated_fat_g, sugar_g = excluded.sugar_g,
            added_sugar_g = excluded.added_sugar_g, sodium_mg = excluded.sodium_mg,
            cholesterol_mg = excluded.cholesterol_mg,
-           source_food_id = excluded.source_food_id, notes = excluded.notes, remote = 1
+           source_food_id = excluded.source_food_id, category = excluded.category,
+           notes = excluded.notes, remote = 1
          WHERE food_entries.dirty = 0 AND food_entries.deleted_at IS NULL`,
         e.id, userId, e.eaten_on, e.meal, e.name, e.servings, e.serving_label,
         e.kcal, e.protein_g, e.carb_g, e.fat_g, e.fibre_g,
         e.saturated_fat_g, e.sugar_g, e.added_sugar_g, e.sodium_mg, e.cholesterol_mg,
-        e.source_food_id, e.notes, now, now,
+        e.source_food_id, e.category, e.notes, now, now,
       );
     }
   });
@@ -908,7 +914,7 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
           fibre_g: r.fibre_g,
           saturated_fat_g: r.saturated_fat_g, sugar_g: r.sugar_g, added_sugar_g: r.added_sugar_g,
           sodium_mg: r.sodium_mg, cholesterol_mg: r.cholesterol_mg,
-          source_food_id: r.source_food_id, notes: r.notes,
+          source_food_id: r.source_food_id, category: r.category, notes: r.notes,
         });
         // COMPARE-AND-SWAP on updated_at: an edit that landed while this push
         // was in flight leaves the row dirty for the next pass rather than

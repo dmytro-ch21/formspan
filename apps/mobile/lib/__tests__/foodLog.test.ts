@@ -157,7 +157,7 @@ describe('reading one entry', () => {
   it('is gone once tombstoned, so the editor says so rather than editing a ghost', async () => {
     const id = await logFood(USER, meal());
     await cacheEntries(USER, TODAY, TODAY, [
-      { ...meal(), id, source_food_id: null, notes: '' } as never,
+      { ...meal(), id, source_food_id: null, category: null, notes: '' } as never,
     ]);
     await removeEntry(USER, id);
     expect(await localEntry(USER, id)).toBeNull();
@@ -191,7 +191,7 @@ describe('removing', () => {
 
   it('tombstones a row the server knows about, so it cannot come back on the next pull', async () => {
     await cacheEntries(USER, TODAY, TODAY, [
-      { ...meal(), id: 'srv-1', source_food_id: null, notes: '' },
+      { ...meal(), id: 'srv-1', source_food_id: null, category: null, notes: '' },
     ]);
     await removeEntry(USER, 'srv-1');
 
@@ -228,7 +228,7 @@ describe('pushing', () => {
 
   it('a tombstone is deleted locally only after the server confirms', async () => {
     await cacheEntries(USER, TODAY, TODAY, [
-      { ...meal(), id: 'srv-1', source_food_id: null, notes: '' },
+      { ...meal(), id: 'srv-1', source_food_id: null, category: null, notes: '' },
     ]);
     await removeEntry(USER, 'srv-1');
     await syncFood(USER, token);
@@ -346,7 +346,7 @@ describe('the pull', () => {
   it('does not clobber a local row that is still owed', async () => {
     const id = await logFood(USER, meal({ name: 'Mine' }));
     await cacheEntries(USER, TODAY, TODAY, [
-      { ...meal({ name: 'Server version' }), id, source_food_id: null, notes: '' },
+      { ...meal({ name: 'Server version' }), id, source_food_id: null, category: null, notes: '' },
     ]);
     const back = await localEntries(USER, TODAY);
     expect(back[0].name).toBe('Mine');
@@ -362,7 +362,7 @@ describe('the pull', () => {
 
   it('removes a synced row the server dropped', async () => {
     await cacheEntries(USER, TODAY, TODAY, [
-      { ...meal(), id: 'srv-1', source_food_id: null, notes: '' },
+      { ...meal(), id: 'srv-1', source_food_id: null, category: null, notes: '' },
     ]);
     await cacheEntries(USER, TODAY, TODAY, []);
     expect(await localEntries(USER, TODAY)).toHaveLength(0);
@@ -370,11 +370,11 @@ describe('the pull', () => {
 
   it('does not resurrect a tombstoned row', async () => {
     await cacheEntries(USER, TODAY, TODAY, [
-      { ...meal(), id: 'srv-1', source_food_id: null, notes: '' },
+      { ...meal(), id: 'srv-1', source_food_id: null, category: null, notes: '' },
     ]);
     await removeEntry(USER, 'srv-1');
     await cacheEntries(USER, TODAY, TODAY, [
-      { ...meal(), id: 'srv-1', source_food_id: null, notes: '' },
+      { ...meal(), id: 'srv-1', source_food_id: null, category: null, notes: '' },
     ]);
     expect(await localEntries(USER, TODAY)).toHaveLength(0);
   });

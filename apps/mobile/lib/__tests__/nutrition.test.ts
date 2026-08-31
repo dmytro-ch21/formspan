@@ -19,6 +19,8 @@ import {
   dayTotals,
   daysBetween,
   kcalLooksOff,
+  mealAllocation,
+  mealAvailable,
   MEALS,
   rankRecents,
   rescale,
@@ -52,6 +54,7 @@ function entry(over: Partial<Entry> = {}): Entry {
     sodium_mg: null,
     cholesterol_mg: null,
     source_food_id: null,
+    category: null,
     notes: '',
     ...over,
   };
@@ -220,9 +223,110 @@ describe('bySlot', () => {
     expect(bySlot([]).map((g) => g.meal)).toEqual(['breakfast', 'lunch', 'dinner', 'snack']);
   });
 
-  it('totals each slot', () => {
-    const groups = bySlot([entry(), entry({ id: 'e2', kcal: 20 })]);
-    expect(groups.find((g) => g.meal === 'lunch')!.kcal).toBe(200);
+  it('totals each slot, kcal and every macro', () => {
+    const groups = bySlot([entry(), entry({ id: 'e2', kcal: 20, protein_g: 3, carb_g: 5, fat_g: 1 })]);
+    const lunch = groups.find((g) => g.meal === 'lunch')!;
+    expect(lunch.kcal).toBe(200);
+    expect(lunch.totals.kcal).toBe(200);
+    expect(lunch.totals.protein_g).toBe(28);
+    expect(lunch.totals.carb_g).toBe(5);
+    expect(lunch.totals.fat_g).toBe(9);
+  });
+
+  it('an empty slot totals to a real zero, not an absent macro', () => {
+    const groups = bySlot([entry({ meal: 'dinner' })]);
+    const breakfast = groups.find((g) => g.meal === 'breakfast')!;
+    expect(breakfast.totals).toEqual(dayTotals([]));
+  });
+
+  // N113's AC: "the section totals and the day's totals agree. Two figures on
+  // one screen computed under two rules is W2/W4, which this repo has paid
+  // for twice." This is the test that would catch a THIRD instance — every
+  // entry has exactly one `meal`, so the four groups partition the day and
+  // summing their totals must reproduce `dayTotals` on the whole list exactly,
+  // for any mix of entries across slots.
+  it('summed across every slot, reproduces the day total exactly', () => {
+    const entries = [
+      entry({ id: 'e1', meal: 'breakfast', kcal: 300, protein_g: 20, carb_g: 30, fat_g: 10 }),
+      entry({ id: 'e2', meal: 'lunch', kcal: 550, protein_g: 40, carb_g: 60, fat_g: 15 }),
+      entry({ id: 'e3', meal: 'lunch', kcal: 120, protein_g: 5, carb_g: 20, fat_g: 2 }),
+      entry({ id: 'e4', meal: 'dinner', kcal: 700, protein_g: 45, carb_g: 70, fat_g: 20 }),
+      // snack deliberately left empty
+    ];
+    const groups = bySlot(entries);
+    const summed = groups.reduce(
+      (acc, g) => ({
+        kcal: acc.kcal + g.totals.kcal,
+        protein_g: acc.protein_g + g.totals.protein_g,
+        carb_g: acc.carb_g + g.totals.carb_g,
+        fat_g: acc.fat_g + g.totals.fat_g,
+      }),
+      { kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0 },
+    );
+    const day = dayTotals(entries);
+    expect(summed).toEqual({
+      kcal: day.kcal,
+      protein_g: day.protein_g,
+      carb_g: day.carb_g,
+      fat_g: day.fat_g,
+    });
+  });
+});
+
+describe('mealAllocation', () => {
+  it('divides the day target evenly across the four slots', () => {
+    const a = mealAllocation(target)!;
+    expect(a.kcal).toBe(600); // 2400 / 4
+    expect(a.protein_g).toBe(45); // 180 / 4
+    expect(a.carb_g).toBe(62.5); // 250 / 4
+    expect(a.fat_g).toBe(17.5); // 70 / 4
+  });
+
+  it('is null with no target — nothing to divide', () => {
+    expect(mealAllocation(null)).toBeNull();
+  });
+
+  it('four allocations sum back to the day target', () => {
+    const a = mealAllocation(target)!;
+    expect(a.kcal * MEALS.length).toBe(target.kcal);
+    expect(a.protein_g * MEALS.length).toBe(target.protein_g);
+  });
+});
+
+describe('mealAvailable', () => {
+  it('is the allocation minus what this slot has already eaten', () => {
+    // Lunch's quarter of `target` is 600 kcal / 45g protein / 62.5g carb /
+    // 17.5g fat — one entry() (180 kcal, 25g protein, 0g carb, 8g fat) has
+    // been logged into it.
+    const totals = dayTotals([entry()]);
+    const avail = mealAvailable(totals, target)!;
+    expect(avail.kcal).toBe(420);
+    expect(avail.protein_g).toBe(20);
+    expect(avail.carb_g).toBe(62.5);
+    expect(avail.fat_g).toBe(9.5);
+  });
+
+  it('floors each macro at zero independently once a slot exceeds its share', () => {
+    // 900 kcal alone blows past lunch's 600 kcal share; the entry's own
+    // protein (25g) still sits under its 45g share. Each macro must floor on
+    // its own, not as a group — an over-budget calorie count must not zero
+    // out an under-budget protein figure.
+    const totals = dayTotals([entry({ kcal: 900, protein_g: 10 })]);
+    const avail = mealAvailable(totals, target)!;
+    expect(avail.kcal).toBe(0);
+    expect(avail.protein_g).toBe(35);
+  });
+
+  it('an untouched slot is available for its whole share', () => {
+    const avail = mealAvailable(dayTotals([]), target)!;
+    expect(avail.kcal).toBe(600);
+    expect(avail.protein_g).toBe(45);
+    expect(avail.carb_g).toBe(62.5);
+    expect(avail.fat_g).toBe(17.5);
+  });
+
+  it('is null with no target, never a fabricated zero', () => {
+    expect(mealAvailable(dayTotals([entry()]), null)).toBeNull();
   });
 });
 

@@ -328,6 +328,84 @@ func TestSaveEntryIsAnUpsertOnTheClientID(t *testing.T) {
 	}
 }
 
+// Category is COPIED onto the entry (N124/N113), the same rule as every macro
+// on this table — see the package doc's "a logged row owns its numbers" and
+// Entry.Category's own comment. This is the entries-side mirror of
+// TestEditingAFoodDoesNotRewriteWhatYouAlreadyAte above: correcting the food
+// this entry was logged from must not repaint the glyph a device is already
+// showing for it, because nothing here may re-derive category from a join.
+func TestEntryCategoryIsCopiedAndSurvivesAnEditToTheFood(t *testing.T) {
+	r := repoFor(t, uid)
+
+	food, err := r.SaveFood(ctx(), aFood(foodID, "Chicken thigh", 180))
+	if err != nil {
+		t.Fatalf("save food: %v", err)
+	}
+
+	e := anEntry(entryID, food, 1)
+	e.Category = strPtr("poultry")
+	logged, err := r.SaveEntry(ctx(), e)
+	if err != nil {
+		t.Fatalf("save entry: %v", err)
+	}
+	if logged.Category == nil || *logged.Category != "poultry" {
+		t.Fatalf("category %v after create, want \"poultry\" — the column exists but "+
+			"the write or read drops it", logged.Category)
+	}
+
+	// Correct the food a month later — same shape as the sibling test. Category
+	// has no relationship to `Food` at all in this schema (`nutrition_foods` has
+	// no category column of its own), so this also proves the read is not
+	// joining anywhere: there is nothing on the food side for it to follow.
+	corrected := aFood(foodID, "Chicken thigh", 210)
+	if _, err := r.SaveFood(ctx(), corrected); err != nil {
+		t.Fatalf("correct food: %v", err)
+	}
+
+	back, err := r.ListEntries(ctx(), uid, "2026-08-01", "2026-08-31", 100)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(back) != 1 {
+		t.Fatalf("got %d entries", len(back))
+	}
+	if back[0].Category == nil || *back[0].Category != "poultry" {
+		t.Fatalf("category was %v after correcting the food, want unchanged \"poultry\"",
+			back[0].Category)
+	}
+
+	// SAVE IT AGAIN with a changed category, exercising the ON CONFLICT DO
+	// UPDATE path — mirroring TestLabelMacrosPersistThroughAnEntry's own note:
+	// a single save only ever inserts, so the update half of the SET clause is
+	// otherwise never covered, and that is exactly the class of bug this table
+	// has shipped three times (see the module pattern's `updateWithin` note).
+	e.Category = strPtr("red_meat")
+	if _, err := r.SaveEntry(ctx(), e); err != nil {
+		t.Fatalf("re-save entry: %v", err)
+	}
+	edited, err := r.ListEntries(ctx(), uid, "2026-08-01", "2026-08-31", 100)
+	if err != nil {
+		t.Fatalf("list after re-save: %v", err)
+	}
+	if len(edited) != 1 || edited[0].Category == nil || *edited[0].Category != "red_meat" {
+		t.Fatalf("category after re-save = %v, want \"red_meat\" — missing from the "+
+			"upsert's SET clause would silently keep the old value", edited)
+	}
+
+	// And a category-less entry — the ordinary case for a saved food or an AI
+	// draft today — must read back null, never an empty string or a guess.
+	noCategory := anEntry("44444444-4444-4444-8444-444444444444", food, 1)
+	saved, err := r.SaveEntry(ctx(), noCategory)
+	if err != nil {
+		t.Fatalf("save entry with no category: %v", err)
+	}
+	if saved.Category != nil {
+		t.Fatalf("category = %v for an entry that stated none — null became a guess", *saved.Category)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
 // THE CARRY-IN ROW. A target set three months ago means a week-long window
 // contains no rows at all, and the client would then report "no target" for a
 // week the athlete was very much eating to one — a bug that only appears for

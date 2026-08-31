@@ -198,14 +198,32 @@ jest.mock('@/lib/ModulesProvider', () => ({
 
 // `...over` last, so `ended_at: null` in an override is what makes a session
 // unfinished and every field above is genuinely a default.
+//
+// **Anchored to TODAY'S CALENDAR DAY at a fixed, safely-midday wall time —
+// NOT "N minutes before real now".** The previous version used
+// `Date.now() - 30 * 60_000`, which crosses local midnight (and lands the
+// session on YESTERDAY's calendar day instead of today's) for any test run
+// inside the first half hour after it — reproduced directly on 2026-08-31 at
+// ~00:03 America/Los_Angeles, on a clean `origin/main` tree with none of this
+// branch's changes applied, so it is pre-existing and unrelated to N124/N113.
+// Two tests depending on the default (`session({ id: 's1', ... })` with no
+// `started_at` override) failed exactly then: "says the plan is done" and
+// "credits a session logged off-plan", both because the component's
+// today-scoped session lookup no longer found a session it considered
+// logged today. Same class of bug as the 2026-08-30 `loadTrendScreen` fix
+// (see `docs/decisions/history.md`) — a fixture computed relative to the
+// real clock whose validity decays depending on what moment the suite
+// happens to run, rather than one pinned to the calendar day it means to
+// represent.
 function session(over: Partial<Session> & { id: string }): Session {
+  const noon = new Date(`${todayKey()}T12:00:00`);
   return {
     user_id: 'u1',
     workout_id: null,
     sport: 'strength',
     name: 'Legs',
-    started_at: new Date(Date.now() - 30 * 60_000).toISOString(),
-    ended_at: new Date().toISOString(),
+    started_at: new Date(noon.getTime() - 30 * 60_000).toISOString(),
+    ended_at: noon.toISOString(),
     notes: '',
     sets: [],
     created_at: '',
@@ -235,6 +253,7 @@ function entry(over: Partial<Entry> & { id: string }): Entry {
     servings: 1,
     serving_label: '1 serving',
     source_food_id: null,
+    category: null,
     notes: '',
     kcal: 100,
     protein_g: 10,

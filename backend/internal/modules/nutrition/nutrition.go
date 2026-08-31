@@ -337,6 +337,18 @@ type Entry struct {
 	// what an entry says you ate.
 	SourceFoodID *string `json:"source_food_id"`
 
+	// Category is a COPY, taken from the catalog food this entry was logged
+	// from — never a live join, for the identical reason SourceFoodID is
+	// provenance-only. Correcting food_catalog's category next month must not
+	// repaint a meal already logged from it (N124/N113).
+	//
+	// Null for an entry with no category source: an athlete's own saved food,
+	// an AI draft or a barcode scan carry none today. Null is the honest
+	// answer, not a gap to paper over — the client's glyphFor() (N58/#375)
+	// degrades a null category to a neutral plate rather than guessing one
+	// from the name.
+	Category *string `json:"category"`
+
 	Notes string `json:"notes"`
 
 	CreatedAt time.Time `json:"created_at"`
@@ -370,6 +382,12 @@ func (e *Entry) Validate() error {
 	}
 	if e.SourceFoodID != nil && !isUUID(*e.SourceFoodID) {
 		return fmt.Errorf("%w: source_food_id must be a UUID", ErrInvalidInput)
+	}
+	if e.Category != nil {
+		c := strings.TrimSpace(*e.Category)
+		if len(c) < 1 || len(c) > 40 {
+			return fmt.Errorf("%w: category must be 1-40 characters", ErrInvalidInput)
+		}
 	}
 	return nil
 }

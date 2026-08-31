@@ -397,6 +397,10 @@ export default function AddFoodScreen() {
         serving_label: food.serving_label,
         ...macrosForGrams(food, grams),
         source_food_id: null,
+        // The ONE place today an entry has a category to copy — see
+        // `Entry.category`'s own doc comment in `nutrition.ts`. `food.category`
+        // is a plain required string on `CatalogFood`, never absent.
+        category: food.category,
       });
       try {
         request('catalog food logged');

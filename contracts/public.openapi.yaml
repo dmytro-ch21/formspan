@@ -306,6 +306,21 @@ components:
               description: >
                 Provenance only, for "log this again". Nothing reads nutrition
                 back through it, and it becomes null if the food is deleted.
+            category:
+              type: string
+              nullable: true
+              minLength: 1
+              maxLength: 40
+              description: >
+                A COPY, taken from the catalog food this entry was logged from
+                (if any) at the moment it was logged — never a live join,
+                exactly like every macro on this object. Correcting the
+                catalog row's category later must not repaint an entry already
+                logged from it. Null for an entry with no category source — an
+                athlete's own saved food, an AI draft, or a barcode scan carry
+                none today, and the client's category-derived glyph (N58)
+                degrades a null category to a neutral one rather than
+                guessing from the name.
             notes: { type: string }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
@@ -322,6 +337,15 @@ components:
             servings: { type: number, exclusiveMinimum: true, minimum: 0 }
             serving_label: { type: string, minLength: 1, maxLength: 40 }
             source_food_id: { type: string, format: uuid, nullable: true }
+            category:
+              type: string
+              nullable: true
+              minLength: 1
+              maxLength: 40
+              description: >
+                Copied by the CLIENT from the catalog food this entry was
+                built from, if any. The server stores it as sent and never
+                derives it — see `NutritionEntry.category`.
             notes: { type: string, maxLength: 500 }
 
     NutritionRecipeItem:

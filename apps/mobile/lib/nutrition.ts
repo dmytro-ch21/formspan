@@ -22,11 +22,38 @@
  * test asserting exactly that, because it is a one-line change away at any
  * point and nothing else would catch it.
  *
- * **No per-meal allocation.** "536 calories now available for breakfast"
- * requires knowing a day the app cannot see; it is wrong the moment you eat a
- * big lunch, and it manufactures four budgets to fail against instead of one
- * honest running total. Slots group the day — they are how people remember food
- * — and that is all they do.
+ * ## Per-meal allocation — REVERSED 2026-08-31 (N124/N113), read this before
+ * touching `mealAllocation`/`mealAvailable` below
+ *
+ * This file used to say, right here: *"No per-meal allocation. '536 calories
+ * now available for breakfast' requires knowing a day the app cannot see; it
+ * is wrong the moment you eat a big lunch, and it manufactures four budgets to
+ * fail against instead of one honest running total. Slots group the day —
+ * they are how people remember food — and that is all they do."* That was
+ * `nutrition-design.md` §5's own objection, quoted, and `food.tsx` shipped a
+ * counter-proposal built on it: one true day-remaining figure
+ * (`mealBudgetLine`, now removed) repeated under every section header instead
+ * of a per-meal split.
+ *
+ * **The user has since seen a reference design built on true per-meal
+ * budgets and confirmed — twice, after being told this is the identical
+ * tension the counter-proposal above was already a response to — that this
+ * app should build true per-meal budgets, matching the reference.** That is
+ * not a call this file gets to re-litigate a third time. `mealAllocation` and
+ * `mealAvailable` below are the result.
+ *
+ * **The allocation algorithm, since neither ticket specifies one beyond the
+ * visual output "938 calories now available":** the day's target is divided
+ * EVENLY across the four meal slots — 25% each, breakfast through snack —
+ * and each slot's "available" figure is that quarter minus whatever has
+ * already been eaten IN THAT SLOT, floored at zero per macro independently.
+ * Chosen as the simplest, most transparent split: it matches the convention
+ * most diet-tracking apps already use, it needs nothing this app cannot see
+ * (unlike a time-of-day-weighted or historical-pattern split, which would
+ * reintroduce exactly the "requires knowing a day the app cannot see"
+ * objection this section used to quote), and it is honest about being a FIXED
+ * allocation rather than pretending to infer one. It is not claimed to be
+ * smarter than that — see `mealAllocation`'s own doc comment.
  */
 
 import { dayString } from './calendar';
@@ -67,6 +94,18 @@ export type Entry = Macros & {
   servings: number;
   serving_label: string;
   source_food_id: string | null;
+  /**
+   * A COPY, taken from the catalog food this entry was logged from (if any) —
+   * never re-derived, exactly like every macro above it. N124/N113: this is
+   * what {@link glyphFor} in `foodGlyph.ts` draws the meal-row icon from.
+   *
+   * **Null is the ordinary case today, not a gap.** Only a catalog pick
+   * carries a category at all — an athlete's own saved food, an AI draft and a
+   * barcode scan have none to copy — and `glyphFor(null)` degrades to the
+   * neutral plate glyph for exactly that reason. Closing that for saved foods
+   * is follow-on work, not something this field fakes by guessing.
+   */
+  category: string | null;
   notes: string;
 };
 
@@ -432,39 +471,64 @@ function addDaysISO(key: string, n: number): string {
 }
 
 /**
- * "536 kcal left today · 28g protein · 48g carbs · 13g fat", or null.
+ * What one meal slot is allocated of the day's target.
  *
- * The counter-proposal to the one thing `nutrition-design.md` §5 rejects by
- * name. Their objection is to ALLOCATING a budget per meal — "it requires
- * knowing a day the app cannot see, it is wrong the moment you eat a big lunch,
- * and it manufactures four budgets to fail against instead of one honest
- * running total". This is the DAY's remaining, computed once, shown in the
- * placement the athlete asked for. "left today" is load-bearing in that
- * sentence, and the caller is responsible for only rendering it on today.
- *
- * **Null rather than a partial line** in every state that cannot support one:
- * no target means nothing is "left", and an unread day means the eaten half is
- * unknown. A line assembled from half an answer is the failure N54 was for.
- *
- * Lives here rather than in the screen because it is a rule, and a rule in a
- * component is a rule no test can reach — the first version of it was in
- * `food.tsx` and its "tests" asserted on hand-written literals instead, so
- * deleting the function left them all green. Found in review.
+ * **A quarter each, in the order `MEALS` lists them** — driven by
+ * `MEALS.length` rather than a hardcoded 4, so a fifth slot would change this
+ * silently rather than leaving three meals to split 100% among themselves.
+ * This is a FIXED split, not a claim about how anyone actually eats across a
+ * day — see the reversal note at the top of this file for why an even split
+ * was chosen over anything that would need to see more of the day than the
+ * app has. Null with no target: there is nothing to divide.
  */
-export function mealBudgetLine(eaten: EatenView, view: TargetView): string | null {
-  const totals = viewTotals(eaten);
-  const target = viewTarget(view);
-  if (!totals || !target) return null;
-  // Floored at zero: "−140 kcal left" is a contradiction, and `RemainingBlock`
-  // already says "140 over" in its own words. Two surfaces phrasing one
-  // overage differently is the drift the shared component exists to prevent.
-  const left = (goal: number, eatenAmount: number) => Math.max(0, Math.round(goal - eatenAmount));
-  return (
-    `${left(target.kcal, totals.kcal)} kcal left today · ` +
-    `${left(target.protein_g, totals.protein_g)}g protein · ` +
-    `${left(target.carb_g, totals.carb_g)}g carbs · ` +
-    `${left(target.fat_g, totals.fat_g)}g fat`
-  );
+export function mealAllocation(target: Target | null): Macros | null {
+  if (!target) return null;
+  const share = 1 / MEALS.length;
+  return {
+    kcal: target.kcal * share,
+    protein_g: target.protein_g * share,
+    carb_g: target.carb_g * share,
+    fat_g: target.fat_g * share,
+    fibre_g: target.fibre_g == null ? null : target.fibre_g * share,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
+  };
+}
+
+/**
+ * What is still available for ONE meal slot — the empty-section figure:
+ * "938 calories now available · 41g protein · 74g carbs · 16g fat".
+ *
+ * `mealAllocation(target)` minus what this slot has ALREADY eaten
+ * (`slotTotals`, e.g. from {@link bySlot}), floored at zero PER MACRO
+ * independently — the same floor `remaining`/the old `mealBudgetLine`
+ * both used, for the identical reason: "−40g protein available" is a
+ * contradiction, not a fact worth stating.
+ *
+ * Null with no target, matching {@link remaining}'s own rule: with nothing to
+ * divide there is nothing to be available, and a zero here would read as "you
+ * have nothing left", the opposite of the truth for a slot nobody has logged
+ * into yet.
+ */
+export function mealAvailable(slotTotals: Macros, target: Target | null): Macros | null {
+  const alloc = mealAllocation(target);
+  if (!alloc) return null;
+  const left = (goal: number, eatenAmount: number) => Math.max(0, goal - eatenAmount);
+  return {
+    kcal: left(alloc.kcal, slotTotals.kcal),
+    protein_g: left(alloc.protein_g, slotTotals.protein_g),
+    carb_g: left(alloc.carb_g, slotTotals.carb_g),
+    fat_g: left(alloc.fat_g, slotTotals.fat_g),
+    fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
+  };
 }
 
 export type Remaining = {
@@ -544,11 +608,30 @@ export function slotForClock(at: Date): Meal {
   return 'snack';
 }
 
-/** Entries grouped by slot, in day order, including slots with nothing in them. */
-export function bySlot(entries: Entry[]): { meal: Meal; entries: Entry[]; kcal: number }[] {
+/**
+ * Entries grouped by slot, in day order, including slots with nothing in
+ * them — and each slot's own totals, via {@link dayTotals} scoped to just
+ * that slot's entries.
+ *
+ * **This is the ONE place a section total is computed**, and it is the same
+ * function the day-level total already goes through — so a section's figures
+ * and the day's are structurally unable to disagree (N113's AC: "the section
+ * totals and the day's totals agree. Two figures on one screen computed under
+ * two rules is W2/W4, which this repo has paid for twice"). Summing every
+ * slot's `totals` reproduces `dayTotals(entries)` exactly, because every
+ * entry has exactly one `meal` and these four groups partition it — pinned by
+ * a test.
+ *
+ * `kcal` stays as its own field, kept for the callers that only ever wanted
+ * the headline figure — `totals.kcal` says the same thing.
+ */
+export function bySlot(
+  entries: Entry[],
+): { meal: Meal; entries: Entry[]; kcal: number; totals: Macros }[] {
   return MEALS.map((meal) => {
     const mine = entries.filter((e) => e.meal === meal);
-    return { meal, entries: mine, kcal: mine.reduce((n, e) => n + e.kcal, 0) };
+    const totals = dayTotals(mine);
+    return { meal, entries: mine, kcal: totals.kcal, totals };
   });
 }
 
