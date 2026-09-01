@@ -50355,6 +50355,156 @@ renders correctly — are `NEEDS HUMAN EVIDENCE` and handed to the user as a
 checklist rather than claimed here.
 
 
+## 2026-09-01 — N121 (#510): a spoken count now reaches the draft, and a floored one reads as blank
+
+The report, verbatim: *"When I log the details with audio I mention the
+submissions I completed, takedowns, sweeps — but they never get counted in
+the log. When it addressed me to the next step the subs, takedowns etc. were
+empty."* #371 had already established the correct behaviour for an
+INDEFINITE quantity ("a couple of sweeps") — leave it uncounted and let the
+athlete fill it in. This ticket was the narrower half: a DEFINITE number
+really was spoken and still was not landing.
+
+**The lead handed to this ticket — `spokenNumber`'s coverage — was not the
+bug.** `backend/internal/modules/bjj/reflect.go`'s count-floor guard is
+already mutation-tested and correctly recognises "five" in a real sentence.
+Investigation went to the real corpus first, per #371's own rule ("authored
+sentences prove the format, not the behaviour"): the two `recorded`
+dictations sitting in `evals/bjj-dictation/pending/` (`rec-01`, `rec-02`,
+captured 2026-08-19, not yet promoted into `cases.json`). `rec-02` ends "I
+did three or four sweeps five passes five submissions" — a hedge and two
+definite fives, run together with no punctuation. Calling the real model
+directly (bypassing `run.py`'s scoring, which does not apply the count-floor
+guard at all — see the gap noted below and in the eval's own README) on that
+exact text, repeated three times, produced count 1, a dropped tag, and count
+5 for "passes" — same model, same prompt, same input, three different
+answers. The model's own `note` field consistently paraphrased "5 passes,
+and 5 submissions" correctly even on the runs where the structured `count`
+field did not — the number was extracted, just not reliably attached to the
+right field on a run-on list of several counted outcomes.
+
+**Fix, backend:** a new paragraph in `reflect_rules.txt` (and its
+byte-identical mirror `SYSTEM_RULES` in `evals/bjj-dictation/prompt.py`,
+`TestTheShippedRulesAreTheRulesTheEvalMeasured` passing) — "COUNT IS THE
+NUMBER THEY SAID, NOT A DEFAULT OF ONE" — telling the model explicitly that
+a stated number is the tag's `count`, that several outcomes listed back to
+back each keep their own number read in order, and that a hedge is not a
+number to invent one value from. Verified on `rec-02`: 3/3 repeated calls
+after the fix landed both fives correctly while correctly leaving the hedged
+sweep count at 1, against 2/2 calls before the fix each missing at least one.
+The 33-case authored corpus was re-run twice after the fix (0.0%/3.0%
+invention, 0.822/0.903 F1) against a same-session baseline rerun on the
+unchanged prompt (3.0%/0.896) — consistent with sampling noise per N118's
+finding that no `llm.Request` carries a temperature, not a regression, though
+two before/after pairs is a spread reading rather than a proven-flat claim.
+Full numbers and the honest bound on what 2 recorded cases can prove:
+`evals/bjj-dictation/README.md`'s new "N121 (#510)" section.
+
+Also added: `TestACountFromTheRealRecordedCorpusSurvives` in `reflect_test.go`,
+pinning the Go half of this story with a dictation MODELLED ON — not quoted
+from — `rec-02`'s real closing sentence (same shape: a hedge immediately
+followed by two identical definite counts, no punctuation), authored fresh
+rather than reproduced verbatim, per `record.py`'s own convention that an
+athlete's raw recorded speech enters git only when deliberately promoted.
+Once the model does emit the count the athlete said, `ResolveDraft` must not
+floor it back down. Mutation-verified (floored the guard's `spokenNumber`
+call to always see an empty dictation; the new test went red; restored;
+green again).
+
+**Fix, mobile — the blank-vs-zero half (AC 3 and 5).** `Tag.count` has no
+null to represent "the athlete never said" — `ResolveDraft` floors an
+unverifiable count to 1 rather than to nothing, because the tag itself is
+still evidence the thing happened. That meant a tag the server could not
+verify and a tag the athlete genuinely said was "one" arrived on the wire
+identically, and `apps/mobile/app/bjj/dictate.tsx`'s `TagRow` stepper showed
+both as a plain, confident "1" — the exact "read as counted when it was not"
+failure the report describes. Fixed by reading the draft's own `notices`
+array (already sent, previously unused for this): `uncertainCountFlags()` in
+`lib/reflectApi.ts` marks the tag indices whose count carries a
+`not_spoken` or `count_below_one` notice, and `TagRow` renders those as the
+same blank glyph and dim styling the session-level `Stepper` already uses
+for a genuinely-null `rounds`/`round_minutes` — with a hint ("How many? We
+weren't sure.") beside it. The flag is tracked in a small parallel
+`countUncertain` array kept in step with `detail.tags` through every
+resize (`setTagCount` clears an index, `dropTag` splices one out,
+`resolvePhrase` appends `false` for a freshly-picked tag), rather than
+folded into the shared `Tag` domain type the manual wizard also writes.
+Pressing "−" on a blank count confirms at the floor rather than deleting the
+tag outright — a blind decrement reading as "remove this" would silently
+drop a real event the athlete already confirmed happened at least once; a
+second press, once the count is a real number, removes it as before.
+`describeNotice`'s `not_spoken` copy was also wrong for this case
+specifically — it said "is blank", which was true for a scalar (`rounds`
+really does go to `null`) but false for a tag count (it is showing "1" on
+screen), so the text now branches on whether the field is `tags[N].count`.
+Steppers are unchanged as the correction control (AC 4) — only the blank
+rendering is new.
+
+**The review pass caught a real gap in the first version of this fix, and it
+is worth stating plainly rather than glossing over.** `ac-verifier` pointed
+out that AC2/AC3 ("an indefinite quantity ... stays null and the confirm
+screen asks") was NOT actually met on the common, well-behaved path: a model
+correctly following the new prompt rule for a hedge emits `count: 1` and
+nothing else, which matches none of `ResolveDraft`'s existing guard cases (1
+is not `<1`, not `>1`, not over the ceiling) — so it produced **zero
+notices**, and the confirm screen showed a plain, confident 1 exactly where
+the model had behaved correctly. `not_spoken`/`count_below_one` only ever
+fire on the model MISBEHAVING; nothing signalled the model correctly reading
+an indefinite quantity, which is the more common case. The fix and the bug it
+was fixing shared the same blind spot. `backend-reviewer` independently
+flagged the same root cause from the eval-corpus side.
+
+**Fix: a new per-tag boolean, `count_hedged`.** `DraftTag.CountHedged` in
+`reflect.go` (mirrored in `prompt.py`'s `draft_schema`, both required in the
+strict JSON schema — `TestTheShippedRulesAreTheRulesTheEvalMeasured` still
+passing) lets the model report its own hedge/no-hedge judgement as DATA,
+rather than that judgement only ever being visible through its effect on
+`count`. `ResolveDraft` turns a `true` value into a new `NoticeHedgedCount`
+notice — independent of and additional to the existing floor logic, since a
+model can in principle get both wrong at once (two new Go tests cover this,
+including the case where a malformed AND hedged count both fire their own
+notice). The mobile client's existing `uncertainCountFlags`/blank-stepper
+mechanism — already built for `not_spoken`/`count_below_one` — now also
+treats `hedged_count` as uncertain, so no new UI was needed, only a new path
+into a mechanism that already worked; `describeNotice` gained a distinct,
+non-accusatory message for it ("you said a range, not a mistake").
+
+Verified LIVE, not just mechanism-tested: 3 repeated calls on the `rec-02`
+pattern after this fix. All three correctly set `count_hedged: true` on the
+"three or four sweeps" tag (and, in 2/3 runs, on "multiple takedowns" too —
+the same kind of hedge) while correctly setting `count_hedged: false` on both
+`count: 5` tags. The 33-case authored corpus was re-run once more with the
+new required schema field: invention 0.0%, F1 0.835 — within the same noise
+band measured above, no regression from the new property.
+
+Fifteen new tests total: 3 Go (`reflect_test.go` — the count-survives case
+above and both `count_hedged` cases), 8 mobile pure (`reflectApi.test.ts` —
+`uncertainCountFlags` and `describeNotice`, including the `hedged_count`
+cases added after review), and 4 mobile screen-level (`dictateScreen.test.tsx`
+— blank render,
+confirm-on-interaction, confirm-not-delete on "−", and the hedge-specific
+case added after review), each mutation-verified against the pre-fix code
+paths.
+
+**A gap surfaced, not fixed, here:** `evals/bjj-dictation/run.py`'s
+`postprocess()` mirrors `ResolveDraft`'s catalog-id validation but not its
+count-floor guard, so an invented count multiplier scores through the eval
+unflagged today. Left alone deliberately — porting `spokenNumber` to Python
+without a parity test the way `reflect_parity_test.go` pins the prompt text
+would just be a second, unsynced copy of the same logic, which is the exact
+drift this file's module-pattern notes warn about elsewhere. Filed as a
+follow-up rather than rushed in alongside this ticket.
+
+**Left undone, and why:** `rec-01` and `rec-02` were not promoted into the
+permanent `cases.json` corpus. Both are long, messy, real dictations with
+dozens of ambiguous candidate phrases apiece (their own
+`_help.catalog_candidates` blocks list them) — the corpus's own history is
+the reason to author that carefully rather than under a ticket deadline:
+the first 33 cases took three passes to stop scoring correct model answers
+as wrong. `evals/bjj-dictation/` still has zero promoted `recorded` cases as
+a result; the README's "What does not exist yet" list is unchanged on that
+point.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

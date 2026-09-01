@@ -293,6 +293,111 @@ after it is output tokens plus a few hundred. This is the measured version of
 
 ---
 
+## N121 (#510): a definite count spoken aloud was not landing (2026-09-01)
+
+The report: *"I mention the submissions I completed, takedowns, sweeps — but
+they never get counted in the log."* #371 had already established that an
+INDEFINITE quantity ("a couple of sweeps") is correctly left uncounted — this
+ticket was narrower: find and fix the case where a DEFINITE number really was
+spoken and still did not survive.
+
+**Measured against the real thing, not an authored sentence** — the two
+`recorded` dictations sitting in `pending/` (`rec-01-first-session-was-one`,
+`rec-02-the-session-was-one`), called live against `gpt-5.6-luna` directly
+(not through `run.py`'s scoring, which does not apply the count-floor guard at
+all — see the gap noted below). `rec-02` ends "I did three or four sweeps five
+passes five submissions" — one hedge, two definite fives, back to back with no
+punctuation.
+
+**The guard in `reflect.go` (`spokenNumber`) was not the bug.** It was already
+mutation-tested against exactly this pattern, and correctly recognises "five".
+The bug is upstream, in the model call itself: three repeated live calls on
+`rec-02`'s unmodified text produced count 1, a dropped tag, and count 5 — same
+model, same prompt, same input, three different answers for `passes`. The
+model's own `note` field consistently paraphrased "5 passes, and 5
+submissions" correctly even when the structured `count` field did not — the
+number was extracted, just not attached to the right field reliably on a
+run-on list of several counted outcomes.
+
+**Fix: a new `SYSTEM_RULES` paragraph** ("COUNT IS THE NUMBER THEY SAID, NOT A
+DEFAULT OF ONE") telling the model explicitly that a stated number is the
+tag's `count`, that several outcomes listed back to back each keep their own
+number, and that a hedge is not a number to invent one value from. Copied
+across to `reflect_rules.txt` verbatim, `TestTheShippedRulesAreTheRulesTheEval
+Measured` passing.
+
+**Verified, honestly bounded:**
+
+- 3/3 repeated live calls on `rec-02` after the fix: `passes` and
+  `submissions` both landed at count 5 every time, and the hedged "three or
+  four sweeps" correctly stayed at 1 (not invented) every time. Before the
+  fix, 2 of 2 repeated calls each dropped or under-counted at least one of the
+  two.
+- The 33-case authored corpus, re-run twice after the fix: invention rate
+  0.0%/3.0% and tag F1 0.903/0.822, against a same-session baseline rerun of
+  3.0%/0.896 on the UNCHANGED prompt — i.e. the spread is sampling noise
+  (`llm.go`'s N118 finding: no `Request` carries a temperature, so identical
+  input does not imply identical output), not a regression the fix caused.
+  This is two before/after pairs, not a proper repeated-sampling study — call
+  it consistent with "no measurable regression" rather than "proven flat".
+- **This is 2 recorded cases and a handful of repeated calls, not fifty.** The
+  fix is grounded in the real failure, not authored around it, but it is not
+  the statistical confidence a larger recorded corpus would give. `rec-01` and
+  `rec-02` were NOT promoted into `cases.json` in this PR — both are long,
+  messy, real dictations with dozens of ambiguous candidate phrases apiece
+  (see their own `_help.catalog_candidates`), and the corpus's own history
+  above is the reason to do that authoring carefully rather than under a
+  ticket deadline: three passes were needed to stop the first 33 cases from
+  scoring correct answers as wrong. Promoting these two remains open work.
+
+### The second gap: a compliant hedge produced no signal at all
+
+The fix above was reviewed before merge (this repo's standing `/pre-merge`
+gate), and `ac-verifier` caught something the first pass missed. AC2/AC3 of
+#510 read: *"An indefinite quantity is never invented as a number. It stays
+null and the confirm screen asks."* The `SYSTEM_RULES` paragraph above makes
+the FIRST half true — a hedge is never invented into a number. It does
+**not**, on its own, make the second half true: a model correctly following
+that instruction for "a couple of sweeps" emits `count: 1` and nothing else,
+which matches none of `ResolveDraft`'s existing guard cases (1 is not `< 1`,
+not `> 1`, not over the ceiling) and so produces **zero notices**. That count
+is then indistinguishable on the wire from an athlete who genuinely said
+"one" — the confirm screen shows a plain, confident 1 and never asks, on
+precisely the well-behaved path the new prompt paragraph exists to produce.
+The bug and its own fix shared the same blind spot.
+
+**Fix: a new per-tag boolean, `count_hedged`.** The model now reports its own
+hedge/no-hedge judgement as data (`DraftTag.CountHedged` in `reflect.go`,
+mirrored in `prompt.py`'s `draft_schema`, both required fields in the strict
+JSON schema), instead of that judgement only ever being visible through its
+effect on `count`. `ResolveDraft` turns a `true` value into a new
+`hedged_count` notice — independent of, and additional to, the existing
+floor-and-notice logic for a malformed or unverifiable count, since a model
+can in principle get both wrong at once. The mobile client's existing
+`uncertainCountFlags`/blank-stepper mechanism (already built for
+`not_spoken`/`count_below_one`) now also treats `hedged_count` as
+uncertain — no new UI, one more way into a mechanism that already worked.
+
+**Verified live, not just mechanism-tested:** 3 repeated calls on `rec-02`
+after this fix. All three correctly set `count_hedged: true` on the "three or
+four sweeps" tag (and, in 2/3, on "multiple takedowns" too — "multiple" is
+exactly the same kind of hedge) while correctly setting `count_hedged: false`
+on both `count: 5` tags for passes and submissions. The 33-case authored
+corpus was re-run once more after adding the required schema field: invention
+0.0%, F1 0.835 — within the same noise band as the pairs above, no regression
+from the new required property.
+
+**A gap this surfaced, not fixed here:** `run.py`'s `postprocess()` mirrors
+the catalog-id validation `ResolveDraft` does, but not the count-floor guard —
+a model response that invents a multiplier scores through the eval unflagged
+by that specific mechanism today. Left alone rather than patched in this PR: a
+second, unsynced port of `spokenNumber` with no parity test would be exactly
+the kind of drift CLAUDE.md's module-pattern notes warn about, and fixing it
+properly wants the same treatment `reflect_parity_test.go` gives the prompt
+text, not a rushed addition alongside an unrelated ticket.
+
+---
+
 ## The format
 
 ```jsonc

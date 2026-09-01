@@ -119,6 +119,19 @@ type DraftTag struct {
 	// Nil is the ordinary outcome and not a failure — see UnresolvedPhrase.
 	TechniqueID *string `json:"technique_id"`
 	Count       int     `json:"count"`
+	// CountHedged is the model's OWN signal that count could not be pinned to
+	// a definite number — "a couple", "maybe three or four" — as opposed to a
+	// definite number that the guard below could not verify. Read on input
+	// only: `ResolveDraft` turns a true value into a Notice and always clears
+	// it before a tag is returned (the `omitempty` tag means it never actually
+	// serialises `true`), so nothing downstream should read it off a response.
+	//
+	// N121/#510: without this, a model correctly leaving `count` at 1 for a
+	// hedge is indistinguishable on the wire from an athlete who said "one" —
+	// both are just `count: 1`, no notice, and the confirm screen shows a
+	// confident number instead of asking. This is the signal that tells them
+	// apart; see NoticeHedgedCount.
+	CountHedged bool `json:"count_hedged,omitempty"`
 }
 
 // AsTag is the tag this draft becomes once confirmed, for validating a draft
@@ -160,6 +173,14 @@ const (
 	NoticeUnknownValue = "unknown_value"
 	// NoticeCountBelowOne is a count of zero or less, floored to one.
 	NoticeCountBelowOne = "count_below_one"
+	// NoticeHedgedCount is the model reporting an indefinite quantity — "a
+	// couple", "maybe three or four" — correctly left at 1 rather than
+	// invented into one of the numbers named. Distinct from NoticeNotSpoken:
+	// there the model proposed a number and it was rejected; here it proposed
+	// nothing, on purpose, and the 1 is not a floor but the honest "at least
+	// once". Added for N121/#510 — without it, this case and an athlete's own
+	// stated "one" are the same `count: 1` with no notice at all.
+	NoticeHedgedCount = "hedged_count"
 	// NoticeTooManyTags is the tag list being cut to MaxDraftTags.
 	NoticeTooManyTags = "too_many_tags"
 )
@@ -461,6 +482,21 @@ func ResolveDraft(raw Draft, cat Catalog, dictation string) Draft {
 			t.Count = 1
 		}
 
+		// Independent of the switch above, and deliberately not exclusive with
+		// it: `CountHedged` is the model's own report about what the athlete
+		// SAID, not a verdict about the number that ended up in `count`. A
+		// compliant model leaves `count` at 1 for a hedge, which matches no
+		// case above (1 is not <1, not >1, not >max) — so without this, a
+		// hedge that the model got exactly right produces zero notices and
+		// looks identical to an athlete who genuinely said "one". See
+		// NoticeHedgedCount and the CountHedged field doc.
+		if t.CountHedged {
+			notices = append(notices, Notice{
+				Field: "count", Was: strconv.Itoa(t.Count), Reason: NoticeHedgedCount,
+			})
+		}
+		t.CountHedged = false // never round-trips true; see the field's doc comment.
+
 		tags = append(tags, t)
 		tagNotices = append(tagNotices, notices)
 	}
@@ -670,13 +706,17 @@ func DraftSchema(families []string) map[string]any {
 	tag := map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []any{"category", "event", "position", "technique_id", "count"},
+		"required":             []any{"category", "event", "position", "technique_id", "count", "count_hedged"},
 		"properties": map[string]any{
 			"category":     map[string]any{"type": "string", "enum": enumOf(categoryStrings())},
 			"event":        map[string]any{"type": "string", "enum": enumOf(eventStrings())},
 			"position":     map[string]any{"type": "string", "enum": positions},
 			"technique_id": map[string]any{"type": []any{"string", "null"}},
 			"count":        map[string]any{"type": "integer"},
+			// See DraftTag.CountHedged: true only for an indefinite quantity
+			// ("a couple", "maybe three or four"), never for a plain unstated
+			// count — that is simply false, not a hedge.
+			"count_hedged": map[string]any{"type": "boolean"},
 		},
 	}
 	unresolved := map[string]any{
