@@ -1735,10 +1735,14 @@ function LeadBlock({
             // never on a day already gone (a past class card says "Not
             // logged", not what to try next on it).
             hint={p.sport === 'bjj' && !isPast && classFocusValue ? classHintText(classFocusValue) : null}
-            // A day already gone is a statement, not a control — the same
-            // rule the plan card this replaced always drew: `past` drops the
-            // handler and the Log button and says `pastLabel` instead of
-            // dimming, because a blanket opacity took "Not logged" below AA.
+            // N457/#766: a day already gone still gets a real button — the
+            // SAME `onStart` this card uses on any other day, which is
+            // already past-day-aware (`startPlanned` passes `viewDay` as the
+            // backfill date when `isPast`). `past` only changes what the
+            // card SAYS (`pastLabel`, no roadmap hint), never whether it can
+            // be tapped — `UpNextCard` handles the two accessibility bugs
+            // that once made `past` mean inert (contrast, VoiceOver
+            // "dimmed") internally now.
             past={isPast}
             pastLabel="Not logged"
             // The verb comes from the CATALOG KIND, not the module key — a
@@ -1753,7 +1757,9 @@ function LeadBlock({
             // Control's "tap BJJ session" matches nothing.
             accessibilityLabel={
               isPast
-                ? `${p.workoutName ?? `${labelFor(modules, p.sport)} session`}, planned and not logged`
+                ? `${
+                    logsAfterwards(p.sport, modules) ? 'Log' : 'Start'
+                  } ${p.workoutName ?? `${labelFor(modules, p.sport)} session`}, planned for ${dayLabel.toLowerCase()}, not yet logged`
                 : `${
                     logsAfterwards(p.sport, modules) ? 'Log' : 'Start'
                   } ${p.workoutName ?? `${labelFor(modules, p.sport)} session`}, planned for ${

@@ -693,7 +693,7 @@ describe('the day switcher, restored on direct user instruction', () => {
     expect(mockPush).toHaveBeenCalledWith('/bjj/log');
   });
 
-  it('steps to a past day with an unmet plan: no press, says Not logged', async () => {
+  it('steps to a past day with an unmet plan: says Not logged, and is a real button', async () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, classPlanId: null, notes: '' },
     ]);
@@ -703,9 +703,40 @@ describe('the day switcher, restored on direct user instruction', () => {
 
     const card = await screen.findByTestId('today-plan-p1');
     expect(screen.getByText('Not logged')).toBeTruthy();
-    // `past` drops the Log button and the press handler entirely.
+    // N457/#766: the card itself is the one control now — `onLog` and
+    // `onOpen` are the same handler at this call site, so there is no
+    // second nested Pressable to find here, only the whole-card button.
     expect(screen.queryByTestId('up-next-log')).toBeNull();
-    expect(card.props.accessibilityRole).toBe('text');
+    // Not `'text'` any more — the two accessibility bugs that role change
+    // used to guard against (opacity dimming, VoiceOver "dimmed") are now
+    // guarded inside `UpNextCard` itself without going inert.
+    expect(card.props.accessibilityRole).toBe('button');
+  });
+
+  it('tapping a past-day unmet plan card logs it, backdated to the browsed day', async () => {
+    mockListPlannedBetween.mockResolvedValue([
+      { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, classPlanId: null, notes: '' },
+    ]);
+    render(<TodayScreen />);
+    await screen.findByTestId('today-unplanned');
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    fireEvent.press(await screen.findByTestId('today-plan-p1'));
+    // N434/#721's mechanism, reused rather than reimplemented: `?date=`
+    // carries the browsed day, not "now".
+    expect(mockPush).toHaveBeenCalledWith(`/session/start?sport=strength&date=${dayFromNow(-1)}`);
+  });
+
+  it('tapping a past-day unmet BJJ plan card opens the BJJ log, backdated to the browsed day', async () => {
+    mockListPlannedBetween.mockResolvedValue([
+      { id: 'p1', day: dayFromNow(-1), sport: 'bjj', workoutId: null, classPlanId: null, notes: '' },
+    ]);
+    render(<TodayScreen />);
+    await screen.findByTestId('today-unplanned');
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    fireEvent.press(await screen.findByTestId('today-plan-p1'));
+    expect(mockPush).toHaveBeenCalledWith(`/bjj/log?date=${dayFromNow(-1)}`);
   });
 
   it('a past rest day says nothing was logged, not "rest counts"', async () => {

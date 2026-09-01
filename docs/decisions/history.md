@@ -50146,6 +50146,92 @@ question in #763 rather than decided unilaterally here, since the
 cost/benefit (extra CI time vs. a class of bug that has now happened exactly
 once) is a judgment call for whoever picks it up next.
 
+## 2026-09-01 — N457/#766: the "Not logged" card can log the session it names
+
+**Direct user report**: *"i need to be able to log that not logged one that
+appears on the screen."* Browsing a past day on Today, a session that was
+planned but never happened rendered as a static "Not logged" line — the card
+was a real button on every other day and plain `accessibilityRole="text"` on
+this one, with no `onPress` at all.
+
+**This finishes what N434/#721 started rather than adding a new path.** N434
+already built the whole past-day-aware backfill mechanism —
+`startPlanned` (`app/(tabs)/index.tsx`) already computed
+`startSessionHref(p, modules, isPast ? dayString(viewDay) : undefined)`, and
+the owed-card render block already passed `onLog={() => onStart(p)}` and
+`onOpen={() => onStart(p)}` into `UpNextCard`. None of that was wrong and
+none of it changed here. The entire bug was inside `UpNextCard.tsx`, which
+received working handlers and refused to call them: `onPress={past ?
+undefined : onOpen}`, `accessibilityRole={past ? 'text' : 'button'}`, and the
+Log button replaced outright by a plain `<Text>`.
+
+**Why it was built that way in the first place, and why that reasoning
+doesn't hold.** `UpNextCard`'s own doc comment named two real accessibility
+bugs on the plan card this one replaced: a blanket `opacity` composited every
+ink inside the card and took "Not logged" to 1.96:1 against its ground
+(fails WCAG AA), and RN's `disabled` prop folds into `accessibilityState`, so
+VoiceOver appended "dimmed" to something already declared `text`. Both are
+real bugs. Dropping the press handler and the button role fixed both by
+removing the feature rather than fixing the dimming — and the card had
+*already* stopped applying a blanket opacity by the time this ticket was
+picked up (`pastLabel` renders in the flat `vola.warn`, no opacity anywhere
+in the file), so the inertness was solving a bug that no longer existed in
+that form and was, in the meantime, blocking the one thing the card exists
+for.
+
+**The fix, entirely inside `UpNextCard.tsx`** — no change to `startPlanned`,
+`startSessionHref`, or `bjj/log.tsx`'s `backdatedTimestamp`, all of which
+were already correct:
+
+- `onPress` is now always `onOpen`, `accessibilityRole` is always `'button'`,
+  on `past` or not.
+- The `past` branch renders `pastLabel` ("Not logged") beside a chevron
+  instead of beside a second nested Log `Pressable` — `onLog` and `onOpen`
+  are the same handler at this component's one call site, so a second hit
+  target would just be two ways to do one thing. The chevron carries the
+  same "this is tappable" signal it already carries on the non-past card.
+- Contrast: unchanged. `pastLabel` was already a flat `vola.warn` on
+  `vola.surface` (measured 9.99:1, clear of the 4.5:1 AA floor) — no opacity
+  was reintroduced anywhere.
+- VoiceOver "dimmed": structurally can't recur. Neither `Pressable` in this
+  file sets `disabled` or `accessibilityState` on any path, past or not, so
+  there is nothing for VoiceOver to fold "dimmed" onto.
+
+`app/(tabs)/index.tsx`'s call site needed one following change: the
+`accessibilityLabel` built for `isPast` read "…, planned and not logged" —
+accurate for an inert card, misleading for a tappable one (it describes a
+state with no mention that tapping does anything). It now matches the
+non-past label's shape: `"${Log|Start} ${title}, planned for ${dayLabel},
+not yet logged"` — same verb selection (`logsAfterwards`), same day, plus
+the outstanding-state word at the end instead of it.
+
+**Tests.** `apps/mobile/components/today/__tests__/upNextCard.test.tsx` is
+new — this component had no direct test file before. It covers: a `past`
+card is `accessibilityRole="button"` and calls `onOpen` on press; it renders
+no nested `up-next-log` control; it never sets `disabled` or
+`accessibilityState.disabled`; and it never carries an `opacity` in its
+style array. `todayScreen.test.tsx`'s existing past-day test ("no press,
+says Not logged") is rewritten to assert the opposite (real button, no
+regression on the missing nested control) and two new integration tests
+assert the actual `mockPush` destination is backdated —
+`/session/start?sport=strength&date=<day>` for strength,
+`/bjj/log?date=<day>` for BJJ — reusing `dayFromNow(-1)` the way N434's own
+tests already do. The non-past assertions in both files are untouched and
+still pass, which is the "TODAY unaffected" criterion checked structurally
+rather than asserted once.
+
+**Mutation-verified**: reverting `UpNextCard.tsx` to its pre-fix state turns
+5 of the 68 relevant tests red (the new direct-component tests plus the
+rewritten integration ones) for the expected reason — restoring the fix
+turns all 68 green again.
+
+**Open**: NEEDS HUMAN EVIDENCE — a device pass browsing to a past day with a
+planned-but-missed BJJ or strength session, tapping its card, confirming the
+log flow opens dated to the browsed day (not today), and confirming the
+resulting session shows up against that past day afterward. The floating
+"New log" FAB path and today's own (non-past) card behavior are unchanged by
+this diff and were not re-verified beyond the existing/updated test suite.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
