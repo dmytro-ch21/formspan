@@ -249,10 +249,16 @@ describe('a tag count the server could not verify', () => {
       expect(screen.getByLabelText('scored pass: how many? not set')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByLabelText('One more scored pass'));
-
-    // Confirmed at 2 now, reading like any ordinary stepper — no more "not set".
+    // "+" on a blank count confirms at the hidden floor first — same reasoning
+    // as "−": the underlying value is already 1, and jumping straight to 2
+    // would silently double-count for an athlete who tapped once meaning "yes,
+    // one". Matches the session-level `Stepper`'s own null-count semantics.
+    fireEvent.press(screen.getByLabelText('Set scored pass to 1'));
     expect(screen.queryByLabelText('scored pass: how many? not set')).toBeNull();
+    expect(screen.getByLabelText('1 scored pass')).toBeTruthy();
+
+    // Now an ordinary, un-flagged stepper — a second "+" behaves normally.
+    fireEvent.press(screen.getByLabelText('One more scored pass'));
     expect(screen.getByLabelText('2 scored pass')).toBeTruthy();
 
     fireEvent.press(screen.getByLabelText('Save this session'));
@@ -314,9 +320,12 @@ describe('a tag count the server could not verify', () => {
     // The stepper reads blank, same as any other uncertain count — this is
     // not a second UI, it is the same mechanism reached a new way.
     expect(screen.getByText(/how many\? we weren.t sure/i)).toBeTruthy();
-    // And the notice text does not accuse the model of a mistake — it made
-    // none; the athlete gave a range, not a number.
+    // The real message renders (not just "neither wrong message showed" —
+    // that would also pass if `describeNotice` silently fell through to its
+    // unknown-reason default), and it does not accuse the model of a
+    // mistake — it made none; the athlete gave a range, not a number.
     expect(screen.getByTestId('dictate-notices')).toBeTruthy();
+    expect(screen.getByText(/you said a range/i)).toBeTruthy();
     expect(screen.queryByText(/couldn.t match/i)).toBeNull();
     expect(screen.queryByText(/came back as/i)).toBeNull();
   });

@@ -123,8 +123,12 @@ type DraftTag struct {
 	// a definite number — "a couple", "maybe three or four" — as opposed to a
 	// definite number that the guard below could not verify. Read on input
 	// only: `ResolveDraft` turns a true value into a Notice and always clears
-	// it before a tag is returned (the `omitempty` tag means it never actually
-	// serialises `true`), so nothing downstream should read it off a response.
+	// it to false before a tag is returned. That explicit clear, not the
+	// `omitempty` tag, is what guarantees a response never carries `true` —
+	// `omitempty` alone omits `false`, but WOULD still serialise a `true` it
+	// was given; it does its job here only because the value reaching it is
+	// already false on every path. Do not remove the clear on the theory that
+	// `omitempty` covers it.
 	//
 	// N121/#510: without this, a model correctly leaving `count` at 1 for a
 	// hedge is indistinguishable on the wire from an athlete who said "one" —

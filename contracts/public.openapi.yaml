@@ -1576,9 +1576,17 @@ components:
           description: What the model said, rendered as text.
         reason:
           type: string
-          enum: [unknown_technique, not_spoken, unknown_value, count_below_one, too_many_tags]
+          enum: [unknown_technique, not_spoken, unknown_value, count_below_one, hedged_count, too_many_tags]
           description: >
             Part of the contract; branch on this rather than on any message.
+            `hedged_count` is distinct from `not_spoken`/`count_below_one`:
+            those two only ever fire when the model got a count wrong (invented
+            or malformed a number); `hedged_count` fires on the model behaving
+            CORRECTLY — the athlete gave an indefinite quantity ("a couple",
+            "maybe three or four") and the model left `count` at 1 rather than
+            inventing one value from a range, self-reporting that judgement so
+            a client can still ask rather than show a silently confident 1
+            (N121/#510).
 
     BjjDraftQuota:
       type: object

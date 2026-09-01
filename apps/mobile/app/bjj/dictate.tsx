@@ -713,10 +713,20 @@ function TagRow({
           {countUncertain ? '—' : tag.count}
         </Text>
         <Pressable
-          onPress={() => onCount(tag.count + 1)}
+          onPress={() => {
+            // Same reasoning as "−": the count is already floored to 1
+            // underneath a blank stepper, invisibly. Incrementing THAT (to 2)
+            // is not what an athlete tapping "+" once from "—" is asking for
+            // — matches the session-level `Stepper`'s own null-count
+            // semantics, where "+" from blank also lands on 1, not 2.
+            onCount(countUncertain ? tag.count : tag.count + 1);
+          }}
           style={styles.stepButton}
           accessibilityRole="button"
-          accessibilityLabel={`One more ${title}`}
+          // Both step buttons confirm the same floor on a first press from
+          // blank — worded differently from "−"'s so the two remain
+          // individually addressable to a screen reader (and to a test).
+          accessibilityLabel={countUncertain ? `Set ${title} to ${tag.count}` : `One more ${title}`}
         >
           <Text style={styles.stepGlyph}>+</Text>
         </Pressable>

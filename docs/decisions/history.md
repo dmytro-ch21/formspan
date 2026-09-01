@@ -50505,6 +50505,48 @@ as wrong. `evals/bjj-dictation/` still has zero promoted `recorded` cases as
 a result; the README's "What does not exist yet" list is unchanged on that
 point.
 
+**A second review pass (PR #784, `ac-verifier` + `backend-reviewer` +
+`frontend-reviewer`, after the `count_hedged` fix above) found two more real
+things, both fixed in the same PR before it went to the user:**
+
+- **`[blocking]`, `backend-reviewer`: `contracts/public.openapi.yaml`'s
+  `BjjDraftNotice.reason` enum did not list `hedged_count`**, so the server
+  was emitting a reason value the hand-maintained wire contract said could
+  not occur — and the mobile diff in this very PR branches on it. Fixed by
+  adding it to the enum with a description distinguishing it from
+  `not_spoken`/`count_below_one` (those two only ever fire on the model
+  getting a count wrong; `hedged_count` fires on it behaving correctly).
+  `pnpm run lint:openapi` passing.
+- **`[suggestion]`, `frontend-reviewer`, taken as a real fix rather than left
+  as a judgement call: "+" on a blank tag count jumped straight to 2.** The
+  count is already floored to 1 underneath a blank stepper, invisibly — an
+  athlete tapping "+" once, meaning "yes, one", got 2, silently one over
+  what they confirmed. The session-level `Stepper` already gets this right
+  (`(value ?? 0) + 1` lands a null count on 1, not 2); `TagRow`'s "+" did not
+  share that semantic. Fixed to match: "+" and "−" both confirm the existing
+  floor on a first press from blank, and only diverge into their ordinary
+  increment/decrement-or-remove behaviour once the count is a real,
+  un-flagged number. The two buttons needed distinguishable accessibility
+  labels once they could do the identical thing ("Set … to 1" vs.
+  "Confirm … at 1") — same action, worded from each button's own glyph.
+  Mutation-verified.
+- Also fixed, `[suggestion]`, `backend-reviewer`: `CountHedged`'s doc comment
+  had attributed "never serialises `true`" to the `omitempty` JSON tag,
+  which is wrong — measured directly, `omitempty` omits `false` but WOULD
+  still serialise a `true` it was given. The real guarantee is the explicit
+  clear in `ResolveDraft` before a tag is returned; the comment now says so,
+  so a future edit does not delete the clear "because omitempty covers it".
+- The hedge screen test was strengthened per `frontend-reviewer`'s note that
+  it only asserted the wrong copy was ABSENT, which would also pass if
+  `describeNotice` silently fell through to its unknown-reason default — it
+  now positively asserts the real `hedged_count` sentence renders.
+
+Both `ac-verifier` and `backend-reviewer` independently confirmed the first
+round's two fixes (the compliant-hedge blind spot, and the verbatim
+transcript) are genuinely resolved on this branch — `3d3d347d`, the commit
+that had carried the verbatim text, was never pushed to GitHub at all
+(`gh api .../commits/3d3d347d` returns 404) and is unreachable from any ref.
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
