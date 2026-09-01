@@ -15144,11 +15144,12 @@ Reading the diff cannot settle any of these.
   unplanned session via **New log**. Confirm it is reachable exactly the same
   way as a planned day — the FAB does not require a plan to exist first.
 - Browse to a past day that already has a planned-and-missed BJJ/strength
-  session shown as "Not logged" on the Up Next card. Confirm **New log** (not
-  the card itself, which stays a statement) is still the route to backfill
-  it, and that logging it does NOT retroactively mark the Up Next card's
-  planned entry as fulfilled unless the sport/day genuinely match the plan's
-  own matching rule.
+  session shown as "Not logged" on the Up Next card. Confirm **New log** is
+  still one route to backfill it, and that logging it does NOT retroactively
+  mark the Up Next card's planned entry as fulfilled unless the sport/day
+  genuinely match the plan's own matching rule. (**Superseded by N457/#766,
+  below — the card itself is now a second, more direct route to the same
+  backfill, not only a statement.**)
 - Backfill the SAME day twice (two BJJ sessions, or a BJJ and a strength
   session, both dated the same past day). Confirm both persist as separate
   sessions — no dedup, no overwrite — the way two real sessions on one day
@@ -15792,3 +15793,76 @@ its own.
   `MacroDonut`) and the glyphs read correctly at a glance.
 - The section sums checked by hand against the day total on a real logged
   day, not just asserted in a unit test.
+
+## N457 — the "Not logged" card on a past day is a real log button (`apps/mobile/components/today/UpNextCard.tsx`, `apps/mobile/app/(tabs)/index.tsx`)
+
+Completes N434/#721's own promise: N434 built the past-day-aware backfill
+route end to end but only wired it to the floating "New log" picker.
+`UpNextCard` itself refused to call the same, already-correct handlers when
+`past` was true. See the N434 section above for the underlying backfill
+mechanism (`?date=`, `backdatedTimestamp`) — this section covers only what
+changed: the card's own tappability and accessibility.
+
+### Happy path
+
+- Browse Today back to a past day carrying a planned-but-not-logged BJJ
+  session (Up Next shows "Not logged"). Tap the card itself (not a separate
+  button — the whole card is the tap target). Confirm this opens `/bjj/log`
+  with the browsed day pre-filled/backdated, identically to what tapping
+  **New log** → BJJ on that same day would produce.
+- Same, for a planned-but-not-logged **strength** session on a past day. Tap
+  the card. Confirm it opens the session-start flow for that sport, dated to
+  the browsed day, not today.
+- After logging either from the card, confirm the session appears in history
+  dated to the browsed day, and that Up Next's "Not logged" card is replaced
+  by the "planned and done" / all-done state for that day, matching how
+  logging the same plan item via **New log** already behaves.
+- Press-and-release the card without dragging off it: confirm the pressed
+  state (background tint) shows and releases the same way the non-past
+  card's pressed state does — it should read as one ordinary button, not a
+  disabled control that happens to still fire.
+
+### Edge cases and errors
+
+- Confirm today's (non-past, `dayOffset === 0`) Up Next card is
+  byte-unaffected: it still shows the separate "Log"/"Start" pill plus
+  chevron, tapping the pill logs it, and tapping elsewhere on the card also
+  logs it (both call the same handler at this call site) — this ticket did
+  not touch that branch.
+- Confirm a FUTURE day's Up Next card (`dayOffset > 0`) is also unaffected —
+  it already routed through the same `onStart`/`startSessionHref` machinery
+  as today, undated, and this ticket changes nothing about that path either.
+- Confirm the floating **New log** FAB still works unchanged on a past day
+  for a session that was NOT planned (a genuinely off-plan backfill) — this
+  ticket only changes the specific plan item's own card, not the FAB.
+- A past BJJ day that also carries a roadmap hint: confirm the hint line
+  still does NOT render on a past card (`hint` is suppressed whenever
+  `isPast`, unchanged by this ticket) — only the card's tappability changed.
+
+### Accessibility (the sharpest risk in this change)
+
+- **VoiceOver, past card**: confirm it announces as a **button** naming the
+  session and day (e.g. "Log Strength session, planned for [day], not yet
+  logged"), and does **not** append "dimmed" — the double-announcement bug
+  this card's own history documents. If "dimmed" reappears, check for a
+  reintroduced `disabled` prop or explicit `accessibilityState` on either
+  `Pressable` in `UpNextCard.tsx`.
+- **Contrast, past card**: confirm "Not logged" is clearly legible against
+  the card background at a glance in both light and dim gym lighting — it
+  should look identical in colour to before this ticket (no opacity wash was
+  added; `vola.warn` on `vola.surface` measures 9.99:1). If it looks washed
+  out, that is a regression of the 1.96:1 bug this ticket was explicitly
+  told not to reintroduce.
+- **VoiceOver focus order**: confirm there is exactly one focusable element
+  for this card on a past day (the whole card), not two — unlike the
+  non-past card, which has two (the card and the nested Log pill).
+
+### Needs a device
+
+- Everything under "Accessibility" above — VoiceOver's actual announced
+  string and the "dimmed" trailer specifically can only be heard on-device;
+  the unit tests assert the underlying props (`accessibilityRole`, absence
+  of `disabled`/`accessibilityState`) but not what VoiceOver actually says.
+- The tap-target size and press-feedback feel for a past card on a real
+  phone, standing at the gym rather than at a desk — this is the scenario
+  the direct user report described.

@@ -46,14 +46,24 @@ export type UpNextCardProps = {
   onOpen: () => void;
   logLabel?: string;
   /**
-   * A day already gone. The card becomes inert and says so in words.
+   * A day already gone, and nothing was logged for it — still a real button
+   * (N457/#766): tapping it opens the same past-day-aware log flow as any
+   * other card, backdated to the day being browsed, so a planned-but-missed
+   * session can be logged from right here instead of only through the
+   * floating "New log" picker.
    *
-   * **Not `disabled`, and not dimmed.** React Native folds `disabled` into
-   * `accessibilityState`, so VoiceOver appends "dimmed" to something already
-   * declared `text`; and a blanket `opacity` composites every ink inside, which
-   * took the old card's "Not logged" to 1.96:1 against its ground. Both traps
-   * are recorded on the plan card this replaced, and both are avoided the same
-   * way: drop the handler, change the role, say the state.
+   * It was briefly made inert instead — dropping the handler entirely and
+   * saying `pastLabel` as plain text — to fix two real accessibility bugs on
+   * the plan card this replaced: a blanket `opacity` composited every ink
+   * inside and took "Not logged" to 1.96:1 against its ground (fails AA), and
+   * `disabled` folded into `accessibilityState`, so VoiceOver appended
+   * "dimmed" to something already declared `text`. That fixed the symptom by
+   * removing the feature. Both bugs are avoided here without going inert
+   * again: `pastLabel` renders in `vola.warn`, a flat colour (no opacity
+   * wash) that measures 9.99:1 on `vola.surface` — clear of AA with room —
+   * and this component never sets `disabled` or `accessibilityState` on
+   * either `Pressable`, on this path or any other, so VoiceOver has nothing
+   * to fold "dimmed" onto.
    */
   past?: boolean;
   pastLabel?: string;
@@ -79,12 +89,12 @@ export function UpNextCard({
 
   return (
     <Pressable
-      onPress={past ? undefined : onOpen}
-      accessibilityRole={past ? 'text' : 'button'}
+      onPress={onOpen}
+      accessibilityRole="button"
       accessibilityLabel={
         accessibilityLabel ?? `${title}, ${when}${hint ? `. ${hint}` : ''}`
       }
-      style={({ pressed }) => [styles.card, pressed && !past && styles.pressed]}
+      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
       testID={testID}
     >
       {/* The sport's rule down the leading edge, flat fill. */}
@@ -108,7 +118,19 @@ export function UpNextCard({
       </RNView>
 
       {past ? (
-        <Text style={styles.missed}>{pastLabel}</Text>
+        <>
+          {/*
+            The whole card is already the one active control here (`onOpen`
+            above) — `onLog` is the same handler at every call site this
+            component has, so a second nested Pressable would just be two
+            hit targets doing one thing. The chevron is what used to sit
+            beside the Log button; keeping it beside `pastLabel` is what
+            tells a sighted athlete "Not logged" is now tappable rather than
+            a plain status line.
+          */}
+          <Text style={styles.missed}>{pastLabel}</Text>
+          <Icon name="chevron" size={16} color={vola.textDim} />
+        </>
       ) : (
         <>
           <Pressable
