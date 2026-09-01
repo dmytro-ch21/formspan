@@ -119,12 +119,24 @@ type Promotion struct {
 	// PromotedOn is "YYYY-MM-DD", or nil when the athlete does not remember.
 	// An undated promotion still establishes rank — refusing it to protect
 	// the metadata would lose the fact itself.
-	PromotedOn *string   `json:"promoted_on"`
-	Academy    string    `json:"academy"`
-	Instructor string    `json:"instructor"`
-	Note       string    `json:"note"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	PromotedOn *string `json:"promoted_on"`
+	Academy    string  `json:"academy"`
+	Instructor string  `json:"instructor"`
+	Note       string  `json:"note"`
+
+	// PhotoKey is the storage key, never a URL, and it is **not serialised to
+	// clients** — a client receives `photo_url` instead, a short-lived
+	// presigned link the handler mints per response, exactly as
+	// `body.Checkin.PhotoKey`/`PhotoURL` already work. Same reasoning as
+	// `PromotedOn` above: a promotion with no photo still fully establishes
+	// rank, so the field is nullable and optional everywhere, never required.
+	PhotoKey *string `json:"-"`
+	// PhotoURL is presigned and expires. Absent when there is no photo, or
+	// when object storage is not configured.
+	PhotoURL string `json:"photo_url,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Standing is the whole BJJ rank picture for one athlete.
@@ -144,8 +156,21 @@ type Standing struct {
 // Repository is the persistence port.
 type Repository interface {
 	ListPromotions(ctx context.Context, userID string) ([]Promotion, error)
+	// GetPromotion reads one promotion, scoped to its owner. Added for the
+	// photo delete-cleanup path — DeletePromotion below only ever returns an
+	// error, so this is how the handler learns a photo key exists before the
+	// row that names it is gone.
+	GetPromotion(ctx context.Context, userID, id string) (Promotion, error)
 	CreatePromotion(ctx context.Context, p Promotion) (Promotion, error)
 	UpdatePromotion(ctx context.Context, p Promotion) (Promotion, error)
+	// AttachPhotoKey writes ONLY the photo key, mirroring
+	// body.Repository.AttachPhotoKey and for the same reason: routing this
+	// through UpdatePromotion would require the caller to resend every other
+	// field or have them overwritten. Unlike a check-in this is never an
+	// upsert — a promotion has no natural key to upsert on, so attaching a
+	// photo to an id that does not exist (or belongs to someone else) is
+	// ErrNotFound.
+	AttachPhotoKey(ctx context.Context, userID, id, key string) (Promotion, error)
 	DeletePromotion(ctx context.Context, userID, id string) error
 }
 

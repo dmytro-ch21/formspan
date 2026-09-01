@@ -2969,6 +2969,44 @@ rendering, submitting and reflecting what the server derived.
 - Deleting a promotion asks for confirmation first (`Alert.alert` on mobile,
   `confirm()` on web) and does nothing if declined.
 
+### Promotion photo (N456)
+
+- A promotion with no photo is exactly as valid a record as one with one —
+  the field is optional everywhere, matching `promoted_on`'s own "undated
+  promotion still establishes rank" precedent. Nothing on the add form or
+  the standing list requires or implies a photo.
+- **Adding**: picking a photo before the first Save only previews it
+  locally — nothing is uploaded yet, because the promotion has no id to
+  attach it to. Saving creates the promotion, then uploads the held photo to
+  the id the create returned.
+- If the deferred upload fails after a successful create (bad connection
+  right after Save, say), the promotion is still saved and the form still
+  navigates away — the athlete is told the photo needs adding again, and can
+  do that by opening the promotion. The rank must never be lost over a photo
+  failure.
+- **Editing**: picking a photo on an already-saved promotion uploads it
+  immediately — no need to press Save, the same interaction check-ins offer
+  on `checkin/[date].tsx`. Picking again replaces the previous photo (same
+  storage key, overwritten in place).
+- A promotion with a photo shows it on the edit screen; the `/bjj` hub's
+  promotion list carries the presigned URL through to the edit screen as a
+  first-paint hint, then the edit screen re-fetches standing on its own to
+  mint a fresh one — the hint may be minutes old by the time it's opened, so
+  don't treat a broken image on first paint alone as a bug; it should
+  resolve within a moment.
+- Deleting a promotion that has a photo removes the object too — reopening
+  the deleted promotion's id (if that were possible) or re-adding a
+  promotion must never resurrect the old picture.
+- With no object storage configured (local dev, CI), the photo picker still
+  offers to attach — the upload request answers honestly that storage isn't
+  configured, rather than the picker silently doing nothing or crashing the
+  form. A promotion saved in this state has no photo, which is a supported
+  state, not a broken one.
+- Attempting to attach a photo to a promotion id that doesn't belong to the
+  signed-in account (a crafted request, not reachable through the UI)
+  answers 404, identical to editing or deleting somebody else's promotion —
+  never a distinct response that would confirm the id exists.
+
 ### Module gating
 
 - With `bjj` disabled, the You-screen card, the `/bjj` route, and web's

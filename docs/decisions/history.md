@@ -50232,6 +50232,129 @@ resulting session shows up against that past day afterward. The floating
 "New log" FAB path and today's own (non-past) card behavior are unchanged by
 this diff and were not re-verified beyond the existing/updated test suite.
 
+## 2026-09-01 — N456 (#765): a promotion photo, following body_checkins' presigned-key pattern exactly
+
+**The request, verbatim (2026-08-31):** *"make that when we log a new
+promotion for bjj so we can attach a picture."* `bjj_promotions` had no
+photo/image field at all, and neither promotion screen had a picker — a belt
+promotion photo, one of the more obviously permanent things an athlete wants
+recorded, had nowhere to live.
+
+**Backend.** Migration `000083_bjj_promotion_photo` adds `photo_key TEXT`
+(nullable) to `bjj_promotions` — same column, same nullability, same
+"absent means no photo" semantics `body_checkins.photo_key` already
+established. `Promotion` gained `PhotoKey *string` (unserialised) and
+`PhotoURL string` (presigned, computed at read time, `omitempty`), following
+`Checkin.PhotoKey`/`PhotoURL`'s exact doc-comment shape and the same
+"a promotion with no photo is exactly as valid a record" reasoning
+`PromotedOn`'s own doc comment already makes for an undated promotion.
+
+Two repository methods that did not exist before this: `GetPromotion`
+(scoped by user_id — needed for the delete-cleanup path, and there had
+previously been no single-row read at all, only `ListPromotions`) and
+`AttachPhotoKey` (mirrors `body.Repository.AttachPhotoKey` — a photo-only
+write, never routed through `UpdatePromotion`, for the same reason: that path
+already replaces every field and would silently blank whatever the athlete
+had typed if a photo attach went through it). **Unlike a check-in, this is
+never an upsert** — a promotion has no natural key to upsert on, so the
+promotion has to already exist (created via `POST /bjj/promotions` first);
+attaching a photo to an unknown or another account's id is `ErrNotFound`, not
+an implicit insert.
+
+`Handler` gained a possibly-nil `*objectstore.Store`, `present()` (mints a
+15-minute presigned GET per response, silent-and-logged on failure, exactly
+`body.Handler.present`'s shape), `deleteObject()` (identical to `body`'s —
+both talk to the same kind of presigned-DELETE store), and
+`PhotoUploadURL` (`POST /v1/bjj/promotions/{promotionID}/photo`, 30-minute
+presigned PUT, derives the key from the authenticated caller and the path id
+so a client can never obtain a signature over somebody else's object). Unlike
+a check-in's date-derived key (stable per day, so a same-day re-upload
+overwrites in place), a promotion's key is **id-derived and stable for the
+life of the row** — `promotions/{userID}/{promotionID}.jpg` — so replacing a
+photo overwrites the same object rather than minting a new one each time.
+`GetStanding`/`AdminGetStanding` now call `present()` over every returned
+promotion; `UpdatePromotion`'s response does too, so correcting a rank/date
+doesn't read as though it silently dropped an attached photo.
+
+**Delete cleanup.** `DeletePromotion` now fetches the row via `GetPromotion`
+before deleting it, and — if a photo key is set — deletes the object first,
+non-fatally (a storage outage must not block deleting the promotion; the
+athlete asked for the row gone, and the row is the part under our control).
+Same ordering and the same reasoning as `body.Handler.DeleteCheckin`. Unlike
+a check-in's key, a promotion's key can genuinely **never be reconstructed
+again** once the row is gone (nothing else derives it), so an orphaned object
+here is retained for good rather than merely until the next attempt — logged
+at Warn rather than swallowed.
+
+**Local dev / CI with no bucket degrades exactly as documented.** `NewHandler`
+takes a possibly-nil store; `PhotoUploadURL` answers `503` honestly rather
+than a 500 that reads like a bug; `present()` is silently a no-op with no
+store, so a promotion with a photo key but no store still renders — every
+other field intact, just no `photo_url`.
+
+**Frontend.** `lib/bjj.ts` gained `Promotion.photo_url` and
+`uploadPromotionPhoto()` — the same two-request shape (mint a ticket, PUT the
+blob straight to storage) as `lib/body.ts`'s `uploadCheckinPhoto`, including
+the same "the returned `promotion` deliberately has an empty `photo_url`"
+behaviour, for the same reason: the key is deterministic, so presigning it
+immediately after minting the PUT would resolve to whatever was there
+*before* this upload's bytes arrive.
+
+`components/PromotionForm.tsx` — shared by both `promotion/new.tsx` and
+`promotion/[id].tsx` — is where the actual picker lives, and the two modes
+behave differently on purpose:
+
+- **Adding** (no promotion exists yet — no id to attach a photo TO): picking
+  one only downscales it (`lib/imageUpload.ts`'s shared
+  `prepareImageForUpload`, N74's helper — the fifth call site now, after
+  avatar/food-describe/check-in/session-identify) and previews it locally.
+  `save()` creates the promotion first, and only then — now that an id
+  exists — uploads the held photo. A failed photo upload does not undo or
+  block the save: the rank is what mattered, and the athlete is told the
+  promotion saved but the photo needs re-adding.
+- **Editing** (the promotion already has an id): a pick uploads immediately,
+  the exact interaction `checkin/[date].tsx` already offers — no Save
+  required.
+
+**The no-GET-by-id design meant a small wrinkle worth recording.**
+`promotion/[id].tsx` has never fetched anything — by design (its own doc
+comment: the hub screen already has the full row, so there's nothing to
+cross-check against). A photo, unlike every other field it carries, is
+represented by a **presigned URL that expires in 15 minutes**, so trusting
+the route param indefinitely would eventually show a broken image on a
+promotion that has a perfectly good photo. Rather than add a `GET
+/bjj/promotions/{id}` endpoint that didn't exist for anything else, the form
+re-mints a fresh URL itself on mount via the existing `getStanding()` list
+call (and again after every edit-mode upload) — the route param still paints
+first, so the screen isn't blank while that resolves.
+
+**Testing.** Neither `postgres_test.go` nor `handler_test.go` existed for the
+promotions feature at all before this — only `bjj_test.go`'s pure
+`StandingFrom` coverage. Both now exist: `postgres_test.go` covers
+`GetPromotion`/`AttachPhotoKey`'s owner-scoping (IDOR) and that
+`UpdatePromotion`'s SET clause — which does not name `photo_key` — really
+does leave it alone (the regression this module's own `updateWithin` note
+warns has bitten three times elsewhere), run against a real Postgres via
+`TEST_DATABASE_URL`. `handler_test.go` covers the no-store 503, the
+delete-before-row ordering and its non-fatal failure mode, and
+`GetStanding` presenting a URL only for promotions that actually have a key,
+using an in-memory `Repository` and an `httptest.Server`-backed
+`objectstore.Store` (the same `fakeObjectStore` pattern
+`profile/avatar_test.go` already uses). `components/__tests__/PromotionForm.test.tsx`
+covers the add-vs-edit branch directly — held-then-uploaded vs.
+uploaded-immediately, a failed deferred upload not blocking the save, and the
+route-param-then-refresh photo URL sequencing. The IDOR guard, the
+delete-before-row ordering, and the create-then-upload ordering were each
+mutation-verified (broken, confirmed red as a genuine assertion failure
+rather than a compile error, restored, confirmed green by re-running).
+
+**Left open:** the acceptance criteria's device checks — logging a promotion
+with a photo and confirming it displays, attaching one to an existing
+promotion after the fact, and confirming a photo-less promotion still
+renders correctly — are `NEEDS HUMAN EVIDENCE` and handed to the user as a
+checklist rather than claimed here.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
