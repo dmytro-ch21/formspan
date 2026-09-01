@@ -241,7 +241,16 @@ export function PromotionForm({
         options={{
           title: initial ? 'Edit promotion' : 'Add promotion',
           headerRight: () => (
-            <Pressable onPress={save} disabled={saving} hitSlop={12} testID="promotion-save">
+            <Pressable
+              onPress={save}
+              // Also disabled while a just-picked photo is still being
+              // resized (N456 follow-up, frontend-reviewer): saving during
+              // that sub-second window would create the promotion before
+              // `pendingPhoto` is set, silently dropping the photo the
+              // helper text just promised would upload.
+              disabled={saving || photoBusy}
+              hitSlop={12}
+              testID="promotion-save">
               <Text style={[styles.headerAction, { color: accent.ink }]}>
                 {saving ? 'Saving…' : 'Save'}
               </Text>

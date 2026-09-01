@@ -201,6 +201,49 @@ describe('adding a new promotion', () => {
     await waitFor(() => expect(mockBack).toHaveBeenCalled());
     expect(mockUploadPromotionPhoto).not.toHaveBeenCalled();
   });
+
+  it('Save is disabled while a just-picked photo is still being resized, so the photo cannot be silently dropped', async () => {
+    mockCreatePromotion.mockResolvedValue(asPromotion({ id: 'new-id' }));
+    // Held open deliberately, to land a Save tap inside the `photoBusy`
+    // window `pickPhoto` holds between the picker resolving and
+    // `prepareImageForUpload` (via `manipulateAsync`) finishing.
+    let resolveManipulate!: (v: { uri: string }) => void;
+    mockManipulate.mockReset().mockReturnValue(
+      new Promise((resolve) => {
+        resolveManipulate = resolve;
+      }),
+    );
+    render(<PromotionForm />);
+    await screen.findByTestId('promotion-form');
+
+    // Start the pick — `photoBusy` becomes true once the picker itself
+    // resolves, before `manipulateAsync` (held open above) ever settles.
+    act(() => {
+      fireEvent.press(screen.getByTestId('promotion-photo'));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('promotion-save').props.accessibilityState?.disabled).toBe(true),
+    );
+
+    // A Save tap in this window must be a no-op — the promotion has not
+    // been created yet, so `pendingPhoto` will never reach it.
+    fireEvent.press(screen.getByTestId('promotion-save'));
+    expect(mockCreatePromotion).not.toHaveBeenCalled();
+
+    // Let the resize finish; Save re-enables and now genuinely holds the
+    // photo — the normal "save() creates THEN uploads" path above.
+    await act(async () => {
+      resolveManipulate({ uri: 'file:///shrunk.jpg' });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('promotion-save').props.accessibilityState?.disabled).toBe(false),
+    );
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('promotion-save'));
+    });
+    await waitFor(() => expect(mockCreatePromotion).toHaveBeenCalled());
+  });
 });
 
 describe('editing an existing promotion', () => {
