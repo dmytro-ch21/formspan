@@ -22,6 +22,8 @@ import {
   deleteCurriculum,
   enrollInCurriculum,
   getCurriculum,
+  markItemRead,
+  unmarkItemRead,
   type Curriculum,
 } from '@/lib/curriculum';
 import { proposeFocus, proposeOneFocus, type FocusProposal } from '@/lib/roadmapFocus';
@@ -285,6 +287,39 @@ export default function CurriculumScreen() {
   );
 
   /**
+   * N123. The athlete's OWN claim to have read and understood a concept —
+   * never a technique, and never through this control: the backend refuses a
+   * technique item at the database level, and this button is rendered only
+   * when `l.kind === 'concept'` — NOT merely inside the `l.measures === null`
+   * branch, which also contains a criteria-free technique (a "reading list"
+   * item with no completion criteria authored). See the render site's own
+   * comment for why that distinction is load-bearing.
+   *
+   * Deliberately its own handler rather than sharing `workOnLesson`'s or
+   * `toggleEnrollment`'s shape, even though all three follow the same
+   * optimistic-reload pattern — "log evidence toward mastery" and "attest you
+   * read this" are different actions, and the ticket's own acceptance
+   * criterion is that they must not share a control. A shared function name
+   * would be a shared control with extra steps.
+   */
+  const toggleItemRead = useCallback(
+    async (itemID: number, currentlyRead: boolean) => {
+      if (!curriculum) return;
+      setBusy(true);
+      try {
+        if (currentlyRead) await unmarkItemRead(getToken, curriculum.id, itemID);
+        else await markItemRead(getToken, curriculum.id, itemID);
+        await load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [curriculum, getToken, load],
+  );
+
+  /**
    * Permanent, and gated on `curriculum.editable` the same way the two menu
    * entries below are — resolved server-side, never inferred. Confirmed
    * through a second `Alert`, matching the eviction confirm above rather than
@@ -502,6 +537,18 @@ export default function CurriculumScreen() {
               {view.countableMilestones === 1 ? '' : 's'} completed
             </Text>
             <Bar fraction={curriculum.enrolled ? (view.progress ?? 0) : 0} tone={tone} />
+            {/* A SEPARATE FIGURE, never blended into the milestone bar above —
+                the ticket's own recommendation. Read state is the athlete's
+                own attestation, not derived evidence, so it must never dilute
+                or inflate what the ring and bar report. Hidden entirely when
+                nothing here is a concept, matching how the bar itself is
+                absent for a milestone with nothing completable. */}
+            {curriculum.concept_items > 0 && (
+              <Text style={styles.conceptsReadNote} testID="roadmap-concepts-read">
+                {curriculum.read_concepts} of {curriculum.concept_items} concept
+                {curriculum.concept_items === 1 ? '' : 's'} read
+              </Text>
+            )}
           </RNView>
           <ProgressRing
             percent={ringPercent}
@@ -553,6 +600,7 @@ export default function CurriculumScreen() {
               }}
               onToggleLesson={(key) => setOpenLesson((v) => (v === key ? null : key))}
               onWork={workOnLesson}
+              onToggleRead={toggleItemRead}
               inFocus={inFocus}
             />
           ))}
@@ -622,6 +670,7 @@ function MilestoneCard({
   onToggle,
   onToggleLesson,
   onWork,
+  onToggleRead,
   inFocus,
 }: {
   milestone: Milestone;
@@ -636,6 +685,7 @@ function MilestoneCard({
   onToggle: () => void;
   onToggleLesson: (key: string) => void;
   onWork: (techniqueID: string) => void;
+  onToggleRead: (itemID: number, currentlyRead: boolean) => void;
   inFocus: ReadonlySet<string>;
 }) {
   const size = isCurrent ? CIRCLE_NOW : CIRCLE;
@@ -751,6 +801,7 @@ function MilestoneCard({
                 busy={busy}
                 onToggle={() => onToggleLesson(l.key)}
                 onWork={onWork}
+                onToggleRead={onToggleRead}
                 inFocus={l.techniqueID !== null && inFocus.has(l.techniqueID)}
               />
             ))}
@@ -780,6 +831,7 @@ function LessonRow({
   busy,
   onToggle,
   onWork,
+  onToggleRead,
   inFocus,
 }: {
   lesson: Lesson;
@@ -791,6 +843,7 @@ function LessonRow({
   busy: boolean;
   onToggle: () => void;
   onWork: (techniqueID: string) => void;
+  onToggleRead: (itemID: number, currentlyRead: boolean) => void;
   /** Already in the focus list, so there is nothing left for the button to do. */
   inFocus: boolean;
 }) {
@@ -850,10 +903,71 @@ function LessonRow({
             {l.measures === null ? (
               /* A concept carries no criteria by design, and dressing one as an
                  unfinished measurable would misreport it. */
-              <Text style={styles.understand}>
-                Understand this. There is nothing to count — it is an idea the
-                milestone is teaching, not a step your record completes.
-              </Text>
+              <>
+                <Text style={styles.understand}>
+                  Understand this. There is nothing to count — it is an idea the
+                  milestone is teaching, not a step your record completes.
+                </Text>
+                {/* N123. A checkbox affordance, not a "Work on this"-style CTA —
+                    the two are genuinely different actions ("log evidence"
+                    versus "attest you read this") and per the ticket's own
+                    acceptance criterion must not share a control. Reversible:
+                    tapping again withdraws the claim, and the label changes to
+                    say so rather than relying on the same tap reading two ways.
+
+                    Gated on `l.kind === 'concept'`, NOT on `l.measures === null`
+                    alone — measures is also null for a criteria-free TECHNIQUE
+                    (a "reading list" item authored with no completion criteria;
+                    see Lesson.measures' own doc comment), and the backend's
+                    database-level guard (curriculum_item_reads_concept_only_trg)
+                    refuses that item's itemID outright. Rendering the toggle
+                    there would offer a control that always fails against a real,
+                    common content shape — the reference syllabuses carry 73 of
+                    these — not a hypothetical one. `kind` is the actual invariant
+                    this whole feature protects, so the render gate reads it
+                    directly rather than inferring it from a sibling field. */}
+                {l.kind === 'concept' && (
+                  <Pressable
+                    onPress={() => onToggleRead(l.itemID, l.read)}
+                    disabled={busy}
+                    // Short of 44pt like every other sub-44pt control on this
+                    // screen (see CIRCLE_SLOP/LESSON_SLOP's own comment) — the
+                    // 18pt box plus text is the smallest tappable thing here,
+                    // and it is the one an athlete is asked to tap at exactly
+                    // the belt (brown, majority concept) where it fires most.
+                    hitSlop={LESSON_SLOP}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: l.read, disabled: busy }}
+                    accessibilityLabel={
+                      l.read ? 'Read and understood' : 'Mark as read and understood'
+                    }
+                    accessibilityHint={
+                      l.read
+                        ? 'Marks this idea as not yet read'
+                        : 'Marks this idea as read and understood — your own note, not evidence of mastery'
+                    }
+                    testID={`roadmap-read-toggle-${l.key}`}
+                    style={({ pressed }) => [
+                      styles.readToggle,
+                      pressed && styles.pressed,
+                      busy && styles.disabled,
+                    ]}
+                  >
+                    <RNView
+                      style={[
+                        styles.readBox,
+                        { borderColor: tone },
+                        l.read && { backgroundColor: tone },
+                      ]}
+                    >
+                      {l.read && <Icon name="check" size={11} color={vola.bg} />}
+                    </RNView>
+                    <Text style={[styles.readToggleText, l.read && { color: tone }]}>
+                      {l.read ? 'Read and understood' : 'Mark as read and understood'}
+                    </Text>
+                  </Pressable>
+                )}
+              </>
             ) : (
               <>
                 <Text style={styles.measureHead}>HOW THIS IS MEASURED</Text>
@@ -988,6 +1102,12 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1, gap: 5 },
   cardTitle: { color: vola.text, fontSize: 16, fontWeight: '700' },
   cardNote: { color: vola.textMuted, fontSize: 12, lineHeight: 17 },
+  // A separate line from cardNote/the bar above it — see the call site's
+  // comment for why this must never blend into the milestone figure.
+  // `textMuted`, not `textDim` — this is #512's own progress figure, not a
+  // decorative annotation, and `textDim` measures 2.51:1 (below any body-text
+  // threshold; see constants/Colors.ts) while `textMuted` measures 4.67:1.
+  conceptsReadNote: { color: vola.textMuted, fontSize: 11, lineHeight: 16, marginTop: 1 },
 
   barTrack: {
     height: 3,
@@ -1096,6 +1216,26 @@ const styles = StyleSheet.create({
   lessonDetail: { gap: 6, paddingTop: 4, paddingBottom: 8 },
   lessonNotes: { color: vola.textMuted, fontSize: 12, lineHeight: 17 },
   understand: { color: vola.textMuted, fontSize: 12, lineHeight: 17, fontStyle: 'italic' },
+  // The read toggle (N123) — a checkbox affordance, deliberately NOT styled
+  // like `secondary`/`secondaryText` below: "log evidence" and "attest you
+  // read this" must not look like the same control, per the ticket's own
+  // acceptance criterion that the two share no control.
+  readToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+    paddingVertical: 2,
+  },
+  readBox: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  readToggleText: { color: vola.textMuted, fontSize: 13, fontWeight: '600' },
   measureHead: {
     color: vola.textDim,
     fontSize: 9,

@@ -43,6 +43,8 @@ function curriculum(over: Partial<Curriculum> = {}): Curriculum {
     item_count: 3,
     countable_items: 0,
     mastered_items: 0,
+    concept_items: 0,
+    read_concepts: 0,
     ...over,
   };
 }

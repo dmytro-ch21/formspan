@@ -1584,3 +1584,317 @@ func TestAReseedKeepsTheEnrolmentAndTheEvidenceWhileTheFractionMoves(t *testing.
 			"evidence should never have been touched", restored.MasteredItems, restored.CountableItems)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// N123: "read and understood" — a CONCEPT's own claim, and never a
+// technique's. Three properties, one test each: it works and reverses, a
+// technique is refused (at the database level, not just here), and it never
+// moves — or is moved by — mastery.
+// ---------------------------------------------------------------------------
+
+func TestMarkingAConceptReadIsReversibleAndCounted(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "reader20")
+	tech := seedTechnique(t, pool, "test-read-tech-1")
+
+	c, err := repo.Create(ctx, "reader20", "", NewCurriculum{
+		Name: "Purple belt",
+		Items: []NewItem{
+			{Kind: "concept", Title: "Base and balance"},
+			{Kind: "concept", Title: "Position before submission"},
+			{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(5)}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if c.ConceptItems != 2 {
+		t.Fatalf("concept_items = %d, want 2", c.ConceptItems)
+	}
+	if c.ReadConcepts != 0 {
+		t.Fatalf("read_concepts = %d, want 0 before marking anything", c.ReadConcepts)
+	}
+	concept := c.Items[0]
+	if concept.Kind != "concept" || concept.Read() || concept.ID == 0 {
+		t.Fatalf("fixture concept wrong: %+v", concept)
+	}
+
+	if err := repo.MarkItemRead(ctx, "reader20", c.ID, concept.ID); err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+	got, err := repo.Get(ctx, "reader20", c.ID, "")
+	if err != nil {
+		t.Fatalf("get after mark: %v", err)
+	}
+	if !got.Items[0].Read() || got.Items[0].ReadAt == nil {
+		t.Fatal("marking read did not stick")
+	}
+	// THE FIGURE THE TICKET ASKS FOR: a separate count, never blended into
+	// countable_items/mastered_items.
+	if got.ReadConcepts != 1 {
+		t.Fatalf("read_concepts = %d, want 1 after marking one of two", got.ReadConcepts)
+	}
+	if got.ConceptItems != 2 {
+		t.Fatalf("concept_items changed from marking one read: got %d, want 2", got.ConceptItems)
+	}
+
+	// REVERSIBLE — the ticket's own acceptance criterion: marking something
+	// read by mistake must not be permanent.
+	if err := repo.UnmarkItemRead(ctx, "reader20", c.ID, concept.ID); err != nil {
+		t.Fatalf("unmark: %v", err)
+	}
+	after, err := repo.Get(ctx, "reader20", c.ID, "")
+	if err != nil {
+		t.Fatalf("get after unmark: %v", err)
+	}
+	if after.Items[0].Read() || after.Items[0].ReadAt != nil {
+		t.Fatal("unmarking did not clear the claim")
+	}
+	if after.ReadConcepts != 0 {
+		t.Fatalf("read_concepts = %d, want 0 after unmarking", after.ReadConcepts)
+	}
+
+	// Idempotent on both ends: a retry after a dropped response must converge
+	// rather than error.
+	if err := repo.MarkItemRead(ctx, "reader20", c.ID, concept.ID); err != nil {
+		t.Fatalf("re-mark: %v", err)
+	}
+	if err := repo.MarkItemRead(ctx, "reader20", c.ID, concept.ID); err != nil {
+		t.Fatalf("re-mark again: %v", err)
+	}
+	if err := repo.UnmarkItemRead(ctx, "reader20", c.ID, concept.ID); err != nil {
+		t.Fatalf("unmark: %v", err)
+	}
+	if err := repo.UnmarkItemRead(ctx, "reader20", c.ID, concept.ID); err != nil {
+		t.Fatalf("unmarking an already-unmarked item errored: %v", err)
+	}
+}
+
+func TestMarkingATechniqueItemReadIsRejected(t *testing.T) {
+	// THE GUARD THIS TEST EXISTS FOR: curriculum_item_reads_concept_only_trg,
+	// enforced at the DATABASE level so an application-only check could never
+	// be bypassed by a future endpoint. See the migration's own comment.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "reader21")
+	tech := seedTechnique(t, pool, "test-read-tech-2")
+
+	c, err := repo.Create(ctx, "reader21", "", NewCurriculum{
+		Name:  "Blue belt",
+		Items: []NewItem{{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(5)}}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	technique := c.Items[0]
+	if technique.Kind != "technique" {
+		t.Fatalf("fixture wrong: %+v", technique)
+	}
+
+	if err := repo.MarkItemRead(ctx, "reader21", c.ID, technique.ID); err != ErrInvalidInput {
+		t.Fatalf("marking a technique read: want ErrInvalidInput, got %v", err)
+	}
+
+	// And no row was written — a rejected write that silently left a partial
+	// row behind would still let mastery and "read" collide, just later.
+	got, err := repo.Get(ctx, "reader21", c.ID, "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Items[0].Read() || got.Items[0].ReadAt != nil {
+		t.Fatal("a rejected mark still left a read row behind")
+	}
+	if got.ReadConcepts != 0 || got.ConceptItems != 0 {
+		t.Fatalf("read_concepts/concept_items = %d/%d, want 0/0 — nothing here is a concept",
+			got.ReadConcepts, got.ConceptItems)
+	}
+}
+
+func TestMarkItemReadCannotBeUsedAgainstAnotherCurriculumsItem(t *testing.T) {
+	// The path carries BOTH curriculumID and itemID, and the write must not
+	// trust them to already agree — otherwise marking read on an itemID that
+	// belongs to a DIFFERENT curriculum than the one named in the path would
+	// still succeed, misattributing the claim.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "reader23")
+
+	c1, err := repo.Create(ctx, "reader23", "", NewCurriculum{
+		Name:  "First",
+		Items: []NewItem{{Kind: "concept", Title: "Idea one"}},
+	})
+	if err != nil {
+		t.Fatalf("create c1: %v", err)
+	}
+	c2, err := repo.Create(ctx, "reader23", "", NewCurriculum{
+		Name:  "Second",
+		Items: []NewItem{{Kind: "concept", Title: "Idea two"}},
+	})
+	if err != nil {
+		t.Fatalf("create c2: %v", err)
+	}
+
+	if err := repo.MarkItemRead(ctx, "reader23", c2.ID, c1.Items[0].ID); err != ErrNotFound {
+		t.Fatalf("cross-curriculum mark: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestReadStateNeverAffectsMasteryOrProgress(t *testing.T) {
+	// The whole point of keeping Read() and Mastered() on separate fields:
+	// marking a concept read must not move a technique's derived progress,
+	// and a technique's derived progress must never be reachable through the
+	// read control. Migrations 000034 and 000051 are the guarantees this
+	// checks; this ticket adds a third fact without touching either.
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	cleanupUser(t, pool, "reader22")
+	tech := seedTechnique(t, pool, "test-read-tech-3")
+
+	c, err := repo.Create(ctx, "reader22", "", NewCurriculum{
+		Name: "White belt",
+		Items: []NewItem{
+			{Kind: "concept", Title: "Survive first"},
+			{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(1)}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.Enroll(ctx, "reader22", c.ID, ""); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	backdateEnrollment(t, pool, "reader22", 30)
+	logEvidence(t, pool, "reader22", tech, 1, map[string]int{"scored": 1})
+
+	before, err := repo.Get(ctx, "reader22", c.ID, "")
+	if err != nil {
+		t.Fatalf("get before: %v", err)
+	}
+	if before.MasteredItems != 1 || before.CountableItems != 1 {
+		t.Fatalf("fixture not mastered before marking anything read: %d/%d",
+			before.MasteredItems, before.CountableItems)
+	}
+	concept := before.Items[0]
+	if concept.Kind != "concept" {
+		t.Fatalf("fixture order wrong: %+v", concept)
+	}
+
+	if err := repo.MarkItemRead(ctx, "reader22", c.ID, concept.ID); err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+	after, err := repo.Get(ctx, "reader22", c.ID, "")
+	if err != nil {
+		t.Fatalf("get after: %v", err)
+	}
+	if after.MasteredItems != 1 || after.CountableItems != 1 {
+		t.Fatalf("marking a concept read moved mastery: %d/%d", after.MasteredItems, after.CountableItems)
+	}
+	if after.ReadConcepts != 1 || after.ConceptItems != 1 {
+		t.Fatalf("read_concepts/concept_items = %d/%d, want 1/1", after.ReadConcepts, after.ConceptItems)
+	}
+	// And the technique item itself never carries a read state at all — the
+	// two kinds of claim live on the same struct but must never be
+	// confusable field-for-field.
+	for _, it := range after.Items {
+		if it.Kind == "technique" && it.Read() {
+			t.Fatal("a technique item reports Read() true")
+		}
+	}
+}
+
+// TestReadMarksSurviveAContentRewrite is the read-mark counterpart of
+// TestAReseedKeepsTheEnrolmentAndTheEvidenceWhileTheFractionMoves above.
+//
+// replaceContent (and seedOne, which shares the same captureConceptReads /
+// restoreConceptReads helpers — see their doc comments in postgres.go) delete
+// every curriculum_items row under a curriculum and reinsert fresh ones with
+// new identities on every owner Update and every `cmd/seed` run — including
+// an edit that touches nothing about the concept itself, like fixing a typo
+// in an unrelated item's notes. Without preserving reads across that rewrite
+// by title, an athlete's "read and understood" claim on EVERY concept in the
+// curriculum would be silently erased by an edit to any one item, or by a
+// routine reseed on deploy — the involuntary-impermanence bug the ticket's
+// own "marking something read by mistake is not permanent" criterion exists
+// to rule out for a deliberate unmark, happening instead by accident.
+func TestReadMarksSurviveAContentRewrite(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	const athlete = "athlete-n123-rewrite"
+	cleanupUser(t, pool, athlete)
+	tech := seedTechnique(t, pool, "n123-rewrite-tech")
+
+	before, err := repo.Create(ctx, athlete, "", NewCurriculum{
+		Name: "Blue belt",
+		Items: []NewItem{
+			{Kind: "concept", Title: "Base and balance"},
+			{Kind: "concept", Title: "Position before submission"},
+			{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(5)}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var baseAndBalance, positionBeforeSubmission int64
+	for _, it := range before.Items {
+		switch it.Title {
+		case "Base and balance":
+			baseAndBalance = it.ID
+		case "Position before submission":
+			positionBeforeSubmission = it.ID
+		}
+	}
+	if baseAndBalance == 0 || positionBeforeSubmission == 0 {
+		t.Fatalf("fixture missing expected concepts: %+v", before.Items)
+	}
+
+	// Mark only ONE of the two concepts read — the other stays unread, so the
+	// test can also prove the rewrite does not INVENT a read that was never
+	// made.
+	if err := repo.MarkItemRead(ctx, athlete, before.ID, baseAndBalance); err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+
+	// A rewrite that changes NOTHING about the two concepts — same titles, same
+	// order — but is still a full delete-and-reinsert underneath, exactly like
+	// fixing a typo in the technique's notes would be.
+	if _, err := repo.Update(ctx, athlete, before.ID, "", Update{Items: []NewItem{
+		{Kind: "concept", Title: "Base and balance"},
+		{Kind: "concept", Title: "Position before submission"},
+		{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(5)}, Notes: "typo fixed"},
+	}}); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+
+	after, err := repo.Get(ctx, athlete, before.ID, "")
+	if err != nil {
+		t.Fatalf("get after rewrite: %v", err)
+	}
+	if after.ReadConcepts != 1 || after.ConceptItems != 2 {
+		t.Fatalf("read_concepts/concept_items = %d/%d after an unrelated rewrite, want 1/2 — "+
+			"the read mark was silently wiped", after.ReadConcepts, after.ConceptItems)
+	}
+	for _, it := range after.Items {
+		switch it.Title {
+		case "Base and balance":
+			if !it.Read() {
+				t.Error("the read mark on the untouched concept did not survive the rewrite")
+			}
+		case "Position before submission":
+			if it.Read() {
+				t.Error("the rewrite invented a read mark on a concept that was never marked")
+			}
+		}
+		// And the new rows really do have fresh identities — this is not a
+		// test that accidentally passes because nothing actually changed.
+		if it.Title == "Base and balance" && it.ID == baseAndBalance {
+			t.Fatal("item id survived the rewrite — this test is not exercising the delete-and-" +
+				"reinsert path it exists to cover")
+		}
+	}
+}

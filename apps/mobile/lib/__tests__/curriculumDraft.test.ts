@@ -213,6 +213,8 @@ function curriculum(over: Partial<Curriculum> = {}): Curriculum {
     item_count: 0,
     countable_items: 0,
     mastered_items: 0,
+    concept_items: 0,
+    read_concepts: 0,
     ...over,
   };
 }
@@ -227,6 +229,7 @@ describe('seeding a draft from an existing curriculum', () => {
     const c = curriculum({
       items: [
         {
+          id: 1,
           kind: 'technique',
           technique_id: 't1',
           name: 'Knee cut',
@@ -243,6 +246,7 @@ describe('seeding a draft from an existing curriculum', () => {
             target_drilled_sessions: null,
           },
           progress: null,
+          read_at: null,
         },
       ],
     });
@@ -257,8 +261,9 @@ describe('seeding a draft from an existing curriculum', () => {
     const c = curriculum({
       items: [
         {
-          kind: 'technique', technique_id: 't1', name: 'Knee cut', position: 'Half guard top',
+          id: 1, kind: 'technique', technique_id: 't1', name: 'Knee cut', position: 'Half guard top',
           category: 'pass', order: 0, phase: null, notes: '', criteria: null, progress: null,
+          read_at: null,
         },
       ],
     });
@@ -269,8 +274,8 @@ describe('seeding a draft from an existing curriculum', () => {
     const c = curriculum({
       items: [
         {
-          kind: 'concept', title: 'Posture', name: '', position: '', category: '', order: 0,
-          phase: null, notes: '', criteria: null, progress: null,
+          id: 1, kind: 'concept', title: 'Posture', name: '', position: '', category: '', order: 0,
+          phase: null, notes: '', criteria: null, progress: null, read_at: null,
         },
       ],
     });

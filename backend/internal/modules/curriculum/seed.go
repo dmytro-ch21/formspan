@@ -91,6 +91,17 @@ func SeedData() ([]SeedCurriculum, error) {
 // curriculum but is deleted here directly, so an athlete's PROGRESS is
 // untouched — progress lives in `bjj_session_tags` and is recomputed on read,
 // which is exactly the property that makes reseeding safe.
+//
+// **N123's read marks are a second thing this wholesale replace threatens,
+// and are handled the same way progress always was — by not actually
+// depending on the identity that gets replaced.** `curriculum_item_reads`
+// DOES reference `curriculum_items.id`, which this function regenerates on
+// every run, so without `captureConceptReads`/`restoreConceptReads` around
+// the delete-and-reinsert below, every athlete's "read and understood" claim
+// on every concept in a syllabus would be silently erased by every deploy.
+// Both helpers live in `postgres.go`, shared with `replaceContent` (an owner
+// `Update` has the identical problem for the identical reason) — see
+// `conceptRead`'s own doc comment there for the full reasoning.
 func Seed(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	data, err := SeedData()
 	if err != nil {
@@ -161,6 +172,21 @@ func seedOne(ctx context.Context, tx pgx.Tx, c SeedCurriculum) error {
 		return nil
 	}
 
+	// Captured before the delete below and restored by title once the
+	// reinsert is done — N123. Without this, `cmd/seed` (run on every
+	// deploy, and documented above as "safe to re-run" because progress
+	// "lives in bjj_session_tags and is recomputed on read") would silently
+	// erase every athlete's "read and understood" claim on every concept in
+	// this syllabus each time it ran, even when nothing about the content
+	// actually changed — because curriculum_items is replaced wholesale here
+	// too, with fresh ids, and curriculum_item_reads cascades from them. See
+	// conceptRead's own doc comment (postgres.go) for the full reasoning and
+	// its accepted trade-offs.
+	savedReads, err := captureConceptReads(ctx, tx, c.ID)
+	if err != nil {
+		return err
+	}
+
 	// Items first, phases second: the composite FK points from item to phase.
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM curriculum_items WHERE curriculum_id = $1`, c.ID); err != nil {
@@ -228,5 +254,5 @@ func seedOne(ctx context.Context, tx pgx.Tx, c SeedCurriculum) error {
 			}
 		}
 	}
-	return nil
+	return restoreConceptReads(ctx, tx, c.ID, savedReads)
 }

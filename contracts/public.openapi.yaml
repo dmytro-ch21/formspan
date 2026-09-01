@@ -5219,8 +5219,15 @@ components:
         completable by hand. Concepts therefore never count toward progress
         either; the progress rule (countable = carries criteria) already
         excludes them.
-      required: [kind, name, position, category, order, phase, notes]
+      required: [id, kind, name, position, category, order, phase, notes]
       properties:
+        id:
+          type: integer
+          format: int64
+          description: >
+            The item's stable identity (curriculum_items.id) — additive as of
+            N123, and the id `PUT/DELETE
+            /curricula/{curriculumID}/items/{itemID}/read` names.
         kind: { type: string, enum: [technique, concept] }
         technique_id:
           type: string
@@ -5259,6 +5266,28 @@ components:
           description: >
             Null when the caller is not enrolled, or when the item has no
             criteria.
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            N123. When the caller marked this CONCEPT read and understood —
+            their own claim, never a derived one. Always null on a
+            `technique` item (refused at the database level by
+            `curriculum_item_reads_concept_only_trg`) and null on an unread
+            concept.
+
+
+            A DIFFERENT KIND OF THING from `progress`/`criteria`, on purpose:
+            `progress.mastered` is computed from logged evidence and cannot be
+            set by a client; `read_at` is nothing BUT set by a client, through
+            its own subresource
+            (`PUT/DELETE /curricula/{curriculumID}/items/{itemID}/read`),
+            never through the same control that touches criteria or progress.
+            A concept marked read must never be presentable as evidence of
+            mastery — that is this ticket's whole acceptance criterion, and
+            keeping the two fields, the two endpoints and the two UI controls
+            separate is how it holds.
 
     Curriculum:
       type: object
@@ -5273,7 +5302,8 @@ components:
         it is going.
       required:
         [id, editable, official, name, description, visibility, enrolled,
-         item_count, countable_items, mastered_items, created_at, updated_at]
+         item_count, countable_items, mastered_items, concept_items,
+         read_concepts, created_at, updated_at]
       properties:
         id: { type: string }
         editable:
@@ -5354,6 +5384,33 @@ components:
             fact. That shipped once, in reverse: a card read `countable_items`
             when it too was absent, and told every athlete their roadmap was a
             reading list.
+        concept_items:
+          type: integer
+          description: >
+            N123. How many items are `kind: concept` — the CONCEPT-side twin
+            of `countable_items`, computed the same additive way and never
+            folded into it. Cheap and content-only, like `countable_items`, so
+            present on the list response as well as a single read.
+        read_concepts:
+          type: integer
+          description: >
+            N123. How many of `concept_items` the caller has marked read and
+            understood. The CONCEPT-side twin of `mastered_items` — **and
+            deliberately NEVER combined with `mastered_items` or
+            `countable_items` into one percentage**: whether read concepts
+            should count toward a belt's completion is a decision made in the
+            open, and the one taken is "no" — a client renders this as its own
+            adjacent figure, e.g. "8 of 11 milestones · 22 of 48 concepts
+            read", so a roadmap that is mostly concepts stops reading as
+            permanently stuck at 0% without the two kinds of claim (derived
+            mastery vs. an athlete's own attestation) ever sharing one number.
+
+
+            **Zero on the list response**, for the same reason
+            `mastered_items` is: it needs the caller's own per-item state, and
+            computing it once per row of a 200-row cross-user list is a cost
+            paid to draw a number nobody reads off a browse screen. Real only
+            on a single read (and on `/curricula/working`).
         phases:
           type: array
           description: >
@@ -7984,6 +8041,82 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /curricula/{curriculumID}/items/{itemID}/read:
+    parameters:
+      - name: curriculumID
+        in: path
+        required: true
+        schema: { type: string }
+      - name: itemID
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+        description: A `CurriculumItem`'s own `id`.
+    put:
+      summary: Mark a concept read and understood
+      operationId: markCurriculumItemRead
+      description: >
+        N123. An athlete's own claim to have read and understood a `concept`
+        item — never a `technique`, whose progress stays fully derived from
+        logged evidence (migration 000034) and is not reachable through this
+        or any other hand-set control.
+
+
+        A subresource, matching `.../enrollment`'s own reasoning: the acting
+        user is always the caller, and no request body can name somebody
+        else's read.
+
+
+        Idempotent: marking an already-read item again just moves `read_at`
+        forward, the same convergent-retry contract `.../enrollment`'s PUT
+        uses for `started_on`.
+
+
+        404 for an `itemID` that does not exist, does not belong to
+        `curriculumID`, or belongs to a curriculum not visible to the caller —
+        the same "cannot be used as a read oracle" posture the enrollment
+        endpoint takes for a private curriculum's id.
+
+
+        400, `invalid_input`, for a `technique` item: refused at the DATABASE
+        level (a trigger validates the item's `kind` before the row can ever
+        be written), not only by this handler, because a technique's progress
+        must never be settable by hand — see `CurriculumItem.read_at`'s own
+        description for why this is the whole point of the ticket that added
+        it.
+      responses:
+        "204":
+          description: Marked read.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Withdraw a "read and understood" mark
+      operationId: unmarkCurriculumItemRead
+      description: >
+        N123. Reversible, per the ticket's own acceptance criterion: marking
+        something read by mistake must not be permanent.
+
+
+        Idempotent and always 204 — an item never marked, one already
+        unmarked, and one that does not exist under this curriculum all reach
+        the same end state ("this claim does not exist"), and undoing a
+        mistaken tap has no use for being told which. Unlike the PUT above,
+        this is intentionally reachable even if the curriculum has since gone
+        private or the item has been edited out from under it: withdrawing the
+        athlete's own claim about their own state should not depend on the
+        content around it still being in the same shape.
+      responses:
+        "204":
+          description: Unmarked (or was never marked).
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /bjj/focus:
     get:

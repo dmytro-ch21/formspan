@@ -115,6 +115,24 @@ type Curriculum struct {
 	// absent.
 	CountableItems int `json:"countable_items"`
 	MasteredItems  int `json:"mastered_items"`
+	// ConceptItems and ReadConcepts are the CONCEPT-side twin of the two
+	// fields above, computed the same additive way and NEVER folded into
+	// them. This ticket's own acceptance criteria are explicit that read
+	// state must be visibly a different kind of thing from mastery — the same
+	// tick in the same place, or the same percentage carrying both, would
+	// erase the distinction the schema spends two migrations (000034, 000051)
+	// protecting. A client renders this as a separate figure alongside the
+	// milestone count: "8 of 11 milestones · 22 of 48 concepts read".
+	//
+	// ConceptItems is cheap and content-only (just how many items are kind =
+	// 'concept'), so — like CountableItems — it is present on List as well as
+	// a single read. ReadConcepts needs the caller's own per-item state, so —
+	// like MasteredItems — it is real only on Get and Working, and zero on
+	// List for the same reason MasteredItems is: computing it once per row of
+	// a 200-row cross-user list is a cost paid to draw a number nobody reads
+	// off a browse screen.
+	ConceptItems int `json:"concept_items"`
+	ReadConcepts int `json:"read_concepts"`
 }
 
 // Phase is one named section of a curriculum. Order is its identity — items
@@ -132,6 +150,13 @@ type Phase struct {
 // criteria, because no evidence stream could measure one and nothing here may
 // be completable by hand.
 type Item struct {
+	// ID is curriculum_items' own stable identity (BIGINT GENERATED ALWAYS AS
+	// IDENTITY, from migration 000034) — added additively for N123, so it is
+	// the natural foreign key for curriculum_item_reads below rather than
+	// reinventing one out of (curriculum_id, Order): Order is NOT stable,
+	// since replaceContent reassigns it from array position on every content
+	// write.
+	ID   int64  `json:"id"`
 	Kind string `json:"kind"`
 	// TechniqueID is empty on concept items, which point at nothing.
 	TechniqueID string `json:"technique_id,omitempty"`
@@ -154,7 +179,34 @@ type Item struct {
 	// Progress is nil when Criteria is, and when the caller is not enrolled.
 	// There is no progress toward a target that does not exist.
 	Progress *Progress `json:"progress"`
+	// ReadAt is when the athlete marked this CONCEPT read and understood —
+	// their own claim, not a derived one. Nil for every technique item (see
+	// Read()'s doc comment for why marking one is refused, enforced at the
+	// database level by curriculum_item_reads_concept_only_trg) and nil for
+	// an unread concept.
+	//
+	// A full timestamp, unlike StartedOn's date-only string, because "when did
+	// I read this" has no timezone-boundary argument the way an enrollment
+	// date does — nobody cares whether it happened just before or just after
+	// local midnight, so this is plain RFC3339 via time.Time's default JSON
+	// marshalling rather than the dateLayout convention.
+	ReadAt *time.Time `json:"read_at"`
 }
+
+// Read reports whether the athlete has marked this concept read and
+// understood.
+//
+// A DIFFERENT KIND OF CLAIM FROM Mastered(), on purpose and by construction.
+// Mastered() reads Progress, which is derived from logged evidence and can
+// never be set by hand (see Criteria's doc comment); Read() reads ReadAt,
+// which is NOTHING BUT set by hand — it is the athlete's own attestation that
+// they looked at a concept and understood it. Keeping them on separate
+// fields, exposed through separate methods, and never rendered through one
+// shared control is the whole point of this ticket: a concept marked read
+// must never be presentable as evidence of mastery. Always false for a
+// technique item, since ReadAt is nil there by the database-level guarantee
+// curriculum_item_reads_concept_only_trg enforces.
+func (i Item) Read() bool { return i.ReadAt != nil }
 
 // Criteria is what mastering this technique takes.
 //
@@ -520,4 +572,24 @@ type Repository interface {
 	// having worked a syllabus and stopped is a fact about them, and a roadmap
 	// that vanishes cannot later say "you did three quarters of this".
 	Archive(ctx context.Context, userID, id string) error
+	// MarkItemRead records the caller's own claim to have read and understood
+	// a CONCEPT item. Returns ErrInvalidInput for a technique item — refused
+	// at the database level by curriculum_item_reads_concept_only_trg, not
+	// just here, because an application-only guard is one future endpoint
+	// away from being bypassed. Returns ErrNotFound when itemID does not
+	// belong to curriculumID, or curriculumID is not visible to the caller —
+	// same "cannot be used as an existence oracle" posture as Enroll.
+	//
+	// Idempotent: marking an already-read item again just moves ReadAt
+	// forward, the same "no distinct instant matters" reasoning Enroll's own
+	// ON CONFLICT uses.
+	MarkItemRead(ctx context.Context, userID, curriculumID string, itemID int64) error
+	// UnmarkItemRead withdraws the claim — the reversibility this ticket's own
+	// acceptance criteria require: marking something read by mistake must not
+	// be permanent. Idempotent and deliberately never ErrNotFound: an item
+	// that was never marked, one already unmarked, or one that does not exist
+	// under this curriculum all reach the same end state ("this claim does
+	// not exist"), and a client undoing a mistaken tap has no use for being
+	// told which.
+	UnmarkItemRead(ctx context.Context, userID, curriculumID string, itemID int64) error
 }

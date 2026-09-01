@@ -15904,3 +15904,108 @@ changed: the card's own tappability and accessibility.
 - The tap-target size and press-feedback feel for a past card on a real
   phone, standing at the gym rather than at a desk — this is the scenario
   the direct user report described.
+
+## N123 — marking a concept "read and understood" (`PUT`/`DELETE /v1/curricula/{curriculumID}/items/{itemID}/read`, `apps/mobile/app/curriculum/[id].tsx`)
+
+A concept item (`kind: 'concept'`) carries no completion criteria by design
+(migration 000051) and a technique's progress stays fully derived from logged
+evidence (migration 000034, "deliberately no way to mark a technique mastered
+by hand"). This ticket adds a third, narrower fact next to both: the athlete's
+own claim to have read and understood a concept. Every scenario below exists
+to prove that claim never collides with either guard.
+
+### Happy path — API
+
+- `PUT` on a concept item you can see (own private curriculum, or any public
+  one) → `204`. `GET` the curriculum back: that item's `read_at` is a
+  non-null RFC3339 timestamp, `read_concepts` incremented by one,
+  `concept_items` unchanged.
+- `PUT` again on the same item → `204`, idempotent — `read_at` moves forward
+  but the item count does not change.
+- `DELETE` on the same path → `204`. `GET` again: `read_at` back to null,
+  `read_concepts` decremented.
+- `DELETE` on an item that was never marked → `204` anyway (not `404`) — the
+  desired end state ("unread") already holds.
+- A curriculum with several concepts: mark two of three read, confirm
+  `read_concepts: 2` and `concept_items: 3` — and confirm `countable_items`/
+  `mastered_items` on the same response are completely unmoved by any of it.
+
+### Edge cases and errors — API
+
+- `PUT` on a **technique** item (has `criteria`) → `400 invalid_input`, and a
+  follow-up `GET` shows that item's `read_at` still null — no partial write
+  left behind. Reproduces migration 000034's own guard from a different
+  angle: read-marking is not a side door onto "mastered by hand."
+- `PUT` with an `itemID` that exists but belongs to a **different**
+  `curriculumID` than the one in the path → `404`, not a misattributed
+  success against the wrong curriculum.
+- `PUT` on an `itemID` under a **private curriculum belonging to someone
+  else** → `404`, never `403` (matches every other read on this module — a
+  403 here would confirm the id exists).
+- `PUT`/`DELETE` unauthenticated → `401`.
+- `itemID` that is not a positive integer (e.g. `abc`, `0`, `-1`) → `400`.
+
+### Happy path — mobile (`app/curriculum/[id].tsx`)
+
+- Open a roadmap with at least one concept milestone (purple or brown belt is
+  the sharpest case — brown carries 48). Expand a concept lesson: confirm the
+  read toggle renders below the existing "Understand this…" copy, unchecked,
+  labelled "Mark as read and understood."
+- Tap it: confirm it flips to checked, relabels "Read and understood," and
+  the progress card's "N of M concepts read" line increments — while the
+  milestone bar/ring directly above it, and the belt's overall percentage,
+  are **visibly unchanged** by the tap.
+- Tap the same toggle again: confirm it reverts to unchecked and the count
+  decrements — reversible, matching the ticket's own acceptance criterion
+  that marking something read by mistake must not be permanent.
+- Collapse and re-expand the lesson, or navigate away and back: confirm the
+  read state survives (it is server state, not local UI state).
+
+### Edge cases and errors — mobile
+
+- **Expand a technique lesson and confirm the read toggle never appears
+  there** — only "Work on this"/"Already in your focus", never the checkbox.
+  This is the sharpest risk in the whole change: the same tick in the same
+  place for both would erase the distinction the schema spends two
+  migrations protecting.
+- A roadmap with **zero** concept items: confirm the "N of M concepts read"
+  line does not render at all (absent, not "0 of 0") — same convention the
+  milestone bar already uses for nothing-completable.
+- Browsing a curriculum **not enrolled in**: confirm the toggle still works
+  (marking "read" is not gated on enrollment the way progress/criteria are —
+  an athlete can read a concept before formally taking the roadmap on).
+- A network failure on the `PUT`/`DELETE`: confirm the screen surfaces the
+  existing error banner and the toggle's visual state does not flip until
+  the reload actually confirms the change (no optimistic flip that could
+  desync from the server).
+- Rapid double-tap on the toggle: confirm it does not fire two conflicting
+  requests that could leave the UI reading opposite to the server (the
+  screen's existing `busy` gate should already cover this — confirm it
+  actually does for this control too).
+
+### Accessibility
+
+- VoiceOver announces the toggle with `accessibilityRole="checkbox"` and the
+  correct `checked`/`unchecked` state, and the hint distinguishes it clearly
+  from "Work on this" ("attest you read this" vs. "log evidence") — the two
+  must not sound interchangeable any more than they look it.
+- Confirm the checkbox's touch target is comfortably tappable one-handed,
+  standing up, between rounds — the scenario the mobile-first rule exists
+  for.
+
+### Needs a device
+
+- The whole "Happy path — mobile" and "Edge cases and errors — mobile"
+  sections above, on a real phone, **at brown belt specifically**, where the
+  effect is largest (majority-concept roadmaps) — this is the ticket's own
+  `NEEDS HUMAN EVIDENCE` criterion.
+- Confirm the toggle reads clearly in both light and dim gym lighting, and
+  that its checked/unchecked states are visually distinguishable at a glance
+  without relying on the text label alone.
+
+### Out of scope for this ticket
+
+- `apps/web`'s curriculum detail page has no equivalent control yet — a
+  deliberate, recorded mobile-first-only scope decision (see
+  `docs/decisions/history.md`'s N123 entry), not an oversight. Scenarios for
+  a web read-toggle belong to whatever ticket implements it.
