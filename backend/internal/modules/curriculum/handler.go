@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -354,6 +355,51 @@ func (h *Handler) Enroll(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	if err := h.repo.Archive(r.Context(), claims.UserID, r.PathValue("curriculumID")); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// itemID parses the {itemID} path segment, which names curriculum_items.id —
+// a real BIGINT identity, not a client-chosen string, so an unparseable value
+// is a 400 rather than a lookup that could never match.
+func itemID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("itemID"), 10, 64)
+	if err != nil || id <= 0 {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "itemID must be a positive integer")
+		return 0, false
+	}
+	return id, true
+}
+
+// MarkItemRead is the athlete's own claim to have read and understood a
+// CONCEPT item — see Item.Read's doc comment for why this is a fundamentally
+// different action from anything that touches mastery, and
+// curriculum_item_reads_concept_only_trg for why a technique item cannot
+// reach this successfully no matter what the handler does.
+func (h *Handler) MarkItemRead(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	id, ok := itemID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.repo.MarkItemRead(r.Context(), claims.UserID, r.PathValue("curriculumID"), id); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// UnmarkItemRead withdraws the claim — the reversibility this ticket's
+// acceptance criteria require.
+func (h *Handler) UnmarkItemRead(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+	id, ok := itemID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.repo.UnmarkItemRead(r.Context(), claims.UserID, r.PathValue("curriculumID"), id); err != nil {
 		writeError(w, r, err)
 		return
 	}

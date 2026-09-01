@@ -38,8 +38,9 @@ let n = 0;
 
 /** A countable step: it has criteria, so it can be mastered. */
 const step = (phase: number | null, mastered: boolean): CurriculumItem => ({
+  id: (n += 1),
   kind: 'technique',
-  technique_id: `t${(n += 1)}`,
+  technique_id: `t${n}`,
   name: `Technique ${n}`,
   position: 'guard',
   category: 'sweep',
@@ -48,6 +49,7 @@ const step = (phase: number | null, mastered: boolean): CurriculumItem => ({
   notes: '',
   criteria: CRITERIA,
   progress: PROGRESS(mastered),
+  read_at: null,
 });
 
 /**

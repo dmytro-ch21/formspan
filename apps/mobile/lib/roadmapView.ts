@@ -45,6 +45,8 @@ export type Measure = {
 export type Lesson = {
   /** Stable within one curriculum: technique id, or `c<order>` for a concept. */
   key: string;
+  /** The item's own server identity — what the read toggle (N123) sends. */
+  itemID: number;
   kind: 'technique' | 'concept';
   /** Null on a concept — an idea points at nothing in the library. */
   techniqueID: string | null;
@@ -77,6 +79,14 @@ export type Lesson = {
    * mastery stays derived.
    */
   evidenceNote: string | null;
+  /**
+   * N123. Only ever true on a `concept` lesson — the athlete's own claim to
+   * have read and understood it. A DIFFERENT KIND OF THING from `mastered`
+   * above: `mastered` is read off logged evidence and this app offers no
+   * control that can set it, while `read` is nothing BUT set by the athlete
+   * tapping the read toggle. Always false for a technique lesson.
+   */
+  read: boolean;
 };
 
 export type Milestone = {
@@ -345,6 +355,7 @@ export function buildRoadmap(c: Curriculum): RoadmapView {
       const measures = measuresOf(item, c.enrolled);
       return {
         key: item.technique_id ?? `c${item.order}`,
+        itemID: item.id,
         kind: item.kind,
         techniqueID: item.technique_id ?? null,
         name: item.kind === 'concept' ? (item.title ?? item.name) : item.name,
@@ -353,6 +364,13 @@ export function buildRoadmap(c: Curriculum): RoadmapView {
         mastered: item.progress?.mastered ?? false,
         started: startedOf(item),
         evidenceNote: evidenceNoteOf(item, c.enrolled),
+        // `item.kind === 'concept'` checked HERE rather than trusting
+        // `read_at` alone — the same defence-in-depth `evidenceNoteOf` uses
+        // for its own kind guard, one function up. The backend's own
+        // curriculum_item_reads_concept_only_trg already makes a non-null
+        // read_at on a technique impossible, but this function is correct on
+        // its own terms rather than only while that constraint holds.
+        read: item.kind === 'concept' && item.read_at !== null,
       };
     });
     const countable = lessons.filter((l) => l.measures !== null).length;

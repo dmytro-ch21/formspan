@@ -3,6 +3,7 @@ import { groupByPhase } from '../curriculumPhases';
 
 function item(over: Partial<CurriculumItem>): CurriculumItem {
   return {
+    id: 0,
     kind: 'technique',
     technique_id: 'x',
     name: 'X',
@@ -13,6 +14,7 @@ function item(over: Partial<CurriculumItem>): CurriculumItem {
     notes: '',
     criteria: null,
     progress: null,
+    read_at: null,
     ...over,
   };
 }

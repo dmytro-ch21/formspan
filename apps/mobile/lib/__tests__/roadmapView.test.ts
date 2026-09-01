@@ -47,6 +47,7 @@ function technique(
   progress?: Partial<Progress>,
 ): CurriculumItem {
   return {
+    id: 0,
     kind: 'technique',
     technique_id: id,
     name: id,
@@ -57,11 +58,21 @@ function technique(
     notes: '',
     criteria: criteria === null ? null : { ...NO_CRITERIA, ...criteria },
     progress: progress === undefined ? null : { ...NO_PROGRESS, ...progress },
+    // A technique's read_at is always null — see Item.Read's doc comment on
+    // the Go side. Tests that need a non-null id or a read concept override
+    // this explicitly, below.
+    read_at: null,
   };
 }
 
-function concept(order: number, phase: number | null, title: string): CurriculumItem {
+function concept(
+  order: number,
+  phase: number | null,
+  title: string,
+  opts: { id?: number; readAt?: string | null } = {},
+): CurriculumItem {
   return {
+    id: opts.id ?? order,
     kind: 'concept',
     title,
     name: title,
@@ -72,6 +83,7 @@ function concept(order: number, phase: number | null, title: string): Curriculum
     notes: 'Position before submission.',
     criteria: null,
     progress: null,
+    read_at: opts.readAt ?? null,
   };
 }
 
@@ -91,6 +103,8 @@ function curriculum(over: Partial<Curriculum> = {}): Curriculum {
     item_count: 0,
     countable_items: 0,
     mastered_items: 0,
+    concept_items: 0,
+    read_concepts: 0,
     phases: [],
     items: [],
     ...over,
@@ -275,6 +289,47 @@ describe('milestones', () => {
     expect(lesson.name).toBe('Position before submission');
     expect(lesson.measures).toBeNull();
     expect(lesson.techniqueID).toBeNull();
+  });
+
+  // N123 — "read and understood" is the athlete's own claim, and this is the
+  // one place the wire's `read_at` becomes the screen's `read`/`itemID`.
+  it('carries the item id through as itemID, for the read toggle to send back', () => {
+    const c = curriculum({
+      phases,
+      items: [concept(1, 1, 'Position before submission', { id: 42 })],
+    });
+    const lesson = buildRoadmap(c).milestones[1].lessons[0];
+    expect(lesson.itemID).toBe(42);
+  });
+
+  it('reads a concept as read from a non-null read_at, and unread from null', () => {
+    const c = curriculum({
+      phases,
+      items: [
+        concept(1, 0, 'Read this', { readAt: '2026-08-30T12:00:00Z' }),
+        concept(2, 0, 'Not yet', { readAt: null }),
+      ],
+    });
+    const [read, unread] = buildRoadmap(c).milestones[0].lessons;
+    expect(read.read).toBe(true);
+    expect(unread.read).toBe(false);
+  });
+
+  it('never reports a technique lesson as read, whatever read_at says', () => {
+    // Defence in depth: the backend guarantees a technique's read_at is
+    // always null (curriculum_item_reads_concept_only_trg), but this is the
+    // one place a malformed payload would surface, and the assertion is
+    // cheap insurance against that guarantee ever being read wrong here.
+    const malformed: CurriculumItem = {
+      ...technique('armbar', 0, { target_scored: 1 }),
+      read_at: '2026-08-30T12:00:00Z',
+    };
+    const c = curriculum({ phases, items: [malformed] });
+    const lesson = buildRoadmap(c).milestones[0].lessons[0];
+    // `measures` still renders — read state must never gate or replace the
+    // technique's own derived progress display.
+    expect(lesson.measures).not.toBeNull();
+    expect(lesson.read).toBe(false);
   });
 });
 

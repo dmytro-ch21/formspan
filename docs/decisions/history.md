@@ -50354,6 +50354,126 @@ promotion after the fact, and confirming a photo-less promotion still
 renders correctly — are `NEEDS HUMAN EVIDENCE` and handed to the user as a
 checklist rather than claimed here.
 
+## 2026-09-01 — N123 (#512): a concept can be marked read and understood, and it is a different kind of thing from mastery
+
+**The request, verbatim:** *"Let's make items in roadmaps that are only to
+read to mark as read and understood."* A roadmap item is a `technique` (progress
+derived from logged evidence, migration 000034) or a `concept` (authored
+text — "position before submission", a graduation standard — carrying no
+criteria at all, migration 000051, "because no evidence stream could measure
+one"). A concept therefore had **no state whatsoever**: nothing recorded that
+an athlete had even looked at it. Purple and brown belts are majority
+concept — brown carries 48 of them — so those roadmaps were largely items
+that could never move in any sense, including the harmless one of "I read
+this."
+
+**This does not reopen either guard — it adds a third fact next to them.**
+000034: *"There is deliberately no way to mark a technique mastered by
+hand."* 000051: *"[concepts] never count toward progress."* Both stay true.
+"Read and understood" is the athlete's own attestation about a concept, never
+a derived claim about a skill, and it is never presentable as evidence of
+mastery. Keeping the two apart — different table, different column, different
+struct field, different endpoint, different UI control — is the whole design,
+and it is enforced at every layer rather than by convention at one:
+
+- **Schema.** A new `curriculum_item_reads` table
+  (`user_id, curriculum_item_id, read_at`, PK on the first two, FK to
+  `curriculum_items.id ON DELETE CASCADE`) keyed on the stable identity
+  `curriculum_items` already had (`id BIGINT GENERATED ALWAYS AS IDENTITY`,
+  migration 000034) rather than reinventing one out of `sort_order`, which is
+  not even stable — `replaceContent` reassigns it from array position on
+  every content write. `curriculum_item_reads_concept_only_trg`, a
+  `BEFORE INSERT OR UPDATE` trigger, refuses any row whose item is not
+  `kind = 'concept'`, raising `ERRCODE 23514` so `translate()` maps it onto
+  the same `ErrInvalidInput` every other shape guard in this module already
+  uses. A CHECK constraint cannot look at another table, so this is the one
+  place `curriculum` reaches for a trigger instead of `curriculum_items_kind_shape`'s
+  plain CHECK — same declarative intent, different mechanism, because the
+  fact being guarded now spans two tables.
+- **Domain.** `Item.ID` is exposed on the wire for the first time (additive —
+  it was always the row's real identity, just never serialised) and
+  `Item.ReadAt *time.Time` sits beside `Progress` as a **sibling field
+  computed by a sibling method**: `Read()` reads `ReadAt`, `Mastered()` reads
+  `Progress.Mastered`, and neither can be reached through the other.
+  `Curriculum.ConceptItems`/`ReadConcepts` are the concept-side twin of
+  `CountableItems`/`MasteredItems`, computed the same additive way and never
+  folded into them — `ConceptItems` is cheap and content-only so it rides
+  along on `List` like `CountableItems` does; `ReadConcepts` needs the
+  caller's own per-item state so it is real only on `Get`/`Working` and zero
+  on `List`, the same asymmetry `MasteredItems` already has.
+- **API.** `PUT`/`DELETE /v1/curricula/{curriculumID}/items/{itemID}/read`, a
+  subresource matching `.../enrollment`'s own reasoning: the acting user is
+  always the caller, so no body can name somebody else's read. `PUT` is
+  idempotent (`ON CONFLICT DO UPDATE SET read_at = now()`, the same
+  convergent-retry contract enrollment's `started_on` uses) and re-derives
+  visibility from `curriculum_items`/`curricula` in its own `WHERE` rather
+  than trusting the two path parameters to already agree — a cross-curriculum
+  `itemID` returns 404, never a misattributed write. `DELETE` is
+  deliberately **not** visibility-scoped and always 204: withdrawing your own
+  claim about your own state must work even if the curriculum went private or
+  the item was edited out from under it since, and "never marked" / "already
+  unmarked" / "doesn't exist under this curriculum" all reach the same end
+  state a client undoing a mistaken tap has no use for being told apart.
+- **The recorded decision** the ticket asked for: read concepts are **never**
+  blended into `countable_items`/`mastered_items`. A client renders
+  `read_concepts`/`concept_items` as its own adjacent figure — "8 of 11
+  milestones · 22 of 48 concepts read" — so a roadmap that is mostly concepts
+  stops reading as permanently stuck at 0% without the derived and the
+  attested ever sharing one number.
+- **Mobile** (`apps/mobile/app/curriculum/[id].tsx`): the concept-detail
+  branch (`l.measures === null`) gets a checkbox affordance below the
+  existing "Understand this" copy — genuinely different chrome from the
+  technique branch's "Work on this" button (different copy, a checkbox role
+  and state rather than a filled CTA), because the ticket's own acceptance
+  criterion is that the two must not share a control, and this is a UI
+  requirement as much as a backend one. Tapping again withdraws the claim
+  (`unmarkItemRead`) — reversible, and the label changes ("Read and
+  understood" ↔ "Mark as read and understood") rather than relying on one tap
+  reading two ways. `roadmapView.ts`'s `Lesson.read` is gated on
+  `item.kind === 'concept'` explicitly, the same defence-in-depth
+  `evidenceNoteOf` already uses for its own kind check, rather than trusting
+  a non-null `read_at` alone — belt-and-suspenders against a malformed
+  payload, since the real guarantee lives in the trigger. The "N of M
+  concepts read" figure sits on the progress card as its own line under the
+  milestone bar, never blended into the ring or the bar, and is absent
+  entirely (like the bar itself for a milestone with nothing completable)
+  when `concept_items` is 0.
+- **Backend tests** (`postgres_test.go`): mark-then-unmark reversibility with
+  idempotent re-marks and re-unmarks; marking a technique read rejected as
+  `ErrInvalidInput` with no row left behind, and **mutation-verified** — the
+  covering test was run with `curriculum_item_reads_concept_only_trg`
+  disabled directly in Postgres (`ALTER TABLE ... DISABLE TRIGGER`), confirmed
+  red as a genuine assertion failure, the trigger re-enabled, confirmed green
+  again by re-running; a cross-curriculum `itemID` rejected as `ErrNotFound`;
+  and mastery/progress computation proven completely unaffected by read
+  state (enroll, log evidence to mastery, mark a concept read, assert
+  `countable_items`/`mastered_items` unmoved) — the two migrations'
+  invariants stay true. Mobile: `roadmapView.test.ts` covers `itemID`/`read`
+  derivation, including a malformed-technique-with-`read_at` case that
+  mutation-verified the kind guard the same way (removed, confirmed red,
+  restored, confirmed green); `roadmapScreen.test.tsx` covers the toggle's
+  render gating (present on a concept, **mutation-verified absent** on a
+  technique — a duplicated toggle was temporarily rendered into the
+  technique branch, the guard test went red as a genuine failure, the
+  mutation was reverted and the diff confirmed byte-identical to the
+  pre-mutation file, then the suite was re-run green), mark/unmark against
+  the mocked API with the screen reflecting the reload, and the separate
+  concepts-read figure appearing and disappearing correctly.
+- **Web scope — deliberate, not an oversight.** This PR ships mobile only.
+  The mobile-first hard rule requires that an athlete with only a phone can
+  do this at all, which mobile alone satisfies; it does not require parity
+  in one PR, and `apps/web`'s curriculum detail page
+  (`src/app/dashboard/curricula/[id]/page.tsx`, ~600 lines, its own
+  hand-duplicated types per the `apps/web`/`apps/mobile`-cannot-import-from-
+  each-other constraint N100's `roadmapFocus.ts` already lives with) would
+  roughly double this change's surface for a feature whose "in the moment"
+  reading — a concept read on a mat, between rounds — is squarely a phone
+  job. Web parity is a reasonable fast-follow, filed as its own ticket
+  rather than absorbed into this one's scope.
+
+**Left open, `NEEDS HUMAN EVIDENCE`:** the toggle has never been tapped on a
+device. The acceptance criterion asks for it specifically at brown belt,
+where the effect (majority-concept roadmaps) is largest.
 
 ## Open items / known gaps as of this entry
 

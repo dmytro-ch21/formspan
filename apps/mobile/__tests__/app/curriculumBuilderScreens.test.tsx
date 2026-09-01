@@ -105,11 +105,13 @@ function curriculum(over: Partial<Curriculum> = {}): Curriculum {
     item_count: 1,
     countable_items: 0,
     mastered_items: 0,
+    concept_items: 0,
+    read_concepts: 0,
     items: [
       {
-        kind: 'technique', technique_id: 't-knee-cut', name: 'Knee cut',
+        id: 1, kind: 'technique', technique_id: 't-knee-cut', name: 'Knee cut',
         position: 'Half guard top', category: 'pass', order: 0, phase: null,
-        notes: '', criteria: null, progress: null,
+        notes: '', criteria: null, progress: null, read_at: null,
       },
     ],
     ...over,

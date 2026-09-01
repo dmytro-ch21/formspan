@@ -21,6 +21,7 @@ import type { CurriculumItem } from '../curriculum';
 let n = 0;
 
 const step = (id: string, mastered: boolean): CurriculumItem => ({
+  id: n,
   kind: 'technique',
   technique_id: id,
   name: id,
@@ -45,6 +46,7 @@ const step = (id: string, mastered: boolean): CurriculumItem => ({
     drilled_sessions: 0,
     mastered,
   },
+  read_at: null,
 });
 
 /** No criteria — reading, not a roadmap step. */
@@ -82,6 +84,7 @@ const focus = (id: string, curriculumIds: string[] = []): Focus => ({
 
 /** A concept — authored text, no technique behind it at all. */
 const concept = (title: string): CurriculumItem => ({
+  id: n,
   kind: 'concept',
   title,
   name: '',
@@ -92,6 +95,7 @@ const concept = (title: string): CurriculumItem => ({
   notes: '',
   criteria: null,
   progress: null,
+  read_at: null,
 });
 
 /** The roadmap under test throughout — a fixed id so `unchanged`'s claim

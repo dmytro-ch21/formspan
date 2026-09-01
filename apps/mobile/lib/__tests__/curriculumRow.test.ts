@@ -64,6 +64,7 @@ function criteria(over: Partial<Criteria> = {}): Criteria {
 
 function item(c: Criteria | null, p: Progress | null): CurriculumItem {
   return {
+    id: 1,
     kind: 'technique',
     technique_id: 't1',
     name: 'Armbar from closed guard',
@@ -74,6 +75,7 @@ function item(c: Criteria | null, p: Progress | null): CurriculumItem {
     phase: null,
     criteria: c,
     progress: p,
+    read_at: null,
   };
 }
 

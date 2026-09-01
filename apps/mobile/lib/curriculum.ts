@@ -82,6 +82,9 @@ export type CurriculumPhase = {
 };
 
 export type CurriculumItem = {
+  /** The item's stable identity (curriculum_items.id) — additive as of N123.
+   *  What `markItemRead`/`unmarkItemRead` below take. */
+  id: number;
   /** A `technique` points into the library and may carry criteria; a
    *  `concept` is authored text — "position before submission", a graduation
    *  standard — and NEVER does: no evidence stream could measure one, and
@@ -104,6 +107,20 @@ export type CurriculumItem = {
   criteria: Criteria | null;
   /** Null when not enrolled, or when the item has no criteria. */
   progress: Progress | null;
+  /**
+   * N123. When the caller marked this CONCEPT read and understood — their
+   * own claim, never a derived one. Always null on a `technique` item
+   * (refused at the database level, not just by convention) and null on an
+   * unread concept.
+   *
+   * A DIFFERENT KIND OF THING from `progress`, on purpose: `progress.mastered`
+   * is computed from logged evidence and this app offers no control that can
+   * set it. `read_at` is nothing BUT set by hand, through its own
+   * subresource (`markItemRead`/`unmarkItemRead` below) — never through
+   * anything that touches criteria or progress. A concept marked read must
+   * never be presentable as evidence of mastery.
+   */
+  read_at: string | null;
 };
 
 export type Curriculum = {
@@ -160,6 +177,19 @@ export type Curriculum = {
    *  card drawing a bar from it renders a placeholder as fact, which shipped
    *  once on web already. Only meaningful on a single read. */
   mastered_items: number;
+  /** N123. How many items are `kind: concept` — the concept-side twin of
+   *  `countable_items`, and never folded into it. Cheap and content-only, so
+   *  present on the list response too. */
+  concept_items: number;
+  /** N123. How many of `concept_items` the caller has marked read and
+   *  understood — the concept-side twin of `mastered_items`, and
+   *  DELIBERATELY NEVER COMBINED with it or with `countable_items` into one
+   *  percentage: whether read concepts count toward a belt's completion is a
+   *  decision made in the open, and the one taken is "no" — render this as
+   *  its own adjacent figure ("8 of 11 milestones · 22 of 48 concepts read"),
+   *  never blended in. **Zero on the list response**, same reason as
+   *  `mastered_items`. */
+  read_concepts: number;
   /** Present on a single read, absent from the list — same lazy contract as
    *  `items`. Empty for a flat curriculum. */
   phases?: CurriculumPhase[];
@@ -255,6 +285,44 @@ export function archiveCurriculumEnrollment(
   return apiRequest<void>(getToken, `/curricula/${encodeURIComponent(id)}/enrollment`, {
     method: 'DELETE',
   });
+}
+
+/**
+ * N123. The athlete's own claim to have read and understood a CONCEPT item —
+ * never a technique, refused at the database level regardless of what this
+ * app sends. A subresource, matching {@link enrollInCurriculum}'s own
+ * reasoning: the acting user is always the caller.
+ *
+ * Idempotent: marking an already-read item again just moves `read_at`
+ * forward, so a retry after a dropped response converges rather than errors.
+ */
+export function markItemRead(
+  getToken: TokenGetter,
+  curriculumID: string,
+  itemID: number,
+): Promise<void> {
+  return apiRequest<void>(
+    getToken,
+    `/curricula/${encodeURIComponent(curriculumID)}/items/${itemID}/read`,
+    { method: 'PUT' },
+  );
+}
+
+/**
+ * N123. Withdraws the claim — reversible, per the ticket's own acceptance
+ * criterion: marking something read by mistake must not be permanent.
+ * Idempotent and always succeeds, including against an item already unread.
+ */
+export function unmarkItemRead(
+  getToken: TokenGetter,
+  curriculumID: string,
+  itemID: number,
+): Promise<void> {
+  return apiRequest<void>(
+    getToken,
+    `/curricula/${encodeURIComponent(curriculumID)}/items/${itemID}/read`,
+    { method: 'DELETE' },
+  );
 }
 
 /**

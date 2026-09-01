@@ -142,8 +142,9 @@ const PROGRESS = (mastered: boolean): Progress => ({
 
 let n = 0;
 const step = (phase: number | null, mastered: boolean, name?: string): CurriculumItem => ({
+  id: (n += 1),
   kind: 'technique',
-  technique_id: `t${(n += 1)}`,
+  technique_id: `t${n}`,
   name: name ?? `Technique ${n}`,
   position: 'guard',
   category: 'sweep',
@@ -152,6 +153,7 @@ const step = (phase: number | null, mastered: boolean, name?: string): Curriculu
   notes: '',
   criteria: CRITERIA,
   progress: PROGRESS(mastered),
+  read_at: null,
 });
 
 const curriculum = (over: Partial<Curriculum>): Curriculum =>

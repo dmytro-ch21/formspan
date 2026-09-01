@@ -632,6 +632,16 @@ func main() {
 	// enrollment.go for why it is here and not inside either module.
 	mux.Handle("DELETE /v1/curricula/{curriculumID}/enrollment",
 		verifier.RequireAuth(releaseRoadmapFocus(bjjRepo, http.HandlerFunc(curriculumHandler.Archive))))
+	// N123: an athlete's own claim to have read and understood a CONCEPT
+	// item — never a technique, enforced at the database level by
+	// curriculum_item_reads_concept_only_trg, not just by this handler. A
+	// subresource under the item, matching enrollment's own reasoning: the
+	// acting user is always the caller, and no request body can name
+	// somebody else's read.
+	mux.Handle("PUT /v1/curricula/{curriculumID}/items/{itemID}/read",
+		verifier.RequireAuth(http.HandlerFunc(curriculumHandler.MarkItemRead)))
+	mux.Handle("DELETE /v1/curricula/{curriculumID}/items/{itemID}/read",
+		verifier.RequireAuth(http.HandlerFunc(curriculumHandler.UnmarkItemRead)))
 
 	// Sequences: the chain a class actually taught, in the order it flows.
 	//

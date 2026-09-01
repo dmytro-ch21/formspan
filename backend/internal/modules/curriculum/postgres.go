@@ -38,7 +38,7 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]Curricu
 		SELECT c.id, c.owner_user_id, c.name, c.description, c.belt, c.track, c.visibility,
 		       c.created_at, c.updated_at,
 		       e.user_id IS NOT NULL AS enrolled, e.started_on,
-		       n.items, n.countable
+		       n.items, n.countable, n.concepts
 		FROM curricula c
 		-- Item counts, so a list card can tell a roadmap from a reading list.
 		--
@@ -58,7 +58,13 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]Curricu
 		               WHERE i.target_scored IS NOT NULL
 		                  OR i.target_defended IS NOT NULL
 		                  OR i.target_drilled_sessions IS NOT NULL
-		           ) AS countable
+		           ) AS countable,
+		           -- Cheap and content-only, unlike read_concepts below: how
+		           -- many items ARE concepts does not depend on who is asking,
+		           -- so -- like countable beside it -- it costs nothing extra
+		           -- to carry on the list. See ConceptItems' doc comment for
+		           -- why its per-user twin, ReadConcepts, stays 0 here instead.
+		           count(*) FILTER (WHERE i.kind = 'concept') AS concepts
 		    FROM curriculum_items i WHERE i.curriculum_id = c.id
 		) n ON true
 		-- LEFT, and joined on the caller: enrollment decorates the row rather
@@ -67,6 +73,8 @@ func (r *PostgresRepository) List(ctx context.Context, userID string) ([]Curricu
 		LEFT JOIN curriculum_enrollments e
 		       ON e.curriculum_id = c.id AND e.user_id = $1 AND e.archived_on IS NULL
 		WHERE `+visibleTo+`
+		-- List query continues below; n.items, n.countable, n.concepts feed
+		-- scanCurriculum's ItemCount/CountableItems/ConceptItems in order.
 		-- OWN ROWS FIRST, then enrolled, then belt, then name. The ordering is
 		-- not cosmetic under the cap below: this list spans every user's public
 		-- curricula, so leading with `+"`enrolled`"+` alone would let strangers'
@@ -107,7 +115,11 @@ func scanCurriculum(rows pgx.Rows, userID string) (*Curriculum, *time.Time, erro
 	if err := rows.Scan(
 		&c.ID, &c.OwnerUserID, &c.Name, &c.Description, &c.Belt, &c.Track, &c.Visibility,
 		&c.CreatedAt, &c.UpdatedAt, &c.Enrolled, &startedOn,
-		&c.ItemCount, &c.CountableItems,
+		&c.ItemCount, &c.CountableItems, &c.ConceptItems,
+		// ReadConcepts is deliberately NOT scanned here, matching
+		// MasteredItems: it needs the caller's per-item state, so List leaves
+		// it at Go's zero value and Get/Working fill in the real count from
+		// the items() read below.
 	); err != nil {
 		return nil, nil, fmt.Errorf("curriculum: scan: %w", err)
 	}
@@ -131,8 +143,9 @@ func (r *PostgresRepository) Working(ctx context.Context, userID, tz string) ([]
 		       c.created_at, c.updated_at,
 		       true AS enrolled, e.started_on,
 		       -- Filled from the items below, like Get: counting criteria in SQL
-		       -- as well would put the rule in two places for one number.
-		       0, 0
+		       -- as well would put the rule in two places for one number. Third
+		       -- placeholder is ConceptItems, filled the same way.
+		       0, 0, 0
 		FROM curriculum_enrollments e
 		JOIN curricula c ON c.id = e.curriculum_id
 		-- INNER on the enrollment, so this is "mine" by construction rather than
@@ -190,6 +203,12 @@ func (r *PostgresRepository) Working(ctx context.Context, userID, tz string) ([]
 					p.c.MasteredItems++
 				}
 			}
+			if it.Kind == "concept" {
+				p.c.ConceptItems++
+				if it.Read() {
+					p.c.ReadConcepts++
+				}
+			}
 		}
 		// **Nothing completable is nothing being worked.** Enrolment on a
 		// criteria-free list is a bookmark — an athlete's own reading list has
@@ -222,8 +241,9 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id, tz string) (*C
 		       -- Placeholders, filled below from the items this read fetches
 		       -- anyway. Counting them in SQL here would put the criteria rule
 		       -- in two places -- a WHERE clause and Countable() -- for one
-		       -- number, which is how the two drift apart.
-		       0, 0
+		       -- number, which is how the two drift apart. Third placeholder is
+		       -- ConceptItems, filled the same way.
+		       0, 0, 0
 		FROM curricula c
 		LEFT JOIN curriculum_enrollments e
 		       ON e.curriculum_id = c.id AND e.user_id = $1 AND e.archived_on IS NULL
@@ -272,6 +292,12 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id, tz string) (*C
 			c.CountableItems++
 			if it.Mastered() {
 				c.MasteredItems++
+			}
+		}
+		if it.Kind == "concept" {
+			c.ConceptItems++
+			if it.Read() {
+				c.ReadConcepts++
 			}
 		}
 	}
@@ -386,14 +412,15 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 			       OR (s.started_at AT TIME ZONE $4)::date >= $3::date)
 			GROUP BY t.technique_id
 		)
-		SELECT i.kind, i.technique_id, i.title,
+		SELECT i.id, i.kind, i.technique_id, i.title,
 		       COALESCE(lib.name, ''), COALESCE(lib.position, ''), COALESCE(lib.category, ''),
 		       i.sort_order, i.phase_order, i.notes,
 		       i.target_scored, i.target_defended, i.target_sessions, i.min_hit_rate,
 		       i.target_drilled_sessions,
 		       COALESCE(ev.scored, 0), COALESCE(ev.defended, 0),
 		       COALESCE(ev.attempts, 0), COALESCE(ev.sessions, 0),
-		       COALESCE(ev.drilled_sessions, 0)
+		       COALESCE(ev.drilled_sessions, 0),
+		       r.read_at
 		FROM curriculum_items i
 		-- LEFT, for the CONCEPT rows only — their technique_id is NULL by
 		-- constraint. For technique rows the join still cannot miss: the FK is
@@ -401,6 +428,13 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 		-- and the COALESCEs above only ever fire for concepts.
 		LEFT JOIN techniques lib ON lib.id = i.technique_id
 		LEFT JOIN ev ON ev.technique_id = i.technique_id
+		-- LEFT, scoped to the CALLER: r.read_at is non-NULL only where this
+		-- athlete has marked this exact item read. It can only ever match a
+		-- concept row — curriculum_item_reads_concept_only_trg refuses any
+		-- other row from existing — but the join carries no kind filter of its
+		-- own, on purpose: the guarantee lives in the schema, not duplicated
+		-- into every reader of it.
+		LEFT JOIN curriculum_item_reads r ON r.curriculum_item_id = i.id AND r.user_id = $1
 		WHERE i.curriculum_id = $2
 		ORDER BY i.sort_order`, userID, id, since, zone(tz))
 	if err != nil {
@@ -423,16 +457,19 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 			tSess       *int
 			minRate     *float64
 			tDrilled    *int
+			readAt      *time.Time
 		)
 		if err := rows.Scan(
-			&it.Kind, &techniqueID, &it.Title,
+			&it.ID, &it.Kind, &techniqueID, &it.Title,
 			&it.Name, &it.Position, &it.Category,
 			&it.Order, &it.Phase, &it.Notes,
 			&tScored, &tDef, &tSess, &minRate, &tDrilled,
 			&scored, &defended, &attempts, &sessions, &drilled,
+			&readAt,
 		); err != nil {
 			return nil, fmt.Errorf("curriculum: scan item: %w", err)
 		}
+		it.ReadAt = readAt
 		if techniqueID != nil {
 			it.TechniqueID = *techniqueID
 		}
@@ -738,6 +775,75 @@ func (r *PostgresRepository) Archive(ctx context.Context, userID, id string) err
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// MarkItemRead records the caller's own claim to have read and understood a
+// CONCEPT item.
+//
+// The INSERT's own SELECT re-derives visibility and ownership from
+// curriculum_items/curricula rather than trusting the two path parameters to
+// agree — the same race-free posture Update and Enroll use, and load-bearing
+// for the same reason: without it, marking an item read on a curriculumID
+// that does not actually own itemID (or is not visible to the caller) would
+// still succeed, silently attributing a read to whatever the id happens to
+// resolve to.
+//
+// The technique-rejection path never reaches the RowsAffected check below: a
+// technique item DOES match the SELECT (it exists and is visible), so the
+// INSERT is attempted, and curriculum_item_reads_concept_only_trg raises
+// before any row is written — translate() maps that 23514 to ErrInvalidInput,
+// the same family every other shape guard in this module uses.
+func (r *PostgresRepository) MarkItemRead(ctx context.Context, userID, curriculumID string, itemID int64) error {
+	tag, err := r.pool.Exec(ctx, `
+		INSERT INTO curriculum_item_reads (user_id, curriculum_item_id, read_at)
+		SELECT $1, i.id, now()
+		FROM curriculum_items i
+		JOIN curricula c ON c.id = i.curriculum_id
+		WHERE i.id = $2 AND i.curriculum_id = $3 AND `+visibleTo+`
+		-- Idempotent: marking an already-read item again just moves read_at
+		-- forward, the same "no distinct instant matters" reasoning Enroll's
+		-- own ON CONFLICT uses for started_on's counterpart.
+		ON CONFLICT (user_id, curriculum_item_id) DO UPDATE SET read_at = now()`,
+		userID, itemID, curriculumID)
+	if err != nil {
+		return translate(err, "mark item read")
+	}
+	if tag.RowsAffected() == 0 {
+		// The SELECT matched nothing: itemID does not exist, does not belong
+		// to curriculumID, or curriculumID is not visible to this caller.
+		// ErrNotFound in every case — never ErrForbidden, matching Get's own
+		// reasoning: confirming "wrong curriculum" versus "not yours to see"
+		// would make this endpoint a probe for a private curriculum's ids.
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UnmarkItemRead withdraws the claim.
+//
+// Deliberately NOT scoped through visibleTo the way MarkItemRead is: undoing
+// a mistaken tap must work even if the curriculum was made private, or the
+// item removed from it, in between — the athlete's own claim about their own
+// state should not become unreachable because the content around it changed
+// shape. The curriculum_id filter still exists, so a caller cannot unmark a
+// read against an itemID that belongs to a DIFFERENT curriculum than the one
+// named in the path — that would be the wrong resource responding to the
+// request, not an authorization question.
+//
+// Idempotent and never ErrNotFound — see the Repository interface doc comment
+// for why: an item never marked, one already unmarked, and one that does not
+// exist under this curriculum all reach the same end state.
+func (r *PostgresRepository) UnmarkItemRead(ctx context.Context, userID, curriculumID string, itemID int64) error {
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM curriculum_item_reads
+		WHERE user_id = $1 AND curriculum_item_id = $2
+		  AND curriculum_item_id IN (
+		      SELECT i.id FROM curriculum_items i WHERE i.curriculum_id = $3
+		  )`,
+		userID, itemID, curriculumID); err != nil {
+		return fmt.Errorf("curriculum: unmark item read: %w", err)
 	}
 	return nil
 }

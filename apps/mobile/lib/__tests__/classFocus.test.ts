@@ -44,6 +44,7 @@ function progress(over: Partial<Progress> = {}): Progress {
  *  a test could not see or control. */
 function step(id: string, order: number, over: Partial<CurriculumItem> = {}): CurriculumItem {
   return {
+    id: order,
     kind: 'technique',
     technique_id: id,
     name: over.name ?? `Technique ${id}`,
@@ -54,6 +55,7 @@ function step(id: string, order: number, over: Partial<CurriculumItem> = {}): Cu
     notes: '',
     criteria: CRITERIA,
     progress: progress(),
+    read_at: null,
     ...over,
   };
 }
@@ -73,6 +75,8 @@ function roadmap(over: Partial<Curriculum> = {}): Curriculum {
     item_count: over.items?.length ?? 0,
     countable_items: over.items?.filter((i) => i.criteria !== null).length ?? 0,
     mastered_items: over.items?.filter((i) => i.progress?.mastered).length ?? 0,
+    concept_items: over.items?.filter((i) => i.kind === 'concept').length ?? 0,
+    read_concepts: over.items?.filter((i) => i.kind === 'concept' && i.read_at !== null).length ?? 0,
     phases: over.phases,
     items: over.items ?? [],
     ...over,

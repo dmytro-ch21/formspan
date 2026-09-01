@@ -73,12 +73,16 @@ jest.mock('react-native-safe-area-context', () => ({
 
 const mockGetCurriculum = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve(null));
 const mockDeleteCurriculum = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve());
+const mockMarkItemRead = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve());
+const mockUnmarkItemRead = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve());
 jest.mock('@/lib/curriculum', () => ({
   ...jest.requireActual('@/lib/curriculum'),
   getCurriculum: (...a: unknown[]) => mockGetCurriculum(...a),
   enrollInCurriculum: jest.fn(() => Promise.resolve()),
   archiveCurriculumEnrollment: jest.fn(() => Promise.resolve()),
   deleteCurriculum: (...a: unknown[]) => mockDeleteCurriculum(...a),
+  markItemRead: (...a: unknown[]) => mockMarkItemRead(...a),
+  unmarkItemRead: (...a: unknown[]) => mockUnmarkItemRead(...a),
 }));
 
 const mockSetFocus = jest.fn((..._a: unknown[]): Promise<unknown> => Promise.resolve());
@@ -134,8 +138,10 @@ jest.mock('@/lib/sync', () => ({
   },
 }));
 
+let nextItemID = 1;
 function technique(id: string, name: string, phase: number, scored: number): CurriculumItem {
   return {
+    id: nextItemID++,
     kind: 'technique',
     technique_id: id,
     name,
@@ -160,6 +166,9 @@ function technique(id: string, name: string, phase: number, scored: number): Cur
       drilled_sessions: 0,
       mastered: false,
     },
+    // A technique's read_at is always null — see Item.Read's doc comment
+    // (Go) and roadmapView's own defence-in-depth kind guard.
+    read_at: null,
   };
 }
 
@@ -177,6 +186,8 @@ const WHITE: Curriculum = {
   item_count: 4,
   countable_items: 3,
   mastered_items: 0,
+  concept_items: 1,
+  read_concepts: 0,
   phases: [
     { order: 0, title: 'Start Standing', description: 'Begin safely.' },
     { order: 1, title: 'Sweep From Bottom', description: 'Bottom to top.' },
@@ -187,6 +198,7 @@ const WHITE: Curriculum = {
     technique('scissor-sweep', 'Scissor sweep', 1, 15),
     technique('hip-bump-sweep', 'Hip bump sweep', 1, 12),
     {
+      id: 9,
       kind: 'concept',
       title: 'Position before submission',
       name: 'Position before submission',
@@ -197,6 +209,7 @@ const WHITE: Curriculum = {
       notes: 'Improve where you are before you try to finish.',
       criteria: null,
       progress: null,
+      read_at: null,
     },
   ],
 };
@@ -477,6 +490,88 @@ describe('a lesson', () => {
     expect(screen.queryByText('HOW THIS IS MEASURED')).toBeNull();
     // And no "start this" button: there is nothing a focus chip would record.
     expect(screen.queryByTestId('roadmap-work-c9')).toBeNull();
+  });
+
+  // N123 — "read and understood" is the athlete's own claim, and it must not
+  // share a control with anything above: no "Work on this" copy, no
+  // technique lesson ever offering it.
+  describe('marking a concept read (N123)', () => {
+    it('offers the read toggle on a concept, and NEVER on a technique', async () => {
+      await open();
+      fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
+      fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
+      expect(screen.getByTestId('roadmap-read-toggle-c9')).toBeTruthy();
+
+      fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+      fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+      // THE GUARD THIS TEST EXISTS FOR: the ticket's own acceptance criterion
+      // that a technique and a concept must not share a control.
+      expect(screen.queryByTestId('roadmap-read-toggle-scissor-sweep')).toBeNull();
+    });
+
+    it('marks it read, and the toggle reflects the reload', async () => {
+      await open();
+      fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
+      fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
+
+      const toggle = screen.getByTestId('roadmap-read-toggle-c9');
+      expect(toggle.props.accessibilityState).toEqual(expect.objectContaining({ checked: false }));
+      expect(toggle).toHaveTextContent('Mark as read and understood');
+
+      const readItems = WHITE.items!.map((it) =>
+        it.id === 9 ? { ...it, read_at: '2026-08-30T12:00:00Z' } : it,
+      );
+      mockGetCurriculum.mockResolvedValueOnce({ ...WHITE, read_concepts: 1, items: readItems });
+
+      await act(async () => fireEvent.press(screen.getByTestId('roadmap-read-toggle-c9')));
+
+      expect(mockMarkItemRead).toHaveBeenCalledWith(expect.anything(), 'white-belt-basics', 9);
+      await waitFor(() =>
+        expect(screen.getByTestId('roadmap-read-toggle-c9').props.accessibilityState).toEqual(
+          expect.objectContaining({ checked: true }),
+        ),
+      );
+      expect(screen.getByTestId('roadmap-read-toggle-c9')).toHaveTextContent('Read and understood');
+    });
+
+    it('is reversible — tapping a read concept withdraws the claim', async () => {
+      const readItems = WHITE.items!.map((it) =>
+        it.id === 9 ? { ...it, read_at: '2026-08-30T12:00:00Z' } : it,
+      );
+      mockGetCurriculum.mockResolvedValue({ ...WHITE, read_concepts: 1, items: readItems });
+      await open();
+      fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
+      fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
+      expect(screen.getByTestId('roadmap-read-toggle-c9').props.accessibilityState).toEqual(
+        expect.objectContaining({ checked: true }),
+      );
+
+      mockGetCurriculum.mockResolvedValueOnce({ ...WHITE, read_concepts: 0, items: WHITE.items });
+      await act(async () => fireEvent.press(screen.getByTestId('roadmap-read-toggle-c9')));
+
+      expect(mockUnmarkItemRead).toHaveBeenCalledWith(expect.anything(), 'white-belt-basics', 9);
+      await waitFor(() =>
+        expect(screen.getByTestId('roadmap-read-toggle-c9').props.accessibilityState).toEqual(
+          expect.objectContaining({ checked: false }),
+        ),
+      );
+    });
+
+    it('shows "N of M concepts read" as its own figure, separate from milestones', async () => {
+      await open();
+      expect(screen.getByTestId('roadmap-concepts-read')).toHaveTextContent('0 of 1 concept read');
+    });
+
+    it('is absent entirely when nothing here is a concept', async () => {
+      mockGetCurriculum.mockResolvedValue({
+        ...WHITE,
+        concept_items: 0,
+        read_concepts: 0,
+        items: WHITE.items!.filter((it) => it.kind !== 'concept'),
+      });
+      await open();
+      expect(screen.queryByTestId('roadmap-concepts-read')).toBeNull();
+    });
   });
 
   it('closes when a different milestone is opened', async () => {
