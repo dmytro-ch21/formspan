@@ -50519,6 +50519,128 @@ and it is enforced at every layer rather than by convention at one:
 device. The acceptance criterion asks for it specifically at brown belt,
 where the effect (majority-concept roadmaps) is largest.
 
+## 2026-09-01 — N459 (#770): mobile native scaffolding for GPS running — map library, when-in-use-only location
+
+Pure scaffolding for the GPS-running workstream (#771/#772/#774 build on this):
+`expo-location` and `react-native-maps` added as **direct** `apps/mobile`
+dependencies (via `npx expo install`, which resolved SDK-57-compatible pins —
+`expo-location@~57.0.14`, `react-native-maps@1.27.2` — rather than latest, the
+same convention every other `expo-*` entry in `package.json` already follows).
+`expo install` initially picked `57.0.15` (published the same day) and pnpm's
+supply-chain `minimumReleaseAge` guard correctly refused it; rather than
+carrying a `minimumReleaseAgeExclude` waiver, the pin was dropped one patch to
+`~57.0.14` (a week old, same SDK-57 range, no behavioural difference for this
+ticket) so the guard needs no exception at all — flagged in review
+(frontend-reviewer) and fixed before merge. app.json permission strings added,
+and the dev client rebuilt and Simulator-verified. No running screen exists
+yet — that is later tickets'
+work.
+
+**Map library: react-native-maps, Apple Maps provider, no Google Maps key.**
+Evaluated against MapLibre (`@maplibre/maplibre-react-native`). Both ship an
+Expo config plugin and both work under a managed-workflow dev-client rebuild
+— that was not the deciding factor. What decided it:
+
+- **react-native-maps on iOS defaults to Apple Maps for free, with zero API
+  key and zero billing account**, confirmed by reading the plugin source
+  (`plugin/build/ios.js`): `withMapsIOS` only touches `GMSApiKey`/adds the
+  Google CocoaPods subspec when `iosGoogleMapsApiKey` is set; omitting it
+  gives a plain Apple-Maps-backed `MapView` out of the box. VOLA's only
+  tested/deployed mobile platform right now is iOS (`docs/device-deployment`
+  — the user's own 16 Pro Max; no Android device in the loop anywhere in this
+  repo's history), so "zero setup on the platform we actually ship" beat
+  "more flexible tile sourcing" for a scaffolding ticket.
+- **MapLibre's zero-Google-billing story is real but not zero-setup**: it
+  renders from a vector/raster **tile source you supply** — there is no
+  default style baked in, so standing this up for real would mean either
+  self-hosting tiles (no infra for that exists in this repo — no Railway
+  tile service) or signing up with a different vendor (MapTiler, Stadia,
+  Protomaps) for its own API key. That trade is a real option for a later
+  ticket if Android or a specific map style becomes a requirement, but it is
+  strictly more setup than this ticket needs to unblock #771/#772/#774.
+  MapLibre is also the more actively-published package right now (a release
+  the same day this entry was written, vs. react-native-maps' most recent
+  ~2 months prior) — noted in case that maintenance gap widens and this
+  decision needs revisiting.
+- **The Android cost is real and deliberately deferred, not solved.**
+  react-native-maps has no Apple-Maps-equivalent free tier on Android — it
+  always needs a Google Maps API key there (`plugin/build/android.js` only
+  ever writes or removes the `com.google.android.geo.API_KEY` meta-data; there
+  is no keyless path). Since nothing in this repo builds or tests Android
+  today, that cost is simply not paid yet. Whoever adds an Android build for
+  running will need `androidGoogleMapsApiKey` and a Google Cloud billing
+  account at that point — flagging it now so it isn't rediscovered as a
+  surprise.
+
+`app.json`'s `plugins` array gained a bare `"react-native-maps"` entry (no
+`iosGoogleMapsApiKey`/`androidGoogleMapsApiKey` — Apple Maps, no Android key).
+
+**Location scope: When-In-Use only, and two silent defaults had to be
+suppressed by hand.** The ticket calls for iOS
+`NSLocationWhenInUseUsageDescription` only, explicitly **not**
+`NSLocationAlwaysAndWhenInUseUsageDescription` or `UIBackgroundModes:
+["location"]`, to keep v1 to foreground/screen-on tracking and reduce App
+Store review risk — background/lock-screen tracking is a deliberate
+fast-follow ticket, not a gap in this one. Reading `expo-location`'s config
+plugin source (`plugin/build/withLocation.js`) before wiring it up surfaced
+the same class of trap `expo-camera`/`expo-image-picker` already have
+documented in the `vola-mobile-build` skill: `createPermissionsPlugin`'s
+`applyPermissions` sets its **generic default text for every key in its
+defaults map** (`NSLocationAlwaysAndWhenInUseUsageDescription`,
+`NSLocationAlwaysUsageDescription`, `NSLocationWhenInUseUsageDescription`,
+`NSMotionUsageDescription`) unless that key's plugin option is passed as
+literal `false` — leaving a permission string unset does **not** suppress it,
+it silently falls through to boilerplate ("Allow $(PRODUCT_NAME) to access
+your location") and still gets written into `Info.plist`. So the app.json
+entry explicitly sets `locationAlwaysAndWhenInUsePermission: false`,
+`locationAlwaysPermission: false`, **and** `motionUsagePermission: false`
+(motion tracking was never asked for and nothing in this ticket uses it) —
+without all three, the build would have silently declared two location
+permissions and one motion permission App Store review never asked to see,
+exactly the trap the skill already warns about for camera/microphone. Also
+left off: `isIosBackgroundLocationEnabled`, `isAndroidBackgroundLocationEnabled`
+and `isAndroidForegroundServiceEnabled` (all default-falsy, so
+`UIBackgroundModes`, `ACCESS_BACKGROUND_LOCATION` and the foreground-service
+permissions are never added) — this is the scoping decision from the ticket,
+encoded as plugin options rather than left to be re-derived later. Anyone
+adding background running tracking will need to flip these deliberately, not
+discover they were already on.
+
+The `NSLocationWhenInUseUsageDescription` copy itself: "VOLA uses your
+location to track your run's route, distance and pace while you're using the
+app. Location is only accessed while VOLA is open and on screen — VOLA does
+not track your location in the background or when the app is closed." —
+states the feature and the scope in the same sentence App Store review reads.
+
+**Verified on Simulator (iPhone 15 Pro, dev client rebuilt via `pnpm --dir
+apps/mobile run ios`):** build succeeded, app installed and launched cleanly
+with both new native modules linked (no `PluginError`, no dyld symbol crash —
+the two failure modes the `vola-mobile-build` skill warns a new native dep
+can produce). A throwaway route (added, exercised, then deleted before
+commit — never part of the diff) called
+`Location.requestForegroundPermissionsAsync()` and rendered a `MapView`:
+the system prompt appeared with the exact copy above and **only** "Allow
+Once" / "Allow While Using App" / "Don't Allow" — no "Always Allow" option,
+confirming the When-In-Use-only scoping took effect in the built binary, not
+just in the source file. Granting it (via `xcrun simctl privacy … grant
+location` after the interactive prompt's buttons didn't respond to this
+environment's tap injection — a tool/sandbox limitation, not a code issue)
+resolved to `{"status":"granted","ios":{"scope":"whenInUse","accuracy":"full"}}`,
+and a `MapView` rendered real Apple Maps tiles centered on a `simctl
+location set` mock coordinate with a marker — confirming the map and location
+modules are both genuinely linked and functional, not merely present in
+`package.json`.
+
+**Left open, `NEEDS HUMAN EVIDENCE`, not claimed here:** the ticket's
+acceptance checkbox for "seen on a real device/simulator" is left unticked.
+What's above is real Simulator verification of the prompt text, the
+restricted option set, and a rendered mocked GPS track — but it used a
+throwaway test route this branch does not ship, not a real running screen
+(that lands in a later ticket), and none of it happened on a physical device.
+The remaining device work — a real device run, and confirming the same
+behaviour once an actual running UI exists — is for the user to check.
+
+
 ## Open items / known gaps as of this entry
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
