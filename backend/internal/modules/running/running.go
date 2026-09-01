@@ -91,9 +91,12 @@ type RoutePoint struct {
 }
 
 // maxLatDegrees and maxLngDegrees bound a coordinate to the range a real GPS
-// fix can report. Not a precision check — just enough to reject a client bug
-// (swapped lat/lng, a stray 0,0 sentinel far from where anyone actually
-// runs) before it becomes a track nobody can render sensibly on a map.
+// fix can report. Not a precision check, and not a reliable catch for a
+// swapped lat/lng either — most real coordinates fit in both ranges, so a
+// swap only trips this for the minority that don't (e.g. anything with a
+// longitude past ±90). What it does reliably catch is a value outside what
+// a coordinate can physically be — a stray sentinel, a unit mixup — before
+// it becomes a track nobody can render sensibly on a map.
 const (
 	maxLatDegrees = 90.0
 	maxLngDegrees = 180.0
