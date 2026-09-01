@@ -50203,7 +50203,7 @@ accurate for an inert card, misleading for a tappable one (it describes a
 state with no mention that tapping does anything). It now matches the
 non-past label's shape: `"${Log|Start} ${title}, planned for ${dayLabel},
 not yet logged"` — same verb selection (`logsAfterwards`), same day, plus
-the outstanding-state word at the end instead of instead of it.
+the outstanding-state word at the end instead of it.
 
 **Tests.** `apps/mobile/components/today/__tests__/upNextCard.test.tsx` is
 new — this component had no direct test file before. It covers: a `past`

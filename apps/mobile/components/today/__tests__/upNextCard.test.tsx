@@ -46,6 +46,14 @@ describe('past (a day already gone, unmet)', () => {
     expect(screen.getByText('Not logged')).toBeTruthy();
   });
 
+  it('folds pastLabel into the DEFAULT accessibilityLabel, so a future caller cannot omit it silently', () => {
+    // The one real call site always passes an explicit accessibilityLabel —
+    // this guards the fallback a second caller would get if it didn't.
+    render(<UpNextCard {...BASE} past pastLabel="Not logged" testID="card" />);
+    const card = screen.getByTestId('card');
+    expect(card.props.accessibilityLabel).toBe('Strength session, Today. Not logged');
+  });
+
   it('renders no second, nested Log control — the card itself is the one target', () => {
     render(<UpNextCard {...BASE} past testID="card" />);
     expect(screen.queryByTestId('up-next-log')).toBeNull();

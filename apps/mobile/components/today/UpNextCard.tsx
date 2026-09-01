@@ -92,7 +92,8 @@ export function UpNextCard({
       onPress={onOpen}
       accessibilityRole="button"
       accessibilityLabel={
-        accessibilityLabel ?? `${title}, ${when}${hint ? `. ${hint}` : ''}`
+        accessibilityLabel ??
+        `${title}, ${when}${hint ? `. ${hint}` : ''}${past ? `. ${pastLabel}` : ''}`
       }
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
       testID={testID}
