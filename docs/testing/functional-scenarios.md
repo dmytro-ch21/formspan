@@ -16155,3 +16155,68 @@ hand).
 - Whether the granted permission and a rendered map track survive the app
   being backgrounded and foregrounded again mid-run, once a real running
   screen exists to test against.
+
+## N458 — a `running` backend module: session detail, migration, records (`PUT /v1/running/sessions/{sessionID}`, `GET /v1/running/sessions/{sessionID}`)
+
+Backend-only, mirroring `bjj`'s session-detail split: the session itself is
+an ordinary `sessions` row (`sport = "running"`) created through
+`POST /v1/sessions`, and this module carries only the GPS track, splits,
+elevation and pace a run has and a lift or a mat session do not.
+`longest_time`/`furthest_distance` records keep working through the generic
+`session`/records pipeline unchanged — this ticket adds no record logic of
+its own, and deliberately no pace-normalized PRs (fastest 5k/10k are a later
+ticket). No client surface exists yet — these scenarios are API-level.
+
+### Happy path
+
+- `PUT /v1/running/sessions/{id}` on a session the caller owns
+  (`sport = "running"`) with a full payload — `route_points` (several, with
+  and without `elevation_m`), `splits`, `elevation_gain_m`,
+  `avg_pace_sec_per_km`, `distance_m`, `duration_seconds`,
+  `source: "phone_gps"` — returns `200` and echoes the stored detail with
+  `created_at`/`updated_at` set.
+- `GET /v1/running/sessions/{id}` on the same session returns the same
+  detail, route points and splits in the order they were submitted.
+- A `source: "manual"` PUT with no `route_points` at all (hand-entered
+  distance/duration, no track) — `200`, `route_points: []` in the response,
+  not an error.
+- A second PUT with the same session id and a shorter `route_points`/
+  `splits` array — `200`, and a subsequent `GET` returns exactly the new,
+  shorter arrays: replace-wholesale, not append (the mobile outbox retry
+  case).
+- `route_points[].elevation_m` omitted on some points and present on
+  others in the same request — each round-trips independently; an omitted
+  one reads back `null`, never `0`.
+
+### Edge cases & errors
+
+- An unknown `source` value — `400 invalid_input`, naming the vocabulary.
+- Negative `distance_m`, `duration_seconds`, `elevation_gain_m` or
+  `avg_pace_sec_per_km` — `400 invalid_input`.
+- A route point with `lat` outside `-90..90` or `lng` outside `-180..180` —
+  `400 invalid_input`.
+- A split with `distance_m <= 0` or `duration_seconds <= 0` — `400
+  invalid_input`.
+- More than the route-point or split ceiling in one request — `400
+  invalid_input` rather than an unbounded transaction.
+- `PUT` against a session that does not exist — `404`, same shape as an
+  owned-but-wrong-sport session (below) — no existence oracle.
+- `PUT` against an existing **strength** or **bjj** session — `404`, not
+  written; a running detail must not attach to another discipline's
+  session.
+- Malformed JSON body, or a body over the size ceiling — `400
+  invalid_input`.
+
+### Auth/security
+
+- `PUT`/`GET` on another caller's `sessionID` — `404`, indistinguishable
+  from a nonexistent id or a session of another sport. This is the same
+  three-way non-disclosure `bjj`'s session-detail endpoints already commit
+  to.
+- No auth header — `401` on both routes.
+- A second PUT from a **different** user against a session id whose detail
+  row already exists (the update path, where the composite owner
+  foreign key stops applying because no referencing column changes on
+  `ON CONFLICT DO UPDATE`) — still `404`, and the original owner's detail is
+  left byte-for-byte unmodified. This is the path a foreign-key-only
+  implementation would silently miss.

@@ -50833,7 +50833,92 @@ transcript) are genuinely resolved on this branch — `3d3d347d`, the commit
 that had carried the verbatim text, was never pushed to GitHub at all
 (`gh api .../commits/3d3d347d` returns 404) and is unreachable from any ref.
 
+## 2026-09-01 — N458: a `running` backend module, mirroring `bjj`'s session-detail split (#769)
+
+**What.** `backend/internal/modules/running/` — the running half of a
+session: GPS track, distance-based splits, elevation gain, average pace,
+distance, duration and a `source` (`phone_gps`/`healthkit`/`manual`). A
+running session is a `sessions` row like any other (`sport = "running"`),
+exactly as a BJJ session is — this module hangs its own detail off that row
+rather than widening `sessions` or building a parallel domain. `Repository{
+PutDetail, GetDetail}` mirrors `bjj.SessionRepository` deliberately: PUT is
+an upsert that replaces the route and splits wholesale, so a retry from the
+mobile offline outbox after a partial failure converges instead of
+duplicating. Wired as `PUT`/`GET /v1/running/sessions/{sessionID}`, directly
+alongside the existing `/v1/bjj/sessions/{sessionID}` pair in `main.go`, so a
+client that already knows the BJJ shape can guess the running one.
+
+**Why a single JSONB-backed table and not a companion table per bjj's
+`_tags` split.** `bjj_session_tags` earns its own table because three
+deferred features (the technique funnel, the position heatmap, gap
+detection) all query it ACROSS sessions — "every event for this technique",
+"every tag at this position". Nothing here has that shape: a route point or
+a split is only ever read or written as part of its OWN session's detail,
+never aggregated across sessions. With no cross-session query to serve, a
+child table buys nothing and costs real overhead — a two-hour run's GPS
+track can be on the order of a thousand points, which as child rows would be
+a thousand round trips inside one transaction on every save. So
+`running_session_detail` stores `route_points` and `splits` as JSONB columns
+on the one detail row, replaced wholesale on every `PutDetail` alongside the
+scalar columns, in a single `INSERT ... ON CONFLICT DO UPDATE` rather than
+bjj's transaction-plus-batch. If a later ticket ever needs to query into the
+track or splits across sessions, that is the trigger to split them out —
+not before.
+
+**Ownership, mirrored exactly from bjj.** `running_session_detail.(session_id,
+user_id)` references `sessions (id, user_id)` as a composite FK, `ON DELETE
+CASCADE`. As with bjj, that FK is a backstop against a race, not the
+authorization: `PutDetail` reads `sessions.sport` explicitly inside the
+transaction and checks both ownership and sport before writing, because the
+FK says nothing about sport and does not fire at all on the upsert's
+`DO UPDATE` path (Postgres skips the referential-integrity check when no
+referencing column changes, and the update rewrites only payload columns).
+The `WHERE running_session_detail.user_id = $2` predicate on that upsert is
+therefore the only thing stopping one athlete from overwriting another's run
+once a detail row exists — verified with the same two-pronged test bjj uses:
+a repository-level test (which can't actually reach the predicate, since the
+ownership `SELECT` answers first) plus
+`TestUpsertPredicateRefusesACrossUserUpdateAtTheSQLLevel`, which issues the
+upsert directly as an attacker and asserts the database refuses it on its
+own. Mutation-verified: the `sport != sportKey` guard was disabled, the
+cross-sport-attach test failed as a genuine assertion failure (not a compile
+error), then restored and reconfirmed green by re-running — not by grepping
+the file.
+
+**Out of scope, deliberately.** No pace-normalized PR logic (fastest 5k/10k
+etc.) — that's L12 (#778). `longest_time`/`furthest_distance` already work
+for running through the generic `session`/records pipeline (`RecordKindsFor`
+keyed on an exercise's `load_type`), unchanged by this ticket — a running
+session logs its own `session_sets` row against a `distance_time` exercise
+exactly like any other sport, and this module's `distance_m`/
+`duration_seconds` are a second, independently-populated copy for its own
+detail screen rather than the numbers the record pipeline reads. Same
+relationship bjj's `session_rpe` has to `session_sets.rpe` on a strength
+session: one fact, two homes, serving two different screens.
+
+**Migration `000084`** (`running_session_detail`), claimed at rebase time
+against `origin/main`'s tip per the numbering rule — re-verified there was
+no higher migration immediately before pushing.
+
+**Testing.** `postgres_test.go` (gated on `TEST_DATABASE_URL`, `main_test.go`
+taking the `testdb` advisory lock) run against a real migrated Postgres:
+put/get round-trip including route-point elevation nullability, replace-
+wholesale on retry, cross-user write/read rejected on both the insert and
+update paths, cross-sport attach rejected, cascade delete, and the raw-SQL
+upsert-predicate test. Plus pure-logic `Validate()` coverage in
+`running_test.go` (coordinate ranges, split positivity, the route-point and
+split ceilings, the source vocabulary). Full backend suite (`go test -p 1
+./...`) green against the same database alongside every other module.
+
+**Left open:** the mobile/web surfaces that would actually PUT a track from
+a phone's GPS or from a HealthKit import are separate, later tickets — this
+lands the backend contract they'll write against. `contracts/public.openapi.yaml`
+gained `RunningSessionDetail`/`RunningRoutePoint`/`RunningSplit` and the two
+new paths; `pnpm run lint:openapi` passes.
+
+
 ## Open items / known gaps as of this entry
+
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
 - **What a filled ring on the week strip MEANS is currently food, and that is a guess.** `WeekStrip` deliberately takes a `Set` of day keys rather than deriving it, so the choice sits at the call site in `app/(tabs)/index.tsx` — food days, chosen so the strip agrees with the `LOGGING` card at the foot rather than contradicting it. A training reading is equally defensible and would make the strip agree with `TRAINING` instead. Nothing in the reference disambiguates it.

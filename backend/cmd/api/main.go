@@ -32,6 +32,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/nutrition"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/plan"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/profile"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/running"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/sequence"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/session"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/sessioncard"
@@ -109,6 +110,7 @@ func main() {
 	bjjProficiencyHandler := bjj.NewProficiencyHandler(bjjRepo)
 	bjjPositionHandler := bjj.NewPositionHandler(bjjRepo)
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
+	runningHandler := running.NewHandler(running.NewPostgresRepository(pool))
 	accomplishmentHandler := accomplishment.NewHandler(accomplishment.NewPostgresRepository(pool))
 	contestHandler := contest.NewHandler(contest.NewPostgresRepository(pool))
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
@@ -562,6 +564,13 @@ func main() {
 	// platform split: choosing a focus for the next few weeks is planning.
 	mux.Handle("GET /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Get)))
 	mux.Handle("PUT /v1/bjj/focus", verifier.RequireAuth(http.HandlerFunc(bjjFocusHandler.Set)))
+	// The running half of a session — the GPS track, splits, elevation and
+	// pace a run has and a lift or a mat session do not. Same shape as the
+	// BJJ pair above and for the same reason: the session itself is created
+	// through POST /v1/sessions like any other sport, and this is what a
+	// client PUTs alongside it.
+	mux.Handle("PUT /v1/running/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(runningHandler.PutDetail)))
+	mux.Handle("GET /v1/running/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(runningHandler.GetDetail)))
 
 	// Say what happened and have it fill the chips (N33). A DRAFT comes back;
 	// nothing is logged until the athlete confirms it and PUTs it through
