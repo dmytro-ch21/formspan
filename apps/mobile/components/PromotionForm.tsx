@@ -1,6 +1,8 @@
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, TextInput } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'react-native';
 
 import { Belt as BeltView, describeBelt } from '@/components/Belt';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -13,16 +15,19 @@ import {
   MAX_STRIPES,
   createPromotion,
   deletePromotion,
+  getStanding,
   updatePromotion,
+  uploadPromotionPhoto,
   type Belt,
   type PromotionInput,
   type Rank,
 } from '@/lib/bjj';
+import { prepareImageForUpload, type UploadableImage } from '@/lib/imageUpload';
 import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 
-export type EditablePromotion = PromotionInput & { id: string };
+export type EditablePromotion = PromotionInput & { id: string; photo_url?: string };
 
 /** Matches the server's own `dateLayout` (`2006-01-02`). */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -64,6 +69,82 @@ export function PromotionForm({
   // rather than offered and then refused.
   const isBlack = belt === 'black';
 
+  /**
+   * Photo.
+   *
+   * `photoUrl` is what gets RENDERED — a presigned link, always re-minted
+   * rather than trusted from route params (see the effect below and
+   * `[id].tsx`'s own comment) because it expires in 15 minutes and there is
+   * no telling how long ago the hub screen fetched it.
+   *
+   * `pendingPhoto` only exists on the ADD form. A brand-new promotion has no
+   * id yet, so there is nothing to attach a photo TO — see
+   * `uploadPromotionPhoto`'s doc. The picked image is held locally and
+   * uploaded once `save()` has created the row and knows its id. On the EDIT
+   * form there is always an id already, so a pick uploads immediately (same
+   * interaction as `checkin/[date].tsx`) and `pendingPhoto` is never used.
+   */
+  const [photoUrl, setPhotoUrl] = useState<string | null>(initial?.photo_url ?? null);
+  const [pendingPhoto, setPendingPhoto] = useState<UploadableImage | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  useEffect(() => {
+    if (!initial) return;
+    let cancelled = false;
+    getStanding(getToken)
+      .then((standing) => {
+        if (cancelled) return;
+        const match = standing.promotions.find((p) => p.id === initial.id);
+        if (match) setPhotoUrl(match.photo_url ?? null);
+      })
+      .catch(() => {
+        // Best-effort refresh only. The route-param photo_url (if any) is
+        // already painted, and simply may have expired by the time it's
+        // seen — no worse than not refreshing at all.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial is a route-derived snapshot, not reactive state
+  }, [initial?.id, getToken]);
+
+  async function pickPhoto() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      setError('VOLA needs access to your photos to attach one.');
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+    if (picked.canceled || !picked.assets[0]) return;
+
+    setPhotoBusy(true);
+    setError(null);
+    try {
+      // Same downscale every screen with a picker uses — see
+      // `prepareImageForUpload`'s own doc for why this is one shared call
+      // rather than three lines each screen has to remember.
+      const prepared = await prepareImageForUpload(picked.assets[0]);
+      if (initial) {
+        // Editing: the promotion already has an id, so there's no reason to
+        // wait for Save — attach it now, the same interaction the check-in
+        // screen offers.
+        await uploadPromotionPhoto(getToken, initial.id, prepared.uri);
+        const standing = await getStanding(getToken);
+        const match = standing.promotions.find((p) => p.id === initial.id);
+        setPhotoUrl(match?.photo_url ?? null);
+      } else {
+        // Adding: nothing to attach a photo to yet. Held until save() has
+        // created the promotion and knows its id.
+        setPendingPhoto(prepared);
+        setPhotoUrl(prepared.uri);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
   async function save() {
     if (saving) return;
     const trimmedDate = promotedOn.trim();
@@ -89,9 +170,25 @@ export function PromotionForm({
     };
     try {
       if (initial) {
+        // Any photo on an edit was already uploaded the moment it was
+        // picked (see pickPhoto) — nothing photo-related to do here.
         await updatePromotion(getToken, initial.id, input);
       } else {
-        await createPromotion(getToken, input);
+        const created = await createPromotion(getToken, input);
+        if (pendingPhoto) {
+          try {
+            await uploadPromotionPhoto(getToken, created.id, pendingPhoto.uri);
+          } catch (err) {
+            // The rank is safely recorded at this point — only the photo
+            // failed. Don't lose the save over it; the promotion can be
+            // opened again afterwards to attach one, same as any existing
+            // promotion.
+            Alert.alert(
+              'Promotion saved',
+              `${err instanceof Error ? err.message : String(err)} You can add the photo again by opening this promotion.`,
+            );
+          }
+        }
       }
       router.back();
     } catch (err) {
@@ -256,6 +353,51 @@ export function PromotionForm({
           multiline
         />
 
+        {/*
+          Photo — optional, matching `promoted_on`'s own precedent: a
+          promotion with no photo is exactly as valid a record as one with
+          one. On the edit form a pick uploads immediately (same interaction
+          as checkin/[date].tsx); on the add form nothing exists to attach it
+          to yet, so it's held until Save creates the row.
+        */}
+        <View style={styles.field}>
+          <Text style={styles.sectionLabel}>Photo</Text>
+          {photoUrl ? (
+            <Image
+              source={{ uri: photoUrl }}
+              style={styles.photo}
+              contentFit="cover"
+              // Never cached: a presigned link expires, and the local
+              // preview on the add form is a one-shot uri that won't be
+              // seen again either way.
+              cachePolicy="none"
+              alt="Photo for this promotion"
+              testID="promotion-photo-image"
+            />
+          ) : null}
+          <Pressable
+            onPress={() => void pickPhoto()}
+            disabled={saving || photoBusy}
+            style={[styles.photoButton, (saving || photoBusy) && styles.off]}
+            accessibilityRole="button"
+            accessibilityLabel={photoUrl ? 'Replace the photo' : 'Add a photo'}
+            testID="promotion-photo"
+          >
+            {photoBusy ? (
+              <ActivityIndicator />
+            ) : (
+              <Text style={[styles.photoButtonText, { color: accent.ink }]}>
+                {photoUrl ? 'Replace photo' : 'Add photo'}
+              </Text>
+            )}
+          </Pressable>
+          <Text style={styles.how}>
+            {initial
+              ? 'Private to you. Attached right away — no need to hit Save.'
+              : 'Private to you. Uploaded once you save this promotion.'}
+          </Text>
+        </View>
+
         {initial && (
           <Pressable
             onPress={confirmDelete}
@@ -405,6 +547,19 @@ const styles = StyleSheet.create({
   stepperDotActive: {},
   stepperText: { fontWeight: '700', color: vola.textMuted },
   stepperTextActive: { color: vola.navy },
+  photo: { width: '100%', height: 220, borderRadius: 12, backgroundColor: vola.surfaceRaised },
+  photoButton: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: vola.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoButtonText: { fontWeight: '700', fontSize: 14 },
+  how: { fontSize: 11, color: vola.textDim, lineHeight: 15 },
+  off: { opacity: 0.5 },
+
   deleteRow: { marginTop: 24, alignItems: 'center', paddingVertical: 12 },
   deleteText: { color: vola.danger, fontWeight: '600', fontSize: 14 },
   error: { color: vola.danger, fontSize: 14 },

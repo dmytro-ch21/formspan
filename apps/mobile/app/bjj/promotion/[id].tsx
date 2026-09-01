@@ -25,6 +25,7 @@ export default function EditPromotionScreen() {
     academy: string;
     instructor: string;
     note: string;
+    photo_url: string;
   }>();
 
   if (!params.id || !BELTS.includes(params.belt as Belt)) {
@@ -40,6 +41,10 @@ export default function EditPromotionScreen() {
     academy: params.academy ?? '',
     instructor: params.instructor ?? '',
     note: params.note ?? '',
+    // A first-paint hint only — the form re-mints a fresh presigned link of
+    // its own, since this one may already be minutes old by the time the
+    // athlete taps into the row that carried it.
+    photo_url: params.photo_url || undefined,
   };
 
   return <PromotionForm initial={initial} />;

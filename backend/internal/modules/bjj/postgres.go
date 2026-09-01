@@ -19,7 +19,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
-const promotionColumns = `id, belt, stripes, degree, promoted_on, academy, instructor, note, created_at, updated_at`
+const promotionColumns = `id, belt, stripes, degree, promoted_on, academy, instructor, note, photo_key, created_at, updated_at`
 
 func (r *PostgresRepository) ListPromotions(ctx context.Context, userID string) ([]Promotion, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -82,6 +82,27 @@ func (r *PostgresRepository) UpdatePromotion(ctx context.Context, p Promotion) (
 	return scanPromotion(row)
 }
 
+// GetPromotion reads one promotion, scoped to its owner. See the Repository
+// doc for why this exists — the delete-cleanup path needs the photo key
+// before the row is gone, and there was previously no single-row read at all.
+func (r *PostgresRepository) GetPromotion(ctx context.Context, userID, id string) (Promotion, error) {
+	return scanPromotion(r.pool.QueryRow(ctx, `
+		SELECT `+promotionColumns+`
+		FROM bjj_promotions WHERE id = $1 AND user_id = $2`, id, userID))
+}
+
+// AttachPhotoKey writes only the key — see the Repository doc for why this is
+// not folded into UpdatePromotion. Scoped by user_id like every other write
+// here; an id belonging to somebody else is ErrNotFound via scanPromotion's
+// own pgx.ErrNoRows handling, never a distinct response that would confirm
+// the id exists.
+func (r *PostgresRepository) AttachPhotoKey(ctx context.Context, userID, id, key string) (Promotion, error) {
+	return scanPromotion(r.pool.QueryRow(ctx, `
+		UPDATE bjj_promotions SET photo_key = $3, updated_at = now()
+		WHERE id = $1 AND user_id = $2
+		RETURNING `+promotionColumns, id, userID, key))
+}
+
 func (r *PostgresRepository) DeletePromotion(ctx context.Context, userID, id string) error {
 	tag, err := r.pool.Exec(ctx,
 		`DELETE FROM bjj_promotions WHERE id = $1 AND user_id = $2`, id, userID)
@@ -114,7 +135,7 @@ func scanPromotion(s scanner) (Promotion, error) {
 		on *time.Time
 		b  string
 	)
-	err := s.Scan(&p.ID, &b, &p.Stripes, &p.Degree, &on, &p.Academy, &p.Instructor, &p.Note,
+	err := s.Scan(&p.ID, &b, &p.Stripes, &p.Degree, &on, &p.Academy, &p.Instructor, &p.Note, &p.PhotoKey,
 		&p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Promotion{}, ErrNotFound

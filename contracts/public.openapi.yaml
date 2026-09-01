@@ -1345,6 +1345,13 @@ components:
                 Server-minted, unlike session and workout ids. Those are
                 client-generated so an offline push can retry idempotently;
                 a promotion has no offline outbox behind it.
+            photo_url:
+              type: string
+              description: >
+                A short-lived presigned link, minted per response — same
+                pattern as `BodyCheckin.photo_url`. Absent when there is no
+                photo attached, or the environment has no object storage
+                configured. Never store it; it expires.
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
 
@@ -7306,12 +7313,73 @@ paths:
       summary: Remove a recorded promotion
       description: >
         Removing the promotion that set the current rank lowers it, because
-        rank is derived from what remains.
+        rank is derived from what remains. Any attached photo's object is
+        deleted too, best-effort — see createBjjPromotionPhotoUpload.
       operationId: deleteBjjPromotion
       responses:
         "204": { description: Removed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /bjj/promotions/{promotionID}/photo:
+    post:
+      operationId: createBjjPromotionPhotoUpload
+      summary: A short-lived URL to upload a promotion photo to
+      description: >
+        Returns a presigned PUT, the same shape as
+        createBodyCheckinPhotoUpload. **The bytes never pass through this
+        API.**
+
+
+        **The storage key is derived from the authenticated caller and the
+        promotion id in the path, never accepted from the client.** That is
+        the whole security property: a caller cannot obtain a signature over
+        somebody else's object.
+
+
+        Unlike a check-in's date-derived key, a promotion's key is
+        id-derived and stable for the life of the row — the promotion must
+        already exist (create it first via `POST /bjj/promotions`), and
+        replacing the photo overwrites the same object rather than minting a
+        new key. An id that does not exist, or belongs to another account,
+        answers 404.
+
+
+        These objects are private, read through a short-lived presigned URL
+        minted per response and returned as `photo_url` on the promotion; a
+        stored URL would simply expire.
+
+
+        `503` when the environment has no object storage configured, which is
+        a supported state rather than a fault — local development and CI
+        have no bucket.
+      tags: [BJJ]
+      parameters:
+        - name: promotionID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Upload the JPEG to `upload_url` with the given content type.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [upload_url, content_type, max_bytes, expires_in, promotion]
+                properties:
+                  upload_url: { type: string }
+                  content_type: { type: string, example: image/jpeg }
+                  max_bytes: { type: integer, description: What the client must downscale below. }
+                  expires_in: { type: integer, description: Seconds the signature is valid for. }
+                  promotion: { $ref: "#/components/schemas/BjjPromotion" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: Object storage is not configured on this environment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /sequences:
     get:

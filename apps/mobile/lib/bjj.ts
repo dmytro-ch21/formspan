@@ -1,4 +1,5 @@
 import { apiRequest } from './apiRequest';
+import { netFetch, SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -35,6 +36,14 @@ export type PromotionInput = Rank & {
 
 export type Promotion = PromotionInput & {
   id: string;
+  /**
+   * A presigned link that **expires** — see the backend handler. Never cache
+   * it: a stored one is a broken image with extra steps. Absent when there is
+   * no photo attached, or the environment has no object storage configured. A
+   * promotion with no photo is exactly as valid a record as one with one; see
+   * `promoted_on`'s own "undated promotion still establishes rank" reasoning.
+   */
+  photo_url?: string;
   created_at: string;
   updated_at: string;
 };
@@ -126,6 +135,71 @@ export function deletePromotion(getToken: TokenGetter, id: string): Promise<void
   return apiRequest<void>(getToken, `/bjj/promotions/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
+}
+
+type PromotionUploadTicket = {
+  upload_url: string;
+  content_type: string;
+  max_bytes: number;
+  expires_in: number;
+  promotion: Promotion;
+};
+
+/**
+ * Attach or replace a promotion's photo. Same two-step shape as
+ * `body.ts`'s `uploadCheckinPhoto` and for the same reason: the bytes never
+ * touch our API, only a short-lived signed URL does.
+ *
+ * **Unlike a check-in, the promotion must already exist** — there is no
+ * date-keyed upsert to fall back on, so this can only be called with a real
+ * id. A brand-new promotion is created first (`createPromotion`), and only
+ * then can a photo be attached to the id it returns.
+ *
+ * The `promotion` on the returned ticket deliberately has an EMPTY
+ * `photo_url` — see the backend handler's own comment: the key is
+ * deterministic for this promotion, so presigning it here would resolve to
+ * whatever was at that key before this upload finished. Callers that need to
+ * display the fresh photo re-fetch (`getStanding`) after this resolves.
+ */
+export async function uploadPromotionPhoto(
+  getToken: TokenGetter,
+  id: string,
+  localUri: string,
+): Promise<Promotion> {
+  const ticket = await apiRequest<PromotionUploadTicket>(
+    getToken,
+    `/bjj/promotions/${encodeURIComponent(id)}/photo`,
+    { method: 'POST' },
+  );
+
+  const blob = await (await fetch(localUri)).blob();
+  if (blob.size > ticket.max_bytes) {
+    // The caller downscales before getting here; this is the backstop that
+    // turns a silent storage rejection into a sentence.
+    throw new Error(
+      `That photo is ${Math.round(blob.size / 1024 / 1024)}MB — it needs to be under ${Math.round(
+        ticket.max_bytes / 1024 / 1024,
+      )}MB.`,
+    );
+  }
+
+  const res = await netFetch(
+    ticket.upload_url,
+    {
+      method: 'PUT',
+      // Exactly the content type that was signed. Anything else is refused by
+      // the signature, which is the point of signing it.
+      headers: { 'Content-Type': ticket.content_type },
+      body: blob,
+    },
+    // The slow budget, not the default: a multi-megabyte PUT to object
+    // storage over whatever the gym's wifi is doing.
+    { timeoutMs: SLOW_REQUEST_TIMEOUT_MS },
+  );
+  if (!res.ok) {
+    throw new Error(`Couldn't upload that photo (${res.status}).`);
+  }
+  return ticket.promotion;
 }
 
 /**

@@ -84,6 +84,11 @@ export default function BjjStandingScreen() {
         academy: p.academy,
         instructor: p.instructor,
         note: p.note,
+        // Best-effort only — this presigned link expires in 15 minutes, so
+        // the edit form re-mints a fresh one itself via getStanding rather
+        // than trusting this to still be good by the time it's opened. It's
+        // forwarded anyway so the first paint has something to show.
+        photo_url: p.photo_url ?? '',
       },
     });
   }
