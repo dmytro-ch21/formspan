@@ -1806,3 +1806,95 @@ func TestReadStateNeverAffectsMasteryOrProgress(t *testing.T) {
 		}
 	}
 }
+
+// TestReadMarksSurviveAContentRewrite is the read-mark counterpart of
+// TestAReseedKeepsTheEnrolmentAndTheEvidenceWhileTheFractionMoves above.
+//
+// replaceContent (and seedOne, which shares the same captureConceptReads /
+// restoreConceptReads helpers — see their doc comments in postgres.go) delete
+// every curriculum_items row under a curriculum and reinsert fresh ones with
+// new identities on every owner Update and every `cmd/seed` run — including
+// an edit that touches nothing about the concept itself, like fixing a typo
+// in an unrelated item's notes. Without preserving reads across that rewrite
+// by title, an athlete's "read and understood" claim on EVERY concept in the
+// curriculum would be silently erased by an edit to any one item, or by a
+// routine reseed on deploy — the involuntary-impermanence bug the ticket's
+// own "marking something read by mistake is not permanent" criterion exists
+// to rule out for a deliberate unmark, happening instead by accident.
+func TestReadMarksSurviveAContentRewrite(t *testing.T) {
+	pool := testPool(t)
+	repo := NewPostgresRepository(pool)
+	ctx := context.Background()
+	const athlete = "athlete-n123-rewrite"
+	cleanupUser(t, pool, athlete)
+	tech := seedTechnique(t, pool, "n123-rewrite-tech")
+
+	before, err := repo.Create(ctx, athlete, "", NewCurriculum{
+		Name: "Blue belt",
+		Items: []NewItem{
+			{Kind: "concept", Title: "Base and balance"},
+			{Kind: "concept", Title: "Position before submission"},
+			{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(5)}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var baseAndBalance, positionBeforeSubmission int64
+	for _, it := range before.Items {
+		switch it.Title {
+		case "Base and balance":
+			baseAndBalance = it.ID
+		case "Position before submission":
+			positionBeforeSubmission = it.ID
+		}
+	}
+	if baseAndBalance == 0 || positionBeforeSubmission == 0 {
+		t.Fatalf("fixture missing expected concepts: %+v", before.Items)
+	}
+
+	// Mark only ONE of the two concepts read — the other stays unread, so the
+	// test can also prove the rewrite does not INVENT a read that was never
+	// made.
+	if err := repo.MarkItemRead(ctx, athlete, before.ID, baseAndBalance); err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+
+	// A rewrite that changes NOTHING about the two concepts — same titles, same
+	// order — but is still a full delete-and-reinsert underneath, exactly like
+	// fixing a typo in the technique's notes would be.
+	if _, err := repo.Update(ctx, athlete, before.ID, "", Update{Items: []NewItem{
+		{Kind: "concept", Title: "Base and balance"},
+		{Kind: "concept", Title: "Position before submission"},
+		{TechniqueID: tech, Criteria: &Criteria{TargetScored: intp(5)}, Notes: "typo fixed"},
+	}}); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+
+	after, err := repo.Get(ctx, athlete, before.ID, "")
+	if err != nil {
+		t.Fatalf("get after rewrite: %v", err)
+	}
+	if after.ReadConcepts != 1 || after.ConceptItems != 2 {
+		t.Fatalf("read_concepts/concept_items = %d/%d after an unrelated rewrite, want 1/2 — "+
+			"the read mark was silently wiped", after.ReadConcepts, after.ConceptItems)
+	}
+	for _, it := range after.Items {
+		switch it.Title {
+		case "Base and balance":
+			if !it.Read() {
+				t.Error("the read mark on the untouched concept did not survive the rewrite")
+			}
+		case "Position before submission":
+			if it.Read() {
+				t.Error("the rewrite invented a read mark on a concept that was never marked")
+			}
+		}
+		// And the new rows really do have fresh identities — this is not a
+		// test that accidentally passes because nothing actually changed.
+		if it.Title == "Base and balance" && it.ID == baseAndBalance {
+			t.Fatal("item id survived the rewrite — this test is not exercising the delete-and-" +
+				"reinsert path it exists to cover")
+		}
+	}
+}

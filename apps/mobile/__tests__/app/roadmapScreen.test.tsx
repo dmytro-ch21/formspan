@@ -172,6 +172,32 @@ function technique(id: string, name: string, phase: number, scored: number): Cur
   };
 }
 
+/**
+ * A TECHNIQUE with no criteria authored — a "reading list" item, real and
+ * common (the reference syllabuses carry 73 of these), not a hypothetical
+ * shape. `measuresOf` returns null for it, same as a concept — which is
+ * exactly the trap: the N123 read toggle must gate on `kind === 'concept'`,
+ * not on `measures === null` alone, or this item gets offered a control the
+ * database refuses every time. Mirrors `reading()` in
+ * `apps/mobile/lib/__tests__/roadmapFocus.test.ts`.
+ */
+function readingTechnique(id: string, name: string, phase: number): CurriculumItem {
+  return {
+    id: nextItemID++,
+    kind: 'technique',
+    technique_id: id,
+    name,
+    position: 'Standing',
+    category: 'Concept-adjacent drill',
+    order: 0,
+    phase,
+    notes: 'No criteria authored — nothing here is measured by a target.',
+    criteria: null,
+    progress: null,
+    read_at: null,
+  };
+}
+
 const WHITE: Curriculum = {
   id: 'white-belt-basics',
   editable: false,
@@ -183,7 +209,7 @@ const WHITE: Curriculum = {
   visibility: 'public',
   enrolled: true,
   started_on: '2026-01-01',
-  item_count: 4,
+  item_count: 5,
   countable_items: 3,
   mastered_items: 0,
   concept_items: 1,
@@ -211,6 +237,10 @@ const WHITE: Curriculum = {
       progress: null,
       read_at: null,
     },
+    // Same phase as the concept above — a criteria-free TECHNIQUE, which
+    // shares `measures === null` with a concept but must NEVER share the
+    // read toggle. See readingTechnique's own comment.
+    readingTechnique('shadow-drilling', 'Shadow drilling', 2),
   ],
 };
 
@@ -265,9 +295,11 @@ describe('arriving', () => {
 
   it('counts the lessons in each milestone without opening it', async () => {
     await open();
-    // Two milestones hold one lesson each, one holds two.
-    expect(screen.getAllByText('1 lesson')).toHaveLength(2);
-    expect(screen.getByText('2 lessons')).toBeTruthy();
+    // One milestone holds one lesson (Start Standing), two hold two each
+    // (Sweep From Bottom; Strategy, since N123 added `shadow-drilling`
+    // alongside the concept).
+    expect(screen.getByText('1 lesson')).toBeTruthy();
+    expect(screen.getAllByText('2 lessons')).toHaveLength(2);
   });
 
   it('keeps the belt thesis to one line until it is asked to expand', async () => {
@@ -507,6 +539,21 @@ describe('a lesson', () => {
       // THE GUARD THIS TEST EXISTS FOR: the ticket's own acceptance criterion
       // that a technique and a concept must not share a control.
       expect(screen.queryByTestId('roadmap-read-toggle-scissor-sweep')).toBeNull();
+    });
+
+    it('never offers the read toggle on a criteria-free technique, even though it shares measures === null with a concept', async () => {
+      // THE GUARD THIS TEST EXISTS FOR: `shadow-drilling` is a TECHNIQUE with
+      // no criteria, in the same milestone as the concept above — `measures`
+      // is null for both, which is exactly the trap that shipped a read
+      // toggle onto a real content shape the database refuses every time.
+      // Gating on `l.kind === 'concept'` is what this test pins.
+      await open();
+      fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
+      fireEvent.press(screen.getByTestId('roadmap-lesson-shadow-drilling'));
+      expect(screen.getByTestId('roadmap-lesson-detail-shadow-drilling')).toHaveTextContent(
+        /Understand this/,
+      );
+      expect(screen.queryByTestId('roadmap-read-toggle-shadow-drilling')).toBeNull();
     });
 
     it('marks it read, and the toggle reflects the reload', async () => {

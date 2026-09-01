@@ -8113,6 +8113,8 @@ paths:
       responses:
         "204":
           description: Unmarked (or was never marked).
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
 

@@ -50421,8 +50421,13 @@ and it is enforced at every layer rather than by convention at one:
   stops reading as permanently stuck at 0% without the derived and the
   attested ever sharing one number.
 - **Mobile** (`apps/mobile/app/curriculum/[id].tsx`): the concept-detail
-  branch (`l.measures === null`) gets a checkbox affordance below the
-  existing "Understand this" copy — genuinely different chrome from the
+  branch (`l.measures === null`, gated additionally on `l.kind === 'concept'`
+  for the toggle itself — `measures` is also null for a criteria-free
+  TECHNIQUE, a real and common shape the reference syllabuses carry 73 of,
+  and rendering the toggle there would offer a control the database refuses
+  every time; caught in review, fixed before merge) gets a checkbox
+  affordance below the existing "Understand this" copy — genuinely different
+  chrome from the
   technique branch's "Work on this" button (different copy, a checkbox role
   and state rather than a filled CTA), because the ticket's own acceptance
   criterion is that the two must not share a control, and this is a UI
@@ -50452,13 +50457,26 @@ and it is enforced at every layer rather than by convention at one:
   derivation, including a malformed-technique-with-`read_at` case that
   mutation-verified the kind guard the same way (removed, confirmed red,
   restored, confirmed green); `roadmapScreen.test.tsx` covers the toggle's
-  render gating (present on a concept, **mutation-verified absent** on a
-  technique — a duplicated toggle was temporarily rendered into the
-  technique branch, the guard test went red as a genuine failure, the
-  mutation was reverted and the diff confirmed byte-identical to the
-  pre-mutation file, then the suite was re-run green), mark/unmark against
-  the mocked API with the screen reflecting the reload, and the separate
-  concepts-read figure appearing and disappearing correctly.
+  render gating, mark/unmark against the mocked API with the screen
+  reflecting the reload, and the separate concepts-read figure appearing and
+  disappearing correctly.
+- **A real instance of the trap this ticket is built to avoid shipped past
+  review's first pass, and review caught it.** The screen's original render
+  gate offered the toggle whenever `l.measures === null` — which is also true
+  for a TECHNIQUE authored with no completion criteria (a "reading list"
+  item; the reference syllabuses carry 73 of them), not concepts alone. That
+  item's `itemID` would have been sent to `markItemRead`, which the database
+  trigger correctly refuses — no data corruption — but as a real, reachable,
+  always-failing control on ordinary content, directly against this ticket's
+  own "must not share a control" criterion. The existing guard test used
+  `scissor-sweep`, a technique **with** criteria, so it could not have caught
+  this; it was passing against both the buggy gate and the fix. Fixed by
+  gating the toggle on `l.kind === 'concept'` instead — the actual invariant
+  — with a new fixture (`shadow-drilling`, a criteria-free technique sharing
+  the same milestone as the concept) and a test asserting no toggle renders
+  for it, mutation-verified live in this session: gate reverted to `true`,
+  test went red on a genuine assertion failure, gate restored, diff confirmed
+  byte-identical to pre-mutation, suite re-run green.
 - **Web scope — deliberate, not an oversight.** This PR ships mobile only.
   The mobile-first hard rule requires that an athlete with only a phone can
   do this at all, which mobile alone satisfies; it does not require parity
@@ -50468,8 +50486,34 @@ and it is enforced at every layer rather than by convention at one:
   each-other constraint N100's `roadmapFocus.ts` already lives with) would
   roughly double this change's surface for a feature whose "in the moment"
   reading — a concept read on a mat, between rounds — is squarely a phone
-  job. Web parity is a reasonable fast-follow, filed as its own ticket
-  rather than absorbed into this one's scope.
+  job. Web parity is a reasonable fast-follow, filed as its own ticket rather
+  than absorbed into this one's scope: #781 (N466).
+- **A second, sharper instance of the same class of bug, also caught in
+  review: read marks did not survive an ordinary content rewrite.**
+  `replaceContent` (every owner `Update`) and `seedOne` (every `cmd/seed`
+  run, which happens on every deploy) both delete every `curriculum_items`
+  row under a curriculum and reinsert fresh ones with new
+  `GENERATED ALWAYS` identities — including for an edit that touches nothing
+  about the concepts themselves, like a typo fix in one technique's notes.
+  `curriculum_item_reads` is `ON DELETE CASCADE` from that id, so without a
+  fix every athlete's "read and understood" claim on every concept in a
+  syllabus would have been silently wiped by any edit to that syllabus, or by
+  the routine reseed this repo's own docs call "idempotent, safe to re-run."
+  That reasoning was correct for progress (`bjj_session_tags` is keyed off
+  `technique_id`, not `curriculum_items.id`, and is recomputed on read — see
+  `Seed`'s own doc comment) and did not hold for the table this ticket added,
+  which references the identity that gets thrown away. Fixed by capturing
+  every concept read by TITLE before the delete and restoring it by title
+  after the reinsert (`conceptRead`/`captureConceptReads`/
+  `restoreConceptReads` in `postgres.go`, shared by both call sites) — title
+  is a concept's authored identity, matching best-effort (a renamed concept
+  loses its mark, which is the one case where losing it is correct).
+  Covered by `TestReadMarksSurviveAContentRewrite`, the read-mark
+  counterpart of the existing `TestAReseedKeepsTheEnrolmentAndTheEvidence...`
+  test, and mutation-verified live in this session: the restore call
+  neutralized, the new test went red with the exact wiped-to-zero failure
+  the bug produces, the fix restored, diff confirmed byte-identical, suite
+  re-run green.
 
 **Left open, `NEEDS HUMAN EVIDENCE`:** the toggle has never been tapped on a
 device. The acceptance criterion asks for it specifically at brown belt,

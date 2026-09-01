@@ -290,7 +290,10 @@ export default function CurriculumScreen() {
    * N123. The athlete's OWN claim to have read and understood a concept —
    * never a technique, and never through this control: the backend refuses a
    * technique item at the database level, and this button is rendered only
-   * inside the `l.measures === null` branch, which is concepts alone.
+   * when `l.kind === 'concept'` — NOT merely inside the `l.measures === null`
+   * branch, which also contains a criteria-free technique (a "reading list"
+   * item with no completion criteria authored). See the render site's own
+   * comment for why that distinction is load-bearing.
    *
    * Deliberately its own handler rather than sharing `workOnLesson`'s or
    * `toggleEnrollment`'s shape, even though all three follow the same
@@ -910,40 +913,60 @@ function LessonRow({
                     versus "attest you read this") and per the ticket's own
                     acceptance criterion must not share a control. Reversible:
                     tapping again withdraws the claim, and the label changes to
-                    say so rather than relying on the same tap reading two ways. */}
-                <Pressable
-                  onPress={() => onToggleRead(l.itemID, l.read)}
-                  disabled={busy}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: l.read, disabled: busy }}
-                  accessibilityLabel={
-                    l.read ? 'Read and understood' : 'Mark as read and understood'
-                  }
-                  accessibilityHint={
-                    l.read
-                      ? 'Marks this idea as not yet read'
-                      : 'Marks this idea as read and understood — your own note, not evidence of mastery'
-                  }
-                  testID={`roadmap-read-toggle-${l.key}`}
-                  style={({ pressed }) => [
-                    styles.readToggle,
-                    pressed && styles.pressed,
-                    busy && styles.disabled,
-                  ]}
-                >
-                  <RNView
-                    style={[
-                      styles.readBox,
-                      { borderColor: tone },
-                      l.read && { backgroundColor: tone },
+                    say so rather than relying on the same tap reading two ways.
+
+                    Gated on `l.kind === 'concept'`, NOT on `l.measures === null`
+                    alone — measures is also null for a criteria-free TECHNIQUE
+                    (a "reading list" item authored with no completion criteria;
+                    see Lesson.measures' own doc comment), and the backend's
+                    database-level guard (curriculum_item_reads_concept_only_trg)
+                    refuses that item's itemID outright. Rendering the toggle
+                    there would offer a control that always fails against a real,
+                    common content shape — the reference syllabuses carry 73 of
+                    these — not a hypothetical one. `kind` is the actual invariant
+                    this whole feature protects, so the render gate reads it
+                    directly rather than inferring it from a sibling field. */}
+                {l.kind === 'concept' && (
+                  <Pressable
+                    onPress={() => onToggleRead(l.itemID, l.read)}
+                    disabled={busy}
+                    // Short of 44pt like every other sub-44pt control on this
+                    // screen (see CIRCLE_SLOP/LESSON_SLOP's own comment) — the
+                    // 18pt box plus text is the smallest tappable thing here,
+                    // and it is the one an athlete is asked to tap at exactly
+                    // the belt (brown, majority concept) where it fires most.
+                    hitSlop={LESSON_SLOP}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: l.read, disabled: busy }}
+                    accessibilityLabel={
+                      l.read ? 'Read and understood' : 'Mark as read and understood'
+                    }
+                    accessibilityHint={
+                      l.read
+                        ? 'Marks this idea as not yet read'
+                        : 'Marks this idea as read and understood — your own note, not evidence of mastery'
+                    }
+                    testID={`roadmap-read-toggle-${l.key}`}
+                    style={({ pressed }) => [
+                      styles.readToggle,
+                      pressed && styles.pressed,
+                      busy && styles.disabled,
                     ]}
                   >
-                    {l.read && <Icon name="check" size={11} color={vola.bg} />}
-                  </RNView>
-                  <Text style={[styles.readToggleText, l.read && { color: tone }]}>
-                    {l.read ? 'Read and understood' : 'Mark as read and understood'}
-                  </Text>
-                </Pressable>
+                    <RNView
+                      style={[
+                        styles.readBox,
+                        { borderColor: tone },
+                        l.read && { backgroundColor: tone },
+                      ]}
+                    >
+                      {l.read && <Icon name="check" size={11} color={vola.bg} />}
+                    </RNView>
+                    <Text style={[styles.readToggleText, l.read && { color: tone }]}>
+                      {l.read ? 'Read and understood' : 'Mark as read and understood'}
+                    </Text>
+                  </Pressable>
+                )}
               </>
             ) : (
               <>
@@ -1081,7 +1104,10 @@ const styles = StyleSheet.create({
   cardNote: { color: vola.textMuted, fontSize: 12, lineHeight: 17 },
   // A separate line from cardNote/the bar above it — see the call site's
   // comment for why this must never blend into the milestone figure.
-  conceptsReadNote: { color: vola.textDim, fontSize: 11, lineHeight: 16, marginTop: 1 },
+  // `textMuted`, not `textDim` — this is #512's own progress figure, not a
+  // decorative annotation, and `textDim` measures 2.51:1 (below any body-text
+  // threshold; see constants/Colors.ts) while `textMuted` measures 4.67:1.
+  conceptsReadNote: { color: vola.textMuted, fontSize: 11, lineHeight: 16, marginTop: 1 },
 
   barTrack: {
     height: 3,

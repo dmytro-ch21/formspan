@@ -657,6 +657,87 @@ func (r *PostgresRepository) Delete(ctx context.Context, userID, id string) erro
 	return tx.Commit(ctx)
 }
 
+// conceptRead is one athlete's "read and understood" claim, captured by a
+// concept's TITLE rather than its curriculum_items.id.
+//
+// Title, not id, because id is exactly what does NOT survive a
+// replaceContent/seedOne rewrite: both delete every row under a curriculum
+// and reinsert fresh ones with new `GENERATED ALWAYS` identities, and
+// curriculum_item_reads' FK is ON DELETE CASCADE (see migration 000084's own
+// reasoning: "once that item is gone ... there is nothing left for the mark
+// to be about"). That reasoning is right when an item is actually REMOVED —
+// it is wrong when the same content is simply being rewritten, which is what
+// every owner Update and every `cmd/seed` run does, even for a one-field
+// notes edit or an unrelated syllabus's redeploy. Without this, reseeding —
+// documented elsewhere in this file as safe because progress "lives in
+// bjj_session_tags and is recomputed on read" — silently erased every
+// athlete's read marks on every concept, on every deploy, which is exactly
+// the involuntary-impermanence bug N123's own acceptance criteria exist to
+// rule out for a deliberate unmark.
+//
+// Title is a concept's authored, human-facing identity — the same field
+// `curriculum.go`'s doc comments call "a concept's heading" — and matching on
+// it is inherently best-effort: a renamed concept loses its read mark (the
+// content it was an attestation about no longer exists under that name,
+// which is the one case where losing it is correct), and two concepts
+// sharing one title in the same curriculum — true of no syllabus in this
+// repo today — would have their reads restored onto both. Both are
+// accepted trade-offs for "the ordinary edit or reseed does not wipe
+// everyone's reading progress", which is the property that matters.
+type conceptRead struct {
+	userID string
+	title  string
+	readAt time.Time
+}
+
+// captureConceptReads reads every athlete's read claim for this curriculum's
+// CONCEPT items, keyed by title, before the caller deletes curriculum_items
+// out from under them. See conceptRead's doc comment for why this exists.
+// Technique items are never included — they can never carry a read at all
+// (curriculum_item_reads_concept_only_trg), so there is nothing on them to
+// preserve.
+func captureConceptReads(ctx context.Context, tx pgx.Tx, curriculumID string) ([]conceptRead, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT r.user_id, i.title, r.read_at
+		FROM curriculum_item_reads r
+		JOIN curriculum_items i ON i.id = r.curriculum_item_id
+		WHERE i.curriculum_id = $1 AND i.kind = 'concept'`, curriculumID)
+	if err != nil {
+		return nil, fmt.Errorf("curriculum: capture concept reads: %w", err)
+	}
+	defer rows.Close()
+	var out []conceptRead
+	for rows.Next() {
+		var cr conceptRead
+		if err := rows.Scan(&cr.userID, &cr.title, &cr.readAt); err != nil {
+			return nil, fmt.Errorf("curriculum: scan concept read: %w", err)
+		}
+		out = append(out, cr)
+	}
+	return out, rows.Err()
+}
+
+// restoreConceptReads re-attaches reads captured by captureConceptReads onto
+// the freshly reinserted items sharing the same title, once the caller's
+// rewrite has finished inserting. A title with no surviving match restores
+// nothing — the concept it was about is gone, so there is nothing left for
+// the claim to be true of, which matches curriculum_item_reads' own
+// ON DELETE CASCADE reasoning for a genuine removal.
+func restoreConceptReads(ctx context.Context, tx pgx.Tx, curriculumID string, reads []conceptRead) error {
+	for _, cr := range reads {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO curriculum_item_reads (user_id, curriculum_item_id, read_at)
+			SELECT $1, i.id, $2
+			FROM curriculum_items i
+			WHERE i.curriculum_id = $3 AND i.kind = 'concept' AND i.title = $4
+			ON CONFLICT (user_id, curriculum_item_id) DO UPDATE SET read_at = excluded.read_at`,
+			cr.userID, cr.readAt, curriculumID, cr.title); err != nil {
+			return fmt.Errorf("curriculum: restore concept read: %w", err)
+		}
+	}
+	return nil
+}
+
 // replaceContent rewrites the phases and items wholesale, as one unit.
 //
 // Delete-then-insert rather than a diff, matching SetFocus and every other
@@ -667,7 +748,16 @@ func (r *PostgresRepository) Delete(ctx context.Context, userID, id string) erro
 //
 // Items go before phases on the way out and after them on the way in, because
 // the composite FK points from item to phase.
+//
+// Concept read marks are captured before the delete and restored by title
+// after the reinsert — see conceptRead's doc comment for why this is
+// necessary at all: curriculum_items.id is not stable across this rewrite,
+// and curriculum_item_reads cascades from it.
 func replaceContent(ctx context.Context, tx pgx.Tx, id string, phases []NewPhase, items []NewItem) error {
+	savedReads, err := captureConceptReads(ctx, tx, id)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM curriculum_items WHERE curriculum_id = $1`, id); err != nil {
 		return fmt.Errorf("curriculum: clear items: %w", err)
 	}
@@ -675,6 +765,9 @@ func replaceContent(ctx context.Context, tx pgx.Tx, id string, phases []NewPhase
 		return fmt.Errorf("curriculum: clear phases: %w", err)
 	}
 	if len(phases) == 0 && len(items) == 0 {
+		// Nothing was reinserted, so nothing exists for a saved read to
+		// restore onto — an emptied curriculum has no concepts left, which is
+		// the genuine-removal case conceptRead's own doc comment carves out.
 		return nil
 	}
 	// One batch rather than up to 170 sequential round trips, matching
@@ -734,6 +827,9 @@ func replaceContent(ctx context.Context, tx pgx.Tx, id string, phases []NewPhase
 	}
 	if err := results.Close(); err != nil {
 		return translate(err, "insert items")
+	}
+	if err := restoreConceptReads(ctx, tx, id, savedReads); err != nil {
+		return err
 	}
 	return nil
 }
