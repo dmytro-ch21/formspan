@@ -51838,6 +51838,63 @@ Three call sites needed the third verdict wired in, not just the pure function:
 - **`TrainingCalendar.tsx`'s own month-tile totals still sum only `volumeKg`** — the same running gap this ticket fixes for the week view and the day-entry line, present in a third place (`frontend-reviewer` finding). Not extended here; scope was the two surfaces the ticket names.
 - **`app/session/history.tsx` ("All sessions") builds its own row meta independently of `TrainingCalendar`'s** (`ac-verifier` finding) — a running row there shows date + duration only, no distance or pace, though the existing `> 0` guards do at least keep it from showing a fabricated "0 sets". The ticket's "Training History" criterion is the Progress-tab surface (`components/progress/TrainingHistory.tsx` → `TrainingCalendar`), which this satisfies; the sibling screen is a follow-up, not a blocker.
 
+## 2026-09-02 — F30 (#791): react-native-maps broke every native iOS build under pnpm
+
+`react-native-maps` (added in N459/N461 for GPS running) declares
+`@expo/config-plugins` only as a `devDependency` (`^9.0.17`), but its Expo
+config plugin `require()`s it at prebuild time
+(`react-native-maps/plugin/build/ios.js`). This is true of both the pinned
+react-native-maps@1.27.2 and the latest stable 1.29.0 — same devDependency
+mistake in both, ruled out as an `@expo/config-plugins` `exports`-map
+restriction (it has a working `./build/*` wildcard).
+
+The originally-reported symptom, on a real device build from the primary
+checkout: `expo run:ios`/`xcodebuild` against
+`apps/mobile/ios/VOLA.xcworkspace` failing at the "[CP-User] Generate
+app.config for prebuilt Constants.manifest" script phase with `Cannot find
+module '@expo/config-plugins/build/plugins/ios-plugins'`, under pnpm's
+strict `node_modules` correctly refusing to expose a devDependency to the
+package that declared it (works under npm/yarn's flat `node_modules` via
+hoisting). Fixed with the standard pnpm remedy for an upstream package that
+only declares a needed peer as a devDependency: a `pnpm.packageExtensions`
+entry in `pnpm-workspace.yaml` promoting `@expo/config-plugins` to a real
+dependency of `react-native-maps`, then `pnpm install` to regenerate the
+lockfile. Two Release device builds from the primary checkout succeeded with
+the fix applied.
+
+**Worth recording plainly rather than glossing over**: this session's own
+attempts to reproduce the failure — `node -e "require.resolve(...)"` from
+react-native-maps' own resolution path, a full `expo prebuild --platform
+ios`, and a direct invocation of `expo-constants`'s
+`get-app-config-ios.sh`/`getAppConfig.js` (the actual script behind the
+failing phase) — all **succeeded without the fix**, on a fresh `pnpm
+install` of this same `origin/main` state. The reason: pnpm's default
+`hoistPattern: ['*']` also hoists devDependencies into
+`node_modules/.pnpm/node_modules/`, which sits on Node's module-resolution
+walk-up from every package's real location — so a plain `require.resolve`
+check, and apparently `getConfig({isPublicConfig: true})`, can both succeed
+whether or not the package extension is present. This means the automated
+check available in this environment does not reliably discriminate
+fixed-from-broken, and the real evidence for both the bug and the fix is the
+two device builds above, not the checks run alongside them. The fix is
+still applied because it is the textbook-correct, harmless pnpm remedy for
+an underdeclared dependency regardless of when the hoisting gap bites — but
+whoever provides this ticket's NEEDS HUMAN EVIDENCE criterion should also
+check the mirror case (does `main`, unfixed, actually fail a real build
+right now) rather than assume the original failure still reproduces on
+demand.
+
+**Open**: nothing in `verify` or CI runs a real `xcodebuild` —
+`typecheck:mobile` only boots Metro/Expo Router typegen, and the jest suite
+never does a native prebuild — so this class of bug (an Expo config plugin's
+transitive native-build dependency missing under pnpm's strict resolution)
+is invisible to every automated check and will recur silently for the next
+package that makes the same mistake. No test added for this reason; the only
+thing that would have caught it is a native build step, which does not exist
+in CI today. **And even a native-build check would need to be a real
+`xcodebuild`, not a proxy like `require.resolve` or `expo prebuild`** — both
+of those passed on the broken state in this investigation.
+
 ## Open items / known gaps as of this entry
 
 
