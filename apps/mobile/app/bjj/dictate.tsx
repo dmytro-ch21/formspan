@@ -40,6 +40,51 @@
  * leaves the phone, nothing is recorded, and there is no audio dependency
  * anywhere in this feature. The *text* does leave, which is a different fact
  * and one the screen states before it sends rather than after.
+ *
+ * ## This screen is where a dictated session ends (N120/#509)
+ *
+ * It used to save the draft and then `router.replace` into the ordinary
+ * three-step wizard (`/bjj/reflect/[id]`) "so what was dictated is corrected
+ * with the same controls as anything typed" — a real design decision, not an
+ * oversight, and the wrong one anyway: the athlete had already said the
+ * rounds, the gi, what was drilled and what happened live, and out loud is
+ * not typed. Routing into a wizard that asks for all of it again is the
+ * literal bug this ticket reports — *"once we do the verbal log … it should
+ * be enough. If we log by audio this should fill everything and we should be
+ * done."*
+ *
+ * So this screen now carries editing surfaces for everything the wizard's
+ * three steps would ask about — including surfaces the confirm screen never
+ * had: adding a technique the model missed entirely (below the tag list,
+ * matching the wizard's own search-and-add pattern), correcting what a tag's
+ * `event` actually was (drilled/attempted/scored/conceded/defended — a chip
+ * row under each tag), and correcting WHERE it happened (a second chip row,
+ * added in review once the same audit that found the event gap found this
+ * one had no editing surface either — `resolvePhrase` writes `position: ''`
+ * and a server-extracted tag carries whatever the model read, with nothing
+ * on the old confirm screen to fix either one). Save lands on the session's
+ * own read view (`/bjj/session/[id]`), not back in the wizard. **The wizard
+ * is not removed** — that screen's own "Add detail" button still opens it,
+ * exactly as it does for a session logged by hand — it is just never
+ * entered automatically for a dictated one any more. Draft-then-confirm is
+ * unchanged throughout: nothing above is written until Save is tapped.
+ *
+ * **The event chips are narrower for a tag with no `technique_id`.** Found
+ * in review: `attempted`/`defended` are a technique-scoped concept
+ * everywhere else in this app (`FUNNEL_OUTCOMES`'s own doc — one row per
+ * focus technique, feeding a roadmap's hit-rate math, which divides by a
+ * per-technique count that does not exist without one), and the wizard's own
+ * category grid (`bump()`) never writes an untagged `drilled` either — only
+ * `scored`/`conceded` are ever written without a technique attached. The
+ * dictation model is not bound by any of that and can hand back exactly the
+ * combination nothing else in the app produces. `session/[id].tsx`'s
+ * "Techniques" section is keyed by `technique_id` and "What happened live"
+ * is scored/conceded only, so an untagged `drilled`/`attempted`/`defended`
+ * tag would save, sync, and render nowhere — recorded data with no display
+ * surface, which is worse than the blank field this ticket is otherwise
+ * about. `TagRow` restricts the choices for such a tag to the two the read
+ * view can show, and flags one that already arrived stranded rather than
+ * letting it pass silently.
  */
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -55,6 +100,7 @@ import {
 } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { LibraryTile, categoryBadge } from '@/components/LibraryTile';
 import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
@@ -62,7 +108,11 @@ import { useAccent } from '@/lib/AccentProvider';
 import { backdatedTimestamp } from '@/lib/calendar';
 import {
   KINDS,
+  POSITIONS,
   describeRPE,
+  familyOf,
+  toCategory,
+  type Event,
   type Kind,
   type SessionDetail,
   type Tag,
@@ -154,24 +204,36 @@ export default function DictateReflectionScreen() {
   // the trap `log.tsx` documents, where a retry puts the class in history twice.
   const createdRef = useRef<string | null>(null);
 
-  // Loaded when the first phrase might need it, not on mount: most dictations
-  // resolve cleanly and never open a picker.
+  // Loaded once the confirm screen has a real draft to show, not on mount:
+  // most of this screen (the dictation box, an empty-draft result) never
+  // needs the catalog at all.
+  //
+  // Gated on `detail !== null` — a BOOLEAN, not the `detail` object itself —
+  // on purpose. `detail` gets a new reference on every keystroke and every
+  // tap (`patch`, `setTagCount`, …), and this effect must fire once per
+  // draft, not once per edit: N120/#509 made this the trigger for BOTH the
+  // unresolved-phrase picker and the always-present "add a technique"
+  // search below, so a second cause for the old N-parallel-requests bug this
+  // comment used to warn about (see history.md) would be easy to reintroduce
+  // here by depending on the object instead of the transition into having one.
   useEffect(() => {
-    if (unresolved.length === 0 || catalog !== null || catalogFailed) return;
+    if (detail === null || catalog !== null || catalogFailed) return;
     let cancelled = false;
     fetchTechniques(getToken)
       .then((list) => {
         if (!cancelled) setCatalog(list);
       })
       .catch(() => {
-        // The phrase stays unresolved, which is the honest outcome — it costs
-        // the athlete nothing they had, and the wizard can still add it.
+        // The phrase stays unresolved and the search stays unusable, which is
+        // the honest outcome — it costs the athlete nothing they had, and the
+        // wizard can still add a technique by hand.
         if (!cancelled) setCatalogFailed(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [unresolved.length, catalog, catalogFailed, getToken]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `detail !== null` is the intended trigger, not `detail` itself; see the comment above.
+  }, [detail !== null, catalog, catalogFailed, getToken]);
 
   async function read() {
     const said = text.trim();
@@ -231,10 +293,13 @@ export default function DictateReflectionScreen() {
       }
       await saveLocalBjjDetail(userId, sessionId, detail);
       requestSync('bjj-dictated');
-      // Into the ordinary wizard, so what was dictated is corrected with the
-      // same controls as anything typed. There is no separate "review a
-      // dictated session" surface, deliberately.
-      router.replace({ pathname: '/bjj/reflect/[id]', params: { id: sessionId } });
+      // N120/#509: NOT the wizard any more — this screen's own doc comment
+      // explains why. The session's read view is where a manually-logged
+      // session lands too when the athlete goes on to add detail, and it is
+      // where the wizard is still reachable from ("Add detail"/"Edit
+      // detail"), unconditionally, for anyone who wants to correct this
+      // later.
+      router.replace({ pathname: '/bjj/session/[id]', params: { id: sessionId } });
     } catch {
       // Local storage, not the network — so no transport wording, and no raw
       // SQLite text either. The draft on screen is untouched by a failed save.
@@ -259,6 +324,83 @@ export default function DictateReflectionScreen() {
   function dropTag(i: number) {
     setDetail((d) => (d ? { ...d, tags: d.tags.filter((_, n) => n !== i) } : d));
     setCountUncertain((flags) => flags.filter((_, n) => n !== i));
+  }
+
+  /**
+   * Correct what a tag actually was.
+   *
+   * N120/#509: the model's read on drilled vs. attempted vs. scored vs.
+   * conceded vs. defended is a judgement call exactly like the count above,
+   * and getting it wrong is exactly as invisible — a technique correctly
+   * named under the wrong outcome reads as right on this screen and lands
+   * wrong in the funnel. The count is unaffected; only what happened
+   * changes.
+   */
+  function setTagEvent(i: number, event: Event) {
+    setDetail((d) =>
+      d ? { ...d, tags: d.tags.map((t, n) => (n === i ? { ...t, event } : t)) } : d,
+    );
+  }
+
+  /**
+   * Correct where a tag happened — or say it, when the dictation never did.
+   *
+   * N120/#509, found in review: `resolvePhrase` above writes a blank
+   * `position` for anything resolved from an ambiguous phrase, and a
+   * server-extracted tag carries whatever the model read — right or wrong —
+   * with nothing on this screen to fix either one. The wizard's own live
+   * step has exactly this control (`reflect/[id].tsx`'s "From where?"
+   * pills), scoped to the next tap rather than to a tag that already exists;
+   * this is that same vocabulary applied per-tag instead, the same shape as
+   * `setTagEvent` right above it.
+   */
+  function setTagPosition(i: number, position: string) {
+    setDetail((d) =>
+      d ? { ...d, tags: d.tags.map((t, n) => (n === i ? { ...t, position } : t)) } : d,
+    );
+  }
+
+  /**
+   * A technique the dictation never named at all.
+   *
+   * `resolvePhrase` above answers the model naming something it could not
+   * pin to one catalog entry. This answers the other gap N120/#509 found:
+   * something the athlete drilled or rolled that the transcript's picture
+   * never contained in the first place. Without this the only way to add it
+   * was the wizard this screen no longer routes into — which would have put
+   * "audio log, then correct in the wizard" back under a different name.
+   *
+   * Added as `drilled`, the same default the wizard's own search-and-add
+   * uses for a technique picked by name rather than named in an exchange;
+   * the event chips on the tag below correct it from there. Guarded the same
+   * way the wizard guards its own picker — against adding the identical
+   * technique twice as `drilled`, which would double the funnel's first
+   * stage for one real repetition — but only a `drilled` duplicate: the same
+   * technique already recorded as `scored` is a different fact and adding it
+   * as `drilled` too is not a mistake.
+   */
+  function addManualTechnique(t: TechniqueSummary) {
+    let added = false;
+    setDetail((d) => {
+      if (!d) return d;
+      if (d.tags.some((tag) => tag.technique_id === t.id && tag.event === 'drilled')) return d;
+      added = true;
+      return {
+        ...d,
+        tags: [
+          ...d.tags,
+          {
+            category: toCategory(t.category),
+            event: 'drilled',
+            position: familyOf(t.position),
+            technique_id: t.id,
+            count: 1,
+          } as Tag,
+        ],
+      };
+    });
+    // Picked by hand, just now — as confirmed as anything the athlete typed.
+    if (added) setCountUncertain((flags) => [...flags, false]);
   }
 
   /** Resolving a phrase adds the tag it was always going to be. */
@@ -509,53 +651,71 @@ export default function DictateReflectionScreen() {
                 {detail.tags.map((t, i) => (
                   <TagRow
                     key={i}
+                    index={i}
                     tag={t}
                     countUncertain={countUncertain[i] ?? false}
                     onCount={(c) => setTagCount(i, c)}
                     onRemove={() => dropTag(i)}
+                    onEvent={(e) => setTagEvent(i, e)}
+                    onPosition={(p) => setTagPosition(i, p)}
                   />
                 ))}
               </View>
             </>
           )}
 
-          {/* Gated on what the MODEL extracted, never on the live value —
-              gating on `detail.note` unmounted the field the moment the athlete
-              backspaced it empty, dropping the keyboard mid-edit with no way to
-              bring the section back. */}
-          {!!draft.note && (
-            <>
-              <SectionHeader label="Note" />
-              <View style={styles.card}>
-                <TextInput
-                  style={styles.noteInput}
-                  value={detail.note}
-                  onChangeText={(v) => patch({ note: v })}
-                  multiline
-                  accessibilityLabel="Session note"
-                />
-              </View>
-            </>
-          )}
+          {/* N120/#509: something the dictation never named at all, not just
+              a phrase it couldn't pin down. Always here, tags or not — a
+              session where nothing was picked up from the words but the
+              athlete DID drill something must still be able to add it,
+              without the wizard this screen no longer routes into. */}
+          <SectionHeader label="Add something you did" />
+          <View style={styles.card}>
+            <AddTechnique
+              catalog={catalog}
+              failed={catalogFailed}
+              existing={detail.tags}
+              onAdd={addManualTechnique}
+            />
+          </View>
 
-          {/* Shown for the same reason the note is: this screen's premise is
-              that everything it saves arrived editable. A body note the model
-              pulled out — "knee popped in round three" — is exactly the kind of
-              thing that must not be written sight-unseen. */}
-          {!!draft.body_note && (
-            <>
-              <SectionHeader label="Body" />
-              <View style={styles.card}>
-                <TextInput
-                  style={styles.noteInput}
-                  value={detail.body_note}
-                  onChangeText={(v) => patch({ body_note: v })}
-                  multiline
-                  accessibilityLabel="Note about your body"
-                />
-              </View>
-            </>
-          )}
+          {/* N120/#509: unconditional now, where this used to be gated on
+              `draft.note`. The wizard's own note step is always present
+              regardless of what was said, and this screen replaces it rather
+              than handing off to it — hiding the field whenever dictation
+              said nothing about it would leave an athlete who drilled in
+              silence no way to add one at all. The placeholder, not a value,
+              is what keeps "nothing was said" honest instead of inventing
+              text or reading as broken. */}
+          <SectionHeader label="Note" />
+          <View style={styles.card}>
+            <TextInput
+              style={styles.noteInput}
+              value={detail.note}
+              onChangeText={(v) => patch({ note: v })}
+              multiline
+              placeholder="Nothing said about this — add anything worth remembering"
+              placeholderTextColor={vola.textDim}
+              accessibilityLabel="Session note"
+            />
+          </View>
+
+          {/* Same reasoning as the note above, and the same reason it used to
+              be shown only some of the time: this screen's premise is that
+              everything it saves arrived editable, and that includes a body
+              note the athlete never mentioned. */}
+          <SectionHeader label="Body" />
+          <View style={styles.card}>
+            <TextInput
+              style={styles.noteInput}
+              value={detail.body_note}
+              onChangeText={(v) => patch({ body_note: v })}
+              multiline
+              placeholder="Nothing said — add anything that hurt"
+              placeholderTextColor={vola.textDim}
+              accessibilityLabel="Note about your body"
+            />
+          </View>
 
           <Pressable
             onPress={save}
@@ -570,9 +730,11 @@ export default function DictateReflectionScreen() {
               <Text style={styles.primaryLabel}>Save it</Text>
             )}
           </Pressable>
-          <Text style={styles.muted}>
-            Nothing’s been saved yet. You can keep correcting this in the next screen.
-          </Text>
+          {/* N120/#509: used to say "in the next screen", true when Save
+              always continued into the wizard. It no longer does — this
+              screen is the whole correction surface now, and the true
+              remaining fact is just that nothing above is written yet. */}
+          <Text style={styles.muted}>Nothing’s been saved yet. Everything above is still editable.</Text>
 
           <QuotaLine quota={quota} />
         </>
@@ -661,11 +823,19 @@ function Stepper({
 
 function TagRow({
   tag,
+  index,
   countUncertain,
   onCount,
   onRemove,
+  onEvent,
+  onPosition,
 }: {
   tag: Tag;
+  /** Position in `detail.tags` — only used to keep the event/position chips'
+   *  testIDs addressable per row; nothing here reorders or reindexes on its
+   *  own. (Yes, "position" is overloaded here — this is the tag's array
+   *  index, not the `tag.position` BJJ position family the prop below sets.) */
+  index: number;
   /**
    * True when the server floored this count to 1 rather than confirming it —
    * "the athlete never said" and "the athlete said one" are different answers
@@ -675,63 +845,246 @@ function TagRow({
   countUncertain: boolean;
   onCount: (c: number) => void;
   onRemove: () => void;
+  /** N120/#509: what actually happened, correctable — see `setTagEvent`. */
+  onEvent: (e: Event) => void;
+  /** N120/#509: where it happened, correctable — see `setTagPosition`. */
+  onPosition: (p: string) => void;
 }) {
+  const accent = useAccent();
   // Named, because with three tags "One fewer" × 3 is three indistinguishable
   // buttons to anyone using a screen reader.
   const title = `${tag.event} ${tag.category}${tag.position ? ` · ${tag.position}` : ''}`;
+  // N120/#509, found in review: a tag with no `technique_id` is exactly what
+  // the wizard's own category grid (`bump()` in `reflect/[id].tsx`) writes,
+  // and that grid only ever writes `scored`/`conceded` — `attempted` and
+  // `defended` are a technique-scoped concept everywhere else in this app
+  // (`FUNNEL_OUTCOMES`'s own doc: "one row per focus technique", and the
+  // hit-rate math a roadmap runs divides by a per-technique count that does
+  // not exist without one). `drilled` without a technique_id is the same
+  // problem one stage earlier: nothing else in the app ever writes it, and
+  // `session/[id].tsx`'s "Techniques" section is keyed by `technique_id` —
+  // an untagged drilled/attempted/defended tag has no chip there and no row
+  // in "What happened live" either (that grid is scored/conceded only), so
+  // it would save, sync, and then render nowhere. The dictation model is not
+  // bound by any of this and can hand back exactly that combination.
+  //
+  // So the event chips below only ever OFFER what an untagged tag can
+  // actually be shown as. This cannot make an already-untagged tag MORE
+  // invisible — restricting the choice, never the display of the value
+  // already on it — and the hint below names the fix instead of letting the
+  // gap pass silently, which the count-uncertain hint above does for the
+  // same reason.
+  const untaggedLimited = !tag.technique_id;
+  const eventChoices = untaggedLimited ? UNTAGGED_EVENT_OPTIONS : EVENT_OPTIONS;
+  const strandedEvent = untaggedLimited && !UNTAGGED_EVENT_OPTIONS.some((o) => o.key === tag.event);
   return (
-    <View style={styles.tagRow}>
-      <View style={styles.tagText}>
-        <Text style={styles.tagTitle}>{title}</Text>
-        {countUncertain && <Text style={styles.rowHint}>How many? We weren’t sure.</Text>}
-      </View>
-      <View style={styles.stepper}>
-        <Pressable
-          onPress={() => {
-            // Blank confirms downward first — a "−" here means "it happened,
-            // but not more than that", which is the floor already on record.
-            // Only a second press, once the number is a real one, removes it.
-            if (countUncertain) {
-              onCount(tag.count);
-              return;
+    <View style={styles.tagBlock}>
+      <View style={styles.tagRow}>
+        <View style={styles.tagText}>
+          <Text style={styles.tagTitle}>{title}</Text>
+          {countUncertain && <Text style={styles.rowHint}>How many? We weren’t sure.</Text>}
+          {strandedEvent && (
+            <Text style={styles.rowHint}>
+              No technique named — pick Scored or Conceded below, or add the technique under “Add
+              something you did” so this shows on your session.
+            </Text>
+          )}
+        </View>
+        <View style={styles.stepper}>
+          <Pressable
+            onPress={() => {
+              // Blank confirms downward first — a "−" here means "it happened,
+              // but not more than that", which is the floor already on record.
+              // Only a second press, once the number is a real one, removes it.
+              if (countUncertain) {
+                onCount(tag.count);
+                return;
+              }
+              if (tag.count <= 1) onRemove();
+              else onCount(tag.count - 1);
+            }}
+            style={styles.stepButton}
+            accessibilityRole="button"
+            accessibilityLabel={
+              countUncertain ? `Confirm ${title} at ${tag.count}` : tag.count <= 1 ? `Remove ${title}` : `One fewer ${title}`
             }
-            if (tag.count <= 1) onRemove();
-            else onCount(tag.count - 1);
-          }}
-          style={styles.stepButton}
-          accessibilityRole="button"
-          accessibilityLabel={
-            countUncertain ? `Confirm ${title} at ${tag.count}` : tag.count <= 1 ? `Remove ${title}` : `One fewer ${title}`
-          }
-        >
-          <Text style={styles.stepGlyph}>−</Text>
-        </Pressable>
-        <Text
-          style={[styles.stepValue, countUncertain && styles.stepBlank]}
-          accessibilityLabel={countUncertain ? `${title}: how many? not set` : `${tag.count} ${title}`}
-        >
-          {countUncertain ? '—' : tag.count}
-        </Text>
-        <Pressable
-          onPress={() => {
-            // Same reasoning as "−": the count is already floored to 1
-            // underneath a blank stepper, invisibly. Incrementing THAT (to 2)
-            // is not what an athlete tapping "+" once from "—" is asking for
-            // — matches the session-level `Stepper`'s own null-count
-            // semantics, where "+" from blank also lands on 1, not 2.
-            onCount(countUncertain ? tag.count : tag.count + 1);
-          }}
-          style={styles.stepButton}
-          accessibilityRole="button"
-          // Both step buttons confirm the same floor on a first press from
-          // blank — worded differently from "−"'s so the two remain
-          // individually addressable to a screen reader (and to a test).
-          accessibilityLabel={countUncertain ? `Set ${title} to ${tag.count}` : `One more ${title}`}
-        >
-          <Text style={styles.stepGlyph}>+</Text>
-        </Pressable>
+          >
+            <Text style={styles.stepGlyph}>−</Text>
+          </Pressable>
+          <Text
+            style={[styles.stepValue, countUncertain && styles.stepBlank]}
+            accessibilityLabel={countUncertain ? `${title}: how many? not set` : `${tag.count} ${title}`}
+          >
+            {countUncertain ? '—' : tag.count}
+          </Text>
+          <Pressable
+            onPress={() => {
+              // Same reasoning as "−": the count is already floored to 1
+              // underneath a blank stepper, invisibly. Incrementing THAT (to 2)
+              // is not what an athlete tapping "+" once from "—" is asking for
+              // — matches the session-level `Stepper`'s own null-count
+              // semantics, where "+" from blank also lands on 1, not 2.
+              onCount(countUncertain ? tag.count : tag.count + 1);
+            }}
+            style={styles.stepButton}
+            accessibilityRole="button"
+            // Both step buttons confirm the same floor on a first press from
+            // blank — worded differently from "−"'s so the two remain
+            // individually addressable to a screen reader (and to a test).
+            accessibilityLabel={countUncertain ? `Set ${title} to ${tag.count}` : `One more ${title}`}
+          >
+            <Text style={styles.stepGlyph}>+</Text>
+          </Pressable>
+        </View>
+      </View>
+      {/* N120/#509: what this tag actually was, correctable — five outcomes,
+          same vocabulary as the title above (drilled/attempted/scored/
+          conceded/defended) rather than new copy invented for this row. */}
+      <View style={styles.eventChips}>
+        {eventChoices.map((o) => {
+          const active = tag.event === o.key;
+          return (
+            <Pressable
+              key={o.key}
+              onPress={() => onEvent(o.key)}
+              style={[styles.eventChip, active && { backgroundColor: accent.ink, borderColor: accent.ink }]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${o.label}, for ${title}`}
+              testID={`dictate-tag-${index}-event-${o.key}`}
+            >
+              <Text style={[styles.eventChipLabel, active && { color: vola.bg }]}>{o.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {/* N120/#509: where this happened, correctable the same way the event
+          above is — a blank position ('') is "the athlete didn't say", not a
+          missing tenth family, so it gets its own chip ("Not saying") rather
+          than defaulting to one of the nine. Same vocabulary and blank
+          handling as the wizard's own "From where?" pills. */}
+      <View style={styles.eventChips}>
+        {(['', ...POSITIONS] as const).map((p) => {
+          const active = tag.position === p;
+          return (
+            <Pressable
+              key={p || 'any'}
+              onPress={() => onPosition(p)}
+              style={[styles.eventChip, active && { backgroundColor: accent.ink, borderColor: accent.ink }]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${p || 'Not saying'}, for ${title}`}
+              testID={`dictate-tag-${index}-position-${p || 'any'}`}
+            >
+              <Text style={[styles.eventChipLabel, active && { color: vola.bg }]}>{p || 'Not saying'}</Text>
+            </Pressable>
+          );
+        })}
       </View>
     </View>
+  );
+}
+
+/** The five outcomes a tag can record — see `bjjSession.ts`'s own doc on `Event`. */
+const EVENT_OPTIONS: { key: Event; label: string }[] = [
+  { key: 'drilled', label: 'Drilled' },
+  { key: 'attempted', label: 'Attempted' },
+  { key: 'scored', label: 'Scored' },
+  { key: 'conceded', label: 'Conceded' },
+  { key: 'defended', label: 'Defended' },
+];
+
+/**
+ * The only two outcomes a tag with no `technique_id` can be relabelled to —
+ * see the `untaggedLimited` comment in `TagRow`. Kept to exactly the events
+ * the wizard's own category grid can write, so a correction made here can
+ * never produce a state the rest of the app has no display for.
+ */
+const UNTAGGED_EVENT_OPTIONS = EVENT_OPTIONS.filter((o) => o.key === 'scored' || o.key === 'conceded');
+
+/**
+ * A technique the dictation never named at all.
+ *
+ * `PickOne` (below) covers the model naming something it could not pin to
+ * one catalog entry. This is the other gap N120/#509 found: something the
+ * athlete drilled or rolled that never made it into the transcript's picture
+ * in the first place. Search-first, same as the wizard's own picker — the
+ * athlete already knows what they are looking for.
+ */
+function AddTechnique({
+  catalog,
+  failed,
+  existing,
+  onAdd,
+}: {
+  /** null while still loading; shared with `PickOne` via the parent screen. */
+  catalog: TechniqueSummary[] | null;
+  failed: boolean;
+  existing: Tag[];
+  onAdd: (t: TechniqueSummary) => void;
+}) {
+  const accent = useAccent();
+  const [query, setQuery] = useState('');
+
+  const matches = useMemo(
+    () => (catalog && query.trim() ? rankTechniques(catalog, query).slice(0, 6) : []),
+    [catalog, query],
+  );
+  // Only a `drilled` duplicate is blocked — see `addManualTechnique`'s own
+  // comment on why the same technique already recorded under a different
+  // event is not a duplicate at all.
+  const already = useMemo(
+    () => new Set(existing.filter((t) => t.event === 'drilled').map((t) => t.technique_id)),
+    [existing],
+  );
+
+  return (
+    <>
+      <TextInput
+        style={styles.techSearch}
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Search techniques"
+        placeholderTextColor={vola.textDim}
+        autoCapitalize="none"
+        autoCorrect={false}
+        accessibilityLabel="Add a technique"
+        testID="dictate-add-technique-search"
+      />
+      {query.trim().length > 0 &&
+        (failed ? (
+          <Text style={styles.muted}>Couldn’t load the library just now.</Text>
+        ) : catalog === null ? (
+          <ActivityIndicator accessibilityLabel="Loading the technique library" />
+        ) : matches.length === 0 ? (
+          <Text style={styles.muted}>No technique matches “{query.trim()}”.</Text>
+        ) : (
+          matches.map((t) => {
+            const [code, badgeAccent] = categoryBadge(t.category);
+            const added = already.has(t.id);
+            return (
+              <Pressable
+                key={t.id}
+                onPress={() => {
+                  if (added) return;
+                  onAdd(t);
+                  setQuery('');
+                }}
+                style={[styles.addResult, added && styles.disabled]}
+                accessibilityRole="button"
+                accessibilityLabel={added ? `${t.name}, already added` : `Add ${t.name}`}
+                testID={`dictate-add-technique-${t.id}`}
+              >
+                <LibraryTile code={code} accent={badgeAccent} />
+                <Text style={styles.addResultName} numberOfLines={1}>
+                  {t.name}
+                </Text>
+                {!added && <Text style={[styles.techPlus, { color: accent.ink }]}>＋</Text>}
+              </Pressable>
+            );
+          })
+        ))}
+    </>
   );
 }
 
@@ -781,15 +1134,20 @@ function PickOne({
   if (failed) {
     body = (
       <Text style={styles.muted}>
-        Couldn’t load the library just now. You can add this in the next screen.
+        Couldn’t load the library just now. Skip this one — nothing else on this screen needs it.
       </Text>
     );
   } else if (catalog === null) {
     body = <ActivityIndicator accessibilityLabel="Loading the technique library" />;
   } else if (matches.length === 0) {
+    // N120/#509: "the next screen" used to mean the wizard this screen no
+    // longer routes into. "Add something you did" below is the same library
+    // search, on this same screen — the honest replacement, not a rewrite of
+    // the old sentence to say nothing.
     body = (
       <Text style={styles.muted}>
-        Nothing in the library matches that. You can add it in the next screen.
+        Nothing in the library matches that. Skip this one — you can search for it under “Add
+        something you did” below.
       </Text>
     );
   } else {
@@ -892,9 +1250,22 @@ const styles = StyleSheet.create({
   stepGlyph: { fontSize: 20, fontWeight: '800' },
   stepValue: { fontSize: 17, fontWeight: '800', minWidth: 34, textAlign: 'center' },
   stepBlank: { color: vola.textDim },
+  tagBlock: { gap: 8 },
   tagRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   tagText: { flexShrink: 1 },
   tagTitle: { fontSize: 14, fontWeight: '600', textTransform: 'capitalize' },
+  // N120/#509: the per-tag event correction. Small on purpose — this is a
+  // fix-up control for the rare wrong read, not a primary input, and the
+  // count stepper above stays the thing the eye goes to first.
+  eventChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  eventChip: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  eventChipLabel: { fontSize: 11, fontWeight: '600' },
   pickPrompt: { fontSize: 15, lineHeight: 22 },
   pickPhrase: { fontWeight: '800' },
   pickOption: {
@@ -905,4 +1276,27 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   pickOptionLabel: { fontSize: 15, fontWeight: '600' },
+  // N120/#509: the "add a technique the dictation missed" search, styled to
+  // match the wizard's own `search`/`result` pattern (`reflect/[id].tsx`) so
+  // this reads as the same control rather than a new one invented here.
+  techSearch: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: vola.text,
+    backgroundColor: vola.surface,
+  },
+  addResult: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.lineSoft,
+  },
+  addResultName: { flex: 1, fontSize: 15, fontWeight: '600' },
+  techPlus: { fontSize: 20, fontWeight: '700' },
 });

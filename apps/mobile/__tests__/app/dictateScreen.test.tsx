@@ -21,9 +21,31 @@ import { saveLocalBjjDetail } from '@/lib/sessionStore';
  * suite's general preference: the property is about what reaches
  * `saveLocalBjjDetail` after a real interaction, and a pure test of the
  * transform cannot see a screen that adds a tag in a `useEffect`.
+ *
+ * N120/#509 added a second rule this file has to pin: Save must land on the
+ * session's own read view, never back in the reflection wizard — the exact
+ * hand-off this ticket reverses. `mockReplace` below is what makes that an
+ * assertion rather than a hope; the default `expo-router` mock in
+ * `jest.setup.js` hands back a fresh `jest.fn()` on every `useRouter()` call,
+ * which is unobservable by design.
  */
 
 jest.setTimeout(30_000);
+
+const mockReplace = jest.fn();
+
+jest.mock('expo-router', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require('react');
+  return {
+    // `KeyboardAwareScrollView` calls this too — see the identical note in
+    // `bjjReflectScreen.test.tsx`.
+    useFocusEffect: (cb: () => void) => React.useEffect(() => cb(), [cb]),
+    useLocalSearchParams: () => ({}),
+    useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: mockReplace }),
+    Stack: { Screen: () => null },
+  };
+});
 
 const deferred = <T,>(value: T) => new Promise<T>((r) => setTimeout(() => r(value), 0));
 
@@ -60,13 +82,16 @@ jest.mock('@/lib/sessionStore', () => ({
 jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
 
 // The catalog the picker offers. "Armbar" is genuinely ambiguous across these,
-// which is the whole reason the server refuses to choose.
+// which is the whole reason the server refuses to choose. "Knee cut" is
+// unambiguous — used by the N120/#509 "add a technique" tests, which need a
+// search that resolves to exactly one result rather than a picker.
 jest.mock('@/lib/techniques', () => ({
   ...jest.requireActual('@/lib/techniques'),
   fetchTechniques: jest.fn(() =>
     deferred([
       { id: 'armbar-from-guard', name: 'Armbar from Guard', aliases: ['armbar'], category: 'Submission', position: 'Closed Guard - Bottom', position_detail: '', gi_no_gi: 'Both' },
       { id: 'armbar-from-mount', name: 'Armbar from Mount', aliases: ['armbar'], category: 'Submission', position: 'Mount - Top', position_detail: '', gi_no_gi: 'Both' },
+      { id: 'knee-cut-pass', name: 'Knee Cut Pass', aliases: ['knee cut'], category: 'Pass', position: 'Half Guard - Top', position_detail: '', gi_no_gi: 'Both' },
     ]),
   ),
 }));
@@ -82,6 +107,7 @@ jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() 
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockReplace.mockClear();
   mockResponse = {
     draft: baseDraft,
     quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
@@ -521,5 +547,254 @@ describe('when the draft fails', () => {
       expect(screen.getByLabelText('Save this session')).toBeTruthy();
     });
     expect(screen.queryByTestId('dictate-retrying')).toBeNull();
+  });
+});
+
+/**
+ * N120/#509: "once we do the verbal log … it should be enough. If we log by
+ * audio this should fill everything and we should be done."
+ *
+ * The screen used to `router.replace` into the ordinary reflection wizard
+ * after Save, so a dictated session had to be corrected a second time
+ * through three tap-through steps. These pin the reversal: Save now lands on
+ * the session's own read view, and this screen carries the two editing
+ * surfaces the wizard offered that the old confirm screen did not —
+ * correcting what a tag's event actually was, and adding a technique the
+ * dictation never named at all — so nothing is lost by not handing off.
+ */
+describe('N120/#509: the confirm screen is the whole flow', () => {
+  it('lands on the session read view after Save, never the reflection wizard', async () => {
+    await speak();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Save this session')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByLabelText('Save this session'));
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalled();
+    });
+    const [dest] = mockReplace.mock.calls[0];
+    expect(dest).toEqual({ pathname: '/bjj/session/[id]', params: { id: 'new-session' } });
+    // The exact hand-off this ticket reverses, asserted as an explicit
+    // negative rather than just "replace happened with something new".
+    expect(dest.pathname).not.toBe('/bjj/reflect/[id]');
+  });
+
+  it('does not navigate while the draft is only on screen — draft-then-confirm is unchanged', async () => {
+    await speak();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Save this session')).toBeTruthy();
+    });
+    // Arriving at the confirm screen must not itself be a navigation event —
+    // only an explicit Save tap is. This is the guard N120/#509 must not
+    // weaken while shortening the flow.
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('exposes a blank, editable note and body field even when dictation said nothing', async () => {
+    // baseDraft's note/body_note are both '' — the old screen hid the whole
+    // section on this input. Hidden reads as "there is nothing to say";
+    // blank-with-a-placeholder reads as "we heard nothing", which is the
+    // honest one and the one the ticket's blank-vs-invented rule requires.
+    await speak();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Session note')).toBeTruthy();
+    });
+    expect(screen.getByLabelText('Session note').props.value).toBe('');
+    expect(screen.getByLabelText('Session note').props.placeholder).toMatch(/nothing said/i);
+    expect(screen.getByLabelText('Note about your body')).toBeTruthy();
+    expect(screen.getByLabelText('Note about your body').props.placeholder).toMatch(/nothing said/i);
+
+    fireEvent.changeText(screen.getByLabelText('Session note'), 'Sharp today.');
+    fireEvent.changeText(screen.getByLabelText('Note about your body'), 'Knee twinge.');
+    fireEvent.press(screen.getByLabelText('Save this session'));
+
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.note).toBe('Sharp today.');
+    expect(detail.body_note).toBe('Knee twinge.');
+  });
+
+  it('lets the athlete add a technique the dictation never named at all', async () => {
+    mockResponse = {
+      draft: { ...baseDraft, tags: [] },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('Just rolled, nothing structured');
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Add a technique')).toBeTruthy();
+    });
+    fireEvent.changeText(screen.getByLabelText('Add a technique'), 'knee cut');
+    await waitFor(() => {
+      expect(screen.getByLabelText('Add Knee Cut Pass')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByLabelText('Add Knee Cut Pass'));
+
+    // Added as `drilled` — the wizard's own default for a technique picked by
+    // search rather than named in an exchange.
+    await waitFor(() => {
+      expect(screen.getByText('drilled pass · Half Guard')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags).toHaveLength(1);
+    expect(detail.tags[0]).toMatchObject({
+      technique_id: 'knee-cut-pass',
+      event: 'drilled',
+      category: 'pass',
+      count: 1,
+    });
+  });
+
+  it('does not add the same technique twice as drilled', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'pass', event: 'drilled', position: 'Half Guard', technique_id: 'knee-cut-pass', count: 1 }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('Drilled knee cut, then rolled');
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Add a technique')).toBeTruthy();
+    });
+    fireEvent.changeText(screen.getByLabelText('Add a technique'), 'knee cut');
+    await waitFor(() => {
+      expect(screen.getByLabelText('Knee Cut Pass, already added')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByLabelText('Knee Cut Pass, already added'));
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    // Still one — the press on an already-added result did nothing.
+    expect((saveLocalBjjDetail as jest.Mock).mock.calls[0][2].tags).toHaveLength(1);
+  });
+
+  it("lets the athlete correct what a tag's event actually was", async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'submission', event: 'scored', position: '', technique_id: null, count: 1 }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('Landed an armbar');
+
+    await waitFor(() => {
+      expect(screen.getByText('scored submission')).toBeTruthy();
+    });
+    // The model read this as scored; the athlete corrects it to conceded —
+    // same tag, same count, a different outcome.
+    fireEvent.press(screen.getByTestId('dictate-tag-0-event-conceded'));
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags).toHaveLength(1);
+    expect(detail.tags[0].event).toBe('conceded');
+    expect(detail.tags[0].count).toBe(1);
+  });
+
+  it("lets the athlete correct where a tag happened", async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'submission', event: 'scored', position: '', technique_id: 'armbar-from-guard', count: 1 }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('Landed an armbar');
+
+    await waitFor(() => {
+      expect(screen.getByText('scored submission')).toBeTruthy();
+    });
+    // The dictation named the technique but not where it happened — the
+    // athlete fills that in without re-entering anything already correct.
+    fireEvent.press(screen.getByTestId('dictate-tag-0-position-Guard'));
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags[0].position).toBe('Guard');
+    // Correcting position leaves everything else on the tag untouched.
+    expect(detail.tags[0].event).toBe('scored');
+    expect(detail.tags[0].count).toBe(1);
+  });
+
+  it('restricts an untagged tag to Scored/Conceded and flags one the dictation already stranded outside that pair', async () => {
+    // No `technique_id` — a category-level read the model made without
+    // naming a specific technique, and with an event the app has no display
+    // surface for on `session/[id].tsx` (see `TagRow`'s own comment). This is
+    // the shape the model can hand back even though nothing on this screen
+    // would ever construct one by hand.
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'pass', event: 'drilled', position: '', technique_id: null, count: 1 }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('Worked on some passing');
+
+    await waitFor(() => {
+      expect(screen.getByText('drilled pass')).toBeTruthy();
+    });
+    // The honest flag, not a silent restriction.
+    expect(screen.getByText(/no technique named/i)).toBeTruthy();
+    // Only the two events the read view can actually show for a tag with no
+    // technique — matching what the wizard's own category grid ever writes.
+    expect(screen.getByTestId('dictate-tag-0-event-scored')).toBeTruthy();
+    expect(screen.getByTestId('dictate-tag-0-event-conceded')).toBeTruthy();
+    expect(screen.queryByTestId('dictate-tag-0-event-drilled')).toBeNull();
+    expect(screen.queryByTestId('dictate-tag-0-event-attempted')).toBeNull();
+    expect(screen.queryByTestId('dictate-tag-0-event-defended')).toBeNull();
+
+    // Reclassifying it into one of the two clears the flag and makes it a
+    // tag the read view can display.
+    fireEvent.press(screen.getByTestId('dictate-tag-0-event-scored'));
+    expect(screen.queryByText(/no technique named/i)).toBeNull();
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags[0].event).toBe('scored');
+  });
+
+  it('leaves all five event choices open for a tag that DOES name a technique', async () => {
+    // The restriction is specific to `technique_id: null` — a named
+    // technique still supports the full funnel via `techniqueRows`, so
+    // narrowing its choices too would take away a legitimate correction.
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'pass', event: 'drilled', position: '', technique_id: 'knee-cut-pass', count: 1 }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('Drilled the knee cut');
+
+    await waitFor(() => {
+      expect(screen.getByText('drilled pass')).toBeTruthy();
+    });
+    for (const key of ['drilled', 'attempted', 'scored', 'conceded', 'defended']) {
+      expect(screen.getByTestId(`dictate-tag-0-event-${key}`)).toBeTruthy();
+    }
+    expect(screen.queryByText(/no technique named/i)).toBeNull();
   });
 });
