@@ -46,8 +46,10 @@ import {
   startLocalSession,
   unsyncedWorkoutIDs,
 } from '@/lib/sessionStore';
+import { sessionHref } from '@/lib/startSession';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { useModules } from '@/lib/ModulesProvider';
 import { fromDisplayWeight, toDisplayWeight, weightUnit } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
 
@@ -57,6 +59,7 @@ export default function WorkoutDetailScreen() {
   const { userId } = useAuth();
   const getToken = useAuthToken();
   const router = useRouter();
+  const { modules } = useModules();
 
   const [workout, setWorkout] = useState<Workout | null>(null);
   const [items, setItems] = useState<WorkoutItem[]>([]);
@@ -309,7 +312,12 @@ export default function WorkoutDetailScreen() {
         sets,
       });
       requestSync('session-started-from-workout');
-      router.push(`/session/${session.id}`);
+      // sessionHref, not a hardcoded `/session/${id}` — a workout can be
+      // running's own interval template (N460/#771: running's catalog is
+      // `exercises`, same as strength, so a running workout is a real thing
+      // this screen can start), and the hardcoded route sent it to the
+      // strength-shaped live set logger regardless of sport.
+      router.push(sessionHref({ id: session.id, sport: workout.sport }, modules));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

@@ -51202,6 +51202,44 @@ follows) and `apps/web/src/lib/units.ts` was regenerated via
 `python3 scripts/sync-units.py --write` per that file's own generation
 contract; `check:units` and `check:unit-literals` both pass.
 
+**`frontend-reviewer` found two real bugs on the first pass, both fixed before
+this landed.** (1) `persistProgress` wrote `duration_seconds` only from
+`pause()`/`finish()`, never from the per-point save during live tracking — so
+a killed-and-relaunched run restored its GPS track (the criterion this ticket
+cares about) but reset its clock to 0 or to whatever the last pause recorded,
+directly contradicting this entry's own "resumes from the wall clock" claim
+above. Fixed by computing `duration_seconds` from the active-time accumulator
+on EVERY save, with a `trackDurationSeconds` fallback on load for a row saved
+before the fix. (2) Two more `/session/${id}` hardcodes survived outside
+`session/start.tsx` — `app/workout/[id].tsx` (starting a workout template,
+which running can have, since its catalog is `exercises`) and `app/sync.tsx`'s
+repair-screen `destinationOf` — both now route through `sessionHref` like
+every other site. `ac-verifier`'s pass additionally asked for the "survives a
+simulated network drop" criterion to be a real test rather than
+`NEEDS HUMAN EVIDENCE`: `runningPush.test.ts` now exercises it directly
+against a real migrated SQLite fixture (`migratedFixture()`, the same pattern
+`planSync.test.ts` uses) — save a track, reject the PUT with a
+`Network request failed`-shaped error, assert the row is untouched and still
+`dirty`, then let the retry succeed and assert the PUT body carries the exact
+buffered track. Also fixed in this pass: `splitsFromTrack` floored a
+degenerate zero-duration split at 0, which `running.Split.valid()` rejects
+server-side — one GPS glitch (two points landing on the same timestamp) would
+have made the ENTIRE wholesale PUT a permanent 400, discarding every other
+split's real data with it; floored at 1 instead, with a test pinning it. Two
+more `sessionHref` cases (`startSession.test.ts`) pin the running branch by
+name rather than leaving it covered only by inference from the screen working.
+A GPS-watch subscription leak on a fast double pause/resume (the `await
+Location.watchPositionAsync(...)` racing an unmount or a second call) and an
+unhandled-rejection path in `finish()` were fixed too, and the map's polyline
+coordinates are now memoized separately from the once-a-second clock re-render
+that used to rebuild them for nothing. Fixing `destinationOf`'s routing also
+meant updating `__tests__/app/syncDestination.test.ts`, which pre-dates this
+ticket and pinned the OLD, buggy behaviour by name — one of its four cases was
+literally titled "treats an unrecognised sport as a strength session" and
+asserted a running row opened `/session/s1`. Retitled to say what it now
+actually checks, plus a fifth case for a genuinely unknown sport, so the
+fallthrough behaviour that test used to (mis)cover is still pinned.
+
 **Deliberately NOT built, per the ticket's explicit scope:** pace-normalized
 personal records (fastest 5k/10k — L12/#778) and any background/Always
 location permission — N459's scoping decision stands untouched; this screen

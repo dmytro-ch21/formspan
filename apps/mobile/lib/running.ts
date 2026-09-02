@@ -234,7 +234,16 @@ export function splitsFromTrack(points: RoutePoint[], splitMeters = DEFAULT_SPLI
       const boundaryTime = prevTime + fraction * (curTime - prevTime);
       splits.push({
         distance_m: nextBoundary - splitStartDistance,
-        duration_seconds: Math.max(0, Math.round((boundaryTime - splitStartTime) / 1000)),
+        // Floored at 1, not 0. `running.Split.valid()` on the server requires
+        // `duration_seconds > 0`, and the PUT sends every split in one
+        // wholesale request — one degenerate split (two points landing on
+        // the same timestamp, a GPS glitch rather than a real teleport) would
+        // otherwise make the ENTIRE track a permanent 400, discarding every
+        // other split's real data along with it. 1 second is an honest floor
+        // for "too fast for this clock's resolution to say", not a fabricated
+        // number — the true value is some tiny positive amount this track's
+        // sampling simply cannot resolve.
+        duration_seconds: Math.max(1, Math.round((boundaryTime - splitStartTime) / 1000)),
       });
       splitStartDistance = nextBoundary;
       splitStartTime = boundaryTime;

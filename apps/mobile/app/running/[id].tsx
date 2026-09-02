@@ -18,6 +18,7 @@ import {
   RUN_EXERCISE_ID,
   splitsFromTrack,
   trackDistanceMeters,
+  trackDurationSeconds,
   type RoutePoint,
   type SessionDetail as RunningDetail,
 } from '@/lib/running';
@@ -109,10 +110,31 @@ export default function RunningSessionScreen() {
 
   const distanceMeters = useMemo(() => trackDistanceMeters(points), [points]);
   const splits = useMemo(() => splitsFromTrack(points), [points]);
+  // Memoized separately from the map's own render: the 1s clock tick below
+  // re-renders this component every second regardless of whether a GPS fix
+  // arrived, and recomputing this array on every one of those renders would
+  // make `Polyline` re-diff and re-send its entire coordinate list across
+  // the bridge once a second for no reason — this only changes when `points`
+  // actually does.
+  const polylineCoordinates = useMemo(
+    () => points.map((p) => ({ latitude: p.lat, longitude: p.lng })),
+    [points],
+  );
   const paceSecPerKm = useMemo(
     () => averagePaceSecPerKm(distanceMeters, elapsedSeconds),
     [distanceMeters, elapsedSeconds],
   );
+
+  /**
+   * Active seconds elapsed right now — `elapsedMsRef`'s accumulated total
+   * plus whatever has ticked since the current tracking segment resumed (0
+   * while paused/finished, since `resumedAtRef` is only non-null while
+   * tracking).
+   */
+  const currentActiveSeconds = useCallback(() => {
+    const active = resumedAtRef.current == null ? 0 : Date.now() - resumedAtRef.current;
+    return Math.round((elapsedMsRef.current + active) / 1000);
+  }, []);
 
   const persistProgress = useCallback(
     (finalised?: Partial<RunningDetail>) => {
@@ -123,6 +145,12 @@ export default function RunningSessionScreen() {
         splits: splitsFromTrack(pointsRef.current),
         distance_m: trackDistanceMeters(pointsRef.current) || null,
         elevation_gain_m: elevationGainMeters(pointsRef.current) || null,
+        // Included on EVERY save, not only at Pause/Finish — a kill-and-
+        // relaunch mid-run must restore the clock along with the track, and
+        // reading a stale `duration_seconds` (0, or whatever the last pause
+        // wrote) would silently reset it to the wrong value the moment a new
+        // point arrives and overwrites this same row.
+        duration_seconds: currentActiveSeconds(),
         ...finalised,
       };
       // Fire-and-forget from the caller's point of view — this is a local
@@ -130,7 +158,7 @@ export default function RunningSessionScreen() {
       // it here would make every GPS callback block on disk I/O.
       void saveLocalRunningDetail(userId, id, detail);
     },
-    [id, userId],
+    [id, userId, currentActiveSeconds],
   );
 
   // --- load: resume an in-progress run, or start a fresh one ---------------
@@ -172,7 +200,16 @@ export default function RunningSessionScreen() {
       if (existing && existing.route_points.length > 0) {
         setPoints(existing.route_points);
         pointsRef.current = existing.route_points;
-        elapsedMsRef.current = (existing.duration_seconds ?? 0) * 1000;
+        // `duration_seconds` is written on every save now (see
+        // `persistProgress`), so this is normally populated. The fallback to
+        // `trackDurationSeconds` covers a row saved before that fix, or any
+        // other reason the field is missing — the track's own wall-clock span
+        // is the honest floor for "how long has this run been going" when
+        // nothing better survived the kill, exactly the case
+        // `trackDurationSeconds`'s own doc comment reserves it for.
+        elapsedMsRef.current =
+          (existing.duration_seconds ?? Math.round(trackDurationSeconds(existing.route_points))) *
+          1000;
       }
 
       const perm = await Location.getForegroundPermissionsAsync();
@@ -208,7 +245,7 @@ export default function RunningSessionScreen() {
     resumedAtRef.current = Date.now();
     setStatus('tracking');
     requestSync('run-started');
-    watchRef.current = await Location.watchPositionAsync(
+    const sub = await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.BestForNavigation,
         timeInterval: 3000,
@@ -240,6 +277,21 @@ export default function RunningSessionScreen() {
         );
       },
     );
+    // The screen can unmount while this `await` was in flight — assigning
+    // unconditionally would leak the subscription: nothing left holding its
+    // reference would ever call `.remove()`, so the GPS indicator and the
+    // battery cost outlive the screen.
+    if (!mountedRef.current) {
+      sub.remove();
+      return;
+    }
+    // And a second `startWatch()` (a fast double-tap of Resume before the
+    // first call's promise settles) must not leak the ONE it replaces —
+    // whichever this is, it is the subscription this screen means to have
+    // going forward, so any stale one is removed first rather than merely
+    // overwritten.
+    watchRef.current?.remove();
+    watchRef.current = sub;
   }
 
   // Elapsed clock + weak-signal banner, both driven by wall-clock reads
@@ -298,22 +350,34 @@ export default function RunningSessionScreen() {
       elevation_gain_m: finalElevationGain || null,
       avg_pace_sec_per_km: finalPace,
     };
-    await saveLocalRunningDetail(userId, id, detail);
+    // These are three local SQLite writes, not network calls — but a full
+    // disk or a corrupted row is still a real, if rare, way for one to
+    // throw, and an unhandled rejection here left the screen showing
+    // "tracking" with no watch running and no way to retry. Surfaced as the
+    // ordinary error state rather than a silent stall.
+    try {
+      await saveLocalRunningDetail(userId, id, detail);
 
-    // A `session_sets` row against the seeded `run` exercise, so the generic
-    // personal-record pipeline (`longest_time`/`furthest_distance`) sees this
-    // run exactly as `internal/modules/running/running.go`'s package doc
-    // describes — the running detail above is a SEPARATE fact for THIS
-    // module's own screen, not what that pipeline reads.
-    await saveLocalSets(userId, id, [
-      {
-        ...emptySet(RUN_EXERCISE_ID, 0),
-        distance_m: finalDistance || null,
-        seconds: finalDuration || null,
-        completed: true,
-      },
-    ]);
-    await finishLocalSession(userId, id);
+      // A `session_sets` row against the seeded `run` exercise, so the
+      // generic personal-record pipeline (`longest_time`/`furthest_distance`)
+      // sees this run exactly as
+      // `internal/modules/running/running.go`'s package doc describes — the
+      // running detail above is a SEPARATE fact for THIS module's own
+      // screen, not what that pipeline reads.
+      await saveLocalSets(userId, id, [
+        {
+          ...emptySet(RUN_EXERCISE_ID, 0),
+          distance_m: finalDistance || null,
+          seconds: finalDuration || null,
+          completed: true,
+        },
+      ]);
+      await finishLocalSession(userId, id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus('error');
+      return;
+    }
     requestSync('run-finished');
 
     setPoints(finalPoints);
@@ -400,7 +464,7 @@ export default function RunningSessionScreen() {
       >
         {points.length > 1 && (
           <Polyline
-            coordinates={points.map((p) => ({ latitude: p.lat, longitude: p.lng }))}
+            coordinates={polylineCoordinates}
             strokeColor={vola.lime}
             strokeWidth={4}
           />

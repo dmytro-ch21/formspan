@@ -212,4 +212,22 @@ describe('splitsFromTrack', () => {
     const track = meridianTrack(3, 0.0001, 60); // a few metres, nowhere near 1km
     expect(splitsFromTrack(track, DEFAULT_SPLIT_METERS)).toEqual([]);
   });
+
+  it('floors a degenerate zero-duration split at 1 second, never 0', () => {
+    // Two points at the SAME timestamp (a GPS glitch re-emitting a fix, not a
+    // real teleport) whose segment happens to straddle a split boundary. The
+    // interpolated duration is exactly 0 — the server rejects
+    // `duration_seconds <= 0` on ANY split, which would turn one degenerate
+    // sample into a permanent 400 discarding the whole track's real splits
+    // along with it.
+    const stamp = '2026-01-01T08:00:00.000Z';
+    const track: RoutePoint[] = [
+      { lat: 37, lng: LNG, elevation_m: null, recorded_at: stamp },
+      { lat: 37 + 1200 / meridianMetersPerDegree(), lng: LNG, elevation_m: null, recorded_at: stamp },
+    ];
+    const splits = splitsFromTrack(track, DEFAULT_SPLIT_METERS);
+    expect(splits).toHaveLength(1);
+    expect(splits[0].duration_seconds).toBe(1);
+    expect(splits[0].duration_seconds).toBeGreaterThan(0);
+  });
 });

@@ -6,9 +6,12 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-nati
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { useModules } from '@/lib/ModulesProvider';
 import { blockedRows, retryBlockedRow, type BlockedRow } from '@/lib/sessionStore';
+import { sessionHref } from '@/lib/startSession';
 import { syncNow, useSyncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { fallbackModules, type Module } from '@/lib/modules';
 
 /**
  * What is stuck, why, and one button per row to do something about it.
@@ -43,6 +46,7 @@ export default function SyncScreen() {
   const { userId } = useAuth();
   const getToken = useAuthToken();
   const router = useRouter();
+  const { modules } = useModules();
   const state = useSyncState();
   const [rows, setRows] = useState<BlockedRow[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -140,7 +144,7 @@ export default function SyncScreen() {
                       it. Try again keeps its place for the rows whose obstacle
                       really has cleared on its own. */}
                   <Pressable
-                    onPress={() => router.push(destinationOf(row))}
+                    onPress={() => router.push(destinationOf(row, modules))}
                     style={styles.rowAction}
                     accessibilityRole="button"
                     accessibilityLabel={`Open ${row.name || 'this item'} to fix it`}
@@ -180,10 +184,19 @@ export default function SyncScreen() {
  * knows only about sets, and sending a class there is the bug that made a
  * logged class open to "Sets 0 · Reps 0 · Volume —". So the sport rides along
  * on the row rather than being guessed here.
+ *
+ * Delegates to `sessionHref` (N460/#771) rather than repeating the branch —
+ * this file used to hardcode `sport === 'bjj' ? … : '/session/…'`, which is
+ * the exact bug that sent a blocked RUNNING session to the strength-shaped
+ * live set logger too, since neither branch named it. `modules` defaults to
+ * `fallbackModules()` for a caller with no live registry (there is no
+ * production caller like that today — `SyncScreen` always has one from
+ * `useModules()` — but keeping this a plain, independently-callable function
+ * rather than a hook is worth an optional argument).
  */
-export function destinationOf(row: BlockedRow): Href {
+export function destinationOf(row: BlockedRow, modules: Module[] = fallbackModules()): Href {
   if (row.kind === 'workout') return `/workout/${row.id}`;
-  return row.sport === 'bjj' ? `/bjj/session/${row.id}` : `/session/${row.id}`;
+  return sessionHref({ id: row.id, sport: row.sport }, modules);
 }
 
 const styles = StyleSheet.create({
