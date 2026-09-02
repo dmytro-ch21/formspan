@@ -55987,6 +55987,146 @@ rule); worth a real device/staging check as a fast follow, since the whole
 finding here was a client silently disagreeing with a contract nothing
 exercised end-to-end.
 
+## 2026-09-02 — N470 (#799): the egress broker's own cancellation race leaked the residue its audit exists to catch
+
+`engine/internal/worker`'s egress-broker tests (`egress_test.go`, `sandbox_test.go`,
+both from N196/#622) were flaky both locally and in CI — unrelated to any diff
+touching `engine/`, first noticed on PR #793's CI run. Two symptoms, traced to one
+cause plus one contributing condition:
+
+**The real bug.** `ensureEgressBroker` (`egress.go`) only recorded
+`ws.egress.network`/`ws.egress.container` on the in-memory `egressBroker` struct
+*after* the corresponding `docker network create`/`docker run -d` command returned
+successfully. `exec.CommandContext` kills the `docker` CLI client on context
+cancellation, but the Docker *daemon* can already have created the resource
+server-side by the time that kill lands — so the client-observed error and the
+daemon's real state disagree. When that race landed on `docker network create`
+specifically, the function returned immediately with **no call to
+`teardownEgressLocked` at all**, because nothing on `ws.egress` said there was
+anything to clean up. Reproduced exactly on CI (`TestCancelledRunDoesNotLeaveAn
+OrphanedContainer` failing with `egress networks: engine-egress-44-470ad840`, no
+leaked container — consistent with cancellation landing before the broker
+container was ever created) and confirmed independently: this host had four
+broker containers, still `Up`, dating back **5–6 days**, orphaned by exactly this
+race during earlier ad hoc test runs, found and removed while investigating.
+Fixed by recording both names on `ws.egress` *before* attempting the command that
+creates them, not after — `docker rm -f`/`docker network rm` against a name that
+in fact was never created is a harmless no-op error, already discarded by every
+caller.
+
+**The contributing condition, and its actual fix — not just a bump.** This
+host's Colima VM is configured with only 2 CPUs / 2GiB
+(`~/.colima/default/colima.yaml`) and is **shared by every concurrent Docker
+use on the machine** — this repo's own worktree/parallel-agent convention
+means that routinely includes other sessions' `engine` tests running at the
+same time. `waitForBrokerReady`'s 15s deadline was tuned against an idle
+daemon and every broker start used to pay a cold `go run .` compile (no
+persisted build cache) — measured live while investigating, one broker start
+took **30s** for a single isolated test (no local parallelism at all) purely
+from contention with *other sessions'* concurrently-running broker
+containers on the same shared daemon, visible in `docker ps` with fresh
+timestamps and rotating `RunID`s that weren't this session's own.
+
+The deadline is bumped 15s→30s (a readiness poll, not a correctness check —
+a broker that will genuinely never start is still caught, just later), but
+the bump alone is a mitigation, not a fix for what it's racing against. The
+actual fix is `brokerGoCacheDir`: a **persisted, stable host directory**
+mounted into every broker container as `GOCACHE`, shared across every broker
+this process (or any other process using the same OS user cache directory)
+ever starts. Only the very first broker on a given host still pays the cold
+compile; every later one — including every other test in the same suite
+run — reuses it. Best-effort: if the OS cache directory can't be resolved,
+this silently falls back to today's behaviour rather than failing a broker
+start over a speed optimisation.
+
+**A third bug, found while building the retry the second fix's own tests
+needed.** Recording a resource's name before the command that creates it
+(the real bug, above) closes the leak, but exposed why a *single* removal
+attempt in `teardownEgressLocked` isn't enough in practice: `docker rm -f`
+and `docker network rm` can report **success** (exit 0, no error — true even
+for "No such container", so a target that plain doesn't exist looks
+identical to one just removed) against a resource still mid-transition
+(Docker's own "Created" state — created, never started, since the client
+that would have started it was the one killed) **without the removal
+actually taking effect**, still findable via `docker inspect` moments
+later. Trusting the exit code alone reads as "cleaned up" on exactly the
+case this exists to catch. Fixed with `removeDockerResourceWithRetry`:
+retries the removal until an `exists` check (not the command's own exit
+code) confirms the resource is actually gone, spending most of
+`teardownEgressLocked`'s 30s cleanup budget on it rather than giving up
+early. A first version of this checked `exists` *before* attempting removal
+too (wait-for-it-to-exist, then remove-and-verify) — reverted: the
+container-phase wait starved the network-cleanup's own share of the same
+budget when both were mid-transition at once, making the leak worse, not
+better. The simpler perpetual-retry-until-`ctx`-done shape (no separate
+existence-wait phase) is what shipped.
+
+One more thing the speedup broke: `TestCancelledRunDoesNotLeaveAnOrphaned
+Container`'s own timing assumption. It used to sleep a fixed 1s before
+cancelling, safe only because a cold compile reliably made broker startup
+slower than that. A warm `GOCACHE` can now finish broker startup in well
+under a second, so the fixed sleep sometimes cancelled *after* the broker
+had already finished starting — missing the race the test exists to catch
+entirely, and reading as this test flaking rather than as the timing
+assumption going stale. Fixed by polling `docker` for the earliest
+observable side effect (the egress network or the sandbox container itself)
+and cancelling the instant either appears, regardless of how fast a given
+run turns out to be.
+
+Not filed as a Colima-config change (bumping the VM's own CPU/memory is a
+host decision, not a repo one) — recorded instead as a "Known gotchas"
+class: concurrent sessions on this host contend for one shared, small Docker
+daemon, and `engine/internal/worker`'s Docker-heavy tests are the part of
+the suite most exposed to that. See `CLAUDE.md`'s "Verify that a check can
+fail" section for the fuller writeup, which points back here.
+
+**Verified, not just written.** `TestCancelledRunDoesNotLeaveAnOrphanedContainer`
+passed 3/3 back-to-back runs (~1s each, thanks to the warm cache). The full
+`engine` package suite passed 3 fresh (`-count=3`, not Go's test cache)
+back-to-back runs in ~50s combined — against the 175s-and-timing-out state
+the unpatched suite was measured at twice earlier the same day. Checked for
+residue after: nothing new leaked; the one stray "Created"-state container
+found on the host predated the test window by several hours, ambient noise
+from a different concurrent session rather than this fix.
+
+**Mutation-tested, and a real gap found in the process.** Reverting the
+`removeDockerResourceWithRetry` fix entirely (back to trusting the command's
+exit code alone, no `exists` check) — `TestCancelledRunDoesNotLeaveAn
+OrphanedContainer` **still passed 3/3**. The integration test's own
+cancel-on-first-observable-side-effect timing (see the sandbox_test.go note
+above) cannot reliably land in the narrow window where a real Docker daemon
+is caught mid-transition — that specific race is inherently hard to force
+on demand locally, which is exactly why it was originally found via a live
+CI failure rather than a written reproduction. Reverting the reorder fix in
+`ensureEgressBroker` (recording the name after the command again, not
+before) got the same result: still green. Neither ordering mutation is
+caught by anything short of the real race actually landing.
+
+That is a real coverage gap, not a reason to skip mutation-testing — the
+project's own rule is to write the test the gap needs, not to accept "the
+existing suite doesn't catch it." Added `egress_retry_test.go`: three unit
+tests against `removeDockerResourceWithRetry` directly, using `true`/`false`
+as free stand-ins for the docker command (the function only reads the exit
+code and `CombinedOutput`, needing no real Docker at all) and an injectable
+`exists` closure to force the exact "reported success but still there"
+sequence a real daemon only produces by chance. These three **do** catch
+the retry-loop mutation above (reverted, ran, confirmed all three red for
+the right reason — 0 calls to `exists` instead of 3, `nil` instead of an
+error, and an near-instant return instead of one retry interval elapsed —
+restored, confirmed green by re-running). The reorder fix in
+`ensureEgressBroker` itself remains **not** mechanically mutation-verified;
+its correctness rests on the invariant being obviously sound by inspection
+(recording a name before the call that creates it can only ever help an
+exit path that runs after it, regardless of timing) rather than on a red/
+green test, and that gap is worth naming rather than silently claiming full
+coverage.
+
+**Open**: NEEDS HUMAN EVIDENCE — this is satisfiable by the PR's own CI run
+(the `Backend (Go)` job's `engine` step), not a device check: confirm it
+goes green on GitHub's actual runner, not just measured locally on this one
+host's Colima config.
+
+
 ## Open items / known gaps as of this entry
 
 

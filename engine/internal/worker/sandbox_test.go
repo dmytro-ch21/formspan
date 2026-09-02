@@ -338,14 +338,56 @@ func TestCancelledRunDoesNotLeaveAnOrphanedContainer(t *testing.T) {
 		ws.RunSandboxed(ctx, Sandbox{}, "", nil, []string{"sleep", "30"})
 	}()
 
-	// Give the container time to actually start before cancelling — a
-	// cancel before it exists would prove nothing about cleanup.
-	time.Sleep(1 * time.Second)
+	// Cancel the instant ANY resource for this run becomes observable on the
+	// daemon — the egress broker's own network (created first; see
+	// ensureEgressBroker) or the sandbox container itself — rather than
+	// after a fixed sleep. A fixed sleep here used to be safe because a cold
+	// `go run .` compile made broker startup reliably slower than 1s, but
+	// N470/#799 added a persisted build cache for that compile (alongside
+	// this test's own fix for the leak it's about to check), and a warm
+	// cache can now finish broker startup in well under a second — so a
+	// fixed 1s sleep sometimes landed the cancel AFTER RunSandboxed had
+	// already moved past broker creation into the sandbox container's own
+	// run, missing the broker-creation race entirely (the broker was then
+	// correctly left running for reuse — nothing to catch, a vacuous pass
+	// that read as this test flaking instead of as the timing assumption
+	// going stale). Polling for the earliest observable side effect and
+	// cancelling immediately keeps this landing as close to "something is
+	// still mid-creation" as the daemon's own visibility allows, regardless
+	// of how fast or slow a given run turns out to be.
+	egressNetFilter := fmt.Sprintf("name=engine-egress-%d-", ws.RunID)
+	sandboxFilter := fmt.Sprintf("name=engine-sandbox-%d-", ws.RunID)
+	startDeadline := time.Now().Add(10 * time.Second)
+	for {
+		netOut, err := exec.Command("docker", "network", "ls", "--filter", egressNetFilter, "--format", "{{.Name}}").CombinedOutput()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sbOut, err := exec.Command("docker", "ps", "-a", "--filter", sandboxFilter, "--format", "{{.Names}}").CombinedOutput()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(string(netOut)) != "" || strings.TrimSpace(string(sbOut)) != "" {
+			break
+		}
+		if time.Now().After(startDeadline) {
+			t.Fatal("nothing for this run appeared on the daemon before deadline — cancel would prove nothing about cleanup")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	cancel()
 
 	select {
 	case <-done:
-	case <-time.After(15 * time.Second):
+	case <-time.After(40 * time.Second):
+		// Longer than teardownEgressLocked's own 30s cleanup budget
+		// (removeDockerResourceWithRetry, egress.go) — that retry runs
+		// SYNCHRONOUSLY inside the cancelled ensureEgressBroker call before
+		// RunSandboxed can return, and is deliberately allowed to spend
+		// most of those 30s absorbing a slow-to-settle Docker daemon (see
+		// its own doc comment). A shorter wait here would fail this test
+		// over cleanup legitimately still in progress, not over a real
+		// hang.
 		t.Fatal("RunSandboxed did not return after its context was cancelled")
 	}
 
@@ -363,7 +405,8 @@ func TestCancelledRunDoesNotLeaveAnOrphanedContainer(t *testing.T) {
 	// alone proves nothing about the broker leak this extends the test to
 	// catch.
 	deadline := time.Now().Add(10 * time.Second)
-	sandboxFilter := fmt.Sprintf("name=engine-sandbox-%d-", ws.RunID)
+	// sandboxFilter is reused from the polling loop above — same RunID, same
+	// pattern.
 	egressFilter := fmt.Sprintf("name=engine-egress-%d", ws.RunID) // matches both engine-egress-N and engine-egress-broker-N
 	for {
 		sandboxOut, err := exec.Command("docker", "ps", "-a", "--filter", sandboxFilter, "--format", "{{.Names}}").CombinedOutput()

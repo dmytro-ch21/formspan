@@ -171,10 +171,25 @@ func (ws *Workspace) ensureEgressBroker(ctx context.Context, allowedHosts []stri
 		return "", "", fmt.Errorf("egress: generate name suffix: %w", err)
 	}
 	networkName = fmt.Sprintf("engine-egress-%d-%s", ws.RunID, suffix)
+	// Recorded BEFORE the command runs, not after it succeeds — found by
+	// reproducing the residue AuditResidue exists to catch (N470/#799): a
+	// cancelled ctx kills the `docker network create` CLIENT, but the
+	// daemon can have already created the network by the time that kill
+	// lands, so the client-observed error and the daemon's real state can
+	// disagree. With the assignment only on the success path, that race
+	// returned here with `ws.egress.network` still "" and NO call to
+	// teardownEgressLocked at all — a network genuinely created on the
+	// daemon that this process never recorded owning, invisible to its own
+	// cleanup. Recording the name first means teardownEgressLocked always
+	// knows what to try to remove, regardless of which side of the race the
+	// client landed on; `docker network rm` against a name that in fact was
+	// never created is a harmless no-op error, already discarded by every
+	// caller below.
+	ws.egress.network = networkName
 	if out, err := exec.CommandContext(ctx, "docker", "network", "create", "--internal", networkName).CombinedOutput(); err != nil {
+		ws.teardownEgressLocked(ctx)
 		return "", "", fmt.Errorf("egress: create internal network: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	ws.egress.network = networkName
 
 	// The broker's source is embedded IN THIS BINARY (see egressBrokerSrc)
 	// rather than read from a source tree on disk — the running process may
@@ -223,14 +238,41 @@ func (ws *Workspace) ensureEgressBroker(ctx context.Context, allowedHosts []stri
 		"-e", "ALLOWED_HOSTS=" + strings.Join(allowedHosts, ","),
 		"-e", "DB_RELAY_PORT=" + dbRelayPort,
 		"-e", "PROXY_PORT=" + proxyPort,
+	}
+	// A persisted GOCACHE, not per-workspace and not per-run — added while
+	// investigating N470/#799. Without it, EVERY broker start pays a cold
+	// `go run .`: modern Go toolchains don't ship the standard library
+	// precompiled in the image, so the first build after `go` is installed
+	// compiles it into GOCACHE from scratch, and that compile — not
+	// anything about this broker's own tiny main.go — is what
+	// waitForBrokerReady's deadline is actually racing against. Measured
+	// directly while investigating: under real contention on this shared
+	// host, that cold compile alone exceeded even a 30s deadline. Mounting a
+	// stable host directory here means only the very FIRST broker this
+	// process (or any other process sharing the same OS user cache
+	// directory) ever starts pays that cost; every later one, including
+	// every other test in the same suite run, reuses it. Best-effort: if
+	// the OS cache directory can't be resolved or created, this silently
+	// falls back to today's behavior (a cold compile every time) rather
+	// than failing the broker start over a speed optimization.
+	if cacheDir := brokerGoCacheDir(); cacheDir != "" {
+		if err := os.MkdirAll(cacheDir, 0o700); err == nil {
+			runArgs = append(runArgs, "-v", cacheDir+":/gocache", "-e", "GOCACHE=/gocache")
+		}
+	}
+	runArgs = append(runArgs,
 		DefaultSandboxImage, // has the Go toolchain the broker is `go run` under; no separate image to build/pull
 		"go", "run", ".",
-	}
+	)
+	// Same rationale as networkName above: recorded before the command runs
+	// so a client killed mid-`docker run -d` (after the daemon has already
+	// created/started the container, before this process observes success)
+	// still leaves teardownEgressLocked able to find and remove it by name.
+	ws.egress.container = containerName
 	if out, err := exec.CommandContext(ctx, "docker", runArgs...).CombinedOutput(); err != nil {
 		ws.teardownEgressLocked(ctx)
 		return "", "", fmt.Errorf("egress: start broker container: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	ws.egress.container = containerName
 
 	// The second leg: real internet + host.docker.internal, via Docker's
 	// ordinary default bridge — this is what makes the broker able to relay
@@ -268,6 +310,22 @@ func (ws *Workspace) ensureEgressBroker(ctx context.Context, allowedHosts []stri
 	return ip, networkName, nil
 }
 
+// brokerGoCacheDir returns a stable HOST directory for the broker's `go run
+// .` build cache — see its call site's doc comment for why this exists.
+// Deliberately NOT under ws.Dir or anything else per-workspace: the whole
+// point is that it outlives any one workspace and is shared by every broker
+// this process (or, on a shared dev host, any other process using the same
+// OS user cache directory) ever starts. Returns "" if the OS cache directory
+// can't be resolved (e.g. no $HOME) — callers must treat that as "skip the
+// mount", never as an error, since this is a speed optimization only.
+func brokerGoCacheDir() string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "engine-egressbroker-gocache")
+}
+
 // canonicalAllowlist renders an allowlist as a stable, order-independent
 // string for equality comparison — two calls building the same set of hosts
 // in a different order (or with different backing slices) must compare
@@ -285,20 +343,35 @@ func canonicalAllowlist(hosts []string) string {
 // same pseudo-device sandbox_test.go already relies on for connectivity
 // checks against this same image, so this needs nothing the broker's image
 // doesn't already carry.
+// brokerReadyTimeout is how long waitForBrokerReady polls before giving up.
+// 30s, not the 15s this originally shipped with — bumped after N470/#799
+// measured this timing out under real host contention rather than any
+// broker-logic defect: this project's own Colima VM is configured with only
+// 2 CPUs / 2GiB (`~/.colima/default/colima.yaml`), shared by every
+// concurrent Docker use on the machine including other worktrees' tests per
+// this repo's own parallel-agent convention, and every broker start used to
+// pay a cold `go run .` compile inside that VM (brokerGoCacheDir's mount
+// closes most of that cost, but the very first broker on a given host still
+// pays it, and this timeout is what has to survive that one). This is a
+// poll for a slow-starting process, not a correctness check — a broker that
+// will genuinely never start is still caught, just later than it used to
+// be.
+const brokerReadyTimeout = 30 * time.Second
+
 func waitForBrokerReady(ctx context.Context, containerName string) error {
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(brokerReadyTimeout)
 	script := fmt.Sprintf(
 		`exec 3<>/dev/tcp/localhost/%s && exec 4<>/dev/tcp/localhost/%s`,
 		dbRelayPort, proxyPort)
 	for {
 		// Fail fast on a cancelled/expired ctx rather than burning the full
-		// 15s wall-clock deadline finding out the hard way — every retry
-		// below would fail near-instantly anyway once ctx is done, so
-		// without this a caller whose OWN context was already cancelled
-		// (a run's wall-time budget, say) waits out the full deadline for
-		// no reason, which can itself blow a caller's own shorter timeout.
-		// Found while fixing the leak this same cancellation shape caused
-		// in ensureEgressBroker's cleanup path — see teardownEgressLocked.
+		// wall-clock deadline finding out the hard way — every retry below
+		// would fail near-instantly anyway once ctx is done, so without
+		// this a caller whose OWN context was already cancelled (a run's
+		// wall-time budget, say) waits out the full deadline for no reason,
+		// which can itself blow a caller's own shorter timeout. Found while
+		// fixing the leak this same cancellation shape caused in
+		// ensureEgressBroker's cleanup path — see teardownEgressLocked.
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("broker readiness wait: %w", err)
 		}
@@ -308,7 +381,7 @@ func waitForBrokerReady(ctx context.Context, containerName string) error {
 		}
 		if time.Now().After(deadline) {
 			out, _ := exec.CommandContext(ctx, "docker", "logs", containerName).CombinedOutput()
-			return fmt.Errorf("broker did not start listening within 15s; container logs: %s", strings.TrimSpace(string(out)))
+			return fmt.Errorf("broker did not start listening within %s; container logs: %s", brokerReadyTimeout, strings.TrimSpace(string(out)))
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -370,15 +443,23 @@ func (ws *Workspace) teardownEgressLocked(ctx context.Context) error {
 	defer cancel()
 	var firstErr error
 	if ws.egress.container != "" {
-		if out, err := exec.CommandContext(cleanupCtx, "docker", "rm", "-f", ws.egress.container).CombinedOutput(); err != nil {
-			firstErr = fmt.Errorf("remove broker container: %w: %s", err, strings.TrimSpace(string(out)))
+		container := ws.egress.container
+		exists := func(ctx context.Context) bool {
+			return exec.CommandContext(ctx, "docker", "inspect", container).Run() == nil
+		}
+		if err := removeDockerResourceWithRetry(cleanupCtx, "remove broker container", exists, "docker", "rm", "-f", container); err != nil {
+			firstErr = err
 		}
 		ws.egress.container = ""
 	}
 	if ws.egress.network != "" {
-		if out, err := exec.CommandContext(cleanupCtx, "docker", "network", "rm", ws.egress.network).CombinedOutput(); err != nil {
+		network := ws.egress.network
+		exists := func(ctx context.Context) bool {
+			return exec.CommandContext(ctx, "docker", "network", "inspect", network).Run() == nil
+		}
+		if err := removeDockerResourceWithRetry(cleanupCtx, "remove egress network", exists, "docker", "network", "rm", network); err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("remove egress network: %w: %s", err, strings.TrimSpace(string(out)))
+				firstErr = err
 			}
 		}
 		ws.egress.network = ""
@@ -389,6 +470,63 @@ func (ws *Workspace) teardownEgressLocked(ctx context.Context) error {
 	}
 	ws.egress.brokerIP = ""
 	return firstErr
+}
+
+// removeDockerResourceWithRetry retries a `docker rm`/`docker network rm`-
+// shaped command until `exists` confirms the resource is actually gone, or
+// ctx (the caller's cleanupCtx — see teardownEgressLocked) runs out —
+// whichever comes first. Found necessary while fixing N470/#799's leak:
+// recording a resource's name on ws.egress BEFORE the command that creates
+// it (see ensureEgressBroker) closes the original leak (a cancelled client
+// can leave a container the daemon still creates, that this process never
+// otherwise learns the name of), but exposed why a single removal attempt
+// is not enough to close it in practice: measured directly, `docker rm -f`/
+// `docker network rm` can report SUCCESS (exit 0, no error — true even for
+// "No such container"/"No such network", so a target that plain doesn't
+// exist looks identical to one that was truly just removed) against a
+// container still mid-transition (Docker's own "Created" state — created,
+// never started, since the client that would have started it was the one
+// killed above) WITHOUT the removal actually taking effect, still findable
+// via `docker inspect` moments later. Trusting the exit code alone reads as
+// "cleaned up" on exactly the case this exists to catch. `exists` is the
+// actual proof.
+//
+// This is a best-effort mitigation, not a guarantee: on a sufficiently
+// contended host the daemon can still take longer than this retries for to
+// settle a resource out of that half-created state, in which case this
+// function correctly reports the removal as failed (never silently drops
+// it) but the resource can still be left running — see the "Known gotchas"
+// section of CLAUDE.md and docs/decisions/history.md's N470 entry for what
+// was measured about how far this closes the gap versus how far it
+// couldn't, and why a fancier client-side wait-then-verify design (tried and
+// reverted while building this) made it WORSE by starving a sibling
+// resource's own retry budget rather than actually closing the remaining
+// race.
+//
+// The caller (teardownEgressLocked) unconditionally clears its own
+// bookkeeping once this returns, by design — a resource that never existed
+// at all must not wedge cleanup in a retry loop forever — so this is the
+// only chance a real-but-not-yet-settled resource gets before its name is
+// lost for good, and it is worth spending most of teardownEgressLocked's
+// own 30s budget on rather than giving up early.
+func removeDockerResourceWithRetry(ctx context.Context, action string, exists func(context.Context) bool, name string, args ...string) error {
+	var lastErr error
+	for {
+		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+		switch {
+		case err != nil:
+			lastErr = fmt.Errorf("%s: %w: %s", action, err, strings.TrimSpace(string(out)))
+		case !exists(ctx):
+			return nil
+		default:
+			lastErr = fmt.Errorf("%s: reported success but the resource still exists", action)
+		}
+		select {
+		case <-ctx.Done():
+			return lastErr
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 }
 
 // materializeEmbeddedDir writes every file under fsys's subdir into dest on
