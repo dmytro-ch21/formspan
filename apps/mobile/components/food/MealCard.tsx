@@ -87,7 +87,7 @@
  */
 
 import { useState } from 'react';
-import { Pressable, StyleSheet, RNView } from 'react-native';
+import { Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
