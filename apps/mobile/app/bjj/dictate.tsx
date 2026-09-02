@@ -54,16 +54,37 @@
  * done."*
  *
  * So this screen now carries editing surfaces for everything the wizard's
- * three steps would ask about — including two the confirm screen never had:
- * adding a technique the model missed entirely (below the tag list, matching
- * the wizard's own search-and-add pattern), and correcting what a tag's
+ * three steps would ask about — including surfaces the confirm screen never
+ * had: adding a technique the model missed entirely (below the tag list,
+ * matching the wizard's own search-and-add pattern), correcting what a tag's
  * `event` actually was (drilled/attempted/scored/conceded/defended — a chip
- * row under each tag). Save lands on the session's own read view
- * (`/bjj/session/[id]`), not back in the wizard. **The wizard is not
- * removed** — that screen's own "Add detail" button still opens it, exactly
- * as it does for a session logged by hand — it is just never entered
- * automatically for a dictated one any more. Draft-then-confirm is
+ * row under each tag), and correcting WHERE it happened (a second chip row,
+ * added in review once the same audit that found the event gap found this
+ * one had no editing surface either — `resolvePhrase` writes `position: ''`
+ * and a server-extracted tag carries whatever the model read, with nothing
+ * on the old confirm screen to fix either one). Save lands on the session's
+ * own read view (`/bjj/session/[id]`), not back in the wizard. **The wizard
+ * is not removed** — that screen's own "Add detail" button still opens it,
+ * exactly as it does for a session logged by hand — it is just never
+ * entered automatically for a dictated one any more. Draft-then-confirm is
  * unchanged throughout: nothing above is written until Save is tapped.
+ *
+ * **The event chips are narrower for a tag with no `technique_id`.** Found
+ * in review: `attempted`/`defended` are a technique-scoped concept
+ * everywhere else in this app (`FUNNEL_OUTCOMES`'s own doc — one row per
+ * focus technique, feeding a roadmap's hit-rate math, which divides by a
+ * per-technique count that does not exist without one), and the wizard's own
+ * category grid (`bump()`) never writes an untagged `drilled` either — only
+ * `scored`/`conceded` are ever written without a technique attached. The
+ * dictation model is not bound by any of that and can hand back exactly the
+ * combination nothing else in the app produces. `session/[id].tsx`'s
+ * "Techniques" section is keyed by `technique_id` and "What happened live"
+ * is scored/conceded only, so an untagged `drilled`/`attempted`/`defended`
+ * tag would save, sync, and render nowhere — recorded data with no display
+ * surface, which is worse than the blank field this ticket is otherwise
+ * about. `TagRow` restricts the choices for such a tag to the two the read
+ * view can show, and flags one that already arrived stranded rather than
+ * letting it pass silently.
  */
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -87,6 +108,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { backdatedTimestamp } from '@/lib/calendar';
 import {
   KINDS,
+  POSITIONS,
   describeRPE,
   familyOf,
   toCategory,
@@ -317,6 +339,24 @@ export default function DictateReflectionScreen() {
   function setTagEvent(i: number, event: Event) {
     setDetail((d) =>
       d ? { ...d, tags: d.tags.map((t, n) => (n === i ? { ...t, event } : t)) } : d,
+    );
+  }
+
+  /**
+   * Correct where a tag happened — or say it, when the dictation never did.
+   *
+   * N120/#509, found in review: `resolvePhrase` above writes a blank
+   * `position` for anything resolved from an ambiguous phrase, and a
+   * server-extracted tag carries whatever the model read — right or wrong —
+   * with nothing on this screen to fix either one. The wizard's own live
+   * step has exactly this control (`reflect/[id].tsx`'s "From where?"
+   * pills), scoped to the next tap rather than to a tag that already exists;
+   * this is that same vocabulary applied per-tag instead, the same shape as
+   * `setTagEvent` right above it.
+   */
+  function setTagPosition(i: number, position: string) {
+    setDetail((d) =>
+      d ? { ...d, tags: d.tags.map((t, n) => (n === i ? { ...t, position } : t)) } : d,
     );
   }
 
@@ -617,6 +657,7 @@ export default function DictateReflectionScreen() {
                     onCount={(c) => setTagCount(i, c)}
                     onRemove={() => dropTag(i)}
                     onEvent={(e) => setTagEvent(i, e)}
+                    onPosition={(p) => setTagPosition(i, p)}
                   />
                 ))}
               </View>
@@ -787,10 +828,13 @@ function TagRow({
   onCount,
   onRemove,
   onEvent,
+  onPosition,
 }: {
   tag: Tag;
-  /** Position in `detail.tags` — only used to keep the event chips' testIDs
-   *  addressable per row; nothing here reorders or reindexes on its own. */
+  /** Position in `detail.tags` — only used to keep the event/position chips'
+   *  testIDs addressable per row; nothing here reorders or reindexes on its
+   *  own. (Yes, "position" is overloaded here — this is the tag's array
+   *  index, not the `tag.position` BJJ position family the prop below sets.) */
   index: number;
   /**
    * True when the server floored this count to 1 rather than confirming it —
@@ -803,17 +847,48 @@ function TagRow({
   onRemove: () => void;
   /** N120/#509: what actually happened, correctable — see `setTagEvent`. */
   onEvent: (e: Event) => void;
+  /** N120/#509: where it happened, correctable — see `setTagPosition`. */
+  onPosition: (p: string) => void;
 }) {
   const accent = useAccent();
   // Named, because with three tags "One fewer" × 3 is three indistinguishable
   // buttons to anyone using a screen reader.
   const title = `${tag.event} ${tag.category}${tag.position ? ` · ${tag.position}` : ''}`;
+  // N120/#509, found in review: a tag with no `technique_id` is exactly what
+  // the wizard's own category grid (`bump()` in `reflect/[id].tsx`) writes,
+  // and that grid only ever writes `scored`/`conceded` — `attempted` and
+  // `defended` are a technique-scoped concept everywhere else in this app
+  // (`FUNNEL_OUTCOMES`'s own doc: "one row per focus technique", and the
+  // hit-rate math a roadmap runs divides by a per-technique count that does
+  // not exist without one). `drilled` without a technique_id is the same
+  // problem one stage earlier: nothing else in the app ever writes it, and
+  // `session/[id].tsx`'s "Techniques" section is keyed by `technique_id` —
+  // an untagged drilled/attempted/defended tag has no chip there and no row
+  // in "What happened live" either (that grid is scored/conceded only), so
+  // it would save, sync, and then render nowhere. The dictation model is not
+  // bound by any of this and can hand back exactly that combination.
+  //
+  // So the event chips below only ever OFFER what an untagged tag can
+  // actually be shown as. This cannot make an already-untagged tag MORE
+  // invisible — restricting the choice, never the display of the value
+  // already on it — and the hint below names the fix instead of letting the
+  // gap pass silently, which the count-uncertain hint above does for the
+  // same reason.
+  const untaggedLimited = !tag.technique_id;
+  const eventChoices = untaggedLimited ? UNTAGGED_EVENT_OPTIONS : EVENT_OPTIONS;
+  const strandedEvent = untaggedLimited && !UNTAGGED_EVENT_OPTIONS.some((o) => o.key === tag.event);
   return (
     <View style={styles.tagBlock}>
       <View style={styles.tagRow}>
         <View style={styles.tagText}>
           <Text style={styles.tagTitle}>{title}</Text>
           {countUncertain && <Text style={styles.rowHint}>How many? We weren’t sure.</Text>}
+          {strandedEvent && (
+            <Text style={styles.rowHint}>
+              No technique named — pick Scored or Conceded below, or add the technique under “Add
+              something you did” so this shows on your session.
+            </Text>
+          )}
         </View>
         <View style={styles.stepper}>
           <Pressable
@@ -866,7 +941,7 @@ function TagRow({
           same vocabulary as the title above (drilled/attempted/scored/
           conceded/defended) rather than new copy invented for this row. */}
       <View style={styles.eventChips}>
-        {EVENT_OPTIONS.map((o) => {
+        {eventChoices.map((o) => {
           const active = tag.event === o.key;
           return (
             <Pressable
@@ -883,6 +958,29 @@ function TagRow({
           );
         })}
       </View>
+      {/* N120/#509: where this happened, correctable the same way the event
+          above is — a blank position ('') is "the athlete didn't say", not a
+          missing tenth family, so it gets its own chip ("Not saying") rather
+          than defaulting to one of the nine. Same vocabulary and blank
+          handling as the wizard's own "From where?" pills. */}
+      <View style={styles.eventChips}>
+        {(['', ...POSITIONS] as const).map((p) => {
+          const active = tag.position === p;
+          return (
+            <Pressable
+              key={p || 'any'}
+              onPress={() => onPosition(p)}
+              style={[styles.eventChip, active && { backgroundColor: accent.ink, borderColor: accent.ink }]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${p || 'Not saying'}, for ${title}`}
+              testID={`dictate-tag-${index}-position-${p || 'any'}`}
+            >
+              <Text style={[styles.eventChipLabel, active && { color: vola.bg }]}>{p || 'Not saying'}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -895,6 +993,14 @@ const EVENT_OPTIONS: { key: Event; label: string }[] = [
   { key: 'conceded', label: 'Conceded' },
   { key: 'defended', label: 'Defended' },
 ];
+
+/**
+ * The only two outcomes a tag with no `technique_id` can be relabelled to —
+ * see the `untaggedLimited` comment in `TagRow`. Kept to exactly the events
+ * the wizard's own category grid can write, so a correction made here can
+ * never produce a state the rest of the app has no display for.
+ */
+const UNTAGGED_EVENT_OPTIONS = EVENT_OPTIONS.filter((o) => o.key === 'scored' || o.key === 'conceded');
 
 /**
  * A technique the dictation never named at all.

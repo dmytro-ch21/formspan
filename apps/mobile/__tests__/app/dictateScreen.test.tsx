@@ -706,4 +706,95 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
     expect(detail.tags[0].event).toBe('conceded');
     expect(detail.tags[0].count).toBe(1);
   });
+
+  it("lets the athlete correct where a tag happened", async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'submission', event: 'scored', position: '', technique_id: 'armbar-from-guard', count: 1 }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('Landed an armbar');
+
+    await waitFor(() => {
+      expect(screen.getByText('scored submission')).toBeTruthy();
+    });
+    // The dictation named the technique but not where it happened — the
+    // athlete fills that in without re-entering anything already correct.
+    fireEvent.press(screen.getByTestId('dictate-tag-0-position-Guard'));
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags[0].position).toBe('Guard');
+    // Correcting position leaves everything else on the tag untouched.
+    expect(detail.tags[0].event).toBe('scored');
+    expect(detail.tags[0].count).toBe(1);
+  });
+
+  it('restricts an untagged tag to Scored/Conceded and flags one the dictation already stranded outside that pair', async () => {
+    // No `technique_id` — a category-level read the model made without
+    // naming a specific technique, and with an event the app has no display
+    // surface for on `session/[id].tsx` (see `TagRow`'s own comment). This is
+    // the shape the model can hand back even though nothing on this screen
+    // would ever construct one by hand.
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'pass', event: 'drilled', position: '', technique_id: null, count: 1 }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('Worked on some passing');
+
+    await waitFor(() => {
+      expect(screen.getByText('drilled pass')).toBeTruthy();
+    });
+    // The honest flag, not a silent restriction.
+    expect(screen.getByText(/no technique named/i)).toBeTruthy();
+    // Only the two events the read view can actually show for a tag with no
+    // technique — matching what the wizard's own category grid ever writes.
+    expect(screen.getByTestId('dictate-tag-0-event-scored')).toBeTruthy();
+    expect(screen.getByTestId('dictate-tag-0-event-conceded')).toBeTruthy();
+    expect(screen.queryByTestId('dictate-tag-0-event-drilled')).toBeNull();
+    expect(screen.queryByTestId('dictate-tag-0-event-attempted')).toBeNull();
+    expect(screen.queryByTestId('dictate-tag-0-event-defended')).toBeNull();
+
+    // Reclassifying it into one of the two clears the flag and makes it a
+    // tag the read view can display.
+    fireEvent.press(screen.getByTestId('dictate-tag-0-event-scored'));
+    expect(screen.queryByText(/no technique named/i)).toBeNull();
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags[0].event).toBe('scored');
+  });
+
+  it('leaves all five event choices open for a tag that DOES name a technique', async () => {
+    // The restriction is specific to `technique_id: null` — a named
+    // technique still supports the full funnel via `techniqueRows`, so
+    // narrowing its choices too would take away a legitimate correction.
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'pass', event: 'drilled', position: '', technique_id: 'knee-cut-pass', count: 1 }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('Drilled the knee cut');
+
+    await waitFor(() => {
+      expect(screen.getByText('drilled pass')).toBeTruthy();
+    });
+    for (const key of ['drilled', 'attempted', 'scored', 'conceded', 'defended']) {
+      expect(screen.getByTestId(`dictate-tag-0-event-${key}`)).toBeTruthy();
+    }
+    expect(screen.queryByText(/no technique named/i)).toBeNull();
+  });
 });

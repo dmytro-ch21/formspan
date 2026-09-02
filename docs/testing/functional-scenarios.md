@@ -11139,7 +11139,17 @@ entered automatically for a dictated one any more.
   duplicate and can still be added as `drilled` too.
 - **A tag's event (drilled/attempted/scored/conceded/defended) is correctable**
   via a small chip row under each tag, independent of its count — changing the
-  event leaves the count untouched.
+  event leaves the count untouched. **For a tag with no `technique_id`
+  (found in review), only Scored/Conceded are offered** — the only two the
+  session read view can display for an untagged tag; a tag that already
+  arrived with a different event and no technique shows an explicit "No
+  technique named" hint rather than saving silently into a state that renders
+  nowhere. A tag that DOES name a technique keeps all five choices.
+- **A tag's position (found in review) is correctable the same way its event
+  is** — a second chip row using the wizard's own position vocabulary, with a
+  "Not saying" option for blank rather than defaulting to one of the nine
+  families. Previously nothing on this screen could set or fix a tag's
+  position at all.
 - **A count the words did not contain stays blank**, not zero, with the reason
   shown ("we couldn't find that in what you said").
 - Decrementing a count to zero **removes the tag** rather than storing a zero.
@@ -11196,6 +11206,16 @@ entered automatically for a dictated one any more.
   empty is the same failure as before, moved to a different field.** They
   must render — with a placeholder, not a value — regardless of what the
   draft contains.
+- **N120/#509, found in review: the event chips must never offer a choice
+  that leaves an untagged tag (`technique_id: null`) invisible on
+  `session/[id].tsx`.** That screen's "Techniques" section is keyed by
+  `technique_id` and "What happened live" only ever shows `scored`/`conceded`
+  for an untagged tag — nothing else renders `drilled`/`attempted`/`defended`
+  without a technique attached. A regression here reads as giving the athlete
+  more correction options, not fewer, which is exactly why it is dangerous:
+  the failure is "saved, synced, shown nowhere," not a crash or a visible
+  error. Assert the disallowed testIDs are absent for an untagged tag, not
+  just that the allowed ones are present.
 
 ### Retrying a failed draft (N118)
 

@@ -51344,6 +51344,49 @@ count. The routing assertion was mutation-verified directly — reverted to
 (a `toEqual` mismatch naming both pathnames), restored, confirmed green again
 by re-running rather than by reading the diff.
 
+**Two gaps found in review, both fixed before push.** The audit against
+`SessionDetail` above found the event correction; a second pass, done because
+this ticket's own sharpest risk is a field the athlete corrected quietly
+becoming invisible, found two more — one on this screen, one one screen over:
+
+- **No editing surface for a tag's `position` at all.** `resolvePhrase` writes
+  `position: ''` and a server-extracted tag carries whatever the model read,
+  with nothing on the confirm screen to set or fix either one — the wizard's
+  live step has exactly this control ("From where?" pills) and the confirm
+  screen had no equivalent. Fixed with a second chip row per tag, `setTagPosition`,
+  mirroring `setTagEvent`'s shape and using the wizard's own `POSITIONS`
+  vocabulary — `''` reads as "Not saying", matching the wizard's own
+  blank-is-a-real-answer convention rather than defaulting to one of the nine
+  families.
+- **The event chips could relabel a tag with no `technique_id` into a state
+  the read view cannot display.** `session/[id].tsx`'s "Techniques" section is
+  keyed by `technique_id`; "What happened live" is a scored/conceded grid only.
+  Nothing else in the app ever produces an untagged `drilled`/`attempted`/
+  `defended` tag — the wizard's own category grid (`bump()`) only ever writes
+  `scored`/`conceded` without a technique attached, and `attempted`/`defended`
+  are documented elsewhere (`FUNNEL_OUTCOMES` in `bjjSession.ts`) as a
+  technique-scoped concept feeding a roadmap's hit-rate math. The dictation
+  model is not bound by that and can hand back the combination directly
+  (confirmed in `backend/internal/modules/bjj/reflect.go`'s own tag
+  reconciliation, which places no such constraint on the model's output). So a
+  tag like this could arrive already stranded, or an athlete could strand one
+  by hand via the event chips — either way, saved, synced, and shown nowhere,
+  which is the exact "shorter flow hides what wasn't captured" failure this
+  ticket's own acceptance criteria warn against, one layer down from the field
+  itself. Fixed by narrowing `TagRow`'s event choices to `scored`/`conceded`
+  for a tag with no `technique_id` — restricting the choice, never the display
+  of whatever event is already on it — and surfacing an explicit hint ("No
+  technique named — pick Scored or Conceded below, or add the technique…")
+  when a tag already arrives in that state, rather than letting it save
+  silently.
+
+Both additions have their own tests (position correction; the untagged-event
+restriction and its hint, mutation-verified the same way as the routing
+assertion above — `setTagPosition` and `UNTAGGED_EVENT_OPTIONS` were each
+broken in turn, confirmed the relevant test failed, restored, confirmed green
+again by re-running) plus a fifth test confirming a *tagged* tag keeps all
+five event choices, since the restriction is specific to the untagged case.
+
 **Open**: NEEDS HUMAN EVIDENCE — dictating a full session on a device and
 reaching a logged session without typing anything that was spoken. Nothing in
 this change is reachable by a test that cannot hear speech; see N60's own
