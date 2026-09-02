@@ -367,6 +367,25 @@ export async function cacheEntries(
   await withTransaction(db, async () => {
     const ids = entries.map((e) => e.id);
     const placeholders = ids.length ? ids.map(() => '?').join(',') : `''`;
+    // frontend-reviewer, N468 review: a food entry deleted from ANOTHER
+    // surface (web's DayEditor, say) reaches this device as an absence from
+    // `entries` on the next pull, and is swept up by the DELETE below —
+    // which used to be the end of it. If that food had caused a caffeine
+    // entry (N468/#792), the caffeine row survived with nothing left to
+    // point at: the athlete's own alert on it says "edit or remove that
+    // food entry in Food", and there is no longer a food entry anywhere to
+    // edit or remove. Read the ids ABOUT to be deleted first — the DELETE
+    // itself reports only a row count, not which rows — so each one's
+    // caffeine entry (if it caused one) can be cascaded alongside it, in
+    // the SAME transaction as the delete rather than as a separate,
+    // skippable step.
+    const willDelete = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM food_entries
+        WHERE user_id = ? AND eaten_on BETWEEN ? AND ?
+          AND id NOT IN (${placeholders})
+          AND dirty = 0 AND remote = 1 AND deleted_at IS NULL`,
+      userId, from, to, ...ids,
+    );
     await db.runAsync(
       `DELETE FROM food_entries
         WHERE user_id = ? AND eaten_on BETWEEN ? AND ?
@@ -374,6 +393,18 @@ export async function cacheEntries(
           AND dirty = 0 AND remote = 1 AND deleted_at IS NULL`,
       userId, from, to, ...ids,
     );
+    // Best-effort per row, matching `syncFoodCaffeine`'s own posture — a
+    // caffeine-entry cascade failing here must not roll back a pull that
+    // otherwise succeeded. `removeFoodCaffeineEntry` makes no `withTransaction`
+    // call of its own (see `db.ts`'s own warning against nesting one), so
+    // running it here, inside this transaction's body, is safe.
+    for (const { id } of willDelete) {
+      try {
+        await removeFoodCaffeineEntry(userId, id);
+      } catch {
+        // Swallowed — see the comment above.
+      }
+    }
     const now = stamp();
     for (const e of entries) {
       await db.runAsync(

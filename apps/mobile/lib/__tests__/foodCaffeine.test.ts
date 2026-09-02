@@ -103,4 +103,24 @@ describe('the origin-marking id scheme', () => {
     expect(isFoodCaffeineEntryId('coffee-entry-1-caf')).toBe(false); // coffeeCaffeine.ts's own suffix
     expect(isFoodCaffeineEntryId('uuid-1')).toBe(false); // an ordinary manual tap
   });
+
+  /**
+   * frontend-reviewer, N468 review: this used to accept a whole
+   * `randomUUID()` as the tail (36 chars), producing a 78-character id
+   * against the backend's 64-character `NewEntry.Validate` limit
+   * (`tracker.go`) — every food-caused caffeine entry was rejected
+   * PERMANENTLY and silently, never reaching the server or a second
+   * device. Pinned here the same way `coffeeCaffeine.test.ts` already pins
+   * its own sibling id scheme against the identical limit.
+   */
+  it("stays comfortably under the backend's 64-character entry id limit for a UUID-length id and tail", () => {
+    const uuid = '123e4567-e89b-12d3-a456-426614174000';
+    expect(uuid).toHaveLength(36);
+    expect(pairedFoodCaffeineEntryId(uuid, uuid).length).toBeLessThanOrEqual(64);
+  });
+
+  it('truncates a long tail rather than trusting the caller to have shortened it', () => {
+    const id = pairedFoodCaffeineEntryId('food-1', 'abcdefghijklmnop');
+    expect(id).toBe(`food-1${FOOD_CAFFEINE_ID_INFIX}abcdefgh`);
+  });
 });

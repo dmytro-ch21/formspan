@@ -31,7 +31,7 @@ import {
   syncFood,
 } from '../foodLog';
 import type { Food, Target } from '../nutrition';
-import { isFoodCaffeineEntryId } from '../foodCaffeine';
+import { isFoodCaffeineEntryId, pairedFoodCaffeineEntryId } from '../foodCaffeine';
 import {
   cacheTrackers,
   localEntries as localTrackerEntries,
@@ -894,5 +894,54 @@ describe('N468/#792: a caffeinated food automatically posts to the caffeine trac
     await removeEntry(USER, id);
     const entries = await localTrackerEntries(USER, TODAY);
     expect(entries.map((e) => e.id)).toEqual(['manual-1']);
+  });
+
+  /**
+   * frontend-reviewer, N468 review: a food entry deleted from ANOTHER
+   * surface (web's `DayEditor.tsx`, say) reaches this device as an absence
+   * from the next `cacheEntries` pull, not as a call to `removeEntry` — and
+   * `cacheEntries`'s own DELETE used to have no idea a caffeine entry was
+   * ever paired to the row it was sweeping. The orphan this pins: the
+   * caffeine banner keeps a padlocked entry pointing at a food log that no
+   * longer has anything to edit or remove, on this device and any other
+   * that pulls the same day — the exact "the two disagree" failure this
+   * ticket's own AC named.
+   */
+  it('a food entry removed via a PULL (not this device\'s own removeEntry) also removes the caffeine entry it caused', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    // This device's copy of a server-known food entry — inserted the way a
+    // real pull would (dirty=0, remote=1), not via logFood.
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal({ name: 'Latte' }), id: 'srv-food-1', source_food_id: null, category: null, notes: '' },
+    ]);
+    // Its caffeine entry, as if an earlier `logFood`/`editEntry` on some
+    // device had already run `syncFoodCaffeineEntry` for it.
+    const caffeineId = pairedFoodCaffeineEntryId('srv-food-1', 'abc12345');
+    await db.runAsync(
+      `INSERT INTO tracker_entries (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
+       VALUES (?,?,?,?,?,?,?,1,0)`,
+      caffeineId, caffeine.id, USER, TODAY, '2026-08-18T08:00:00.000Z', 95, '2026-08-18T08:00:00.000Z',
+    );
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(1);
+
+    // The server no longer reports the food (deleted from web, say) — the
+    // next pull sweeps the local row via cacheEntries, never touching
+    // removeEntry at all.
+    await cacheEntries(USER, TODAY, TODAY, []);
+
+    expect(await localEntries(USER, TODAY)).toHaveLength(0);
+    // The orphan this bug named: the caffeine entry must go with it, not
+    // survive pointing at nothing.
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it('a pull that drops an UNCAFFEINATED food touches no tracker row at all', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal({ name: 'Chicken thigh' }), id: 'srv-food-2', source_food_id: null, category: null, notes: '' },
+    ]);
+    await cacheEntries(USER, TODAY, TODAY, []);
+    expect(await localEntries(USER, TODAY)).toHaveLength(0);
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
   });
 });

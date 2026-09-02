@@ -47,6 +47,15 @@
  *   contributes nothing — silently, exactly like `coffeeCaffeine.ts`'s
  *   `other` bucket, which "posts no invented number" for the identical
  *   reason. No figure is invented for a category this file cannot cite.
+ * - **The servings scaling assumes a drink-count basis** (`caffeineMgForFoodEntry`
+ *   multiplies the per-serving figure by `entry.servings`), which is right
+ *   for "2 lattes" but wrong for a catalog/barcode row logged on a
+ *   per-100g basis — a 330 ml energy drink logged as "3.3 servings of
+ *   100 g" would post 3.3× its real caffeine, because `servings` there
+ *   counts grams-of-hundred, not drinks. **frontend-reviewer, N468
+ *   review** — not solved here (this file has no reliable way to tell a
+ *   drink-count `serving_label` from a weight-basis one), named so the next
+ *   reader does not assume the scaling is always right.
  *
  * ## Every mg figure is cited, not invented
  *
@@ -78,7 +87,12 @@ type FoodCaffeineGroup = {
  */
 const GROUPS: readonly FoodCaffeineGroup[] = [
   { mgPerServing: 200, words: ['energy shot', '5 hour energy', '5-hour energy'] },
-  { mgPerServing: 79, words: ['energy drink', 'red bull', 'monster energy', 'monster'] },
+  // frontend-reviewer, N468 review: a bare 'monster' matched "Monster
+  // Burger" as readily as an actual energy drink — broader than any of
+  // this group's other phrases need to be, and the easiest of the accepted
+  // false positives to just not have. 'monster energy' alone still catches
+  // the brand by name.
+  { mgPerServing: 79, words: ['energy drink', 'red bull', 'monster energy'] },
   { mgPerServing: 63, words: ['espresso', 'macchiato', 'ristretto'] },
   {
     mgPerServing: 95,
@@ -163,9 +177,34 @@ export function caffeineMgForFoodEntry(entry: { name: string; servings: number }
  */
 export const FOOD_CAFFEINE_ID_INFIX = '-fcaf-';
 
-/** One caffeine entry id caused by food entry `foodEntryId`, tagged `tail`. */
+/**
+ * How much of the tail survives — **frontend-reviewer, N468 review**: this
+ * used to accept a whole `randomUUID()` as the tail, producing a 78-char id
+ * (36 + 6 + 36) against `backend/internal/modules/tracker/tracker.go`'s
+ * 64-character entry-id limit. Every entry over the limit was rejected
+ * PERMANENTLY (classified `permanent`, `dirty` cleared, `remote` left at 0)
+ * — the row stayed on the phone that logged it, forever, and never reached
+ * the server, a second device, or web, with no error surfaced anywhere. This
+ * is the same constraint `coffeeCaffeine.ts`'s own `pairedCaffeineEntryId`
+ * already states and solves with a 4-character suffix; this file did not
+ * inherit it. 8 hex characters (the first chunk of a fresh `randomUUID()`,
+ * before its first hyphen) keeps a food entry id at 36 + 6 + 8 = 50
+ * characters — comfortably under 64 — while still carrying enough entropy
+ * (32 bits) that two supersedes of the SAME food entry colliding is not a
+ * realistic concern.
+ */
+const FOOD_CAFFEINE_TAIL_LENGTH = 8;
+
+/**
+ * One caffeine entry id caused by food entry `foodEntryId`, tagged `tail`.
+ *
+ * `tail` is truncated to {@link FOOD_CAFFEINE_TAIL_LENGTH} HERE, not left to
+ * the caller to remember — a single enforcement point, so nothing that ever
+ * calls this can regress the 64-character limit above by passing a longer
+ * one.
+ */
 export function pairedFoodCaffeineEntryId(foodEntryId: string, tail: string): string {
-  return `${foodEntryId}${FOOD_CAFFEINE_ID_INFIX}${tail}`;
+  return `${foodEntryId}${FOOD_CAFFEINE_ID_INFIX}${tail.slice(0, FOOD_CAFFEINE_TAIL_LENGTH)}`;
 }
 
 /**
