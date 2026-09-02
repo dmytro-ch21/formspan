@@ -434,6 +434,25 @@ export default function RunningSessionScreen() {
           <Stat label="time" value={formatElapsed(elapsedSeconds)} />
           <Stat label="pace" value={formatPace(paceSecPerKm, units)} />
         </StatRow>
+        {/* N463: "is my distance climbing over the last few weeks" — reachable
+            from every run, not only the one just finished, since this same
+            branch renders whenever a past run is reopened from Training
+            History (`sessionHref` in `lib/startSession.ts`). See
+            `lib/runningTrend.ts` for the full carve-out argument. */}
+        <Pressable
+          onPress={() => router.push('/running/trend')}
+          style={({ pressed }) => [styles.trendRow, pressed && styles.trendRowPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Distance over time"
+          accessibilityHint="Your run distance, charted over time"
+          testID="running-trend-link"
+        >
+          <View style={styles.trendRowText}>
+            <Text style={styles.trendRowTitle}>Distance over time</Text>
+            <Text style={styles.trendRowNote}>Every run, session by session.</Text>
+          </View>
+          <Icon name="chevron" size={16} color={vola.textMuted} />
+        </Pressable>
         <Pressable
           style={styles.primary}
           onPress={() => router.replace('/(tabs)')}
@@ -605,6 +624,23 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
   muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   errorText: { color: vola.danger, fontSize: 15, textAlign: 'center' },
+  trendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+  },
+  trendRowPressed: { opacity: 0.85 },
+  trendRowText: { flex: 1, gap: 2 },
+  trendRowTitle: { fontSize: 15, fontWeight: '700' },
+  trendRowNote: { color: vola.textMuted, fontSize: 13 },
   secondary: {
     borderWidth: 1,
     borderColor: vola.line,

@@ -51695,6 +51695,125 @@ wrong the fix is the band widths in `PACE_ZONES`, not the mechanism. CSV
 export covers splits only, not the raw route track — exporting the GPS
 points themselves was judged out of scope for a "nice-to-have."
 
+## N463 — a mobile running trend screen: distance over time (#774)
+
+Adds `app/running/trend.tsx`: a range-chip'd, dot-only chart of a run's total
+distance session by session, plus a delta-since-date line and a capped
+entries list below — reachable from every run's own detail view (the
+`finished` branch of `app/running/[id].tsx`, which renders both for a run
+just completed and for a past one reopened from Training History), with a
+new "Distance over time" row added there.
+
+**Passes the mobile-chart carve-out on the same two conditions the ticket
+named, and neither was fudged:**
+
+- **No second metric.** The screen offers exactly one series — distance —
+  with no toggle to pace, elevation or duration. `lib/runningTrend.ts`'s doc
+  comment states this is deliberate, matching `lib/loadTrend.ts`'s own
+  "one metric only" carve-out for per-exercise load.
+- **No start+end picker.** The range row is `RANGES.filter(r => r.key !==
+  'Plan')` — `1W 1M 3M 6M 1Y All`, the same six presets `app/goals/trend.tsx`
+  and `app/records/[exerciseId]/trend.tsx` already offer, every one of them
+  ending today. `Plan` is dropped for the same reason the load trend screen
+  drops it: a run has no prescribed-rate plan to anchor a window to.
+
+The comparable, exportable, correlate-with-training-load version is N464
+(#775, on web, built concurrently by a different session this ticket does not
+touch) — this screen is not a step toward moving that: it reads only what the
+phone already fetches (the generic session listing), offers no export and no
+comparison, and its own doc comment says so explicitly.
+
+**Why no backend change was needed.** `session.LoadHistory` — the endpoint
+`lib/loadTrend.ts` and the strength records screen read — only ever carries
+weight fields (`top_weight_kg`, the 1RM estimate); it was built for lifts and
+has no distance column. Rather than add one, `lib/runningTrend.ts` reduces
+over what `GET /v1/sessions?sport=running` (`lib/sessions.ts#listSessionsPage`,
+already used elsewhere for training history) already returns: each session's
+full `sets` array, `distance_m` included. `runPointsFromSessions` sums every
+completed `run`-exercise set per session (matching `RUN_EXERCISE_ID`, the same
+id the generic personal-record pipeline already reads for
+`furthest_distance`) into one point; a session with no such set (abandoned
+before Finish, or any non-running session that slipped into an unfiltered
+list) contributes nothing rather than a zero-distance dot.
+
+Like the load trend, this draws no connecting line — `buildTrend` is called
+with no `smooth` function, so every run is a dot and a calendar gap between
+two of them carries no meaning, matching `buildLoadTrend`'s own reasoning
+that lifting (and now running) sessions are not daily the way a weigh-in is
+meant to be. There is also no goal line: nothing on an athlete's profile
+prescribes a weekly-mileage target the way a weight-loss phase prescribes a
+target weight, so `goal` is simply never passed to `TrendChart` here.
+
+Distance is displayed in a fixed km/mi unit (never the short-range m/yd
+`formatDistance` switches to below 1000m/half a mile), via two new
+`lib/units.ts` exports — `distanceUnit`/`toDisplayDistanceLong` — added
+rather than written as a screen-local literal. The first attempt WAS
+screen-local, and `check:unit-literals` refused it: that check exists
+precisely because N105 found screens re-inventing a unit label a few hundred
+lines below a call to the units module that was supposed to be the one
+source of it, and a bare `'km'` string in a new screen is exactly the shape
+it watches for. Kept as a small additive pair rather than reusing
+`toDisplayDistance` (which already exists, and deliberately converts to the
+SHORT unit — m/yd — for a distance *input* field, not the long one a run's
+total wants), so the two stay distinguishable by name rather than by an
+undocumented convention about which magnitude a caller meant.
+
+New pure-logic module `lib/runningTrend.ts` (`runPointsFromSessions`,
+`buildDistanceTrend`), covered by `lib/__tests__/runningTrend.test.ts` —
+matching `loadTrend.test.ts`'s shape: which sessions become readings, that a
+missing-distance set is dropped rather than zeroed, that two run sets in one
+session sum, that no connecting line is drawn, and that the delta is always
+measured off raw readings with its evidence count.
+
+**Suspected overlap, noted rather than resolved here**: N461 (#772, "post-run
+report: extend `SessionCelebration` for running") is concurrently touching
+`app/running/[id].tsx`'s `finished` branch, and N462 (#773, "fix Progress
+tab's running gap + RecordsCard/Training History support") is concurrently
+touching running's presence on the Progress tab and in `RecordsCard`. This
+branch adds one `Pressable` row to the `finished` branch and touches nothing
+in `RecordsCard` or the Progress tab, to keep the diff as small and as
+orthogonal to both as the entry point allowed — but a merge conflict on
+`app/running/[id].tsx`'s `finished` return is plausible and is for the
+coordinating session to reconcile at merge time. (The two additive
+`lib/units.ts` exports mentioned above ARE a shared-file touch, but a purely
+additive one — new function names, nothing existing renamed or changed —
+which is a low-collision shape even if a sibling branch also happens to
+touch that file.)
+
+**Caught by the pre-merge review gate, fixed before the PR opened:**
+
+- `ac-verifier` against #774's criteria: the entries list's "capped, and the
+  cap is stated" criterion was `NOT MET` as first written. The screen
+  compared `rows.length > MAX_ENTRIES` to decide whether to show the notice
+  — but `rows` is a subset of `points`, which the fetch itself already caps
+  at 200, so `rows.length` could never exceed a 200-entry display cap and
+  the branch was dead code. A runner with 250 logged runs saw a silently
+  trimmed list with no notice at all — exactly the "quietly stops" failure
+  the screen's own comment claimed to avoid. Fixed by reading
+  `listSessionsPage`'s own `page.total` (the server's real count, not the
+  length of an already-capped page) and comparing THAT against the cap.
+- `frontend-reviewer`: `runPointsFromSessions`'s doc comment, its test file's
+  own header, and the functional-scenarios entry above all said "a
+  *completed* `run`-exercise set", but the filter never actually checked
+  `set.completed`. Not a live bug today — `finish()` in
+  `app/running/[id].tsx` is the only writer and always sets `completed:
+  true` — but `emptySet` defaults to `false`, so a future provisional write
+  carrying a distance would have charted as a real run. Fixed by adding the
+  check the doc comment already claimed, with two new tests (an
+  uncompleted set alone, and one completed set beside one that isn't).
+  Two lower-severity suggestions from the same review — stale `points` still
+  rendering in the entries list after a later failed refetch, and the
+  server-only data source meaning a just-finished, not-yet-synced run is
+  briefly absent from its own trend screen — are recorded as judgment calls:
+  the first is fixed here (`points={failed ? [] : points ?? []}`); the second
+  matches `app/records/[exerciseId]/trend.tsx`'s identical, already-accepted
+  behaviour and is left as-is rather than fixed under this ticket.
+
+**Open**: NEEDS HUMAN EVIDENCE — nothing here reads a sensor or renders
+anything device-specific beyond what N460's own chart machinery
+(`TrendChart`, already device-verified via the weight and load trend screens)
+already covers, so no new device check is added by this entry.
+
 ## Open items / known gaps as of this entry
 
 

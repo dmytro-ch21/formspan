@@ -223,6 +223,24 @@ export function fromDisplayDistance(v: number, u: UnitSystem): number {
 }
 
 /**
+ * The unit a RUN's total distance is measured in — always km or mi, never
+ * the short-range m/yd `formatDistance` switches to below 1000m/half a
+ * mile. A trend chart's axis has to hold one unit throughout its whole
+ * domain; the short/long split that makes sense for a single measurement
+ * would put a low gridline in metres and a high one in kilometres on the
+ * same axis, which is not one scale pretending to be two — it is two.
+ */
+export function distanceUnit(u: UnitSystem): string {
+  return u === 'imperial' ? 'mi' : 'km';
+}
+
+/** A run's total distance in {@link distanceUnit}'s unit, unrounded — the
+ *  caller decides precision, the way `toDisplayWeight`'s callers do. */
+export function toDisplayDistanceLong(metres: number, u: UnitSystem): number {
+  return u === 'imperial' ? metres / M_PER_MILE : metres / 1000;
+}
+
+/**
  * A running pace — "5:12/km", "8:23/mi".
  *
  * Storage is always seconds per KILOMETRE, matching `running.SessionDetail`'s
