@@ -32,6 +32,7 @@ import {
   toDisplayWeight,
   weightUnit,
   weightUnitName,
+  type UnitSystem,
 } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -95,6 +96,25 @@ export default function CheckinScreen() {
   const loadSeqRef = useRef(0);
 
   /**
+   * Which draft fields the athlete actually typed into, this visit.
+   *
+   * Set only by a field's own `onChangeText` — never inferred from the draft's
+   * *content*, because content alone cannot tell "still showing what loaded"
+   * from "retyped to the same-looking digits": both read as the identical
+   * string. `save()` uses this to decide whether a field may be re-derived
+   * from what's on screen at all, or must be written back exactly as it was
+   * stored (N125, #519).
+   */
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  /**
+   * The unit system the CURRENT `draft` was last known to be consistent with.
+   * A ref, not state — it exists purely for `load()`'s own bookkeeping and
+   * must never itself trigger a re-render (see the comment inside `load`).
+   */
+  const draftUnitsRef = useRef<UnitSystem | null>(null);
+
+  /**
    * `load` rebuilds the form from the server, so it must only run when there is
    * nothing unsaved to lose. `fill` says whether to touch the draft at all.
    */
@@ -115,6 +135,38 @@ export default function CheckinScreen() {
       const today = list[0] ?? null;
       setCheckin(today);
       setProfile(p);
+
+      if (fill) {
+        /*
+         * A draft's digits mean something only together with the unit system
+         * they were typed under. If the account-wide unit preference has
+         * moved since this draft was last (re)built, the draft is stale — the
+         * athlete flipped units (in Profile) with unsaved numbers still
+         * sitting on this screen. Reinterpreting those digits under the new
+         * unit would silently turn a typed "33" (inches) into a stored 33cm,
+         * so the chosen behaviour is DISCARD, never reinterpret (N125, #519).
+         *
+         * On a day that already has a check-in this is invisible: the refill
+         * immediately below repopulates every numeric field from the stored
+         * centimetres/kilograms, correctly converted to the new unit, so it
+         * reads as "re-expressed" even though what actually happened is
+         * discard-then-refill-from-truth. On a day with none, there is no
+         * stored truth to refill from, so the field is simply left empty —
+         * exactly what a first-ever visit already looks like. That symmetry
+         * is what makes the two cases consistent, which the ticket requires.
+         */
+        if (draftUnitsRef.current != null && draftUnitsRef.current !== units) {
+          setDraft((d) => {
+            const next = { ...d };
+            delete next.weight_kg;
+            for (const s of GIRTH_SITES) delete next[s.key];
+            return next;
+          });
+          setTouched({});
+        }
+        draftUnitsRef.current = units;
+      }
+
       if (today && fill) {
         const next: Record<string, string> = {};
         if (today.weight_kg != null) {
@@ -126,6 +178,7 @@ export default function CheckinScreen() {
         }
         setDraft(next);
         setNotes(today.notes);
+        setTouched({});
         // Open the girths if there already are some — the athlete is editing
         // them, not being asked for them.
         setOpenGirths(GIRTH_SITES.some((s) => today[s.key] != null));
@@ -199,15 +252,34 @@ export default function CheckinScreen() {
     setError(null);
     try {
       const input: CheckinInput = { notes };
-      const w = num('weight_kg');
-      // Converted back to kilograms on the way in — storage is always metric,
-      // whatever the field is labelled.
-      if (w !== undefined) input.weight_kg = fromDisplayWeight(w, units);
-      // Converted back to centimetres on the way in, for the same reason the
-      // weight above is: storage is metric whatever the field is labelled.
+      /*
+       * A field the athlete never touched is written back EXACTLY as it was
+       * loaded — never re-derived from the display conversion, however
+       * innocuous that looks. On an imperial profile a stored `84.0` cm loads
+       * as `33.1` in; converting `33.1` back on save gives `84.1`, a silent
+       * drift with nothing on screen to show for it (N125, #519). `touched`
+       * is the only signal that can tell "still showing what loaded" apart
+       * from "retyped, even to the same-looking digits" — `num()` alone
+       * cannot, since both read as the identical string.
+       */
+      if (touched.weight_kg) {
+        const w = num('weight_kg');
+        // Converted back to kilograms on the way in — storage is always
+        // metric, whatever the field is labelled.
+        if (w !== undefined) input.weight_kg = fromDisplayWeight(w, units);
+      } else if (checkin?.weight_kg != null) {
+        input.weight_kg = checkin.weight_kg;
+      }
       for (const s of GIRTH_SITES) {
-        const v = num(s.key);
-        if (v !== undefined) input[s.key] = fromDisplayGirth(v, units);
+        if (touched[s.key]) {
+          const v = num(s.key);
+          // Converted back to centimetres on the way in, for the same reason
+          // the weight above is: storage is metric whatever the field is
+          // labelled.
+          if (v !== undefined) input[s.key] = fromDisplayGirth(v, units);
+        } else if (checkin?.[s.key] != null) {
+          input[s.key] = checkin[s.key];
+        }
       }
       await saveCheckin(getToken, date, input);
       router.back();
@@ -298,7 +370,10 @@ export default function CheckinScreen() {
         <TextInput
           style={styles.weightInput}
           value={draft.weight_kg ?? ''}
-          onChangeText={(t) => setDraft((d) => ({ ...d, weight_kg: t }))}
+          onChangeText={(t) => {
+            setDraft((d) => ({ ...d, weight_kg: t }));
+            setTouched((tc) => ({ ...tc, weight_kg: true }));
+          }}
           keyboardType="decimal-pad"
           inputMode="decimal"
           placeholder="—"
@@ -339,7 +414,10 @@ export default function CheckinScreen() {
               <TextInput
                 style={styles.input}
                 value={draft[s.key] ?? ''}
-                onChangeText={(t) => setDraft((d) => ({ ...d, [s.key]: t }))}
+                onChangeText={(t) => {
+                  setDraft((d) => ({ ...d, [s.key]: t }));
+                  setTouched((tc) => ({ ...tc, [s.key]: true }));
+                }}
                 keyboardType="decimal-pad"
                 inputMode="decimal"
                 placeholder="—"

@@ -55414,6 +55414,66 @@ insets other screens' `KeyboardAwareScrollView` already handles — this branch
 has no keyboard interaction, so a plain `ScrollView` was judged sufficient,
 but that judgment is unverified on a device.
 
+## 2026-09-02 — N125: an untouched Save no longer drifts imperial girths, and a unit flip no longer reinterprets an unsaved draft (#519)
+
+`frontend-reviewer`, reviewing N112 (#518), found two silent bugs in
+`apps/mobile/app/checkin/[date].tsx` — both pre-dating that PR (they already
+shipped for the weight field on `main`); N112 only extended the same shape to
+nine more girth fields, which is what made them worth writing down.
+
+**Bug 1 — an untouched Save re-derived every non-blank draft field through the
+display-unit conversion, even the ones nobody typed into.** On an imperial
+profile the draft holds an INCHES display value; converting it back to
+centimetres on every save — whether or not the field was edited — is a lossy
+round trip. Stored `83.82` cm displays as `33` in; saving that unconditionally
+recomputed `round(33 × 2.54, 1) = 83.8`, a `0.02` cm drift with nothing on
+screen to show for it. An athlete who opened a past day only to fix a typo in
+the notes silently nudged every girth on it.
+
+**Fix**: a `touched` boolean per field, set only by that field's own
+`onChangeText` — the only signal that can distinguish "still showing what
+loaded" from "retyped to the same-looking digits", since both read as an
+identical string. `save()` now writes an untouched field back EXACTLY as it
+was loaded (`checkin[key]`, no conversion at all) and only re-derives a field
+that was actually touched. Applied to weight and all nine girths, per the
+ticket's explicit "the same mechanism, cover both" criterion.
+
+**Bug 2 — flipping the account's unit system with an unsaved draft, on a day
+with no check-in yet, silently reinterpreted the digits.** `load()` only
+refilled the draft when a check-in already existed for the day, so: open a
+fresh day, type `33` meaning inches, switch to metric in Profile, come back —
+the stale draft survived untouched and Save stored `33` as centimetres. A day
+that already had a check-in didn't have this problem, because returning to it
+already re-fetched and rebuilt the draft from the stored centimetres — but
+that inconsistency (fixed for one case, not the other) was itself the second
+half of the bug per the ticket's acceptance criteria.
+
+**Fix, and the chosen behaviour is DISCARD, not reinterpret** (stated in the
+code, per the ticket's requirement to say which and cover it with a test): a
+new `draftUnitsRef` remembers which unit system the current draft is
+consistent with. When `load()` runs and finds the account's live unit
+preference has moved on from that, every numeric field is cleared before any
+refill happens. On a day with a check-in this is invisible — the refill
+immediately below repopulates every field from the stored truth, correctly
+converted to the new unit, so it *reads* as re-expressed even though what
+happened is discard-then-refill. On a day with none there is no stored truth
+to refill from, so the field is simply left empty — the same as a first-ever
+visit. That symmetry is the "consistent between the two cases" the ticket
+asked for.
+
+Both guards mutation-verified by hand: reverted each independently, confirmed
+the covering tests in the new `checkinSaveDrift.test.tsx` went red for the
+right reason (a byte-mismatch against the loaded value for bug 1; the stale
+"33" surviving the flip for bug 2), restored, confirmed green again by
+re-running. The existing `checkinGirthUnits.test.tsx` suite (round-trip tests
+that all start from a *typed* value, which is exactly why it couldn't see
+either bug) stays green, unmodified.
+
+**Open**: the ticket's `NEEDS HUMAN EVIDENCE` criterion — an imperial profile,
+a past check-in with girths, saved untouched, then read back in metric with
+the centimetres confirmed unchanged — needs a device/Simulator run this branch
+could not perform. Handed to the user as a checklist alongside the PR.
+
 ## Open items / known gaps as of this entry
 
 

@@ -1180,6 +1180,14 @@ overwrites the newer one's state. Mutation-verified — reverting the
 check: it needs a cold start plus a specific network interleaving, so the
 regression test is the only thing pinning it.
 
+**Check-in save drift and unit-flip discard (`apps/mobile/app/checkin/[date].tsx`), N125 (#519).**
+- **An untouched Save must leave every stored value byte-identical.** On an imperial profile, enter girths and a weight on a day, save. Reopen that day, change only the notes (or nothing at all), save again, then switch to metric and reopen: every centimetre/kilogram value must read exactly what it did before the notes edit — not shifted by the display-unit round trip. **NEEDS HUMAN EVIDENCE** — the AC's own device-check: open a past imperial check-in with girths, save it untouched, switch to metric, confirm the centimetres are unchanged.
+- **A field that IS edited still converts normally** — this is not "nothing ever re-derives", only "an untouched field never does". Editing one girth must not perturb the untouched ones beside it.
+- **The same mechanism, and the same fix, covers weight** — not just the nine girths N112 added.
+- **Flipping the unit preference with an unsaved draft discards it, never reinterprets it.** On a day with **no** check-in yet: type a girth or weight, switch the account's unit system (in Profile), come back — the draft is cleared, not silently kept and saved under the new unit's meaning. A typed `33` (meant as inches) must never be stored as `33` centimetres.
+- **The same discard behaviour holds on a day that already HAS a check-in** — the two cases must not disagree. An in-progress unsaved edit there is likewise discarded (and immediately replaced by the day's own stored values, correctly re-expressed in the new unit) rather than resaved as the stale digits.
+- Both guards are covered by `checkinSaveDrift.test.tsx`, mutation-verified (each guard reverted independently, its test confirmed red for the right reason, then restored).
+
 **Progress photo (`addPhoto`, same screen).**
 - Pick a photo from the library; confirm it appears and the check-in's other
   drafted-but-unsaved fields (weight, notes) survive the refresh — `addPhoto`
