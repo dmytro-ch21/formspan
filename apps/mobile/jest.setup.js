@@ -108,6 +108,38 @@ jest.mock('expo-haptics', () => ({
   NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
 }));
 
+/*
+  `react-native-maps` cannot be loaded under jest at all.
+
+  Its JS reads a native module (`RNMapsAirModule`) via
+  `TurboModuleRegistry.getEnforcing` at import time, which throws outside a
+  real native binary — jest-expo does not stub this one, same class of
+  failure as `expo-audio` above, and it takes down the whole SUITE rather
+  than a test. `SessionCelebration` started importing it for N461's running
+  route thumbnail, which is how a change about a run's map broke the BJJ
+  screen's render test.
+
+  Mocked as inert `View` stand-ins rather than a real map: no test in this
+  suite asserts on map rendering — the thumbnail's actual logic
+  (`regionForRoute`, `downsampleRoute`) is pure and covered directly in
+  `lib/__tests__/celebration.test.ts`, per this app's logic-first testing
+  rule — and a props-preserving stand-in keeps any future testID query
+  working.
+*/
+jest.mock('react-native-maps', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const MapView = (props) => React.createElement(View, props, props.children);
+  return {
+    __esModule: true,
+    default: MapView,
+    Polyline: (props) => React.createElement(View, props),
+    Marker: (props) => React.createElement(View, props),
+    PROVIDER_DEFAULT: 'default',
+    PROVIDER_GOOGLE: 'google',
+  };
+});
+
 jest.mock('expo-router', () => {
   const React = require('react');
   const { Text } = require('react-native');

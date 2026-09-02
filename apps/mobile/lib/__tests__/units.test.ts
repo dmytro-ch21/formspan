@@ -3,6 +3,7 @@ import {
   formatFluid,
   formatGirth,
   formatHeight,
+  formatPace,
   formatWeight,
   formatWeightRate,
   fromDisplayDistance,
@@ -208,6 +209,35 @@ describe('distance', () => {
       checked += 1;
     }
     expect(checked).toBe(2000);
+  });
+});
+
+describe('pace (N461/#772)', () => {
+  it('formats a metric pace as minutes:seconds per kilometre', () => {
+    // 324s = 5:24.
+    expect(formatPace(324, 'metric')).toBe('5:24/km');
+  });
+
+  it('pads seconds under 10 but not minutes', () => {
+    expect(formatPace(304, 'metric')).toBe('5:04/km');
+  });
+
+  it('converts to seconds per mile for imperial, not a bare unit relabel', () => {
+    // 324s/km * (1609.344m / 1000m) = 521.43s/mi, rounds to 521s = 8:41.
+    // A mutation that only swapped the suffix (still dividing by 1000)
+    // would print "5:24/mi" here instead.
+    expect(formatPace(324, 'imperial')).toBe('8:41/mi');
+  });
+
+  it('is unset for null, undefined, zero or a negative pace', () => {
+    expect(formatPace(null, 'metric')).toBe('—');
+    expect(formatPace(undefined, 'metric')).toBe('—');
+    expect(formatPace(0, 'metric')).toBe('—');
+    expect(formatPace(-5, 'metric')).toBe('—');
+  });
+
+  it('drops to 0:SS under a minute per unit', () => {
+    expect(formatPace(45, 'metric')).toBe('0:45/km');
   });
 });
 

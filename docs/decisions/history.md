@@ -50924,6 +50924,125 @@ gained `RunningSessionDetail`/`RunningRoutePoint`/`RunningSplit` and the two
 new paths; `pnpm run lint:openapi` passes.
 
 
+## 2026-09-01 — N461 (#772): post-run report — `SessionCelebration` extended for running
+
+Third sport for the finish-a-session celebration modal, after strength and
+BJJ. `CelebrationSport` in `apps/mobile/lib/celebration.ts` gains `'running'`;
+`SessionSummary` gains four running-only fields — `distanceM`,
+`avgPaceSecPerKm`, `elevationGainM`, `routePoints` — each following the
+existing "omit rather than show a zero that reads as a failure to record
+something" rule `tonnageKg`/`matMinutes` already live by.
+
+**`statsFor` gets a running branch, not a reuse of strength/BJJ's shared
+leading "Time" tile.** The ticket names Distance, Duration, Avg Pace,
+Elevation Gain; Duration sits in the same visual slot the shared tile does,
+but under its own label — showing the identical number twice under "Time"
+and "Duration" would be exactly the crowding N447/#745 already removed the
+Reps tile for. `formatDistance`/`formatPace` are injected the same way
+`formatTonnage`/`formatWeight` already are (so the card never has to know the
+athlete's unit system), and default to `lib/units.ts`'s own metric
+formatters rather than a hand-rolled duplicate when omitted — a caller with
+no unit system handy (a test, or a screen not yet built) still gets a real,
+correctly-formatted number. `formatPace` is new in `units.ts` (seconds
+stored per kilometre always, converted to per-mile for imperial on the way
+out, matching every other unit in that file) and was synced to
+`apps/web/src/lib/units.ts` via `sync-units.py --write` per that file's own
+generation rule.
+
+**`worthCelebrating` needed a running case, or the modal would never have
+shown for a run at all.** It used to gate on `sets > 0 || rounds > 0`
+unconditionally; a running summary carries neither, structurally, the same
+way a BJJ summary carries no sets. Gated explicitly on `summary.sport ===
+'running'` rather than folded into one OR across every field, so a stray
+`distanceM` on some future sport's summary can't accidentally mark it
+celebration-worthy — a run counts as worth celebrating on distance alone,
+duration alone, or both, which also covers a manual time-only treadmill entry
+with no GPS distance.
+
+**`summariseSession` takes an optional fourth argument**, a
+`RunningSessionDetail` matching the fields of `running.SessionDetail`
+(N458) the card can use — splits and per-point elevation/timestamps are not
+read here, the same way this function never reads a strength session's
+per-set RIR. Duration prefers the running module's own figure over the
+timestamp diff when both exist (it can exclude paused time a plain diff
+cannot, per that field's own doc on the Go side) and falls back to the
+timestamp diff when a running session is read back before its detail has
+synced — a real, offline-first state, not an error. PR detection needed **no
+new code**: `recordExerciseIDs` was already computed generically from
+`session.sets` before any sport branch, so a running session's own
+`session_sets` row (against a "run" exercise, per N458's doc on how the
+generic PR pipeline sees it) flows through the same
+`/v1/records` → `recordsFromSession` → `badgeFor` path BJJ/strength already
+use, with the same gold-medal treatment — `longest_time`/`furthest_distance`
+were already registered kinds in `lib/records.ts`'s `RECORD_LABEL` map.
+
+**The route thumbnail is a static, non-interactive `MapView`+`Polyline`
+inside `SessionCelebration.tsx`**, using `react-native-maps` — the library
+N459 already added and picked (Apple Maps, no Google key) — rather than a
+second map dependency. `scrollEnabled`/`zoomEnabled`/`rotateEnabled`/
+`pitchEnabled` are all off and the view sits under `pointerEvents="none"`, so
+it reads as a picture of the route rather than the live-tracking screen
+(#771, separate and not depended on here). Two new pure helpers in
+`celebration.ts` do the actual work and are unit-tested directly:
+`downsampleRoute` thins a track down to `ROUTE_THUMBNAIL_POINTS` (60) by
+striding evenly across the whole array — a naive `slice(0, 60)` would draw
+only a marathon's opening kilometre — while always keeping the true last
+point; `regionForRoute` frames the (possibly thinned) route with margin and a
+zoom floor, and returns `null` for zero or one points so the card omits the
+thumbnail entirely rather than drawing a blank frame or a lone dot on open
+ocean.
+
+**A real jest breakage, caught before it reached `verify`:** `react-native-maps`
+cannot load under jest at all — its JS calls
+`TurboModuleRegistry.getEnforcing('RNMapsAirModule')` at import time, which
+throws outside a real native binary — and `SessionCelebration.tsx` now
+imports it unconditionally. That took down `bjjSessionScreen.test.tsx`'s
+whole suite (not a test failure, a "Test suite failed to run") the moment the
+import landed, the exact `expo-audio`/`expo-image`/`expo-haptics` shape
+`jest.setup.js` already documents and fixes for a native module "every screen
+needs to merely exist, not behaviour anything asserts." Fixed the same way:
+`react-native-maps` is now mocked in `jest.setup.js` as inert `View`
+stand-ins for `MapView`/`Polyline`/`Marker`. Nothing in this suite asserts on
+map rendering — the thumbnail's actual logic is the two pure functions above,
+tested directly — so a props-preserving stand-in costs nothing and keeps any
+future testID query working.
+
+**Testing, per `vola-testing`'s pure-logic rule** (no dedicated running
+screen exists yet to render, and this ticket does not depend on #771's):
+`lib/__tests__/celebration.test.ts` gained running cases across every touched
+function — `worthCelebrating`, `statsFor`'s running branch (tile order,
+formatter injection, per-tile zero-omission), `subtitleFor`, and a full
+`summariseSession` running-branch suite against a constructed
+finished-running-session fixture with a `RunningSessionDetail`, plus direct
+`downsampleRoute`/`regionForRoute` coverage. `lib/__tests__/units.test.ts`
+gained `formatPace` coverage (metric, imperial conversion, the
+null/zero/negative "—" cases). Mutation-verified two of the new guards by
+hand: deleting `worthCelebrating`'s running branch turned two tests red as
+real assertion failures (not a compile error); deleting `downsampleRoute`'s
+"always keep the true last point" step turned two tests red the same way
+(including the `summariseSession` route test, which reads the downsampled
+result rather than calling the helper directly). Both restored and
+re-confirmed green by re-running, not by reading the diff. Full mobile suite
+(240 files, 3814 tests) green; `check-unit-literals.py` flagged one hardcoded
+`/km` in a first draft of the pace fallback, fixed by routing the fallback
+through `lib/units.ts`'s own `formatPace`/`formatDistance` instead of a
+second hand-rolled copy — which the check exists specifically to push toward.
+
+**Left open, matching the ticket's own scope boundary:** `SessionShare.tsx`
+(the exported PNG card) is untouched, as asked — its `statsFor(summary,
+formatTonnage)` call already picks up running's new stat tiles for free
+(the ceiling-of-four slice in `sessionCard.ts` needed no change either), but
+without `formatDistance`/`formatPace` threaded through it renders the
+default metric fallback rather than the athlete's own unit system; wiring
+that through is small and left for whichever ticket first builds a real
+running session screen to call this from. No backend changes — `longest_time`
+and `furthest_distance` were already registered record kinds. `NEEDS HUMAN
+EVIDENCE`, not claimed here: nobody has seen the map thumbnail, the tile
+strip or the PR badge render on a device or Simulator against a real
+finished running session — no such session exists in this branch to produce
+one from, since #771 (the live-tracking screen) is a separate, concurrent
+ticket this one does not depend on.
+
 ## Open items / known gaps as of this entry
 
 
