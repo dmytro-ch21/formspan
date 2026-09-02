@@ -52623,6 +52623,61 @@ the actual failure without needing to understand or influence Nixpacks'
 internal toolchain-selection heuristics.
 
 
+## 2026-09-02 — N472: describe-a-meal gets a live totals footer and an AI-named "compile into one meal"
+
+A description of a multi-item meal (the user's own example: a Chipotle order
+that came back as 8 rows — Pollo Asado, brown rice, fajita veggies, three
+salsas, sour cream, cheese, guacamole) had no aggregate figure anywhere on the
+review screen, and Log always logged every row as its own separate food
+entry with no way to log the description as one meal.
+
+**Totals footer.** `sumMacros(items: Macros[]): Macros` was extracted out of
+`dayTotals` in `apps/mobile/lib/nutrition.ts` (now a one-line wrapper over
+it) so the new footer on `describe.tsx` sums drafted rows under the exact
+same "a nullable macro sums only if at least one row states it" rule the day
+screen already uses, rather than re-deriving that rule a third time — this
+file's own doc comment already names two figures computed under two rules as
+the W2/W4 defect shape. Recomputed every render off the CURRENT `rows` (via
+the same `fromDraft` parse the log path uses), so an edited or removed row is
+reflected immediately rather than showing the original estimate. Hidden for a
+single row, which already states its own totals in the fields above it.
+
+**Compile into one meal.** A checkbox (shown only for 2+ rows) that logs the
+summed macros as ONE entry instead of N. The combined entry's name comes from
+a new `meal_name` field on the estimate endpoint's response — same LLM call
+as the existing item breakdown (`backend/internal/modules/nutrition/
+estimate.go`'s `EstimateSchema()`/`Estimate` struct, `prompt.go`'s system
+prompt), so no added latency or estimate-quota cost, and no backend
+persistence change at all: the combined entry just uses the ordinary
+per-entry `name` field every individual row already had. Rendered as an
+**editable** suggestion (`describe-meal-name`), consistent with every other
+AI-authored value on this screen never being presented as final. A join-based
+fallback (`defaultMealName`, first two item names + "N more") covers the rare
+case the model returns an empty `meal_name` — the prompt allows that only
+when there is "nothing coherent to name," and an empty Log button is not an
+acceptable answer to it either way.
+
+Deliberately NOT `logAll` with a different loop body: the per-row
+save-then-log sequence exists to give each ingredient its own reusable saved
+food (N114) — compiling is the opposite claim, one new thing the athlete is
+naming right now, and saving it under N114's per-ingredient reuse rule would
+mean the next "Chipotle bowl" silently reuses today's exact rice/salsa/cheese
+split even when the order was different. `logCompiled` saves and logs once.
+
+A fresh estimate (a new description, or "estimate it again") always starts
+uncompiled — carrying the previous draft's choice forward would silently
+combine a description the athlete never asked to combine.
+
+**Mobile-first**: this is the phone screen already; no web-only surface
+needed or added.
+
+**Open**: NEEDS HUMAN EVIDENCE — tried on a device with a real multi-item
+description, confirming the totals match hand-adding the rows and the
+suggested name reads as sensible for an actual order (a Chipotle bowl was
+this ticket's own example and the closest thing to a specified acceptance
+test, but no live model call was made while writing this — the schema/prompt
+changes are unit-tested against a fake completer, not the real provider).
+
 ## Open items / known gaps as of this entry
 
 

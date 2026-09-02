@@ -209,6 +209,12 @@ func DraftFromSavedFood(f Food, in EstimateInput, normalized string) Estimate {
 		// message about an estimate, and this draft has no model behind it —
 		// the client renders the reuse from Match, which is data it can check.
 		Note: "",
+		// Always exactly one item here, which already has its own name — a
+		// second, meal-level name beside it would be a needless duplicate.
+		// `Estimator.Estimate` enforces this same rule structurally for the
+		// GENERATED path; stated explicitly here too, since no model call
+		// exists on this path to enforce it for.
+		MealName: "",
 		// Deliberately NOT stamped with a model. See above.
 		Model:  "",
 		Source: in.Source(),

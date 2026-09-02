@@ -253,13 +253,23 @@ export type Target = {
 };
 
 /**
- * Sum a day.
+ * Sum a set of macro-carrying rows — a day of entries, a draft's rows, a
+ * recipe's items, anything shaped like {@link Macros}.
  *
- * Fibre sums only if at least one entry states it, so a day nobody recorded
- * fibre for reports null rather than a confident zero. Every other macro is
- * genuinely zero when nothing was eaten.
+ * Fibre (and the other four N52 label macros) sums only if at least one row
+ * states it, so a set nobody recorded fibre for reports null rather than a
+ * confident zero. `kcal`/`protein_g`/`carb_g`/`fat_g` are genuinely zero when
+ * there is nothing to sum — those four are never null on a single row, so
+ * there is no "nobody stated it" case for them the way there is for the
+ * nullable five.
+ *
+ * **Extracted from `dayTotals` for N472** so the describe-a-meal screen's new
+ * live totals footer sums drafted rows under the exact same null-handling
+ * rule as the day screen, rather than re-deriving it — this repo's own
+ * `dayTotals` doc comment already warns that two figures computed under two
+ * rules is the W2/W4 defect shape, paid for twice.
  */
-export function dayTotals(entries: Entry[]): Macros {
+export function sumMacros(items: Macros[]): Macros {
   const out: Macros = {
     kcal: 0,
     protein_g: 0,
@@ -284,7 +294,7 @@ export function dayTotals(entries: Entry[]): Macros {
   let anySodium = false;
   let cholesterol = 0;
   let anyCholesterol = false;
-  for (const e of entries) {
+  for (const e of items) {
     out.kcal += e.kcal;
     out.protein_g += e.protein_g;
     out.carb_g += e.carb_g;
@@ -321,6 +331,17 @@ export function dayTotals(entries: Entry[]): Macros {
   if (anySodium) out.sodium_mg = sodium;
   if (anyCholesterol) out.cholesterol_mg = cholesterol;
   return out;
+}
+
+/**
+ * Sum a day. A thin, still-exported alias over {@link sumMacros} — `Entry`
+ * already structurally satisfies `Macros`, so this needed no arithmetic of
+ * its own once the sum moved there; kept as its own named function because
+ * "sum a day of entries" is the call site most of this codebase reaches for
+ * and reads better than `sumMacros(entries)` at each of them.
+ */
+export function dayTotals(entries: Entry[]): Macros {
+  return sumMacros(entries);
 }
 
 /**

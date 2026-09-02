@@ -8677,6 +8677,11 @@ Edge cases and errors — the five states are the point:
   with what it cannot.
 - **The quick-add search text is carried into the describe screen**, so nothing
   typed there has to be typed twice.
+- **A multi-item response also carries `meal_name`** (N472) — a recognisable
+  name for the meal as a whole, from the same call, at no extra quota cost. A
+  single-item response, and every reused (`match` set) response, carries it
+  empty — a scenario asserting it is non-empty on those would be asserting
+  something the endpoint's own contract does not promise.
 
 **The rules that must not break**
 
@@ -8791,6 +8796,42 @@ Edge cases and errors — the five states are the point:
 - **The fallback for a failure carrying no message diagnoses nothing.** It fires
   precisely when nothing is known about the cause, and it used to assert the one
   an athlete cannot act on.
+
+**The totals footer and "compile into one meal" (N472)**
+
+- **The totals footer sums the CURRENT rows, not the original estimate.** Edit
+  a kcal field or remove a row and the footer must move with it — a scenario
+  that only checks the footer against the freshly-arrived draft would pass
+  against one wired to `estimate.items` instead of `rows`.
+- **The footer is absent for a single-item draft.** That row already states
+  its own totals in the fields above it; a scenario asserting the footer is
+  present there is asserting a duplicate number, not a missing one.
+- **The compile toggle is offered only for two or more rows**, and removing
+  rows down to exactly one must make both the toggle AND the footer disappear
+  — not just one of the two, which is the kind of gap a scenario checking only
+  the toggle would miss.
+- **Compiling logs exactly ONE entry, with the summed macros**, whatever the
+  row count — assert the save/log call count is 1, not "at least one", and
+  assert the logged macros equal the footer's own total, not a recomputation
+  a scenario derives independently (the same two-figures-two-rules trap the
+  rest of this doc warns about elsewhere).
+- **The compiled name is EDITABLE and pre-filled from the model's own
+  `meal_name`, never presented as final.** A scenario should change the field
+  and assert the edited text is what gets logged, not the AI's original
+  suggestion — the whole point is that the athlete can correct it.
+- **Un-ticking the toggle returns to logging every row separately.** The two
+  behaviours must be reachable from the SAME draft, not only from two separate
+  drafts that never demonstrate the toggle actually switching between them.
+- **A fresh estimate always starts uncompiled**, even immediately after a
+  previous draft was compiled — describe again (or "estimate it again") and
+  the toggle and the name field must both be gone, not carried forward onto a
+  description the athlete never asked to combine.
+- **NEEDS HUMAN EVIDENCE, not covered by the Playwright/jest suite**: whether
+  `meal_name` reads as a sensible, recognisable name for a REAL multi-item
+  order (a Chipotle-style bowl is the feature's own worked example) — that is
+  a model-quality question belonging with the "What the model is and is not
+  allowed to do" behavioural list above, not something a fixture-driven
+  scenario can assert.
 
 **Privacy**
 

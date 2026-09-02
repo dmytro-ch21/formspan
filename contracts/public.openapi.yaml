@@ -106,7 +106,7 @@ components:
       description: >
         A draft, not an entry. Nothing has been written; the athlete corrects
         these rows and confirms them.
-      required: [items, note, model, source]
+      required: [items, note, meal_name, model, source]
       properties:
         items:
           type: array
@@ -117,6 +117,17 @@ components:
           description: >
             What the model wants the athlete to know about the estimate as a
             whole — typically what it could not see. Empty is normal.
+        meal_name:
+          type: string
+          description: >
+            A short, recognisable name for the meal AS A WHOLE — "Chipotle
+            chicken bowl", not a concatenation of its items — so a client can
+            offer to combine every item into one logged entry under it
+            (N472). A SUGGESTION, not a final value: every other AI-authored
+            field on this type arrives editable, and this is no different.
+            Empty when there is only one item, or nothing coherent to name —
+            never invented to fill the field. Also empty on the reuse path
+            (`match` set below), which is always exactly one item.
         model:
           type: string
           description: Which model produced this, so a later quality question has an answer.

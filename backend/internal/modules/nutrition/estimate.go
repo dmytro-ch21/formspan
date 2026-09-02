@@ -244,6 +244,19 @@ type Estimate struct {
 	// Note is the model's message about the estimate as a whole, if any —
 	// typically what it could not see. Empty is normal and not an error.
 	Note string `json:"note"`
+	// MealName is a short, recognisable name for the meal AS A WHOLE — "Chipotle
+	// chicken bowl", not a concatenation of its items — offered so a client can
+	// let the athlete combine several drafted components into one logged entry
+	// under a name that reads as what they actually ate (N472). Deliberately a
+	// SUGGESTION, never a final value: every other AI-authored field on this
+	// type arrives editable rather than authoritative, and a compiled meal's
+	// name is no different.
+	//
+	// Empty on the reuse path (`Match` set, below) — that draft is always
+	// exactly one item, which already has its own name, and there is nothing
+	// to compile. Empty is otherwise unusual but not invalid: a one-item
+	// generated draft has equally little use for a second name.
+	MealName string `json:"meal_name"`
 	// Model records which model produced this, so a later quality question can
 	// be answered rather than guessed at.
 	Model string `json:"model"`
@@ -424,8 +437,14 @@ func EstimateSchema() map[string]any {
 				"type":        "string",
 				"description": "Anything the athlete should know about this estimate as a whole — typically what you could not see. Empty string if there is nothing.",
 			},
+			"meal_name": map[string]any{
+				"type": "string",
+				"description": "A short, recognisable name for the meal AS A WHOLE, so an athlete could combine every item into one logged entry under it — " +
+					"'Chipotle chicken bowl', not 'Pollo asado, brown rice, fajita veggies, ...'. Say what it actually is, the way the athlete themselves " +
+					"would describe the plate to a friend, not a list of its parts. Empty string when there is only one item, or nothing coherent to name.",
+			},
 		},
-		"required":             []any{"items", "note"},
+		"required":             []any{"items", "note", "meal_name"},
 		"additionalProperties": false,
 	}
 }
