@@ -23,7 +23,7 @@
  * point and nothing else would catch it.
  *
  * ## Per-meal allocation — REVERSED 2026-08-31 (N124/N113), read this before
- * touching `mealAllocation`/`mealAvailable` below
+ * touching `mealAllocation`/`mealAvailableForDay` below
  *
  * This file used to say, right here: *"No per-meal allocation. '536 calories
  * now available for breakfast' requires knowing a day the app cannot see; it
@@ -40,7 +40,8 @@
  * tension the counter-proposal above was already a response to — that this
  * app should build true per-meal budgets, matching the reference.** That is
  * not a call this file gets to re-litigate a third time. `mealAllocation` and
- * `mealAvailable` below are the result.
+ * `mealAvailableForDay` below are the result (the latter renamed and reworked
+ * by N468/#792 — see that section further down).
  *
  * **The allocation algorithm, since neither ticket specifies one beyond the
  * visual output "938 calories now available":** the day's target is divided
@@ -52,8 +53,59 @@
  * (unlike a time-of-day-weighted or historical-pattern split, which would
  * reintroduce exactly the "requires knowing a day the app cannot see"
  * objection this section used to quote), and it is honest about being a FIXED
- * allocation rather than pretending to infer one. It is not claimed to be
- * smarter than that — see `mealAllocation`'s own doc comment.
+ * allocation rather than pretending to infer one. **It was not claimed to be
+ * smarter than that — see N468/#792 immediately below, which is that next
+ * step.**
+ *
+ * ## Weighted, pooled-remainder redistribution — N468/#792
+ *
+ * **This is the step the paragraph above explicitly left undone, not a
+ * re-litigation of whether per-meal budgets exist.** That question closed
+ * with the reversal above. What changed here is only HOW the day's target is
+ * apportioned across the four slots.
+ *
+ * Two things were wrong with the even 25% split, both named by the user's own
+ * example: *"if I enter breakfast 600 cals then I have left 1200, we need to
+ * spread it smartly — lunch will have a similar amount as dinner, and snacks
+ * will have the least."*
+ *
+ * 1. **An even split does not match how anyone actually eats.** Breakfast is
+ *    typically the smallest real meal, lunch and dinner are the two big ones,
+ *    and a snack budget the size of a meal invites logging a whole meal as a
+ *    "snack" to spend it. `MEAL_WEIGHTS` below encodes that: breakfast 25%,
+ *    lunch 35%, dinner 30%, snack 10% — lunch and dinner both large and close
+ *    to one another, breakfast smaller, snack smallest by a wide margin. These
+ *    are the exact figures this ticket's own acceptance criteria suggest as an
+ *    example; nothing here claims they are individually tuned, only that they
+ *    encode the right SHAPE (two big meals, a moderate breakfast, a small
+ *    snack) rather than four equal quarters.
+ * 2. **A fixed, independently-floored share throws away information the old
+ *    algorithm already had.** Eating less than breakfast's share used to just
+ *    vanish — lunch's budget was still exactly its own quarter, never larger
+ *    for having under-spent breakfast. `mealAvailableForDay` fixes this: what
+ *    is left of the day's target once every ALREADY-EATEN slot is subtracted
+ *    (the user's own "1200") is pooled, then split across whichever slots
+ *    are still empty, weighted by `MEAL_WEIGHTS` renormalised over just those
+ *    empty slots — which is what makes "lunch similar to dinner" fall out
+ *    directly when lunch and dinner are the two still open, rather than
+ *    dinner only ever inheriting whatever lunch happens to leave behind one
+ *    link later. See {@link mealAvailableForDay}'s own doc comment for why a
+ *    one-hop cascade was tried first and rejected, and for the exact
+ *    arithmetic.
+ *
+ * **Already-eaten slots do not retroactively change.** A slot that already
+ * has entries renders its own eaten total (`MealCard`'s populated branch),
+ * never the "available" figure — and `mealAvailableForDay` does not even
+ * compute one for it: only slots with zero entries share in the pooled
+ * remainder, by construction, so there is no figure for a populated slot to
+ * disagree with in the first place. A test pins this directly rather than
+ * leaving it as an inference from "populated slots ignore `available`"
+ * alone.
+ *
+ * **Per-macro, independently — not just calories.** Carbs and fat pool and
+ * redistribute on their own totals, exactly like calories and protein; a day
+ * that ran heavy on carbs but light on fat leaves a per-macro remainder, not
+ * one blended figure.
  */
 
 import { dayString } from './calendar';
@@ -471,19 +523,37 @@ function addDaysISO(key: string, n: number): string {
 }
 
 /**
- * What one meal slot is allocated of the day's target.
+ * The weighted share of the day's target each meal slot starts with, before
+ * any carryover — N468/#792. See the file header's "Weighted, carryover-aware
+ * redistribution" section for the reasoning.
  *
- * **A quarter each, in the order `MEALS` lists them** — driven by
- * `MEALS.length` rather than a hardcoded 4, so a fifth slot would change this
- * silently rather than leaving three meals to split 100% among themselves.
- * This is a FIXED split, not a claim about how anyone actually eats across a
- * day — see the reversal note at the top of this file for why an even split
- * was chosen over anything that would need to see more of the day than the
- * app has. Null with no target: there is nothing to divide.
+ * **Lunch and dinner large and close to one another, breakfast smaller,
+ * snack smallest by a wide margin** — the shape typical nutrition guidance
+ * describes, and the exact figures this ticket's own acceptance criteria
+ * offer as an example. Sums to 1 across `MEALS`, pinned by a test, so the
+ * four shares always account for the whole target with nothing left
+ * unassigned and nothing double-counted.
  */
-export function mealAllocation(target: Target | null): Macros | null {
+export const MEAL_WEIGHTS: Record<Meal, number> = {
+  breakfast: 0.25,
+  lunch: 0.35,
+  dinner: 0.3,
+  snack: 0.1,
+};
+
+/**
+ * What one meal slot is allocated of the day's target, BEFORE any carryover
+ * from an earlier slot — this is the "own share" half of N468/#792's
+ * algorithm, not the published "available" figure (that is
+ * {@link mealAvailableForDay}, which adds carryover and floors at zero).
+ *
+ * Weighted by `MEAL_WEIGHTS` rather than an even quarter — see the file
+ * header's reversal note for why an even split was replaced. Null with no
+ * target: there is nothing to divide.
+ */
+export function mealAllocation(target: Target | null, meal: Meal): Macros | null {
   if (!target) return null;
-  const share = 1 / MEALS.length;
+  const share = MEAL_WEIGHTS[meal];
   return {
     kcal: target.kcal * share,
     protein_g: target.protein_g * share,
@@ -499,36 +569,108 @@ export function mealAllocation(target: Target | null): Macros | null {
 }
 
 /**
- * What is still available for ONE meal slot — the empty-section figure:
- * "938 calories now available · 41g protein · 74g carbs · 16g fat".
+ * What is still available for EVERY not-yet-eaten meal slot, for one day —
+ * the empty-section figure: "938 calories now available · 41g protein · 74g
+ * carbs · 16g fat". N468/#792's replacement for the old independently-floored
+ * `mealAvailable`; see the file header for the full reasoning.
  *
- * `mealAllocation(target)` minus what this slot has ALREADY eaten
- * (`slotTotals`, e.g. from {@link bySlot}), floored at zero PER MACRO
- * independently — the same floor `remaining`/the old `mealBudgetLine`
- * both used, for the identical reason: "−40g protein available" is a
- * contradiction, not a fact worth stating.
+ * **Pooled-and-redistributed, not a one-hop cascade.** The design that was
+ * tried first and rejected here carried each slot's leftover forward to only
+ * the NEXT slot in day order — and it does not match the user's own worked
+ * example: *"if I enter breakfast 600 cals then I have left 1200, we need to
+ * spread it smartly — lunch will have a similar amount as dinner."* A
+ * one-hop cascade cannot produce "lunch similar to dinner" directly from
+ * breakfast — dinner would only inherit what LUNCH left over, one link away,
+ * not a share computed alongside lunch's. What the example actually
+ * describes is: whatever is left of the day's target once the ALREADY-EATEN
+ * slots are subtracted (the "1200") gets split across the slots that are
+ * still empty, in one pass, weighted by `MEAL_WEIGHTS` — which is exactly
+ * "lunch similar to dinner, snack least" when lunch and dinner are the two
+ * still-empty slots being compared.
  *
- * Null with no target, matching {@link remaining}'s own rule: with nothing to
- * divide there is nothing to be available, and a zero here would read as "you
- * have nothing left", the opposite of the truth for a slot nobody has logged
- * into yet.
+ * **Takes the WHOLE day** — `slots` is exactly {@link bySlot}'s return
+ * shape (every slot present, each with its own `entries` and `totals`) —
+ * because the pool is a fact about the whole day (target minus everything
+ * eaten anywhere), not about one slot in isolation.
+ *
+ * The algorithm, per macro, independently:
+ *
+ * 1. `pool = target − (sum of every slot's totals)`. Not floored — a day
+ *    already over target produces a negative pool, and every share of a
+ *    negative number floors to zero below, which is the honest "nothing
+ *    available anywhere" rather than a fabricated positive figure.
+ * 2. Only slots with **no entries yet** (`entries.length === 0`) share in the
+ *    pool — a slot that already has entries contributes its total to what
+ *    was subtracted in step 1 and gets no "available" figure at all, because
+ *    `MealCard` never reads one for a populated slot (see below).
+ * 3. Each empty slot's `MEAL_WEIGHTS` share is **renormalised across just the
+ *    empty slots** (divided by the sum of their weights, not by 1), so the
+ *    still-open portion of the day always accounts for the WHOLE remaining
+ *    pool — nothing is left stranded reserved for a slot that has already
+ *    been eaten. On a completely untouched day every slot is empty, the
+ *    renormalised weights equal `MEAL_WEIGHTS` exactly, and this reproduces
+ *    the plain weighted split with no pool logic visible at all — the
+ *    carryover is genuinely invisible until something has actually been
+ *    eaten, which is the property a reader would expect of "smart" rather
+ *    than "different for its own sake".
+ * 4. Each empty slot's available figure is `max(0, pool × renormalised
+ *    share)` — the same per-macro floor `remaining`/the old algorithm both
+ *    used, for the identical reason ("−40g protein available" is a
+ *    contradiction, not a fact worth stating).
+ *
+ * **Already-eaten slots do not retroactively change.** A populated slot's
+ * headline is its own eaten total (`MealCard`'s branch on `entries.length`),
+ * never this figure — nothing this function does can rewrite what breakfast
+ * or lunch are shown to have eaten once dinner's own redistribution runs;
+ * a populated slot is simply excluded from the returned map, by construction
+ * (step 2), so there is no figure for it to disagree with in the first
+ * place. A caller that reads this map for a populated slot's key gets
+ * `undefined` rather than a stale or fabricated number — pinned by a test.
+ *
+ * Null with no target, matching {@link remaining}'s own rule.
  */
-export function mealAvailable(slotTotals: Macros, target: Target | null): Macros | null {
-  const alloc = mealAllocation(target);
-  if (!alloc) return null;
-  const left = (goal: number, eatenAmount: number) => Math.max(0, goal - eatenAmount);
-  return {
-    kcal: left(alloc.kcal, slotTotals.kcal),
-    protein_g: left(alloc.protein_g, slotTotals.protein_g),
-    carb_g: left(alloc.carb_g, slotTotals.carb_g),
-    fat_g: left(alloc.fat_g, slotTotals.fat_g),
-    fibre_g: null,
-    saturated_fat_g: null,
-    sugar_g: null,
-    added_sugar_g: null,
-    sodium_mg: null,
-    cholesterol_mg: null,
-  };
+export function mealAvailableForDay(
+  slots: readonly { meal: Meal; entries: readonly unknown[]; totals: Macros }[],
+  target: Target | null,
+): ReadonlyMap<Meal, Macros> | null {
+  if (!target) return null;
+
+  let eatenKcal = 0;
+  let eatenProtein = 0;
+  let eatenCarb = 0;
+  let eatenFat = 0;
+  for (const slot of slots) {
+    eatenKcal += slot.totals.kcal;
+    eatenProtein += slot.totals.protein_g;
+    eatenCarb += slot.totals.carb_g;
+    eatenFat += slot.totals.fat_g;
+  }
+  const poolKcal = target.kcal - eatenKcal;
+  const poolProtein = target.protein_g - eatenProtein;
+  const poolCarb = target.carb_g - eatenCarb;
+  const poolFat = target.fat_g - eatenFat;
+
+  const empty = slots.filter((s) => s.entries.length === 0);
+  const weightSum = empty.reduce((sum, s) => sum + MEAL_WEIGHTS[s.meal], 0);
+
+  const out = new Map<Meal, Macros>();
+  if (weightSum <= 0) return out; // every slot already populated — nothing to redistribute
+  for (const slot of empty) {
+    const share = MEAL_WEIGHTS[slot.meal] / weightSum;
+    out.set(slot.meal, {
+      kcal: Math.max(0, poolKcal * share),
+      protein_g: Math.max(0, poolProtein * share),
+      carb_g: Math.max(0, poolCarb * share),
+      fat_g: Math.max(0, poolFat * share),
+      fibre_g: null,
+      saturated_fat_g: null,
+      sugar_g: null,
+      added_sugar_g: null,
+      sodium_mg: null,
+      cholesterol_mg: null,
+    });
+  }
+  return out;
 }
 
 export type Remaining = {

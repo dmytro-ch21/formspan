@@ -400,7 +400,24 @@ function DrilledStep({
   // order put three closed-guard armbars above every side-control one for an
   // athlete who had just drilled side control. 20 rather than 8 because the
   // shortlist is now worth scrolling.
-  const matches = useMemo(() => (query.trim() ? rankTechniques(all, query) : []), [all, query]);
+  //
+  // `rawMatches` is the ranked list BEFORE removing what's already drilled —
+  // kept separate from `matches` (below) so the empty-state copy can tell
+  // "nothing in the library matches this" from "everything that matches is
+  // already added" apart. See the two gates that read them further down.
+  const rawMatches = useMemo(() => (query.trim() ? rankTechniques(all, query) : []), [all, query]);
+  // N468/#792: search used to clear itself on every `add()`, so adding a
+  // second related technique meant retyping the same search from scratch.
+  // Now the query survives a selection (see `add` below) and instead the
+  // just-added technique is filtered OUT of the results here — it visibly
+  // disappears from the list without touching the input, which is the
+  // user's own spec: "I find the technique I want and click it... if I want
+  // to enter a few more techniques related to it I need to reenter it."
+  const drilledIds = useMemo(
+    () => new Set(drilled.map((d) => d.technique_id).filter((id): id is string => !!id)),
+    [drilled],
+  );
+  const matches = useMemo(() => rawMatches.filter((t) => !drilledIds.has(t.id)), [rawMatches, drilledIds]);
   const results = useMemo(() => matches.slice(0, 20), [matches]);
 
   // Sequences the athlete already has. `null` is still loading and `[]` is
@@ -456,7 +473,13 @@ function DrilledStep({
         },
       ],
     });
-    setQuery('');
+    // N468/#792: used to `setQuery('')` here, which is the bug this ticket
+    // fixes — clearing the search on every selection meant a second related
+    // technique had to be retyped from scratch. The query now survives a
+    // selection; `matches`/`results` above filter the just-added technique
+    // out instead, so it visibly disappears from the list without the input
+    // changing. The query only resets on an explicit "type something new"
+    // signal — see the search `TextInput`'s `onFocus` below.
   }
 
   function remove(techniqueID: string | null | undefined) {
@@ -628,6 +651,11 @@ function DrilledStep({
         style={styles.search}
         value={query}
         onChangeText={setQuery}
+        // N468/#792: the athlete tapping back into the search box is the
+        // explicit "I want to type something new" signal the ticket asks
+        // for — the query no longer resets on a selection (see `add`
+        // above), so this is now the only place it resets at all.
+        onFocus={() => setQuery('')}
         placeholder="Search techniques"
         placeholderTextColor={vola.textDim}
         autoCapitalize="none"
@@ -653,11 +681,35 @@ function DrilledStep({
         so without it a cold session claims "no match" for whatever is typed
         while the library is still downloading — the same false negative, on
         the same screen, arrived at from the other direction.
+
+        Gated on `rawMatches` — the ranked list BEFORE the just-added filter —
+        not `results`/`matches`. N468/#792's own filtering of already-drilled
+        techniques out of the results introduced a second way to reach zero
+        results that is NOT "no match": every technique that matched is
+        already added. Collapsing the two into one message would tell an
+        athlete who searched "knee shield" a second time, after already
+        adding the only knee-shield technique in the library, that the
+        library doesn't have it — the exact false negative this comment
+        already exists to prevent, reintroduced one filter later. See the
+        gate right below for that distinct, true case.
       */}
-      {!failed && all.length > 0 && query.trim().length > 0 && results.length === 0 && (
+      {!failed && all.length > 0 && query.trim().length > 0 && rawMatches.length === 0 && (
         <Text style={styles.muted} testID="bjj-drilled-empty">
           No technique matches “{query.trim()}”. Try a shorter search or another spelling — or skip
           this step, everything else still saves.
+        </Text>
+      )}
+
+      {/*
+        The distinct case the comment above names: real matches exist, but
+        every one of them is already in "Drilled today". Not the same
+        sentence as "no match" — the library has it, the athlete already
+        added it, and the fix is neither a shorter search nor another
+        spelling.
+      */}
+      {!failed && all.length > 0 && query.trim().length > 0 && rawMatches.length > 0 && matches.length === 0 && (
+        <Text style={styles.muted} testID="bjj-drilled-all-added">
+          You’ve already added every technique that matches “{query.trim()}”.
         </Text>
       )}
 

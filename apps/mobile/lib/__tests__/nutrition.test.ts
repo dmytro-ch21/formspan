@@ -20,7 +20,8 @@ import {
   daysBetween,
   kcalLooksOff,
   mealAllocation,
-  mealAvailable,
+  mealAvailableForDay,
+  MEAL_WEIGHTS,
   MEALS,
   rankRecents,
   rescale,
@@ -273,60 +274,153 @@ describe('bySlot', () => {
   });
 });
 
-describe('mealAllocation', () => {
-  it('divides the day target evenly across the four slots', () => {
-    const a = mealAllocation(target)!;
-    expect(a.kcal).toBe(600); // 2400 / 4
-    expect(a.protein_g).toBe(45); // 180 / 4
-    expect(a.carb_g).toBe(62.5); // 250 / 4
-    expect(a.fat_g).toBe(17.5); // 70 / 4
+describe('MEAL_WEIGHTS', () => {
+  it('sums to exactly 1 across MEALS — nothing left unassigned, nothing double-counted', () => {
+    const sum = MEALS.reduce((s, m) => s + MEAL_WEIGHTS[m], 0);
+    expect(sum).toBeCloseTo(1, 10);
   });
 
-  it('is null with no target — nothing to divide', () => {
-    expect(mealAllocation(null)).toBeNull();
-  });
-
-  it('four allocations sum back to the day target', () => {
-    const a = mealAllocation(target)!;
-    expect(a.kcal * MEALS.length).toBe(target.kcal);
-    expect(a.protein_g * MEALS.length).toBe(target.protein_g);
+  it('lunch and dinner are the two largest and close to one another; snack is smallest', () => {
+    expect(MEAL_WEIGHTS.lunch).toBeGreaterThan(MEAL_WEIGHTS.breakfast);
+    expect(MEAL_WEIGHTS.dinner).toBeGreaterThan(MEAL_WEIGHTS.breakfast);
+    expect(MEAL_WEIGHTS.snack).toBeLessThan(MEAL_WEIGHTS.breakfast);
+    expect(MEAL_WEIGHTS.snack).toBeLessThan(MEAL_WEIGHTS.lunch);
+    expect(MEAL_WEIGHTS.snack).toBeLessThan(MEAL_WEIGHTS.dinner);
   });
 });
 
-describe('mealAvailable', () => {
-  it('is the allocation minus what this slot has already eaten', () => {
-    // Lunch's quarter of `target` is 600 kcal / 45g protein / 62.5g carb /
-    // 17.5g fat — one entry() (180 kcal, 25g protein, 0g carb, 8g fat) has
-    // been logged into it.
-    const totals = dayTotals([entry()]);
-    const avail = mealAvailable(totals, target)!;
-    expect(avail.kcal).toBe(420);
-    expect(avail.protein_g).toBe(20);
-    expect(avail.carb_g).toBe(62.5);
-    expect(avail.fat_g).toBe(9.5);
+describe('mealAllocation', () => {
+  it('weights each slot by MEAL_WEIGHTS, not an even quarter', () => {
+    expect(mealAllocation(target, 'breakfast')!.kcal).toBe(600); // 2400 * .25
+    expect(mealAllocation(target, 'lunch')!.kcal).toBe(840); // 2400 * .35
+    expect(mealAllocation(target, 'dinner')!.kcal).toBe(720); // 2400 * .30
+    expect(mealAllocation(target, 'snack')!.kcal).toBe(240); // 2400 * .10
   });
 
-  it('floors each macro at zero independently once a slot exceeds its share', () => {
-    // 900 kcal alone blows past lunch's 600 kcal share; the entry's own
-    // protein (25g) still sits under its 45g share. Each macro must floor on
-    // its own, not as a group — an over-budget calorie count must not zero
-    // out an under-budget protein figure.
-    const totals = dayTotals([entry({ kcal: 900, protein_g: 10 })]);
-    const avail = mealAvailable(totals, target)!;
-    expect(avail.kcal).toBe(0);
-    expect(avail.protein_g).toBe(35);
+  it('applies the same weight to every macro, not just calories', () => {
+    const lunch = mealAllocation(target, 'lunch')!;
+    expect(lunch.protein_g).toBeCloseTo(63, 10); // 180 * .35
+    expect(lunch.carb_g).toBeCloseTo(87.5, 10); // 250 * .35
+    expect(lunch.fat_g).toBeCloseTo(24.5, 10); // 70 * .35
   });
 
-  it('an untouched slot is available for its whole share', () => {
-    const avail = mealAvailable(dayTotals([]), target)!;
-    expect(avail.kcal).toBe(600);
-    expect(avail.protein_g).toBe(45);
-    expect(avail.carb_g).toBe(62.5);
-    expect(avail.fat_g).toBe(17.5);
+  it('is null with no target — nothing to divide', () => {
+    expect(mealAllocation(null, 'lunch')).toBeNull();
+  });
+
+  it('the four allocations sum back to the day target', () => {
+    const sum = (key: 'kcal' | 'protein_g' | 'carb_g' | 'fat_g') =>
+      MEALS.reduce((s, m) => s + mealAllocation(target, m)![key], 0);
+    expect(sum('kcal')).toBeCloseTo(target.kcal, 10);
+    expect(sum('protein_g')).toBeCloseTo(target.protein_g, 10);
+  });
+});
+
+describe('mealAvailableForDay', () => {
+  it('on a completely untouched day, reproduces the plain weighted split with no carryover visible', () => {
+    const slots = bySlot([]);
+    const avail = mealAvailableForDay(slots, target)!;
+    expect(avail.get('breakfast')!.kcal).toBeCloseTo(600, 8);
+    expect(avail.get('lunch')!.kcal).toBeCloseTo(840, 8);
+    expect(avail.get('dinner')!.kcal).toBeCloseTo(720, 8);
+    expect(avail.get('snack')!.kcal).toBeCloseTo(240, 8);
+  });
+
+  it("matches the user's own example: what breakfast left over is pooled and split lunch-similar-to-dinner, snack least", () => {
+    // Breakfast (600 kcal, its own exact 25% share) is EATEN; lunch, dinner
+    // and snack are all still empty. Pool = 2400 - 600 = 1800, split over
+    // lunch/dinner/snack's weights (.35/.30/.10, summing to .75).
+    const slots = bySlot([entry({ meal: 'breakfast', kcal: 600, protein_g: 45, carb_g: 62.5, fat_g: 17.5 })]);
+    const avail = mealAvailableForDay(slots, target)!;
+    expect(avail.has('breakfast')).toBe(false); // already eaten — no figure to disagree with it
+    expect(avail.get('lunch')!.kcal).toBeCloseTo((1800 * 0.35) / 0.75, 6); // 840
+    expect(avail.get('dinner')!.kcal).toBeCloseTo((1800 * 0.3) / 0.75, 6); // 720
+    expect(avail.get('snack')!.kcal).toBeCloseTo((1800 * 0.1) / 0.75, 6); // 240
+    // Lunch and dinner land close to one another; snack sits well below both.
+    expect(Math.abs(avail.get('lunch')!.kcal - avail.get('dinner')!.kcal)).toBeLessThan(
+      avail.get('lunch')!.kcal - avail.get('snack')!.kcal,
+    );
+  });
+
+  it('an under-spent breakfast grows what the still-empty slots have available', () => {
+    // Breakfast ate only 300 of its 600 kcal share — 300 more than the
+    // untouched-day baseline is left to redistribute.
+    const slots = bySlot([entry({ meal: 'breakfast', kcal: 300, protein_g: 20, carb_g: 30, fat_g: 5 })]);
+    const avail = mealAvailableForDay(slots, target)!;
+    // Untouched-day lunch would be 840; with 300 extra pooled at .35/.75 share:
+    expect(avail.get('lunch')!.kcal).toBeCloseTo(840 + (300 * 0.35) / 0.75, 6);
+  });
+
+  it('an over-spent breakfast shrinks what the still-empty slots have available', () => {
+    const slots = bySlot([entry({ meal: 'breakfast', kcal: 900, protein_g: 45, carb_g: 62.5, fat_g: 17.5 })]);
+    const avail = mealAvailableForDay(slots, target)!;
+    // 300 kcal over breakfast's own share comes out of the pool for the rest
+    // of the day — lunch's share shrinks below its untouched-day 840.
+    expect(avail.get('lunch')!.kcal).toBeCloseTo(840 - (300 * 0.35) / 0.75, 6);
+    expect(avail.get('lunch')!.kcal).toBeLessThan(840);
+  });
+
+  it('floors each macro at zero independently once the day is over target', () => {
+    // 3000 kcal alone blows past the whole day's 2400 kcal target, but
+    // protein (100g) sits well under the 180g target — the pool is negative
+    // for kcal and still positive for protein, and each must floor on its
+    // own rather than one over-budget macro zeroing every other.
+    const slots = bySlot([entry({ meal: 'breakfast', kcal: 3000, protein_g: 100, carb_g: 10, fat_g: 5 })]);
+    const avail = mealAvailableForDay(slots, target)!;
+    expect(avail.get('lunch')!.kcal).toBe(0);
+    expect(avail.get('lunch')!.protein_g).toBeGreaterThan(0);
+  });
+
+  it('an already-eaten slot gets no available figure at all — nothing for it to disagree with', () => {
+    const slots = bySlot([
+      entry({ id: 'e1', meal: 'breakfast', kcal: 400 }),
+      entry({ id: 'e2', meal: 'lunch', kcal: 500 }),
+    ]);
+    const avail = mealAvailableForDay(slots, target)!;
+    expect(avail.has('breakfast')).toBe(false);
+    expect(avail.has('lunch')).toBe(false);
+    expect(avail.has('dinner')).toBe(true);
+    expect(avail.has('snack')).toBe(true);
+  });
+
+  /**
+   * THE AC THIS PINS: "a slot that's already passed does not retroactively
+   * change once entered." Breakfast and lunch are both populated ("done");
+   * running the day's redistribution — computing dinner and snack's shares —
+   * must not alter anything that would change what breakfast/lunch are shown
+   * to have eaten. Their own headline comes from `bySlot`'s totals alone
+   * (`MealCard`'s populated branch), which this function never touches; this
+   * test pins that dinner being populated TOO (a third state change) still
+   * leaves breakfast/lunch's own totals bit-for-bit identical.
+   */
+  it('a later slot becoming populated does not retroactively change an earlier slot already entered', () => {
+    const early = [
+      entry({ id: 'e1', meal: 'breakfast', kcal: 400, protein_g: 20, carb_g: 40, fat_g: 10 }),
+      entry({ id: 'e2', meal: 'lunch', kcal: 500, protein_g: 30, carb_g: 50, fat_g: 15 }),
+    ];
+    const breakfastBefore = bySlot(early).find((s) => s.meal === 'breakfast')!.totals;
+    const lunchBefore = bySlot(early).find((s) => s.meal === 'lunch')!.totals;
+
+    // Dinner now also gets entries, and mealAvailableForDay runs again over
+    // the whole day — the "later redistribution" the AC names.
+    const later = [...early, entry({ id: 'e3', meal: 'dinner', kcal: 700, protein_g: 40, carb_g: 60, fat_g: 20 })];
+    const slotsAfter = bySlot(later);
+    void mealAvailableForDay(slotsAfter, target);
+    const breakfastAfter = slotsAfter.find((s) => s.meal === 'breakfast')!.totals;
+    const lunchAfter = slotsAfter.find((s) => s.meal === 'lunch')!.totals;
+
+    expect(breakfastAfter).toEqual(breakfastBefore);
+    expect(lunchAfter).toEqual(lunchBefore);
   });
 
   it('is null with no target, never a fabricated zero', () => {
-    expect(mealAvailable(dayTotals([entry()]), null)).toBeNull();
+    expect(mealAvailableForDay(bySlot([entry()]), null)).toBeNull();
+  });
+
+  it('is empty, not null, once every slot is populated', () => {
+    const filled = MEALS.map((m, i) => entry({ id: `e${i}`, meal: m, kcal: 100 }));
+    const avail = mealAvailableForDay(bySlot(filled), target)!;
+    expect(avail.size).toBe(0);
   });
 });
 

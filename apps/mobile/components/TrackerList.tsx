@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 
+import { CaffeineBanner } from '@/components/CaffeineBanner';
 import { Text } from '@/components/Themed';
 import { TrackerCard } from '@/components/TrackerCard';
 import { vola } from '@/constants/Colors';
@@ -166,6 +167,26 @@ export function TrackerList({
         // before" criterion: what was an instant tap became two taps that
         // bought nothing.
         const showPicker = isCoffee && caffeineTracker != null;
+
+        // N468/#792: the caffeine tracker gets a DEDICATED banner rather than
+        // the generic `TrackerCard` treatment — see `CaffeineBanner`'s own
+        // header for why that has to happen here rather than inside
+        // `TrackerCard` itself (which stays preset-naive by design). Every
+        // other tracker, coffee included, is completely unaffected.
+        if (t.preset === 'caffeine') {
+          return (
+            <CaffeineBanner
+              key={`${t.id}-${on}`}
+              tracker={t}
+              entries={day.entriesFor(t.id, on)}
+              now={now}
+              onAdd={() => void day.addTap(t, dayAtTap())}
+              onRemove={(entryID) => void day.removeEntry(entryID, dayAtTap())}
+              onEdit={() => day.openSettings(t)}
+            />
+          );
+        }
+
         return (
           <TrackerCard
             // Keyed on the day too, not just the tracker — see `on`'s own doc

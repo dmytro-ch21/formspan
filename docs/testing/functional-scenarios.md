@@ -16787,6 +16787,144 @@ mutually exclusive at `Validate()`.
   logic over data N458's `/v1/records` and the existing local session store
   already deliver under the signed-in athlete's own session.
 
+## N468 §1 — technique search survives a selection (`apps/mobile/app/bjj/reflect/[id].tsx`)
+
+### Happy path
+
+- Search "knee shield" on the drilled step, tap a result, then tap a second,
+  different result with no retyping: both land in "Drilled today" and the
+  search box still reads "knee shield".
+- A technique just added visibly disappears from the results list under the
+  same query, without the input changing.
+- Tap into the search input after it already has text: the field clears,
+  ready for a new search.
+
+### Edge cases & errors
+
+- Search a query that matches nothing in the library: the existing "No
+  technique matches…" copy still fires.
+- Search a query where every real match is already in "Drilled today": a
+  DIFFERENT message fires ("You've already added every technique that
+  matches…"), never the "no match" copy — the library has the technique,
+  it is just already added.
+- The "showing N best matches of M" truncation copy still fires correctly
+  once already-added techniques are filtered out of the count.
+
+### Auth/security
+
+- No new endpoint or auth surface — purely client-side search/filter state
+  over the same technique catalog already fetched.
+
+## N468 §2 — collapsible meal sections and a day summary card (`apps/mobile/app/(tabs)/food.tsx`, `apps/mobile/components/food/MealCard.tsx`, `apps/mobile/components/food/FoodSummaryCard.tsx`)
+
+### Happy path
+
+- Open Food with entries logged in two of the four meals: a summary card
+  above the meal list states the day's total item count, total calories and
+  the protein/carb/fat split consumed so far.
+- Tap a meal section's header: it collapses (hiding its macro line/available
+  line and its logged rows) while the header itself and the "Add Food"
+  button both stay visible and usable. Tap again: it expands back to
+  exactly what it showed before — same entries, same totals.
+- Step to a different day: each meal section opens expanded again (the
+  default), not carrying over a collapse from the previous day.
+
+### Edge cases & errors
+
+- A day with nothing logged at all: the summary card honestly states "0
+  items logged · 0 kcal" rather than being hidden or omitted.
+- Collapsing a section and then adding a new item to it via "Add Food":
+  confirm the new item is not lost and the section's own totals reflect it
+  once expanded again.
+- The summary card renders nothing while the day's food is still loading or
+  failed to load locally — it must not assert a zero from a read that never
+  completed.
+
+### Auth/security
+
+- No new endpoint or auth surface — presentation state and client-side
+  totals over the existing food log read.
+
+## N468 §3 — weighted, pooled-remainder redistribution across meal slots (`apps/mobile/lib/nutrition.ts`)
+
+### Happy path
+
+- With a target set and nothing logged yet, each empty meal section's
+  "available" figure reflects `MEAL_WEIGHTS` (breakfast smallest of the
+  three big slots, lunch and dinner close to one another and largest,
+  snack smallest of all four) rather than an even quarter.
+- Log a lunch under its own weighted share, leaving dinner and snack both
+  empty: their "available" figures both grow proportionally to reflect the
+  unspent remainder, with dinner and snack still keeping their own
+  weighted relationship to one another (dinner's higher weight shows more
+  than snack's).
+- Log a meal OVER its own weighted share: the still-empty slots' available
+  figures shrink accordingly, never displaying a negative number for any
+  macro.
+- Every macro (calories, protein, carb, fat) redistributes independently —
+  a day heavy on carbs but light on fat should not zero out fat's own
+  available figure.
+
+### Edge cases & errors
+
+- A day with every slot already populated: no meal section shows an
+  "available" figure at all (each shows its own eaten total instead).
+- Editing an EARLIER slot (e.g. correcting breakfast) after a LATER slot
+  (e.g. dinner) already has entries: dinner's own displayed total must not
+  change — only the still-empty slots' available figures may move.
+- No target set at all: no meal section shows an "available" figure;
+  logged slots still show what was eaten.
+
+### Auth/security
+
+- No new endpoint or auth surface — pure client-side arithmetic over the
+  athlete's own already-fetched target and food entries.
+
+## N468 §4 — a dedicated caffeine banner, and auto-add from logged food (`apps/mobile/components/CaffeineBanner.tsx`, `apps/mobile/lib/foodCaffeine.ts`, `apps/mobile/lib/trackers.ts`, `apps/mobile/lib/foodLog.ts`, `apps/mobile/components/TrackerList.tsx`)
+
+### Happy path
+
+- With a caffeine tracker provisioned, Food/Today render a dedicated
+  caffeine card (not the generic tracker card) stating today's total mg,
+  the 400 mg reference (cited to Mayo Clinic) and a short note on the
+  effects of too much.
+- Log a food recognised as caffeinated (e.g. "Latte" under Breakfast): the
+  caffeine card's total updates automatically, with no separate manual
+  step, and the new entry is labelled as coming from a logged food.
+- Edit that food's servings (e.g. 1 → 2): the caffeine total updates to
+  match the new amount rather than leaving the old figure standing
+  alongside a new one.
+- Edit that food's name to something not recognised as caffeinated (or
+  remove the food entirely): the caffeine total drops back down to match.
+- Attempt to remove a food-caused entry directly from the caffeine card: it
+  is refused, with a message pointing to editing/removing the food entry in
+  Food instead — the entry stays exactly as it was.
+- A manual caffeine tap, and a coffee-tap-caused caffeine entry (N431/N432),
+  both remain freely removable from the card exactly as before this ticket.
+
+### Edge cases & errors
+
+- A food whose name merely resembles a caffeinated drink but is not one
+  (e.g. "Coffee Cake"): it IS counted by this heuristic — a named,
+  accepted false positive, not a bug to chase in this ticket.
+- A caffeinated drink under an unlisted brand or name this heuristic does
+  not recognise: it contributes nothing, silently, matching the "other"
+  coffee-tap bucket's own honest-uncertainty precedent.
+- "Decaf" anywhere in a food's name: never counted, regardless of what
+  else the name contains.
+- An athlete with no caffeine tracker: logging a "Latte" behaves exactly as
+  before this ticket — no caffeine entry, no error.
+- Editing a caffeinated food's name/servings to the SAME caffeine figure it
+  already had (e.g. correcting an unrelated typo): the caffeine entry is
+  left untouched rather than being tombstoned and recreated for no reason.
+
+### Auth/security
+
+- No new endpoint — the food-to-caffeine link and the banner are entirely
+  client-side, over the athlete's own already-scoped food log and tracker
+  reads/writes. The existing tracker-entry scoping (an athlete cannot
+  remove another athlete's entry) is unchanged by this ticket.
+
 ## N115 — combining logged entries into one named meal (`apps/mobile/app/(tabs)/food.tsx`, `apps/mobile/components/food/MealCard.tsx`, `apps/mobile/app/food/combine.tsx`, `apps/mobile/app/food/entry/[id].tsx`, `apps/mobile/lib/recipe.ts`)
 
 No new backend surface — this builds entirely on N114's existing `Food`/

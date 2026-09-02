@@ -102,6 +102,52 @@ describe('populated vs. empty — a different sentence, never the same one at ze
   });
 });
 
+describe('collapsible sections — N468/#792', () => {
+  it('defaults expanded regardless of whether the slot has entries', () => {
+    renderCard({ entries: [entry()], totals: { ...zeroMacros, kcal: 145 } });
+    expect(screen.getByTestId('meal-breakfast-macros')).toBeTruthy();
+
+    renderCard({ entries: [], available: { ...zeroMacros, kcal: 938 } });
+    expect(screen.getByTestId('meal-breakfast-available')).toBeTruthy();
+  });
+
+  it('collapsing hides the macro line and the logged rows, without losing or resetting anything', () => {
+    const e = entry();
+    renderCard({
+      entries: [e],
+      totals: { ...zeroMacros, kcal: 145, protein_g: 11, carb_g: 0, fat_g: 11 },
+    });
+
+    // Expanded: the macro row and the logged item are both visible.
+    expect(screen.getByTestId('meal-breakfast-macros')).toBeTruthy();
+    expect(screen.getByText('Oats')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('meal-breakfast-toggle'));
+
+    // Collapsed: gone from the tree — but the header (which already states
+    // the slot's own total) and the Add button both stay reachable.
+    expect(screen.queryByTestId('meal-breakfast-macros')).toBeNull();
+    expect(screen.queryByText('Oats')).toBeNull();
+    expect(screen.getByText('Breakfast · 145 kcal')).toBeTruthy();
+    expect(screen.getByTestId('food-add-breakfast')).toBeTruthy();
+
+    // Expanding again shows the SAME entry, unaffected by the toggle —
+    // collapsing is purely a display state, never a data mutation.
+    fireEvent.press(screen.getByTestId('meal-breakfast-toggle'));
+    expect(screen.getByTestId('meal-breakfast-macros')).toBeTruthy();
+    expect(screen.getByText('Oats')).toBeTruthy();
+  });
+
+  it('reflects its state in accessibility so a collapsed section reads as collapsed', () => {
+    renderCard({ entries: [entry()] });
+    const toggle = screen.getByTestId('meal-breakfast-toggle');
+    expect(toggle.props.accessibilityState).toEqual(expect.objectContaining({ expanded: true }));
+
+    fireEvent.press(toggle);
+    expect(toggle.props.accessibilityState).toEqual(expect.objectContaining({ expanded: false }));
+  });
+});
+
 describe('food row amounts are unit-aware (#483)', () => {
   it('a gram-basis entry converts through the athlete\'s chosen unit', () => {
     renderCard({ entries: [entry({ servings: 1.5, serving_label: '100 g' })] });

@@ -31,6 +31,12 @@ import {
   syncFood,
 } from '../foodLog';
 import type { Food, Target } from '../nutrition';
+import { isFoodCaffeineEntryId, pairedFoodCaffeineEntryId } from '../foodCaffeine';
+import {
+  cacheTrackers,
+  localEntries as localTrackerEntries,
+} from '../trackers';
+import type { Tracker } from '../trackerModel';
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 
 let db: FixtureDb;
@@ -779,5 +785,163 @@ describe('localLoggedDayKcal', () => {
   it('does not see another athlete’s days', async () => {
     await logFood('someone-else', meal({ kcal: 2000 }));
     expect(await localLoggedDayKcal(USER, '2026-08-12', TODAY)).toEqual([]);
+  });
+});
+
+/** The shipped caffeine preset (N431), same fixture shape `trackers.test.ts` uses. */
+const caffeine: Tracker = {
+  id: 't_caffeine', preset: 'caffeine', name: 'Caffeine', icon: '⚡', color_key: 'amber',
+  unit: 'mg', increment: 80, target: 400, render_style: 'glyphs', sort_order: 30,
+  count_noun: 'cup', provisioned: false, cutoff_minutes: 960,
+};
+
+const caffeineWire = (over: Partial<Record<string, unknown>> = {}) => ({
+  ...caffeine,
+  user_id: USER,
+  archived_at: null,
+  created_at: '2026-08-01T00:00:00.000Z',
+  updated_at: '2026-08-01T00:00:00.000Z',
+  ...over,
+});
+
+/**
+ * N468/#792 — a logged food item automatically posting to the caffeine
+ * tracker, staying in sync across edits, and being un-postable when the
+ * food is removed. `foodCaffeine.test.ts` covers the heuristic itself in
+ * isolation; this is the dual-write mechanics, against real SQLite.
+ */
+describe('N468/#792: a caffeinated food automatically posts to the caffeine tracker', () => {
+  it('logs a paired caffeine entry when the athlete has a caffeine tracker', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    await logFood(USER, meal({ name: 'Latte' }));
+
+    const entries = await localTrackerEntries(USER, TODAY);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ tracker_id: caffeine.id, amount: 95 });
+    expect(isFoodCaffeineEntryId(entries[0].id)).toBe(true);
+  });
+
+  it('scales the mg figure by how many servings were logged', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    await logFood(USER, meal({ name: 'Espresso', servings: 2 }));
+
+    const entries = await localTrackerEntries(USER, TODAY);
+    expect(entries[0].amount).toBe(126); // 63 mg * 2
+  });
+
+  it('posts nothing when the food is not recognised as caffeinated', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    await logFood(USER, meal({ name: 'Chicken thigh' }));
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it('posts nothing when the athlete has no caffeine tracker — exactly as before this ticket', async () => {
+    await logFood(USER, meal({ name: 'Latte' }));
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it('a food-caused entry is refused/removed only alongside the food — editing the food to a non-caffeinated name removes it', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    const id = await logFood(USER, meal({ name: 'Latte' }));
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(1);
+
+    await editEntry(USER, id, meal({ name: 'Decaf Latte' }));
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it('editing servings updates the caffeine total to match, not leaving the old figure stranded', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    const id = await logFood(USER, meal({ name: 'Latte', servings: 1 }));
+    expect((await localTrackerEntries(USER, TODAY))[0].amount).toBe(95);
+
+    await editEntry(USER, id, meal({ name: 'Latte', servings: 2 }));
+    const entries = await localTrackerEntries(USER, TODAY);
+    expect(entries).toHaveLength(1); // the stale one was superseded, not left beside the new one
+    expect(entries[0].amount).toBe(190);
+  });
+
+  it('an edit that changes nothing about the caffeine figure does not churn the entry', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    const id = await logFood(USER, meal({ name: 'Latte' }));
+    const before = (await localTrackerEntries(USER, TODAY))[0].id;
+
+    // Editing only the note, say — the mg figure is unchanged.
+    await editEntry(USER, id, meal({ name: 'Latte' }));
+    const after = await localTrackerEntries(USER, TODAY);
+    expect(after).toHaveLength(1);
+    expect(after[0].id).toBe(before); // same row, not tombstoned and recreated
+  });
+
+  it('removing the food removes the caffeine entry it caused', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    const id = await logFood(USER, meal({ name: 'Latte' }));
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(1);
+
+    await removeEntry(USER, id);
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it('does not touch a manually-tapped caffeine entry that merely shares a day', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    const id = await logFood(USER, meal({ name: 'Latte' }));
+    // A manual tap the athlete made themselves, unrelated to any food.
+    await db.runAsync(
+      `INSERT INTO tracker_entries (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
+       VALUES (?,?,?,?,?,?,?,1,0)`,
+      'manual-1', caffeine.id, USER, TODAY, '2026-08-18T08:00:00.000Z', 80, '2026-08-18T08:00:00.000Z',
+    );
+
+    await removeEntry(USER, id);
+    const entries = await localTrackerEntries(USER, TODAY);
+    expect(entries.map((e) => e.id)).toEqual(['manual-1']);
+  });
+
+  /**
+   * frontend-reviewer, N468 review: a food entry deleted from ANOTHER
+   * surface (web's `DayEditor.tsx`, say) reaches this device as an absence
+   * from the next `cacheEntries` pull, not as a call to `removeEntry` — and
+   * `cacheEntries`'s own DELETE used to have no idea a caffeine entry was
+   * ever paired to the row it was sweeping. The orphan this pins: the
+   * caffeine banner keeps a padlocked entry pointing at a food log that no
+   * longer has anything to edit or remove, on this device and any other
+   * that pulls the same day — the exact "the two disagree" failure this
+   * ticket's own AC named.
+   */
+  it('a food entry removed via a PULL (not this device\'s own removeEntry) also removes the caffeine entry it caused', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    // This device's copy of a server-known food entry — inserted the way a
+    // real pull would (dirty=0, remote=1), not via logFood.
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal({ name: 'Latte' }), id: 'srv-food-1', source_food_id: null, category: null, notes: '' },
+    ]);
+    // Its caffeine entry, as if an earlier `logFood`/`editEntry` on some
+    // device had already run `syncFoodCaffeineEntry` for it.
+    const caffeineId = pairedFoodCaffeineEntryId('srv-food-1', 'abc12345');
+    await db.runAsync(
+      `INSERT INTO tracker_entries (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
+       VALUES (?,?,?,?,?,?,?,1,0)`,
+      caffeineId, caffeine.id, USER, TODAY, '2026-08-18T08:00:00.000Z', 95, '2026-08-18T08:00:00.000Z',
+    );
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(1);
+
+    // The server no longer reports the food (deleted from web, say) — the
+    // next pull sweeps the local row via cacheEntries, never touching
+    // removeEntry at all.
+    await cacheEntries(USER, TODAY, TODAY, []);
+
+    expect(await localEntries(USER, TODAY)).toHaveLength(0);
+    // The orphan this bug named: the caffeine entry must go with it, not
+    // survive pointing at nothing.
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it('a pull that drops an UNCAFFEINATED food touches no tracker row at all', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal({ name: 'Chicken thigh' }), id: 'srv-food-2', source_food_id: null, category: null, notes: '' },
+    ]);
+    await cacheEntries(USER, TODAY, TODAY, []);
+    expect(await localEntries(USER, TODAY)).toHaveLength(0);
+    expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
   });
 });

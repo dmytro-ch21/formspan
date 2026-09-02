@@ -131,9 +131,11 @@ describe('days logged — a count, not a streak', () => {
  * explicitly, and its own tests pinned the shipped string so a change back to
  * per-meal division would go red. The user has since confirmed, twice, that
  * this app should build TRUE per-meal budgets after all, matching a supplied
- * reference. `mealBudgetLine` is gone; `mealAllocation` and `mealAvailable` in
- * `nutrition.ts` are the replacement, and their tests now live in
+ * reference. `mealBudgetLine` is gone; `mealAllocation` and `mealAvailableForDay`
+ * in `nutrition.ts` are the replacement — the latter renamed and reworked by
+ * N468/#792 from an even, independently-floored split to a weighted,
+ * pooled-remainder redistribution — and their tests now live in
  * `nutrition.test.ts` alongside the rest of that file's arithmetic — see the
  * reversal note at the top of `nutrition.ts` for the full account, and
- * `docs/decisions/history.md`'s N124/N113 entry for why.
+ * `docs/decisions/history.md`'s N124/N113 and N468 entries for why.
  */
